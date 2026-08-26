@@ -239,6 +239,9 @@ if (!history) failures.push(".mur-chat-history missing");
 if (!input) failures.push(".mur-chat-input missing");
 if (!send) failures.push(".mur-send-btn missing");
 if (!mic) failures.push("voice plugin did not insert the mic button");
+if (window.document.querySelector(".voice-status")) {
+  failures.push("a .voice-status element exists after the voice plugin mounted");
+}
 if (!statusBar) failures.push("status bar placeholder missing");
 if (statusBar && statusBar.tagName !== "FOOTER") {
   failures.push("the status bar is not a <footer> landmark");
@@ -788,6 +791,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("smoke test passed: the bundled app mounts the chat UI and answers a message");
-// The voice-status auto-hide timer outlives the assertions; exit rather
-// than wait it out.
+// Pending timers (the voice stop grace window, the status-bar LED pulse)
+// outlive the assertions; exit rather than wait them out.
 process.exit(0);

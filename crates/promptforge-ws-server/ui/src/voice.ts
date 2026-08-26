@@ -11,7 +11,6 @@ import type { StatusBar } from "./status-bar";
 
 export interface VoiceElements {
   mic: HTMLButtonElement;
-  status: HTMLDivElement;
   input: HTMLTextAreaElement;
 }
 
@@ -33,21 +32,10 @@ interface TakeState {
 }
 
 export function setupVoice(elements: VoiceElements, statusBar: StatusBar): VoiceHandle {
-  const { mic, status, input } = elements;
+  const { mic, input } = elements;
   let voice: VoiceSession | null = null;
-  let voiceStatusTimer = 0;
   let suppressReplies = false;
   let take: TakeState | null = null;
-
-  function showVoiceStatus(text: string, isError: boolean): void {
-    status.textContent = text;
-    status.classList.toggle("voice-status--error", Boolean(isError));
-    status.classList.add("voice-status--visible");
-    clearTimeout(voiceStatusTimer);
-    voiceStatusTimer = window.setTimeout(() => {
-      status.classList.remove("voice-status--visible");
-    }, 8000);
-  }
 
   function setRecording(next: boolean): void {
     mic.classList.toggle("voice-mic--recording", next);
@@ -139,17 +127,16 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
       if (text !== "") {
         finishTake(text);
         input.focus();
-        showVoiceStatus("Transcript ready - edit, then send.", false);
       } else {
         finishTake("");
         const frames = typeof msg.frames === "number" ? msg.frames : 0;
-        showVoiceStatus(`No speech detected (${frames} PCM frames captured).`, false);
+        statusBar.showLocal(`No speech detected (${frames} PCM frames captured).`, "info");
       }
       return true;
     }
     // Anything else is shown verbatim and ends the take.
     finishTake("");
-    showVoiceStatus(String(data), false);
+    statusBar.showLocal(String(data), "error");
     return true;
   }
 
@@ -167,7 +154,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
 
   async function startVoice(): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.WebSocket) {
-      showVoiceStatus("Voice capture is not available in this browser.", true);
+      statusBar.showLocal("Voice capture is not available in this browser.", "error");
       return;
     }
     let stream: MediaStream;
@@ -185,7 +172,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
         error instanceof Error && error.name === "NotAllowedError"
           ? "microphone permission denied"
           : `microphone unavailable: ${(error as Error).message || error}`;
-      showVoiceStatus(detail, true);
+      statusBar.showLocal(detail, "error");
       return;
     }
     let ws: WebSocket | undefined;
@@ -226,7 +213,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
           statusBar.setRecording(false);
           if (take) finishTake("");
           releaseAudio(session);
-          showVoiceStatus("The voice connection dropped.", true);
+          statusBar.showLocal("The voice connection dropped.", "error");
         }
       });
       source.connect(node);
@@ -238,7 +225,6 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
       ws.send("start");
       setRecording(true);
       statusBar.setRecording(true);
-      showVoiceStatus("Recording - press the mic button again to stop.", false);
     } catch (error) {
       for (const track of stream.getTracks()) {
         track.stop();
@@ -249,7 +235,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
       if (ctx) {
         ctx.close().catch(() => {});
       }
-      showVoiceStatus(`Voice capture failed: ${(error as Error).message || error}`, true);
+      statusBar.showLocal(`Voice capture failed: ${(error as Error).message || error}`, "error");
     }
   }
 
@@ -285,7 +271,6 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
     discardTake();
     setRecording(false);
     statusBar.setRecording(false);
-    showVoiceStatus("Recording discarded.", false);
   }
 
   mic.addEventListener("click", () => {

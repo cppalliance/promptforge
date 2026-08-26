@@ -458,25 +458,6 @@ body {
     0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #d9a03f) 55%, transparent);
 }
 
-.voice-status {
-  width: 100%;
-  max-width: var(--mur-chat-form-width, 768px);
-  font-size: 12px;
-  color: var(--text-muted, #8b90a0);
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.15s ease-out, padding 0.15s ease-out;
-}
-
-.voice-status--visible {
-  max-height: 40px;
-  padding: 0 var(--space-md, 8px);
-}
-
-.voice-status--error {
-  color: var(--danger-text, #cf7f88);
-}
-
 .voice-mic {
   flex: none;
 }
