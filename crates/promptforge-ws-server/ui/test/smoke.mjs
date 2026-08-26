@@ -73,6 +73,9 @@ class FakeWebSocket {
   constructor(url) {
     this.url = url;
     this.readyState = FakeWebSocket.CONNECTING;
+    // Mid-stream hang mode: answer a chat frame with one delta and no
+    // done, so the generation stays in flight until the client aborts.
+    this.hangChat = false;
     chatSockets.push(this);
     setTimeout(() => {
       this.readyState = FakeWebSocket.OPEN;
@@ -95,6 +98,12 @@ class FakeWebSocket {
     }
     if (frame.type !== "chat") return;
     this.chatFrame = frame;
+    if (this.hangChat) {
+      queueMicrotask(() =>
+        this.onmessage?.({ data: JSON.stringify({ type: "delta", content: "partial", id: frame.id }) }),
+      );
+      return;
+    }
     const frames = [
       { type: "delta", content: "Hello", id: frame.id },
       { type: "delta", content: " back [docs](https://example.com/)", id: frame.id },
@@ -891,6 +900,67 @@ if (persistentSocket && statusText) {
     failures.push("no replacement /ws socket opened after the reconnect backoff");
   } else if (!chatSockets[chatSockets.length - 1].url.endsWith("/ws")) {
     failures.push("the reconnect opened a socket that is not /ws");
+  }
+}
+
+// Stop mid-stream: with a generation hanging (one delta, no done), the
+// observer's thinking frame holds the amber LED. Pressing Stop aborts the
+// chat and recycles the socket, so no terminal status frame ever arrives
+// for it; the bar must clear its own activity LED on the abort.
+const liveSocket = chatSockets.filter((socket) => socket.url.endsWith("/ws")).at(-1);
+if (liveSocket && input && form && send && ledEl) {
+  const openDeadline = Date.now() + 5000;
+  while (liveSocket.readyState !== FakeWebSocket.OPEN && Date.now() < openDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (liveSocket.readyState !== FakeWebSocket.OPEN) {
+    failures.push("stop-mid-stream: the reconnected /ws socket never opened");
+  } else {
+    liveSocket.hangChat = true;
+    input.value = "hang please";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    // Wait for the chat frame on the wire, not the stop button's label:
+    // the label flips synchronously on submit, but the engine's request
+    // preparation is async, so the socket stream exists a few ticks later.
+    const sendDeadline = Date.now() + 5000;
+    while (!liveSocket.chatFrame && Date.now() < sendDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (!liveSocket.chatFrame) {
+      failures.push("stop-mid-stream: the hanging chat frame was never sent");
+    } else if (send.getAttribute("aria-label") !== "Stop generation") {
+      failures.push("stop-mid-stream: the send button never became a stop button");
+    } else {
+      liveSocket.onmessage?.({
+        data: JSON.stringify({
+          type: "status",
+          label: "Streaming response...",
+          description: "the gateway is streaming the reply",
+          severity: "info",
+          activity: "thinking",
+          progress: null,
+        }),
+      });
+      if (!ledEl.classList.contains("status-bar__led--thinking")) {
+        failures.push("stop-mid-stream: the thinking frame did not light the LED amber");
+      }
+      // The stop button is type=submit with no click handler of its own;
+      // dispatching the form's submit routes to the same handler, which
+      // sees the in-flight generation and stops it.
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      if (ledEl.classList.contains("status-bar__led--generating") ||
+          ledEl.classList.contains("status-bar__led--thinking")) {
+        failures.push("stop-mid-stream: the LED stayed lit through the abort");
+      }
+      // Let any pulse timer left over from the stream settle; the LED
+      // must stay idle rather than be re-armed by a stale sustained state.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      if (ledEl.classList.contains("status-bar__led--generating") ||
+          ledEl.classList.contains("status-bar__led--thinking")) {
+        failures.push("stop-mid-stream: the LED re-lit after the abort once timers settled");
+      }
+    }
   }
 }
 

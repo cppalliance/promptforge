@@ -118,3 +118,7 @@ the doc comment referenced a planned Windows ACL helper that never existed; remo
 
 the user diagnosed the mic failure as CPU fallback and directed "hide the controls entirely"; the server exposes a /voice/capability probe and the UI hides the mic rather than offering an unusable slow take. (user said, assistant reasoned the mechanism)
 
+## 2026-08-26 Clear the activity LED when a chat aborts mid-stream
+
+on Stop the client aborts and recycles the socket, so the server's terminal status frame never arrives and the thinking state persists; clear LED state client-side on abort and emit status.idle() server-side on disconnect. (user reported, assistant reasoned the two-sided fix)
+
