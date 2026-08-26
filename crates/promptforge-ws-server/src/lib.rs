@@ -19,6 +19,7 @@ mod status;
 mod tape;
 mod transcribe;
 mod voice;
+mod workspace;
 
 pub use app::{AppError, AppState, DEFAULT_ADDR, router};
 pub use config::{
