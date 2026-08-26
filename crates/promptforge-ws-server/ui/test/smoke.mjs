@@ -181,6 +181,14 @@ globalThis.fetch = (url) => {
       }),
     );
   }
+  if (url === "/voice/capability") {
+    return Promise.resolve(
+      new Response(JSON.stringify({ gpu: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
   return Promise.reject(new Error(`unexpected fetch in the smoke test: ${url}`));
 };
 
@@ -222,6 +230,14 @@ globalThis.document = window.document;
 
 await import(pathToFileURL(path.join(distDir, "app.js")).href);
 
+// The mic button waits on the GPU capability fetch, so it mounts a
+// microtask or two after the rest of the composer.
+let mic = null;
+for (let i = 0; i < 100 && !mic; i++) {
+  mic = window.document.querySelector(".voice-mic");
+  if (!mic) await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
 // The bundle mounts dockview on #dock with one chat panel, and ChatUI on
 // the .mur-app inside it: a successful mount leaves the murm structure
 // intact and renders the empty-chat state.
@@ -230,7 +246,6 @@ const app = window.document.querySelector("#dock .mur-app");
 const history = window.document.querySelector(".mur-chat-history");
 const input = window.document.querySelector(".mur-chat-input");
 const send = window.document.querySelector(".mur-send-btn");
-const mic = window.document.querySelector(".voice-mic");
 const statusBar = window.document.querySelector(".status-bar");
 const statusText = window.document.querySelector(".status-bar__text");
 const statusSlot = window.document.querySelector(".status-bar__slot");

@@ -77,6 +77,31 @@ pub(crate) fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
 
+/// Returns true when voice transcription can run on the GPU: the build
+/// carries the CUDA backend and an NVIDIA driver is present. Without both,
+/// whisper falls back to a CPU pass slow enough that the UI hides the mic
+/// rather than offering a take that stalls for half a minute.
+pub(crate) fn gpu_transcription_available() -> bool {
+    cfg!(feature = "cuda") && gpu_driver_present()
+}
+
+/// The CUDA driver library ships with every NVIDIA display driver.
+#[cfg(target_os = "windows")]
+fn gpu_driver_present() -> bool {
+    Path::new(r"C:\Windows\System32\nvcuda.dll").exists()
+}
+
+/// The primary NVIDIA device node exists once the driver is loaded.
+#[cfg(target_os = "linux")]
+fn gpu_driver_present() -> bool {
+    Path::new("/dev/nvidia0").exists()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn gpu_driver_present() -> bool {
+    false
+}
+
 /// The per-server voice engine: the interim and final-pass whisper workers
 /// plus the interim loop's window and cadence, built once at startup from
 /// `[voice]` in `workshop.toml`.
@@ -822,6 +847,13 @@ mod tests {
     use super::*;
 
     use crate::transcribe::fixtures;
+
+    #[test]
+    fn no_cuda_build_means_no_gpu_transcription() {
+        if !cfg!(feature = "cuda") {
+            assert!(!gpu_transcription_available());
+        }
+    }
 
     #[tokio::test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]

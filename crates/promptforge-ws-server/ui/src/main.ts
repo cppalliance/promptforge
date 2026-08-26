@@ -14,7 +14,7 @@ import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
 import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
-import { setupVoice, type VoiceHandle } from "./voice";
+import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./voice";
 import { setupWindowChrome } from "./window-chrome";
 import { setupWindowMenus } from "./window-menu";
 import { setupWorkspaceDrops } from "./workspace-drops";
@@ -54,23 +54,30 @@ function selectedModel(): string {
   return pickerEl.value;
 }
 
-// The mic button joins murm-ui's composer through the plugin seam; voice
-// messages paint the status bar directly.
+// The mic button joins murm-ui's composer through the plugin seam, but only
+// when the server can transcribe on a GPU; a CPU take stalls long enough to
+// read as broken, so the control stays hidden instead. Voice messages paint
+// the status bar directly.
 let voiceHandle: VoiceHandle | null = null;
 const voicePlugin: ChatPlugin = {
   name: "voice",
   onInputMount({ form, input }) {
-    const mic = document.createElement("button");
-    mic.type = "button";
-    mic.className = "voice-mic mur-form-icon-btn";
-    mic.title = "Push to talk";
-    mic.setAttribute("aria-label", "Push to talk");
-    mic.setAttribute("aria-pressed", "false");
-    mic.innerHTML =
-      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
-    form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
+    void voiceGpuAvailable().then((gpu) => {
+      if (!gpu) {
+        return;
+      }
+      const mic = document.createElement("button");
+      mic.type = "button";
+      mic.className = "voice-mic mur-form-icon-btn";
+      mic.title = "Push to talk";
+      mic.setAttribute("aria-label", "Push to talk");
+      mic.setAttribute("aria-pressed", "false");
+      mic.innerHTML =
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
+      form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
 
-    voiceHandle = setupVoice({ mic, input }, statusBar);
+      voiceHandle = setupVoice({ mic, input }, statusBar);
+    });
   },
   onUserSubmit() {
     voiceHandle?.discardIfRecording();
