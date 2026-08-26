@@ -18,6 +18,7 @@ use crate::status::{Activity, StatusBus};
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use crate::voice;
+use crate::workspace::{self, Workspace};
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
@@ -33,6 +34,7 @@ pub struct AppState {
     status: StatusBus,
     health: GatewayHealth,
     catalog: CatalogBus,
+    workspace: Workspace,
 }
 
 impl AppState {
@@ -71,6 +73,7 @@ impl AppState {
             status,
             health: GatewayHealth::new(),
             catalog: CatalogBus::new(),
+            workspace: Workspace::new(),
         })
     }
 
@@ -113,6 +116,13 @@ impl AppState {
     /// from.
     pub(crate) fn catalog(&self) -> CatalogBus {
         self.catalog.clone()
+    }
+
+    /// The confined workspace, shared with the `/workspace/*` handlers;
+    /// grants registered through `POST /workspace/grant` are visible to
+    /// every clone immediately.
+    pub(crate) fn workspace(&self) -> &Workspace {
+        &self.workspace
     }
 }
 
@@ -222,6 +232,12 @@ pub fn router(state: AppState) -> Router {
         .route("/chat", post(chat))
         .route("/ws", get(chat_ws::upgrade))
         .route("/voice", get(voice::upgrade))
+        .route("/workspace/tree", get(workspace::tree))
+        .route(
+            "/workspace/file",
+            get(workspace::read_file).put(workspace::write_file),
+        )
+        .route("/workspace/grant", post(workspace::grant))
         .with_state(state)
 }
 
@@ -1070,6 +1086,7 @@ mod tests {
             status: StatusBus::new(),
             health: GatewayHealth::new(),
             catalog: CatalogBus::new(),
+            workspace: Workspace::new(),
         };
         let response = router(state)
             .oneshot(chat_request())
