@@ -354,6 +354,13 @@ export interface ChatPlugin {
 	name: string;
 
 	/**
+	 * When true, the plugin renders its own loading indicator for an empty
+	 * generating assistant message, and the core three-dot fallback is
+	 * suppressed.
+	 */
+	ownsEmptyLoadingState?: boolean;
+
+	/**
 	 * Fires once when the chat UI initializes.
 	 */
 	onMount?: (ctx: PluginContext) => void;

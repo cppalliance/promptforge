@@ -24,16 +24,14 @@ interface ThinkingState {
 	cacheIsGenerating: boolean;
 	latestBlock: ReasoningBlock;
 	btn: HTMLButtonElement;
-	labelEl: HTMLElement;
 	liveEl: HTMLElement;
 	contentEl: HTMLElement;
 }
 
-const GRACE_DELAY_MS = 500;
 const PREVIEW_BOTTOM_TOLERANCE_PX = 8;
 
-const LABEL_IDLE = "Thinking";
-const LABEL_STREAMING = "Planning next moves...";
+const LABEL_THINKING = "Thinking";
+const LABEL_PREFILL = "Planning next moves";
 
 const ENCRYPTED_REASONING_FALLBACK = "<i>Thought process is hidden by the model provider.</i>";
 
@@ -45,19 +43,12 @@ function getReasoningDisplayContent(block: ReasoningBlock): string {
 export function ThinkingPlugin(): ChatPlugin {
 	const stateMap = new WeakMap<HTMLElement, ThinkingState>();
 	let blockSeq = 0;
-	let graceTimer: number | undefined;
-	let graceRow: HTMLElement | null = null;
-	let unsubscribeGrace: (() => void) | null = null;
+	let prefillRow: HTMLElement | null = null;
+	let unsubscribePrefill: (() => void) | null = null;
 
-	const clearGraceTimer = (): void => {
-		if (graceTimer === undefined) return;
-		window.clearTimeout(graceTimer);
-		graceTimer = undefined;
-	};
-
-	const removeGraceRow = (): void => {
-		graceRow?.remove();
-		graceRow = null;
+	const removePrefillRow = (): void => {
+		prefillRow?.remove();
+		prefillRow = null;
 	};
 
 	const pinPreviewToBottom = (state: ThinkingState): void => {
@@ -86,14 +77,12 @@ export function ThinkingPlugin(): ChatPlugin {
 	};
 
 	// State transitions are announced through a visually-hidden live region;
-	// per-token text never is.
+	// per-token text never is. The toggle label stays "Thinking" in every
+	// state; the shimmer lives only on the prefill row.
 	const syncStreamingChrome = (state: ThinkingState, isGenerating: boolean): void => {
 		if (state.cacheIsGenerating === isGenerating) return;
 		state.cacheIsGenerating = isGenerating;
-		const label = isGenerating ? LABEL_STREAMING : LABEL_IDLE;
-		state.labelEl.textContent = label;
-		state.labelEl.classList.toggle("mur-think-label--streaming", isGenerating);
-		state.liveEl.textContent = label;
+		state.liveEl.textContent = isGenerating ? LABEL_THINKING : `${LABEL_THINKING} complete`;
 	};
 
 	// Collapsing shrinks the feed; capture the scroll position and restore it
@@ -117,7 +106,7 @@ export function ThinkingPlugin(): ChatPlugin {
 		btn.setAttribute("aria-expanded", "false");
 		btn.setAttribute("aria-controls", contentId);
 
-		const labelEl = el("span", "mur-think-label", { textContent: LABEL_IDLE });
+		const labelEl = el("span", "mur-think-label", { textContent: LABEL_THINKING });
 		btn.appendChild(labelEl);
 
 		const contentEl = el("div", "mur-think-content");
@@ -138,12 +127,11 @@ export function ThinkingPlugin(): ChatPlugin {
 			autoPin: true,
 			cacheReasoning: "",
 			cacheIsGenerating: false,
-			latestBlock: block,
-			btn,
-			labelEl,
-			liveEl,
-			contentEl,
-		};
+		latestBlock: block,
+		btn,
+		liveEl,
+		contentEl,
+	};
 
 		btn.addEventListener("click", () => {
 			state.userToggled = true;
@@ -170,10 +158,10 @@ export function ThinkingPlugin(): ChatPlugin {
 		return state;
 	};
 
-	// Grace-period loader: a synthetic streaming row, shown only when
-	// generation runs ~500ms with no reasoning block, so fast responses never
-	// flicker it.
-	const showGraceRow = (ctx: PluginContext, messageId: string): void => {
+	// Prefill indicator: shown the moment generation starts, before the first
+	// reasoning or content token arrives. Non-interactive; the first reasoning
+	// delta replaces it with the Thinking toggle.
+	const showPrefillRow = (ctx: PluginContext, messageId: string): void => {
 		const engineState = ctx.engine.state;
 		if (engineState.generatingMessageId !== messageId) return;
 		const message = engineState.messages.find((candidate) => candidate.id === messageId);
@@ -183,51 +171,45 @@ export function ThinkingPlugin(): ChatPlugin {
 		const target = messages.item(messages.length - 1);
 		if (!(target instanceof HTMLElement)) return;
 
-		const label = el("span", "mur-think-label mur-think-label--streaming", { textContent: LABEL_STREAMING });
-		const row = el("div", "mur-think-grace", {}, [label]);
+		const label = el("span", "mur-think-label mur-think-label--prefill", { textContent: LABEL_PREFILL });
+		const row = el("div", "mur-think-prefill", {}, [label]);
 		row.setAttribute("role", "status");
 		target.appendChild(row);
-		graceRow = row;
+		prefillRow = row;
 	};
 
 	return {
 		name: "thinking",
+		ownsEmptyLoadingState: true,
 
 		onMount: (ctx) => {
-			unsubscribeGrace = ctx.engine.onChange(
+			unsubscribePrefill = ctx.engine.onChange(
 				(engineState) => engineState.generatingMessageId,
 				(generatingMessageId) => {
-					clearGraceTimer();
-					removeGraceRow();
+					removePrefillRow();
 					if (generatingMessageId === null) return;
-					graceTimer = window.setTimeout(() => {
-						graceTimer = undefined;
-						showGraceRow(ctx, generatingMessageId);
-					}, GRACE_DELAY_MS);
+					showPrefillRow(ctx, generatingMessageId);
 				},
 			);
 		},
 
 		destroy: () => {
-			clearGraceTimer();
-			removeGraceRow();
-			unsubscribeGrace?.();
-			unsubscribeGrace = null;
+			removePrefillRow();
+			unsubscribePrefill?.();
+			unsubscribePrefill = null;
 		},
 
 		onBlockRender: (block, containerEl, isGenerating) => {
-			// Any block rendering into the message that carries the grace row
-			// supersedes the loader, whatever the block type.
-			if (graceRow?.parentElement?.contains(containerEl)) {
-				clearGraceTimer();
-				removeGraceRow();
+			// Any block rendering into the message that carries the prefill row
+			// supersedes it, whatever the block type.
+			if (prefillRow?.parentElement?.contains(containerEl)) {
+				removePrefillRow();
 			}
 
 			if (block.type !== "reasoning") return false;
 
-			// A real reasoning block supersedes the grace-period loader.
-			clearGraceTimer();
-			removeGraceRow();
+			// A real reasoning block supersedes the prefill indicator.
+			removePrefillRow();
 
 			let state = stateMap.get(containerEl);
 			if (!state) {
