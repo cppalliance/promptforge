@@ -18,6 +18,7 @@ import { StatusBar } from "./status-bar";
 import { setupVoice, type VoiceHandle } from "./voice";
 import { setupWindowChrome } from "./window-chrome";
 import { setupWindowMenus } from "./window-menu";
+import { setupWorkspaceDrops } from "./workspace-drops";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
 
@@ -35,6 +36,9 @@ const statusBar = new StatusBar(statusBarRoot);
 // The custom title bar stays hidden in a plain browser; it only appears
 // when the desktop shell sets its initialization flag.
 setupWindowChrome();
+// Native Explorer drops arrive as a typed event from the desktop shell;
+// each path becomes a workspace grant. Inert in a plain browser.
+setupWorkspaceDrops(statusBar);
 const workshopSocket = new WorkshopSocket();
 workshopSocket.onStatus((frame) => statusBar.render(frame));
 // A dropped socket means every in-flight status is stale; the bar returns
