@@ -90,6 +90,15 @@ export function renderSafeHTML(
 					node.removeAttribute(attr);
 				}
 			}
+
+			// Anchors open externally: target/rel are set after the attribute
+			// sweep so author-supplied values (stripped as unsafe above) cannot
+			// override them. Anchors whose href failed the URL check keep no
+			// href and stay inert.
+			if (tagName === "A" && node.hasAttribute("href")) {
+				node.setAttribute("target", "_blank");
+				node.setAttribute("rel", "noopener");
+			}
 		}
 		node = walker.nextNode() as Element;
 	}
