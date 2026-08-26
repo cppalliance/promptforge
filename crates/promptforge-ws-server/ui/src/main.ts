@@ -12,6 +12,7 @@ import type { IContentRenderer } from "dockview";
 import type { ChatPlugin } from "./chat/core/types";
 import { ChatUI } from "./chat/main";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
+import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
 import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
 import { setupVoice, type VoiceHandle } from "./voice";
@@ -106,7 +107,7 @@ const chat = new ChatUI({
   enableSidebar: false,
   routing: false,
   fullscreen: false,
-  plugins: () => [voicePlugin, ThinkingPlugin()],
+  plugins: () => [voicePlugin, ThinkingPlugin(), ToolsPlugin()],
 });
 
 function applyModel(): void {
