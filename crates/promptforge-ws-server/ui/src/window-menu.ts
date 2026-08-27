@@ -21,7 +21,6 @@ import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chro
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
 export interface WindowMenuCommands {
-  readonly newChat: () => void;
   readonly newAgent: () => void;
   readonly closeWindow: () => void;
   readonly undo: () => void;
@@ -30,19 +29,28 @@ export interface WindowMenuCommands {
   readonly copy: () => void;
   readonly paste: () => void;
   readonly selectAll: () => void;
+  readonly toggleWorkshopPanel: () => void;
   readonly minimizeWindow: () => void;
   readonly toggleWindowMaximize: () => void;
   readonly showAbout: () => void;
 }
 
 /**
+ * The workshop surface the Window menu dispatches through: the Workshop
+ * Panel item toggles the tree, sharing the Ctrl+B command from
+ * workshop/shortcuts.
+ */
+export interface WorkshopMenuCommands {
+  readonly toggleWorkshopPanel: () => void;
+}
+
+/**
  * The agent surface the File menu dispatches through: New Agent opens a
- * fresh Agent tab; New Chat starts a new session on the active agent.
- * The Agent panel controller satisfies this structurally.
+ * fresh Agent tab, the only way to start a new conversation. The Agent
+ * panel controller satisfies this structurally.
  */
 export interface AgentMenuCommands {
   readonly newAgent: () => void;
-  readonly newChat: () => void;
 }
 
 /** One catalog entry the Model menu lists. */
@@ -118,12 +126,13 @@ function buildMenuItems(
   hasEditTarget: () => boolean,
 ): Record<MenuId, readonly MenuItem[]> {
   const windowItems: MenuItem[] = [
+    { kind: "command", label: "Workshop Panel", shortcut: "Ctrl+B", run: commands.toggleWorkshopPanel },
+    { kind: "separator" },
     { kind: "command", label: "Minimize", run: commands.minimizeWindow },
     { kind: "command", label: "Maximize/Restore", run: commands.toggleWindowMaximize },
   ];
   return {
     file: [
-      { kind: "command", label: "New Chat", run: commands.newChat },
       { kind: "command", label: "New Agent", run: commands.newAgent },
       { kind: "separator" },
       { kind: "command", label: "Close Window", shortcut: "Alt+F4", run: commands.closeWindow },
@@ -155,6 +164,7 @@ function buildMenuItems(
  */
 export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
+  readonly workshop: WorkshopMenuCommands;
   readonly modelMenu?: ModelMenuSurface;
 }): WindowMenuCommands {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
@@ -191,7 +201,6 @@ export function setupWindowMenus(options: {
   const commands: WindowMenuCommands = {
     // Wrapped, not aliased: the agent surface may be a class instance
     // whose methods need their receiver.
-    newChat: () => options.agents.newChat(),
     newAgent: () => options.agents.newAgent(),
     closeWindow,
     undo: () => runEditCommand("undo"),
@@ -200,6 +209,7 @@ export function setupWindowMenus(options: {
     copy: () => runEditCommand("copy"),
     paste: () => runEditCommand("paste"),
     selectAll: () => runEditCommand("selectAll"),
+    toggleWorkshopPanel: () => options.workshop.toggleWorkshopPanel(),
     minimizeWindow,
     toggleWindowMaximize,
     showAbout: showAboutDialog,

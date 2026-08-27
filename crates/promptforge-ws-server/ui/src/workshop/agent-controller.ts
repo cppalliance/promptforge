@@ -46,26 +46,12 @@ export class AgentController {
     }
   }
 
-  /** File > New Agent: a fresh tab, never a cleared conversation. */
+  /**
+   * File > New Agent: a fresh tab with its own conversation, the only
+   * way to start a new one.
+   */
   newAgent(): void {
     openAgentPanel();
-  }
-
-  /**
-   * File > New Chat: a fresh session on the active agent. With no agent
-   * open at all, opens one first so the command always lands somewhere.
-   */
-  newChat(): void {
-    if (this.activeId === null || !this.agents.has(this.activeId)) {
-      this.newAgent();
-    }
-    const chat = this.active();
-    if (chat === null) {
-      return;
-    }
-    void chat.engine.sessions.create().catch((error: unknown) => {
-      console.error("New Chat failed:", error);
-    });
   }
 
   /** Broadcasts a model selection to every live agent's engine. */

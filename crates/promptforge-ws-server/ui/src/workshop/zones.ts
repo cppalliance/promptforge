@@ -173,6 +173,7 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
   const panel = dock.addPanel({
     id,
     component: entry.type,
+    tabComponent: entry.tabComponent,
     title: titleFor(type, params),
     params,
     position: group ? { referenceGroup: group.id } : rebuildPosition(zone),
