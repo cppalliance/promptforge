@@ -63,6 +63,16 @@ export class StatusBar extends Disposable {
     // keeps the amber LED lit until something else takes over; any other
     // activity clears it so the LED returns to idle after the pulse decays.
     this.sustained = frame.activity === "thinking" ? "thinking" : null;
+    // With no pulse pending, nothing else will ever repaint the LED - an
+    // earlier pulse's decay may have re-added the old sustained state to
+    // the lit set and cleared the timer, orphaning that glow. Land the lit
+    // set on the new sustained value here. A pending pulse needs no help:
+    // its decay already lands on the updated sustained state.
+    if (this.ledTimer === null) {
+      this.lit.clear();
+      if (this.sustained) this.lit.add(this.sustained);
+      this.applyLed();
+    }
     this.text.textContent = frame.label;
     this.root.title = frame.description;
     this.text.classList.toggle("status-bar__text--error", frame.severity === "error");
