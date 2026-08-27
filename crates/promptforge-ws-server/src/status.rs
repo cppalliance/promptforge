@@ -14,86 +14,14 @@
 //! `{"type":"status",...}` frame (see [`StatusBarUpdate::frame`]),
 //! interleaving freely with a chat's `delta`/`done`/`error` replies.
 
-use serde::Serialize;
 use tokio::sync::broadcast;
+
+use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
 
 /// Ring capacity of the status bus. Covers a startup burst plus a chat's
 /// phase transitions with headroom; a receiver lagging past it skips ahead
 /// rather than slowing the senders.
 const STATUS_CHANNEL_CAPACITY: usize = 64;
-
-/// One status bar update: what the bar should show right now.
-///
-/// Every update is a complete snapshot, so a lagging receiver loses nothing
-/// by skipping intermediates. `label` is the short text rendered in the
-/// status bar; `description` is the longer tooltip shown on hover.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct StatusBarUpdate {
-    /// Short text rendered in the status bar.
-    pub(crate) label: String,
-    /// Longer text shown as the bar's tooltip.
-    pub(crate) description: String,
-    /// Determinate progress, when the activity can report it.
-    pub(crate) progress: Option<Progress>,
-    /// How loudly the update speaks; the UI ignores `Debug` updates.
-    pub(crate) severity: Severity,
-    /// Which subsystem is active, driving the bar's activity indicator.
-    pub(crate) activity: Activity,
-}
-
-impl StatusBarUpdate {
-    /// The update as a wire frame: its own fields plus `"type": "status"`.
-    pub(crate) fn frame(&self) -> StatusFrame<'_> {
-        StatusFrame {
-            kind: "status",
-            update: self,
-        }
-    }
-}
-
-/// A determinate progress report for the status bar's progress slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub(crate) struct Progress {
-    /// Units completed so far.
-    pub(crate) current: u64,
-    /// Units expected in total.
-    pub(crate) total: u64,
-}
-
-/// How loudly a status update speaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Severity {
-    /// User-visible status text.
-    Info,
-    /// Internal instrumentation; the UI ignores it for display.
-    Debug,
-    /// A failure the user should see.
-    Error,
-}
-
-/// The subsystem an update belongs to, driving the activity indicator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum Activity {
-    /// No specific subsystem; the activity LED stays dark.
-    General,
-    /// A model turn in flight: amber on the activity LED.
-    Thinking,
-    /// Output tokens arriving: green on the activity LED.
-    Generating,
-}
-
-/// The serialized shape of one update on the socket: the update's fields
-/// flattened beside `"type": "status"`, matching the chat protocol's frame
-/// taxonomy.
-#[derive(Debug, Serialize)]
-pub(crate) struct StatusFrame<'a> {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    #[serde(flatten)]
-    update: &'a StatusBarUpdate,
-}
 
 /// The shared status bus: a cloneable handle onto the broadcast channel.
 ///
@@ -206,66 +134,6 @@ impl Default for StatusBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Builds a minimal update with the given label.
-    fn stub(label: impl Into<String>) -> StatusBarUpdate {
-        StatusBarUpdate {
-            label: label.into(),
-            description: String::new(),
-            progress: None,
-            severity: Severity::Info,
-            activity: Activity::General,
-        }
-    }
-
-    #[test]
-    fn a_status_update_serializes_as_a_status_frame() {
-        let frame = serde_json::to_value(stub("Ready").frame()).expect("the frame serializes");
-        assert_eq!(
-            frame,
-            serde_json::json!({
-                "type": "status",
-                "label": "Ready",
-                "description": "",
-                "progress": null,
-                "severity": "info",
-                "activity": "general",
-            }),
-            "the wire shape matches the chat protocol's frame taxonomy"
-        );
-    }
-
-    #[test]
-    fn progress_and_the_remaining_variants_serialize() {
-        let update = StatusBarUpdate {
-            progress: Some(Progress {
-                current: 1,
-                total: 2,
-            }),
-            severity: Severity::Error,
-            activity: Activity::Thinking,
-            ..stub("Working")
-        };
-        let frame = serde_json::to_value(update.frame()).expect("the frame serializes");
-        assert_eq!(
-            frame["progress"],
-            serde_json::json!({"current": 1, "total": 2})
-        );
-        assert_eq!(frame["severity"], "error");
-        assert_eq!(frame["activity"], "thinking");
-        // Debug serializes too; the UI, not the bus, ignores it.
-        let debug = serde_json::to_value(
-            StatusBarUpdate {
-                severity: Severity::Debug,
-                activity: Activity::Generating,
-                ..stub("x")
-            }
-            .frame(),
-        )
-        .expect("the frame serializes");
-        assert_eq!(debug["severity"], "debug");
-        assert_eq!(debug["activity"], "generating");
-    }
 
     #[tokio::test]
     async fn emitting_with_no_subscribers_is_a_no_op() {
