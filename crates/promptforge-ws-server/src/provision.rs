@@ -28,8 +28,8 @@ use tokio::sync::oneshot;
 use crate::config::VoiceConfig;
 use crate::gateway::{CacheEvent, CacheResponse, GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
-use crate::protocol::{Activity, Progress};
-use crate::status::StatusBus;
+use crate::protocol::Activity;
+use crate::push::Push;
 use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 
 /// A running provisioning task.
@@ -56,17 +56,17 @@ impl Provision {
 }
 
 /// Spawns the provisioning task against `client`, reporting through
-/// `status`, waiting on `health`, and activating `voice` on success.
+/// `push`, waiting on `health`, and activating `voice` on success.
 pub(crate) fn spawn(
     client: GatewayClient,
-    status: StatusBus,
+    push: Push,
     health: GatewayHealth,
     voice: VoiceSlot,
     config: VoiceConfig,
 ) -> Provision {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&client, &status, &health, &voice, &config, &mut stopped).await;
+        run(&client, &push, &health, &voice, &config, &mut stopped).await;
     });
     Provision {
         stop: Some(stop),
@@ -79,7 +79,7 @@ pub(crate) fn spawn(
 /// so a persistent failure can never spin.
 async fn run(
     client: &GatewayClient,
-    status: &StatusBus,
+    push: &Push,
     health: &GatewayHealth,
     voice: &VoiceSlot,
     config: &VoiceConfig,
@@ -107,13 +107,13 @@ async fn run(
         }
         let outcome = tokio::select! {
             _ = &mut *stop => return,
-            outcome = provision_once(client, status, voice, config) => outcome,
+            outcome = provision_once(client, push, voice, config) => outcome,
         };
         match outcome {
             Ok(()) => return,
             Err(error) => {
                 tracing::warn!(%error, "voice model provisioning failed");
-                report_failure(status, &error);
+                report_failure(push, &error);
             }
         }
         // A failed attempt is retried on the next reconnect and only then:
@@ -140,18 +140,13 @@ fn can_provision(config: &VoiceConfig) -> bool {
 /// voice engine from them and activates the slot.
 async fn provision_once(
     client: &GatewayClient,
-    status: &StatusBus,
+    push: &Push,
     voice: &VoiceSlot,
     config: &VoiceConfig,
 ) -> Result<(), ProvisionError> {
-    let interim = resolve_model(
-        client,
-        status,
-        &config.interim_model,
-        &config.interim_source,
-    )
-    .await?;
-    let final_pass = resolve_final(client, status, config).await?;
+    let interim =
+        resolve_model(client, push, &config.interim_model, &config.interim_source).await?;
+    let final_pass = resolve_final(client, push, config).await?;
     let mut resolved = config.clone();
     resolved.interim_model = interim;
     resolved.final_model = final_pass.unwrap_or_default();
@@ -162,7 +157,7 @@ async fn provision_once(
         .map_err(ProvisionError::EngineTask)?
         .map_err(ProvisionError::LoadEngine)?;
     voice.activate(engine);
-    status.info(
+    push.push_status_update(
         "Voice ready",
         "the whisper models are loaded; push-to-talk transcription is available",
         Activity::General,
@@ -174,7 +169,7 @@ async fn provision_once(
 /// exists, otherwise a cache fetch of its source URL.
 async fn resolve_model(
     client: &GatewayClient,
-    status: &StatusBus,
+    push: &Push,
     path: &Path,
     source: &str,
 ) -> Result<PathBuf, ProvisionError> {
@@ -186,7 +181,7 @@ async fn resolve_model(
             path: path.to_path_buf(),
         });
     }
-    cache_fetch(client, status, source).await
+    cache_fetch(client, push, source).await
 }
 
 /// Resolves the optional final-pass model. A configured final path that is
@@ -195,7 +190,7 @@ async fn resolve_model(
 /// close with the interim model as they do when no final model is set.
 async fn resolve_final(
     client: &GatewayClient,
-    status: &StatusBus,
+    push: &Push,
     config: &VoiceConfig,
 ) -> Result<Option<PathBuf>, ProvisionError> {
     if config.final_model.is_file() {
@@ -203,7 +198,7 @@ async fn resolve_final(
     }
     if config.final_source.is_empty() {
         if !config.final_model.as_os_str().is_empty() {
-            status.info(
+            push.push_status_update(
                 "Voice final pass unavailable",
                 format!(
                     "{} is missing and no final_source is configured; takes close with the interim model",
@@ -214,7 +209,7 @@ async fn resolve_final(
         }
         return Ok(None);
     }
-    cache_fetch(client, status, &config.final_source)
+    cache_fetch(client, push, &config.final_source)
         .await
         .map(Some)
 }
@@ -237,7 +232,7 @@ fn source_filename(source: &str) -> &str {
 /// on provisioning). A reconnect does not interrupt a stalled attempt.
 async fn cache_fetch(
     client: &GatewayClient,
-    status: &StatusBus,
+    push: &Push,
     source: &str,
 ) -> Result<PathBuf, ProvisionError> {
     match client.cache_ensure(source).await? {
@@ -269,18 +264,16 @@ async fn cache_fetch(
                     // A null total means the upstream sent no
                     // Content-Length; it crosses the wire as a 0 total,
                     // which the status bar clamps to a degenerate bar.
-                    status.progress(
+                    push.push_progress(
                         format!("Downloading {filename}"),
                         format!("{source} through the gateway cache"),
-                        Progress {
-                            current: bytes,
-                            total: total.unwrap_or(0),
-                        },
+                        bytes,
+                        total.unwrap_or(0),
                         Activity::General,
                     );
                 }
                 CacheEvent::Ready { path } => {
-                    status.info(
+                    push.push_status_update(
                         "Download complete",
                         format!("{filename} is cached at {}", path.display()),
                         Activity::General,
@@ -296,14 +289,14 @@ async fn cache_fetch(
 /// Reports a provisioning failure. A transport failure means the gateway
 /// is not there - the heartbeat's story to tell - so it speaks at Info
 /// with the retry note; every other failure is a user-visible error.
-fn report_failure(status: &StatusBus, error: &ProvisionError) {
+fn report_failure(push: &Push, error: &ProvisionError) {
     match error {
-        ProvisionError::Transport(_) => status.info(
+        ProvisionError::Transport(_) => push.push_status_update(
             "Voice models wait on the gateway",
             format!("{error}; provisioning retries when the gateway reconnects"),
             Activity::General,
         ),
-        _ => status.error(
+        _ => push.push_failure(
             "Voice provisioning failed",
             format!("{error}; voice stays disabled; a gateway reconnect retries"),
             Activity::General,
@@ -367,7 +360,9 @@ mod tests {
     use axum::routing::post;
     use tokio::sync::broadcast;
 
+    use crate::catalog::CatalogBus;
     use crate::protocol::{Severity, StatusBarUpdate};
+    use crate::status::StatusBus;
     use crate::transcribe::fixtures;
 
     const INTERIM_SOURCE: &str = "http://gateway.test/models/ggml-large-v3-turbo.bin";
@@ -486,7 +481,7 @@ mod tests {
         // provisioning immediately, before any publish.
         let provision = spawn(
             client,
-            status,
+            Push::new(status, CatalogBus::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -529,7 +524,7 @@ mod tests {
         let health = GatewayHealth::new();
         let provision = spawn(
             client,
-            status,
+            Push::new(status, CatalogBus::new()),
             health.clone(),
             slot.clone(),
             sourced_config(),
@@ -561,7 +556,7 @@ mod tests {
         let slot = VoiceSlot::default();
         let provision = spawn(
             client,
-            status,
+            Push::new(status, CatalogBus::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -579,7 +574,7 @@ mod tests {
         let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
         let provision = spawn(
             client,
-            StatusBus::new(),
+            Push::new(StatusBus::new(), CatalogBus::new()),
             GatewayHealth::new(),
             VoiceSlot::default(),
             VoiceConfig::default(),
@@ -616,7 +611,7 @@ mod tests {
         );
         let provision = spawn(
             client,
-            StatusBus::new(),
+            Push::new(StatusBus::new(), CatalogBus::new()),
             GatewayHealth::new(),
             slot,
             sourced_config(),
@@ -641,7 +636,7 @@ mod tests {
         config.final_source = String::new();
         let provision = spawn(
             client,
-            StatusBus::new(),
+            Push::new(StatusBus::new(), CatalogBus::new()),
             GatewayHealth::new(),
             slot.clone(),
             config,
@@ -672,7 +667,7 @@ mod tests {
         let slot = VoiceSlot::default();
         let provision = spawn(
             client,
-            status,
+            Push::new(status, CatalogBus::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -695,7 +690,7 @@ mod tests {
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
         gateway: GatewayClient,
-        status: StatusBus,
+        push: Push,
         health: GatewayHealth,
         slot: VoiceSlot,
         voice: VoiceConfig,
@@ -719,7 +714,7 @@ mod tests {
         };
         let state = crate::AppState::new(&config).expect("state builds in tests");
         let gateway = state.gateway_client().clone();
-        let status = state.status();
+        let push = state.push();
         let health = state.health().clone();
         let slot = state.voice_slot();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -737,7 +732,7 @@ mod tests {
         Workshop {
             socket,
             gateway,
-            status,
+            push,
             health,
             slot,
             voice: config.voice.clone(),
@@ -783,7 +778,7 @@ mod tests {
         workshop.health.publish(false);
         let provision = spawn(
             workshop.gateway.clone(),
-            workshop.status.clone(),
+            workshop.push.clone(),
             workshop.health.clone(),
             workshop.slot.clone(),
             workshop.voice.clone(),
