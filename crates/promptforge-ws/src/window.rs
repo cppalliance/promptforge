@@ -13,7 +13,7 @@ use anyhow::Context as _;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::run_return::EventLoopExtRunReturn;
-use tao::window::{Icon, WindowBuilder};
+use tao::window::{Icon, Window, WindowBuilder};
 #[cfg(not(target_os = "windows"))]
 use wry::DragDropEvent;
 use wry::{PermissionKind, PermissionResponse, WebView, WebViewBuilder};
@@ -70,8 +70,8 @@ pub(crate) enum WindowCommand {
     Close,
 }
 
-/// A user event delivered to the tao event loop. Both the IPC handler and
-/// the drag-drop handler run on webview threads without access to the tao
+/// A user event delivered to the tao event loop. The IPC, drag-drop, and
+/// navigation handlers run on webview threads without access to the tao
 /// `Window` or the `WebView`, so their payloads travel through an
 /// `EventLoopProxy` and run on the event loop thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +80,19 @@ pub(crate) enum ShellEvent {
     Command(WindowCommand),
     /// Real OS paths dropped onto the webview from Explorer.
     FileDrop(Vec<PathBuf>),
+    /// An external URL a denied navigation opens in the system browser.
+    OpenExternal(String),
+}
+
+/// The deferred half of a navigation decision: a denied external URL
+/// becomes an [`OpenExternal`](ShellEvent::OpenExternal) event for the
+/// event loop to execute; an allowed navigation defers nothing.
+#[must_use]
+fn navigation_effect(classification: Navigation, target: String) -> Option<ShellEvent> {
+    match classification {
+        Navigation::Allow => None,
+        Navigation::OpenExternally => Some(ShellEvent::OpenExternal(target)),
+    }
 }
 
 /// Parses one IPC envelope (`{"command": "..."}`) into a window command.
@@ -194,6 +207,42 @@ fn dispatch_file_drop(webview: &WebView, paths: &[PathBuf]) {
     }
 }
 
+/// Executes one [`ShellEvent`] on the event loop thread, where the tao
+/// `Window` and the `WebView` live. The match is exhaustive on purpose:
+/// a new variant fails to compile here instead of being silently
+/// swallowed by the loop's catch-all for foreign tao events.
+fn handle_shell_event(
+    event: ShellEvent,
+    window: &Window,
+    webview: &WebView,
+    control_flow: &mut ControlFlow,
+) {
+    match event {
+        ShellEvent::Command(WindowCommand::Close) => {
+            *control_flow = ControlFlow::Exit;
+        }
+        ShellEvent::Command(WindowCommand::Drag) => {
+            if let Err(error) = window.drag_window() {
+                eprintln!("could not start the native window drag: {error}");
+            }
+        }
+        ShellEvent::Command(WindowCommand::Minimize) => {
+            window.set_minimized(true);
+        }
+        ShellEvent::Command(WindowCommand::ToggleMaximize) => {
+            window.set_maximized(!window.is_maximized());
+        }
+        ShellEvent::FileDrop(paths) => {
+            dispatch_file_drop(webview, &paths);
+        }
+        ShellEvent::OpenExternal(url) => {
+            if let Err(error) = open::that(&url) {
+                eprintln!("could not open {url} in the system browser: {error}");
+            }
+        }
+    }
+}
+
 /// Runs the window's event loop until the user closes the window, then
 /// returns.
 ///
@@ -213,6 +262,7 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
         .context("create the workshop window")?;
 
     let proxy = event_loop.create_proxy();
+    let navigation_proxy = event_loop.create_proxy();
     let webview_builder = WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script("window.__PROMPTFORGE_DESKTOP__ = true;")
@@ -224,18 +274,22 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
                 eprintln!("could not forward the window command to the event loop: {error}");
             }
         })
+        // Both decision callbacks below stay inline: wry demands each
+        // answer synchronously as the callback's return value, so the
+        // decision cannot defer through the proxy - the proxy can fire
+        // events at the loop, never answer from it.
         .with_permission_handler(|kind| match kind {
             PermissionKind::Microphone => PermissionResponse::Allow,
             _ => PermissionResponse::Default,
         })
-        .with_navigation_handler(|target| match classify_navigation(&target) {
-            Navigation::Allow => true,
-            Navigation::OpenExternally => {
-                if let Err(error) = open::that(&target) {
-                    eprintln!("could not open {target} in the system browser: {error}");
-                }
-                false
+        .with_navigation_handler(move |target| {
+            let classification = classify_navigation(&target);
+            if let Some(effect) = navigation_effect(classification, target)
+                && let Err(error) = navigation_proxy.send_event(effect)
+            {
+                eprintln!("could not forward the external-open request to the event loop: {error}");
             }
+            classification == Navigation::Allow
         });
     // On Windows the shell must NOT use wry's drag-drop handler: wry
     // implements it by registering its own OLE drop target on the WebView2
@@ -290,27 +344,15 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            }
-            | Event::UserEvent(ShellEvent::Command(WindowCommand::Close)) => {
+            } => {
                 *control_flow = ControlFlow::Exit;
             }
             Event::WindowEvent {
                 event: WindowEvent::Resized(..),
                 ..
             } => dispatch_maximized(&webview, window.is_maximized()),
-            Event::UserEvent(ShellEvent::Command(WindowCommand::Drag)) => {
-                if let Err(error) = window.drag_window() {
-                    eprintln!("could not start the native window drag: {error}");
-                }
-            }
-            Event::UserEvent(ShellEvent::Command(WindowCommand::Minimize)) => {
-                window.set_minimized(true);
-            }
-            Event::UserEvent(ShellEvent::Command(WindowCommand::ToggleMaximize)) => {
-                window.set_maximized(!window.is_maximized());
-            }
-            Event::UserEvent(ShellEvent::FileDrop(paths)) => {
-                dispatch_file_drop(&webview, &paths);
+            Event::UserEvent(shell_event) => {
+                handle_shell_event(shell_event, &window, &webview, control_flow);
             }
             _ => {}
         }
@@ -323,8 +365,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        ICON_PNG, Navigation, WindowCommand, classify_navigation, decode_png_rgba,
-        normalize_dropped_path, parse_window_command,
+        ICON_PNG, Navigation, ShellEvent, WindowCommand, classify_navigation, decode_png_rgba,
+        navigation_effect, normalize_dropped_path, parse_window_command,
     };
 
     #[test]
@@ -404,6 +446,23 @@ mod tests {
                 "{url}"
             );
         }
+    }
+
+    #[test]
+    fn allowed_navigations_defer_no_side_effect() {
+        assert_eq!(
+            navigation_effect(Navigation::Allow, "http://127.0.0.1:7910/".to_owned()),
+            None
+        );
+    }
+
+    #[test]
+    fn denied_navigations_defer_the_browser_open_to_the_event_loop() {
+        let target = "https://example.com/docs";
+        assert_eq!(
+            navigation_effect(Navigation::OpenExternally, target.to_owned()),
+            Some(ShellEvent::OpenExternal(target.to_owned()))
+        );
     }
 
     #[test]
