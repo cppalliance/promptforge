@@ -42,9 +42,10 @@ use axum::response::Response;
 use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
-use crate::app::{AppState, tape_round_trip, value_from_bytes};
+use crate::app::AppState;
 use crate::gateway::{ChatStream, GatewayResponse};
 use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
+use crate::relay::{tape_round_trip, value_from_bytes};
 use crate::tape::Tape;
 use crate::ws_session::WsSession;
 
