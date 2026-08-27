@@ -26,6 +26,17 @@ mod voice;
 mod workspace;
 mod ws_session;
 
+/// Crate-internal test fixtures, re-exported to the integration-test
+/// binary; the `test-fixtures` feature that compiles them is enabled by
+/// the crate's own dev-dependency, so every `cargo test` sees them while
+/// production builds do not.
+#[cfg(feature = "test-fixtures")]
+#[doc(hidden)]
+pub mod fixtures {
+    pub use crate::app::fixtures::spawn_gateway;
+    pub use crate::transcribe::fixtures::{fixture_dir, jfk_samples, model_path, require_model};
+}
+
 pub use app::{AppError, AppState, DEFAULT_ADDR, router};
 pub use config::{
     Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL, DEFAULT_VOICE_INTERVAL_MS,

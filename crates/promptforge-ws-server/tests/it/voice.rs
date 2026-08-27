@@ -2,10 +2,10 @@
 //! with per-take generations, PCM frame counting through the final reply,
 //! and - with the whisper fixtures - interim and final transcripts.
 
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use promptforge_ws_server::VoiceConfig;
+use promptforge_ws_server::fixtures::{jfk_samples, require_model};
 use serde_json::json;
 
 use crate::common::{JsonSocket, TestServer};
@@ -28,50 +28,6 @@ async fn send_samples(socket: &mut JsonSocket, samples: &[f32]) {
         }
         socket.send_binary(bytes).await;
     }
-}
-
-/// The directory holding the downloaded whisper fixtures, shared with the
-/// `src/voice.rs` module tests.
-fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
-}
-
-/// Path to the test model, panicking with download instructions when it
-/// has not been fetched.
-fn require_model() -> PathBuf {
-    let path = fixture_dir().join("ggml-tiny.en.bin");
-    assert!(
-        path.is_file(),
-        "test model missing: download ggml-tiny.en.bin from \
-         https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin \
-         into {}",
-        fixture_dir().display()
-    );
-    path
-}
-
-/// Decodes `jfk.wav` (16 kHz mono s16 PCM, "ask not what your country can
-/// do for you") into f32 samples for the wire format.
-#[expect(
-    clippy::expect_used,
-    reason = "test helpers fail by panicking with the invariant named"
-)]
-fn jfk_samples() -> Vec<f32> {
-    let path = fixture_dir().join("jfk.wav");
-    let mut reader =
-        hound::WavReader::open(&path).expect("jfk.wav fixture exists beside the test model");
-    let spec = reader.spec();
-    assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
-    assert_eq!(spec.channels, 1, "fixture must be mono");
-    assert_eq!(spec.bits_per_sample, 16, "fixture must be 16-bit PCM");
-    let samples: Vec<i16> = reader
-        .samples::<i16>()
-        .collect::<Result<_, _>>()
-        .expect("fixture decodes as s16 PCM");
-    let mut floats = vec![0.0; samples.len()];
-    whisper_rs::convert_integer_to_float_audio(&samples, &mut floats)
-        .expect("s16 to f32 conversion cannot fail");
-    floats
 }
 
 #[tokio::test]
