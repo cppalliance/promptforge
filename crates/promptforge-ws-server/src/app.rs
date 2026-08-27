@@ -1,26 +1,21 @@
-//! The axum router, shared handler state, and startup wiring for the
-//! workshop server.
+//! Shared handler state and the composition root that assembles the
+//! per-feature routers into the workshop server.
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::http::header;
-use axum::response::IntoResponse;
-use axum::routing::{get, post};
 
 use crate::catalog::CatalogBus;
-use crate::chat_ws;
 use crate::config::{Config, VoiceConfig};
 use crate::gateway::{GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
 use crate::protocol::Activity;
 use crate::push::Push;
+use crate::routes;
 use crate::status::StatusBus;
 use crate::tape::{Tape, TapeError};
 use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
-use crate::voice;
-use crate::workspace::{self, Workspace};
-use crate::{assets, relay};
+use crate::workspace::Workspace;
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
@@ -239,55 +234,22 @@ fn degrade(config: &VoiceConfig, push: &Push, error: &TranscribeError) -> Option
     None
 }
 
-/// Returns the workshop server router with every route mounted.
+/// Returns the workshop server router with every route mounted: each
+/// feature router from [`crate::routes`] built and merged, the workspace
+/// group narrowed to the one service its handlers use.
 pub fn router(state: AppState) -> Router {
+    let workspace = state.workspace().clone();
     Router::new()
-        .route("/", get(assets::ui_index))
-        .route("/app.js", get(assets::ui_app_js))
-        .route("/app.css", get(assets::ui_app_css))
-        .route("/style.css", get(assets::ui_style_css))
-        .route("/pcm-worklet.js", get(assets::ui_pcm_worklet))
-        .route(
-            "/icons/promptforge-icon-1.png",
-            get(assets::ui_program_icon),
-        )
-        .route("/health", get(health))
-        .route("/v1/models", get(relay::models))
-        .route("/profiles", get(relay::profiles))
-        .route("/profiles/switch", post(relay::switch_profile))
-        .route("/chat", post(relay::chat))
-        .route("/ws", get(chat_ws::upgrade))
-        .route("/voice", get(voice::upgrade))
-        .route("/voice/capability", get(voice_capability))
-        .route("/workspace/tree", get(workspace::tree))
-        .route(
-            "/workspace/file",
-            get(workspace::read_file).put(workspace::write_file),
-        )
-        .route("/workspace/grant", post(workspace::grant))
-        .with_state(state)
+        .merge(routes::assets::routes())
+        .merge(routes::health::routes())
+        .merge(routes::chat::routes(state.clone()))
+        .merge(routes::voice::routes(state))
+        .merge(routes::workspace::routes(workspace))
 }
 
-/// Answers the health probe with a static JSON body.
-async fn health() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/json")],
-        r#"{"status":"serving"}"#,
-    )
-}
-
-/// Reports whether voice transcription can run on the GPU, so the UI can
-/// hide the mic rather than offer a take that stalls on a CPU pass.
-async fn voice_capability() -> impl IntoResponse {
-    let gpu = crate::transcribe::gpu_transcription_available();
-    (
-        [(header::CONTENT_TYPE, "application/json")],
-        format!(r#"{{"gpu":{gpu}}}"#),
-    )
-}
-
-/// Shared fixtures for the router tests here and in [`crate::assets`] and
-/// [`crate::relay`]: state construction against a stub gateway address and
+/// Shared fixtures for the router tests here and in [`crate::relay`],
+/// [`crate::chat_ws`], and the [`crate::routes`] feature modules: state
+/// construction against a stub gateway address and
 /// the small helpers every route test leans on. [`fixtures::spawn_gateway`]
 /// is additionally re-exported to the integration-test binary through the
 /// `test-fixtures` feature the crate's own dev-dependency enables.
@@ -375,12 +337,11 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use axum::body::Body;
-    use axum::http::{HeaderMap, Request, StatusCode};
-    use axum::response::Response;
-    use tower::ServiceExt;
+    use axum::http::{HeaderMap, header};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
 
-    use super::fixtures::{body_bytes, config_for, spawn_gateway, state_for};
+    use super::fixtures::{config_for, spawn_gateway};
     use crate::protocol::{Severity, StatusBarUpdate};
     use crate::transcribe::fixtures;
 
@@ -410,79 +371,6 @@ mod tests {
     #[test]
     fn default_bind_is_loopback_port_7910() {
         assert_eq!(DEFAULT_ADDR, "127.0.0.1:7910");
-    }
-
-    /// A plain GET to `/ws` without upgrade headers is rejected with 400,
-    /// which proves the route is mounted; the WebSocket chat flow is covered
-    /// by the `chat_ws` module's own tests over a live socket.
-    #[tokio::test]
-    async fn ws_route_rejects_a_non_upgrade_get() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .uri("/ws")
-            .body(Body::empty())
-            .expect("static request parts are valid");
-        let response = router(state)
-            .oneshot(request)
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    /// A plain GET to `/voice` without upgrade headers is rejected with 400,
-    /// which proves the route is mounted; the full WebSocket session flow is
-    /// covered by the `voice` module's own tests over a live socket.
-    #[tokio::test]
-    async fn voice_route_rejects_a_non_upgrade_get() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .uri("/voice")
-            .body(Body::empty())
-            .expect("static request parts are valid");
-        let response = router(state)
-            .oneshot(request)
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn voice_capability_reports_the_build() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .uri("/voice/capability")
-            .body(Body::empty())
-            .expect("request builds");
-        let response = router(state)
-            .oneshot(request)
-            .await
-            .expect("the route answers");
-        assert_eq!(response.status(), StatusCode::OK);
-        let expected = crate::transcribe::gpu_transcription_available();
-        assert_eq!(
-            &body_bytes(response).await[..],
-            format!(r#"{{"gpu":{expected}}}"#).as_bytes()
-        );
-    }
-
-    #[tokio::test]
-    async fn health_returns_serving() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .uri("/health")
-            .body(Body::empty())
-            .expect("static request parts are valid");
-        let response = router(state)
-            .oneshot(request)
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .expect("the health handler sets content-type");
-        assert_eq!(content_type, "application/json");
-        assert_eq!(&body_bytes(response).await[..], br#"{"status":"serving"}"#);
     }
 
     #[test]
