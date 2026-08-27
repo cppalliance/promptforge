@@ -2,8 +2,8 @@
 // and in a plain browser, because it carries the application menus; only
 // the native window controls (drag region, minimize/maximize/close) are
 // desktop-only, since they need the wry IPC bridge. Every control sends a
-// narrow, typed command through that bridge - the shell (step 9) parses
-// and validates the payload before any native window operation runs.
+// narrow, typed command through that bridge - the shell parses and
+// validates the payload before any native window operation runs.
 
 import "./window-chrome.css";
 
