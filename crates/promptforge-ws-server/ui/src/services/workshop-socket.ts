@@ -44,6 +44,27 @@ function defaultUrl(): string {
 const RECONNECT_INITIAL_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
+/**
+ * Most pushes a boot queue will ever hold before `ready()` releases it.
+ * When full, the oldest push is dropped: a newer status or catalog frame
+ * supersedes an older one, and an unbounded queue on a socket whose owner
+ * never declares readiness is a leak.
+ */
+export const BOOT_QUEUE_CAP = 32;
+
+type QueuedPush =
+  | { kind: "status"; frame: StatusFrame }
+  | { kind: "models"; models: CatalogModel[] };
+
+/**
+ * Unsolicited server pushes (status, models) that arrive before `ready()`
+ * is called are held in a queue bounded at `BOOT_QUEUE_CAP` (drop-oldest)
+ * and replayed in arrival order when the composition root declares itself
+ * ready - handlers attached at different points of boot would otherwise
+ * race the server's first pushes.
+ * After `ready()`, pushes deliver immediately. Chat reply frames are never
+ * queued: they answer a `streamChat` call, which implies a running app.
+ */
 export class WorkshopSocket extends Disposable {
   private socket: WebSocket | null = null;
   private opening: { socket: WebSocket; promise: Promise<void> } | null = null;
@@ -51,6 +72,8 @@ export class WorkshopSocket extends Disposable {
   private reconnectDelayMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<number, PendingChat>();
+  private isReady = false;
+  private readonly bootQueue: QueuedPush[] = [];
 
   private readonly _onStatus = this._register(new Emitter<StatusFrame>());
   /** Fires for every unsolicited status frame; subscribing returns the severing disposable. */
@@ -91,6 +114,7 @@ export class WorkshopSocket extends Disposable {
           this.socket = null;
         }
         this.settleAll();
+        this.bootQueue.length = 0;
       }),
     );
   }
@@ -100,6 +124,23 @@ export class WorkshopSocket extends Disposable {
     // A failed open is ignored here: `onerror` has already reset the state,
     // and the next `streamChat` retries through `ensureOpen`.
     void this.ensureOpen().catch(() => {});
+  }
+
+  /**
+   * Declares the app ready for pushes: replays every queued status/models
+   * push in arrival order, then delivers later pushes immediately.
+   * Idempotent. The composition root calls this once its handlers and
+   * panels are wired.
+   */
+  ready(): void {
+    if (this.isReady) return;
+    // Readiness flips before the flush: a push a handler delivers
+    // re-entrantly must emit immediately, not land in a queue that has
+    // already drained and will never flush again.
+    this.isReady = true;
+    for (const push of this.bootQueue.splice(0)) {
+      this.emitPush(push);
+    }
   }
 
   /**
@@ -188,6 +229,9 @@ export class WorkshopSocket extends Disposable {
       if (this.socket === socket) this.socket = null;
       if (this.opening === entry) this.opening = null;
       this.settleAll();
+      // A dropped connection invalidates its queued pushes: replaying them
+      // after the onDisconnect reset would render state from a dead socket.
+      this.bootQueue.length = 0;
       this._onDisconnect.fire(undefined);
       this.scheduleReconnect();
     };
@@ -235,12 +279,12 @@ export class WorkshopSocket extends Disposable {
       return;
     }
     if (frame.type === "status") {
-      this._onStatus.fire(frame as unknown as StatusFrame);
+      this.deliverPush({ kind: "status", frame: frame as unknown as StatusFrame });
       return;
     }
     if (frame.type === "models") {
       const models = Array.isArray(frame.models) ? (frame.models as CatalogModel[]) : [];
-      this._onModels.fire(models);
+      this.deliverPush({ kind: "models", models });
       return;
     }
     if (typeof frame.id !== "number") return;
@@ -273,6 +317,26 @@ export class WorkshopSocket extends Disposable {
           ),
         ),
       );
+    }
+  }
+
+  /** Queues a push before `ready()`, dropping the oldest at the cap. */
+  private deliverPush(push: QueuedPush): void {
+    if (this.isReady) {
+      this.emitPush(push);
+      return;
+    }
+    if (this.bootQueue.length >= BOOT_QUEUE_CAP) {
+      this.bootQueue.shift();
+    }
+    this.bootQueue.push(push);
+  }
+
+  private emitPush(push: QueuedPush): void {
+    if (push.kind === "status") {
+      this._onStatus.fire(push.frame);
+    } else {
+      this._onModels.fire(push.models);
     }
   }
 
