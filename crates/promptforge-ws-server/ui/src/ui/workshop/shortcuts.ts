@@ -9,6 +9,7 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview";
 
+import { toDisposable, type IDisposable } from "../../base/lifecycle";
 import { EditorPanel } from "./editor-panel";
 import { WorkshopTreePanel } from "./workshop-panel";
 import { openInZone, panelIdFor } from "./zones";
@@ -89,9 +90,9 @@ function isPlainCtrl(event: KeyboardEvent): boolean {
 /**
  * Installs the app-level keydown listener. Unbound combinations fall
  * through without preventDefault so the browser and CodeMirror keep
- * theirs. Returns an uninstaller.
+ * theirs. Returns the disposable that uninstalls it.
  */
-export function installShortcuts(dock: DockviewApi): () => void {
+export function installShortcuts(dock: DockviewApi): IDisposable {
   const onKeydown = (event: KeyboardEvent): void => {
     if (!isPlainCtrl(event)) {
       return;
@@ -125,7 +126,7 @@ export function installShortcuts(dock: DockviewApi): () => void {
     }
   };
   document.addEventListener("keydown", onKeydown);
-  return () => {
+  return toDisposable(() => {
     document.removeEventListener("keydown", onKeydown);
-  };
+  });
 }

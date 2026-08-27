@@ -8,6 +8,7 @@ import "dockview/dist/styles/dockview.css";
 
 import { createDockview, themeDark } from "dockview";
 
+import { DisposableStore } from "./base/lifecycle";
 import type { ChatPlugin } from "./chat/core/types";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
@@ -26,10 +27,14 @@ import { createPanelComponent, createPanelTabComponent } from "./ui/workshop/pan
 import { installShortcuts, toggleWorkshopPanel } from "./ui/workshop/shortcuts";
 import { initZones, openInZone } from "./ui/workshop/zones";
 
+// The root of the ownership tree: every top-level binding registers here,
+// so the whole composition tears down with one dispose() call.
+const disposables = new DisposableStore();
+
 // The model catalog and selection live in the ModelService, not module
 // state: the title-bar Model menu and the Agent controller receive the
 // service through their constructors and observe its change events.
-const modelService = new ModelService();
+const modelService = disposables.add(new ModelService());
 
 // One persistent socket carries chat frames upstream and every downstream
 // JSON frame - chat replies and the observer's status updates, which the
@@ -38,21 +43,21 @@ const statusBarRoot = document.querySelector(".status-bar") as HTMLElement | nul
 if (!statusBarRoot) {
   throw new Error("DOM Error: .status-bar not found in the page.");
 }
-const statusBar = new StatusBar(statusBarRoot);
+const statusBar = disposables.add(new StatusBar(statusBarRoot));
 // The custom title bar stays hidden in a plain browser; it only appears
 // when the desktop shell sets its initialization flag.
-setupWindowChrome();
+disposables.add(setupWindowChrome());
 // Native Explorer drops arrive as a typed event from the desktop shell;
 // each path becomes a workspace grant. Inert in a plain browser.
-setupWorkspaceDrops(statusBar);
-const workshopSocket = new WorkshopSocket();
-workshopSocket.onStatus((frame) => statusBar.render(frame));
+disposables.add(setupWorkspaceDrops(statusBar));
+const workshopSocket = disposables.add(new WorkshopSocket());
+disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.
-workshopSocket.onDisconnect(() => statusBar.reset());
+disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
 // An aborted chat recycles the socket, so no terminal status frame for it
 // ever arrives; the bar clears its own activity LED instead.
-workshopSocket.onAbort(() => statusBar.clearActivity());
+disposables.add(workshopSocket.onAbort(() => statusBar.clearActivity()));
 workshopSocket.connect();
 
 // The mic button joins murm-ui's composer through the plugin seam, but only
@@ -85,6 +90,12 @@ function createVoicePlugin(): ChatPlugin {
     onUserSubmit() {
       voiceHandle?.discardIfRecording();
     },
+    // Closing a tab destroys its ChatUI, which fires this hook: the mic
+    // unwires and a live take is discarded with the tab that owned it.
+    destroy() {
+      voiceHandle?.dispose();
+      voiceHandle = null;
+    },
     // With no model selected there is nothing to send to; the old UI disabled
     // the send button in the same situation.
     isSubmitBlocked: () => !modelService.current,
@@ -109,7 +120,11 @@ const dock = createDockview(dockEl, {
   locked: false,
   noPanelsOverlay: "emptyGroup",
 });
-initZones(dock);
+// Teardown order matters: the dock registers before the Agent controller,
+// so a root dispose() tears the panels down while the controller still
+// listens - each closing Agent tab destroys its ChatUI through unmount.
+disposables.add(dock);
+disposables.add(initZones(dock));
 
 // The Agent controller observes the dock: every Agent panel that appears
 // (New Agent, or a restored layout recreating its tabs) gets its own
@@ -119,12 +134,14 @@ initZones(dock);
 // model service's shared selection, whose changes the controller
 // broadcasts to every live engine. The controller must exist before
 // restoreLayout so restored tabs mount their chats.
-const agents = new AgentController({
-  dock,
-  provider: new WorkshopProvider(workshopSocket),
-  plugins: () => [createVoicePlugin(), ThinkingPlugin(), ToolsPlugin()],
-  models: modelService,
-});
+const agents = disposables.add(
+  new AgentController({
+    dock,
+    provider: new WorkshopProvider(workshopSocket),
+    plugins: () => [createVoicePlugin(), ThinkingPlugin(), ToolsPlugin()],
+    models: modelService,
+  }),
+);
 
 // Restore the persisted layout; any failure falls back to the known-good
 // default: the tree anchors the left zone first, then one Agent opens
@@ -140,19 +157,21 @@ if (!restoreLayout(dock)) {
 // non-closable) or carries no Agent panel gets them back.
 openInZone("tree", {});
 agents.ensureAgent();
-startLayoutPersistence(dock);
-installShortcuts(dock);
+disposables.add(startLayoutPersistence(dock));
+disposables.add(installShortcuts(dock));
 
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the model service's catalog and writes the selection back
 // into it. File > New Agent opens a fresh tab; Window > Workshop Panel
 // shares Ctrl+B's toggle.
-setupWindowMenus({
-  agents,
-  workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
-  modelMenu: modelService,
-});
+disposables.add(
+  setupWindowMenus({
+    agents,
+    workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
+    modelMenu: modelService,
+  }),
+);
 
 async function loadModels(): Promise<void> {
   try {
@@ -171,6 +190,6 @@ async function loadModels(): Promise<void> {
 
 // A pushed catalog means the gateway returned after an outage; refresh the
 // catalog state in place so a boot-time failure heals itself.
-workshopSocket.onModels((models) => modelService.setModels(models));
+disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
 
 void loadModels();
