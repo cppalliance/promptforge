@@ -9,6 +9,7 @@ use axum::http::header;
 use axum::response::{IntoResponse, Response};
 
 use crate::app::AppState;
+use crate::error::AppError;
 use crate::gateway::{GatewayError, GatewayResponse};
 use crate::protocol::{Activity, ChatRequest};
 use crate::push::Push;
@@ -20,7 +21,7 @@ use crate::tape::{Tape, TapeEvent};
 /// attempted: the route answers 502 with a user-visible message instead.
 pub(crate) async fn models(State(state): State<AppState>) -> Response {
     if !state.health().is_reachable() {
-        return gateway_unreachable();
+        return AppError::GatewayUnreachable.into_response();
     }
     let push = state.push();
     push.push_status_update(
@@ -42,7 +43,7 @@ pub(crate) async fn models(State(state): State<AppState>) -> Response {
 /// profile support reads as its own error, not the workshop's.
 pub(crate) async fn profiles(State(state): State<AppState>) -> Response {
     if !state.health().is_reachable() {
-        return gateway_unreachable();
+        return AppError::GatewayUnreachable.into_response();
     }
     let list = match state.gateway.list_profiles().await {
         Ok(upstream) if upstream.status.is_success() => upstream,
@@ -81,10 +82,10 @@ struct SwitchProfileBody {
 pub(crate) async fn switch_profile(State(state): State<AppState>, body: String) -> Response {
     let request: SwitchProfileBody = match serde_json::from_str(&body) {
         Ok(request) => request,
-        Err(error) => return bad_request(&error),
+        Err(error) => return AppError::BadRequest(error).into_response(),
     };
     if !state.health().is_reachable() {
-        return gateway_unreachable();
+        return AppError::GatewayUnreachable.into_response();
     }
     let push = state.push();
     push.push_status_update(
@@ -124,23 +125,23 @@ fn report_gateway_outcome(
 pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Response {
     let request_value: serde_json::Value = match serde_json::from_str(&body) {
         Ok(value) => value,
-        Err(error) => return bad_request(&error),
+        Err(error) => return AppError::BadRequest(error).into_response(),
     };
     if request_value
         .get("stream")
         .and_then(serde_json::Value::as_bool)
         == Some(true)
     {
-        return stream_unsupported();
+        return AppError::StreamUnsupported.into_response();
     }
     let request: ChatRequest = match serde_json::from_value(request_value.clone()) {
         Ok(request) => request,
-        Err(error) => return bad_request(&error),
+        Err(error) => return AppError::BadRequest(error).into_response(),
     };
     // A gateway the heartbeat knows is down is not attempted, matching the
     // /ws chat short-circuit.
     if !state.health().is_reachable() {
-        return gateway_unreachable();
+        return AppError::GatewayUnreachable.into_response();
     }
     let push = state.push();
     push.push_status_update(
@@ -169,39 +170,6 @@ pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Respons
         .await;
     }
     relay(result)
-}
-
-/// Renders the 502 envelope for a gateway the heartbeat knows is down: the
-/// request is not attempted, and the message is user-visible.
-pub(crate) fn gateway_unreachable() -> Response {
-    (
-        axum::http::StatusCode::BAD_GATEWAY,
-        [(header::CONTENT_TYPE, "application/json")],
-        serde_json::json!({
-            "error": {
-                "message": "Gateway unreachable",
-                "code": "gateway_unreachable",
-            }
-        })
-        .to_string(),
-    )
-        .into_response()
-}
-
-/// Renders the 400 envelope for a chat request that asked for a stream.
-fn stream_unsupported() -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        [(header::CONTENT_TYPE, "application/json")],
-        serde_json::json!({
-            "error": {
-                "message": "streaming moved to GET /ws; POST /chat is buffered only",
-                "code": "stream_unsupported",
-            }
-        })
-        .to_string(),
-    )
-        .into_response()
 }
 
 /// Parses a gateway body as JSON, falling back to a plain string.
@@ -235,26 +203,10 @@ pub(crate) async fn tape_round_trip(
     }
 }
 
-/// Renders the 400 envelope for an unparseable chat body.
-pub(crate) fn bad_request(error: &serde_json::Error) -> Response {
-    (
-        axum::http::StatusCode::BAD_REQUEST,
-        [(header::CONTENT_TYPE, "application/json")],
-        serde_json::json!({
-            "error": {
-                "message": format!("invalid chat request: {error}"),
-                "code": "bad_request",
-            }
-        })
-        .to_string(),
-    )
-        .into_response()
-}
-
 /// Turns a gateway call outcome into the workshop's HTTP response.
 ///
 /// Success (any status) is relayed byte-for-byte; a transport failure
-/// becomes `502 Bad Gateway` with a small JSON error envelope.
+/// becomes `502 Bad Gateway` through the [`AppError`] wire envelope.
 pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
     match result {
         Ok(upstream) => (
@@ -263,18 +215,7 @@ pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
             upstream.body,
         )
             .into_response(),
-        Err(error) => (
-            axum::http::StatusCode::BAD_GATEWAY,
-            [(header::CONTENT_TYPE, "application/json")],
-            serde_json::json!({
-                "error": {
-                    "message": error.to_string(),
-                    "code": "gateway_unreachable",
-                }
-            })
-            .to_string(),
-        )
-            .into_response(),
+        Err(error) => AppError::Gateway(error).into_response(),
     }
 }
 

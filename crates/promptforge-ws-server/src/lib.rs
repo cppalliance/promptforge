@@ -11,6 +11,7 @@ mod assets;
 mod catalog;
 mod chat_ws;
 mod config;
+mod error;
 mod gateway;
 mod heartbeat;
 mod protocol;
@@ -37,7 +38,7 @@ pub mod fixtures {
     pub use crate::transcribe::fixtures::{fixture_dir, jfk_samples, model_path, require_model};
 }
 
-pub use app::{AppError, AppState, DEFAULT_ADDR, router};
+pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
     Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL, DEFAULT_VOICE_INTERVAL_MS,
     DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,

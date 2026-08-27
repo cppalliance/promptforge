@@ -4,6 +4,8 @@
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 
+use crate::error::AppError;
+
 /// The workshop UI assets under `ui/dist/`, written by the crate's build
 /// script (the esbuild bundle plus copies of the static files). Debug builds
 /// read the files from disk at request time, so UI edits need no Rust
@@ -20,11 +22,6 @@ pub(crate) fn ui_asset(path: &str, content_type: &'static str) -> Response {
             asset.data.into_owned(),
         )
             .into_response(),
-        None => (
-            axum::http::StatusCode::NOT_FOUND,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            format!("ui asset not found: {path}"),
-        )
-            .into_response(),
+        None => AppError::AssetMissing(path.to_string()).into_response(),
     }
 }
