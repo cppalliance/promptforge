@@ -1,7 +1,7 @@
 //! The `/ws` WebSocket endpoint: one persistent socket carrying all
 //! downstream JSON - browser chat over bidirectional text frames, relayed
 //! through the gateway's streaming chat completion, plus unsolicited status
-//! updates from the observer.
+//! updates from the observer and model catalog pushes.
 //!
 //! A client upgrades `GET /ws` once and sends chat requests as text frames:
 //! `{"type":"chat","id":N,"model":"...","messages":[...]}`. Each chat frame
@@ -21,19 +21,25 @@
 //! down is answered immediately with a "Gateway unreachable" error frame -
 //! no upstream attempt, no tape event.
 //!
-//! Status updates from [`crate::status`] and model catalog pushes from
-//! [`crate::catalog`] are forwarded to the socket as unsolicited
-//! `{"type":"status",...}` and `{"type":"models",...}` frames by a
-//! dedicated task, so they flow at any time - including while a chat is
-//! streaming, when the inbound loop is parked inside the relay.
+//! One task owns the socket: a single `select!` loop reads inbound frames
+//! and writes every outbound frame itself - no outbox channel, no writer
+//! task. The in-flight chat's gateway payloads arrive as a branch of the
+//! same loop, so status updates from [`crate::status`] and catalog pushes
+//! from [`crate::catalog`] keep flowing between deltas while a chat
+//! streams. On connect the session first sends the retained status and
+//! catalog snapshots, honoring the delivery contract's resend promise
+//! (see [`crate::protocol`]); after that both buses forward as they
+//! publish, and a session too slow to drain them skips ahead to the
+//! newest snapshot rather than slowing the producers.
 //!
 //! Exactly one tape event is written per chat frame, after the stream
 //! settles and before the terminal frame is sent, so a client holding
 //! `done` or `error` can trust the tape to hold the exchange. A client
 //! that disconnects mid-stream is taped with a `client disconnected` note
-//! beside the partial content.
+//! beside the partial content by the abandoned chat's drop guard.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use axum::extract::State;
@@ -43,100 +49,208 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
 use crate::app::AppState;
-use crate::gateway::{ChatStream, GatewayResponse};
+use crate::gateway::{ChatStream, GatewayError, GatewayResponse, SsePayloadStream};
 use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
 use crate::push::Push;
 use crate::relay::{tape_round_trip, value_from_bytes};
 use crate::tape::Tape;
-use crate::ws_session::WsSession;
+
+/// Chat session ids for log correlation, handed out in connection order.
+static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 /// Upgrades a `GET /ws` request to a WebSocket chat session.
 pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| run_session(socket, state))
 }
 
-/// Runs one chat session until the socket closes or fails.
-async fn run_session(socket: WebSocket, state: AppState) {
-    let (sink, mut stream) = socket.split();
-    // The receive loop and the status forwarder both speak to the client,
-    // so outbound messages funnel through the session's outbox into its
-    // writer task, mirroring the voice session.
-    let session = WsSession::new(sink);
-    let session_id = session.id();
-    tracing::info!(session = session_id, "chat session opened");
+/// Runs one chat session until the socket closes or fails: a single
+/// `select!` loop owning the socket for both reading and writing.
+async fn run_session(mut socket: WebSocket, state: AppState) {
+    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
+    tracing::info!(session, "chat session opened");
+    let _closed = SessionLog { session };
+    let push = state.push();
 
-    // Status frames and catalog pushes are unsolicited and must flow while
-    // a chat relay has the inbound loop parked, so they get their own task
-    // off the broadcast buses rather than a branch in that loop. A client
-    // too slow to keep up lags the rings and skips ahead; the buses never
-    // block for it.
+    // Subscribe before snapshotting, so an update emitted between the two
+    // arrives at least once; the possible duplicate is harmless because
+    // status and catalog frames are complete snapshots.
     let mut status_rx = state.status().subscribe();
     let mut catalog_rx = state.catalog().subscribe();
-    let status_out = session.outbox().clone();
-    let forwarder = tokio::spawn(async move {
-        loop {
-            let text = tokio::select! {
-                received = status_rx.recv() => match received {
-                    Ok(update) => {
-                        // Serializing strings and integers cannot fail.
-                        let Ok(text) = serde_json::to_string(&update.frame()) else {
-                            continue;
-                        };
-                        text
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(session = session_id, skipped, "status receiver lagged; skipped updates");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                },
-                received = catalog_rx.recv() => match received {
-                    Ok(push) => {
-                        // Serializing a JSON value cannot fail.
-                        let Ok(text) = serde_json::to_string(&push.frame()) else {
-                            continue;
-                        };
-                        text
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(session = session_id, skipped, "catalog receiver lagged; skipped pushes");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                },
-            };
-            if status_out.send(Message::Text(text.into())).await.is_err() {
-                break;
-            }
-        }
-    });
+    // The delivery contract resends the current status and catalog on
+    // reconnect; the buses retain the newest copy for exactly this send.
+    if let Some(update) = state.status().latest()
+        && !send_frame(&mut socket, &update.frame()).await
+    {
+        return;
+    }
+    if let Some(catalog) = state.catalog().latest()
+        && !send_frame(&mut socket, &catalog.frame()).await
+    {
+        return;
+    }
 
-    while let Some(received) = stream.next().await {
-        match received {
-            Ok(Message::Text(text)) => handle_frame(&state, &text, session.outbox()).await,
-            // Binary frames carry no chat meaning; pings and pongs are
-            // answered by axum itself.
-            Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_)) => {}
-            Ok(Message::Close(_)) => break,
-            Err(error) => {
-                tracing::warn!(session = session_id, %error, "chat session socket failed");
-                break;
+    let mut chat: Option<ActiveChat> = None;
+    // The buses close only when the server state tears down; a closed bus
+    // disables its branch rather than spinning the loop on `Closed`.
+    let mut status_open = true;
+    let mut catalog_open = true;
+
+    loop {
+        tokio::select! {
+            // Biased, ephemeral branches first: an in-flight chat's payload
+            // stream against a local gateway is ready on every poll, and an
+            // unbiased select could starve the queued status frames past
+            // the chat's `done`. Draining the buses first bounds their
+            // staleness at one frame; they cannot starve the durable path
+            // in turn because their producers push at human pace.
+            biased;
+            // The ephemeral path: bounded broadcasts. A lagged receiver
+            // skips ahead to the retained window, which is a resync
+            // because every status and catalog frame is a complete
+            // snapshot.
+            received = status_rx.recv(), if status_open => match received {
+                Ok(update) => {
+                    if !send_frame(&mut socket, &update.frame()).await {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
+                }
+                Err(broadcast::error::RecvError::Closed) => status_open = false,
+            },
+            received = catalog_rx.recv(), if catalog_open => match received {
+                Ok(catalog) => {
+                    if !send_frame(&mut socket, &catalog.frame()).await {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(session, skipped, "catalog receiver lagged; skipped pushes");
+                }
+                Err(broadcast::error::RecvError::Closed) => catalog_open = false,
+            },
+            // The durable path. Chat reply frames are direct per-request
+            // replies: the gateway stream feeding them is owned by this
+            // loop and fans out to nobody else, so sending them from this
+            // branch preserves stream order and delivers exactly - the
+            // contract's direct-reply case, which needs no Notify or
+            // cursor because no shared transcript state exists to index.
+            payload = next_payload(&mut chat) => {
+                if !advance_chat(&mut chat, payload, &mut socket, &push).await {
+                    break;
+                }
             }
+            // Inbound frames wait while a chat streams, which keeps chat
+            // replies strictly ordered; a client that vanishes mid-stream
+            // surfaces as a failed send on the durable branch above.
+            inbound = socket.recv(), if chat.is_none() => match inbound {
+                Some(Ok(Message::Text(text))) => {
+                    chat = handle_frame(&state, &text, &mut socket).await;
+                }
+                // Binary frames carry no chat meaning; pings and pongs are
+                // answered by axum itself.
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(error)) => {
+                    tracing::warn!(session, %error, "chat session socket failed");
+                    break;
+                }
+            },
         }
     }
-    session.close();
-    forwarder.abort();
-    tracing::info!(session = session_id, "chat session closed");
 }
 
-/// Handles one inbound text frame: a well-formed `chat` frame runs a
-/// streamed completion, anything else is answered with an `error` frame.
-async fn handle_frame(state: &AppState, text: &str, out: &tokio::sync::mpsc::Sender<Message>) {
+/// Logs the session close when the connection task ends, however it ends,
+/// so the session loop's exit paths carry no cleanup calls.
+struct SessionLog {
+    session: u64,
+}
+
+impl Drop for SessionLog {
+    fn drop(&mut self) {
+        tracing::info!(session = self.session, "chat session closed");
+    }
+}
+
+/// One chat in flight: the gateway's SSE payload stream beside the state
+/// its settle paths need. Everything here releases on drop - dropping the
+/// payload stream cancels the upstream completion, and the tape guard
+/// records the abandoned exchange.
+struct ActiveChat {
+    payloads: SsePayloadStream,
+    /// The request's `id`, echoed on every frame of this chat's reply.
+    id: Option<serde_json::Value>,
+    tape: StreamTape,
+}
+
+/// The next SSE payload of the in-flight chat; pending forever when no
+/// chat is in flight, so the select! branch simply never fires.
+async fn next_payload(chat: &mut Option<ActiveChat>) -> Option<Result<String, GatewayError>> {
+    match chat.as_mut() {
+        Some(active) => active.payloads.next().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Advances the in-flight chat by one payload outcome: forwards deltas,
+/// settles the chat when its stream ends or fails. A `false` return means
+/// the client is gone and the session loop should end; the abandoned
+/// chat's guard then tapes the disconnect.
+async fn advance_chat(
+    chat: &mut Option<ActiveChat>,
+    payload: Option<Result<String, GatewayError>>,
+    socket: &mut WebSocket,
+    push: &Push,
+) -> bool {
+    // `next_payload` resolves only while a chat is in flight, so each arm
+    // below always finds one.
+    match payload {
+        Some(Ok(payload)) => {
+            // The terminal sentinel ends the wire stream but carries no
+            // content; role-priming and usage events have none either.
+            if payload == "[DONE]" {
+                return true;
+            }
+            let Some(active) = chat.as_mut() else {
+                return true;
+            };
+            match forward_payload(&payload, active, socket, push).await {
+                Forward::Sent => true,
+                Forward::ClientGone => false,
+            }
+        }
+        Some(Err(error)) => {
+            let Some(active) = chat.take() else {
+                return true;
+            };
+            let message = error.to_string();
+            active.tape.record(Some(message.clone())).await;
+            push.push_failure("Connection lost", message.clone(), Activity::General);
+            send_error(socket, active.id.as_ref(), message).await;
+            true
+        }
+        None => {
+            let Some(active) = chat.take() else {
+                return true;
+            };
+            active.tape.record(None).await;
+            push.push_idle();
+            let _ = send_frame(socket, &DoneFrame::new(active.id.as_ref())).await;
+            true
+        }
+    }
+}
+
+/// Handles one inbound text frame: a well-formed `chat` frame opens a
+/// streamed completion and returns it as the loop's in-flight chat;
+/// anything else is answered with an `error` frame.
+async fn handle_frame(state: &AppState, text: &str, socket: &mut WebSocket) -> Option<ActiveChat> {
     let frame: serde_json::Value = match serde_json::from_str(text) {
         Ok(frame) => frame,
         Err(error) => {
-            send_error(out, None, format!("invalid JSON frame: {error}")).await;
-            return;
+            send_error(socket, None, format!("invalid JSON frame: {error}")).await;
+            return None;
         }
     };
     // The request id, echoed on every frame of this chat's reply so one
@@ -144,35 +258,42 @@ async fn handle_frame(state: &AppState, text: &str, out: &tokio::sync::mpsc::Sen
     // untagged.
     let id = frame.get("id").cloned().filter(|id| !id.is_null());
     if frame.get("type").and_then(serde_json::Value::as_str) != Some("chat") {
-        send_error(out, id.as_ref(), "unknown frame type; expected \"chat\"").await;
-        return;
+        send_error(socket, id.as_ref(), "unknown frame type; expected \"chat\"").await;
+        return None;
     }
     let request: ChatRequest = match serde_json::from_value(frame.clone()) {
         Ok(request) => request,
         Err(error) => {
-            send_error(out, id.as_ref(), format!("invalid chat request: {error}")).await;
-            return;
+            send_error(
+                socket,
+                id.as_ref(),
+                format!("invalid chat request: {error}"),
+            )
+            .await;
+            return None;
         }
     };
     // A gateway the heartbeat knows is down is not attempted: the chat
     // fails fast with a user-visible error instead of a transport error,
     // and nothing is taped because no exchange happened.
     if !state.health().is_reachable() {
-        send_error(out, id.as_ref(), "Gateway unreachable").await;
-        return;
+        send_error(socket, id.as_ref(), "Gateway unreachable").await;
+        return None;
     }
-    relay_chat(state, request, frame, id, out).await;
+    open_chat(state, request, frame, id, socket).await
 }
 
-/// Runs one streaming chat completion against the gateway, forwarding
-/// content deltas as `delta` frames and settling with `done` or `error`.
-async fn relay_chat(
+/// Opens one streaming chat completion against the gateway: returns the
+/// in-flight chat when the gateway streams, or settles immediately - an
+/// `error` frame, plus a tape event where an exchange happened - and
+/// returns nothing.
+async fn open_chat(
     state: &AppState,
     request: ChatRequest,
     frame: serde_json::Value,
     id: Option<serde_json::Value>,
-    out: &tokio::sync::mpsc::Sender<Message>,
-) {
+    socket: &mut WebSocket,
+) -> Option<ActiveChat> {
     let started = Instant::now();
     let push = state.push();
     push.push_status_update(
@@ -188,18 +309,28 @@ async fn relay_chat(
         Ok(chat_stream) => chat_stream,
         Err(error) => {
             push.push_failure("Connection lost", error.to_string(), Activity::General);
-            send_error(out, id.as_ref(), error.to_string()).await;
-            return;
+            send_error(socket, id.as_ref(), error.to_string()).await;
+            return None;
         }
     };
-    let mut payloads = match chat_stream {
+    match chat_stream {
         ChatStream::Stream { payloads, .. } => {
             push.push_status_update(
                 "Streaming response...",
                 "the gateway is streaming the reply",
                 Activity::Thinking,
             );
-            payloads
+            Some(ActiveChat {
+                payloads,
+                id,
+                tape: StreamTape::open(
+                    Arc::clone(state.tape()),
+                    request.model,
+                    frame,
+                    started,
+                    push,
+                ),
+            })
         }
         ChatStream::Relay(upstream) => {
             declined_stream(
@@ -209,52 +340,10 @@ async fn relay_chat(
                 upstream,
                 started,
                 id.as_ref(),
-                out,
+                socket,
             )
             .await;
-            return;
-        }
-    };
-    let mut finish = StreamTape {
-        tape: Arc::clone(state.tape()),
-        model: request.model,
-        request: frame,
-        started,
-        assembled: String::new(),
-        error: None,
-    };
-    loop {
-        match payloads.next().await {
-            Some(Ok(payload)) => {
-                // The terminal sentinel ends the wire stream but carries no
-                // content; role-priming and usage events have none either.
-                if payload == "[DONE]" {
-                    continue;
-                }
-                match forward_payload(&payload, &push, id.as_ref(), out, &mut finish.assembled)
-                    .await
-                {
-                    Forward::Sent => {}
-                    Forward::ClientGone => {
-                        client_disconnected(finish, &push).await;
-                        return;
-                    }
-                }
-            }
-            Some(Err(error)) => {
-                let message = error.to_string();
-                finish.error = Some(message.clone());
-                finish.record().await;
-                push.push_failure("Connection lost", message.clone(), Activity::General);
-                send_error(out, id.as_ref(), message).await;
-                return;
-            }
-            None => {
-                finish.record().await;
-                push.push_idle();
-                let _ = send_frame(out, &DoneFrame::new(id.as_ref())).await;
-                return;
-            }
+            None
         }
     }
 }
@@ -268,15 +357,15 @@ enum Forward {
 /// Forwards one SSE payload's deltas to the client: the reasoning side
 /// channel as a `reasoning` frame (for the UI's Thinking block, never part
 /// of the taped response) and the answer content as a `delta` frame,
-/// appended to `assembled` for the tape. The chunk pulses at Debug: the UI
-/// ignores the text, but the activity field keeps the LED lit.
+/// appended to the tape's assembled response. The chunk pulses at Debug:
+/// the UI ignores the text, but the activity field keeps the LED lit.
 async fn forward_payload(
     payload: &str,
+    active: &mut ActiveChat,
+    socket: &mut WebSocket,
     push: &Push,
-    id: Option<&serde_json::Value>,
-    out: &tokio::sync::mpsc::Sender<Message>,
-    assembled: &mut String,
 ) -> Forward {
+    let ActiveChat { id, tape, .. } = active;
     let fields = delta_fields(payload);
     if let Some(text) = fields.reasoning {
         push.push_activity(
@@ -284,34 +373,24 @@ async fn forward_payload(
             "a gateway reasoning chunk",
             Activity::Thinking,
         );
-        if !send_frame(out, &ReasoningFrame::new(text, id)).await {
+        if !send_frame(socket, &ReasoningFrame::new(text, id.as_ref())).await {
             return Forward::ClientGone;
         }
     }
     let Some(text) = fields.content else {
         return Forward::Sent;
     };
-    assembled.push_str(&text);
+    tape.append(&text);
     push.push_activity(
         "Streaming response...",
         "a gateway response chunk",
         Activity::Generating,
     );
-    if send_frame(out, &DeltaFrame::new(text, id)).await {
+    if send_frame(socket, &DeltaFrame::new(text, id.as_ref())).await {
         Forward::Sent
     } else {
         Forward::ClientGone
     }
-}
-
-/// Settles a stream whose client vanished mid-way: the tape records the
-/// partial exchange, and because the dead client is gone but any other
-/// subscriber still watches the observer, the status returns to Ready
-/// rather than leaving a stale activity LED.
-async fn client_disconnected(mut finish: StreamTape, push: &Push) {
-    finish.error = Some("client disconnected mid-stream".to_string());
-    finish.record().await;
-    push.push_idle();
 }
 
 /// Handles a gateway that declined the stream with an ordinary response:
@@ -324,7 +403,7 @@ async fn declined_stream(
     upstream: GatewayResponse,
     started: Instant,
     id: Option<&serde_json::Value>,
-    out: &tokio::sync::mpsc::Sender<Message>,
+    socket: &mut WebSocket,
 ) {
     let response = value_from_bytes(&upstream.body);
     tape_round_trip(
@@ -353,7 +432,7 @@ async fn declined_stream(
         message.clone(),
         Activity::General,
     );
-    send_error(out, id, message).await;
+    send_error(socket, id, message).await;
 }
 
 /// The text fields of one streaming delta: answer content and the
@@ -398,32 +477,96 @@ fn delta_fields(payload: &str) -> DeltaFields {
     DeltaFields { content, reasoning }
 }
 
-/// Tape bookkeeping carried through one streaming chat.
+/// Tape bookkeeping carried through one streaming chat, doubling as the
+/// disconnect guard.
 ///
-/// The session consumes this exactly once per chat frame, so a streamed chat
-/// always tapes exactly one event.
+/// The settle paths consume it through [`StreamTape::record`], so a
+/// streamed chat always tapes exactly one event; a chat abandoned
+/// mid-stream drops it un-recorded, and the drop spawns the tape write
+/// with the disconnect note and then returns the status bar to Ready -
+/// the session loop's exit paths carry no cleanup calls.
 struct StreamTape {
+    /// Present until the chat settles; taken exactly once, by `record` or
+    /// by the drop.
+    entry: Option<TapeEntry>,
+    push: Push,
+}
+
+/// What one tape event needs from the chat that produced it.
+struct TapeEntry {
     tape: Arc<Tape>,
     model: String,
     request: serde_json::Value,
     started: Instant,
     /// Concatenation of every content delta forwarded so far.
     assembled: String,
-    /// The mid-stream failure note, when the gateway stream errored.
-    error: Option<String>,
 }
 
 impl StreamTape {
+    /// Arms the guard for one streaming chat.
+    fn open(
+        tape: Arc<Tape>,
+        model: String,
+        request: serde_json::Value,
+        started: Instant,
+        push: Push,
+    ) -> Self {
+        Self {
+            entry: Some(TapeEntry {
+                tape,
+                model,
+                request,
+                started,
+                assembled: String::new(),
+            }),
+            push,
+        }
+    }
+
+    /// Appends one forwarded content delta to the assembled response.
+    fn append(&mut self, text: &str) {
+        if let Some(entry) = self.entry.as_mut() {
+            entry.assembled.push_str(text);
+        }
+    }
+
     /// Writes the stream's single tape event: the assembled content on
-    /// success, or an error note plus the partial content on failure.
-    async fn record(self) {
+    /// success, or `error` beside the partial content on failure.
+    async fn record(mut self, error: Option<String>) {
+        if let Some(entry) = self.entry.take() {
+            entry.write(error).await;
+        }
+    }
+}
+
+impl Drop for StreamTape {
+    fn drop(&mut self) {
+        let Some(entry) = self.entry.take() else {
+            return;
+        };
+        let push = self.push.clone();
+        // Drop cannot await, so the abandoned exchange is taped from a
+        // spawned task; the idle push follows the write inside that task,
+        // so a status observer that sees Ready can trust the tape to hold
+        // the disconnect note.
+        tokio::spawn(async move {
+            entry
+                .write(Some("client disconnected mid-stream".to_string()))
+                .await;
+            push.push_idle();
+        });
+    }
+}
+
+impl TapeEntry {
+    /// Writes the tape event this entry was collected for.
+    async fn write(self, error: Option<String>) {
         let Self {
             tape,
             model,
             request,
             started,
             assembled,
-            error,
         } = self;
         let response = match error {
             Some(message) => serde_json::json!({
@@ -437,34 +580,31 @@ impl StreamTape {
 }
 
 /// Sends one JSON text frame; a false return means the client is gone.
-async fn send_frame<F: serde::Serialize>(
-    out: &tokio::sync::mpsc::Sender<Message>,
-    frame: &F,
-) -> bool {
+async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
     // Serializing the protocol frames cannot fail: strings, integers, and
     // JSON values only. A frame that somehow cannot serialize is skipped,
     // which is not a gone client.
     let Ok(text) = serde_json::to_string(frame) else {
         return true;
     };
-    out.send(Message::Text(text.into())).await.is_ok()
+    socket.send(Message::Text(text.into())).await.is_ok()
 }
 
 /// Sends one `error` frame carrying `message`, tagged with the request's
 /// `id` when there is one, ignoring a dead client.
 async fn send_error(
-    out: &tokio::sync::mpsc::Sender<Message>,
+    socket: &mut WebSocket,
     id: Option<&serde_json::Value>,
     message: impl Into<String>,
 ) {
-    let _ = send_frame(out, &ErrorFrame::new(message.into(), id)).await;
+    let _ = send_frame(socket, &ErrorFrame::new(message.into(), id)).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use axum::Router;
@@ -476,8 +616,8 @@ mod tests {
     use futures_util::{SinkExt, stream};
     use tokio_tungstenite::tungstenite;
 
+    use crate::app::fixtures::{spawn_gateway, state_for};
     use crate::app::router;
-    use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
     use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
 
     const STREAM_BODY: &str = concat!(
@@ -583,39 +723,12 @@ mod tests {
             .into_response()
     }
 
-    /// Binds `app` as a mock gateway on a free loopback port and returns its
-    /// base URL.
-    async fn spawn_gateway(app: Router) -> String {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind mock gateway");
-        let addr = listener.local_addr().expect("mock gateway address");
-        tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("mock gateway serves");
-        });
-        format!("http://{addr}")
-    }
-
     /// Binds the workshop router against the gateway at `base_url` on a
     /// free loopback port and returns the `/ws` URL, the tempdir keeping
     /// the tape alive, and a handle on the shared state (for poking the
-    /// status bus directly).
+    /// status and catalog buses directly).
     async fn spawn_chat_server(base_url: &str) -> (String, tempfile::TempDir, AppState) {
-        let tape_dir = tempfile::TempDir::new().expect("tempdir");
-        let config = Config {
-            gateway: GatewayConfig {
-                base_url: base_url.to_string(),
-                api_key: "test-key".to_string(),
-            },
-            tape: TapeConfig {
-                path: tape_dir.path().join("tape.jsonl"),
-            },
-            server: ServerConfig::default(),
-            voice: VoiceConfig::default(),
-        };
-        let state = AppState::new(&config).expect("state builds in tests");
+        let (state, tape_dir) = state_for(base_url);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind the chat test server");
@@ -644,8 +757,9 @@ mod tests {
     }
 
     /// Reads frames until one arrives that is not a status update. Status
-    /// frames are unsolicited and may interleave with a chat's replies at
-    /// any point, so reply assertions skip them.
+    /// frames are unsolicited - the snapshot on connect, then bus pushes
+    /// that may interleave with a chat's replies at any point - so reply
+    /// assertions skip them.
     async fn read_non_status_frame<S>(socket: &mut S) -> serde_json::Value
     where
         S: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
@@ -842,6 +956,11 @@ mod tests {
         let (mut observer, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect an observer to /ws");
+        // Every session first receives the retained status snapshot -
+        // Ready here, since the state is idle. Consume it so the Ready
+        // watched for below can only be the post-disconnect idle.
+        let snapshot = read_frame(&mut observer).await;
+        assert_eq!(snapshot["type"], "status", "the snapshot arrives first");
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -956,13 +1075,13 @@ mod tests {
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
-        // A malformed frame's error reply proves the session's inbound loop
-        // is running, which means the status subscription before it is live.
+        // A malformed frame's error reply proves the session loop is
+        // running (the connect snapshot rides ahead of it and is skipped).
         socket
             .send(tungstenite::Message::Text("not json".into()))
             .await
             .expect("the frame is sent");
-        let reply = read_frame(&mut socket).await;
+        let reply = read_non_status_frame(&mut socket).await;
         assert_eq!(reply["type"], "error");
 
         state.status().emit(StatusBarUpdate {
@@ -988,6 +1107,58 @@ mod tests {
                 "activity": "generating",
             }),
             "the update arrives as one status frame"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_new_session_receives_the_retained_status_and_catalog_snapshots() {
+        let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        // Both pushes land on the buses while nobody is connected, so only
+        // the retained copies can deliver them to the socket below - the
+        // contract's resend-on-reconnect for ephemeral frames.
+        state.status().emit(StatusBarUpdate {
+            label: "Downloading model".to_string(),
+            description: "ggml-large-v3.bin".to_string(),
+            progress: Some(Progress {
+                current: 1,
+                total: 2,
+            }),
+            severity: Severity::Info,
+            activity: Activity::Generating,
+        });
+        state.catalog().publish(vec![
+            serde_json::json!({"id": "test-model", "object": "model"}),
+        ]);
+
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        let first = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut socket))
+            .await
+            .expect("the status snapshot arrives unprompted");
+        assert_eq!(
+            first,
+            serde_json::json!({
+                "type": "status",
+                "label": "Downloading model",
+                "description": "ggml-large-v3.bin",
+                "progress": {"current": 1, "total": 2},
+                "severity": "info",
+                "activity": "generating",
+            }),
+            "the retained status is the connection's first frame"
+        );
+        let second = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut socket))
+            .await
+            .expect("the catalog snapshot arrives unprompted");
+        assert_eq!(
+            second,
+            serde_json::json!({
+                "type": "models",
+                "models": [{"id": "test-model", "object": "model"}],
+            }),
+            "the retained catalog follows it"
         );
         socket.close(None).await.expect("close the socket");
     }
@@ -1088,8 +1259,12 @@ mod tests {
         ([(header::CONTENT_TYPE, "application/json")], CATALOG).into_response()
     }
 
+    // Un-ignored with the session rewrite: the flip below now waits for
+    // the heartbeat's observed outage, so the recovery is always a real
+    // down-to-up transition and the catalog push always happens; the
+    // session's own subscription is live before the flip for the same
+    // reason.
     #[tokio::test]
-    #[ignore = "flaky on CI: the catalog push races the heartbeat transition and never arrives on slow runners"]
     async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
         let healthy = Arc::new(AtomicBool::new(false));
         let base_url = spawn_gateway(
@@ -1109,14 +1284,18 @@ mod tests {
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
-        // A malformed frame's error reply proves the session's tasks -
-        // including its catalog subscription - are live before the flip.
-        socket
-            .send(tungstenite::Message::Text("not json".into()))
-            .await
-            .expect("the frame is sent");
-        let reply = read_frame(&mut socket).await;
-        assert_eq!(reply["type"], "error");
+        // Hold the flip until the heartbeat's outage reaches this socket
+        // (as the connect snapshot or a live push): the catalog is pushed
+        // only on an observed down-to-up transition, so flipping before
+        // the first probe lands would leave nothing to push.
+        loop {
+            let frame = tokio::time::timeout(Duration::from_secs(30), read_frame(&mut socket))
+                .await
+                .expect("the heartbeat publishes the outage within the deadline");
+            if frame["type"] == "status" && frame["label"] == "Gateway unreachable" {
+                break;
+            }
+        }
 
         healthy.store(true, Ordering::Relaxed);
         // Status frames (the "Connected to gateway" transition) interleave

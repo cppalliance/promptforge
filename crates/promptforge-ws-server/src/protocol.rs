@@ -16,14 +16,15 @@
 //! pushed frame type ships unclassified.
 //!
 //! **Durable** frames are delivered exactly, and coalesce. Where the
-//! data is shared fan-out state (the chat transcript), the producer
-//! records it and wakes the connection loop through a `Notify`; the
-//! loop compares the shared revision against its own per-client cursor
-//! and sends everything past the cursor, so a missed wakeup is harmless
-//! because the next one delivers everything past the cursor. A durable
-//! frame that answers the connection's own request (the voice
-//! announcements and stop replies) is sent directly by the loop that
-//! owns the socket, which delivers exactly without any cursor.
+//! data is shared fan-out state, the producer records it and wakes each
+//! connection loop through a `Notify`; the loop compares the shared
+//! revision against its own per-client cursor and sends everything past
+//! the cursor, so a missed wakeup is harmless because the next one
+//! delivers everything past the cursor. A durable frame that answers
+//! the connection's own request (the chat reply stream relayed from the
+//! gateway, the voice announcements and stop replies) is sent directly
+//! by the loop that owns the socket, which delivers exactly without any
+//! cursor - no shared state exists for a cursor to index.
 //!
 //! **Ephemeral** frames may drop under lag. They ride bounded channels
 //! (a broadcast where the state fans out); a client too slow to drain

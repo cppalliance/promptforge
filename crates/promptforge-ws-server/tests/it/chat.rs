@@ -173,6 +173,12 @@ async fn a_chat_pushes_status_frames_on_the_same_socket() {
     let base_url = spawn_gateway(streaming_gateway(STREAM_BODY)).await;
     let server = TestServer::spawn(&base_url);
     let mut socket = JsonSocket::connect(&server.ws_url("/ws")).await;
+    // Every session's first frame is the retained status snapshot, which
+    // may already read Ready; consume it so the Ready watched for below
+    // can only be the post-chat idle. (Licensed by the protocol contract:
+    // the current status is resent on reconnect.)
+    let snapshot = socket.recv_json().await;
+    assert_eq!(snapshot["type"], "status", "the snapshot arrives first");
     send_chat(&mut socket, 1).await;
 
     // Collect the chat's status frames up to the terminal idle push; the
@@ -230,6 +236,40 @@ async fn a_chat_pushes_status_frames_on_the_same_socket() {
 }
 
 #[tokio::test]
+async fn a_new_connection_receives_the_current_status_as_its_first_frame() {
+    // Nothing listens on port 1: after the heartbeat's first probe the
+    // status settles on "Gateway unreachable" and never changes again, so
+    // the frame below is deterministic.
+    let server = TestServer::spawn("http://127.0.0.1:1");
+    let mut witness = JsonSocket::connect(&server.ws_url("/ws")).await;
+    witness
+        .recv_until(Duration::from_secs(10), |frame| {
+            frame["type"] == "status" && frame["label"] == "Gateway unreachable"
+        })
+        .await;
+
+    // The outage predates this connection, so only the retained snapshot
+    // can deliver it here - the contract's resend of the current status
+    // on reconnect.
+    let mut late = JsonSocket::connect(&server.ws_url("/ws")).await;
+    let snapshot = late.recv_json().await;
+    assert_eq!(
+        snapshot,
+        json!({
+            "type": "status",
+            "label": "Gateway unreachable",
+            "description": "the gateway does not answer its health probe",
+            "progress": null,
+            "severity": "info",
+            "activity": "general",
+        }),
+        "the retained status arrives as the connection's first frame"
+    );
+    late.close().await;
+    witness.close().await;
+}
+
+#[tokio::test]
 async fn a_malformed_frame_is_answered_with_an_error_and_the_session_survives() {
     let base_url = spawn_gateway(streaming_gateway(STREAM_BODY)).await;
     let server = TestServer::spawn(&base_url);
@@ -278,6 +318,12 @@ async fn a_client_disconnect_mid_stream_returns_status_to_ready_and_tapes_the_no
     // A second session observes the status bus: the dead client's terminal
     // update must still reach every remaining subscriber.
     let mut observer = JsonSocket::connect(&server.ws_url("/ws")).await;
+    // Consume the observer's connect snapshot, which may already read
+    // Ready, so the Ready watched for below can only be the
+    // post-disconnect idle. (Licensed by the protocol contract: the
+    // current status is resent on reconnect.)
+    let snapshot = observer.recv_json().await;
+    assert_eq!(snapshot["type"], "status", "the snapshot arrives first");
     let mut chatter = JsonSocket::connect(&server.ws_url("/ws")).await;
     send_chat(&mut chatter, 3).await;
     let first = chatter.recv_non_status().await;

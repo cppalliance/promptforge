@@ -99,20 +99,9 @@ impl Drop for TestServer {
     }
 }
 
-/// Binds `app` as a mock gateway on a free loopback port and returns its
-/// base URL.
-pub(crate) async fn spawn_gateway(app: axum::Router) -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock gateway");
-    let addr = listener.local_addr().expect("mock gateway address");
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("the mock gateway serves");
-    });
-    format!("http://{addr}")
-}
+// The crate's own fixture, shared here instead of duplicated: binds a mock
+// gateway on a free loopback port and returns its base URL.
+pub(crate) use promptforge_ws_server::fixtures::spawn_gateway;
 
 /// A typed JSON WebSocket client: JSON and control frames out, JSON frames
 /// in, every receive bounded by a timeout.

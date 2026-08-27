@@ -288,19 +288,35 @@ async fn voice_capability() -> impl IntoResponse {
 
 /// Shared fixtures for the router tests here and in [`crate::assets`] and
 /// [`crate::relay`]: state construction against a stub gateway address and
-/// the small helpers every route test leans on.
-#[cfg(test)]
+/// the small helpers every route test leans on. [`fixtures::spawn_gateway`]
+/// is additionally re-exported to the integration-test binary through the
+/// `test-fixtures` feature the crate's own dev-dependency enables.
+// An `allow` rather than an `expect`: whether the lint fires here depends
+// on the build's cfg permutation (clippy suppresses expect_used inside
+// test-cfg'd code on its own), so an expectation would be unfulfilled in
+// some builds and fail the -D warnings gate.
+#[cfg(any(test, feature = "test-fixtures"))]
+#[allow(
+    clippy::expect_used,
+    reason = "test fixtures fail by panicking with the invariant named"
+)]
 pub(crate) mod fixtures {
+    #[cfg(test)]
     use std::path::Path;
 
     use axum::Router;
+    #[cfg(test)]
     use axum::body::to_bytes;
+    #[cfg(test)]
     use axum::response::Response;
 
+    #[cfg(test)]
     use crate::app::AppState;
+    #[cfg(test)]
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
 
     /// Builds a configuration pointing at `base_url`, taping to `tape_path`.
+    #[cfg(test)]
     pub(crate) fn config_for(base_url: &str, tape_path: &Path) -> Config {
         Config {
             gateway: GatewayConfig {
@@ -317,6 +333,7 @@ pub(crate) mod fixtures {
 
     /// Builds state whose tape lives in a fresh tempdir, returned alongside
     /// so the directory outlives the test.
+    #[cfg(test)]
     pub(crate) fn state_for(base_url: &str) -> (AppState, tempfile::TempDir) {
         let tape_dir = tempfile::TempDir::new().expect("tempdir");
         let config = config_for(base_url, &tape_dir.path().join("tape.jsonl"));
@@ -325,6 +342,7 @@ pub(crate) mod fixtures {
     }
 
     /// Collects a response body already buffered in memory.
+    #[cfg(test)]
     pub(crate) async fn body_bytes(response: Response) -> axum::body::Bytes {
         to_bytes(response.into_body(), usize::MAX)
             .await
@@ -333,7 +351,11 @@ pub(crate) mod fixtures {
 
     /// Binds `app` as a mock gateway on a free loopback port and returns its
     /// base URL.
-    pub(crate) async fn spawn_gateway(app: Router) -> String {
+    ///
+    /// # Panics
+    /// Panics when the loopback bind fails or the bound address cannot be
+    /// read.
+    pub async fn spawn_gateway(app: Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock gateway");
