@@ -8,8 +8,8 @@
 //! `{"type":"stream","generation":N}` announcement before any of that
 //! generation's frames, and tags every interim and final frame with the
 //! generation, so the client can discard frames a stop/restart race left
-//! behind. While a take records, an interim loop transcribes
-//! the take's uncommitted audio every `voice.interval_ms` and pushes
+//! behind. While a take records, an interim task transcribes
+//! the take's uncommitted audio every `voice.interval_ms` and publishes
 //! `{"type":"interim","committed":"...","tentative":"...","generation":N}`
 //! text messages:
 //! `committed` is the crystallized prefix (final-pass segment transcripts,
@@ -32,22 +32,35 @@
 //! transcripts come back empty. Silent audio is never transcribed (whisper
 //! hallucinates on silence), and an interim frame is sent only when
 //! `committed` or `tentative` changed since the last one.
+//!
+//! One task owns the socket: a single `select!` loop reads inbound frames
+//! and writes every outbound frame itself - no outbox channel, no writer
+//! task. The stream announcement and the final reply are durable direct
+//! replies sent by the loop in order (see [`crate::protocol`]). Interim
+//! frames are ephemeral: the take's interim task publishes each one into a
+//! `watch` channel that retains only the newest frame, and the loop
+//! forwards what it finds there - a loop busy with the socket skips
+//! straight to the latest interim, which supersedes everything older per
+//! the delivery contract. The take's whisper work is cancelled by drop
+//! guards, so the loop's exit paths carry no cleanup calls.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
-use futures_util::StreamExt;
+use tokio::sync::watch;
 
 use crate::app::AppState;
 use crate::protocol::{Activity, FinalFrame, InterimFrame, StreamFrame, VOICE_START, VOICE_STOP};
 use crate::push::Push;
 use crate::segment::Segmenter;
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
-use crate::ws_session::WsSession;
+
+/// Voice session ids for log correlation, handed out in connection order.
+static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 /// Floor between microphone activity pulses: the worklet posts chunks far
 /// faster than the status bar can usefully change, so mic activity pulses
@@ -59,12 +72,6 @@ pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade)
     let engine = state.voice_engine();
     let push = state.push();
     ws.on_upgrade(move |socket| run_session(socket, engine, push))
-}
-
-/// Locks the PCM buffer, recovering from poisoning the way the tape does: a
-/// panicking writer cannot leave the session permanently wedged.
-fn lock_buffer(buffer: &Mutex<Vec<f32>>) -> MutexGuard<'_, Vec<f32>> {
-    buffer.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Appends `piece` to `text` with the single-space join the final-pass
@@ -82,9 +89,9 @@ fn append_transcript(text: &mut String, piece: &str) {
 /// One take's crystallized transcript: the segment texts the final-pass
 /// worker has reported on the take's channel, joined by single spaces
 /// exactly as the worker assembles its own transcript. Shared between the
-/// receive loop (drained on each binary message and once at `stop`) and
-/// the interim loop (drained each tick, since a segment can finish while
-/// no audio arrives), behind the same kind of std mutex as the PCM
+/// connection loop (drained on each binary message and once at `stop`)
+/// and the interim task (drained each tick, since a segment can finish
+/// while no audio arrives), behind the same kind of std mutex as the PCM
 /// buffer; no guard ever crosses an `.await`.
 #[derive(Debug, Default)]
 struct Committed {
@@ -104,57 +111,115 @@ impl Committed {
     }
 }
 
-/// Locks the committed transcript, recovering from poisoning the way the
-/// PCM buffer does.
-fn lock_committed(committed: &Mutex<Committed>) -> MutexGuard<'_, Committed> {
-    committed.lock().unwrap_or_else(PoisonError::into_inner)
+/// One take's audio state, shared between the connection loop and the
+/// take's interim task behind std mutexes that recover from poisoning the
+/// way the tape does: a panicking peer cannot leave the session
+/// permanently wedged. No guard ever crosses an `.await`.
+#[derive(Debug, Default)]
+struct TakeState {
+    /// The take's PCM samples since the most recent `start`.
+    buffer: Mutex<Vec<f32>>,
+    /// The take's crystallized transcript.
+    committed: Mutex<Committed>,
+    /// The segmenter's consumed offset, published for the interim task,
+    /// which cannot borrow the loop-local segmenter.
+    consumed: AtomicUsize,
 }
 
-/// Copies the take's uncommitted audio - everything past the segmenter's
-/// consumed offset - capped to the trailing interim window. Committed
-/// audio is never re-decoded by the interim model, and the cap keeps a
-/// take whose segments never close (or which has no final pass) from
-/// re-decoding its whole length on every pass.
-fn uncommitted_snapshot(
-    buffer: &Mutex<Vec<f32>>,
-    consumed: usize,
-    window_samples: usize,
-) -> Vec<f32> {
-    let guard = lock_buffer(buffer);
-    // A take reset can clear the buffer behind a stale offset read by a
-    // not-yet-aborted previous interim loop; clamp rather than panic on it.
-    let uncommitted = &guard[consumed.min(guard.len())..];
-    transcribe::tail(uncommitted, window_samples).to_vec()
-}
+impl TakeState {
+    /// Locks the PCM buffer, recovering from poisoning.
+    fn lock_buffer(&self) -> MutexGuard<'_, Vec<f32>> {
+        self.buffer.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
-/// Aborts the interim loop, if one is running.
-fn stop_interim(interim: &mut Option<tokio::task::JoinHandle<()>>) {
-    if let Some(task) = interim.take() {
-        task.abort();
+    /// Locks the committed transcript, recovering from poisoning.
+    fn lock_committed(&self) -> MutexGuard<'_, Committed> {
+        self.committed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Resets the state for a new take, installing the take's
+    /// segment-completion receiver (present only with a final pass).
+    fn reset(&self, segments: Option<std::sync::mpsc::Receiver<String>>) {
+        self.lock_buffer().clear();
+        self.consumed.store(0, Ordering::Relaxed);
+        let mut committed = self.lock_committed();
+        committed.text.clear();
+        committed.segments = segments;
+    }
+
+    /// Copies the take's uncommitted audio - everything past `consumed` -
+    /// capped to the trailing interim window. Committed audio is never
+    /// re-decoded by the interim model, and the cap keeps a take whose
+    /// segments never close (or which has no final pass) from re-decoding
+    /// its whole length on every pass.
+    fn uncommitted_snapshot(&self, consumed: usize, window_samples: usize) -> Vec<f32> {
+        let guard = self.lock_buffer();
+        // A take reset can clear the buffer behind a stale offset read by
+        // the previous take's not-yet-cancelled interim task; clamp rather
+        // than panic on it.
+        let uncommitted = &guard[consumed.min(guard.len())..];
+        transcribe::tail(uncommitted, window_samples).to_vec()
     }
 }
 
-/// The interim loop: every `interval`, drain newly crystallized segments,
-/// transcribe the take's uncommitted audio (everything past the segmenter's
-/// consumed offset, so a long take does not re-decode its own prefix), and
-/// push an interim frame - tagged with the take's stream generation - when
-/// either field changed since the last send. Runs until aborted (on
-/// `start`, `stop`, or session end) or until the outbound channel closes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the take's shared state travels piecemeal so run_session's message loop stays flat"
-)]
-fn spawn_interim_loop(
+/// One take's interim machinery: the newest-frame channel the connection
+/// loop polls and the guard cancelling the transcription task. Dropping
+/// it - on stop, restart, or disconnect - cancels the whisper work and
+/// discards any frame still parked in the channel, so no interim of a
+/// settled take can follow its final reply onto the socket.
+#[derive(Debug)]
+struct ActiveTake {
+    /// The newest serialized interim frame; the watch retains exactly
+    /// one, so a loop that falls behind skips straight to the latest
+    /// interim - the contract's newest-supersedes drop.
+    interims: watch::Receiver<Option<String>>,
+    /// Aborts the interim task when the take drops.
+    _task: InterimTask,
+}
+
+/// Cancels the take's interim transcription task on drop, so no exit path
+/// needs a manual stop call.
+#[derive(Debug)]
+struct InterimTask(tokio::task::JoinHandle<()>);
+
+impl Drop for InterimTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// The next interim frame of the take in flight; pending forever when no
+/// take is live (or no engine is configured), so the select! branch simply
+/// never fires.
+async fn next_interim(take: &mut Option<ActiveTake>) -> Option<String> {
+    match take.as_mut() {
+        Some(active) => match active.interims.changed().await {
+            Ok(()) => active.interims.borrow_and_update().clone(),
+            // The interim task ended on its own; nothing more arrives
+            // this take.
+            Err(_) => std::future::pending().await,
+        },
+        None => std::future::pending().await,
+    }
+}
+
+/// Spawns one take's interim task: every `interval`, drain newly
+/// crystallized segments, transcribe the take's uncommitted audio
+/// (everything past the segmenter's consumed offset, so a long take does
+/// not re-decode its own prefix), and publish an interim frame - tagged
+/// with the take's stream generation - when either field changed since
+/// the last one. Runs until the take drops.
+fn spawn_interim(
     session: u64,
     generation: u64,
     engine: Arc<VoiceEngine>,
-    buffer: Arc<Mutex<Vec<f32>>>,
-    committed: Arc<Mutex<Committed>>,
-    consumed: Arc<AtomicUsize>,
-    out: tokio::sync::mpsc::Sender<Message>,
+    state: Arc<TakeState>,
     push: Push,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+) -> ActiveTake {
+    let (interim_tx, interims) = watch::channel(None);
+    let task = InterimTask(tokio::spawn(async move {
         let mut last_committed = String::new();
         let mut last_tentative = String::new();
         // The latch: committed text at the time of the last non-empty
@@ -167,13 +232,12 @@ fn spawn_interim_loop(
         loop {
             tokio::time::sleep(engine.interval()).await;
             let committed_text = {
-                let mut guard = lock_committed(&committed);
+                let mut guard = state.lock_committed();
                 guard.drain();
                 guard.text.clone()
             };
-            let window = uncommitted_snapshot(
-                &buffer,
-                consumed.load(Ordering::Relaxed),
+            let window = state.uncommitted_snapshot(
+                state.consumed.load(Ordering::Relaxed),
                 engine.window_samples(),
             );
             let tentative = if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window)
@@ -217,11 +281,17 @@ fn spawn_interim_loop(
             else {
                 continue;
             };
-            if out.send(Message::Text(message.into())).await.is_err() {
+            if interim_tx.send(Some(message)).is_err() {
+                // The connection loop dropped the take; the whisper work
+                // is already cancelled with it.
                 return;
             }
         }
-    })
+    }));
+    ActiveTake {
+        interims,
+        _task: task,
+    }
 }
 
 /// The stop-message tail when the final model is absent or fails: one last
@@ -232,11 +302,11 @@ fn spawn_interim_loop(
 async fn final_transcript(
     session: u64,
     engine: &VoiceEngine,
-    buffer: &Mutex<Vec<f32>>,
+    state: &TakeState,
     segmenter: &Segmenter,
     push: &Push,
 ) -> String {
-    let window = uncommitted_snapshot(buffer, segmenter.consumed(), engine.window_samples());
+    let window = state.uncommitted_snapshot(segmenter.consumed(), engine.window_samples());
     if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window) {
         return String::new();
     }
@@ -258,8 +328,7 @@ async fn final_transcript(
 async fn stop_transcript(
     session: u64,
     engine: Option<&VoiceEngine>,
-    buffer: &Mutex<Vec<f32>>,
-    committed: &Mutex<Committed>,
+    state: &TakeState,
     segmenter: &Segmenter,
     push: &Push,
 ) -> String {
@@ -267,7 +336,7 @@ async fn stop_transcript(
         return String::new();
     };
     let tail = {
-        let guard = lock_buffer(buffer);
+        let guard = state.lock_buffer();
         guard[segmenter.consumed()..].to_vec()
     };
     let tail = match engine.final_finish(tail).await {
@@ -275,95 +344,73 @@ async fn stop_transcript(
         Some(Err(error)) => {
             push.push_failure("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
-            final_transcript(session, engine, buffer, segmenter, push).await
+            final_transcript(session, engine, state, segmenter, push).await
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            final_transcript(session, engine, buffer, segmenter, push).await
+            final_transcript(session, engine, state, segmenter, push).await
         }
     };
     // Awaiting the tail's reply drained every segment submitted this take
     // (the worker's channel is FIFO), so this crystallizes everything the
     // take reported before the final frame is assembled.
-    let mut guard = lock_committed(committed);
+    let mut guard = state.lock_committed();
     guard.drain();
     append_transcript(&mut guard.text, &tail);
     guard.text.clone()
 }
 
-/// Starts a new take: clears the buffer and the committed transcript,
-/// resets the segmenter and the final-pass pipeline, installs the take's
-/// segment-completion receiver, and spawns the interim loop when an engine
-/// is configured. `generation` is the take's announced stream generation,
-/// carried by every interim frame the loop pushes.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the take's shared state travels piecemeal so run_session's message loop stays flat"
-)]
+/// Starts a new take: resets the shared audio state, the segmenter, and
+/// the final-pass pipeline, installs the take's segment-completion
+/// receiver, and spawns the take's interim task when an engine is
+/// configured. `generation` is the take's announced stream generation,
+/// carried by every interim frame the task publishes.
 fn begin_take(
     session: u64,
     generation: u64,
     engine: Option<&Arc<VoiceEngine>>,
-    buffer: &Arc<Mutex<Vec<f32>>>,
-    committed: &Arc<Mutex<Committed>>,
-    consumed: &Arc<AtomicUsize>,
+    state: &Arc<TakeState>,
     segmenter: &mut Segmenter,
-    interim: &mut Option<tokio::task::JoinHandle<()>>,
-    out: &tokio::sync::mpsc::Sender<Message>,
     push: &Push,
-) {
-    lock_buffer(buffer).clear();
+) -> Option<ActiveTake> {
     segmenter.reset();
-    consumed.store(0, Ordering::Relaxed);
-    {
-        let mut guard = lock_committed(committed);
-        guard.text.clear();
-        guard.segments = engine
-            .filter(|engine| engine.has_final_pass())
-            .map(|engine| {
-                let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-                engine.final_reset(segment_tx);
-                segment_rx
-            });
-    }
-    stop_interim(interim);
-    if let Some(engine) = engine {
-        *interim = Some(spawn_interim_loop(
+    let segments = engine
+        .filter(|engine| engine.has_final_pass())
+        .map(|engine| {
+            let (segment_tx, segment_rx) = std::sync::mpsc::channel();
+            engine.final_reset(segment_tx);
+            segment_rx
+        });
+    state.reset(segments);
+    let take = engine.map(|engine| {
+        spawn_interim(
             session,
             generation,
             Arc::clone(engine),
-            Arc::clone(buffer),
-            Arc::clone(committed),
-            Arc::clone(consumed),
-            out.clone(),
+            Arc::clone(state),
             push.clone(),
-        ));
-    }
+        )
+    });
     push.push_status_update(
         "Listening...",
         "a push-to-talk take is recording",
         Activity::General,
     );
     tracing::info!(session, "voice capture started");
+    take
 }
 
 /// Cuts any speech segments the newly arrived audio completed, hands them
 /// to the background final pass, publishes the segmenter's consumed offset
 /// for the interim loop, and crystallizes the segments the worker has
 /// finished since the last message.
-fn submit_closed_segments(
-    engine: &VoiceEngine,
-    buffer: &Arc<Mutex<Vec<f32>>>,
-    committed: &Arc<Mutex<Committed>>,
-    consumed: &Arc<AtomicUsize>,
-    segmenter: &mut Segmenter,
-) {
+fn submit_closed_segments(engine: &VoiceEngine, state: &TakeState, segmenter: &mut Segmenter) {
     loop {
         let segment = {
-            let guard = lock_buffer(buffer);
+            let guard = state.lock_buffer();
             segmenter.poll(&guard).map(|range| guard[range].to_vec())
         };
         match segment {
@@ -371,153 +418,180 @@ fn submit_closed_segments(
             None => break,
         }
     }
-    consumed.store(segmenter.consumed(), Ordering::Relaxed);
-    lock_committed(committed).drain();
+    state
+        .consumed
+        .store(segmenter.consumed(), Ordering::Relaxed);
+    state.lock_committed().drain();
 }
 
-/// Announces a new stream generation on the socket, ahead of every frame
-/// belonging to it; a false return means the client is gone.
-async fn announce_stream(out: &tokio::sync::mpsc::Sender<Message>, generation: u64) -> bool {
-    // Serializing an integer cannot fail. An announcement that somehow
-    // cannot serialize is skipped, which is not a gone client.
-    let Ok(message) = serde_json::to_string(&StreamFrame::new(generation)) else {
+/// Sends one JSON text frame; a false return means the client is gone.
+async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
+    // Serializing the protocol frames cannot fail: strings and integers
+    // only. A frame that somehow cannot serialize is skipped, which is not
+    // a gone client.
+    let Ok(text) = serde_json::to_string(frame) else {
         return true;
     };
-    out.send(Message::Text(message.into())).await.is_ok()
+    send_text(socket, text).await
 }
 
-/// Sends the take's `final` reply, tagged with its stream generation; a
-/// false return means the client is gone.
-async fn send_final_reply(
-    out: &tokio::sync::mpsc::Sender<Message>,
-    text: String,
-    frames: u64,
-    generation: u64,
-) -> bool {
-    // Serializing a string and two integers cannot fail. A reply that
-    // somehow cannot serialize is skipped, which is not a gone client.
-    let Ok(reply) = serde_json::to_string(&FinalFrame::new(text, frames, generation)) else {
-        return true;
-    };
-    out.send(Message::Text(reply.into())).await.is_ok()
+/// Sends one already-serialized text frame; a false return means the
+/// client is gone.
+async fn send_text(socket: &mut WebSocket, text: String) -> bool {
+    socket.send(Message::Text(text.into())).await.is_ok()
 }
 
-/// Runs one capture session until the socket closes or fails.
-async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: Push) {
-    let (sink, mut stream) = socket.split();
-    // The receive loop and the interim loop both speak to the client, so
-    // outbound messages funnel through the session's outbox into its
-    // writer task.
-    let ws = WsSession::new(sink);
-    let session = ws.id();
+/// Settles the session's observable end when the connection task returns,
+/// however it returns: the status bar goes back to Ready and the close is
+/// logged - the session loop's exit paths carry no cleanup calls.
+struct SessionClose {
+    session: u64,
+    push: Push,
+}
+
+impl Drop for SessionClose {
+    fn drop(&mut self) {
+        self.push.push_idle();
+        tracing::info!(session = self.session, "voice session closed");
+    }
+}
+
+/// Runs one capture session until the socket closes or fails: a single
+/// `select!` loop owning the socket for both reading and writing.
+async fn run_session(mut socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: Push) {
+    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     tracing::info!(session, "voice session opened");
+    let _closed = SessionClose {
+        session,
+        push: push.clone(),
+    };
 
-    let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-    let committed: Arc<Mutex<Committed>> = Arc::new(Mutex::new(Committed::default()));
-    // The segmenter's consumed offset, published for the interim loop,
-    // which cannot borrow the session-local segmenter.
-    let consumed = Arc::new(AtomicUsize::new(0));
+    let state = Arc::new(TakeState::default());
+    let mut segmenter = Segmenter::new();
+    // The take in flight; dropping it cancels the interim whisper work.
+    let mut take: Option<ActiveTake> = None;
+    // PCM frames received since the most recent `start`.
     let mut frames = 0u64;
     // The connection's stream generation: 0 until the first `start`, then
     // incremented per take, so every frame names the take it belongs to.
     let mut generation = 0u64;
-    let mut interim: Option<tokio::task::JoinHandle<()>> = None;
-    let mut segmenter = Segmenter::new();
     let mut last_mic_pulse: Option<Instant> = None;
 
-    while let Some(received) = stream.next().await {
-        match received {
-            Ok(Message::Binary(payload)) => {
-                // One PCM frame is a single 16 kHz mono f32 sample: four
-                // bytes, little-endian. A trailing partial sample is dropped.
-                let samples: Vec<f32> = payload
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|bytes| f32::from_le_bytes(*bytes))
-                    .collect();
-                frames += samples.len() as u64;
-                lock_buffer(&buffer).extend_from_slice(&samples);
-                if last_mic_pulse.is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL) {
-                    last_mic_pulse = Some(Instant::now());
-                    push.push_activity(
-                        "Listening...",
-                        "microphone audio is arriving",
-                        Activity::General,
-                    );
-                }
-                // Cut any speech segments the new audio completed and hand
-                // them to the background final pass. Without a final pass
-                // nothing can crystallize, so the segmenter stays off and
-                // the interim loop and stop fallback keep seeing the whole
-                // take as uncommitted.
-                if let Some(engine) = &engine
-                    && engine.has_final_pass()
+    loop {
+        tokio::select! {
+            // Biased, ephemeral first: PCM binary frames arrive far faster
+            // than the interim cadence, and an unbiased select could keep
+            // choosing the inbound branch and hold a ready interim stale
+            // past its usefulness. The interim branch cannot starve
+            // inbound in turn because it fires at most once per tick.
+            biased;
+            // The ephemeral path: the newest-frame watch. Intermediates
+            // the loop never saw are the contract's drop-under-lag - each
+            // interim supersedes the one before it.
+            interim = next_interim(&mut take) => {
+                if let Some(text) = interim
+                    && !send_text(&mut socket, text).await
                 {
-                    submit_closed_segments(engine, &buffer, &committed, &consumed, &mut segmenter);
+                    break;
                 }
             }
-            Ok(Message::Text(text)) => match text.as_str() {
-                VOICE_START => {
-                    frames = 0;
-                    last_mic_pulse = None;
-                    generation += 1;
-                    // Announced before begin_take spawns the interim loop,
-                    // so the announcement enters the outbox ahead of every
-                    // frame of its generation.
-                    if !announce_stream(ws.outbox(), generation).await {
-                        break;
+            inbound = socket.recv() => match inbound {
+                Some(Ok(Message::Binary(payload))) => {
+                    // One PCM frame is a single 16 kHz mono f32 sample:
+                    // four bytes, little-endian. A trailing partial sample
+                    // is dropped.
+                    let samples: Vec<f32> = payload
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|bytes| f32::from_le_bytes(*bytes))
+                        .collect();
+                    frames += samples.len() as u64;
+                    state.lock_buffer().extend_from_slice(&samples);
+                    if last_mic_pulse.is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL) {
+                        last_mic_pulse = Some(Instant::now());
+                        push.push_activity(
+                            "Listening...",
+                            "microphone audio is arriving",
+                            Activity::General,
+                        );
                     }
-                    begin_take(
-                        session,
-                        generation,
-                        engine.as_ref(),
-                        &buffer,
-                        &committed,
-                        &consumed,
-                        &mut segmenter,
-                        &mut interim,
-                        ws.outbox(),
-                        &push,
-                    );
-                }
-                VOICE_STOP => {
-                    stop_interim(&mut interim);
-                    push.push_status_update(
-                        "Finalizing transcript...",
-                        "the final pass over the take",
-                        Activity::General,
-                    );
-                    let text = stop_transcript(
-                        session,
-                        engine.as_deref(),
-                        &buffer,
-                        &committed,
-                        &segmenter,
-                        &push,
-                    )
-                    .await;
-                    tracing::info!(session, frames, "voice capture stopped");
-                    if !send_final_reply(ws.outbox(), text, frames, generation).await {
-                        break;
+                    // Cut any speech segments the new audio completed and
+                    // hand them to the background final pass. Without a
+                    // final pass nothing can crystallize, so the segmenter
+                    // stays off and the interim task and stop fallback
+                    // keep seeing the whole take as uncommitted.
+                    if let Some(engine) = &engine
+                        && engine.has_final_pass()
+                    {
+                        submit_closed_segments(engine, &state, &mut segmenter);
                     }
-                    push.push_idle();
                 }
-                _ => {}
+                Some(Ok(Message::Text(text))) => match text.as_str() {
+                    VOICE_START => {
+                        frames = 0;
+                        last_mic_pulse = None;
+                        generation += 1;
+                        // Cancel the superseded take before announcing, so
+                        // none of its frames can follow the announcement.
+                        drop(take.take());
+                        // The durable announcement is a direct reply, sent
+                        // by the loop ahead of every frame of its
+                        // generation.
+                        if !send_frame(&mut socket, &StreamFrame::new(generation)).await {
+                            break;
+                        }
+                        take = begin_take(
+                            session,
+                            generation,
+                            engine.as_ref(),
+                            &state,
+                            &mut segmenter,
+                            &push,
+                        );
+                    }
+                    VOICE_STOP => {
+                        // Dropping the take cancels the interim task and
+                        // discards any parked frame: no interim of this
+                        // take can follow its final reply.
+                        take = None;
+                        push.push_status_update(
+                            "Finalizing transcript...",
+                            "the final pass over the take",
+                            Activity::General,
+                        );
+                        let text = stop_transcript(
+                            session,
+                            engine.as_deref(),
+                            &state,
+                            &segmenter,
+                            &push,
+                        )
+                        .await;
+                        tracing::info!(session, frames, "voice capture stopped");
+                        // The take's single durable stop reply, sent
+                        // directly by the loop.
+                        if !send_frame(&mut socket, &FinalFrame::new(text, frames, generation))
+                            .await
+                        {
+                            break;
+                        }
+                        push.push_idle();
+                    }
+                    // Zone two: unknown control text is logged and
+                    // skipped, never fatal.
+                    _ => tracing::debug!(session, "ignoring an unknown voice control message"),
+                },
+                // Pings and pongs are answered by axum itself.
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(error)) => {
+                    tracing::warn!(session, %error, "voice session socket failed");
+                    break;
+                }
             },
-            // Pings and pongs are answered by axum itself.
-            Ok(Message::Ping(_) | Message::Pong(_)) => {}
-            Ok(Message::Close(_)) => break,
-            Err(error) => {
-                tracing::warn!(session, %error, "voice session socket failed");
-                break;
-            }
         }
     }
-    stop_interim(&mut interim);
-    push.push_idle();
-    ws.close();
-    tracing::info!(session, frames, "voice session closed");
 }
 
 #[cfg(test)]
@@ -526,7 +600,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use futures_util::SinkExt;
+    use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite;
 
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
@@ -1075,6 +1149,36 @@ mod tests {
         assert_eq!(
             committed.text, "ask not what you can do",
             "the second segment appended with a single-space join"
+        );
+    }
+
+    /// The contract's newest-supersedes drop for interims: when the loop
+    /// falls behind, it reads only the latest published frame - never a
+    /// stale one, never a duplicate. A queue in place of the watch would
+    /// deliver the superseded frame too and fail the second assertion.
+    #[tokio::test]
+    async fn a_lagging_loop_reads_only_the_newest_interim() {
+        let (interim_tx, interims) = watch::channel(None);
+        let mut take = Some(ActiveTake {
+            interims,
+            _task: InterimTask(tokio::spawn(std::future::pending::<()>())),
+        });
+        interim_tx
+            .send(Some("old".to_string()))
+            .expect("the receiver is held");
+        interim_tx
+            .send(Some("new".to_string()))
+            .expect("the receiver is held");
+        assert_eq!(
+            next_interim(&mut take).await.as_deref(),
+            Some("new"),
+            "the newest interim supersedes the unread one"
+        );
+        let superseded =
+            tokio::time::timeout(Duration::from_millis(50), next_interim(&mut take)).await;
+        assert!(
+            superseded.is_err(),
+            "the superseded interim is dropped, not queued behind the newest"
         );
     }
 
