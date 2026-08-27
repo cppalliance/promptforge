@@ -10,6 +10,24 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 
 - After completing work (compiles + tests pass), update README.md if the public surface changed.
 - Every public type, function, and module must have a `///` doc comment. `cargo doc` is the project documentation.
-- STYLE.md at the repo root carries the comment, workaround, error-zone, layering, and test conventions for the workshop crates.
+- Each crate's own AGENTS.md binds its subtree. Read the ones governing the paths you touch before writing or reviewing code.
+- The existing test suite stays green and intact during refactors: fix forward; never rewrite a test to make it pass.
+- Library and serve paths never call `process::exit` or install process-global state; failures return through the spawn handshake.
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
+
+## Comments
+
+`///` doc comments on public items are mandatory (above) and are not what this section governs. Any other comment earns its place by exactly four things: a non-obvious why, an invisible constraint no type or test enforces, an external-bug workaround, or a subtle ordering requirement. Comments that narrate what the code already says are deleted on sight. A module doc earns its place by documenting the domain, not by restating the file name.
+
+Every platform or external-bug workaround carries its upstream issue URL inline, in the comment that explains it. When the workaround dies, the URL says when it can be buried.
+
+```rust
+// wry's drag-drop handler suppresses HTML5 drag events on Windows
+// (https://github.com/tauri-apps/tauri/issues/15138), so ...
+```
+
+## Verify
+
+- Rust: `cargo test` at the workspace root.
+- UI: `npm run typecheck && npm test` in `crates/promptforge-ws-server/ui`.
