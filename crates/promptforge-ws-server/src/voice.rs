@@ -37,8 +37,8 @@ use futures_util::StreamExt;
 
 use crate::app::AppState;
 use crate::protocol::{Activity, FinalFrame, InterimFrame, VOICE_START, VOICE_STOP};
+use crate::push::Push;
 use crate::segment::Segmenter;
-use crate::status::StatusBus;
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
 use crate::ws_session::WsSession;
 
@@ -50,8 +50,8 @@ const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
 /// Upgrades a `GET /voice` request to a WebSocket voice-capture session.
 pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
     let engine = state.voice_engine();
-    let status = state.status();
-    ws.on_upgrade(move |socket| run_session(socket, engine, status))
+    let push = state.push();
+    ws.on_upgrade(move |socket| run_session(socket, engine, push))
 }
 
 /// Locks the PCM buffer, recovering from poisoning the way the tape does: a
@@ -140,7 +140,7 @@ fn spawn_interim_loop(
     committed: Arc<Mutex<Committed>>,
     consumed: Arc<AtomicUsize>,
     out: tokio::sync::mpsc::Sender<Message>,
-    status: StatusBus,
+    push: Push,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut last_committed = String::new();
@@ -168,7 +168,7 @@ fn spawn_interim_loop(
             {
                 String::new()
             } else {
-                status.debug(
+                push.push_activity(
                     "Transcribing...",
                     "an interim pass over the uncommitted audio",
                     Activity::General,
@@ -176,7 +176,11 @@ fn spawn_interim_loop(
                 match engine.transcribe(window).await {
                     Ok(text) => text,
                     Err(error) => {
-                        status.debug("Transcription failed", error.to_string(), Activity::General);
+                        push.push_activity(
+                            "Transcription failed",
+                            error.to_string(),
+                            Activity::General,
+                        );
                         tracing::warn!(session, %error, "interim transcription failed");
                         continue;
                     }
@@ -217,7 +221,7 @@ async fn final_transcript(
     engine: &VoiceEngine,
     buffer: &Mutex<Vec<f32>>,
     segmenter: &Segmenter,
-    status: &StatusBus,
+    push: &Push,
 ) -> String {
     let window = uncommitted_snapshot(buffer, segmenter.consumed(), engine.window_samples());
     if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window) {
@@ -226,7 +230,7 @@ async fn final_transcript(
     match engine.transcribe(window).await {
         Ok(text) => text,
         Err(error) => {
-            status.error("Transcription failed", error.to_string(), Activity::General);
+            push.push_failure("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final transcription failed");
             String::new()
         }
@@ -244,7 +248,7 @@ async fn stop_transcript(
     buffer: &Mutex<Vec<f32>>,
     committed: &Mutex<Committed>,
     segmenter: &Segmenter,
-    status: &StatusBus,
+    push: &Push,
 ) -> String {
     let Some(engine) = engine else {
         return String::new();
@@ -256,16 +260,16 @@ async fn stop_transcript(
     let tail = match engine.final_finish(tail).await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
-            status.error("Transcription failed", error.to_string(), Activity::General);
+            push.push_failure("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
-            final_transcript(session, engine, buffer, segmenter, status).await
+            final_transcript(session, engine, buffer, segmenter, push).await
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            final_transcript(session, engine, buffer, segmenter, status).await
+            final_transcript(session, engine, buffer, segmenter, push).await
         }
     };
     // Awaiting the tail's reply drained every segment submitted this take
@@ -294,7 +298,7 @@ fn begin_take(
     segmenter: &mut Segmenter,
     interim: &mut Option<tokio::task::JoinHandle<()>>,
     out: &tokio::sync::mpsc::Sender<Message>,
-    status: &StatusBus,
+    push: &Push,
 ) {
     lock_buffer(buffer).clear();
     segmenter.reset();
@@ -319,10 +323,10 @@ fn begin_take(
             Arc::clone(committed),
             Arc::clone(consumed),
             out.clone(),
-            status.clone(),
+            push.clone(),
         ));
     }
-    status.info(
+    push.push_status_update(
         "Listening...",
         "a push-to-talk take is recording",
         Activity::General,
@@ -370,7 +374,7 @@ async fn send_final_reply(
 }
 
 /// Runs one capture session until the socket closes or fails.
-async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status: StatusBus) {
+async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: Push) {
     let (sink, mut stream) = socket.split();
     // The receive loop and the interim loop both speak to the client, so
     // outbound messages funnel through the session's outbox into its
@@ -404,7 +408,7 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
                 lock_buffer(&buffer).extend_from_slice(&samples);
                 if last_mic_pulse.is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL) {
                     last_mic_pulse = Some(Instant::now());
-                    status.debug(
+                    push.push_activity(
                         "Listening...",
                         "microphone audio is arriving",
                         Activity::General,
@@ -434,12 +438,12 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
                         &mut segmenter,
                         &mut interim,
                         ws.outbox(),
-                        &status,
+                        &push,
                     );
                 }
                 VOICE_STOP => {
                     stop_interim(&mut interim);
-                    status.info(
+                    push.push_status_update(
                         "Finalizing transcript...",
                         "the final pass over the take",
                         Activity::General,
@@ -450,14 +454,14 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
                         &buffer,
                         &committed,
                         &segmenter,
-                        &status,
+                        &push,
                     )
                     .await;
                     tracing::info!(session, frames, "voice capture stopped");
                     if !send_final_reply(ws.outbox(), text, frames).await {
                         break;
                     }
-                    status.idle();
+                    push.push_idle();
                 }
                 _ => {}
             },
@@ -471,7 +475,7 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
         }
     }
     stop_interim(&mut interim);
-    status.idle();
+    push.push_idle();
     ws.close();
     tracing::info!(session, frames, "voice session closed");
 }

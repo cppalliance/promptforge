@@ -45,6 +45,7 @@ use tokio::sync::broadcast;
 use crate::app::AppState;
 use crate::gateway::{ChatStream, GatewayResponse};
 use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
+use crate::push::Push;
 use crate::relay::{tape_round_trip, value_from_bytes};
 use crate::tape::Tape;
 use crate::ws_session::WsSession;
@@ -173,8 +174,8 @@ async fn relay_chat(
     out: &tokio::sync::mpsc::Sender<Message>,
 ) {
     let started = Instant::now();
-    let status = state.status();
-    status.info(
+    let push = state.push();
+    push.push_status_update(
         "Submitting request...",
         format!("a streaming chat completion from {}", request.model),
         Activity::Thinking,
@@ -186,14 +187,14 @@ async fn relay_chat(
     {
         Ok(chat_stream) => chat_stream,
         Err(error) => {
-            status.error("Connection lost", error.to_string(), Activity::General);
+            push.push_failure("Connection lost", error.to_string(), Activity::General);
             send_error(out, id.as_ref(), error.to_string()).await;
             return;
         }
     };
     let mut payloads = match chat_stream {
         ChatStream::Stream { payloads, .. } => {
-            status.info(
+            push.push_status_update(
                 "Streaming response...",
                 "the gateway is streaming the reply",
                 Activity::Thinking,
@@ -230,12 +231,12 @@ async fn relay_chat(
                 if payload == "[DONE]" {
                     continue;
                 }
-                match forward_payload(&payload, &status, id.as_ref(), out, &mut finish.assembled)
+                match forward_payload(&payload, &push, id.as_ref(), out, &mut finish.assembled)
                     .await
                 {
                     Forward::Sent => {}
                     Forward::ClientGone => {
-                        client_disconnected(finish, &status).await;
+                        client_disconnected(finish, &push).await;
                         return;
                     }
                 }
@@ -244,13 +245,13 @@ async fn relay_chat(
                 let message = error.to_string();
                 finish.error = Some(message.clone());
                 finish.record().await;
-                status.error("Connection lost", message.clone(), Activity::General);
+                push.push_failure("Connection lost", message.clone(), Activity::General);
                 send_error(out, id.as_ref(), message).await;
                 return;
             }
             None => {
                 finish.record().await;
-                status.idle();
+                push.push_idle();
                 let _ = send_frame(out, &DoneFrame::new(id.as_ref())).await;
                 return;
             }
@@ -271,14 +272,14 @@ enum Forward {
 /// ignores the text, but the activity field keeps the LED lit.
 async fn forward_payload(
     payload: &str,
-    status: &crate::status::StatusBus,
+    push: &Push,
     id: Option<&serde_json::Value>,
     out: &tokio::sync::mpsc::Sender<Message>,
     assembled: &mut String,
 ) -> Forward {
     let fields = delta_fields(payload);
     if let Some(text) = fields.reasoning {
-        status.debug(
+        push.push_activity(
             "Streaming response...",
             "a gateway reasoning chunk",
             Activity::Thinking,
@@ -291,7 +292,7 @@ async fn forward_payload(
         return Forward::Sent;
     };
     assembled.push_str(&text);
-    status.debug(
+    push.push_activity(
         "Streaming response...",
         "a gateway response chunk",
         Activity::Generating,
@@ -307,10 +308,10 @@ async fn forward_payload(
 /// partial exchange, and because the dead client is gone but any other
 /// subscriber still watches the observer, the status returns to Ready
 /// rather than leaving a stale activity LED.
-async fn client_disconnected(mut finish: StreamTape, status: &crate::status::StatusBus) {
+async fn client_disconnected(mut finish: StreamTape, push: &Push) {
     finish.error = Some("client disconnected mid-stream".to_string());
     finish.record().await;
-    status.idle();
+    push.push_idle();
 }
 
 /// Handles a gateway that declined the stream with an ordinary response:
@@ -347,7 +348,7 @@ async fn declined_stream(
             },
             str::to_string,
         );
-    state.status().error(
+    state.push().push_failure(
         format!("Gateway error: {}", upstream.status),
         message.clone(),
         Activity::General,
@@ -1101,9 +1102,8 @@ mod tests {
         let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
         let heartbeat = crate::heartbeat::spawn(
             state.gateway_client().clone(),
-            state.status(),
+            state.push(),
             state.health().clone(),
-            state.catalog(),
             Duration::from_millis(25),
         );
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)

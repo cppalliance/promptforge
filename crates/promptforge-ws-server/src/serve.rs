@@ -170,9 +170,8 @@ fn serve_thread(
         // outlive the server.
         let heartbeat = heartbeat::spawn(
             state.gateway_client().clone(),
-            state.status(),
+            state.push(),
             state.health().clone(),
-            state.catalog(),
             heartbeat::HEARTBEAT_INTERVAL,
         );
         // Voice is GPU-only (see AppState::new): without GPU transcription
@@ -185,7 +184,7 @@ fn serve_thread(
         };
         let provision = provision::spawn(
             state.gateway_client().clone(),
-            state.status(),
+            state.push(),
             state.health().clone(),
             state.voice_slot(),
             voice_config,
