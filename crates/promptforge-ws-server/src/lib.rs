@@ -24,7 +24,6 @@ mod tape;
 mod transcribe;
 mod voice;
 mod workspace;
-mod ws_session;
 
 /// Crate-internal test fixtures, re-exported to the integration-test
 /// binary; the `test-fixtures` feature that compiles them is enabled by
