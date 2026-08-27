@@ -59,11 +59,14 @@ jobs:
         working-directory: crates/promptforge-ws-server/ui
         run: npm ci
 
+      # --no-default-features: the desktop crate defaults to the cuda
+      # feature, and windows-latest has no CUDA toolkit; CI builds the
+      # CPU-only whisper path instead.
       - name: Clippy (workshop)
-        run: cargo clippy -p promptforge-ws -p promptforge-ws-server --all-targets -- -D warnings
+        run: cargo clippy -p promptforge-ws -p promptforge-ws-server --all-targets --no-default-features -- -D warnings
 
       - name: Test (workshop)
-        run: cargo test --locked -p promptforge-ws -p promptforge-ws-server
+        run: cargo test --locked -p promptforge-ws -p promptforge-ws-server --no-default-features
 
   msrv:
     runs-on: ubuntu-latest
