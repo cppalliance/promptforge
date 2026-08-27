@@ -158,7 +158,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
    * the editor's text over the file.
    */
   private showConflictDialog(): void {
-    showPanelDialog({
+    this._register(showPanelDialog({
       host: this.element,
       classPrefix: "editor-conflict",
       titleId: "editor-conflict-title",
@@ -185,7 +185,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
           },
         },
       ],
-    });
+    }));
   }
 
   /**
@@ -206,7 +206,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
    * succeeds; Discard closes without writing; Cancel keeps the panel.
    */
   private showCloseDialog(): void {
-    showPanelDialog({
+    this._register(showPanelDialog({
       host: this.element,
       classPrefix: "editor-close",
       titleId: "editor-close-title",
@@ -237,7 +237,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
         },
         { label: "Cancel", run: () => undefined },
       ],
-    });
+    }));
   }
 
   /**

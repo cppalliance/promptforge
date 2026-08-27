@@ -13,8 +13,8 @@
 .voice-mic:hover {
   background-color: transparent;
   box-shadow:
-    0 0 0 1px var(--hover-glow, #5b9cf5),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+    0 0 0 1px var(--hover-glow, #7c7fd4),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #7c7fd4) 40%, transparent);
 }
 
 .voice-mic {
@@ -46,8 +46,8 @@
 /* Send button hover: accent glow in both normal and generating states. */
 .mur-action-btn:hover:not(:disabled) {
   box-shadow:
-    0 0 0 1px var(--hover-glow, #5b9cf5),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+    0 0 0 1px var(--hover-glow, #7c7fd4),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #7c7fd4) 40%, transparent);
 }
 
 /* Composer overlap fix: make the form container participate in the column
