@@ -9,7 +9,7 @@
    clips against a fixed box. */
 .status-bar {
   flex: none;
-  min-height: var(--status-bar-height, 24px);
+  min-height: var(--status-bar-height, 28px);
   display: flex;
   align-items: center;
   gap: var(--status-bar-gap, 12px);
