@@ -26,22 +26,20 @@
 //! hallucinates on silence), and an interim frame is sent only when
 //! `committed` or `tentative` changed since the last one.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 
 use crate::app::AppState;
 use crate::segment::Segmenter;
 use crate::status::{Activity, StatusBus};
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
-
-/// Session ids for log correlation, handed out in connection order.
-static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+use crate::ws_session::WsSession;
 
 /// Floor between microphone activity pulses: the worklet posts chunks far
 /// faster than the status bar can usefully change, so mic activity pulses
@@ -50,10 +48,9 @@ const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Upgrades a `GET /voice` request to a WebSocket voice-capture session.
 pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let engine = state.voice_engine();
     let status = state.status();
-    ws.on_upgrade(move |socket| run_session(session, socket, engine, status))
+    ws.on_upgrade(move |socket| run_session(socket, engine, status))
 }
 
 /// Locks the PCM buffer, recovering from poisoning the way the tape does: a
@@ -374,24 +371,14 @@ async fn send_final_reply(
 }
 
 /// Runs one capture session until the socket closes or fails.
-async fn run_session(
-    session: u64,
-    socket: WebSocket,
-    engine: Option<Arc<VoiceEngine>>,
-    status: StatusBus,
-) {
-    tracing::info!(session, "voice session opened");
-    let (mut sink, mut stream) = socket.split();
+async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status: StatusBus) {
+    let (sink, mut stream) = socket.split();
     // The receive loop and the interim loop both speak to the client, so
-    // outbound messages funnel through one channel into the writer task.
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Message>(32);
-    let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
-            if sink.send(message).await.is_err() {
-                break;
-            }
-        }
-    });
+    // outbound messages funnel through the session's outbox into its
+    // writer task.
+    let ws = WsSession::new(sink);
+    let session = ws.id();
+    tracing::info!(session, "voice session opened");
 
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let committed: Arc<Mutex<Committed>> = Arc::new(Mutex::new(Committed::default()));
@@ -447,7 +434,7 @@ async fn run_session(
                         &consumed,
                         &mut segmenter,
                         &mut interim,
-                        &out_tx,
+                        ws.outbox(),
                         &status,
                     );
                 }
@@ -468,7 +455,7 @@ async fn run_session(
                     )
                     .await;
                     tracing::info!(session, frames, "voice capture stopped");
-                    if !send_final_reply(&out_tx, text, frames).await {
+                    if !send_final_reply(ws.outbox(), text, frames).await {
                         break;
                     }
                     status.idle();
@@ -486,8 +473,7 @@ async fn run_session(
     }
     stop_interim(&mut interim);
     status.idle();
-    drop(out_tx);
-    writer.abort();
+    ws.close();
     tracing::info!(session, frames, "voice session closed");
 }
 
@@ -497,6 +483,7 @@ mod tests {
 
     use std::time::Duration;
 
+    use futures_util::SinkExt;
     use tokio_tungstenite::tungstenite;
 
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};

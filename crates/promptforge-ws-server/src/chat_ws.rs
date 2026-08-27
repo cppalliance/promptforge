@@ -34,44 +34,34 @@
 //! beside the partial content.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
 use crate::app::{AppState, tape_round_trip, value_from_bytes};
 use crate::gateway::{ChatRequest, ChatStream, GatewayResponse};
 use crate::status::Activity;
 use crate::tape::Tape;
-
-/// Session ids for log correlation, handed out in connection order.
-static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+use crate::ws_session::WsSession;
 
 /// Upgrades a `GET /ws` request to a WebSocket chat session.
 pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-    ws.on_upgrade(move |socket| run_session(session, socket, state))
+    ws.on_upgrade(move |socket| run_session(socket, state))
 }
 
 /// Runs one chat session until the socket closes or fails.
-async fn run_session(session: u64, socket: WebSocket, state: AppState) {
-    tracing::info!(session, "chat session opened");
-    let (mut sink, mut stream) = socket.split();
+async fn run_session(socket: WebSocket, state: AppState) {
+    let (sink, mut stream) = socket.split();
     // The receive loop and the status forwarder both speak to the client,
-    // so outbound messages funnel through one channel into the writer task,
-    // mirroring the voice session.
-    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Message>(32);
-    let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
-            if sink.send(message).await.is_err() {
-                break;
-            }
-        }
-    });
+    // so outbound messages funnel through the session's outbox into its
+    // writer task, mirroring the voice session.
+    let session = WsSession::new(sink);
+    let session_id = session.id();
+    tracing::info!(session = session_id, "chat session opened");
 
     // Status frames and catalog pushes are unsolicited and must flow while
     // a chat relay has the inbound loop parked, so they get their own task
@@ -80,7 +70,7 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
     // block for it.
     let mut status_rx = state.status().subscribe();
     let mut catalog_rx = state.catalog().subscribe();
-    let status_out = out_tx.clone();
+    let status_out = session.outbox().clone();
     let forwarder = tokio::spawn(async move {
         loop {
             let text = tokio::select! {
@@ -93,7 +83,7 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
                         text
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
+                        tracing::debug!(session = session_id, skipped, "status receiver lagged; skipped updates");
                         continue;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -107,7 +97,7 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
                         text
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::debug!(session, skipped, "catalog receiver lagged; skipped pushes");
+                        tracing::debug!(session = session_id, skipped, "catalog receiver lagged; skipped pushes");
                         continue;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -121,21 +111,20 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
 
     while let Some(received) = stream.next().await {
         match received {
-            Ok(Message::Text(text)) => handle_frame(&state, &text, &out_tx).await,
+            Ok(Message::Text(text)) => handle_frame(&state, &text, session.outbox()).await,
             // Binary frames carry no chat meaning; pings and pongs are
             // answered by axum itself.
             Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_)) => {}
             Ok(Message::Close(_)) => break,
             Err(error) => {
-                tracing::warn!(session, %error, "chat session socket failed");
+                tracing::warn!(session = session_id, %error, "chat session socket failed");
                 break;
             }
         }
     }
-    drop(out_tx);
-    writer.abort();
+    session.close();
     forwarder.abort();
-    tracing::info!(session, "chat session closed");
+    tracing::info!(session = session_id, "chat session closed");
 }
 
 /// Handles one inbound text frame: a well-formed `chat` frame runs a
@@ -496,7 +485,7 @@ mod tests {
     use axum::http::{HeaderMap, StatusCode, header};
     use axum::response::IntoResponse;
     use axum::routing::{get, post};
-    use futures_util::stream;
+    use futures_util::{SinkExt, stream};
     use tokio_tungstenite::tungstenite;
 
     use crate::app::router;
