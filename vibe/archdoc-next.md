@@ -81,3 +81,5 @@
 - [2026-08-26-1-remove-voice-status-line] auditable agent feed: Reasoning and tool activity remain inspectable without allowing transient rows to shift the composer.
 - [2026-08-26-2-model-turn-actions] layout identity only: Restored layout preserves panel identity and placement, not in-memory chat history.
 - [2026-08-26-3-workshop-regression-fixes] drag coexistence: Native file-drop interception must delegate page drag events so internal Dockview dragging survives.
+- [2026-08-26-4-workshop-idiom-refactor] bounded boot queue: Pre-ready state pushes replay in arrival order from a capped queue that is cleared on disconnect.
+- [2026-08-26-4-workshop-idiom-refactor] typed protocol twins: Rust and TypeScript protocol definitions are explicit peers; generation waits for demonstrated drift.
