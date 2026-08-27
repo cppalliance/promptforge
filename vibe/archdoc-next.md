@@ -80,3 +80,4 @@
 - [2026-08-26-1-remove-voice-status-line] zone affinity: Panel types have default zones, user placement persists, and the status bar stays outside the dock.
 - [2026-08-26-1-remove-voice-status-line] auditable agent feed: Reasoning and tool activity remain inspectable without allowing transient rows to shift the composer.
 - [2026-08-26-2-model-turn-actions] layout identity only: Restored layout preserves panel identity and placement, not in-memory chat history.
+- [2026-08-26-3-workshop-regression-fixes] drag coexistence: Native file-drop interception must delegate page drag events so internal Dockview dragging survives.
