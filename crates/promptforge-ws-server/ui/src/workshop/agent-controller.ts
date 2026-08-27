@@ -13,6 +13,7 @@ import type { DockviewApi, IDockviewPanel } from "dockview";
 import type { ChatPlugin } from "../chat/core/types";
 import { ChatUI } from "../chat/main";
 import { MemoryStorage } from "../memory-storage";
+import type { ModelService } from "../services/model-service";
 import type { WorkshopProvider } from "../workshop-provider";
 import { ChatPanel } from "./chat-panel";
 import { openAgentPanel } from "./zones";
@@ -22,8 +23,8 @@ export interface AgentControllerOptions {
   readonly provider: WorkshopProvider;
   /** Runs once per Agent tab, so each tab gets isolated plugin state. */
   readonly plugins: () => ChatPlugin[];
-  /** Reads the shared model selection for newly mounted agents. */
-  readonly getModel: () => string;
+  /** The shared model selection: read at mount, observed for changes. */
+  readonly models: ModelService;
 }
 
 export class AgentController {
@@ -44,6 +45,10 @@ export class AgentController {
     for (const panel of dock.panels) {
       this.mount(panel);
     }
+    // A selection change (Model menu, catalog refresh dropping the
+    // selection) reaches every live engine without the composition root
+    // relaying it.
+    options.models.onDidChangeCurrent((model) => this.applyModel(model));
   }
 
   /**
@@ -94,7 +99,7 @@ export class AgentController {
       fullscreen: false,
       plugins: this.options.plugins,
     });
-    chat.engine.setRequestDefaults({ options: { model: this.options.getModel() } });
+    chat.engine.setRequestDefaults({ options: { model: this.options.models.current } });
     this.agents.set(panel.id, chat);
     if (this.activeId === null || panel.api.isActive) {
       this.activeId = panel.id;

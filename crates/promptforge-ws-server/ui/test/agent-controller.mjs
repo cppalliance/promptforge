@@ -55,6 +55,7 @@ const bundle = await esbuild.build({
     contents: `
       export { createDockview, themeDark } from "dockview";
       export { AgentController } from "./src/workshop/agent-controller.ts";
+      export { ModelService } from "./src/services/model-service.ts";
       export { initZones, openAgentPanel, openInZone } from "./src/workshop/zones.ts";
       export { createPanelComponent, createPanelTabComponent } from "./src/workshop/panel-types.ts";
       export { ChatUI } from "./src/chat/main.ts";
@@ -148,6 +149,7 @@ const {
   createDockview,
   themeDark,
   AgentController,
+  ModelService,
   initZones,
   openAgentPanel,
   openInZone,
@@ -174,6 +176,8 @@ const dock = createDockview(window.document.getElementById("dock"), {
 initZones(dock);
 
 let pluginBuilds = 0;
+const models = new ModelService();
+models.setCurrent("model-a");
 const agents = new AgentController({
   dock,
   provider: {},
@@ -181,7 +185,7 @@ const agents = new AgentController({
     pluginBuilds += 1;
     return [{ name: `plugin-${pluginBuilds}` }];
   },
-  getModel: () => "model-a",
+  models,
 });
 
 const lastModel = (chat) => chat.engine.defaults[chat.engine.defaults.length - 1]?.options?.model;
@@ -209,7 +213,9 @@ check("a second tab leaves the first agent live", !chatA.destroyed);
 
 // --- Shared model broadcast ---------------------------------------------------
 
-agents.applyModel("model-b");
+// Through the service, not applyModel directly: this covers the
+// controller's onDidChangeCurrent subscription.
+models.setCurrent("model-b");
 check(
   "a model change broadcasts to every live engine",
   lastModel(chatA) === "model-b" && lastModel(chatB) === "model-b",

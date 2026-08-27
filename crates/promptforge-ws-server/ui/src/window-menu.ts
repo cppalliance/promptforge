@@ -8,7 +8,7 @@
 // the popovers, future keyboard shortcuts, and any future menu surface
 // all call the same actions. The Window menu reuses the window command
 // functions from window-chrome.ts. The Model menu is dynamic: it
-// rebuilds its rows from the catalog surface on every open.
+// rebuilds its rows from the model service's catalog on every open.
 //
 // Edit commands go through document.execCommand: WebView2 hosts the page
 // as application content with clipboard access, and execCommand preserves
@@ -17,6 +17,7 @@
 // guard keeps the command a no-op there.
 
 import { showAboutDialog } from "./about-dialog";
+import type { ModelService } from "./services/model-service";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
@@ -51,19 +52,6 @@ export interface WorkshopMenuCommands {
  */
 export interface AgentMenuCommands {
   readonly newAgent: () => void;
-}
-
-/** One catalog entry the Model menu lists. */
-export interface ModelMenuEntry {
-  readonly id: string;
-  readonly description?: string;
-}
-
-/** The catalog surface the dynamic Model menu reads and writes. */
-export interface ModelMenuSurface {
-  readonly getModels: () => readonly ModelMenuEntry[];
-  readonly getSelected: () => string;
-  readonly selectModel: (id: string) => void;
 }
 
 const MENU_ORDER = ["file", "edit", "model", "window", "help"] as const;
@@ -165,7 +153,8 @@ function buildMenuItems(
 export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
   readonly workshop: WorkshopMenuCommands;
-  readonly modelMenu?: ModelMenuSurface;
+  /** The shared model state the dynamic Model menu reads and writes. */
+  readonly modelMenu?: ModelService;
 }): WindowMenuCommands {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
   if (!navElement) {
@@ -306,29 +295,29 @@ export function setupWindowMenus(options: {
 
   // The Model menu's rows mirror the catalog at open time: one checkable
   // radio row per model, the description as the tooltip, and a single
-  // disabled row when the catalog is empty or no surface was provided.
+  // disabled row when the catalog is empty or no service was provided.
   function rebuildModelRows(handle: MenuHandle): void {
-    const surface = options.modelMenu;
+    const service = options.modelMenu;
     handle.popover.textContent = "";
     handle.rows.length = 0;
-    const models = surface ? surface.getModels() : [];
+    const models = service ? service.models : [];
     const appendRow = (def: CommandItem, extras: (element: HTMLButtonElement) => void): void => {
       const row = buildCommandRow(def, extras);
       handle.rows.push(row);
       handle.popover.appendChild(row.element);
     };
-    if (!surface || models.length === 0) {
+    if (!service || models.length === 0) {
       appendRow(
         { kind: "command", label: "No models available", run: () => {}, enabled: () => false },
         () => {},
       );
       return;
     }
-    const selected = surface.getSelected();
+    const selected = service.current;
     for (const model of models) {
       const isSelected = model.id === selected;
       appendRow(
-        { kind: "command", label: model.id, run: () => surface.selectModel(model.id) },
+        { kind: "command", label: model.id, run: () => service.setCurrent(model.id) },
         (element) => {
           element.classList.add("window-titlebar__item--checkable");
           element.setAttribute("role", "menuitemradio");
