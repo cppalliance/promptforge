@@ -130,3 +130,7 @@ the title bar carries the application menus, so hiding it in browser mode hid th
 
 wry's drag-drop handler revoked WebView2's OLE drop target, killing in-page drag-and-drop; since Chromium hides real OS paths from HTML5 drops, the design posts File objects over the web-message channel and the shell reads paths from ICoreWebView2File. (user reported, assistant reasoned the bridge)
 
+## 2026-08-27 Document the voice stream announcement in the route table
+
+the refactor's phase-2 idiom gate came back clean except one stale README route table; the commit closes the documentation gap so the table matches the shipped protocol. (assistant reasoned, gate finding)
+

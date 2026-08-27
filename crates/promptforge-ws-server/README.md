@@ -53,7 +53,7 @@ Every field of `workshop.toml`:
 | `GET /v1/models` | Proxies the gateway's model catalog verbatim; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `POST /chat` | Buffered chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` is rejected with 400 - streaming lives on `/ws`; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `GET /ws` | WebSocket upgrade, one persistent socket for all downstream JSON: `{"type":"chat","id","model","messages"}` frames in (the optional `id` is echoed on the reply), `{"type":"delta","content"}` / `{"type":"done"}` / `{"type":"error","message"}` frames out, plus unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates and `{"type":"models","models":[...]}` catalog pushes when the gateway comes back after an outage |
-| `GET /voice` | WebSocket upgrade: binary f32 PCM at 16 kHz mono in, `start`/`stop` control words, interim and final transcripts out |
+| `GET /voice` | WebSocket upgrade: binary f32 PCM at 16 kHz mono in, `start`/`stop` control words, interim and final transcripts out. Each `start` is answered with a `{"type":"stream","generation":N}` announcement (counted from 1 per connection) before that take's frames, and every interim and final frame carries its `generation`, so a client can discard frames a stop/restart race left behind |
 
 ## Gateway resilience
 
