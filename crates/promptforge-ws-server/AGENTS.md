@@ -49,4 +49,4 @@ In-process only: `Router::oneshot` or the spawn fixture, with the typed JSON Web
 
 ## Asset serving and shutdown
 
-Immutable cache headers only on content-hashed assets. API-path misses return 404, never the SPA index. The missing-bundle 404 names the build command. Held sockets must never block shutdown: force-exit watchdog plus stopped barrier.
+No content hashes in asset filenames and no cache headers: the workshop UI is a windowed SPA served from the local process, so nothing is cacheable and the esbuild output keeps its plain names. API-path misses return 404, never the SPA index. The missing-bundle 404 names the build command. Held sockets must never block shutdown: force-exit watchdog plus stopped barrier.
