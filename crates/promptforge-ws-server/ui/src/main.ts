@@ -19,7 +19,7 @@ import { WorkshopSocket } from "./services/workshop-socket";
 import { StatusBar } from "./ui/status-bar";
 import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./ui/voice";
 import { setupWindowChrome } from "./ui/window-chrome";
-import { setupWindowMenus } from "./ui/window-menu";
+import { setupWindowMenus, type ProfileMenuService } from "./ui/window-menu";
 import { setupWorkspaceDrops } from "./ui/workspace-drops";
 import { AgentController } from "./ui/workshop/agent-controller";
 import { restoreLayout, startLayoutPersistence } from "./ui/workshop/layout-persistence";
@@ -160,19 +160,6 @@ agents.ensureAgent();
 disposables.add(startLayoutPersistence(dock));
 disposables.add(installShortcuts(dock));
 
-// The title-bar menus dispatch through one shared command set; the
-// keyboard shortcuts call the same workshop command functions. The Model
-// menu reads the model service's catalog and writes the selection back
-// into it. File > New Agent opens a fresh tab; Window > Workshop Panel
-// shares Ctrl+B's toggle.
-disposables.add(
-  setupWindowMenus({
-    agents,
-    workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
-    modelMenu: modelService,
-  }),
-);
-
 async function loadModels(): Promise<void> {
   try {
     const response = await fetch("/v1/models");
@@ -188,6 +175,80 @@ async function loadModels(): Promise<void> {
   }
 }
 
+// The gateway-profile catalog behind the Model menu's Profiles section.
+// State lives here rather than in a service: the menu is the only reader,
+// and it reads synchronously at open time.
+const profileCatalog = { profiles: [] as readonly string[], active: "" };
+
+async function loadProfiles(): Promise<void> {
+  try {
+    const response = await fetch("/profiles");
+    if (!response.ok) {
+      throw new Error(`GET /profiles answered ${response.status}`);
+    }
+    const catalog = (await response.json()) as { profiles?: unknown; active?: unknown };
+    profileCatalog.profiles = Array.isArray(catalog.profiles)
+      ? catalog.profiles.filter((entry): entry is string => typeof entry === "string")
+      : [];
+    profileCatalog.active = typeof catalog.active === "string" ? catalog.active : "";
+  } catch (error) {
+    // A gateway without profile support (or an outage) leaves the section
+    // hidden; the menu's model rows are unaffected.
+    console.error("Could not load the gateway profiles:", error);
+  }
+}
+
+// Switching swaps the gateway's whole model catalog, so a successful
+// switch refetches both the profiles (for the new active name) and the
+// models; the model service keeps or replaces the selection as the new
+// catalog dictates. Progress and failure paint the status bar - a switch
+// that starts local model children can take minutes.
+async function switchToProfile(name: string): Promise<void> {
+  statusBar.showLocal(`Switching to profile ${name}...`, "info");
+  const response = await fetch("/profiles/switch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? `POST /profiles/switch answered ${response.status}`);
+  }
+  await Promise.all([loadProfiles(), loadModels()]);
+  statusBar.showLocal(`Profile ${name} is active`, "info");
+}
+
+const profileMenu: ProfileMenuService = {
+  get profiles() {
+    return profileCatalog.profiles;
+  },
+  get active() {
+    return profileCatalog.active;
+  },
+  switchTo(name: string): void {
+    switchToProfile(name).catch((error: unknown) => {
+      statusBar.showLocal(`Could not switch to ${name}: ${(error as Error).message}`, "error");
+    });
+  },
+};
+
+// The title-bar menus dispatch through one shared command set; the
+// keyboard shortcuts call the same workshop command functions. The Model
+// menu reads the model service's catalog and writes the selection back
+// into it, and its Profiles section reads the profile catalog above.
+// File > New Agent opens a fresh tab; Window > Workshop Panel shares
+// Ctrl+B's toggle.
+disposables.add(
+  setupWindowMenus({
+    agents,
+    workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
+    modelMenu: modelService,
+    profileMenu,
+  }),
+);
+
 // A pushed catalog means the gateway returned after an outage; refresh the
 // catalog state in place so a boot-time failure heals itself.
 disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
@@ -197,3 +258,4 @@ disposables.add(workshopSocket.onModels((models) => modelService.setModels(model
 workshopSocket.ready();
 
 void loadModels();
+void loadProfiles();

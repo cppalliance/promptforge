@@ -33,6 +33,70 @@ pub(crate) async fn models(State(state): State<AppState>) -> Response {
     relay(result)
 }
 
+/// Answers the gateway's profile catalog as `{"profiles": [...],
+/// "active": "name"}`, combining the gateway's profile list with the
+/// active profile from its status endpoint.
+///
+/// A gateway refusal (non-success status) from either call is relayed
+/// verbatim so its error envelope reaches the caller; a gateway without
+/// profile support reads as its own error, not the workshop's.
+pub(crate) async fn profiles(State(state): State<AppState>) -> Response {
+    if !state.health().is_reachable() {
+        return gateway_unreachable();
+    }
+    let list = match state.gateway.list_profiles().await {
+        Ok(upstream) if upstream.status.is_success() => upstream,
+        other => return relay(other),
+    };
+    let status = match state.gateway.profile_status().await {
+        Ok(upstream) if upstream.status.is_success() => upstream,
+        other => return relay(other),
+    };
+    let profiles = value_from_bytes(&list.body)
+        .get("profiles")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let active = value_from_bytes(&status.body)
+        .get("profile")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    (
+        axum::http::StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({ "profiles": profiles, "active": active }).to_string(),
+    )
+        .into_response()
+}
+
+/// The body of a `POST /profiles/switch` request.
+#[derive(serde::Deserialize)]
+struct SwitchProfileBody {
+    /// The profile to activate, by name.
+    name: String,
+}
+
+/// Forwards a profile switch to the gateway and relays its answer
+/// verbatim. The active model catalog changes with the profile; the UI
+/// refetches `/v1/models` after a successful switch.
+pub(crate) async fn switch_profile(State(state): State<AppState>, body: String) -> Response {
+    let request: SwitchProfileBody = match serde_json::from_str(&body) {
+        Ok(request) => request,
+        Err(error) => return bad_request(&error),
+    };
+    if !state.health().is_reachable() {
+        return gateway_unreachable();
+    }
+    let push = state.push();
+    push.push_status_update(
+        "Switching profile...",
+        "the gateway is loading another profile",
+        Activity::General,
+    );
+    let result = state.gateway.switch_profile(&request.name).await;
+    report_gateway_outcome(&push, &result, "POST /admin/switch-profile");
+    relay(result)
+}
+
 /// Reports a gateway call's outcome on the status bus: back to idle on
 /// success, otherwise the error label matching the failure shape.
 fn report_gateway_outcome(
@@ -330,6 +394,158 @@ mod tests {
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(&body_bytes(response).await[..], CATALOG.as_bytes());
+    }
+
+    async fn mock_profiles(headers: HeaderMap) -> Response {
+        if !authorized(&headers) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"profiles":["main","qwen38"]}"#,
+        )
+            .into_response()
+    }
+
+    async fn mock_admin_status(headers: HeaderMap) -> Response {
+        if !authorized(&headers) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"profile":"qwen38","models":["qwen3-8b"],"queue":"note"}"#,
+        )
+            .into_response()
+    }
+
+    async fn mock_switch_profile(
+        headers: HeaderMap,
+        Json(body): Json<serde_json::Value>,
+    ) -> Response {
+        if !authorized(&headers) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        assert_eq!(body["name"], "qwen38", "the profile name reaches the gateway");
+        (
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"ok":true,"profile":"qwen38"}"#,
+        )
+            .into_response()
+    }
+
+    async fn spawn_profile_mock_gateway() -> String {
+        spawn_gateway(
+            Router::new()
+                .route("/admin/profiles", get(mock_profiles))
+                .route("/admin/status", get(mock_admin_status))
+                .route("/admin/switch-profile", post(mock_switch_profile)),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn profiles_combine_the_gateway_list_with_the_active_profile() {
+        let base_url = spawn_profile_mock_gateway().await;
+        let (state, _tape_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .uri("/profiles")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["profiles"], serde_json::json!(["main", "qwen38"]));
+        assert_eq!(json["active"], "qwen38");
+    }
+
+    #[tokio::test]
+    async fn a_gateway_refusing_the_profile_list_is_relayed_verbatim() {
+        let base_url = spawn_gateway(Router::new().route(
+            "/admin/profiles",
+            get(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    r#"{"error":{"message":"profiles unavailable","code":"profiles_unavailable"}}"#,
+                )
+            }),
+        ))
+        .await;
+        let (state, _tape_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .uri("/profiles")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "profiles_unavailable");
+    }
+
+    #[tokio::test]
+    async fn a_gateway_known_down_short_circuits_profiles_with_bad_gateway() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        state.health().publish(false);
+        let request = Request::builder()
+            .uri("/profiles")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
+        assert_eq!(json["error"]["code"], "gateway_unreachable");
+    }
+
+    #[tokio::test]
+    async fn a_profile_switch_is_relayed_byte_for_byte() {
+        let base_url = spawn_profile_mock_gateway().await;
+        let (state, _tape_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/profiles/switch")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"qwen38"}"#))
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            &body_bytes(response).await[..],
+            br#"{"ok":true,"profile":"qwen38"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn a_profile_switch_without_a_name_is_a_bad_request() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/profiles/switch")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"profile":"qwen38"}"#))
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
+        assert_eq!(json["error"]["code"], "bad_request");
     }
 
     #[tokio::test]

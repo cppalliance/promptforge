@@ -48,7 +48,7 @@ function check(name, condition) {
 // Each scenario gets a fresh jsdom: the modules read the globals and
 // attach listeners to the DOM they find at call time. Pass desktop: false
 // to exercise the plain-browser path (no flag, no ipc bridge).
-function scenario({ desktop = true, modelMenu } = {}) {
+function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
   const posted = [];
@@ -80,7 +80,7 @@ function scenario({ desktop = true, modelMenu } = {}) {
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ agents, workshop, modelMenu });
+  const commands = setupWindowMenus({ agents, workshop, modelMenu, profileMenu });
   const menus = {};
   for (const button of window.document.querySelectorAll(".window-titlebar__menu")) {
     menus[button.dataset.menu] = button;
@@ -300,6 +300,82 @@ function scenario({ desktop = true, modelMenu } = {}) {
   );
   rows[0].click();
   check("clicking the empty-state row keeps the menu open", isOpen("model"));
+}
+
+// --- Model menu: gateway profiles section -------------------------------------
+
+{
+  const modelMenu = new ModelService();
+  modelMenu.setModels([{ id: "alpha" }]);
+  const switches = [];
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switchTo: (name) => switches.push(name),
+  };
+  const { menus, popoverOf, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  check(
+    "the Model menu appends the Profiles section after the catalog",
+    rows.map(rowLabel).join(",") === "alpha,Profiles,main,qwen38",
+  );
+  check(
+    "the sections are divided by a separator",
+    popoverOf("model").querySelector(".window-titlebar__separator") !== null,
+  );
+  check(
+    "the Profiles header is an inert label",
+    rows[1].getAttribute("aria-disabled") === "true",
+  );
+  check(
+    "the active profile is announced checked",
+    rows[2].getAttribute("aria-checked") === "true" &&
+      rows[3].getAttribute("aria-checked") === "false",
+  );
+  check(
+    "the active profile shows the checkmark",
+    rows[2].querySelector(".window-titlebar__item-check").textContent === "✓" &&
+      rows[3].querySelector(".window-titlebar__item-check").textContent === "",
+  );
+  rows[3].click();
+  check("clicking a profile row dispatches switchTo", switches.join(",") === "qwen38");
+  check("switching closes the menu", !isOpen("model"));
+}
+
+{
+  const modelMenu = new ModelService();
+  modelMenu.setModels([{ id: "alpha" }]);
+  const profileMenu = { profiles: ["main"], active: "main", switchTo: () => {} };
+  const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  check(
+    "a single-profile gateway shows no Profiles section",
+    itemsOf("model").length === 1,
+  );
+}
+
+{
+  // A profile whose catalog is empty still offers the way out: the
+  // Profiles section renders below the empty state, so a switch can
+  // restore a usable catalog.
+  const switches = [];
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "qwen38",
+    switchTo: (name) => switches.push(name),
+  };
+  const { menus, itemsOf } = scenario({ modelMenu: new ModelService(), profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  check(
+    "an empty catalog still lists the profiles",
+    rows.map(rowLabel).join(",") === "No models available,Profiles,main,qwen38",
+  );
+  rows[2].click();
+  check("a profile can be switched out of an empty catalog", switches.join(",") === "main");
 }
 
 // --- Help menu: About dialog --------------------------------------------------
