@@ -20,6 +20,9 @@ import type { StatusBar } from "./status-bar";
 /** The native event the shell dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";
 
+/** Fired on window after grants change, so open panels can refresh. */
+export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
+
 /** The web message the shell's file-drop bridge listens for. */
 const DROP_MESSAGE = "workspace-drop";
 
@@ -94,18 +97,26 @@ async function grantPath(path: string): Promise<void> {
 
 /**
  * Grants every dropped path in order. Per-path failures paint the status
- * bar and do not stop the remaining grants.
+ * bar and do not stop the remaining grants. Successful grants confirm on
+ * the status bar and announce the change so the Workshop tree refreshes -
+ * without this the drop works but nothing visible happens.
  */
 async function grantDroppedPaths(
   paths: readonly string[],
   statusBar: StatusBar,
 ): Promise<void> {
+  let granted = 0;
   for (const path of paths) {
     try {
       await grantPath(path);
+      granted += 1;
+      statusBar.showLocal(`Added ${path} to the Workshop`, "info");
     } catch (error) {
       statusBar.showLocal(`Could not open ${path}: ${(error as Error).message}`, "error");
     }
+  }
+  if (granted > 0) {
+    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
   }
 }
 
