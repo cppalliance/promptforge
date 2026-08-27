@@ -10,7 +10,7 @@
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
-use crate::app::{AppError, AppState, router};
+use crate::app::{AppState, StateError, router};
 use crate::config::Config;
 use crate::heartbeat;
 use crate::provision;
@@ -75,7 +75,8 @@ impl Drop for ServerHandle {
     }
 }
 
-/// A failure to start the in-process workshop server.
+/// A failure to start the in-process workshop server: rich, init-only, and
+/// never sent over the wire, so `#[from]` conveniences are welcome here.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SpawnError {
@@ -83,13 +84,13 @@ pub enum SpawnError {
     /// built.
     #[non_exhaustive]
     #[error("build shared state")]
-    State(#[source] AppError),
+    State(#[from] StateError),
 
     /// An I/O failure: the listener bind failed, the bound address could
     /// not be read, or the server thread could not be spawned.
     #[non_exhaustive]
     #[error("start workshop server")]
-    Io(#[source] std::io::Error),
+    Io(#[from] std::io::Error),
 }
 
 /// Spawns the workshop server on a dedicated thread and blocks until the
@@ -107,8 +108,7 @@ pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let thread = std::thread::Builder::new()
         .name("promptforge-ws-server".to_string())
-        .spawn(move || serve_thread(config, ready_tx, shutdown_rx))
-        .map_err(SpawnError::Io)?;
+        .spawn(move || serve_thread(config, ready_tx, shutdown_rx))?;
     match ready_rx.recv() {
         Ok(Ok(url)) => Ok(ServerHandle {
             url,

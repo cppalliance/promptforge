@@ -24,6 +24,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
+use crate::error::AppError;
+
 /// The largest file the workspace reads or accepts for a write: the editor
 /// targets source text, not media, so one MiB is generous.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -550,59 +552,12 @@ pub(crate) async fn grant(
     )
 }
 
-/// Renders a workspace result as JSON, mapping failures to HTTP statuses.
+/// Renders a workspace result as JSON, routing failures through the
+/// [`AppError`] wire envelope.
 fn respond<T: Serialize>(result: Result<T, WorkspaceError>) -> Response {
     match result {
         Ok(value) => (StatusCode::OK, Json(value)).into_response(),
-        Err(error) => (
-            status_for(&error),
-            Json(serde_json::json!({
-                "error": {
-                    "message": error.to_string(),
-                    "code": code_for(&error),
-                }
-            })),
-        )
-            .into_response(),
-    }
-}
-
-/// The HTTP status matching a workspace failure.
-fn status_for(error: &WorkspaceError) -> StatusCode {
-    match error {
-        WorkspaceError::OutsideGrants | WorkspaceError::ForbiddenComponent => StatusCode::FORBIDDEN,
-        WorkspaceError::NotFound => StatusCode::NOT_FOUND,
-        WorkspaceError::NotADirectory | WorkspaceError::NotAFile => StatusCode::BAD_REQUEST,
-        WorkspaceError::BinaryFile | WorkspaceError::NotUtf8 => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        WorkspaceError::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
-        WorkspaceError::ModifiedConflict => StatusCode::CONFLICT,
-        WorkspaceError::ResolveGrant { .. }
-        | WorkspaceError::ResolvePath { .. }
-        | WorkspaceError::InspectPath { .. }
-        | WorkspaceError::ListDirectory { .. }
-        | WorkspaceError::ReadFile { .. }
-        | WorkspaceError::WriteFile { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-    }
-}
-
-/// The machine-readable code matching a workspace failure.
-fn code_for(error: &WorkspaceError) -> &'static str {
-    match error {
-        WorkspaceError::ResolveGrant { .. } => "resolve_grant",
-        WorkspaceError::ResolvePath { .. } => "resolve_path",
-        WorkspaceError::InspectPath { .. } => "inspect_path",
-        WorkspaceError::ListDirectory { .. } => "list_directory",
-        WorkspaceError::ReadFile { .. } => "read_file",
-        WorkspaceError::WriteFile { .. } => "write_file",
-        WorkspaceError::OutsideGrants => "outside_grants",
-        WorkspaceError::ForbiddenComponent => "forbidden_component",
-        WorkspaceError::NotFound => "not_found",
-        WorkspaceError::NotADirectory => "not_a_directory",
-        WorkspaceError::NotAFile => "not_a_file",
-        WorkspaceError::BinaryFile => "binary_file",
-        WorkspaceError::NotUtf8 => "not_utf8",
-        WorkspaceError::FileTooLarge { .. } => "file_too_large",
-        WorkspaceError::ModifiedConflict => "modified_conflict",
+        Err(error) => AppError::from(error).into_response(),
     }
 }
 
