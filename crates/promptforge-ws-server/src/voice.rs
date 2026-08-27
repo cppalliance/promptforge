@@ -3,9 +3,15 @@
 //!
 //! A client upgrades `GET /voice`, sends the text control message `start`,
 //! streams binary messages of little-endian f32 PCM (16 kHz mono), and sends
-//! `stop` to end a take. While a take records, an interim loop transcribes
+//! `stop` to end a take. Each `start` opens a new stream generation,
+//! counted from 1 per connection: the server answers it with a
+//! `{"type":"stream","generation":N}` announcement before any of that
+//! generation's frames, and tags every interim and final frame with the
+//! generation, so the client can discard frames a stop/restart race left
+//! behind. While a take records, an interim loop transcribes
 //! the take's uncommitted audio every `voice.interval_ms` and pushes
-//! `{"type":"interim","committed":"...","tentative":"..."}` text messages:
+//! `{"type":"interim","committed":"...","tentative":"...","generation":N}`
+//! text messages:
 //! `committed` is the crystallized prefix (final-pass segment transcripts,
 //! append-only within a take) and `tentative` is the interim model's decode
 //! of the audio past it. In parallel, an energy-based segmenter
@@ -15,7 +21,8 @@
 //! each conditioned on the take's accumulated transcript. On `stop` the
 //! worker transcribes the unprocessed tail (its FIFO reply drains every
 //! background segment first) and the server answers with one
-//! `{"type":"final","text":"...","frames":N}` text message: the take's
+//! `{"type":"final","text":"...","frames":N,"generation":N}` text
+//! message: the take's
 //! crystallized committed prefix joined with the tail's own text, plus the
 //! total PCM frames received since the most recent `start`. Without a
 //! configured final model nothing crystallizes, segmentation stays off so
@@ -36,7 +43,7 @@ use axum::response::Response;
 use futures_util::StreamExt;
 
 use crate::app::AppState;
-use crate::protocol::{Activity, FinalFrame, InterimFrame, VOICE_START, VOICE_STOP};
+use crate::protocol::{Activity, FinalFrame, InterimFrame, StreamFrame, VOICE_START, VOICE_STOP};
 use crate::push::Push;
 use crate::segment::Segmenter;
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
@@ -130,11 +137,16 @@ fn stop_interim(interim: &mut Option<tokio::task::JoinHandle<()>>) {
 /// The interim loop: every `interval`, drain newly crystallized segments,
 /// transcribe the take's uncommitted audio (everything past the segmenter's
 /// consumed offset, so a long take does not re-decode its own prefix), and
-/// push an interim frame when either field changed since the last send.
-/// Runs until aborted (on `start`, `stop`, or session end) or until the
-/// outbound channel closes.
+/// push an interim frame - tagged with the take's stream generation - when
+/// either field changed since the last send. Runs until aborted (on
+/// `start`, `stop`, or session end) or until the outbound channel closes.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the take's shared state travels piecemeal so run_session's message loop stays flat"
+)]
 fn spawn_interim_loop(
     session: u64,
+    generation: u64,
     engine: Arc<VoiceEngine>,
     buffer: Arc<Mutex<Vec<f32>>>,
     committed: Arc<Mutex<Committed>>,
@@ -199,8 +211,9 @@ fn spawn_interim_loop(
             }
             last_committed.clone_from(&committed_text);
             last_tentative.clone_from(&tentative);
-            // Serializing two strings cannot fail.
-            let Ok(message) = serde_json::to_string(&InterimFrame::new(committed_text, tentative))
+            // Serializing two strings and an integer cannot fail.
+            let Ok(message) =
+                serde_json::to_string(&InterimFrame::new(committed_text, tentative, generation))
             else {
                 continue;
             };
@@ -284,13 +297,15 @@ async fn stop_transcript(
 /// Starts a new take: clears the buffer and the committed transcript,
 /// resets the segmenter and the final-pass pipeline, installs the take's
 /// segment-completion receiver, and spawns the interim loop when an engine
-/// is configured.
+/// is configured. `generation` is the take's announced stream generation,
+/// carried by every interim frame the loop pushes.
 #[expect(
     clippy::too_many_arguments,
     reason = "the take's shared state travels piecemeal so run_session's message loop stays flat"
 )]
 fn begin_take(
     session: u64,
+    generation: u64,
     engine: Option<&Arc<VoiceEngine>>,
     buffer: &Arc<Mutex<Vec<f32>>>,
     committed: &Arc<Mutex<Committed>>,
@@ -318,6 +333,7 @@ fn begin_take(
     if let Some(engine) = engine {
         *interim = Some(spawn_interim_loop(
             session,
+            generation,
             Arc::clone(engine),
             Arc::clone(buffer),
             Arc::clone(committed),
@@ -359,15 +375,28 @@ fn submit_closed_segments(
     lock_committed(committed).drain();
 }
 
-/// Sends the take's `final` reply; a false return means the client is gone.
+/// Announces a new stream generation on the socket, ahead of every frame
+/// belonging to it; a false return means the client is gone.
+async fn announce_stream(out: &tokio::sync::mpsc::Sender<Message>, generation: u64) -> bool {
+    // Serializing an integer cannot fail. An announcement that somehow
+    // cannot serialize is skipped, which is not a gone client.
+    let Ok(message) = serde_json::to_string(&StreamFrame::new(generation)) else {
+        return true;
+    };
+    out.send(Message::Text(message.into())).await.is_ok()
+}
+
+/// Sends the take's `final` reply, tagged with its stream generation; a
+/// false return means the client is gone.
 async fn send_final_reply(
     out: &tokio::sync::mpsc::Sender<Message>,
     text: String,
     frames: u64,
+    generation: u64,
 ) -> bool {
-    // Serializing a string and an integer cannot fail. A reply that
+    // Serializing a string and two integers cannot fail. A reply that
     // somehow cannot serialize is skipped, which is not a gone client.
-    let Ok(reply) = serde_json::to_string(&FinalFrame::new(text, frames)) else {
+    let Ok(reply) = serde_json::to_string(&FinalFrame::new(text, frames, generation)) else {
         return true;
     };
     out.send(Message::Text(reply.into())).await.is_ok()
@@ -389,6 +418,9 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: 
     // which cannot borrow the session-local segmenter.
     let consumed = Arc::new(AtomicUsize::new(0));
     let mut frames = 0u64;
+    // The connection's stream generation: 0 until the first `start`, then
+    // incremented per take, so every frame names the take it belongs to.
+    let mut generation = 0u64;
     let mut interim: Option<tokio::task::JoinHandle<()>> = None;
     let mut segmenter = Segmenter::new();
     let mut last_mic_pulse: Option<Instant> = None;
@@ -429,8 +461,16 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: 
                 VOICE_START => {
                     frames = 0;
                     last_mic_pulse = None;
+                    generation += 1;
+                    // Announced before begin_take spawns the interim loop,
+                    // so the announcement enters the outbox ahead of every
+                    // frame of its generation.
+                    if !announce_stream(ws.outbox(), generation).await {
+                        break;
+                    }
                     begin_take(
                         session,
+                        generation,
                         engine.as_ref(),
                         &buffer,
                         &committed,
@@ -458,7 +498,7 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, push: 
                     )
                     .await;
                     tracing::info!(session, frames, "voice capture stopped");
-                    if !send_final_reply(ws.outbox(), text, frames).await {
+                    if !send_final_reply(ws.outbox(), text, frames, generation).await {
                         break;
                     }
                     push.push_idle();
@@ -584,6 +624,22 @@ mod tests {
         serde_json::from_str(text).expect("the server message is JSON")
     }
 
+    /// Reads the stream announcement that answers a `start`, returning
+    /// its generation.
+    async fn read_stream_generation<S>(socket: &mut S) -> u64
+    where
+        S: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
+    {
+        let frame = parse_message(&read_text(socket).await);
+        assert_eq!(
+            frame["type"], "stream",
+            "a start is answered by the stream announcement before any other frame"
+        );
+        frame["generation"]
+            .as_u64()
+            .expect("every stream frame carries a numeric generation")
+    }
+
     #[tokio::test]
     async fn pcm_frames_are_counted_until_stop() {
         let (url, _tape_dir) = spawn_voice_server(VoiceConfig::default()).await;
@@ -594,6 +650,7 @@ mod tests {
             .send(tungstenite::Message::Text("start".into()))
             .await
             .expect("send start");
+        read_stream_generation(&mut socket).await;
         send_pcm(&mut socket, 128).await;
         send_pcm(&mut socket, 64).await;
         socket
@@ -621,11 +678,13 @@ mod tests {
             .send(tungstenite::Message::Text("start".into()))
             .await
             .expect("send start");
+        read_stream_generation(&mut socket).await;
         send_pcm(&mut socket, 100).await;
         socket
             .send(tungstenite::Message::Text("start".into()))
             .await
             .expect("send a second start");
+        read_stream_generation(&mut socket).await;
         send_pcm(&mut socket, 10).await;
         socket
             .send(tungstenite::Message::Text("stop".into()))
@@ -651,6 +710,7 @@ mod tests {
             .send(tungstenite::Message::Text("start".into()))
             .await
             .expect("send start");
+        read_stream_generation(&mut socket).await;
         socket
             .send(tungstenite::Message::Text("bogus".into()))
             .await
@@ -673,6 +733,59 @@ mod tests {
             "unknown text is ignored and the partial sample is not counted"
         );
         socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn each_start_announces_its_stream_generation() {
+        let (url, _tape_dir) = spawn_voice_server(VoiceConfig::default()).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /voice");
+        socket
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send start");
+        assert_eq!(
+            read_stream_generation(&mut socket).await,
+            1,
+            "the connection's first take is generation 1"
+        );
+        send_pcm(&mut socket, 8).await;
+        socket
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send a second start");
+        assert_eq!(
+            read_stream_generation(&mut socket).await,
+            2,
+            "a restart announces the incremented generation"
+        );
+        socket
+            .send(tungstenite::Message::Text("stop".into()))
+            .await
+            .expect("send stop");
+        let reply = parse_message(&read_text(&mut socket).await);
+        assert_eq!(reply["type"], "final");
+        assert_eq!(
+            reply["generation"], 2,
+            "the final frame carries its take's generation"
+        );
+
+        // Generations are per-connection: a fresh socket starts over at 1.
+        let (mut second, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect a second /voice socket");
+        second
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send start on the second socket");
+        assert_eq!(
+            read_stream_generation(&mut second).await,
+            1,
+            "a new connection resets the generation"
+        );
+        socket.close(None).await.expect("close the socket");
+        second.close(None).await.expect("close the second socket");
     }
 
     #[tokio::test]
@@ -1071,6 +1184,7 @@ mod tests {
             .send(tungstenite::Message::Text("start".into()))
             .await
             .expect("send start");
+        read_stream_generation(&mut socket).await;
         // Three seconds of pure zeros: several interim ticks pass over the
         // window, and the silence gate must swallow every one.
         send_pcm(&mut socket, 3 * 16000).await;

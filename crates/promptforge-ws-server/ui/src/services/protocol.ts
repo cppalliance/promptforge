@@ -1,7 +1,7 @@
 // The pure wire types of the workshop protocol: the JSON frame and payload
-// shapes exchanged with the server over /ws and /v1/models. Types only -
-// the socket logic that sends and routes these frames stays in
-// workshop-socket.ts. The Rust half of this contract is
+// shapes exchanged with the server over /ws, /voice, and /v1/models. Types
+// only - the socket logic that sends and routes these frames stays in
+// workshop-socket.ts and ui/voice.ts. The Rust half of this contract is
 // crates/promptforge-ws-server/src/protocol.rs; the two files cross-cite
 // each other so a shape change touches both or neither.
 
@@ -31,4 +31,40 @@ export interface ModelsFrame {
 export interface ChatPayload {
   model: string;
   messages: Array<{ role: string; content: string }>;
+}
+
+/**
+ * The /voice announcement that a `start` began a new stream generation,
+ * sent before any of that generation's interim or final frames.
+ * Generations count from 1 per connection; the client tracks the current
+ * one and discards frames a stop/restart race left behind from a
+ * superseded take.
+ */
+export interface StreamFrame {
+  type: "stream";
+  generation: number;
+}
+
+/**
+ * One interim transcription push on /voice: the take's crystallized
+ * committed prefix (append-only within a take) plus the interim model's
+ * decode of the audio past it, tagged with the take's stream generation.
+ */
+export interface InterimFrame {
+  type: "interim";
+  committed: string;
+  tentative: string;
+  generation: number;
+}
+
+/**
+ * The take's single stop reply on /voice: the assembled transcript plus
+ * the total PCM frames received since the take's start, tagged with the
+ * take's stream generation.
+ */
+export interface FinalFrame {
+  type: "final";
+  text: string;
+  frames: number;
+  generation: number;
 }
