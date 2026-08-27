@@ -11,6 +11,7 @@ import { createDockview, themeDark } from "dockview";
 import type { ChatPlugin } from "./chat/core/types";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
+import { ModelService } from "./services/model-service";
 import { StatusBar } from "./status-bar";
 import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./voice";
 import { setupWindowChrome } from "./window-chrome";
@@ -24,11 +25,10 @@ import { createPanelComponent, createPanelTabComponent } from "./workshop/panel-
 import { installShortcuts, toggleWorkshopPanel } from "./workshop/shortcuts";
 import { initZones, openInZone } from "./workshop/zones";
 
-// The model catalog lives in module state, not the DOM: the title-bar
-// Model menu reads it through the surface passed to setupWindowMenus, and
-// the selection writes the chat engine's request defaults.
-let modelCatalog: CatalogModel[] = [];
-let currentModel = "";
+// The model catalog and selection live in the ModelService, not module
+// state: the title-bar Model menu and the Agent controller receive the
+// service through their constructors and observe its change events.
+const modelService = new ModelService();
 
 // One persistent socket carries chat frames upstream and every downstream
 // JSON frame - chat replies and the observer's status updates, which the
@@ -86,7 +86,7 @@ function createVoicePlugin(): ChatPlugin {
     },
     // With no model selected there is nothing to send to; the old UI disabled
     // the send button in the same situation.
-    isSubmitBlocked: () => !currentModel,
+    isSubmitBlocked: () => !modelService.current,
   };
 }
 
@@ -115,13 +115,14 @@ initZones(dock);
 // ChatUI with isolated session and plugin state, and closing a tab
 // destroys only that agent. All agents share one provider - the workshop
 // socket multiplexes concurrent chat streams by request id - and the
-// shared model selection, broadcast through applyModel. The controller
-// must exist before restoreLayout so restored tabs mount their chats.
+// model service's shared selection, whose changes the controller
+// broadcasts to every live engine. The controller must exist before
+// restoreLayout so restored tabs mount their chats.
 const agents = new AgentController({
   dock,
   provider: new WorkshopProvider(workshopSocket),
   plugins: () => [createVoicePlugin(), ThinkingPlugin(), ToolsPlugin()],
-  getModel: () => currentModel,
+  models: modelService,
 });
 
 // Restore the persisted layout; any failure falls back to the known-good
@@ -143,37 +144,14 @@ installShortcuts(dock);
 
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
-// menu reads the catalog state through this surface and writes the
-// selection back into it. File > New Agent opens a fresh tab;
-// Window > Workshop Panel shares Ctrl+B's toggle.
+// menu reads the model service's catalog and writes the selection back
+// into it. File > New Agent opens a fresh tab; Window > Workshop Panel
+// shares Ctrl+B's toggle.
 setupWindowMenus({
   agents,
   workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
-  modelMenu: {
-    getModels: () => modelCatalog,
-    getSelected: () => currentModel,
-    selectModel: (id) => {
-      currentModel = id;
-      applyModel();
-    },
-  },
+  modelMenu: modelService,
 });
-
-function applyModel(): void {
-  agents.applyModel(currentModel);
-}
-
-// Records a catalog, keeping the current selection when it survives the
-// refresh and falling back to the first entry (or none) when it does not.
-// Used by the boot fetch and by the pushed catalogs the server sends when
-// the gateway comes back.
-function renderModels(entries: CatalogModel[]): void {
-  modelCatalog = entries;
-  if (!entries.some((entry) => entry.id === currentModel)) {
-    currentModel = entries[0]?.id ?? "";
-  }
-  applyModel();
-}
 
 async function loadModels(): Promise<void> {
   try {
@@ -182,7 +160,7 @@ async function loadModels(): Promise<void> {
       throw new Error(`GET /v1/models answered ${response.status}`);
     }
     const catalog = (await response.json()) as { data?: CatalogModel[] };
-    renderModels(Array.isArray(catalog.data) ? catalog.data : []);
+    modelService.setModels(Array.isArray(catalog.data) ? catalog.data : []);
   } catch (error) {
     // The Model menu shows its empty state until a pushed catalog heals
     // the failed boot fetch.
@@ -192,6 +170,6 @@ async function loadModels(): Promise<void> {
 
 // A pushed catalog means the gateway returned after an outage; refresh the
 // catalog state in place so a boot-time failure heals itself.
-workshopSocket.onModels(renderModels);
+workshopSocket.onModels((models) => modelService.setModels(models));
 
 void loadModels();

@@ -35,6 +35,7 @@ async function bundle(entry) {
 
 const { setupWindowMenus } = await bundle("window-menu.ts");
 const { setupWindowChrome } = await bundle("window-chrome.ts");
+const { ModelService } = await bundle(path.join("services", "model-service.ts"));
 
 const failures = [];
 function check(name, condition) {
@@ -243,22 +244,15 @@ function scenario({ desktop = true, modelMenu } = {}) {
 // --- Model menu: dynamic catalog rows ----------------------------------------
 
 {
-  let selected = "alpha";
-  const selections = [];
   const catalog = [
     { id: "alpha", description: "the alpha model" },
     { id: "beta" },
   ];
-  const { menus, itemsOf, isOpen } = scenario({
-    modelMenu: {
-      getModels: () => catalog,
-      getSelected: () => selected,
-      selectModel: (id) => {
-        selections.push(id);
-        selected = id;
-      },
-    },
-  });
+  const modelMenu = new ModelService();
+  modelMenu.setModels(catalog);
+  const selections = [];
+  modelMenu.onDidChangeCurrent((id) => selections.push(id));
+  const { menus, itemsOf, isOpen } = scenario({ modelMenu });
   menus.model.click();
   check("the Model menu opens", isOpen("model"));
   const rows = itemsOf("model");
@@ -292,13 +286,7 @@ function scenario({ desktop = true, modelMenu } = {}) {
 }
 
 {
-  const { menus, itemsOf, isOpen } = scenario({
-    modelMenu: {
-      getModels: () => [],
-      getSelected: () => "",
-      selectModel: () => {},
-    },
-  });
+  const { menus, itemsOf, isOpen } = scenario({ modelMenu: new ModelService() });
   menus.model.click();
   const rows = itemsOf("model");
   check(
