@@ -195,8 +195,8 @@ impl Workspace {
     /// file path has no parent directory.
     pub(crate) fn grant(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
-        let canonical =
-            canonicalize_simplified(path).map_err(|source| WorkspaceError::ResolveGrant { source })?;
+        let canonical = canonicalize_simplified(path)
+            .map_err(|source| WorkspaceError::ResolveGrant { source })?;
         let root = if canonical.is_dir() {
             canonical
         } else {
@@ -324,11 +324,10 @@ impl Workspace {
                 // The folder's own name reads better than the full path in
                 // the tree; the path stays available as the row tooltip. A
                 // drive root (C:\) has no file name and shows the path.
-                let name = root
-                    .file_name()
-                    .map_or_else(|| root.to_string_lossy().into_owned(), |name| {
-                        name.to_string_lossy().into_owned()
-                    });
+                let name = root.file_name().map_or_else(
+                    || root.to_string_lossy().into_owned(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
                 TreeEntry {
                     name,
                     path: root,
