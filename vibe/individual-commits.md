@@ -134,3 +134,7 @@ wry's drag-drop handler revoked WebView2's OLE drop target, killing in-page drag
 
 the refactor's phase-2 idiom gate came back clean except one stale README route table; the commit closes the documentation gap so the table matches the shipped protocol. (assistant reasoned, gate finding)
 
+## 2026-08-27 Remove every italic style from the thinking UI
+
+user directive, twice escalated ("no italics even for thinking prose"); the sweep covered toggle, content, preview, and the encrypted-reasoning fallback for consistency. (user said)
+
