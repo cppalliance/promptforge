@@ -8,6 +8,7 @@
 
 import type { DockviewApi, SerializedDockview } from "dockview";
 
+import { DisposableStore, toDisposable, type IDisposable } from "../../base/lifecycle";
 import { resetZones, restoreZoneState, serializeZoneState } from "./zones";
 
 export const LAYOUT_STORAGE_KEY = "promptforge.workshop.layout";
@@ -115,17 +116,32 @@ export function restoreLayout(dock: DockviewApi): boolean {
 /**
  * Starts persistence for the running session: layout changes save
  * debounced. Call once, after the boot layout (restored or default) is
- * in place.
+ * in place. Returns the disposable that stops persisting.
  */
-export function startLayoutPersistence(dock: DockviewApi): void {
+export function startLayoutPersistence(dock: DockviewApi): IDisposable {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  dock.onDidLayoutChange(() => {
-    if (timer !== null) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => {
-      timer = null;
-      persistLayout(dock);
-    }, SAVE_DEBOUNCE_MS);
-  });
+  const store = new DisposableStore();
+  store.add(
+    dock.onDidLayoutChange(() => {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timer = null;
+        persistLayout(dock);
+      }, SAVE_DEBOUNCE_MS);
+    }),
+  );
+  // Teardown order matters: the subscription dies first so no layout
+  // change can re-arm the timer between the two steps; then any armed
+  // save is cancelled unsaved.
+  store.add(
+    toDisposable(() => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }),
+  );
+  return store;
 }

@@ -10,6 +10,7 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview";
 
+import { Disposable } from "../../base/lifecycle";
 import type { ChatPlugin } from "../../chat/core/types";
 import { ChatUI } from "../../chat/main";
 import { MemoryStorage } from "../../services/memory-storage";
@@ -27,19 +28,22 @@ export interface AgentControllerOptions {
   readonly models: ModelService;
 }
 
-export class AgentController {
+export class AgentController extends Disposable {
   private readonly agents = new Map<string, ChatUI>();
   private activeId: string | null = null;
 
   constructor(private readonly options: AgentControllerOptions) {
+    super();
     const { dock } = options;
-    dock.onDidAddPanel((panel) => this.mount(panel));
-    dock.onDidRemovePanel((panel) => this.unmount(panel));
-    dock.onDidActivePanelChange(({ panel }) => {
-      if (panel !== undefined && this.agents.has(panel.id)) {
-        this.activeId = panel.id;
-      }
-    });
+    this._register(dock.onDidAddPanel((panel) => this.mount(panel)));
+    this._register(dock.onDidRemovePanel((panel) => this.unmount(panel)));
+    this._register(
+      dock.onDidActivePanelChange(({ panel }) => {
+        if (panel !== undefined && this.agents.has(panel.id)) {
+          this.activeId = panel.id;
+        }
+      }),
+    );
     // Panels added before construction (none in the boot order, but the
     // controller must not depend on it) mount through the same path.
     for (const panel of dock.panels) {
@@ -48,7 +52,7 @@ export class AgentController {
     // A selection change (Model menu, catalog refresh dropping the
     // selection) reaches every live engine without the composition root
     // relaying it.
-    options.models.onDidChangeCurrent((model) => this.applyModel(model));
+    this._register(options.models.onDidChangeCurrent((model) => this.applyModel(model)));
   }
 
   /**

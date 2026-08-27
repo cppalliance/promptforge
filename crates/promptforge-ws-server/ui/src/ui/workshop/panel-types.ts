@@ -6,6 +6,7 @@
 
 import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartInitParameters } from "dockview";
 
+import { Disposable } from "../../base/lifecycle";
 import { ChatPanel } from "./chat-panel";
 import { EditorPanel } from "./editor-panel";
 import { WorkshopTreePanel } from "./workshop-panel";
@@ -79,12 +80,12 @@ export function createPanelComponent(options: CreateComponentOptions): IContentR
  * default chip's structure (same classes, so the theme styles it
  * identically) minus the close action.
  */
-class PermanentTab implements ITabRenderer {
+class PermanentTab extends Disposable implements ITabRenderer {
   public readonly element = document.createElement("div");
   private readonly content = document.createElement("div");
-  private disposeTitleListener: (() => void) | null = null;
 
   constructor() {
+    super();
     this.element.className = "dv-default-tab";
     this.content.className = "dv-default-tab-content";
     this.element.appendChild(this.content);
@@ -92,15 +93,13 @@ class PermanentTab implements ITabRenderer {
 
   public init(parameters: TabPartInitParameters): void {
     this.content.textContent = parameters.title;
-    const subscription = parameters.api.onDidTitleChange((event) => {
-      this.content.textContent = event.title;
-    });
-    this.disposeTitleListener = () => subscription.dispose();
-  }
-
-  public dispose(): void {
-    this.disposeTitleListener?.();
-    this.disposeTitleListener = null;
+    // Dockview calls dispose() when the tab is removed; the inherited
+    // Disposable dispose releases this subscription.
+    this._register(
+      parameters.api.onDidTitleChange((event) => {
+        this.content.textContent = event.title;
+      }),
+    );
   }
 }
 

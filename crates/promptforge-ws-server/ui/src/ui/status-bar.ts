@@ -5,6 +5,7 @@
 // frames are internal instrumentation: they never touch the text or the
 // slot, but they do pulse the LED.
 
+import { Disposable, toDisposable } from "../base/lifecycle";
 import type { StatusFrame } from "../services/protocol";
 
 type PulseActivity = "thinking" | "generating";
@@ -13,7 +14,7 @@ type PulseActivity = "thinking" | "generating";
 // skin that dropped the variable).
 const DEFAULT_LED_PULSE_MS = 250;
 
-export class StatusBar {
+export class StatusBar extends Disposable {
   private readonly text: HTMLElement;
   private readonly progress: HTMLProgressElement;
   private readonly led: HTMLElement;
@@ -23,6 +24,7 @@ export class StatusBar {
   private ledTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly root: HTMLElement) {
+    super();
     const text = root.querySelector<HTMLElement>(".status-bar__text");
     const progress = root.querySelector<HTMLProgressElement>(".status-bar__progress");
     const led = root.querySelector<HTMLElement>(".status-bar__led");
@@ -36,6 +38,15 @@ export class StatusBar {
     this.progress = progress;
     this.led = led;
     this.rec = rec;
+    // The pulse decay timer is the bar's only owned resource.
+    this._register(
+      toDisposable(() => {
+        if (this.ledTimer !== null) {
+          clearTimeout(this.ledTimer);
+          this.ledTimer = null;
+        }
+      }),
+    );
   }
 
   /** Paints one observer update. Debug frames pulse the LED only. */

@@ -14,6 +14,7 @@
 // the dropped file - itself. Only drags carrying files are suppressed;
 // in-page drags (Dockview tabs) are untouched.
 
+import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import type { StatusBar } from "./status-bar";
 
 /** The native event the shell dispatches when files land on the window. */
@@ -120,21 +121,27 @@ function isFileDrag(event: DragEvent): boolean {
  * browser there is no native drop source and the grant listener is never
  * installed. The file-drag default suppression is installed everywhere:
  * dropping a file must never navigate the page away, desktop or browser.
+ * Returns the disposable owning every window listener wired here.
  */
-export function setupWorkspaceDrops(statusBar: StatusBar): void {
-  window.addEventListener("dragover", (event) => {
+export function setupWorkspaceDrops(statusBar: StatusBar): IDisposable {
+  const store = new DisposableStore();
+  const onDragOver = (event: DragEvent): void => {
     if (isFileDrag(event)) event.preventDefault();
-  });
-  window.addEventListener("drop", (event) => {
+  };
+  window.addEventListener("dragover", onDragOver);
+  store.add(toDisposable(() => window.removeEventListener("dragover", onDragOver)));
+  const onDrop = (event: DragEvent): void => {
     if (isFileDrag(event)) {
       event.preventDefault();
       postDroppedFiles(event);
     }
-  });
+  };
+  window.addEventListener("drop", onDrop);
+  store.add(toDisposable(() => window.removeEventListener("drop", onDrop)));
   if (window.__PROMPTFORGE_DESKTOP__ !== true) {
-    return;
+    return store;
   }
-  window.addEventListener(FILE_DROP_EVENT, (event) => {
+  const onFileDrop = (event: Event): void => {
     const paths = readDroppedPaths(event);
     if (paths === null || paths.length === 0) {
       return;
@@ -142,5 +149,8 @@ export function setupWorkspaceDrops(statusBar: StatusBar): void {
     void grantDroppedPaths(paths, statusBar).catch((error: unknown) => {
       statusBar.showLocal(`Could not open the dropped files: ${(error as Error).message}`, "error");
     });
-  });
+  };
+  window.addEventListener(FILE_DROP_EVENT, onFileDrop);
+  store.add(toDisposable(() => window.removeEventListener(FILE_DROP_EVENT, onFileDrop)));
+  return store;
 }

@@ -7,6 +7,7 @@
 // releases readOnly; consecutive takes compose because the cursor position
 // is captured fresh each time.
 
+import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import type { StatusBar } from "./status-bar";
 
 export interface VoiceElements {
@@ -14,7 +15,8 @@ export interface VoiceElements {
   input: HTMLTextAreaElement;
 }
 
-export interface VoiceHandle {
+/** The per-tab voice control; dispose() unwires the mic and discards a live take. */
+export interface VoiceHandle extends IDisposable {
   discardIfRecording(): void;
 }
 
@@ -294,13 +296,20 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
     statusBar.setRecording(false);
   }
 
-  mic.addEventListener("click", () => {
+  const onMicClick = (): void => {
     if (voice) {
       stopVoice();
     } else {
       void startVoice();
     }
-  });
+  };
+  mic.addEventListener("click", onMicClick);
 
-  return { discardIfRecording };
+  const store = new DisposableStore();
+  // Teardown order matters: the click listener detaches before the live
+  // session is discarded, so a click cannot start a new take mid-teardown.
+  store.add(toDisposable(() => mic.removeEventListener("click", onMicClick)));
+  store.add(toDisposable(() => discardIfRecording()));
+
+  return { discardIfRecording, dispose: (): void => store.dispose() };
 }

@@ -16,6 +16,7 @@
 // the async Clipboard API cannot. jsdom leaves execCommand undefined; the
 // guard keeps the command a no-op there.
 
+import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import { showAboutDialog } from "./about-dialog";
 import type { ModelService } from "../services/model-service";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
@@ -148,14 +149,16 @@ function buildMenuItems(
  * their popovers, in the desktop shell and in a plain browser alike.
  * Native window commands (Minimize, Maximize/Restore, Close Window)
  * no-op without the IPC bridge; every other command works in both modes.
- * Throws if the title-bar markup is missing.
+ * Throws if the title-bar markup is missing. The returned dispose()
+ * releases the document-level listeners and removes the popovers (whose
+ * removal also drops every row's element-owned click listener).
  */
 export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
   readonly workshop: WorkshopMenuCommands;
   /** The shared model state the dynamic Model menu reads and writes. */
   readonly modelMenu?: ModelService;
-}): WindowMenuCommands {
+}): WindowMenuCommands & IDisposable {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
   if (!navElement) {
     throw new Error("DOM Error: .window-titlebar__menus not found in the page.");
@@ -164,16 +167,20 @@ export function setupWindowMenus(options: {
   // function declarations below.
   const nav: HTMLElement = navElement;
 
+  const store = new DisposableStore();
+
   // Edit commands act on the editable element focused before the menu
   // opened. Clicking a menu button moves focus to the button, so the
   // target is remembered continuously instead of read at open time.
   let editTarget: HTMLElement | null = null;
-  document.addEventListener("focusin", (event) => {
+  const onFocusIn = (event: FocusEvent): void => {
     const target = event.target instanceof Element ? event.target : null;
     if (isEditable(target)) {
       editTarget = target;
     }
-  });
+  };
+  document.addEventListener("focusin", onFocusIn);
+  store.add(toDisposable(() => document.removeEventListener("focusin", onFocusIn)));
   const hasEditTarget = (): boolean => editTarget !== null && editTarget.isConnected;
 
   function runEditCommand(command: string): void {
@@ -290,6 +297,7 @@ export function setupWindowMenus(options: {
       popover.appendChild(row.element);
     }
     button.insertAdjacentElement("afterend", popover);
+    store.add(toDisposable(() => popover.remove()));
     return { id, button, popover, rows };
   }
 
@@ -397,16 +405,18 @@ export function setupWindowMenus(options: {
   }
 
   for (const handle of handles) {
-    handle.button.addEventListener("click", () => {
+    const onButtonClick = (): void => {
       if (openId === handle.id) {
         closeMenu();
       } else {
         openMenu(handle.id, false);
       }
-    });
+    };
+    handle.button.addEventListener("click", onButtonClick);
+    store.add(toDisposable(() => handle.button.removeEventListener("click", onButtonClick)));
   }
 
-  document.addEventListener("pointerdown", (event) => {
+  const onPointerDown = (event: PointerEvent): void => {
     if (openId === null) {
       return;
     }
@@ -419,9 +429,11 @@ export function setupWindowMenus(options: {
       return;
     }
     closeMenu();
-  });
+  };
+  document.addEventListener("pointerdown", onPointerDown);
+  store.add(toDisposable(() => document.removeEventListener("pointerdown", onPointerDown)));
 
-  document.addEventListener("keydown", (event) => {
+  const onKeydown = (event: KeyboardEvent): void => {
     if (openId === null) {
       return;
     }
@@ -457,7 +469,9 @@ export function setupWindowMenus(options: {
         break;
       }
     }
-  });
+  };
+  document.addEventListener("keydown", onKeydown);
+  store.add(toDisposable(() => document.removeEventListener("keydown", onKeydown)));
 
-  return commands;
+  return { ...commands, dispose: (): void => store.dispose() };
 }

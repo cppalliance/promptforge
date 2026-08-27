@@ -8,6 +8,7 @@
 
 import type { DockviewPanelApi, GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 
+import { Disposable, toDisposable } from "../../base/lifecycle";
 import { showPanelDialog } from "./editor-dialog";
 import { CodeMirrorSurface, type EditorSurface } from "./editor-surface";
 import {
@@ -39,7 +40,7 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-export class EditorPanel implements IContentRenderer {
+export class EditorPanel extends Disposable implements IContentRenderer {
   readonly element = document.createElement("div");
   private readonly surface: EditorSurface;
   private panelApi: DockviewPanelApi | null = null;
@@ -49,11 +50,19 @@ export class EditorPanel implements IContentRenderer {
   private saving = false;
 
   constructor(private readonly deps: EditorPanelDeps = {}) {
+    super();
     this.element.className = "editor-panel";
-    this.surface = deps.createSurface?.() ?? new CodeMirrorSurface();
-    this.surface.onDirtyChange(() => {
-      this.updateTitle();
-    });
+    // The surface is the panel's child: dockview disposes the panel when
+    // its tab closes, and the inherited dispose() releases the surface and
+    // the dirty subscription with it.
+    this.surface = this._register(deps.createSurface?.() ?? new CodeMirrorSurface());
+    this._register(
+      toDisposable(
+        this.surface.onDirtyChange(() => {
+          this.updateTitle();
+        }),
+      ),
+    );
   }
 
   init(parameters: GroupPanelPartInitParameters): void {
@@ -79,10 +88,6 @@ export class EditorPanel implements IContentRenderer {
 
   focus(): void {
     this.surface.focus();
-  }
-
-  dispose(): void {
-    this.surface.dispose();
   }
 
   /**

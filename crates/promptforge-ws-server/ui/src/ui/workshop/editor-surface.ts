@@ -13,6 +13,8 @@ import { search } from "@codemirror/search";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
+import { Disposable, toDisposable } from "../../base/lifecycle";
+
 /** A document handed to the surface: the path it came from and its text. */
 export interface EditorDocument {
   readonly path: string;
@@ -185,7 +187,7 @@ async function languageFor(path: string): Promise<Extension | null> {
 }
 
 /** The CodeMirror 6 EditorSurface. */
-export class CodeMirrorSurface implements EditorSurface {
+export class CodeMirrorSurface extends Disposable implements EditorSurface {
   readonly element = document.createElement("div");
   private view: EditorView | null = null;
   private savedText = "";
@@ -196,7 +198,18 @@ export class CodeMirrorSurface implements EditorSurface {
   private openGeneration = 0;
 
   constructor() {
+    super();
     this.element.className = "editor-surface";
+    // One registered teardown covers whichever view is live at dispose
+    // time: open() replaces the view, so a per-view registration would
+    // accumulate stale entries instead.
+    this._register(
+      toDisposable(() => {
+        this.view?.destroy();
+        this.view = null;
+        this.listeners.clear();
+      }),
+    );
   }
 
   open(document: EditorDocument): void {
@@ -256,12 +269,6 @@ export class CodeMirrorSurface implements EditorSurface {
 
   focus(): void {
     this.view?.focus();
-  }
-
-  dispose(): void {
-    this.view?.destroy();
-    this.view = null;
-    this.listeners.clear();
   }
 
   private setDirty(dirty: boolean): void {

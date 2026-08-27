@@ -5,6 +5,8 @@
 // narrow, typed command through that bridge - the shell (step 9) parses
 // and validates the payload before any native window operation runs.
 
+import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
+
 declare global {
   interface Window {
     // Set by the wry initialization script in the desktop shell; absent in
@@ -79,9 +81,10 @@ function readMaximized(event: Event): boolean | null {
  * only inside the desktop shell; in a browser the control cluster is
  * hidden instead, since the commands would have no IPC bridge to reach.
  * The menu buttons are wired to their popovers by `setupWindowMenus` in
- * window-menu.ts.
+ * window-menu.ts. Returns the disposable owning every listener wired here.
  */
-export function setupWindowChrome(): void {
+export function setupWindowChrome(): IDisposable {
+  const store = new DisposableStore();
   const bar = document.querySelector<HTMLElement>(".window-titlebar");
   if (!bar) {
     throw new Error("DOM Error: .window-titlebar not found in the page.");
@@ -97,7 +100,7 @@ export function setupWindowChrome(): void {
     // No native window exists for the buttons to act on; showing them
     // would present dead controls.
     controls.hidden = true;
-    return;
+    return store;
   }
   const drag = bar.querySelector<HTMLElement>(".window-titlebar__drag");
   const minimize = bar.querySelector<HTMLButtonElement>('[data-command="minimize"]');
@@ -113,18 +116,25 @@ export function setupWindowChrome(): void {
   }
 
   minimize.addEventListener("click", minimizeWindow);
+  store.add(toDisposable(() => minimize.removeEventListener("click", minimizeWindow)));
   maximize.addEventListener("click", toggleWindowMaximize);
+  store.add(toDisposable(() => maximize.removeEventListener("click", toggleWindowMaximize)));
   close.addEventListener("click", closeWindow);
+  store.add(toDisposable(() => close.removeEventListener("click", closeWindow)));
 
   // Only the empty center drags; the buttons handle their own presses.
-  drag.addEventListener("pointerdown", (event) => {
+  const onDragPointerDown = (event: PointerEvent): void => {
     if (event.button === 0 && event.target === drag) {
       postWindowCommand(WindowCommand.Drag);
     }
-  });
-  drag.addEventListener("dblclick", () => postWindowCommand(WindowCommand.ToggleMaximize));
+  };
+  drag.addEventListener("pointerdown", onDragPointerDown);
+  store.add(toDisposable(() => drag.removeEventListener("pointerdown", onDragPointerDown)));
+  const onDragDoubleClick = (): void => postWindowCommand(WindowCommand.ToggleMaximize);
+  drag.addEventListener("dblclick", onDragDoubleClick);
+  store.add(toDisposable(() => drag.removeEventListener("dblclick", onDragDoubleClick)));
 
-  window.addEventListener(MAXIMIZED_EVENT, (event) => {
+  const onMaximized = (event: Event): void => {
     const maximized = readMaximized(event);
     if (maximized === null) {
       return;
@@ -132,5 +142,8 @@ export function setupWindowChrome(): void {
     maximize.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
     maximizeGlyph.hidden = maximized;
     restoreGlyph.hidden = !maximized;
-  });
+  };
+  window.addEventListener(MAXIMIZED_EVENT, onMaximized);
+  store.add(toDisposable(() => window.removeEventListener(MAXIMIZED_EVENT, onMaximized)));
+  return store;
 }

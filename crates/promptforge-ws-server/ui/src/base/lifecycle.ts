@@ -6,6 +6,15 @@ export interface IDisposable {
   dispose(): void;
 }
 
+/**
+ * Wraps a bare cleanup function as an IDisposable, so ad hoc teardown
+ * (removeEventListener pairs, unsubscribe closures, timer clears) can be
+ * routed through a DisposableStore.
+ */
+export function toDisposable(dispose: () => void): IDisposable {
+  return { dispose };
+}
+
 /** Collects disposables and releases them together, in insertion order. */
 export class DisposableStore implements IDisposable {
   private readonly _items = new Set<IDisposable>();

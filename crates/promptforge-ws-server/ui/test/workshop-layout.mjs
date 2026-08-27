@@ -368,7 +368,7 @@ const treeContent = dock2.getPanel("tree").view.content;
 check("Ctrl+Shift+F activates the Workshop tree", dock2.activePanel?.id === "tree");
 check("Ctrl+Shift+F focuses inside the tree",
   treeContent.element.contains(window.document.activeElement));
-uninstall();
+uninstall.dispose();
 
 // --- Restore failures fall back to the default layout ---------------------
 
