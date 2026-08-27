@@ -1,7 +1,9 @@
 // Unit test for the three-state thinking block
 // (src/chat/plugins/thinking/thinking-plugin.ts). Bundles the TS module
 // with esbuild (CSS import stripped), imports it via a data URL, and drives
-// it against jsdom. Covers: immediate dot-free prefill on generation start,
+// it against jsdom. Covers: dot-free prefill on generation start (including
+// the render race where the feed creates the message element after the
+// selector fires, and targeting the generating message by id),
 // the first-token transition from "Planning next moves" to the "Thinking"
 // toggle, the four-line preview cap with internal scroll, auto-pin
 // disengage/re-engage, auto-collapse on the first content token with
@@ -76,21 +78,38 @@ function createFakeEngine() {
   };
 }
 
-// --- Immediate prefill indicator ----------------------------------------------
+// --- Prefill indicator ----------------------------------------------------------
+
+// The attach defers past the current render pass (microtask plus a few
+// frames); a short sleep lets it land in jsdom.
+const flushPrefill = () => sleep(60);
 
 {
   const plugin = ThinkingPlugin();
   const engine = createFakeEngine();
   const container = window.document.createElement("div");
-  const messageEl = window.document.createElement("div");
-  messageEl.className = "mur-message mur-message-assistant";
-  container.appendChild(messageEl);
+  const addMessageEl = (id) => {
+    const messageEl = window.document.createElement("div");
+    messageEl.className = "mur-message mur-message-assistant";
+    messageEl.dataset.messageId = id;
+    container.appendChild(messageEl);
+    return messageEl;
+  };
   plugin.onMount({ engine, container });
 
+  // An earlier completed turn: the prefill must never attach to it.
+  const previousTurn = addMessageEl("m0");
+
+  // The real feed renders the message element on the hot pass, after the
+  // selector notification the prefill listens to; creating the element
+  // after setState reproduces that order (the row used to race and lose).
   engine.setState({ generatingMessageId: "m1", messages: [{ id: "m1", role: "assistant", blocks: [] }] });
-  // No sleep: the prefill row must appear synchronously, with no 500ms delay.
+  const generatingTurn = addMessageEl("m1");
+  await flushPrefill();
   const prefill = container.querySelector(".mur-think-prefill");
-  check("prefill row appears immediately on generation start", !!prefill);
+  check("prefill row appears on generation start", !!prefill);
+  check("prefill attaches to the generating message", prefill?.parentElement === generatingTurn);
+  check("prefill never lands on an earlier turn", !previousTurn.querySelector(".mur-think-prefill"));
   check("prefill label is exactly Planning next moves", prefill?.textContent === "Planning next moves");
   check("prefill label has no ellipsis", !prefill?.textContent?.includes("..."));
   check("prefill row has no three-dot loader", !prefill?.querySelector(".mur-loading-dot"));
@@ -104,9 +123,11 @@ function createFakeEngine() {
 
   // A reasoning block arriving right after generation start replaces prefill.
   engine.setState({ generatingMessageId: "m2", messages: [{ id: "m2", role: "assistant", blocks: [] }] });
+  const secondTurn = addMessageEl("m2");
+  await flushPrefill();
   check("prefill row returns for the next generation", !!container.querySelector(".mur-think-prefill"));
   const earlyBlock = window.document.createElement("div");
-  messageEl.appendChild(earlyBlock);
+  secondTurn.appendChild(earlyBlock);
   plugin.onBlockRender(reasoningBlock("draft", "b2"), earlyBlock, true);
   check("first reasoning token removes the prefill row", !container.querySelector(".mur-think-prefill"));
 
@@ -116,14 +137,18 @@ function createFakeEngine() {
     generatingMessageId: "m4",
     messages: [{ id: "m4", role: "assistant", blocks: [{ id: "t4", type: "text", text: "hi" }] }],
   });
+  addMessageEl("m4");
+  await flushPrefill();
   check("no prefill row when content already exists", !container.querySelector(".mur-think-prefill"));
 
   // A text block arriving while prefill shows removes it.
   engine.setState({ generatingMessageId: null });
   engine.setState({ generatingMessageId: "m5", messages: [{ id: "m5", role: "assistant", blocks: [] }] });
+  const fifthTurn = addMessageEl("m5");
+  await flushPrefill();
   check("prefill row showing for a text-first stream", !!container.querySelector(".mur-think-prefill"));
   const textBlock = window.document.createElement("div");
-  messageEl.appendChild(textBlock);
+  fifthTurn.appendChild(textBlock);
   plugin.onBlockRender({ id: "t5", type: "text", text: "answer" }, textBlock, true);
   check("prefill row removed when the first text block renders", !container.querySelector(".mur-think-prefill"));
 

@@ -129,6 +129,10 @@ function buildAgentRunItem(
 			: buildMachinerySegments(messages, userIndex, runEndIndex, runId, isWorkSegmentExpanded);
 	const stepMessages = flattenStepMessages(segments);
 	if (countAgentStepMessages(stepMessages) < minAgentRunSteps) return null;
+	// Agent runs exist to fold tool machinery. A turn whose only "work" is
+	// reasoning renders as a plain message instead, so the thinking plugin
+	// shows it inline as a durable, expandable Thinking block.
+	if (!hasToolCall(stepMessages)) return null;
 
 	const visibleMessages = flattenVisibleMessages(segments);
 	const collapsed = segments
@@ -288,6 +292,10 @@ function flattenStepMessages(segments: readonly FeedAgentRunSegment[]): Message[
 
 function countAgentStepMessages(messages: readonly Message[]): number {
 	return new Set(messages.map((message) => message.id)).size;
+}
+
+function hasToolCall(messages: readonly Message[]): boolean {
+	return messages.some((message) => message.blocks.some((block) => block.type === "tool_call"));
 }
 
 function flattenVisibleMessages(segments: readonly FeedAgentRunSegment[]): Message[] {

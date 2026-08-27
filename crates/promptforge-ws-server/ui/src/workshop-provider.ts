@@ -5,10 +5,11 @@ import type { WorkshopSocket } from "./workshop-socket";
 /**
  * ChatProvider against the workshop's persistent `/ws` socket: each
  * generation is one id-tagged chat frame on the shared connection, answered
- * by `delta`/`done`/`error` frames carrying that id, while status frames
- * bypass the chat entirely. Deliberately has no `generateTitle`: titles
- * cost an extra completion per chat and nothing in the workshop UI
- * displays them.
+ * by `delta`/`reasoning`/`done`/`error` frames carrying that id, while
+ * status frames bypass the chat entirely. Reasoning frames become
+ * `reasoning_delta` events in their own block, which the Thinking plugin
+ * renders. Deliberately has no `generateTitle`: titles cost an extra
+ * completion per chat and nothing in the workshop UI displays them.
  */
 export class WorkshopProvider implements ChatProvider {
   constructor(private readonly socket: WorkshopSocket) {}
@@ -16,7 +17,16 @@ export class WorkshopProvider implements ChatProvider {
   async streamChat(request: ChatRequest, onEvent: (event: StreamEvent) => void): Promise<void> {
     const messageId = uuidv7();
     const textBlockId = uuidv7();
+    const reasoningBlockId = uuidv7();
     let started = false;
+    const ensureStarted = (): void => {
+      if (started) return;
+      started = true;
+      onEvent({
+        type: "message_start",
+        message: { id: messageId, role: "assistant", blocks: [] },
+      });
+    };
     await this.socket.streamChat(
       {
         // Submit is blocked in the UI without a model; the empty string is
@@ -24,15 +34,20 @@ export class WorkshopProvider implements ChatProvider {
         model: request.options.model ?? "",
         messages: formatMessages(request.messages),
       },
-      (content) => {
-        if (!started) {
-          started = true;
+      {
+        onDelta: (content) => {
+          ensureStarted();
+          onEvent({ type: "text_delta", messageId, blockId: textBlockId, delta: content });
+        },
+        onReasoning: (content) => {
+          ensureStarted();
           onEvent({
-            type: "message_start",
-            message: { id: messageId, role: "assistant", blocks: [] },
+            type: "reasoning_delta",
+            messageId,
+            blockId: reasoningBlockId,
+            delta: content,
           });
-        }
-        onEvent({ type: "text_delta", messageId, blockId: textBlockId, delta: content });
+        },
       },
       request.signal,
     );

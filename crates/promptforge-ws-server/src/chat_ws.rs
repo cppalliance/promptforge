@@ -6,8 +6,10 @@
 //! A client upgrades `GET /ws` once and sends chat requests as text frames:
 //! `{"type":"chat","id":N,"model":"...","messages":[...]}`. Each chat frame
 //! runs one streaming gateway completion; the session answers with
-//! `{"type":"delta","content":"...","id":N}` frames as content arrives, a
-//! terminal `{"type":"done","id":N}` when the stream completes, or
+//! `{"type":"delta","content":"...","id":N}` frames as content arrives,
+//! `{"type":"reasoning","content":"...","id":N}` frames as the model's
+//! reasoning side channel streams (the UI renders these as the Thinking
+//! block), a terminal `{"type":"done","id":N}` when the stream completes, or
 //! `{"type":"error","message":"...","id":N}` on any failure - transport,
 //! mid-stream, or a gateway that declines the stream with a non-success
 //! status. The `id` is optional and echoed verbatim on every frame of that
@@ -238,7 +240,30 @@ async fn relay_chat(
                 if payload == "[DONE]" {
                     continue;
                 }
-                let Some(text) = delta_content(&payload) else {
+                let fields = delta_fields(&payload);
+                if let Some(text) = fields.reasoning {
+                    // Reasoning is a side channel: forwarded for the UI's
+                    // Thinking block, but never part of the taped response.
+                    status.debug(
+                        "Streaming response...",
+                        "a gateway reasoning chunk",
+                        Activity::Thinking,
+                    );
+                    let frame = tagged(
+                        id.as_ref(),
+                        serde_json::json!({"type": "reasoning", "content": text}),
+                    );
+                    if !send_frame(out, frame).await {
+                        finish.error = Some("client disconnected mid-stream".to_string());
+                        finish.record().await;
+                        // The dead client is gone, but any other subscriber
+                        // still watches the observer: return it to Ready
+                        // rather than leaving a stale activity LED.
+                        status.idle();
+                        return;
+                    }
+                }
+                let Some(text) = fields.content else {
                     continue;
                 };
                 finish.assembled.push_str(&text);
@@ -256,9 +281,6 @@ async fn relay_chat(
                 if !send_frame(out, delta).await {
                     finish.error = Some("client disconnected mid-stream".to_string());
                     finish.record().await;
-                    // The dead client is gone, but any other subscriber
-                    // still watches the observer: return it to Ready
-                    // rather than leaving a stale activity LED.
                     status.idle();
                     return;
                 }
@@ -335,21 +357,46 @@ fn tagged(id: Option<&serde_json::Value>, mut frame: serde_json::Value) -> serde
     frame
 }
 
-/// Extracts the text delta from one gateway SSE payload, if it carries
-/// content.
+/// The text fields of one streaming delta: answer content and the
+/// reasoning side channel, either of which may be absent.
+struct DeltaFields {
+    content: Option<String>,
+    reasoning: Option<String>,
+}
+
+/// Extracts the content and reasoning deltas from one gateway SSE payload.
 ///
 /// Role-priming and usage events have no `choices[0].delta.content` and
-/// contribute nothing to the assembled response.
-fn delta_content(payload: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let content = value
-        .get("choices")?
-        .as_array()?
-        .first()?
-        .get("delta")?
-        .get("content")?
-        .as_str()?;
-    Some(content.to_string())
+/// contribute nothing to the assembled response. Reasoning models stream
+/// their scratch work under `reasoning_content` (or the `reasoning` /
+/// `thinking` synonyms, matching promptforge-core's normalization); the
+/// first non-empty synonym wins.
+fn delta_fields(payload: &str) -> DeltaFields {
+    let empty = DeltaFields {
+        content: None,
+        reasoning: None,
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return empty;
+    };
+    let Some(delta) = value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))
+    else {
+        return empty;
+    };
+    let content = delta
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let reasoning = ["reasoning_content", "reasoning", "thinking"]
+        .iter()
+        .find_map(|key| delta.get(*key).and_then(serde_json::Value::as_str))
+        .filter(|text| !text.is_empty())
+        .map(str::to_string);
+    DeltaFields { content, reasoning }
 }
 
 /// Tape bookkeeping carried through one streaming chat.
@@ -439,6 +486,17 @@ mod tests {
     );
     const UPSTREAM_ERROR: &str =
         r#"{"error":{"message":"model unloaded","code":"upstream_unavailable"}}"#;
+
+    /// A reasoning model's stream: scratch work on the side channel first,
+    /// then the answer content.
+    const REASONING_STREAM_BODY: &str = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"hmm \"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"okay\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"po\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ng\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
 
     fn authorized(headers: &HeaderMap) -> bool {
         headers
@@ -645,6 +703,60 @@ mod tests {
         );
         let third = read_non_status_frame(&mut socket).await;
         assert_eq!(third, serde_json::json!({"type": "done"}));
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// Streams `REASONING_STREAM_BODY` as a mock reasoning model.
+    async fn mock_chat_stream_reasons(headers: HeaderMap, body: String) -> Response {
+        assert!(authorized(&headers));
+        let body: serde_json::Value = serde_json::from_str(&body).expect("the request is JSON");
+        assert_eq!(body["stream"], true, "the stream flag is forwarded");
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            REASONING_STREAM_BODY,
+        )
+            .into_response()
+    }
+
+    #[tokio::test]
+    async fn reasoning_deltas_relay_as_reasoning_frames_and_stay_off_the_tape() {
+        let base_url = spawn_gateway(
+            Router::new().route("/v1/chat/completions", post(mock_chat_stream_reasons)),
+        )
+        .await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_chat(&mut socket).await;
+
+        let first = read_non_status_frame(&mut socket).await;
+        assert_eq!(
+            first,
+            serde_json::json!({"type": "reasoning", "content": "hmm "}),
+            "the reasoning side channel arrives as reasoning frames"
+        );
+        let second = read_non_status_frame(&mut socket).await;
+        assert_eq!(
+            second,
+            serde_json::json!({"type": "reasoning", "content": "okay"})
+        );
+        let third = read_non_status_frame(&mut socket).await;
+        assert_eq!(third, serde_json::json!({"type": "delta", "content": "po"}));
+        let fourth = read_non_status_frame(&mut socket).await;
+        assert_eq!(
+            fourth,
+            serde_json::json!({"type": "delta", "content": "ng"})
+        );
+        let fifth = read_non_status_frame(&mut socket).await;
+        assert_eq!(fifth, serde_json::json!({"type": "done"}));
+
+        let events = tape_events(&tape_dir);
+        assert_eq!(events.len(), 1, "exactly one event per chat frame");
+        assert_eq!(
+            events[0]["response"], "pong",
+            "the tape holds the answer content only, never the reasoning"
+        );
         socket.close(None).await.expect("close the socket");
     }
 
