@@ -5,6 +5,8 @@
 // frames are internal instrumentation: they never touch the text or the
 // slot, but they do pulse the LED.
 
+import "./status-bar.css";
+
 import { Disposable, toDisposable } from "../base/lifecycle";
 import type { StatusFrame } from "../services/protocol";
 

@@ -1,0 +1,89 @@
+/* Styles for window-chrome.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in style.css. */
+
+/* --------------------------------------------------------------------------
+   Custom window title bar (Windows desktop chrome). Hidden by default and
+   revealed by window-chrome.ts only under the wry initialization flag; the
+   [hidden] rule must keep winning over the base rule's display:flex, which
+   the attribute selector's extra specificity guarantees. The bar is a
+   fixed-height row in the body's column flex layout - icon, menus, drag
+   region, then the three window controls in Windows order - and the shell
+   below absorbs it without overlap. Hover states flip instantly like native
+   chrome, so nothing here animates.
+   -------------------------------------------------------------------------- */
+.window-titlebar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: var(--titlebar-height, 40px);
+  background: var(--titlebar-bg, #0d0e12);
+  border-bottom: 1px solid var(--titlebar-divider, #262a33);
+  color: var(--titlebar-foreground, #d6d9e0);
+  font-size: var(--titlebar-font-size, 13px);
+  line-height: 1;
+  user-select: none;
+}
+
+.window-titlebar[hidden] {
+  display: none;
+}
+
+/* The program icon is decorative and noninteractive. */
+.window-titlebar__icon {
+  flex: none;
+  align-self: center;
+  width: var(--titlebar-icon-size, 20px);
+  height: var(--titlebar-icon-size, 20px);
+  margin-inline: var(--space-lg, 12px) var(--space-xs, 4px);
+}
+
+/* The empty center: the only surface that initiates a native drag. */
+.window-titlebar__drag {
+  flex: 1;
+  min-width: 0;
+  user-select: none;
+}
+
+/* Window controls: three equal-width buttons with centered glyphs. Hit
+   areas fill the bar's height; the min-height floor keeps them reachable
+   even if a skin shrinks the bar. */
+.window-titlebar__controls {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+/* Browser mode hides the cluster via the hidden attribute; the flex
+   display above would otherwise beat the UA [hidden] rule. */
+.window-titlebar__controls[hidden] {
+  display: none;
+}
+
+.window-titlebar__control {
+  width: var(--titlebar-control-width, 46px);
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--titlebar-glyph, #8b90a0);
+  cursor: pointer;
+  user-select: none;
+}
+
+.window-titlebar__control:focus-visible {
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline-offset: -1px;
+}
+
+.window-titlebar__control--minimize:hover,
+.window-titlebar__control--maximize:hover {
+  background: var(--titlebar-hover, #1a1d25);
+}
+
+.window-titlebar__control--close:hover {
+  background: var(--titlebar-close-hover, #b0606a);
+  color: var(--titlebar-close-glyph-hover, #ffffff);
+}

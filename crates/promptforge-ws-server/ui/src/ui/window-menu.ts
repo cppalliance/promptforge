@@ -16,6 +16,8 @@
 // the async Clipboard API cannot. jsdom leaves execCommand undefined; the
 // guard keeps the command a no-op there.
 
+import "./window-menu.css";
+
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import { showAboutDialog } from "./about-dialog";
 import type { ModelService } from "../services/model-service";

@@ -1,0 +1,108 @@
+/* Styles for window-menu.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in style.css. */
+
+/* Menu buttons: text items flush with the bar's left edge. */
+.window-titlebar__menus {
+  position: relative; /* popover positioning context */
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+.window-titlebar__menu {
+  padding: 0 var(--space-lg, 12px);
+  background: none;
+  border: none;
+  color: var(--titlebar-foreground, #d6d9e0);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.window-titlebar__menu:hover,
+.window-titlebar__menu[aria-expanded="true"] {
+  background: var(--titlebar-hover, #1a1d25);
+}
+
+.window-titlebar__menu:focus-visible {
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline-offset: -1px;
+}
+
+/* Menu popovers: slightly raised near-black surfaces below the bar,
+   absolutely positioned so they never participate in layout. Rows are
+   compact - label left, shortcut right in muted text - and the purple
+   accent is reserved for the focus/selection ring. */
+.window-titlebar__popover {
+  position: absolute;
+  top: 100%;
+  z-index: 100;
+  min-width: var(--titlebar-popover-min-width, 200px);
+  padding: var(--space-xs, 4px) 0;
+  background: var(--bg-raised, #14161c);
+  border: 1px solid var(--border, #262a33);
+  border-radius: var(--radius, 6px);
+  box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
+}
+
+.window-titlebar__popover[hidden] {
+  display: none;
+}
+
+.window-titlebar__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-xl, 16px);
+  width: 100%;
+  padding: var(--space-xs, 4px) var(--space-lg, 12px);
+  background: none;
+  border: none;
+  color: var(--text, #d6d9e0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+
+.window-titlebar__item:hover {
+  background: var(--bg-hover, #1a1d25);
+}
+
+.window-titlebar__item:focus-visible {
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline-offset: -1px;
+  background: var(--bg-hover, #1a1d25);
+}
+
+.window-titlebar__item[aria-disabled="true"] {
+  color: var(--text-muted, #8b90a0);
+  cursor: default;
+}
+
+.window-titlebar__item[aria-disabled="true"]:hover {
+  background: none;
+}
+
+.window-titlebar__shortcut {
+  color: var(--text-muted, #8b90a0);
+  font-size: 12px;
+}
+
+/* Checkable rows (the Model menu): a fixed-width check column keeps the
+   labels aligned whether or not the row is the selected one. */
+.window-titlebar__item--checkable {
+  justify-content: flex-start;
+}
+
+.window-titlebar__item-check {
+  width: 1.2em;
+  flex: none;
+  color: var(--accent, #7c7fd4);
+}
+
+.window-titlebar__separator {
+  height: 1px;
+  margin: var(--space-xs, 4px) 0;
+  background: var(--border, #262a33);
+}

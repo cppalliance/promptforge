@@ -1,0 +1,21 @@
+/* Styles for about-dialog.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in style.css. */
+
+/* About dialog: a centered modal over a dimmed backdrop. Structural only,
+   like the title-bar popovers in window-menu.css. */
+.about-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.about-dialog {
+  padding: var(--space-xl, 16px);
+  background: var(--bg-raised, #14161c);
+  border: 1px solid var(--border, #262a33);
+  border-radius: var(--radius, 6px);
+}

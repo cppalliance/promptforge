@@ -7,6 +7,11 @@
 // releases readOnly; consecutive takes compose because the cursor position
 // is captured fresh each time.
 
+// Bundle-order-sensitive: voice.css overrides murm-ui composer rules at
+// equal specificity, so it must land after the chat styles that main.ts
+// imports first (esbuild emits CSS in module-graph order).
+import "./voice.css";
+
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import type { StatusBar } from "./status-bar";
 

@@ -7,6 +7,8 @@
 // in a zone has been closed its Dockview group is gone; the next open
 // into the zone rebuilds the group on its side of the dock.
 
+import "./zones.css";
+
 import type {
   AddPanelPositionOptions,
   Direction,
