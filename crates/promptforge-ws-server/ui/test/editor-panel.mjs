@@ -172,8 +172,8 @@ function createStubSurface() {
     text() {
       return this.currentText;
     },
-    markSaved() {
-      this.setDirty(false);
+    markSaved(text) {
+      this.setDirty(this.currentText !== text);
     },
     isDirty() {
       return this.dirty;
@@ -333,8 +333,8 @@ check("the clean transition fires the listener", dirtyEvents.join(",") === "true
 
 surface.view.dispatch({ changes: { from: 0, insert: "x" } });
 check("a second edit dirties again", surface.isDirty());
-surface.markSaved();
-check("markSaved clears dirty and rebaselines", !surface.isDirty());
+surface.markSaved(surface.text());
+check("markSaved with the current text clears dirty and rebaselines", !surface.isDirty());
 surface.view.dispatch({ changes: { from: 1, to: 1 } });
 check("a no-op change keeps the surface clean", !surface.isDirty());
 
