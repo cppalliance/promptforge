@@ -178,6 +178,7 @@ function createStubSurface() {
     isDirty() {
       return this.dirty;
     },
+    setReadOnly() {},
     onDirtyChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
