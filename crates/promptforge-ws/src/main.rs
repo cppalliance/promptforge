@@ -53,7 +53,12 @@ fn run() -> anyhow::Result<()> {
     let window_result = health::wait_for_health(&url, HEALTH_TIMEOUT)
         .context("wait for the workshop server")
         .and_then(|()| window::run(&url));
-    let shutdown_result = server.shutdown().context("stop workshop server");
+    // Graceful-versus-forced is not actionable in an exiting shell; the
+    // bounded wait is what matters here.
+    let shutdown_result = server
+        .shutdown()
+        .map(|_termination| ())
+        .context("stop workshop server");
     // A shutdown failure stacked on a window failure is reported, not lost.
     if let (Err(_), Err(shutdown_error)) = (&window_result, &shutdown_result) {
         eprintln!("{shutdown_error:?}");
