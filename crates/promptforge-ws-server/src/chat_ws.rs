@@ -240,49 +240,14 @@ async fn relay_chat(
                 if payload == "[DONE]" {
                     continue;
                 }
-                let fields = delta_fields(&payload);
-                if let Some(text) = fields.reasoning {
-                    // Reasoning is a side channel: forwarded for the UI's
-                    // Thinking block, but never part of the taped response.
-                    status.debug(
-                        "Streaming response...",
-                        "a gateway reasoning chunk",
-                        Activity::Thinking,
-                    );
-                    let frame = tagged(
-                        id.as_ref(),
-                        serde_json::json!({"type": "reasoning", "content": text}),
-                    );
-                    if !send_frame(out, frame).await {
-                        finish.error = Some("client disconnected mid-stream".to_string());
-                        finish.record().await;
-                        // The dead client is gone, but any other subscriber
-                        // still watches the observer: return it to Ready
-                        // rather than leaving a stale activity LED.
-                        status.idle();
+                match forward_payload(&payload, &status, id.as_ref(), out, &mut finish.assembled)
+                    .await
+                {
+                    Forward::Sent => {}
+                    Forward::ClientGone => {
+                        client_disconnected(finish, &status).await;
                         return;
                     }
-                }
-                let Some(text) = fields.content else {
-                    continue;
-                };
-                finish.assembled.push_str(&text);
-                // A chunk pulse at Debug: the UI ignores the text, but the
-                // activity field keeps the generating LED lit.
-                status.debug(
-                    "Streaming response...",
-                    "a gateway response chunk",
-                    Activity::Generating,
-                );
-                let delta = tagged(
-                    id.as_ref(),
-                    serde_json::json!({"type": "delta", "content": text}),
-                );
-                if !send_frame(out, delta).await {
-                    finish.error = Some("client disconnected mid-stream".to_string());
-                    finish.record().await;
-                    status.idle();
-                    return;
                 }
             }
             Some(Err(error)) => {
@@ -305,6 +270,63 @@ async fn relay_chat(
             }
         }
     }
+}
+
+/// Whether one payload's frames all reached the client.
+enum Forward {
+    Sent,
+    ClientGone,
+}
+
+/// Forwards one SSE payload's deltas to the client: the reasoning side
+/// channel as a `reasoning` frame (for the UI's Thinking block, never part
+/// of the taped response) and the answer content as a `delta` frame,
+/// appended to `assembled` for the tape. The chunk pulses at Debug: the UI
+/// ignores the text, but the activity field keeps the LED lit.
+async fn forward_payload(
+    payload: &str,
+    status: &crate::status::StatusBus,
+    id: Option<&serde_json::Value>,
+    out: &tokio::sync::mpsc::Sender<Message>,
+    assembled: &mut String,
+) -> Forward {
+    let fields = delta_fields(payload);
+    if let Some(text) = fields.reasoning {
+        status.debug(
+            "Streaming response...",
+            "a gateway reasoning chunk",
+            Activity::Thinking,
+        );
+        let frame = tagged(id, serde_json::json!({"type": "reasoning", "content": text}));
+        if !send_frame(out, frame).await {
+            return Forward::ClientGone;
+        }
+    }
+    let Some(text) = fields.content else {
+        return Forward::Sent;
+    };
+    assembled.push_str(&text);
+    status.debug(
+        "Streaming response...",
+        "a gateway response chunk",
+        Activity::Generating,
+    );
+    let delta = tagged(id, serde_json::json!({"type": "delta", "content": text}));
+    if send_frame(out, delta).await {
+        Forward::Sent
+    } else {
+        Forward::ClientGone
+    }
+}
+
+/// Settles a stream whose client vanished mid-way: the tape records the
+/// partial exchange, and because the dead client is gone but any other
+/// subscriber still watches the observer, the status returns to Ready
+/// rather than leaving a stale activity LED.
+async fn client_disconnected(mut finish: StreamTape, status: &crate::status::StatusBus) {
+    finish.error = Some("client disconnected mid-stream".to_string());
+    finish.record().await;
+    status.idle();
 }
 
 /// Handles a gateway that declined the stream with an ordinary response:
