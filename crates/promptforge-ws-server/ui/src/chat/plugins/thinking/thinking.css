@@ -10,7 +10,6 @@
 	border: none;
 	color: var(--mur-text-muted);
 	font-size: 0.85rem;
-	font-style: italic;
 	font-weight: 500;
 	cursor: pointer;
 	padding: 0.25rem 0.5rem;
@@ -75,8 +74,8 @@
 	}
 }
 
-/* Open thinking renders as italic muted prose in a subtle container with a
-   soft left edge. */
+/* Open thinking renders as upright muted prose in a subtle container with a
+   soft left edge. No italics anywhere in the thinking UI. */
 .mur-think-content {
 	margin-top: 0.25rem;
 	padding: 0.5rem 0.75rem;
@@ -85,7 +84,6 @@
 	background-color: var(--mur-surface);
 	color: var(--mur-text-muted);
 	font-size: 0.9rem;
-	font-style: italic;
 	line-height: 1.5;
 	white-space: pre-wrap;
 	overscroll-behavior: contain;
@@ -112,7 +110,7 @@
 	padding: 0.25rem 0.5rem;
 	color: var(--mur-text-muted);
 	font-size: 0.85rem;
-	font-style: italic;
+	font-style: normal;
 }
 
 .mur-think-sr-only {

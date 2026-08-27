@@ -33,7 +33,7 @@ const PREVIEW_BOTTOM_TOLERANCE_PX = 8;
 const LABEL_THINKING = "Thinking";
 const LABEL_PREFILL = "Planning next moves";
 
-const ENCRYPTED_REASONING_FALLBACK = "<i>Thought process is hidden by the model provider.</i>";
+const ENCRYPTED_REASONING_FALLBACK = "Thought process is hidden by the model provider.";
 
 function getReasoningDisplayContent(block: ReasoningBlock): string {
 	if (block.encrypted) return ENCRYPTED_REASONING_FALLBACK;
