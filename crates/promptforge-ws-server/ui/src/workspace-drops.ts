@@ -1,10 +1,16 @@
-// Native file drops from the desktop shell. The wry drag-drop handler in
-// the shell turns an Explorer drop into a `promptforge:file-drop` event
+// Native file drops from the desktop shell. The shell's delegating drop
+// target turns an Explorer drop into a `promptforge:file-drop` event
 // carrying real OS paths; this module validates the payload and grants
 // each path through the workspace HTTP API. Desktop mode never reads file
 // bytes merely because a file was dragged onto the window. In a plain
 // browser the event never fires and normal HTML drag/drop of file
 // contents keeps working untouched.
+//
+// Because the shell forwards the OS drop to the webview (that forwarding
+// is what keeps HTML5 drag-and-drop alive for Dockview), the page must
+// suppress the browser's default file-drop action - navigating away to
+// the dropped file - itself. Only drags carrying files are suppressed;
+// in-page drags (Dockview tabs) are untouched.
 
 import type { StatusBar } from "./status-bar";
 
@@ -77,13 +83,26 @@ async function grantDroppedPaths(
   }
 }
 
+/** True when a drag carries OS files rather than an in-page payload. */
+function isFileDrag(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  return types !== undefined && Array.from(types).includes("Files");
+}
+
 /**
  * Listens for the shell's native drop event and grants each dropped path
  * through the workspace API. Active only in the desktop shell; in a plain
- * browser there is no native drop source and the listener is never
- * installed.
+ * browser there is no native drop source and the grant listener is never
+ * installed. The file-drag default suppression is installed everywhere:
+ * dropping a file must never navigate the page away, desktop or browser.
  */
 export function setupWorkspaceDrops(statusBar: StatusBar): void {
+  window.addEventListener("dragover", (event) => {
+    if (isFileDrag(event)) event.preventDefault();
+  });
+  window.addEventListener("drop", (event) => {
+    if (isFileDrag(event)) event.preventDefault();
+  });
   if (window.__PROMPTFORGE_DESKTOP__ !== true) {
     return;
   }
