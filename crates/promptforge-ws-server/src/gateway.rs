@@ -32,6 +32,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// since they can legitimately run for minutes.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Whole-request timeout for a profile switch: the gateway tears down and
+/// starts local model children synchronously inside the call, and loading
+/// a large model into VRAM can take minutes.
+const SWITCH_PROFILE_TIMEOUT: Duration = Duration::from_secs(300);
+
 /// A gateway HTTP response captured for verbatim relay.
 #[derive(Debug)]
 pub struct GatewayResponse {
@@ -267,6 +272,71 @@ impl GatewayClient {
         let response = self
             .authorize(self.http.get(format!("{}/v1/models", self.base_url)))
             .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        read(response).await
+    }
+
+    /// Fetches the gateway's profile list from `GET /admin/profiles`.
+    ///
+    /// A non-success status is relayed in the returned
+    /// [`GatewayResponse`], not reported as an error.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::Transport`] if the request cannot be
+    /// completed and [`GatewayError::ReadBody`] if the response body cannot
+    /// be read.
+    pub async fn list_profiles(&self) -> Result<GatewayResponse, GatewayError> {
+        let response = self
+            .authorize(self.http.get(format!("{}/admin/profiles", self.base_url)))
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        read(response).await
+    }
+
+    /// Fetches the gateway's live status from `GET /admin/status`, which
+    /// carries the active profile's name.
+    ///
+    /// A non-success status is relayed in the returned
+    /// [`GatewayResponse`], not reported as an error.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::Transport`] if the request cannot be
+    /// completed and [`GatewayError::ReadBody`] if the response body cannot
+    /// be read.
+    pub async fn profile_status(&self) -> Result<GatewayResponse, GatewayError> {
+        let response = self
+            .authorize(self.http.get(format!("{}/admin/status", self.base_url)))
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        read(response).await
+    }
+
+    /// Posts a profile switch to `POST /admin/switch-profile`. The call is
+    /// capped at [`SWITCH_PROFILE_TIMEOUT`] rather than the ordinary
+    /// request timeout: the gateway restarts its local model children
+    /// inside the call.
+    ///
+    /// A non-success status is relayed in the returned
+    /// [`GatewayResponse`], not reported as an error.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::Transport`] if the request cannot be
+    /// completed and [`GatewayError::ReadBody`] if the response body cannot
+    /// be read.
+    pub async fn switch_profile(&self, name: &str) -> Result<GatewayResponse, GatewayError> {
+        let response = self
+            .authorize(
+                self.http
+                    .post(format!("{}/admin/switch-profile", self.base_url)),
+            )
+            .json(&serde_json::json!({ "name": name }))
+            .timeout(SWITCH_PROFILE_TIMEOUT)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;

@@ -57,6 +57,22 @@ export interface AgentMenuCommands {
   readonly newAgent: () => void;
 }
 
+/**
+ * The gateway-profile surface the Model menu reads and dispatches
+ * through: the menu lists every profile with the active one checked, and
+ * selecting another asks the gateway to switch. The catalog is read at
+ * open time, so a switch completed while the menu was closed shows on
+ * the next open.
+ */
+export interface ProfileMenuService {
+  /** Every profile the gateway can load, by name. */
+  readonly profiles: readonly string[];
+  /** The active profile's name, or "" when unknown. */
+  readonly active: string;
+  /** Asks the gateway to switch to the named profile. */
+  switchTo(name: string): void;
+}
+
 const MENU_ORDER = ["file", "edit", "model", "window", "help"] as const;
 type MenuId = (typeof MENU_ORDER)[number];
 
@@ -160,6 +176,8 @@ export function setupWindowMenus(options: {
   readonly workshop: WorkshopMenuCommands;
   /** The shared model state the dynamic Model menu reads and writes. */
   readonly modelMenu?: ModelService;
+  /** The gateway-profile state the Model menu's Profiles section reads. */
+  readonly profileMenu?: ProfileMenuService;
 }): WindowMenuCommands & IDisposable {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
   if (!navElement) {
@@ -306,6 +324,8 @@ export function setupWindowMenus(options: {
   // The Model menu's rows mirror the catalog at open time: one checkable
   // radio row per model, the description as the tooltip, and a single
   // disabled row when the catalog is empty or no service was provided.
+  // Below the models, a Profiles section lists the gateway's loadable
+  // profiles the same way; selecting one switches the whole catalog.
   function rebuildModelRows(handle: MenuHandle): void {
     const service = options.modelMenu;
     handle.popover.textContent = "";
@@ -316,31 +336,58 @@ export function setupWindowMenus(options: {
       handle.rows.push(row);
       handle.popover.appendChild(row.element);
     };
+    const appendRadioRow = (
+      label: string,
+      isSelected: boolean,
+      tooltip: string | undefined,
+      run: () => void,
+    ): void => {
+      appendRow({ kind: "command", label, run }, (element) => {
+        element.classList.add("window-titlebar__item--checkable");
+        element.setAttribute("role", "menuitemradio");
+        element.setAttribute("aria-checked", isSelected ? "true" : "false");
+        if (tooltip) {
+          element.title = tooltip;
+        }
+        const check = document.createElement("span");
+        check.className = "window-titlebar__item-check";
+        check.setAttribute("aria-hidden", "true");
+        check.textContent = isSelected ? "✓" : "";
+        element.appendChild(check);
+      });
+    };
     if (!service || models.length === 0) {
       appendRow(
         { kind: "command", label: "No models available", run: () => {}, enabled: () => false },
         () => {},
       );
+    } else {
+      const selected = service.current;
+      for (const model of models) {
+        appendRadioRow(model.id, model.id === selected, model.description, () =>
+          service.setCurrent(model.id),
+        );
+      }
+    }
+    // The Profiles section only appears when the gateway actually offers a
+    // choice; a single-profile (or profile-less) gateway keeps the menu as
+    // it was.
+    const profileService = options.profileMenu;
+    const profiles = profileService ? profileService.profiles : [];
+    if (!profileService || profiles.length < 2) {
       return;
     }
-    const selected = service.current;
-    for (const model of models) {
-      const isSelected = model.id === selected;
-      appendRow(
-        { kind: "command", label: model.id, run: () => service.setCurrent(model.id) },
-        (element) => {
-          element.classList.add("window-titlebar__item--checkable");
-          element.setAttribute("role", "menuitemradio");
-          element.setAttribute("aria-checked", isSelected ? "true" : "false");
-          if (model.description) {
-            element.title = model.description;
-          }
-          const check = document.createElement("span");
-          check.className = "window-titlebar__item-check";
-          check.setAttribute("aria-hidden", "true");
-          check.textContent = isSelected ? "✓" : "";
-          element.appendChild(check);
-        },
+    const separator = document.createElement("div");
+    separator.className = "window-titlebar__separator";
+    separator.setAttribute("role", "separator");
+    handle.popover.appendChild(separator);
+    appendRow(
+      { kind: "command", label: "Profiles", run: () => {}, enabled: () => false },
+      () => {},
+    );
+    for (const profile of profiles) {
+      appendRadioRow(profile, profile === profileService.active, undefined, () =>
+        profileService.switchTo(profile),
       );
     }
   }

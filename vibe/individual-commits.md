@@ -138,3 +138,7 @@ the refactor's phase-2 idiom gate came back clean except one stale README route 
 
 user directive, twice escalated ("no italics even for thinking prose"); the sweep covered toggle, content, preview, and the encrypted-reasoning fallback for consistency. (user said)
 
+## 2026-08-27 Expose gateway profiles in the Model menu
+
+the gateway's /v1/models only advertises the active profile, so the menu was accurate but the user wanted profile switching; the admin API was plumbed through relay routes into a Model-menu profile section. (user reported, assistant reasoned the interpretation)
+
