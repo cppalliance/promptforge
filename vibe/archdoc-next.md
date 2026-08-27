@@ -86,3 +86,5 @@
 - [2026-08-27-1-refresh-tree-on-drop] cache scope: Root invalidation preserves independent expansion and subdirectory caches.
 - [2026-08-27-2-workshop-server-refactor] single socket owner: One select loop owns each WebSocket and cleanup follows resource guards rather than exit-path calls.
 - [2026-08-27-2-workshop-server-refactor] bounded shutdown: Serve handles expose readiness, shutdown, stopped, and join phases with a force watchdog outside library code.
+- [2026-08-27-3-server-driven-menu-state] multiplexed chats: Tagged chats interleave with per-chat ordering and scoped cancellation while inbound events remain readable.
+- [2026-08-27-3-server-driven-menu-state] profile-local memory: The server persists each profile last selected model outside hand-edited config.
