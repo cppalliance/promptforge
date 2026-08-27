@@ -2,8 +2,8 @@
    into dist/app.css. Themed values come from the :root tokens in style.css. */
 
 /* The status bar: a permanent full-width footer below the shell. The left
-   text carries the observer's current label; the right group holds the REC
-   badge and the slot, which holds the progress bar or the activity LED
+   text carries the observer's current label; the right group holds the
+   slot, which holds the progress bar or the REC+LED indicators group
    (never both - the slot's children are mutually exclusive, driven by the
    hidden attribute). min-height rather than height so a descender never
    clips against a fixed box. */
@@ -40,8 +40,16 @@
   gap: 4px;
 }
 
-/* The REC badge: always visible, a dim dark-red outline while idle and a
-   lit bright red while the mic records. */
+/* The REC+LED indicators group: swapped out as one unit whenever the
+   progress bar occupies the slot. */
+.status-bar__indicators {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The REC badge: a dim dark-red outline while idle and a lit bright red
+   while the mic records. */
 .status-bar__rec {
   display: inline-flex;
   align-items: center;
@@ -71,7 +79,7 @@
 }
 
 .status-bar__progress[hidden],
-.status-bar__led[hidden] {
+.status-bar__indicators[hidden] {
   display: none;
 }
 

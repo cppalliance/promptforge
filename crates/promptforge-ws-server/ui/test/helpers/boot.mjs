@@ -287,6 +287,7 @@ export async function bootWorkbench(name, run) {
   const statusText = window.document.querySelector(".status-bar__text");
   const statusSlot = window.document.querySelector(".status-bar__slot");
   const progressEl = window.document.querySelector(".status-bar__progress");
+  const indicatorsEl = window.document.querySelector(".status-bar__indicators");
   const ledEl = window.document.querySelector(".status-bar__led");
   const recEl = window.document.querySelector(".status-bar__rec");
 
@@ -395,6 +396,7 @@ export async function bootWorkbench(name, run) {
     statusText,
     statusSlot,
     progressEl,
+    indicatorsEl,
     ledEl,
     recEl,
     emitStatus,
