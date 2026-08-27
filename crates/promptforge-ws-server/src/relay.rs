@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use crate::app::AppState;
 use crate::gateway::{GatewayError, GatewayResponse};
 use crate::protocol::{Activity, ChatRequest};
-use crate::status::StatusBus;
+use crate::push::Push;
 use crate::tape::{Tape, TapeEvent};
 
 /// Relays the gateway's model catalog to the caller verbatim.
@@ -22,32 +22,32 @@ pub(crate) async fn models(State(state): State<AppState>) -> Response {
     if !state.health().is_reachable() {
         return gateway_unreachable();
     }
-    let status = state.status();
-    status.info(
+    let push = state.push();
+    push.push_status_update(
         "Loading models...",
         "fetching the gateway model catalog",
         Activity::General,
     );
     let result = state.gateway.list_models().await;
-    report_gateway_outcome(&status, &result, "GET /v1/models");
+    report_gateway_outcome(&push, &result, "GET /v1/models");
     relay(result)
 }
 
 /// Reports a gateway call's outcome on the status bus: back to idle on
 /// success, otherwise the error label matching the failure shape.
 fn report_gateway_outcome(
-    status: &StatusBus,
+    push: &Push,
     result: &Result<GatewayResponse, GatewayError>,
     route: &str,
 ) {
     match result {
-        Ok(upstream) if upstream.status.is_success() => status.idle(),
-        Ok(upstream) => status.error(
+        Ok(upstream) if upstream.status.is_success() => push.push_idle(),
+        Ok(upstream) => push.push_failure(
             format!("Gateway error: {}", upstream.status),
             format!("{route} answered a non-success status"),
             Activity::General,
         ),
-        Err(error) => status.error("Connection lost", error.to_string(), Activity::General),
+        Err(error) => push.push_failure("Connection lost", error.to_string(), Activity::General),
     }
 }
 
@@ -78,20 +78,20 @@ pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Respons
     if !state.health().is_reachable() {
         return gateway_unreachable();
     }
-    let status = state.status();
-    status.info(
+    let push = state.push();
+    push.push_status_update(
         "Submitting request...",
         "a buffered chat completion",
         Activity::General,
     );
-    status.info(
+    push.push_status_update(
         "Waiting for response...",
         "the gateway has the request",
         Activity::General,
     );
     let started = Instant::now();
     let result = state.gateway.chat_completion(&request).await;
-    report_gateway_outcome(&status, &result, "POST /v1/chat/completions");
+    report_gateway_outcome(&push, &result, "POST /v1/chat/completions");
     let latency = started.elapsed();
     if let Ok(upstream) = &result {
         let response_value = value_from_bytes(&upstream.body);
@@ -229,6 +229,7 @@ mod tests {
     use crate::catalog::CatalogBus;
     use crate::gateway::GatewayClient;
     use crate::heartbeat::GatewayHealth;
+    use crate::status::StatusBus;
     use crate::transcribe::VoiceSlot;
     use crate::workspace::Workspace;
 
