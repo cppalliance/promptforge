@@ -173,7 +173,10 @@ impl IDropTarget_Impl for DelegatingDropTarget_Impl {
         pt: &POINTL,
         pdwEffect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        unsafe { self.inner.DragEnter(pDataObj.ok()?, grfKeyState, *pt, pdwEffect) }
+        unsafe {
+            self.inner
+                .DragEnter(pDataObj.ok()?, grfKeyState, *pt, pdwEffect)
+        }
     }
 
     fn DragOver(
@@ -427,6 +430,10 @@ mod tests {
             dropped.borrow().is_empty(),
             "a non-file drop never fires the path callback"
         );
-        assert_eq!(*calls.borrow(), vec!["drop"], "the drop still reaches Chromium");
+        assert_eq!(
+            *calls.borrow(),
+            vec!["drop"],
+            "the drop still reaches Chromium"
+        );
     }
 }

@@ -175,12 +175,20 @@ fn serve_thread(
             state.catalog(),
             heartbeat::HEARTBEAT_INTERVAL,
         );
+        // Voice is GPU-only (see AppState::new): without GPU transcription
+        // the provisioning task gets an empty config and exits immediately,
+        // so a CPU build never downloads models or announces "Voice ready".
+        let voice_config = if crate::transcribe::gpu_transcription_available() {
+            config.voice.clone()
+        } else {
+            crate::config::VoiceConfig::default()
+        };
         let provision = provision::spawn(
             state.gateway_client().clone(),
             state.status(),
             state.health().clone(),
             state.voice_slot(),
-            config.voice.clone(),
+            voice_config,
         );
         axum::serve(listener, router(state))
             .with_graceful_shutdown(async move {
