@@ -11,7 +11,9 @@ import type { DockviewApi, SerializedDockview } from "dockview";
 import { resetZones, restoreZoneState, serializeZoneState } from "./zones";
 
 export const LAYOUT_STORAGE_KEY = "promptforge.workshop.layout";
-export const LAYOUT_SCHEMA_VERSION = 2;
+// v3: panels serialize their tabComponent; a v2 snapshot would restore
+// the Workshop tree with a closable default tab.
+export const LAYOUT_SCHEMA_VERSION = 3;
 
 const SAVE_DEBOUNCE_MS = 250;
 

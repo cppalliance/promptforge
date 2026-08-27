@@ -20,8 +20,8 @@ import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
 import { AgentController } from "./workshop/agent-controller";
 import { restoreLayout, startLayoutPersistence } from "./workshop/layout-persistence";
-import { createPanelComponent } from "./workshop/panel-types";
-import { installShortcuts } from "./workshop/shortcuts";
+import { createPanelComponent, createPanelTabComponent } from "./workshop/panel-types";
+import { installShortcuts, toggleWorkshopPanel } from "./workshop/shortcuts";
 import { initZones, openInZone } from "./workshop/zones";
 
 // The model catalog lives in module state, not the DOM: the title-bar
@@ -94,12 +94,15 @@ function createVoicePlugin(): ChatPlugin {
 // maps to a factory in panel-types, and openInZone places panels by zone
 // affinity (tree left, editors main, chat right). The workbench is always
 // unlocked: user drags rearrange panels at any time, and the zone
-// registry records the placement overrides.
+// registry records the placement overrides. Every panel renders a normal
+// chip tab (no singleTabMode: a lone tab stretched full-width reads as a
+// second title bar and hides that tabs exist at all); the Workshop tree's
+// tab comes from the close-button-free renderer.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
+  createTabComponent: createPanelTabComponent,
   theme: themeDark,
-  singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
   locked: false,
@@ -130,7 +133,10 @@ if (!restoreLayout(dock)) {
   treePanel.group.api.setSize({ width: 280 });
   agents.newAgent();
 }
-// A restored layout that carries no Agent panel still gets one.
+// The workbench never boots without its anchors: a restored layout that
+// lost the Workshop tree (a stale snapshot from before the tree became
+// non-closable) or carries no Agent panel gets them back.
+openInZone("tree", {});
 agents.ensureAgent();
 startLayoutPersistence(dock);
 installShortcuts(dock);
@@ -138,10 +144,11 @@ installShortcuts(dock);
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the catalog state through this surface and writes the
-// selection back into it. File > New Chat targets the active agent;
-// File > New Agent opens a fresh tab.
+// selection back into it. File > New Agent opens a fresh tab;
+// Window > Workshop Panel shares Ctrl+B's toggle.
 setupWindowMenus({
   agents,
+  workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
   modelMenu: {
     getModels: () => modelCatalog,
     getSelected: () => currentModel,

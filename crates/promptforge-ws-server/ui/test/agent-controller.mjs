@@ -5,9 +5,9 @@
 // controller's own behavior: one chat mounted per Agent tab onto that
 // panel's .mur-app surface, the plugins factory running once per tab,
 // the shared model applied at mount and broadcast to every live engine,
-// active-agent tracking for New Chat, destroy-on-close with survivor
-// fallback, non-agent panels mounting nothing, New Chat opening an
-// agent when none exist, and ensureAgent's guarantee.
+// active-agent tracking, destroy-on-close with survivor fallback,
+// non-agent panels mounting nothing, newChat's removal (New Agent is the
+// only new-conversation command), and ensureAgent's guarantee.
 // Run: node test/agent-controller.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -19,8 +19,8 @@ import { JSDOM } from "jsdom";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
 // The controller under test talks to ChatUI only through its constructor,
-// engine.setRequestDefaults, engine.sessions.create, and destroy; the
-// stub records all four so the assertions stay on the controller.
+// engine.setRequestDefaults, and destroy; the stub records all three so
+// the assertions stay on the controller.
 const stubChatMain = {
   name: "stub-chat-main",
   setup(build) {
@@ -39,10 +39,6 @@ const stubChatMain = {
             this.engine = {
               defaults: [],
               setRequestDefaults(d) { this.defaults.push(d); },
-              sessions: {
-                count: 0,
-                create() { this.count += 1; return Promise.resolve(); },
-              },
             };
             ChatUI.instances.push(this);
           }
@@ -60,7 +56,7 @@ const bundle = await esbuild.build({
       export { createDockview, themeDark } from "dockview";
       export { AgentController } from "./src/workshop/agent-controller.ts";
       export { initZones, openAgentPanel, openInZone } from "./src/workshop/zones.ts";
-      export { createPanelComponent } from "./src/workshop/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent } from "./src/workshop/panel-types.ts";
       export { ChatUI } from "./src/chat/main.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
@@ -156,6 +152,7 @@ const {
   openAgentPanel,
   openInZone,
   createPanelComponent,
+  createPanelTabComponent,
   ChatUI,
 } = await import(pathToFileURL(bundlePath).href);
 
@@ -167,8 +164,8 @@ function check(name, condition) {
 // The dock, wired exactly as main.ts wires it.
 const dock = createDockview(window.document.getElementById("dock"), {
   createComponent: createPanelComponent,
+  createTabComponent: createPanelTabComponent,
   theme: themeDark,
-  singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
   locked: false,
@@ -222,11 +219,8 @@ check(
 
 panelA.api.setActive();
 check("activating a tab retargets the active agent", agents.active() === chatA);
-agents.newChat();
-check(
-  "New Chat starts a session on the active agent only",
-  chatA.engine.sessions.count === 1 && chatB.engine.sessions.count === 0,
-);
+check("newChat is gone: New Agent is the only new-conversation command",
+  !("newChat" in agents) && typeof agents.newAgent === "function");
 
 // --- Destroy symmetry -----------------------------------------------------------
 
@@ -244,13 +238,13 @@ dock.removePanel(panelB);
 check("closing the last agent destroys it too", chatB.destroyed);
 check("closing the last agent clears the active agent", agents.active() === null);
 
-// --- New Chat and ensureAgent with no agent open --------------------------------
+// --- newAgent and ensureAgent with no agent open --------------------------------
 
-agents.newChat();
+agents.newAgent();
 const chatC = ChatUI.instances[2];
 check(
-  "New Chat with no agent opens one first, then starts its session",
-  ChatUI.instances.length === 3 && agents.active() === chatC && chatC.engine.sessions.count === 1,
+  "newAgent with no agent open mounts a fresh one",
+  ChatUI.instances.length === 3 && agents.active() === chatC,
 );
 
 agents.ensureAgent();
