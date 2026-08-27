@@ -6,6 +6,8 @@
 // map holds at most one entry in practice. The frame shapes themselves live
 // in protocol.ts.
 
+import { Emitter, type Event } from "../base/event";
+import { Disposable, toDisposable } from "../base/lifecycle";
 import type { CatalogModel, ChatPayload, StatusFrame } from "./protocol";
 
 /** The per-chat stream callbacks handed to `streamChat`. */
@@ -42,49 +44,62 @@ function defaultUrl(): string {
 const RECONNECT_INITIAL_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;
 
-export class WorkshopSocket {
+export class WorkshopSocket extends Disposable {
   private socket: WebSocket | null = null;
   private opening: { socket: WebSocket; promise: Promise<void> } | null = null;
   private nextId = 1;
   private reconnectDelayMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<number, PendingChat>();
-  private readonly statusHandlers = new Set<(frame: StatusFrame) => void>();
-  private readonly modelsHandlers = new Set<(models: CatalogModel[]) => void>();
-  private readonly disconnectHandlers = new Set<() => void>();
-  private readonly abortHandlers = new Set<() => void>();
 
-  constructor(private readonly url: string = defaultUrl()) {}
+  private readonly _onStatus = this._register(new Emitter<StatusFrame>());
+  /** Fires for every unsolicited status frame; subscribing returns the severing disposable. */
+  readonly onStatus: Event<StatusFrame> = this._onStatus.event;
+
+  private readonly _onModels = this._register(new Emitter<CatalogModel[]>());
+  /** Fires for every pushed model catalog. */
+  readonly onModels: Event<CatalogModel[]> = this._onModels.event;
+
+  private readonly _onDisconnect = this._register(new Emitter<void>());
+  /** Fires when the socket disconnects. */
+  readonly onDisconnect: Event<void> = this._onDisconnect.event;
+
+  private readonly _onAbort = this._register(new Emitter<void>());
+  /**
+   * Fires when an in-flight chat is aborted. The recycled socket cannot
+   * see the server's terminal status frame for the aborted chat, so
+   * listeners must clear local activity state themselves.
+   */
+  readonly onAbort: Event<void> = this._onAbort.event;
+
+  constructor(private readonly url: string = defaultUrl()) {
+    super();
+    // Disposal silences the socket before closing it (onclose detached the
+    // way reopen() does), so teardown is never mistaken for a dropout: no
+    // disconnect fan-out, no reconnect backoff. In-flight chats settle the
+    // same way a close would, so no caller awaits a reply forever.
+    this._register(
+      toDisposable(() => {
+        if (this.reconnectTimer !== null) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        const socket = this.socket;
+        if (socket) {
+          socket.onclose = null;
+          socket.close();
+          this.socket = null;
+        }
+        this.settleAll();
+      }),
+    );
+  }
 
   /** Opens the socket unless it is already open or opening. */
   connect(): void {
     // A failed open is ignored here: `onerror` has already reset the state,
     // and the next `streamChat` retries through `ensureOpen`.
     void this.ensureOpen().catch(() => {});
-  }
-
-  /** Registers a handler for unsolicited status frames. */
-  onStatus(handler: (frame: StatusFrame) => void): void {
-    this.statusHandlers.add(handler);
-  }
-
-  /** Registers a handler for pushed model catalogs. */
-  onModels(handler: (models: CatalogModel[]) => void): void {
-    this.modelsHandlers.add(handler);
-  }
-
-  /** Registers a handler fired when the socket disconnects. */
-  onDisconnect(handler: () => void): void {
-    this.disconnectHandlers.add(handler);
-  }
-
-  /**
-   * Registers a handler fired when an in-flight chat is aborted. The
-   * recycled socket cannot see the server's terminal status frame for the
-   * aborted chat, so listeners must clear local activity state themselves.
-   */
-  onAbort(handler: () => void): void {
-    this.abortHandlers.add(handler);
   }
 
   /**
@@ -111,9 +126,7 @@ export class WorkshopSocket {
         if (!this.pending.has(id)) return;
         this.settle(id, (chat) => chat.resolve());
         this.reopen();
-        for (const handler of this.abortHandlers) {
-          handler();
-        }
+        this._onAbort.fire(undefined);
       };
       const finish = (): void => signal.removeEventListener("abort", onAbort);
       this.pending.set(id, {
@@ -175,9 +188,7 @@ export class WorkshopSocket {
       if (this.socket === socket) this.socket = null;
       if (this.opening === entry) this.opening = null;
       this.settleAll();
-      for (const handler of this.disconnectHandlers) {
-        handler();
-      }
+      this._onDisconnect.fire(undefined);
       this.scheduleReconnect();
     };
     return entry.promise;
@@ -224,17 +235,12 @@ export class WorkshopSocket {
       return;
     }
     if (frame.type === "status") {
-      const status = frame as unknown as StatusFrame;
-      for (const handler of this.statusHandlers) {
-        handler(status);
-      }
+      this._onStatus.fire(frame as unknown as StatusFrame);
       return;
     }
     if (frame.type === "models") {
       const models = Array.isArray(frame.models) ? (frame.models as CatalogModel[]) : [];
-      for (const handler of this.modelsHandlers) {
-        handler(models);
-      }
+      this._onModels.fire(models);
       return;
     }
     if (typeof frame.id !== "number") return;

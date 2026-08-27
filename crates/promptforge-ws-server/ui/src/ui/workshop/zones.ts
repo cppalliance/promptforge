@@ -15,6 +15,7 @@ import type {
   IDockviewPanel,
 } from "dockview";
 
+import { DisposableStore, type IDisposable } from "../../base/lifecycle";
 import { uuidv7 } from "../../chat/utils/uuid";
 import { PANEL_TYPES, isPanelType, type PanelType } from "./panel-types";
 
@@ -87,16 +88,20 @@ export function setZoneOverride(panelId: string, zone: ZoneName): void {
 /**
  * Binds the registry to the dock. User drags (always possible: the
  * workbench is never locked) flow back into the override map through
- * onDidMovePanel.
+ * onDidMovePanel. Returns the disposable owning that subscription.
  */
-export function initZones(dockview: DockviewApi): void {
+export function initZones(dockview: DockviewApi): IDisposable {
   dock = dockview;
-  dock.onDidMovePanel(({ panel, to }) => {
-    const zone = zoneForGroupId(to.id);
-    if (zone !== undefined) {
-      setZoneOverride(panel.id, zone);
-    }
-  });
+  const store = new DisposableStore();
+  store.add(
+    dockview.onDidMovePanel(({ panel, to }) => {
+      const zone = zoneForGroupId(to.id);
+      if (zone !== undefined) {
+        setZoneOverride(panel.id, zone);
+      }
+    }),
+  );
+  return store;
 }
 
 /** The zone's group while it is alive; undefined once it has closed away. */

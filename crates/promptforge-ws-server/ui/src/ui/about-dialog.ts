@@ -3,6 +3,8 @@
 // dialog while it is open, Escape and the Close button dismiss it, and
 // focus returns to the element that opened it.
 
+import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
+
 // Mirrors [workspace.package] version in the workspace Cargo.toml; bump
 // together with the crate version.
 const APP_VERSION = "0.1.0";
@@ -11,10 +13,15 @@ const LICENSE = "BSL-1.0";
 const FOCUSABLE_SELECTOR =
   'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
-/** Opens the About modal; a no-op while one is already open. */
-export function showAboutDialog(): void {
+/**
+ * Opens the About modal; a no-op while one is already open. Returns the
+ * disposable that dismisses the dialog - Escape and the Close button
+ * dispose it too.
+ */
+export function showAboutDialog(): IDisposable {
   if (document.querySelector(".about-dialog")) {
-    return;
+    // The open dialog owns its own teardown; there is nothing to release.
+    return toDisposable(() => {});
   }
   const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -48,10 +55,10 @@ export function showAboutDialog(): void {
   dialog.append(title, version, license, close);
   overlay.appendChild(dialog);
 
+  const store = new DisposableStore();
+
   function dismiss(): void {
-    document.removeEventListener("keydown", onKeydown, true);
-    overlay.remove();
-    invoker?.focus();
+    store.dispose();
   }
 
   function onKeydown(event: KeyboardEvent): void {
@@ -81,8 +88,22 @@ export function showAboutDialog(): void {
     }
   }
 
+  // Teardown order matters and mirrors the old dismiss(): the trap
+  // listener detaches first, then the overlay leaves the DOM and focus
+  // returns to the invoker.
+  store.add(toDisposable(() => document.removeEventListener("keydown", onKeydown, true)));
+  store.add(
+    toDisposable(() => {
+      overlay.remove();
+      invoker?.focus();
+    }),
+  );
+
+  // The Close button's listener is element-owned: it goes away with the
+  // overlay and needs no registration.
   close.addEventListener("click", dismiss);
   document.addEventListener("keydown", onKeydown, true);
   document.body.appendChild(overlay);
   close.focus();
+  return store;
 }
