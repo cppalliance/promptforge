@@ -42,6 +42,9 @@ const bundle = await esbuild.build({
   platform: "browser",
   target: "es2022",
   logLevel: "silent",
+  // The modules under test import their colocated CSS; strip it - the
+  // test drives only the JS, and jsdom applies no stylesheets anyway.
+  loader: { ".css": "empty" },
 });
 
 const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });

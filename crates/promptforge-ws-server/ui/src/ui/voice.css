@@ -1,0 +1,67 @@
+/* Styles for voice.ts, which imports this file; esbuild bundles it into
+   dist/app.css. Themed values come from the :root tokens in style.css.
+
+   Bundle-order-sensitive: several rules here tie murm-ui's own composer
+   rules on specificity and win only by coming later in the cascade, so
+   this file must land after the chat styles main.ts imports first. Rule
+   order within this file is load-bearing too: the recording rules tie the
+   hover-glow rule on specificity and must stay after it. */
+
+/* Hover glow: icon buttons trade murm-ui's background wash
+   for a 1px accent ring plus a soft bloom. */
+.mur-form-icon-btn:hover:not(:disabled),
+.voice-mic:hover {
+  background-color: transparent;
+  box-shadow:
+    0 0 0 1px var(--hover-glow, #5b9cf5),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+}
+
+.voice-mic {
+  flex: none;
+}
+
+/* Recording mic: a steady danger fill with a matching ring and bloom.
+   The hover form needs :not(:disabled) to match the glow rule's specificity -
+   the mic also carries mur-form-icon-btn, whose hover would otherwise
+   outrank this and strip the fill. */
+.voice-mic--recording {
+  color: var(--on-danger, #ffffff);
+  background: var(--danger, #b0606a);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px var(--danger, #b0606a),
+    0 0 6px color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
+}
+
+.voice-mic--recording:hover:not(:disabled) {
+  color: var(--on-danger, #ffffff);
+  background: var(--danger, #b0606a);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px var(--danger, #b0606a),
+    0 0 8px color-mix(in oklab, var(--danger, #b0606a) 70%, transparent);
+}
+
+/* Send button hover: accent glow in both normal and generating states. */
+.mur-action-btn:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--hover-glow, #5b9cf5),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+}
+
+/* Composer overlap fix: make the form container participate in the column
+   flex flow so the scroll area shrinks to accommodate it. The embedded
+   workshop mode only - murm-ui's standalone keeps absolute positioning. */
+.mur-app-embedded .mur-chat-form-container {
+  position: relative;
+}
+
+.mur-app-embedded.mur-chat-empty .mur-chat-form-container {
+  bottom: auto;
+  transform: none;
+}
+
+.mur-app-embedded .mur-chat-history {
+  padding-bottom: 1rem;
+}

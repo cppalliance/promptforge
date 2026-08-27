@@ -28,6 +28,9 @@ async function bundle(entry) {
     platform: "browser",
     target: "es2022",
     logLevel: "silent",
+    // The modules under test import their colocated CSS; strip it - the
+    // test drives only the JS, and jsdom applies no stylesheets anyway.
+    loader: { ".css": "empty" },
   });
   const code = result.outputFiles[0].text;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);

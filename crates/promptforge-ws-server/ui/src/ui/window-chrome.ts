@@ -5,6 +5,8 @@
 // narrow, typed command through that bridge - the shell (step 9) parses
 // and validates the payload before any native window operation runs.
 
+import "./window-chrome.css";
+
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 
 declare global {
