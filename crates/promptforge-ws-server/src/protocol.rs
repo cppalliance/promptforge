@@ -229,47 +229,78 @@ impl ErrorFrame {
     }
 }
 
+/// The `/voice` stream announcement: `{"type":"stream","generation":N}`,
+/// sent when a `start` begins a new stream generation and before any of
+/// that generation's interim or final frames. Generations count from 1
+/// per connection, so the client can discard frames a stop/restart race
+/// left behind from a superseded take.
+#[derive(Debug, Serialize)]
+pub(crate) struct StreamFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    generation: u64,
+}
+
+impl StreamFrame {
+    /// Builds the announcement for `generation`.
+    pub(crate) fn new(generation: u64) -> Self {
+        Self {
+            kind: "stream",
+            generation,
+        }
+    }
+}
+
 /// One interim transcription push on `/voice`:
-/// `{"type":"interim","committed":"...","tentative":"..."}`. `committed`
-/// is the take's crystallized prefix (append-only within a take) and
-/// `tentative` is the interim model's decode of the audio past it.
+/// `{"type":"interim","committed":"...","tentative":"...","generation":N}`.
+/// `committed` is the take's crystallized prefix (append-only within a
+/// take), `tentative` is the interim model's decode of the audio past it,
+/// and `generation` names the announced stream generation the frame
+/// belongs to.
 #[derive(Debug, Serialize)]
 pub(crate) struct InterimFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     committed: String,
     tentative: String,
+    generation: u64,
 }
 
 impl InterimFrame {
-    /// Builds an interim frame from the take's two transcript fields.
-    pub(crate) fn new(committed: String, tentative: String) -> Self {
+    /// Builds an interim frame from the take's two transcript fields,
+    /// tagged with the take's stream generation.
+    pub(crate) fn new(committed: String, tentative: String, generation: u64) -> Self {
         Self {
             kind: "interim",
             committed,
             tentative,
+            generation,
         }
     }
 }
 
 /// The take's single stop reply on `/voice`:
-/// `{"type":"final","text":"...","frames":N}` - the assembled transcript
-/// plus the total PCM frames received since the most recent start.
+/// `{"type":"final","text":"...","frames":N,"generation":N}` - the
+/// assembled transcript, the total PCM frames received since the most
+/// recent start, and the announced stream generation the take belongs to.
 #[derive(Debug, Serialize)]
 pub(crate) struct FinalFrame {
     #[serde(rename = "type")]
     kind: &'static str,
     text: String,
     frames: u64,
+    generation: u64,
 }
 
 impl FinalFrame {
-    /// Builds the stop reply from the transcript and the frame count.
-    pub(crate) fn new(text: String, frames: u64) -> Self {
+    /// Builds the stop reply from the transcript and the frame count,
+    /// tagged with the take's stream generation.
+    pub(crate) fn new(text: String, frames: u64, generation: u64) -> Self {
         Self {
             kind: "final",
             text,
             frames,
+            generation,
         }
     }
 }
@@ -446,10 +477,23 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_frame_serializes_its_generation() {
+        let frame = serde_json::to_value(StreamFrame::new(3)).expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "stream",
+                "generation": 3,
+            })
+        );
+    }
+
+    #[test]
     fn an_interim_frame_serializes_both_transcript_fields() {
         let frame = serde_json::to_value(InterimFrame::new(
             "ask not".to_string(),
             "what you".to_string(),
+            1,
         ))
         .expect("the frame serializes");
         assert_eq!(
@@ -458,13 +502,14 @@ mod tests {
                 "type": "interim",
                 "committed": "ask not",
                 "tentative": "what you",
+                "generation": 1,
             })
         );
     }
 
     #[test]
     fn a_final_frame_serializes_the_transcript_and_the_frame_count() {
-        let frame = serde_json::to_value(FinalFrame::new(String::new(), 192))
+        let frame = serde_json::to_value(FinalFrame::new(String::new(), 192, 2))
             .expect("the frame serializes");
         assert_eq!(
             frame,
@@ -472,6 +517,7 @@ mod tests {
                 "type": "final",
                 "text": "",
                 "frames": 192,
+                "generation": 2,
             })
         );
     }

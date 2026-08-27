@@ -1,5 +1,8 @@
 // Push-to-talk voice capture over the /voice WebSocket: binary f32 PCM at
 // 16 kHz mono in, "start"/"stop" control words, and JSON text frames out.
+// The server answers each "start" with a `stream` frame announcing the
+// take's generation and tags every interim/final frame with it; frames
+// from an older generation are stale (a stop/restart race) and dropped.
 // Dictation behaves like typing at the cursor: each take captures the
 // selection at record start, splices committed+tentative into that range,
 // and sets readOnly so the user cannot disturb the insertion geometry.
@@ -57,6 +60,14 @@ interface VoiceSession {
 interface TakeState {
   prefix: string;
   suffix: string;
+}
+
+// One socket's announced stream generation (services/protocol.ts
+// StreamFrame), null until the server's announcement arrives. Tracked per
+// socket because each take opens its own /voice connection and the server
+// counts generations per connection.
+interface StreamTracker {
+  current: number | null;
 }
 
 export function setupVoice(elements: VoiceElements, statusBar: StatusBar): VoiceHandle {
@@ -125,7 +136,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
 
   // Handles one server text message. Returns true when the take is over and
   // the socket should close.
-  function handleVoiceMessage(data: unknown): boolean {
+  function handleVoiceMessage(data: unknown, stream: StreamTracker): boolean {
     if (suppressReplies) return true;
     if (typeof data !== "string") {
       return true;
@@ -136,11 +147,30 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
       committed?: unknown;
       tentative?: unknown;
       frames?: unknown;
+      generation?: unknown;
     } | null;
     try {
       msg = JSON.parse(data) as typeof msg;
     } catch {
       msg = null;
+    }
+    if (msg && msg.type === "stream") {
+      stream.current = typeof msg.generation === "number" ? msg.generation : null;
+      return false;
+    }
+    // A frame tagged with a generation other than the announced one belongs
+    // to a take the server has already superseded (a stop/restart race):
+    // drop it and keep listening for the current generation. A frame with
+    // no generation, or one arriving before any announcement, is treated
+    // as current, so the client tolerates a server that never announces.
+    if (
+      msg &&
+      (msg.type === "interim" || msg.type === "final") &&
+      typeof msg.generation === "number" &&
+      stream.current !== null &&
+      msg.generation !== stream.current
+    ) {
+      return false;
     }
     if (msg && msg.type === "interim") {
       const committed = typeof msg.committed === "string" ? msg.committed : "";
@@ -229,8 +259,9 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
           ws!.send(event.data);
         }
       };
+      const generation: StreamTracker = { current: null };
       ws.addEventListener("message", (event) => {
-        if (handleVoiceMessage(event.data)) {
+        if (handleVoiceMessage(event.data, generation)) {
           ws!.close();
         }
       });
