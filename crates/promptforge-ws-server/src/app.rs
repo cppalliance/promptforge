@@ -40,11 +40,13 @@ pub struct AppState {
 impl AppState {
     /// Builds shared state from the loaded configuration.
     ///
-    /// When `[voice]` names an interim model whose file exists, the engine
-    /// loads here. A configured model that is missing or unloadable never
-    /// fails startup: when the model has a source URL, activation defers to
-    /// the provisioning task (which fetches it through the gateway cache);
-    /// otherwise voice degrades to disabled with a status-bar explanation.
+    /// When `[voice]` names an interim model whose file exists and GPU
+    /// transcription is available, the engine loads here. A configured
+    /// model that is missing or unloadable never fails startup: when the
+    /// model has a source URL, activation defers to the provisioning task
+    /// (which fetches it through the gateway cache); otherwise voice
+    /// degrades to disabled with a status-bar explanation. Without GPU
+    /// transcription the models are never loaded at all.
     ///
     /// # Errors
     /// Returns [`AppError::Gateway`] if the HTTP client cannot be built and
@@ -62,8 +64,21 @@ impl AppState {
             .map_err(AppError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
         let voice = VoiceSlot::default();
-        if let Some(engine) = startup_engine(&config.voice, &status) {
-            voice.activate(engine);
+        // Voice is GPU-only: without the CUDA backend and an NVIDIA driver
+        // a take stalls on a CPU pass and the UI hides the mic, so the
+        // server never loads the multi-gigabyte whisper models it could
+        // not use, and never announces voice over a mic that is not there.
+        if crate::transcribe::gpu_transcription_available() {
+            if let Some(engine) = startup_engine(&config.voice, &status) {
+                voice.activate(engine);
+            }
+        } else if config.voice.enabled() {
+            tracing::info!("voice disabled: GPU transcription is unavailable");
+            status.info(
+                "Voice disabled",
+                "GPU transcription is unavailable; the whisper models stay unloaded",
+                Activity::General,
+            );
         }
         status.idle();
         Ok(Self {
