@@ -12,7 +12,9 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use futures_util::stream::{self, Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use crate::protocol::ChatRequest;
 
 /// Bound on a single `GET /health` probe: a gateway that accepts the
 /// connection but never answers must still read as unreachable, and two
@@ -29,18 +31,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// responses (SSE chat and cache downloads) use no whole-request timeout
 /// since they can legitimately run for minutes.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// A non-streaming chat completion request forwarded to the gateway.
-///
-/// This is the body accepted by the workshop's `POST /chat` and sent
-/// upstream to `POST /v1/chat/completions`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChatRequest {
-    /// The model name from the gateway catalog.
-    pub model: String,
-    /// OpenAI chat messages, relayed without inspecting their shape.
-    pub messages: Vec<serde_json::Value>,
-}
 
 /// A gateway HTTP response captured for verbatim relay.
 #[derive(Debug)]

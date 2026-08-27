@@ -21,7 +21,8 @@ use tokio::sync::{oneshot, watch};
 
 use crate::catalog::CatalogBus;
 use crate::gateway::GatewayClient;
-use crate::status::{Activity, StatusBus};
+use crate::protocol::Activity;
+use crate::status::StatusBus;
 
 /// How often the heartbeat probes the gateway. Hardcoded for now; a
 /// configuration knob may follow once someone needs one.
@@ -217,8 +218,7 @@ mod tests {
     use axum::routing::get;
     use tokio::sync::broadcast;
 
-    use crate::catalog::CatalogPush;
-    use crate::status::{Severity, StatusBarUpdate};
+    use crate::protocol::{CatalogPush, Severity, StatusBarUpdate};
 
     /// Fast enough to observe transitions without real waiting, slow
     /// enough that a 200 ms quiet window spans several ticks and so proves

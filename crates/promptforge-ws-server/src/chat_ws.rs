@@ -43,8 +43,8 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
 use crate::app::{AppState, tape_round_trip, value_from_bytes};
-use crate::gateway::{ChatRequest, ChatStream, GatewayResponse};
-use crate::status::Activity;
+use crate::gateway::{ChatStream, GatewayResponse};
+use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
 use crate::tape::Tape;
 use crate::ws_session::WsSession;
 
@@ -250,11 +250,7 @@ async fn relay_chat(
             None => {
                 finish.record().await;
                 status.idle();
-                let _ = send_frame(
-                    out,
-                    tagged(id.as_ref(), serde_json::json!({"type": "done"})),
-                )
-                .await;
+                let _ = send_frame(out, &DoneFrame::new(id.as_ref())).await;
                 return;
             }
         }
@@ -286,11 +282,7 @@ async fn forward_payload(
             "a gateway reasoning chunk",
             Activity::Thinking,
         );
-        let frame = tagged(
-            id,
-            serde_json::json!({"type": "reasoning", "content": text}),
-        );
-        if !send_frame(out, frame).await {
+        if !send_frame(out, &ReasoningFrame::new(text, id)).await {
             return Forward::ClientGone;
         }
     }
@@ -303,8 +295,7 @@ async fn forward_payload(
         "a gateway response chunk",
         Activity::Generating,
     );
-    let delta = tagged(id, serde_json::json!({"type": "delta", "content": text}));
-    if send_frame(out, delta).await {
+    if send_frame(out, &DeltaFrame::new(text, id)).await {
         Forward::Sent
     } else {
         Forward::ClientGone
@@ -361,14 +352,6 @@ async fn declined_stream(
         Activity::General,
     );
     send_error(out, id, message).await;
-}
-
-/// Tags a reply frame with the request's `id`, when it carried one.
-fn tagged(id: Option<&serde_json::Value>, mut frame: serde_json::Value) -> serde_json::Value {
-    if let (Some(id), Some(object)) = (id, frame.as_object_mut()) {
-        object.insert("id".to_string(), id.clone());
-    }
-    frame
 }
 
 /// The text fields of one streaming delta: answer content and the
@@ -452,10 +435,17 @@ impl StreamTape {
 }
 
 /// Sends one JSON text frame; a false return means the client is gone.
-async fn send_frame(out: &tokio::sync::mpsc::Sender<Message>, frame: serde_json::Value) -> bool {
-    out.send(Message::Text(frame.to_string().into()))
-        .await
-        .is_ok()
+async fn send_frame<F: serde::Serialize>(
+    out: &tokio::sync::mpsc::Sender<Message>,
+    frame: &F,
+) -> bool {
+    // Serializing the protocol frames cannot fail: strings, integers, and
+    // JSON values only. A frame that somehow cannot serialize is skipped,
+    // which is not a gone client.
+    let Ok(text) = serde_json::to_string(frame) else {
+        return true;
+    };
+    out.send(Message::Text(text.into())).await.is_ok()
 }
 
 /// Sends one `error` frame carrying `message`, tagged with the request's
@@ -465,11 +455,7 @@ async fn send_error(
     id: Option<&serde_json::Value>,
     message: impl Into<String>,
 ) {
-    let frame = tagged(
-        id,
-        serde_json::json!({"type": "error", "message": message.into()}),
-    );
-    let _ = send_frame(out, frame).await;
+    let _ = send_frame(out, &ErrorFrame::new(message.into(), id)).await;
 }
 
 #[cfg(test)]
@@ -490,7 +476,7 @@ mod tests {
 
     use crate::app::router;
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
-    use crate::status::{Activity, Progress, Severity, StatusBarUpdate};
+    use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
 
     const STREAM_BODY: &str = concat!(
         "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
