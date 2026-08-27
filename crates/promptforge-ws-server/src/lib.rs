@@ -17,6 +17,7 @@ mod protocol;
 mod provision;
 mod push;
 mod relay;
+mod routes;
 mod segment;
 mod serve;
 mod status;

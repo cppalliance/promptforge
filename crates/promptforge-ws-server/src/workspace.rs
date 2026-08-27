@@ -24,8 +24,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
-use crate::app::AppState;
-
 /// The largest file the workspace reads or accepts for a write: the editor
 /// targets source text, not media, so one MiB is generous.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -518,40 +516,35 @@ pub(crate) struct GrantResponse {
 /// Lists one level of a workspace directory, or the granted roots when the
 /// query carries no path.
 pub(crate) async fn tree(
-    State(state): State<AppState>,
+    State(workspace): State<Workspace>,
     Query(query): Query<TreeQuery>,
 ) -> Response {
-    respond(state.workspace().tree(query.path.as_deref().map(Path::new)))
+    respond(workspace.tree(query.path.as_deref().map(Path::new)))
 }
 
 /// Reads a confined UTF-8 text file with its metadata.
 pub(crate) async fn read_file(
-    State(state): State<AppState>,
+    State(workspace): State<Workspace>,
     Query(query): Query<FileQuery>,
 ) -> Response {
-    respond(state.workspace().read_file(Path::new(&query.path)))
+    respond(workspace.read_file(Path::new(&query.path)))
 }
 
 /// Writes a confined file after path, size, and modified-time validation.
 pub(crate) async fn write_file(
-    State(state): State<AppState>,
+    State(workspace): State<Workspace>,
     Json(body): Json<WriteRequest>,
 ) -> Response {
-    respond(state.workspace().write_file(
-        Path::new(&body.path),
-        &body.text,
-        body.expected_modified_ms,
-    ))
+    respond(workspace.write_file(Path::new(&body.path), &body.text, body.expected_modified_ms))
 }
 
 /// Registers a dropped path as a granted root for this process.
 pub(crate) async fn grant(
-    State(state): State<AppState>,
+    State(workspace): State<Workspace>,
     Json(body): Json<GrantRequest>,
 ) -> Response {
     respond(
-        state
-            .workspace()
+        workspace
             .grant(Path::new(&body.path))
             .map(|granted| GrantResponse { granted }),
     )
