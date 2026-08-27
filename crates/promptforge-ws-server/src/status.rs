@@ -12,7 +12,12 @@
 //!
 //! On the wire each update rides the main chat socket as an unsolicited
 //! `{"type":"status",...}` frame (see [`StatusBarUpdate::frame`]),
-//! interleaving freely with a chat's `delta`/`done`/`error` replies.
+//! interleaving freely with a chat's `delta`/`done`/`error` replies. The
+//! bus also retains the newest update, so a session that connects later
+//! sends the current status immediately - the delivery contract's
+//! resend-on-reconnect for ephemeral frames.
+
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::broadcast;
 
@@ -25,18 +30,20 @@ const STATUS_CHANNEL_CAPACITY: usize = 64;
 
 /// The shared status bus: a cloneable handle onto the broadcast channel.
 ///
-/// Clones are cheap (an `Arc` bump) and all of them send into the same
+/// Clones are cheap (two `Arc` bumps) and all of them send into the same
 /// channel, so subsystems take their own copy rather than a reference.
 #[derive(Debug, Clone)]
 pub(crate) struct StatusBus {
     sender: broadcast::Sender<StatusBarUpdate>,
+    latest: Arc<Mutex<Option<StatusBarUpdate>>>,
 }
 
 impl StatusBus {
-    /// Creates a bus with no subscribers and an empty ring.
+    /// Creates a bus with no subscribers, an empty ring, and no snapshot.
     pub(crate) fn new() -> Self {
         Self {
             sender: broadcast::channel(STATUS_CHANNEL_CAPACITY).0,
+            latest: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -45,9 +52,24 @@ impl StatusBus {
         self.sender.subscribe()
     }
 
+    /// The most recently emitted update, retained so a session connecting
+    /// later can send the current status as its snapshot.
+    pub(crate) fn latest(&self) -> Option<StatusBarUpdate> {
+        // A lock poisoned by a panicking peer recovers the value rather
+        // than wedging the process (the crate's zone-two error policy).
+        self.latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// Broadcasts one update. With no subscribers this is a no-op; a slow
     /// subscriber skips ahead rather than applying backpressure.
     pub(crate) fn emit(&self, update: StatusBarUpdate) {
+        // The retained copy (a second owner, hence the clone) is written
+        // before the send, so a session that subscribes after the send
+        // still finds this update as its snapshot.
+        *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(update.clone());
         // A send only fails when there are no receivers, which is the bus's
         // resting state before the first client connects.
         let _ = self.sender.send(update);
@@ -139,6 +161,19 @@ mod tests {
     async fn emitting_with_no_subscribers_is_a_no_op() {
         let bus = StatusBus::new();
         bus.info("Ready", "idle", Activity::General);
+    }
+
+    #[test]
+    fn the_newest_update_is_retained_for_the_connect_snapshot() {
+        let bus = StatusBus::new();
+        assert!(bus.latest().is_none(), "an untouched bus has no snapshot");
+        bus.info("one", "", Activity::General);
+        bus.info("two", "", Activity::General);
+        let latest = bus.latest().expect("the bus retains the newest update");
+        assert_eq!(
+            latest.label, "two",
+            "a session connecting now snapshots the newest update"
+        );
     }
 
     #[tokio::test]

@@ -18,6 +18,8 @@ anyhow.workspace = true
 axum.workspace = true
 dunce.workspace = true
 futures-util.workspace = true
+# Optional: only the test-fixtures feature decodes the WAV voice fixtures.
+hound = { workspace = true, optional = true }
 open.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
@@ -35,9 +37,16 @@ whisper-rs.workspace = true
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
+# Compiles the crate-internal test fixtures and re-exports them to the
+# integration-test binary; enabled for every test build by the self
+# dev-dependency below, never by production consumers.
+test-fixtures = ["dep:hound"]
 
 [dev-dependencies]
-hound.workspace = true
+# The crate dev-depends on itself so every test target - unit and
+# integration alike - builds the library with test-fixtures enabled,
+# without gate commands needing a --features flag.
+promptforge-ws-server = { path = ".", features = ["test-fixtures"] }
 tempfile.workspace = true
 time = { workspace = true, features = ["parsing"] }
 tokio-tungstenite.workspace = true

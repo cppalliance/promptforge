@@ -111,24 +111,43 @@ fn gpu_driver_present() -> bool {
 
 /// Shared fixtures for the transcription tests: a small GGML whisper model
 /// and a 16 kHz mono WAV of known speech, both downloaded out of band (the
-/// URLs are recorded in the design log) and gitignored.
-#[cfg(test)]
+/// URLs are recorded in the design log) and gitignored. Gated on the
+/// `test-fixtures` feature - which the crate's own dev-dependency enables
+/// for every test build - rather than `cfg(test)`, so the integration-test
+/// binary reuses these through the [`crate::fixtures`] re-export instead
+/// of duplicating them.
+// An `allow` rather than an `expect`: whether the lint fires here depends
+// on the build's cfg permutation (clippy suppresses expect_used inside
+// test-cfg'd code on its own), so an expectation would be unfulfilled in
+// some builds and fail the -D warnings gate.
+#[cfg(feature = "test-fixtures")]
+#[allow(
+    clippy::expect_used,
+    reason = "test fixtures fail by panicking with the invariant named"
+)]
 pub(crate) mod fixtures {
     use std::path::{Path, PathBuf};
 
     /// The directory holding the downloaded fixtures.
-    pub(crate) fn fixture_dir() -> PathBuf {
+    #[must_use]
+    pub fn fixture_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
     }
 
     /// Path to the test model, `ggml-tiny.en.bin`.
-    pub(crate) fn model_path() -> PathBuf {
+    #[must_use]
+    pub fn model_path() -> PathBuf {
         fixture_dir().join("ggml-tiny.en.bin")
     }
 
     /// Path to the test model, panicking with download instructions when it
     /// has not been fetched.
-    pub(crate) fn require_model() -> PathBuf {
+    ///
+    /// # Panics
+    /// Panics when the model file has not been downloaded, naming the URL
+    /// and the destination directory.
+    #[must_use]
+    pub fn require_model() -> PathBuf {
         let path = model_path();
         assert!(
             path.is_file(),
@@ -142,7 +161,12 @@ pub(crate) mod fixtures {
 
     /// Decodes `jfk.wav` (16 kHz mono s16 PCM, "ask not what your country
     /// can do for you") into f32 samples for the wire format.
-    pub(crate) fn jfk_samples() -> Vec<f32> {
+    ///
+    /// # Panics
+    /// Panics when the fixture WAV is missing or is not 16 kHz mono s16
+    /// PCM.
+    #[must_use]
+    pub fn jfk_samples() -> Vec<f32> {
         let path = fixture_dir().join("jfk.wav");
         let mut reader =
             hound::WavReader::open(&path).expect("jfk.wav fixture exists beside the test model");

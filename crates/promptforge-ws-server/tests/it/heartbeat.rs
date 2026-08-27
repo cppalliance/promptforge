@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::json;
 
-use crate::common::{JsonSocket, TestServer, spawn_gateway};
+use crate::common::{JsonSocket, RECV_TIMEOUT, TestServer, spawn_gateway};
 
 /// The catalog the mock gateway serves from `/v1/models`.
 const CATALOG: &str =
@@ -117,5 +117,22 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog() {
         }),
         "the refreshed catalog arrives as one models frame"
     );
+
+    // The push above happened before this connection existed, so only the
+    // retained snapshot can deliver the catalog here - the contract's
+    // resend of the catalog on reconnect.
+    let mut late = JsonSocket::connect(&server.ws_url("/ws")).await;
+    let resent = late
+        .recv_until(RECV_TIMEOUT, |frame| frame["type"] == "models")
+        .await;
+    assert_eq!(
+        resent,
+        json!({
+            "type": "models",
+            "models": [{"id": "test-model", "object": "model", "owned_by": "promptforge"}],
+        }),
+        "a connection made after the push still receives the catalog"
+    );
+    late.close().await;
     socket.close().await;
 }

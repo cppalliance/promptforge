@@ -4097,6 +4097,7 @@ dependencies = [
  "futures-util",
  "hound",
  "open",
+ "promptforge-ws-server",
  "reqwest 0.12.28",
  "rust-embed",
  "serde",
