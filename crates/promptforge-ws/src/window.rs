@@ -18,11 +18,6 @@ use tao::window::{Icon, WindowBuilder};
 use wry::DragDropEvent;
 use wry::{PermissionKind, PermissionResponse, WebView, WebViewBuilder};
 
-/// How often the delegating drop target retries its installation while
-/// Chromium's own target has not appeared yet.
-#[cfg(target_os = "windows")]
-const DROP_DELEGATION_RETRY: std::time::Duration = std::time::Duration::from_millis(200);
-
 /// The cold medallion program icon, embedded so the installed binary
 /// carries no asset files. Frames 2-5 stay on disk for a future activity
 /// animation.
@@ -243,10 +238,11 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
             }
         });
     // On Windows the shell must NOT use wry's drag-drop handler: wry
-    // implements it by revoking WebView2's own OLE drop target, which
-    // disables HTML5 drag-and-drop inside the page (Dockview panel drags
-    // included). The delegating drop target installed below observes
-    // Explorer drops without taking Chromium's target away.
+    // implements it by registering its own OLE drop target on the WebView2
+    // child windows, which starves Chromium of drag events and disables
+    // HTML5 drag-and-drop inside the page (Dockview panel drags included).
+    // Explorer path drops arrive over the web-message bridge instead (see
+    // file_drop.rs), attached right after the webview is built.
     #[cfg(not(target_os = "windows"))]
     let webview_builder = {
         let drop_proxy = event_loop.create_proxy();
@@ -268,32 +264,27 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
         .build(&window)
         .context("create the workshop webview")?;
 
-    // The delegating drop target wraps the target Chromium registers on
-    // its child windows. Chromium registers it asynchronously some time
-    // after the webview exists, so installation retries on a short timer
-    // until it lands (or gives up, costing only Explorer path drops).
+    // The page posts a drop's File objects over the WebView2 web-message
+    // channel; the bridge reads their real OS paths and feeds the same
+    // FileDrop event the wry handler produces elsewhere. An attach failure
+    // only degrades Explorer path drops, never the app.
     #[cfg(target_os = "windows")]
-    let mut drop_installer = {
-        use tao::platform::windows::WindowExtWindows as _;
+    {
         let drop_proxy = event_loop.create_proxy();
-        crate::drop_target::Installer::new(
-            window.hwnd(),
-            std::rc::Rc::new(move |paths: Vec<PathBuf>| {
-                if let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths)) {
-                    eprintln!("could not forward the dropped paths to the event loop: {error}");
-                }
-            }),
-        )
-    };
+        if let Err(error) = crate::file_drop::attach(&webview, move |paths| {
+            if let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths)) {
+                eprintln!("could not forward the dropped paths to the event loop: {error}");
+            }
+        }) {
+            eprintln!(
+                "could not attach the file-drop bridge; Explorer drops will not grant workspace roots: {error}"
+            );
+        }
+    }
 
     let mut event_loop = event_loop;
     event_loop.run_return(|event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        #[cfg(target_os = "windows")]
-        if drop_installer.attempt() {
-            *control_flow =
-                ControlFlow::WaitUntil(std::time::Instant::now() + DROP_DELEGATION_RETRY);
-        }
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,

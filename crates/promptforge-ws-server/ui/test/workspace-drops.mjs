@@ -3,9 +3,10 @@
 // it against jsdom. Covers: browser mode never installs the grant listener;
 // in desktop mode a synthesized promptforge:file-drop event POSTs one grant
 // per path with a paths-only JSON body; malformed details are ignored; a
-// failed grant paints the status bar and does not stop the rest; and the
+// failed grant paints the status bar and does not stop the rest; the
 // default action of file drags is suppressed (never navigating away) while
-// in-page drags keep their default.
+// in-page drags keep their default; and a file drop posts its File objects
+// over the WebView2 bridge when one is present.
 // Run: node test/workspace-drops.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -165,6 +166,53 @@ for (const desktop of [false, true]) {
     `a drop without a dataTransfer is left alone (desktop=${desktop})`,
     !bareDrop.defaultPrevented,
   );
+}
+
+// --- The WebView2 bridge receives a drop's File objects ----------------------
+
+// A drop carrying files posts them to the shell under the workspace-drop
+// message; without the bridge (plain browser) the same drop is only
+// default-suppressed. jsdom lacks DragEvent and File, so plain markers
+// stand in for the File objects - the module hands them over untouched.
+{
+  const { window } = scenario({ desktop: true });
+  const posted = [];
+  window.chrome = {
+    webview: {
+      postMessageWithAdditionalObjects: (message, objects) =>
+        posted.push({ message, objects }),
+    },
+  };
+  const fileA = { name: "a.txt" };
+  const fileB = { name: "b" };
+  const drop = syntheticDrag(window, "drop", ["Files"]);
+  // Array-like is all Array.from needs from the FileList stand-in.
+  Object.defineProperty(drop.dataTransfer, "files", {
+    value: { length: 2, 0: fileA, 1: fileB },
+  });
+  window.dispatchEvent(drop);
+  check("a file drop posts one workspace-drop message", posted.length === 1);
+  check(
+    "the message carries the sentinel and every dropped File",
+    posted.length === 1 &&
+      posted[0].message === "workspace-drop" &&
+      posted[0].objects.length === 2 &&
+      posted[0].objects[0] === fileA &&
+      posted[0].objects[1] === fileB,
+  );
+
+  const emptyDrop = syntheticDrag(window, "drop", ["Files"]);
+  Object.defineProperty(emptyDrop.dataTransfer, "files", { value: { length: 0 } });
+  window.dispatchEvent(emptyDrop);
+  check("a file drag with no files posts nothing", posted.length === 1);
+}
+
+{
+  const { window } = scenario({ desktop: true });
+  const drop = syntheticDrag(window, "drop", ["Files"]);
+  Object.defineProperty(drop.dataTransfer, "files", { value: { length: 1, 0: { name: "x" } } });
+  window.dispatchEvent(drop);
+  check("without the bridge a file drop only suppresses the default", drop.defaultPrevented);
 }
 
 // --- A failed grant paints the status bar and the rest still run ------------

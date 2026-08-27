@@ -126,3 +126,7 @@ on Stop the client aborts and recycles the socket, so the server's terminal stat
 
 the title bar carries the application menus, so hiding it in browser mode hid the menus; the bar stays visible everywhere and only the window controls remain desktop-only. (user flagged, assistant reasoned)
 
+## 2026-08-26 Replace the OLE drop target with the WebView2 file bridge
+
+wry's drag-drop handler revoked WebView2's OLE drop target, killing in-page drag-and-drop; since Chromium hides real OS paths from HTML5 drops, the design posts File objects over the web-message channel and the shell reads paths from ICoreWebView2File. (user reported, assistant reasoned the bridge)
+

@@ -1,13 +1,15 @@
-// Native file drops from the desktop shell. The shell's delegating drop
-// target turns an Explorer drop into a `promptforge:file-drop` event
-// carrying real OS paths; this module validates the payload and grants
-// each path through the workspace HTTP API. Desktop mode never reads file
-// bytes merely because a file was dragged onto the window. In a plain
-// browser the event never fires and normal HTML drag/drop of file
-// contents keeps working untouched.
+// Native file drops in the desktop shell. The page cannot read real OS
+// paths from an HTML5 drop, so on drop it posts the DOM File objects over
+// the WebView2 web-message channel (postMessageWithAdditionalObjects);
+// the shell reads each file's real path and answers with a
+// `promptforge:file-drop` event, which this module validates and grants
+// through the workspace HTTP API. Desktop mode never reads file bytes
+// merely because a file was dragged onto the window. In a plain browser
+// neither the bridge nor the event exists and normal HTML drag/drop of
+// file contents keeps working untouched.
 //
-// Because the shell forwards the OS drop to the webview (that forwarding
-// is what keeps HTML5 drag-and-drop alive for Dockview), the page must
+// The shell never touches the OS drop itself (WebView2's own drop target
+// is what keeps HTML5 drag-and-drop alive for Dockview), so the page must
 // suppress the browser's default file-drop action - navigating away to
 // the dropped file - itself. Only drags carrying files are suppressed;
 // in-page drags (Dockview tabs) are untouched.
@@ -16,6 +18,29 @@ import type { StatusBar } from "./status-bar";
 
 /** The native event the shell dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";
+
+/** The web message the shell's file-drop bridge listens for. */
+const DROP_MESSAGE = "workspace-drop";
+
+/** The WebView2 script bridge, present only inside the desktop shell. */
+interface WebView2Bridge {
+  readonly postMessageWithAdditionalObjects?: (message: string, objects: readonly File[]) => void;
+}
+
+/**
+ * Posts a drop's File objects to the shell, which reads their real OS
+ * paths (something the page itself is never allowed to see) and answers
+ * with the `promptforge:file-drop` event. Outside the desktop shell the
+ * bridge does not exist and the drop ends here.
+ */
+function postDroppedFiles(event: DragEvent): void {
+  const files = event.dataTransfer?.files;
+  if (files === undefined || files.length === 0) {
+    return;
+  }
+  const bridge = (window as { chrome?: { webview?: WebView2Bridge } }).chrome?.webview;
+  bridge?.postMessageWithAdditionalObjects?.(DROP_MESSAGE, Array.from(files));
+}
 
 /**
  * Reads the dropped paths out of the native event. The detail arrives as
@@ -101,7 +126,10 @@ export function setupWorkspaceDrops(statusBar: StatusBar): void {
     if (isFileDrag(event)) event.preventDefault();
   });
   window.addEventListener("drop", (event) => {
-    if (isFileDrag(event)) event.preventDefault();
+    if (isFileDrag(event)) {
+      event.preventDefault();
+      postDroppedFiles(event);
+    }
   });
   if (window.__PROMPTFORGE_DESKTOP__ !== true) {
     return;
