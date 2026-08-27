@@ -103,9 +103,13 @@ export class EditorPanel extends Disposable implements IContentRenderer {
     }
     this.saving = true;
     try {
-      const written = await this.writer()(this.path, this.surface.text(), this.modifiedMs);
+      // The text is captured once: the write and the saved baseline must
+      // agree, or keystrokes typed while the PUT is in flight would be
+      // baselined as saved and silently lost.
+      const text = this.surface.text();
+      const written = await this.writer()(this.path, text, this.modifiedMs);
       this.modifiedMs = written.modifiedMs;
-      this.surface.markSaved();
+      this.surface.markSaved(text);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {
         this.showConflictDialog();
@@ -246,20 +250,27 @@ export class EditorPanel extends Disposable implements IContentRenderer {
    * (the file changed again in between) reopens the dialog.
    */
   private async overwrite(): Promise<void> {
-    if (this.path === null) {
+    // The saving guard cannot wedge the conflict flow: the dialog's
+    // Overwrite button runs on a later click, after save()'s finally
+    // block has already cleared the flag.
+    if (this.path === null || this.saving) {
       return;
     }
-    const fresh = await this.reader()(this.path);
+    this.saving = true;
     try {
-      const written = await this.writer()(this.path, this.surface.text(), fresh.modifiedMs);
+      const fresh = await this.reader()(this.path);
+      const text = this.surface.text();
+      const written = await this.writer()(this.path, text, fresh.modifiedMs);
       this.modifiedMs = written.modifiedMs;
-      this.surface.markSaved();
+      this.surface.markSaved(text);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {
         this.showConflictDialog();
       } else {
         this.showError(error);
       }
+    } finally {
+      this.saving = false;
     }
   }
 }

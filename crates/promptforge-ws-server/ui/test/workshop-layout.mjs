@@ -432,8 +432,8 @@ function createStubSurface() {
     text() {
       return this.currentText;
     },
-    markSaved() {
-      this.setDirty(false);
+    markSaved(text) {
+      this.setDirty(this.currentText !== text);
     },
     isDirty() {
       return this.dirty;

@@ -4,7 +4,8 @@
 // and the save flow are written against EditorSurface only - nothing else
 // in the app imports @codemirror/* directly. Dirty tracking is an
 // updateListener comparing the live document against the last opened or
-// saved text; markSaved resets that baseline after a successful write.
+// saved text; markSaved takes the exact text a write persisted, so
+// keystrokes that land while the write is in flight stay dirty.
 // Runtime-reconfigurables (language, readOnly) sit behind Compartments on
 // the surface; the externalUpdate annotation marks server-originated
 // reloads so listeners can tell them from local typing.
@@ -54,8 +55,12 @@ export interface EditorSurface {
   open(document: EditorDocument): void;
   /** The current editor text - what a save would write. */
   text(): string;
-  /** Marks the current text as the saved baseline, clearing dirty state. */
-  markSaved(): void;
+  /**
+   * Records the text a successful write persisted as the saved baseline
+   * and recomputes dirty against the live document, so edits made while
+   * the write was in flight stay dirty.
+   */
+  markSaved(text: string): void;
   /** Whether the text differs from the last open or markSaved baseline. */
   isDirty(): boolean;
   /** Toggles read-only mode; document, history, and view state survive. */
@@ -308,9 +313,9 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
     return this.view?.state.doc.toString() ?? "";
   }
 
-  markSaved(): void {
-    this.savedText = this.text();
-    this.setDirty(false);
+  markSaved(text: string): void {
+    this.savedText = text;
+    this.setDirty(this.text() !== text);
   }
 
   isDirty(): boolean {
