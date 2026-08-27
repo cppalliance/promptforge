@@ -158,24 +158,57 @@ export function ThinkingPlugin(): ChatPlugin {
 		return state;
 	};
 
-	// Prefill indicator: shown the moment generation starts, before the first
-	// reasoning or content token arrives. Non-interactive; the first reasoning
-	// delta replaces it with the Thinking toggle.
-	const showPrefillRow = (ctx: PluginContext, messageId: string): void => {
-		const engineState = ctx.engine.state;
-		if (engineState.generatingMessageId !== messageId) return;
-		const message = engineState.messages.find((candidate) => candidate.id === messageId);
-		if (!message || message.blocks.length > 0) return;
+	// Prefill attach attempts are tokened: a new generation (or the end of
+	// one) invalidates any attempt still waiting on the DOM.
+	let prefillToken = 0;
 
-		const messages = ctx.container.querySelectorAll(".mur-message-assistant");
-		const target = messages.item(messages.length - 1);
-		if (!(target instanceof HTMLElement)) return;
+	// One prefill attach attempt. "attached" and "stop" end the retry loop;
+	// "retry" means the feed has not rendered the message element yet.
+	const attachPrefillRow = (ctx: PluginContext, messageId: string): "attached" | "stop" | "retry" => {
+		const engineState = ctx.engine.state;
+		if (engineState.generatingMessageId !== messageId) return "stop";
+		const message = engineState.messages.find((candidate) => candidate.id === messageId);
+		if (!message) return "stop";
+		// A block already streaming supersedes the prefill indicator.
+		if (message.blocks.length > 0) return "stop";
+
+		const target = ctx.container.querySelector(
+			`.mur-message-assistant[data-message-id="${messageId}"]`,
+		);
+		if (!(target instanceof HTMLElement)) return "retry";
 
 		const label = el("span", "mur-think-label mur-think-label--prefill", { textContent: LABEL_PREFILL });
 		const row = el("div", "mur-think-prefill", {}, [label]);
 		row.setAttribute("role", "status");
 		target.appendChild(row);
 		prefillRow = row;
+		return "attached";
+	};
+
+	// Defers a callback past the current render pass; test environments
+	// without requestAnimationFrame fall back to a short timeout.
+	const defer = (fn: () => void): void => {
+		if (typeof requestAnimationFrame === "function") {
+			requestAnimationFrame(() => fn());
+		} else {
+			setTimeout(fn, 16);
+		}
+	};
+
+	// Prefill indicator: shown the moment generation starts, before the first
+	// reasoning or content token arrives. The selector notification fires
+	// before the feed's hot render creates the message element, so the
+	// attach is retried across a few frames until the element exists.
+	const showPrefillRow = (ctx: PluginContext, messageId: string): void => {
+		const token = ++prefillToken;
+		const tryAttach = (remaining: number): void => {
+			if (token !== prefillToken) return;
+			if (attachPrefillRow(ctx, messageId) !== "retry" || remaining <= 0) return;
+			defer(() => tryAttach(remaining - 1));
+		};
+		// The store notifies selectors before the hot render, both in the
+		// same synchronous set; a microtask lands after that render.
+		queueMicrotask(() => tryAttach(10));
 	};
 
 	return {
@@ -186,6 +219,7 @@ export function ThinkingPlugin(): ChatPlugin {
 			unsubscribePrefill = ctx.engine.onChange(
 				(engineState) => engineState.generatingMessageId,
 				(generatingMessageId) => {
+					prefillToken++;
 					removePrefillRow();
 					if (generatingMessageId === null) return;
 					showPrefillRow(ctx, generatingMessageId);
@@ -194,6 +228,7 @@ export function ThinkingPlugin(): ChatPlugin {
 		},
 
 		destroy: () => {
+			prefillToken++;
 			removePrefillRow();
 			unsubscribePrefill?.();
 			unsubscribePrefill = null;

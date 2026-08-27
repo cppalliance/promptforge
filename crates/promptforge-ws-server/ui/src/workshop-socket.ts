@@ -33,8 +33,17 @@ export interface ChatPayload {
   messages: Array<{ role: string; content: string }>;
 }
 
+/** The per-chat stream callbacks handed to `streamChat`. */
+export interface ChatStreamHandlers {
+  /** Called for each answer-content delta. */
+  onDelta: (content: string) => void;
+  /** Called for each reasoning side-channel delta, when the model has one. */
+  onReasoning?: (content: string) => void;
+}
+
 interface PendingChat {
   onDelta: (content: string) => void;
+  onReasoning: ((content: string) => void) | undefined;
   resolve: () => void;
   reject: (error: Error) => void;
   started: boolean;
@@ -113,7 +122,7 @@ export class WorkshopSocket {
    */
   async streamChat(
     payload: ChatPayload,
-    onDelta: (content: string) => void,
+    handlers: ChatStreamHandlers,
     signal: AbortSignal,
   ): Promise<void> {
     await this.ensureOpen();
@@ -133,7 +142,8 @@ export class WorkshopSocket {
       };
       const finish = (): void => signal.removeEventListener("abort", onAbort);
       this.pending.set(id, {
-        onDelta,
+        onDelta: handlers.onDelta,
+        onReasoning: handlers.onReasoning,
         resolve: () => {
           finish();
           resolve();
@@ -259,6 +269,13 @@ export class WorkshopSocket {
     if (frame.type === "delta" && typeof frame.content === "string" && frame.content !== "") {
       chat.started = true;
       chat.onDelta(frame.content);
+      return;
+    }
+    if (frame.type === "reasoning" && typeof frame.content === "string" && frame.content !== "") {
+      // Reasoning counts as a started reply: a socket that closes after
+      // only scratch work streamed still resolves rather than rejects.
+      chat.started = true;
+      chat.onReasoning?.(frame.content);
       return;
     }
     if (frame.type === "done") {

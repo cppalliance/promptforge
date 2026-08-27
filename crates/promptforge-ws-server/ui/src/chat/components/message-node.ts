@@ -35,6 +35,9 @@ export class MessageNode {
 	) {
 		this.el = document.createElement("div");
 		this.el.className = `mur-message mur-message-${msg.role}`;
+		// Plugins target specific messages by id (the thinking prefill row
+		// attaches to the generating message, never "the last assistant").
+		this.el.dataset.messageId = msg.id;
 		if (msg.role === "assistant") {
 			this.el.setAttribute("role", "article");
 			this.el.setAttribute("aria-label", "AI response");
