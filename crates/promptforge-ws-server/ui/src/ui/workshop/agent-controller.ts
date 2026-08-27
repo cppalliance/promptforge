@@ -10,11 +10,11 @@
 
 import type { DockviewApi, IDockviewPanel } from "dockview";
 
-import type { ChatPlugin } from "../chat/core/types";
-import { ChatUI } from "../chat/main";
-import { MemoryStorage } from "../memory-storage";
-import type { ModelService } from "../services/model-service";
-import type { WorkshopProvider } from "../workshop-provider";
+import type { ChatPlugin } from "../../chat/core/types";
+import { ChatUI } from "../../chat/main";
+import { MemoryStorage } from "../../services/memory-storage";
+import type { ModelService } from "../../services/model-service";
+import type { WorkshopProvider } from "../../services/workshop-provider";
 import { ChatPanel } from "./chat-panel";
 import { openAgentPanel } from "./zones";
 

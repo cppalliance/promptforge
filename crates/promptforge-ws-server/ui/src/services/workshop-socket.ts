@@ -3,35 +3,10 @@
 // unsolicited status updates from the server's observer. Chat requests are
 // multiplexed by an incrementing id the server echoes on that chat's
 // delta/done/error frames; the UI runs one chat at a time, so the pending
-// map holds at most one entry in practice.
+// map holds at most one entry in practice. The frame shapes themselves live
+// in protocol.ts.
 
-/** One observer status update, as sent by the server. */
-export interface StatusFrame {
-  type: "status";
-  label: string;
-  description: string;
-  severity: "info" | "debug" | "error";
-  activity: "general" | "thinking" | "generating";
-  progress: { current: number; total: number } | null;
-}
-
-/** One entry of the gateway's model catalog, as fetched or pushed. */
-export interface CatalogModel {
-  id: string;
-  description?: string;
-}
-
-/** A pushed model catalog, sent when the gateway comes back after an outage. */
-export interface ModelsFrame {
-  type: "models";
-  models: CatalogModel[];
-}
-
-/** The chat payload sent upstream in one `{"type":"chat",...}` frame. */
-export interface ChatPayload {
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-}
+import type { CatalogModel, ChatPayload, StatusFrame } from "./protocol";
 
 /** The per-chat stream callbacks handed to `streamChat`. */
 export interface ChatStreamHandlers {

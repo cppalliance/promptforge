@@ -8,7 +8,7 @@
 
 import type { IContentRenderer } from "dockview";
 
-import { fetchTree, type TreeEntry, type TreeListing } from "./workspace-api";
+import { fetchTree, type TreeEntry, type TreeListing } from "../../services/workspace-api";
 import { openInZone } from "./zones";
 
 // Cache key for the synthetic granted-roots listing, which has no path.

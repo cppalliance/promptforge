@@ -17,7 +17,7 @@
 // guard keeps the command a no-op there.
 
 import { showAboutDialog } from "./about-dialog";
-import type { ModelService } from "./services/model-service";
+import type { ModelService } from "../services/model-service";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */

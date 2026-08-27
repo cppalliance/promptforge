@@ -1,6 +1,6 @@
 // Integration test for the editor panel and EditorSurface contract
-// (src/workshop/editor-panel.ts, editor-surface.ts, and the file
-// read/write half of workspace-api.ts). Bundles the modules with esbuild
+// (src/ui/workshop/editor-panel.ts, editor-surface.ts, and the file
+// read/write half of src/services/workspace-api.ts). Bundles the modules with esbuild
 // and drives them in jsdom.
 //
 // jsdom note: CodeMirror 6 runs in jsdom once Range gains the measurement
@@ -23,8 +23,8 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { EditorPanel } from "./src/workshop/editor-panel.ts";
-      export { CodeMirrorSurface } from "./src/workshop/editor-surface.ts";
+      export { EditorPanel } from "./src/ui/workshop/editor-panel.ts";
+      export { CodeMirrorSurface } from "./src/ui/workshop/editor-surface.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
