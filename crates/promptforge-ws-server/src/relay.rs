@@ -425,7 +425,10 @@ mod tests {
         if !authorized(&headers) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
-        assert_eq!(body["name"], "qwen38", "the profile name reaches the gateway");
+        assert_eq!(
+            body["name"], "qwen38",
+            "the profile name reaches the gateway"
+        );
         (
             [(header::CONTENT_TYPE, "application/json")],
             r#"{"ok":true,"profile":"qwen38"}"#,
