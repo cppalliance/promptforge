@@ -20,6 +20,7 @@ mod tape;
 mod transcribe;
 mod voice;
 mod workspace;
+mod ws_session;
 
 pub use app::{AppError, AppState, DEFAULT_ADDR, router};
 pub use config::{
