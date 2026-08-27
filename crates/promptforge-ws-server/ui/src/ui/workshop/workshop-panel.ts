@@ -9,6 +9,7 @@
 import type { IContentRenderer } from "dockview";
 
 import { fetchTree, type TreeEntry, type TreeListing } from "../../services/workspace-api";
+import { WORKSPACE_CHANGED_EVENT } from "../workspace-drops";
 import { openInZone } from "./zones";
 
 // Cache key for the synthetic granted-roots listing, which has no path.
@@ -25,6 +26,12 @@ const CHEVRON_SVG =
 export class WorkshopTreePanel implements IContentRenderer {
   readonly element = document.createElement("div");
   private readonly list = document.createElement("ul");
+  // A dropped folder grants a new root after this panel rendered; the
+  // change event refetches the roots so the drop is visible immediately.
+  private readonly onWorkspaceChanged = (): void => {
+    listingCache.delete(ROOTS_KEY);
+    this.reload();
+  };
 
   constructor() {
     this.element.className = "workshop-tree";
@@ -35,6 +42,20 @@ export class WorkshopTreePanel implements IContentRenderer {
 
   init(): void {
     this.element.appendChild(this.list);
+    window.addEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
+    void this.loadRoots().catch((error: unknown) => {
+      this.showError(this.list, error);
+    });
+  }
+
+  dispose(): void {
+    window.removeEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
+  }
+
+  /** Clears the rendered roots (and the empty hint) and renders afresh. */
+  private reload(): void {
+    this.list.textContent = "";
+    this.element.querySelector(".workshop-tree__empty")?.remove();
     void this.loadRoots().catch((error: unknown) => {
       this.showError(this.list, error);
     });
