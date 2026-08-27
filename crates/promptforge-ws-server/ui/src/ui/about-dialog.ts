@@ -3,6 +3,8 @@
 // dialog while it is open, Escape and the Close button dismiss it, and
 // focus returns to the element that opened it.
 
+import "./about-dialog.css";
+
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 
 // Mirrors [workspace.package] version in the workspace Cargo.toml; bump

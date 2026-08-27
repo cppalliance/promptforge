@@ -50,6 +50,9 @@ const bundle = await esbuild.build({
   platform: "browser",
   target: "es2022",
   logLevel: "silent",
+  // The modules under test import their colocated CSS; strip it - the
+  // test drives only the JS, and jsdom applies no stylesheets anyway.
+  loader: { ".css": "empty" },
 });
 
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");

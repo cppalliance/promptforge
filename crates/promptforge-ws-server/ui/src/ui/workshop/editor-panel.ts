@@ -6,6 +6,8 @@
 // themed conflict dialog (reload the on-disk text, or overwrite it)
 // instead of silently clobbering the file.
 
+import "./editor-panel.css";
+
 import type { DockviewPanelApi, GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";

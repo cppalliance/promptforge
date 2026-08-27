@@ -1,9 +1,9 @@
-// Title-bar style contract: asserts the custom Windows chrome skin in
-// dist/style.css against the visual spec, at the structural level (which
-// variable feeds which property, which state gets which treatment) rather
-// than pixel-peeping computed boxes. jsdom has no layout engine, so the
-// DOM-side checks cover only what jsdom can prove: cascade behavior of the
-// [hidden] rule and the Windows control order in the shipped markup.
+// Title-bar style contract: asserts the custom Windows chrome skin against
+// the visual spec, at the structural level (which variable feeds which
+// property, which state gets which treatment) rather than pixel-peeping
+// computed boxes. jsdom has no layout engine, so the DOM-side checks cover
+// only what jsdom can prove: cascade behavior of the [hidden] rule and the
+// Windows control order in the shipped markup.
 // Run after `npm run build`: `node test/titlebar-style.mjs`.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,10 +12,20 @@ import { JSDOM } from "jsdom";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "..", "dist");
-const [html, css] = await Promise.all([
+const srcUiDir = path.join(uiDir, "..", "src", "ui");
+// The title-bar rules live in per-component CSS files colocated with their
+// owning modules; they ship bundled inside dist/app.css, where murm-ui's
+// rules would confuse the first-match rule scan below, so this test reads
+// the exact source files instead. Concatenation order mirrors the old
+// single-file order: tokens (dist/style.css), chrome, menus, About dialog.
+const [html, tokens, chrome, menu, about] = await Promise.all([
   readFile(path.join(distDir, "index.html"), "utf8"),
   readFile(path.join(distDir, "style.css"), "utf8"),
+  readFile(path.join(srcUiDir, "window-chrome.css"), "utf8"),
+  readFile(path.join(srcUiDir, "window-menu.css"), "utf8"),
+  readFile(path.join(srcUiDir, "about-dialog.css"), "utf8"),
 ]);
+const css = [tokens, chrome, menu, about].join("\n");
 
 const failures = [];
 function check(name, condition) {
