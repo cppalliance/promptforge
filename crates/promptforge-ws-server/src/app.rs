@@ -46,9 +46,9 @@ impl AppState {
     /// transcription the models are never loaded at all.
     ///
     /// # Errors
-    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built and
-    /// [`AppError::Tape`] if the session tape cannot be opened.
-    pub fn new(config: &Config) -> Result<Self, AppError> {
+    /// Returns [`StateError::Gateway`] if the HTTP client cannot be built
+    /// and [`StateError::Tape`] if the session tape cannot be opened.
+    pub fn new(config: &Config) -> Result<Self, StateError> {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let push = Push::new(status.clone(), catalog.clone());
@@ -60,8 +60,8 @@ impl AppState {
             Activity::General,
         );
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
-            .map_err(AppError::Gateway)?;
-        let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
+            .map_err(StateError::Gateway)?;
+        let tape = Tape::open(&config.tape.path).map_err(StateError::Tape)?;
         let voice = VoiceSlot::default();
         // Voice is GPU-only: without the CUDA backend and an NVIDIA driver
         // a take stalls on a CPU pass and the UI hides the mic, so the
@@ -146,10 +146,11 @@ impl AppState {
     }
 }
 
-/// A shared-state construction failure.
+/// A shared-state construction failure: rich, init-only, and never sent
+/// over the wire (the HTTP failure type is [`crate::error::AppError`]).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum AppError {
+pub enum StateError {
     /// The gateway HTTP client could not be built.
     #[non_exhaustive]
     #[error("build gateway client")]
@@ -382,7 +383,7 @@ mod tests {
         );
         let err = AppState::new(&config).expect_err("an unopenable tape must fail");
         assert!(
-            matches!(err, AppError::Tape(_)),
+            matches!(err, StateError::Tape(_)),
             "expected Tape, got {err:?}"
         );
     }
