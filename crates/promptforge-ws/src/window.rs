@@ -14,7 +14,14 @@ use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::run_return::EventLoopExtRunReturn;
 use tao::window::{Icon, WindowBuilder};
-use wry::{DragDropEvent, PermissionKind, PermissionResponse, WebView, WebViewBuilder};
+#[cfg(not(target_os = "windows"))]
+use wry::DragDropEvent;
+use wry::{PermissionKind, PermissionResponse, WebView, WebViewBuilder};
+
+/// How often the delegating drop target retries its installation while
+/// Chromium's own target has not appeared yet.
+#[cfg(target_os = "windows")]
+const DROP_DELEGATION_RETRY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// The cold medallion program icon, embedded so the installed binary
 /// carries no asset files. Frames 2-5 stay on disk for a future activity
@@ -211,8 +218,7 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
         .context("create the workshop window")?;
 
     let proxy = event_loop.create_proxy();
-    let drop_proxy = event_loop.create_proxy();
-    let webview = WebViewBuilder::new()
+    let webview_builder = WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script("window.__PROMPTFORGE_DESKTOP__ = true;")
         .with_ipc_handler(move |request: wry::http::Request<String>| {
@@ -222,19 +228,6 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
             if let Err(error) = proxy.send_event(ShellEvent::Command(command)) {
                 eprintln!("could not forward the window command to the event loop: {error}");
             }
-        })
-        .with_drag_drop_handler(move |event| {
-            // Only the drop carries paths worth granting; enter, over, and
-            // leave are cursor feedback the shell does not need.
-            if let DragDropEvent::Drop { paths, .. } = event
-                && let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths))
-            {
-                eprintln!("could not forward the dropped paths to the event loop: {error}");
-            }
-            // Take over the drop so the webview never navigates to a
-            // dropped file; the page learns the paths through the
-            // promptforge:file-drop event instead.
-            true
         })
         .with_permission_handler(|kind| match kind {
             PermissionKind::Microphone => PermissionResponse::Allow,
@@ -248,13 +241,59 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
                 }
                 false
             }
+        });
+    // On Windows the shell must NOT use wry's drag-drop handler: wry
+    // implements it by revoking WebView2's own OLE drop target, which
+    // disables HTML5 drag-and-drop inside the page (Dockview panel drags
+    // included). The delegating drop target installed below observes
+    // Explorer drops without taking Chromium's target away.
+    #[cfg(not(target_os = "windows"))]
+    let webview_builder = {
+        let drop_proxy = event_loop.create_proxy();
+        webview_builder.with_drag_drop_handler(move |event| {
+            // Only the drop carries paths worth granting; enter, over, and
+            // leave are cursor feedback the shell does not need.
+            if let DragDropEvent::Drop { paths, .. } = event
+                && let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths))
+            {
+                eprintln!("could not forward the dropped paths to the event loop: {error}");
+            }
+            // Take over the drop so the webview never navigates to a
+            // dropped file; the page learns the paths through the
+            // promptforge:file-drop event instead.
+            true
         })
+    };
+    let webview = webview_builder
         .build(&window)
         .context("create the workshop webview")?;
+
+    // The delegating drop target wraps the target Chromium registers on
+    // its child windows. Chromium registers it asynchronously some time
+    // after the webview exists, so installation retries on a short timer
+    // until it lands (or gives up, costing only Explorer path drops).
+    #[cfg(target_os = "windows")]
+    let mut drop_installer = {
+        use tao::platform::windows::WindowExtWindows as _;
+        let drop_proxy = event_loop.create_proxy();
+        crate::drop_target::Installer::new(
+            window.hwnd(),
+            std::rc::Rc::new(move |paths: Vec<PathBuf>| {
+                if let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths)) {
+                    eprintln!("could not forward the dropped paths to the event loop: {error}");
+                }
+            }),
+        )
+    };
 
     let mut event_loop = event_loop;
     event_loop.run_return(|event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+        #[cfg(target_os = "windows")]
+        if drop_installer.attempt() {
+            *control_flow =
+                ControlFlow::WaitUntil(std::time::Instant::now() + DROP_DELEGATION_RETRY);
+        }
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,

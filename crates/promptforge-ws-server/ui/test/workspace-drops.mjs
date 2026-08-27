@@ -1,9 +1,11 @@
 // Unit test for the native workspace drop handler (src/workspace-drops.ts).
 // Bundles the TS module with esbuild, imports it via a data URL, and drives
-// it against jsdom. Covers: browser mode never installs the listener; in
-// desktop mode a synthesized promptforge:file-drop event POSTs one grant
+// it against jsdom. Covers: browser mode never installs the grant listener;
+// in desktop mode a synthesized promptforge:file-drop event POSTs one grant
 // per path with a paths-only JSON body; malformed details are ignored; a
-// failed grant paints the status bar and does not stop the rest.
+// failed grant paints the status bar and does not stop the rest; and the
+// default action of file drags is suppressed (never navigating away) while
+// in-page drags keep their default.
 // Run: node test/workspace-drops.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,6 +130,41 @@ function scenario({ desktop, responder }) {
   );
   await flush();
   check("malformed or empty drop details never grant", calls.length === 0);
+}
+
+// --- File-drag defaults are suppressed; in-page drags keep theirs ------------
+
+// jsdom has no DragEvent; a plain Event with a scripted dataTransfer is
+// enough for the handler's `types` probe and defaultPrevented flag.
+function syntheticDrag(window, type, types) {
+  const event = new window.Event(type, { cancelable: true, bubbles: true });
+  Object.defineProperty(event, "dataTransfer", { value: { types } });
+  return event;
+}
+
+for (const desktop of [false, true]) {
+  const { window } = scenario({ desktop });
+  const fileOver = syntheticDrag(window, "dragover", ["Files"]);
+  window.dispatchEvent(fileOver);
+  check(
+    `file dragover default is prevented (desktop=${desktop})`,
+    fileOver.defaultPrevented,
+  );
+  const fileDrop = syntheticDrag(window, "drop", ["Files"]);
+  window.dispatchEvent(fileDrop);
+  check(`file drop never navigates the page (desktop=${desktop})`, fileDrop.defaultPrevented);
+  const tabDrag = syntheticDrag(window, "dragover", ["text/plain", "dockview/tab"]);
+  window.dispatchEvent(tabDrag);
+  check(
+    `in-page drags keep their default action (desktop=${desktop})`,
+    !tabDrag.defaultPrevented,
+  );
+  const bareDrop = syntheticDrag(window, "drop", undefined);
+  window.dispatchEvent(bareDrop);
+  check(
+    `a drop without a dataTransfer is left alone (desktop=${desktop})`,
+    !bareDrop.defaultPrevented,
+  );
 }
 
 // --- A failed grant paints the status bar and the rest still run ------------
