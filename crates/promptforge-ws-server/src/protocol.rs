@@ -6,7 +6,62 @@
 //! task, or a clock, so every wire shape is pinned by a plain unit test
 //! below. The TypeScript half of this contract is
 //! `ui/src/services/protocol.ts`; the two files cross-cite each other so a
-//! shape change touches both or neither.
+//! shape change touches both or neither. The wire shapes are additionally
+//! frozen end to end by the characterization tests in `tests/it`.
+//!
+//! # Delivery contract
+//!
+//! Every frame the server pushes carries exactly one of two delivery
+//! semantics. The session loops are built on this classification, so no
+//! pushed frame type ships unclassified.
+//!
+//! **Durable** frames are delivered exactly, and coalesce. Where the
+//! data is shared fan-out state (the chat transcript), the producer
+//! records it and wakes the connection loop through a `Notify`; the
+//! loop compares the shared revision against its own per-client cursor
+//! and sends everything past the cursor, so a missed wakeup is harmless
+//! because the next one delivers everything past the cursor. A durable
+//! frame that answers the connection's own request (the voice
+//! announcements and stop replies) is sent directly by the loop that
+//! owns the socket, which delivers exactly without any cursor.
+//!
+//! **Ephemeral** frames may drop under lag. They ride bounded channels
+//! (a broadcast where the state fans out); a client too slow to drain
+//! its channel lags out and its connection may drop. The drop is
+//! harmless because every ephemeral frame has a repair path that owes
+//! nothing to its predecessors: status and catalog are complete
+//! snapshots resent on reconnect, and a voice interim is superseded by
+//! the next interim of its take.
+//!
+//! ## Classification
+//!
+//! Chat socket (`/ws`):
+//!
+//! - [`DeltaFrame`] - durable. One chunk of a chat reply in flight; a
+//!   dropped chunk is a hole in the transcript no later frame repairs.
+//! - [`ReasoningFrame`] - durable. The same transcript stream on the
+//!   reasoning side channel; chunks are append-only and irreplaceable.
+//! - [`DoneFrame`] - durable. The stream's terminal marker; dropping it
+//!   leaves the client's chat in flight forever.
+//! - [`ErrorFrame`] - durable. A terminal transcript outcome like
+//!   `done`; dropping it leaves the chat unresolved.
+//! - [`StatusFrame`] - ephemeral. Every update is a complete snapshot of
+//!   the bar, so a lagging client loses nothing by skipping
+//!   intermediates, and the current status is resent on reconnect.
+//! - [`CatalogFrame`] - ephemeral. Each push carries the whole catalog
+//!   verbatim; the newest push supersedes every older one and the
+//!   catalog is resent on reconnect.
+//!
+//! Voice socket (`/voice`):
+//!
+//! - [`StreamFrame`] - durable. The single per-take generation
+//!   announcement; every interim and final frame that follows refers to
+//!   it and nothing resends it.
+//! - [`InterimFrame`] - ephemeral. Each interim supersedes the previous
+//!   one - the committed prefix plus a fresh tentative decode - so a
+//!   dropped interim is overwritten by the next.
+//! - [`FinalFrame`] - durable. The take's single stop reply carrying the
+//!   assembled transcript; it has no successor and is never resent.
 
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +154,10 @@ pub(crate) enum Activity {
 /// The serialized shape of one update on the socket: the update's fields
 /// flattened beside `"type": "status"`, matching the chat protocol's frame
 /// taxonomy.
+///
+/// Delivery: ephemeral - every update is a complete snapshot, so a
+/// lagging client skips intermediates and the current status is resent
+/// on reconnect.
 #[derive(Debug, Serialize)]
 pub(crate) struct StatusFrame<'a> {
     #[serde(rename = "type")]
@@ -126,6 +185,9 @@ impl CatalogPush {
 
 /// The serialized shape of a catalog push on the socket, matching the chat
 /// protocol's frame taxonomy.
+///
+/// Delivery: ephemeral - the newest push carries the whole catalog and
+/// supersedes every older one; the catalog is resent on reconnect.
 #[derive(Debug, Serialize)]
 pub(crate) struct CatalogFrame<'a> {
     #[serde(rename = "type")]
@@ -135,6 +197,9 @@ pub(crate) struct CatalogFrame<'a> {
 
 /// One streamed answer-content chunk of a chat reply:
 /// `{"type":"delta","content":"..."}` plus the echoed request `id`.
+///
+/// Delivery: durable - a transcript chunk of a chat in flight; a dropped
+/// chunk is a hole in the reply no later frame repairs.
 #[derive(Debug, Serialize)]
 pub(crate) struct DeltaFrame {
     #[serde(rename = "type")]
@@ -160,6 +225,9 @@ impl DeltaFrame {
 /// One chunk of the model's reasoning side channel, rendered by the UI as
 /// the Thinking block: `{"type":"reasoning","content":"..."}` plus the
 /// echoed request `id`.
+///
+/// Delivery: durable - a transcript chunk on the reasoning side channel;
+/// chunks are append-only and irreplaceable.
 #[derive(Debug, Serialize)]
 pub(crate) struct ReasoningFrame {
     #[serde(rename = "type")]
@@ -185,6 +253,9 @@ impl ReasoningFrame {
 
 /// The terminal frame of a completed chat stream: `{"type":"done"}` plus
 /// the echoed request `id`.
+///
+/// Delivery: durable - the stream's terminal marker; dropping it leaves
+/// the client's chat in flight forever.
 #[derive(Debug, Serialize)]
 pub(crate) struct DoneFrame {
     #[serde(rename = "type")]
@@ -207,6 +278,9 @@ impl DoneFrame {
 
 /// A chat failure report - transport, mid-stream, or a declined stream:
 /// `{"type":"error","message":"..."}` plus the echoed request `id`.
+///
+/// Delivery: durable - a terminal transcript outcome; dropping it leaves
+/// the chat unresolved.
 #[derive(Debug, Serialize)]
 pub(crate) struct ErrorFrame {
     #[serde(rename = "type")]
@@ -234,6 +308,9 @@ impl ErrorFrame {
 /// that generation's interim or final frames. Generations count from 1
 /// per connection, so the client can discard frames a stop/restart race
 /// left behind from a superseded take.
+///
+/// Delivery: durable - the single per-take generation announcement that
+/// every following interim and final frame refers to; nothing resends it.
 #[derive(Debug, Serialize)]
 pub(crate) struct StreamFrame {
     #[serde(rename = "type")]
@@ -257,6 +334,9 @@ impl StreamFrame {
 /// take), `tentative` is the interim model's decode of the audio past it,
 /// and `generation` names the announced stream generation the frame
 /// belongs to.
+///
+/// Delivery: ephemeral - each interim supersedes the previous one, so a
+/// dropped interim is overwritten by the next.
 #[derive(Debug, Serialize)]
 pub(crate) struct InterimFrame {
     #[serde(rename = "type")]
@@ -283,6 +363,9 @@ impl InterimFrame {
 /// `{"type":"final","text":"...","frames":N,"generation":N}` - the
 /// assembled transcript, the total PCM frames received since the most
 /// recent start, and the announced stream generation the take belongs to.
+///
+/// Delivery: durable - the take's single stop reply; it has no successor
+/// and is never resent.
 #[derive(Debug, Serialize)]
 pub(crate) struct FinalFrame {
     #[serde(rename = "type")]
