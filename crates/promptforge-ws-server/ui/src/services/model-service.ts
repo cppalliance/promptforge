@@ -1,8 +1,7 @@
-// The shared model-selection state, formerly module-level mutables in
-// main.ts. App-aware and DOM-free: the composition root constructs one
-// instance and hands it to the Agent controller and the Model menu
-// through their constructors; consumers read the state directly or
-// subscribe to the change events.
+// The shared model-selection state. App-aware and DOM-free: the
+// composition root constructs one instance and hands it to the Agent
+// controller and the Model menu through their constructors; consumers
+// read the state directly or subscribe to the change events.
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable } from "../base/lifecycle";

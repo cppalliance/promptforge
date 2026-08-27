@@ -240,7 +240,8 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
     // On Windows the shell must NOT use wry's drag-drop handler: wry
     // implements it by registering its own OLE drop target on the WebView2
     // child windows, which starves Chromium of drag events and disables
-    // HTML5 drag-and-drop inside the page (Dockview panel drags included).
+    // HTML5 drag-and-drop inside the page (Dockview panel drags included);
+    // see https://github.com/tauri-apps/tauri/issues/15138.
     // Explorer path drops arrive over the web-message bridge instead (see
     // file_drop.rs), attached right after the webview is built.
     #[cfg(not(target_os = "windows"))]
