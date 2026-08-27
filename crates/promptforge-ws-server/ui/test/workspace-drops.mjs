@@ -84,6 +84,10 @@ function scenario({ desktop, responder }) {
 
 {
   const { window, calls, local } = scenario({ desktop: true });
+  let changed = 0;
+  window.addEventListener("promptforge:workspace-changed", () => {
+    changed += 1;
+  });
   const paths = [
     "C:\\Users\\Vinnie\\My Documents\\project",
     "C:\\Users\\Vinnie\\café 中文.txt",
@@ -108,7 +112,17 @@ function scenario({ desktop, responder }) {
     "grant bodies are JSON with a JSON content type",
     calls.every((call) => call.init.headers["Content-Type"] === "application/json"),
   );
-  check("successful grants stay off the status bar", local.length === 0);
+  check(
+    "every successful grant confirms on the status bar as info",
+    local.length === 2 &&
+      local.every(
+        (entry, index) =>
+          entry.severity === "info" &&
+          entry.label.includes(paths[index]) &&
+          entry.label.includes("Added"),
+      ),
+  );
+  check("granting announces one workspace change", changed === 1);
 }
 
 // --- Malformed events: nothing is granted -----------------------------------
@@ -238,13 +252,17 @@ for (const desktop of [false, true]) {
   );
   await flush();
   check("a failed grant does not stop the remaining paths", calls.length === 2);
-  check("a failed grant paints one local error", local.length === 1);
+  const errors = local.filter((entry) => entry.severity === "error");
+  check("a failed grant paints one local error", errors.length === 1);
   check(
-    "the local error carries the path, the server message, and error severity",
-    local.length === 1 &&
-      local[0].severity === "error" &&
-      local[0].label.includes("C:\\blocked") &&
-      local[0].label.includes("path is outside every granted root"),
+    "the local error carries the path and the server message",
+    errors.length === 1 &&
+      errors[0].label.includes("C:\\blocked") &&
+      errors[0].label.includes("path is outside every granted root"),
+  );
+  check(
+    "the surviving grant still confirms as info",
+    local.some((entry) => entry.severity === "info" && entry.label.includes("C:\\allowed")),
   );
 }
 

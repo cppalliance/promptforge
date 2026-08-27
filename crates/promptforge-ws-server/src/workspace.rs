@@ -195,9 +195,8 @@ impl Workspace {
     /// file path has no parent directory.
     pub(crate) fn grant(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
-        let canonical = path
-            .canonicalize()
-            .map_err(|source| WorkspaceError::ResolveGrant { source })?;
+        let canonical =
+            canonicalize_simplified(path).map_err(|source| WorkspaceError::ResolveGrant { source })?;
         let root = if canonical.is_dir() {
             canonical
         } else {
@@ -322,8 +321,16 @@ impl Workspace {
             .into_iter()
             .map(|root| {
                 let metadata = fs::metadata(&root).ok();
+                // The folder's own name reads better than the full path in
+                // the tree; the path stays available as the row tooltip. A
+                // drive root (C:\) has no file name and shows the path.
+                let name = root
+                    .file_name()
+                    .map_or_else(|| root.to_string_lossy().into_owned(), |name| {
+                        name.to_string_lossy().into_owned()
+                    });
                 TreeEntry {
-                    name: root.to_string_lossy().into_owned(),
+                    name,
                     path: root,
                     kind: EntryKind::Directory,
                     size: 0,
@@ -385,7 +392,7 @@ impl Workspace {
     /// Canonicalizes an existing path and confines it to the grants.
     fn confine_existing(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
-        let canonical = path.canonicalize().map_err(|source| {
+        let canonical = canonicalize_simplified(path).map_err(|source| {
             if source.kind() == io::ErrorKind::NotFound {
                 WorkspaceError::NotFound
             } else {
@@ -399,7 +406,7 @@ impl Workspace {
     /// new file confines its canonicalized parent and reattaches its name.
     fn confine_for_write(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         reject_forbidden(path)?;
-        match path.canonicalize() {
+        match canonicalize_simplified(path) {
             Ok(canonical) => self.check_confined(canonical),
             Err(source) if source.kind() == io::ErrorKind::NotFound => {
                 // A dangling symlink canonicalizes as NotFound, but fs::write
@@ -410,7 +417,7 @@ impl Workspace {
                     Err(source) => return Err(WorkspaceError::InspectPath { source }),
                 }
                 let parent = path.parent().ok_or(WorkspaceError::NotFound)?;
-                let canonical_parent = parent.canonicalize().map_err(|source| {
+                let canonical_parent = canonicalize_simplified(parent).map_err(|source| {
                     if source.kind() == io::ErrorKind::NotFound {
                         WorkspaceError::NotFound
                     } else {
@@ -433,6 +440,14 @@ impl Workspace {
             Err(WorkspaceError::OutsideGrants)
         }
     }
+}
+
+/// Canonicalizes and strips Windows' `\\?\` verbatim prefix (a no-op on
+/// other platforms). Every path the workspace stores, compares, or returns
+/// goes through here, so grants and confinement checks stay in one form
+/// and the UI never sees the prefix.
+fn canonicalize_simplified(path: &Path) -> io::Result<PathBuf> {
+    Ok(dunce::simplified(&path.canonicalize()?).to_path_buf())
 }
 
 /// Rejects the lexical tricks canonicalization would otherwise hide: `..`
@@ -612,12 +627,17 @@ mod tests {
         (workspace, dir)
     }
 
+    /// The canonical, verbatim-prefix-free form grants are stored in.
+    fn simplified(path: &Path) -> PathBuf {
+        canonicalize_simplified(path).expect("canonical")
+    }
+
     #[test]
     fn a_folder_grant_grants_the_folder_itself() {
         let workspace = Workspace::new();
         let dir = tempfile::TempDir::new().expect("tempdir");
         let granted = workspace.grant(dir.path()).expect("grant succeeds");
-        assert_eq!(granted, dir.path().canonicalize().expect("canonical"));
+        assert_eq!(granted, simplified(dir.path()));
         assert_eq!(workspace.granted_roots(), vec![granted]);
     }
 
@@ -628,7 +648,7 @@ mod tests {
         let file = dir.path().join("dropped.txt");
         fs::write(&file, "x").expect("seed the dropped file");
         let granted = workspace.grant(&file).expect("grant succeeds");
-        assert_eq!(granted, dir.path().canonicalize().expect("canonical"));
+        assert_eq!(granted, simplified(dir.path()));
         assert_eq!(workspace.granted_roots(), vec![granted]);
     }
 
@@ -823,9 +843,12 @@ mod tests {
         let listing = workspace.tree(None).expect("roots listing");
         assert_eq!(listing.path, None);
         assert_eq!(listing.entries.len(), 1);
+        let root = simplified(dir.path());
+        assert_eq!(listing.entries[0].path, root);
+        // A root row shows the folder's own name, not the whole path.
         assert_eq!(
-            listing.entries[0].path,
-            dir.path().canonicalize().expect("canonical")
+            listing.entries[0].name,
+            root.file_name().expect("leaf").to_string_lossy()
         );
         assert_eq!(listing.entries[0].kind, EntryKind::Directory);
     }
