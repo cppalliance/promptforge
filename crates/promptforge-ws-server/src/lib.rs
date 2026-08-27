@@ -48,6 +48,6 @@ pub use gateway::{
     SsePayloadStream,
 };
 pub use protocol::ChatRequest;
-pub use serve::{ServerHandle, SpawnError, spawn};
+pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use tape::{Tape, TapeError, TapeEvent};
 pub use transcribe::TranscribeError;

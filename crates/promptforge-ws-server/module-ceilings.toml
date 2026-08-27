@@ -46,7 +46,7 @@
 "routes/voice.rs" = 75
 "routes/workspace.rs" = 19
 "segment.rs" = 231
-"serve.rs" = 346
+"serve.rs" = 566
 "status.rs" = 200
 "tape.rs" = 275
 "transcribe.rs" = 224
