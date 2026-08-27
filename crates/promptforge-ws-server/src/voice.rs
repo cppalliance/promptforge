@@ -36,8 +36,9 @@ use axum::response::Response;
 use futures_util::StreamExt;
 
 use crate::app::AppState;
+use crate::protocol::{Activity, FinalFrame, InterimFrame, VOICE_START, VOICE_STOP};
 use crate::segment::Segmenter;
-use crate::status::{Activity, StatusBus};
+use crate::status::StatusBus;
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
 use crate::ws_session::WsSession;
 
@@ -194,12 +195,11 @@ fn spawn_interim_loop(
             }
             last_committed.clone_from(&committed_text);
             last_tentative.clone_from(&tentative);
-            let message = serde_json::json!({
-                "type": "interim",
-                "committed": committed_text,
-                "tentative": tentative,
-            })
-            .to_string();
+            // Serializing two strings cannot fail.
+            let Ok(message) = serde_json::to_string(&InterimFrame::new(committed_text, tentative))
+            else {
+                continue;
+            };
             if out.send(Message::Text(message.into())).await.is_err() {
                 return;
             }
@@ -361,12 +361,11 @@ async fn send_final_reply(
     text: String,
     frames: u64,
 ) -> bool {
-    let reply = serde_json::json!({
-        "type": "final",
-        "text": text,
-        "frames": frames,
-    })
-    .to_string();
+    // Serializing a string and an integer cannot fail. A reply that
+    // somehow cannot serialize is skipped, which is not a gone client.
+    let Ok(reply) = serde_json::to_string(&FinalFrame::new(text, frames)) else {
+        return true;
+    };
     out.send(Message::Text(reply.into())).await.is_ok()
 }
 
@@ -423,7 +422,7 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
                 }
             }
             Ok(Message::Text(text)) => match text.as_str() {
-                "start" => {
+                VOICE_START => {
                     frames = 0;
                     last_mic_pulse = None;
                     begin_take(
@@ -438,7 +437,7 @@ async fn run_session(socket: WebSocket, engine: Option<Arc<VoiceEngine>>, status
                         &status,
                     );
                 }
-                "stop" => {
+                VOICE_STOP => {
                     stop_interim(&mut interim);
                     status.info(
                         "Finalizing transcript...",

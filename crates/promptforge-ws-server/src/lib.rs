@@ -12,6 +12,7 @@ mod chat_ws;
 mod config;
 mod gateway;
 mod heartbeat;
+mod protocol;
 mod provision;
 mod segment;
 mod serve;
@@ -28,9 +29,10 @@ pub use config::{
     DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,
 };
 pub use gateway::{
-    CacheEvent, CacheResponse, ChatRequest, ChatStream, GatewayClient, GatewayError,
-    GatewayResponse, SsePayloadStream,
+    CacheEvent, CacheResponse, ChatStream, GatewayClient, GatewayError, GatewayResponse,
+    SsePayloadStream,
 };
+pub use protocol::ChatRequest;
 pub use serve::{ServerHandle, SpawnError, spawn};
 pub use tape::{Tape, TapeError, TapeEvent};
 pub use transcribe::TranscribeError;

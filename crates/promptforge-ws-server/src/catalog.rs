@@ -8,39 +8,14 @@
 //! with no sessions is a no-op, and a lagging session skips ahead - every
 //! push is a complete snapshot, so an overwritten one loses nothing.
 
-use serde::Serialize;
 use tokio::sync::broadcast;
+
+use crate::protocol::CatalogPush;
 
 /// Ring capacity of the catalog bus. Pushes are rare (one per gateway
 /// reconnect) and each is a full snapshot, so a handful of slots is
 /// generous.
 const CATALOG_CHANNEL_CAPACITY: usize = 4;
-
-/// One pushed model catalog.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CatalogPush {
-    /// The gateway's `/v1/models` `data` array, verbatim.
-    pub(crate) models: Vec<serde_json::Value>,
-}
-
-impl CatalogPush {
-    /// The push as a wire frame: `"type": "models"` beside the array.
-    pub(crate) fn frame(&self) -> CatalogFrame<'_> {
-        CatalogFrame {
-            kind: "models",
-            models: &self.models,
-        }
-    }
-}
-
-/// The serialized shape of a catalog push on the socket, matching the chat
-/// protocol's frame taxonomy.
-#[derive(Debug, Serialize)]
-pub(crate) struct CatalogFrame<'a> {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    models: &'a [serde_json::Value],
-}
 
 /// The shared catalog bus: a cloneable handle onto the broadcast channel,
 /// mirroring [`crate::status::StatusBus`].
@@ -80,22 +55,6 @@ impl Default for CatalogBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_catalog_push_serializes_as_a_models_frame() {
-        let push = CatalogPush {
-            models: vec![serde_json::json!({"id": "test-model", "object": "model"})],
-        };
-        let frame = serde_json::to_value(push.frame()).expect("the frame serializes");
-        assert_eq!(
-            frame,
-            serde_json::json!({
-                "type": "models",
-                "models": [{"id": "test-model", "object": "model"}],
-            }),
-            "the wire shape matches the chat protocol's frame taxonomy"
-        );
-    }
 
     #[tokio::test]
     async fn publishing_with_no_subscribers_is_a_no_op() {

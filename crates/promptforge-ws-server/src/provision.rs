@@ -28,7 +28,8 @@ use tokio::sync::oneshot;
 use crate::config::VoiceConfig;
 use crate::gateway::{CacheEvent, CacheResponse, GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
-use crate::status::{Activity, Progress, StatusBus};
+use crate::protocol::{Activity, Progress};
+use crate::status::StatusBus;
 use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 
 /// A running provisioning task.
@@ -366,7 +367,7 @@ mod tests {
     use axum::routing::post;
     use tokio::sync::broadcast;
 
-    use crate::status::{Severity, StatusBarUpdate};
+    use crate::protocol::{Severity, StatusBarUpdate};
     use crate::transcribe::fixtures;
 
     const INTERIM_SOURCE: &str = "http://gateway.test/models/ggml-large-v3-turbo.bin";

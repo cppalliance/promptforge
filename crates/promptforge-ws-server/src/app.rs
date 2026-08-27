@@ -12,9 +12,10 @@ use axum::routing::{get, post};
 use crate::catalog::CatalogBus;
 use crate::chat_ws;
 use crate::config::{Config, VoiceConfig};
-use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
+use crate::gateway::{GatewayClient, GatewayError, GatewayResponse};
 use crate::heartbeat::GatewayHealth;
-use crate::status::{Activity, StatusBus};
+use crate::protocol::{Activity, ChatRequest};
+use crate::status::StatusBus;
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use crate::voice;
@@ -545,7 +546,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::config::{GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
-    use crate::status::{Severity, StatusBarUpdate};
+    use crate::protocol::{Severity, StatusBarUpdate};
     use crate::transcribe::fixtures;
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
