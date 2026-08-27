@@ -1,5 +1,5 @@
 // Integration test for layout boot, persistence, and shortcuts
-// (src/workshop/layout-persistence.ts, shortcuts.ts, the zone-state
+// (src/ui/workshop/layout-persistence.ts, shortcuts.ts, the zone-state
 // serialization in zones.ts, and EditorPanel.requestClose). Bundles the
 // modules with esbuild, mounts real Dockview docks in jsdom against the
 // real index.html, and drives the public API. Covers: the layout
@@ -29,17 +29,17 @@ const bundle = await esbuild.build({
         openInZone,
         panelIdFor,
         zoneOfPanel,
-      } from "./src/workshop/zones.ts";
-      export { createPanelComponent, createPanelTabComponent } from "./src/workshop/panel-types.ts";
+      } from "./src/ui/workshop/zones.ts";
+      export { createPanelComponent, createPanelTabComponent } from "./src/ui/workshop/panel-types.ts";
       export {
         restoreLayout,
         persistLayout,
         startLayoutPersistence,
         LAYOUT_STORAGE_KEY,
         LAYOUT_SCHEMA_VERSION,
-      } from "./src/workshop/layout-persistence.ts";
-      export { installShortcuts } from "./src/workshop/shortcuts.ts";
-      export { EditorPanel } from "./src/workshop/editor-panel.ts";
+      } from "./src/ui/workshop/layout-persistence.ts";
+      export { installShortcuts } from "./src/ui/workshop/shortcuts.ts";
+      export { EditorPanel } from "./src/ui/workshop/editor-panel.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

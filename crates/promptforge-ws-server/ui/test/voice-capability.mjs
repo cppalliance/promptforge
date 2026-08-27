@@ -1,4 +1,4 @@
-// Unit test for the GPU capability probe (src/voice.ts
+// Unit test for the GPU capability probe (src/ui/voice.ts
 // voiceGpuAvailable). Bundles the TS module with esbuild and drives it
 // against scripted fetch responses: gpu true/false, non-OK status, network
 // failure, and malformed bodies. The mic gate in main.ts hides the control
@@ -11,7 +11,7 @@ import * as esbuild from "esbuild";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "voice.ts")],
+  entryPoints: [path.join(uiDir, "..", "src", "ui", "voice.ts")],
   bundle: true,
   write: false,
   format: "esm",

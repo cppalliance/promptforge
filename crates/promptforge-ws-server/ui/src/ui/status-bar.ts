@@ -5,7 +5,7 @@
 // frames are internal instrumentation: they never touch the text or the
 // slot, but they do pulse the LED.
 
-import type { StatusFrame } from "./workshop-socket";
+import type { StatusFrame } from "../services/protocol";
 
 type PulseActivity = "thinking" | "generating";
 

@@ -12,18 +12,19 @@ import type { ChatPlugin } from "./chat/core/types";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
 import { ModelService } from "./services/model-service";
-import { StatusBar } from "./status-bar";
-import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./voice";
-import { setupWindowChrome } from "./window-chrome";
-import { setupWindowMenus } from "./window-menu";
-import { setupWorkspaceDrops } from "./workspace-drops";
-import { WorkshopProvider } from "./workshop-provider";
-import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
-import { AgentController } from "./workshop/agent-controller";
-import { restoreLayout, startLayoutPersistence } from "./workshop/layout-persistence";
-import { createPanelComponent, createPanelTabComponent } from "./workshop/panel-types";
-import { installShortcuts, toggleWorkshopPanel } from "./workshop/shortcuts";
-import { initZones, openInZone } from "./workshop/zones";
+import type { CatalogModel } from "./services/protocol";
+import { WorkshopProvider } from "./services/workshop-provider";
+import { WorkshopSocket } from "./services/workshop-socket";
+import { StatusBar } from "./ui/status-bar";
+import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./ui/voice";
+import { setupWindowChrome } from "./ui/window-chrome";
+import { setupWindowMenus } from "./ui/window-menu";
+import { setupWorkspaceDrops } from "./ui/workspace-drops";
+import { AgentController } from "./ui/workshop/agent-controller";
+import { restoreLayout, startLayoutPersistence } from "./ui/workshop/layout-persistence";
+import { createPanelComponent, createPanelTabComponent } from "./ui/workshop/panel-types";
+import { installShortcuts, toggleWorkshopPanel } from "./ui/workshop/shortcuts";
+import { initZones, openInZone } from "./ui/workshop/zones";
 
 // The model catalog and selection live in the ModelService, not module
 // state: the title-bar Model menu and the Agent controller receive the

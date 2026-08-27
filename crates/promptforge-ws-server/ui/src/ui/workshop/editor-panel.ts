@@ -15,7 +15,7 @@ import {
   isModifiedConflict,
   writeFile,
   type WorkspaceFile,
-} from "./workspace-api";
+} from "../../services/workspace-api";
 
 /** Injectable seams for tests; production uses the real surface and API. */
 export interface EditorPanelDeps {

@@ -1,5 +1,5 @@
-import type { ChatProvider, ChatRequest, Message, StreamEvent } from "./chat/core/types";
-import { uuidv7 } from "./chat/utils/uuid";
+import type { ChatProvider, ChatRequest, Message, StreamEvent } from "../chat/core/types";
+import { uuidv7 } from "../chat/utils/uuid";
 import type { WorkshopSocket } from "./workshop-socket";
 
 /**

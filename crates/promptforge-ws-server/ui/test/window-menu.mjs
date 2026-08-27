@@ -1,5 +1,5 @@
-// Unit test for the application menus (src/window-menu.ts) and the About
-// dialog (src/about-dialog.ts). Bundles the TS modules with esbuild,
+// Unit test for the application menus (src/ui/window-menu.ts) and the About
+// dialog (src/ui/about-dialog.ts). Bundles the TS modules with esbuild,
 // imports them via data URLs, and drives them against jsdom built from the
 // real index.html with the desktop flag set. Covers: menu opening,
 // one-menu-at-a-time, keyboard navigation and dismissal, New Agent
@@ -33,8 +33,8 @@ async function bundle(entry) {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 
-const { setupWindowMenus } = await bundle("window-menu.ts");
-const { setupWindowChrome } = await bundle("window-chrome.ts");
+const { setupWindowMenus } = await bundle(path.join("ui", "window-menu.ts"));
+const { setupWindowChrome } = await bundle(path.join("ui", "window-chrome.ts"));
 const { ModelService } = await bundle(path.join("services", "model-service.ts"));
 
 const failures = [];

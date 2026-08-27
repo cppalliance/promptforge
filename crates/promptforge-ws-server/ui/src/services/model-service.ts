@@ -6,7 +6,7 @@
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable } from "../base/lifecycle";
-import type { CatalogModel } from "../workshop-socket";
+import type { CatalogModel } from "./protocol";
 
 /**
  * Owns the model catalog and the current model selection shared by every

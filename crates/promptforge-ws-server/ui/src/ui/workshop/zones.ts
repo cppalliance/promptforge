@@ -15,7 +15,7 @@ import type {
   IDockviewPanel,
 } from "dockview";
 
-import { uuidv7 } from "../chat/utils/uuid";
+import { uuidv7 } from "../../chat/utils/uuid";
 import { PANEL_TYPES, isPanelType, type PanelType } from "./panel-types";
 
 export const ZONE_NAMES = ["left", "main", "right"] as const;

@@ -1,5 +1,5 @@
 // Lifecycle test for the Agent panel controller
-// (src/workshop/agent-controller.ts). Bundles the controller with a real
+// (src/ui/workshop/agent-controller.ts). Bundles the controller with a real
 // Dockview dock in jsdom against the real index.html, but stubs ChatUI
 // (an esbuild plugin intercepts src/chat/main) so the test observes the
 // controller's own behavior: one chat mounted per Agent tab onto that
@@ -54,10 +54,10 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export { createDockview, themeDark } from "dockview";
-      export { AgentController } from "./src/workshop/agent-controller.ts";
+      export { AgentController } from "./src/ui/workshop/agent-controller.ts";
       export { ModelService } from "./src/services/model-service.ts";
-      export { initZones, openAgentPanel, openInZone } from "./src/workshop/zones.ts";
-      export { createPanelComponent, createPanelTabComponent } from "./src/workshop/panel-types.ts";
+      export { initZones, openAgentPanel, openInZone } from "./src/ui/workshop/zones.ts";
+      export { createPanelComponent, createPanelTabComponent } from "./src/ui/workshop/panel-types.ts";
       export { ChatUI } from "./src/chat/main.ts";
     `,
     resolveDir: path.join(uiDir, ".."),

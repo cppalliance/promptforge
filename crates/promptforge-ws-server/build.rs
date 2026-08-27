@@ -49,6 +49,10 @@ fn run() -> Result<(), String> {
     );
     println!(
         "cargo::rerun-if-changed={}",
+        ui_dir.join("check-layers.mjs").display()
+    );
+    println!(
+        "cargo::rerun-if-changed={}",
         ui_dir.join("package.json").display()
     );
     // esbuild reads tsconfig.json from its working directory, and the
@@ -63,9 +67,35 @@ fn run() -> Result<(), String> {
     if dist_dir.exists() {
         std::fs::remove_dir_all(&dist_dir).map_err(|error| format!("clear ui/dist: {error}"))?;
     }
+    check_layers(&ui_dir)?;
     bundle(&ui_dir)?;
     copy_static(&ui_dir, &dist_dir)?;
     Ok(())
+}
+
+/// Runs the UI layer-rule walk (`ui/check-layers.mjs`) before bundling, so
+/// an import that crosses the layer boundaries fails `cargo build`. The
+/// esbuild CLI invocation in `bundle` cannot load plugins, hence this
+/// spawned check; `build.mjs` enforces the same rule through an esbuild
+/// plugin. Unlike the npm shims, `node` is a real executable on every
+/// platform, so no `cmd /c` indirection is needed.
+fn check_layers(ui_dir: &Path) -> Result<(), String> {
+    let output = Command::new("node")
+        .arg("check-layers.mjs")
+        .current_dir(ui_dir)
+        .output()
+        .map_err(|error| {
+            format!("node could not be started: {error}; install Node.js so it is on PATH")
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "the UI layer check failed (status {}):\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    ))
 }
 
 /// Runs the esbuild bundle step, preferring the local install in
