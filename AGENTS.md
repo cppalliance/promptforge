@@ -10,5 +10,6 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 
 - After completing work (compiles + tests pass), update README.md if the public surface changed.
 - Every public type, function, and module must have a `///` doc comment. `cargo doc` is the project documentation.
+- STYLE.md at the repo root carries the comment, workaround, error-zone, layering, and test conventions for the workshop crates.
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
