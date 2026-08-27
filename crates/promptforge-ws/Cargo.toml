@@ -23,25 +23,13 @@ tao.workspace = true
 url.workspace = true
 wry.workspace = true
 
-# The delegating OLE drop target (src/drop_target.rs): wry's own drag-drop
-# handler revokes WebView2's drop target, which kills HTML5 drag-and-drop
-# inside the page, so the shell wraps Chromium's target itself. The version
-# and features mirror wry's, keeping one `windows` build in the tree.
-[target.'cfg(target_os = "windows")'.dependencies.windows]
-version = "0.61"
-features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_Com",
-    "Win32_System_Com_StructuredStorage",
-    "Win32_System_Ole",
-    "Win32_System_SystemServices",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-]
+# Explorer path drops (src/file_drop.rs): the page posts dropped File
+# objects over the WebView2 web-message channel and the shell reads their
+# real OS paths from ICoreWebView2File. The versions mirror wry's, keeping
+# one build of each crate in the tree.
+[target.'cfg(target_os = "windows")'.dependencies.webview2-com]
+version = "0.38"
 
-# The #[implement] macro expands to paths in `windows_core`, so the crate
-# must be a direct dependency (wry declares it the same way).
 [target.'cfg(target_os = "windows")'.dependencies.windows-core]
 version = "0.61"
 
@@ -55,11 +43,11 @@ cuda = ["promptforge-ws-server/cuda"]
 [dev-dependencies]
 tempfile.workspace = true
 
-# Not `workspace = true`: the delegating OLE drop target (drop_target.rs)
-# is raw Win32/COM and cannot be written without unsafe, and a workspace
-# `forbid` cannot be overridden by a module allow. The workspace lint set
-# is mirrored with unsafe_code lowered to deny, which drop_target.rs alone
-# opts out of.
+# Not `workspace = true`: the WebView2 file-drop bridge (file_drop.rs) is
+# raw COM and cannot be written without unsafe, and a workspace `forbid`
+# cannot be overridden by a module allow. The workspace lint set is
+# mirrored with unsafe_code lowered to deny, which file_drop.rs alone opts
+# out of.
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

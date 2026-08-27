@@ -8,12 +8,12 @@
 //! it. Closing the window shuts the server down cleanly.
 
 mod discover;
-// The only unsafe module in the workspace: raw Win32/COM has no safe
-// wrapper for wrapping another window's registered OLE drop target. The
-// two clippy allows cover code the windows #[implement] macro expands.
+// The only unsafe module in the workspace: the WebView2 COM surface that
+// reads real OS paths out of dropped File objects has no safe wrapper.
+// The clippy allows cover code the #[implement] macro expands in tests.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code, clippy::inline_always, clippy::ref_as_ptr)]
-mod drop_target;
+mod file_drop;
 mod health;
 mod window;
 
