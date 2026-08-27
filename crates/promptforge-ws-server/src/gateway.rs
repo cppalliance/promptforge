@@ -247,7 +247,7 @@ impl GatewayClient {
     /// a transport failure, a probe timeout, or a non-success answer all
     /// read as unreachable. The request never carries the client's API key
     /// (the endpoint is unauthenticated by design) and is capped at
-    /// [`HEALTH_PROBE_TIMEOUT`].
+    /// `HEALTH_PROBE_TIMEOUT`.
     pub async fn health(&self) -> bool {
         let probe = self
             .http
@@ -318,7 +318,7 @@ impl GatewayClient {
     }
 
     /// Posts a profile switch to `POST /admin/switch-profile`. The call is
-    /// capped at [`SWITCH_PROFILE_TIMEOUT`] rather than the ordinary
+    /// capped at `SWITCH_PROFILE_TIMEOUT` rather than the ordinary
     /// request timeout: the gateway restarts its local model children
     /// inside the call.
     ///
