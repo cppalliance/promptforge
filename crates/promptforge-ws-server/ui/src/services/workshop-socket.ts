@@ -146,10 +146,10 @@ export class WorkshopSocket extends Disposable {
   /**
    * Sends one id-tagged chat frame and resolves when its `done` frame
    * arrives. Rejects on an `error` frame, or on a socket close before any
-   * content streamed; a close after content started resolves, mirroring an
-   * SSE body that ends early. Aborting the signal detaches the chat and
-   * recycles the socket, which is what makes the server drop the orphaned
-   * gateway stream.
+   * answer content streamed (reasoning alone does not count); a close after
+   * answer content started resolves, mirroring an SSE body that ends early.
+   * Aborting the signal detaches the chat and recycles the socket, which
+   * is what makes the server drop the orphaned gateway stream.
    */
   async streamChat(
     payload: ChatPayload,
@@ -297,9 +297,9 @@ export class WorkshopSocket extends Disposable {
       return;
     }
     if (frame.type === "reasoning" && typeof frame.content === "string" && frame.content !== "") {
-      // Reasoning counts as a started reply: a socket that closes after
-      // only scratch work streamed still resolves rather than rejects.
-      chat.started = true;
+      // Reasoning does not mark the reply started: scratch work with no
+      // answer token is not a usable reply, so a socket that closes after
+      // only reasoning streamed rejects instead of resolving an empty turn.
       chat.onReasoning?.(frame.content);
       return;
     }
