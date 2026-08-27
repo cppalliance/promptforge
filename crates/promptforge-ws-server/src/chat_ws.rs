@@ -297,7 +297,10 @@ async fn forward_payload(
             "a gateway reasoning chunk",
             Activity::Thinking,
         );
-        let frame = tagged(id, serde_json::json!({"type": "reasoning", "content": text}));
+        let frame = tagged(
+            id,
+            serde_json::json!({"type": "reasoning", "content": text}),
+        );
         if !send_frame(out, frame).await {
             return Forward::ClientGone;
         }
