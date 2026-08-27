@@ -15,10 +15,38 @@ export function toDisposable(dispose: () => void): IDisposable {
   return { dispose };
 }
 
+/**
+ * Receives DisposableStore lifetime notifications while installed via
+ * setDisposableTracker. Test-only seam: the shared leak-check test helper
+ * is its only consumer.
+ */
+export interface IDisposableTracker {
+  /** Called when a store is constructed. */
+  trackCreated(store: DisposableStore): void;
+  /** Called the first time a store is disposed. */
+  trackDisposed(store: DisposableStore): void;
+}
+
+let tracker: IDisposableTracker | undefined;
+
+/**
+ * Installs `next` as the store tracker, or clears it with undefined.
+ * Off by default, so production pays one undefined check per store
+ * construction and disposal. Test-only seam: the shared leak-check test
+ * helper (test/helpers/leak-check.mjs) is its only consumer.
+ */
+export function setDisposableTracker(next: IDisposableTracker | undefined): void {
+  tracker = next;
+}
+
 /** Collects disposables and releases them together, in insertion order. */
 export class DisposableStore implements IDisposable {
   private readonly _items = new Set<IDisposable>();
   private _isDisposed = false;
+
+  constructor() {
+    tracker?.trackCreated(this);
+  }
 
   /**
    * Takes ownership of `item` and returns it. If the store is already
@@ -40,6 +68,7 @@ export class DisposableStore implements IDisposable {
       return;
     }
     this._isDisposed = true;
+    tracker?.trackDisposed(this);
     for (const item of this._items) {
       item.dispose();
     }
