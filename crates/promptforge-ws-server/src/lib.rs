@@ -7,6 +7,7 @@
 //! in-process on its own thread for embedding binaries.
 
 mod app;
+mod assets;
 mod catalog;
 mod chat_ws;
 mod config;
@@ -14,6 +15,7 @@ mod gateway;
 mod heartbeat;
 mod protocol;
 mod provision;
+mod relay;
 mod segment;
 mod serve;
 mod status;
