@@ -310,6 +310,9 @@ const firstSub = socket.onStatus(() => statusOrder.push("first"));
 socket.onStatus(() => statusOrder.push("second"));
 let disconnects = 0;
 socket.onDisconnect(() => (disconnects += 1));
+// Handlers wired: declare readiness so pushes deliver instead of queueing
+// (the boot queue has its own test, boot-queue.mjs).
+socket.ready();
 
 socket.connect();
 check("connect opens one underlying socket", fakeSockets.length === 1);

@@ -192,4 +192,8 @@ async function loadModels(): Promise<void> {
 // catalog state in place so a boot-time failure heals itself.
 disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
 
+// Every push handler above is wired, so release the socket's boot queue:
+// pushes that raced this module's execution now replay in arrival order.
+workshopSocket.ready();
+
 void loadModels();
