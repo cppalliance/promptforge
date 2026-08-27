@@ -3,11 +3,13 @@
 // serialization in zones.ts, and EditorPanel.requestClose). Bundles the
 // modules with esbuild, mounts real Dockview docks in jsdom against the
 // real index.html, and drives the public API. Covers: the layout
-// survives a reload (serialize -> restore); the envelope carries no
-// lock state; schema version 1 snapshots are rejected; corrupt,
-// version-mismatched, and unloadable layouts fall back to defaults;
-// each shortcut dispatches its command; the status bar never enters the
-// serialized layout. Run: node test/workshop-layout.mjs
+// survives a reload (serialize -> restore), including the tree's
+// close-button-free tab; the envelope carries no lock state; stale
+// schema versions (1 and 2) are rejected; corrupt, version-mismatched,
+// and unloadable layouts fall back to defaults; re-ensuring the tree
+// after a restore never duplicates it; each shortcut dispatches its
+// command; the status bar never enters the serialized layout.
+// Run: node test/workshop-layout.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,12 +30,13 @@ const bundle = await esbuild.build({
         panelIdFor,
         zoneOfPanel,
       } from "./src/workshop/zones.ts";
-      export { createPanelComponent } from "./src/workshop/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent } from "./src/workshop/panel-types.ts";
       export {
         restoreLayout,
         persistLayout,
         startLayoutPersistence,
         LAYOUT_STORAGE_KEY,
+        LAYOUT_SCHEMA_VERSION,
       } from "./src/workshop/layout-persistence.ts";
       export { installShortcuts } from "./src/workshop/shortcuts.ts";
       export { EditorPanel } from "./src/workshop/editor-panel.ts";
@@ -190,10 +193,12 @@ const {
   panelIdFor,
   zoneOfPanel,
   createPanelComponent,
+  createPanelTabComponent,
   restoreLayout,
   persistLayout,
   startLayoutPersistence,
   LAYOUT_STORAGE_KEY,
+  LAYOUT_SCHEMA_VERSION,
   installShortcuts,
   EditorPanel,
 } = await import(pathToFileURL(bundlePath).href);
@@ -217,8 +222,8 @@ function createDock(element) {
   window.document.body.appendChild(element);
   return createDockview(element, {
     createComponent: createPanelComponent,
+    createTabComponent: createPanelTabComponent,
     theme: themeDark,
-    singleTabMode: "fullwidth",
     disableFloatingGroups: true,
     hideBorders: true,
     locked: false,
@@ -234,8 +239,8 @@ const editorBId = panelIdFor("editor", { path: FILE_B });
 const dockEl = window.document.getElementById("dock");
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
+  createTabComponent: createPanelTabComponent,
   theme: themeDark,
-  singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
   locked: false,
@@ -265,7 +270,7 @@ persistLayout(dock);
 const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
 check("the layout persists to localStorage", raw !== null);
 const envelope = JSON.parse(raw);
-check("the envelope carries the schema version", envelope.version === 2);
+check("the envelope carries the schema version", envelope.version === LAYOUT_SCHEMA_VERSION);
 check("the envelope carries no lock state", !("locked" in envelope));
 check("the envelope carries zones and overrides",
   typeof envelope.zones === "object" && typeof envelope.overrides === "object");
@@ -298,6 +303,13 @@ check("restored panels land in their zones",
     zoneOfPanel(dock2.getPanel(editorAId)) === "main");
 check("the restored editor mounted its surface",
   !!dock2.getPanel(editorAId).view.content.element.querySelector(".cm-editor"));
+check("the restored tree keeps its close-button-free tab",
+  dock2.getPanel("tree").view.tab.element.querySelector(".dv-default-tab-action") === null);
+// The boot anchor guard: re-ensuring the tree after a successful restore
+// activates the existing panel instead of duplicating it.
+const panelsAfterRestore = dock2.panels.length;
+check("ensuring the tree after restore never duplicates it",
+  openInZone("tree", {}) === dock2.getPanel("tree") && dock2.panels.length === panelsAfterRestore);
 
 // Debounced writes off onDidLayoutChange.
 startLayoutPersistence(dock2);
@@ -369,7 +381,8 @@ openAgentPanel();
 openInZone("tree", {});
 check("the corrupt-storage fallback mounts the default layout", dock3.panels.length === 2);
 
-// A schema version 1 snapshot (the locked-era envelope) is rejected.
+// Stale schema versions are rejected: v1 (the locked-era envelope) and
+// v2 (before panels serialized their tabComponent).
 window.localStorage.setItem(
   LAYOUT_STORAGE_KEY,
   JSON.stringify({ version: 1, locked: false, zones: {}, overrides: {}, layout: { grid: {} } }),
@@ -377,12 +390,17 @@ window.localStorage.setItem(
 const dock4 = createDock(window.document.createElement("div"));
 initZones(dock4);
 check("a version 1 snapshot fails the restore", restoreLayout(dock4) === false);
+window.localStorage.setItem(
+  LAYOUT_STORAGE_KEY,
+  JSON.stringify({ version: 2, zones: {}, overrides: {}, layout: { grid: {} } }),
+);
+check("a version 2 snapshot fails the restore", restoreLayout(dock4) === false);
 
 // A structurally valid envelope whose layout fromJSON rejects.
 window.localStorage.setItem(
   LAYOUT_STORAGE_KEY,
   JSON.stringify({
-    version: 2,
+    version: LAYOUT_SCHEMA_VERSION,
     zones: {},
     overrides: {},
     layout: { grid: { root: { type: "leaf", data: [] } } },

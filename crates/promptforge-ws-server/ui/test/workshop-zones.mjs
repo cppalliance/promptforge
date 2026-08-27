@@ -3,10 +3,12 @@
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
 // real index.html, and drives the public API. Covers: Agent and Workshop
 // panels mount through the registry; multiple Agent panels coexist as
-// tabs with stable per-agent ids; the tree requests directory paths
-// from /workspace/tree and never file contents; openInZone places panels
-// by affinity and honors per-panel overrides; a zone group is rebuilt
-// after its last panel closes; tree expansion survives a panel reopen.
+// tabs with stable per-agent ids; every panel renders a normal chip tab
+// and the Workshop tree's tab has no close button; the tree requests
+// directory paths from /workspace/tree and never file contents;
+// openInZone places panels by affinity and honors per-panel overrides; a
+// zone group is rebuilt after its last panel closes; tree expansion
+// survives a panel reopen.
 // Run: node test/workshop-zones.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -31,7 +33,7 @@ const bundle = await esbuild.build({
         setZoneOverride,
         zoneOfPanel,
       } from "./src/workshop/zones.ts";
-      export { createPanelComponent, isPanelType } from "./src/workshop/panel-types.ts";
+      export { createPanelComponent, createPanelTabComponent, isPanelType } from "./src/workshop/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -200,6 +202,7 @@ const {
   setZoneOverride,
   zoneOfPanel,
   createPanelComponent,
+  createPanelTabComponent,
   isPanelType,
 } = await import(pathToFileURL(bundlePath).href);
 
@@ -227,8 +230,8 @@ const fileCalls = () => calls.filter((url) => url.startsWith("/workspace/file"))
 // The dock, wired exactly as main.ts wires it.
 const dock = createDockview(window.document.getElementById("dock"), {
   createComponent: createPanelComponent,
+  createTabComponent: createPanelTabComponent,
   theme: themeDark,
-  singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
   locked: false,
@@ -252,6 +255,28 @@ check(
   "reopening a singleton panel activates it instead of duplicating",
   openInZone("tree", {}) === treePanel && dock.panels.length === 2,
 );
+
+// --- Tabs: normal chips, and the tree's has no close button -----------------
+
+const treeTab = treePanel.view.tab.element;
+const chatTab = chatPanel.view.tab.element;
+check(
+  "the tree tab renders the default chip structure",
+  treeTab.classList.contains("dv-default-tab") &&
+    treeTab.querySelector(".dv-default-tab-content")?.textContent === "Workshop",
+);
+check("the tree tab has no close button", treeTab.querySelector(".dv-default-tab-action") === null);
+check(
+  "agent tabs keep the default closable chip",
+  chatTab.classList.contains("dv-default-tab") &&
+    chatTab.querySelector(".dv-default-tab-action") !== null,
+);
+treePanel.api.setTitle("Renamed");
+check(
+  "the permanent tab follows title changes",
+  treeTab.querySelector(".dv-default-tab-content")?.textContent === "Renamed",
+);
+treePanel.api.setTitle("Workshop");
 
 // --- Agent tabs: every New Agent is a fresh panel in the right bank --------
 

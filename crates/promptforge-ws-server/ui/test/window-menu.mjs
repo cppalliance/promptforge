@@ -2,8 +2,9 @@
 // dialog (src/about-dialog.ts). Bundles the TS modules with esbuild,
 // imports them via data URLs, and drives them against jsdom built from the
 // real index.html with the desktop flag set. Covers: menu opening,
-// one-menu-at-a-time, keyboard navigation and dismissal, New Chat and
-// New Agent dispatch through the agent surface, the Window menu sharing
+// one-menu-at-a-time, keyboard navigation and dismissal, New Agent
+// dispatch through the agent surface (the only new-conversation
+// command), the Window menu's Workshop Panel toggle and its sharing of
 // the visible controls' command path, the Model menu's dynamic catalog
 // rows, selection marking, and empty state, Edit target preservation and
 // disabled commands, the About dialog's focus trap and close, and the
@@ -56,14 +57,16 @@ function scenario({ desktop = true, modelMenu } = {}) {
     execCalls.push(command);
     return true;
   };
-  let created = 0;
   let agentsOpened = 0;
   const agents = {
-    newChat: () => {
-      created += 1;
-    },
     newAgent: () => {
       agentsOpened += 1;
+    },
+  };
+  let workshopToggles = 0;
+  const workshop = {
+    toggleWorkshopPanel: () => {
+      workshopToggles += 1;
     },
   };
   globalThis.window = window;
@@ -73,7 +76,7 @@ function scenario({ desktop = true, modelMenu } = {}) {
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ agents, modelMenu });
+  const commands = setupWindowMenus({ agents, workshop, modelMenu });
   const menus = {};
   for (const button of window.document.querySelectorAll(".window-titlebar__menu")) {
     menus[button.dataset.menu] = button;
@@ -87,7 +90,7 @@ function scenario({ desktop = true, modelMenu } = {}) {
   const isOpen = (id) => !popoverOf(id).hidden;
   const keydown = (key) =>
     window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
-  const stats = () => ({ created, agentsOpened, execCalls: [...execCalls] });
+  const stats = () => ({ agentsOpened, workshopToggles, execCalls: [...execCalls] });
   return { window, commands, menus, posted, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
 }
 
@@ -151,14 +154,10 @@ function scenario({ desktop = true, modelMenu } = {}) {
 {
   const { menus, itemByLabel, isOpen, posted, stats } = scenario();
   menus.file.click();
-  itemByLabel("file", "New Chat").click();
-  check("New Chat dispatches the agent surface's newChat", stats().created === 1);
-  check("running a command closes the menu", !isOpen("file"));
-  menus.file.click();
+  check("New Chat is gone from the File menu", itemByLabel("file", "New Chat") === undefined);
   itemByLabel("file", "New Agent").click();
   check("New Agent dispatches the agent surface's newAgent", stats().agentsOpened === 1);
-  check("New Agent leaves the existing conversation alone", stats().created === 1);
-  check("running New Agent closes the menu", !isOpen("file"));
+  check("running a command closes the menu", !isOpen("file"));
   menus.file.click();
   itemByLabel("file", "Close Window").click();
   check(
@@ -167,11 +166,21 @@ function scenario({ desktop = true, modelMenu } = {}) {
   );
 }
 
-// --- Window menu shares the visible controls' command path -------------------
+// --- Window menu: Workshop Panel toggle and the shared command path ----------
 
 {
-  const { window, menus, itemByLabel, posted } = scenario();
+  const { window, menus, itemByLabel, isOpen, posted, stats } = scenario();
   setupWindowChrome();
+  menus.window.click();
+  const workshopItem = itemByLabel("window", "Workshop Panel");
+  check("the Window menu lists Workshop Panel", workshopItem !== undefined);
+  check(
+    "Workshop Panel shows the Ctrl+B shortcut hint",
+    workshopItem?.querySelector(".window-titlebar__shortcut")?.textContent === "Ctrl+B",
+  );
+  workshopItem.click();
+  check("Workshop Panel dispatches the workshop toggle", stats().workshopToggles === 1);
+  check("running Workshop Panel closes the menu", !isOpen("window"));
   const visible = (command) => window.document.querySelector(`[data-command="${command}"]`);
   visible("minimize").click();
   menus.window.click();
@@ -345,14 +354,15 @@ function scenario({ desktop = true, modelMenu } = {}) {
 
 {
   const { commands, stats } = scenario();
-  check("setup returns the shared command set", typeof commands.newChat === "function" &&
-    typeof commands.newAgent === "function" &&
+  check("setup returns the shared command set", typeof commands.newAgent === "function" &&
+    typeof commands.toggleWorkshopPanel === "function" &&
     typeof commands.minimizeWindow === "function" &&
     typeof commands.showAbout === "function");
-  commands.newChat();
-  check("the shared set dispatches New Chat", stats().created === 1);
+  check("newChat is gone from the shared command set", !("newChat" in commands));
   commands.newAgent();
   check("the shared set dispatches New Agent", stats().agentsOpened === 1);
+  commands.toggleWorkshopPanel();
+  check("the shared set dispatches the workshop toggle", stats().workshopToggles === 1);
 }
 
 // --- Browser mode: popovers wired, native window commands inert --------------
@@ -365,8 +375,8 @@ function scenario({ desktop = true, modelMenu } = {}) {
   );
   menus.file.click();
   check("clicking File opens its popover in browser mode", isOpen("file"));
-  itemByLabel("file", "New Chat").click();
-  check("browser mode commands dispatch", stats().created === 1);
+  itemByLabel("file", "New Agent").click();
+  check("browser mode commands dispatch", stats().agentsOpened === 1);
   check("running a command closes the menu in browser mode", !isOpen("file"));
   menus.window.click();
   itemByLabel("window", "Minimize").click();
@@ -376,8 +386,8 @@ function scenario({ desktop = true, modelMenu } = {}) {
     "native window commands no-op without the IPC bridge",
     posted.length === 0 && !("ipc" in window),
   );
-  commands.newChat();
-  check("browser mode still returns a working command set", stats().created === 2);
+  commands.newAgent();
+  check("browser mode still returns a working command set", stats().agentsOpened === 2);
 }
 
 if (failures.length > 0) {
