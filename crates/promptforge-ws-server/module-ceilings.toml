@@ -1,0 +1,60 @@
+# Module size ratchet for promptforge-ws-server. Enforced by the `ratchet`
+# module of the tests/it integration binary; a module that outgrows its
+# ceiling fails `cargo test -p promptforge-ws-server --test it`.
+#
+# Counting rule: physical lines, the count diff tooling reports - every
+# newline ends a line, and a final line missing its trailing newline still
+# counts as one. Blank lines and comments count; this is a tripwire against
+# regrowth, not a code-quality metric.
+#
+# Slack: the test lets a module run up to 30 lines past its ceiling (the
+# SLACK constant in tests/it/ratchet.rs). A fixed count rather than a
+# percentage, because a percentage would hand the largest modules - the ones
+# the ratchet exists to contain - the most free growth.
+#
+# Raising a ceiling: edit the number here in the same commit as the growth,
+# and state the reason in that commit's message. Never raise a ceiling to
+# quiet the test in an unrelated commit.
+#
+# New and deleted modules: every .rs file under src/ has exactly one entry
+# here. The test fails on a missing entry (a new module ships with a
+# recorded ceiling) and on a stale one (a deleted module takes its entry
+# with it).
+#
+# Shrinking is free and never fails the test; after a big shrink, re-record
+# the ceiling downward in the same commit to bank the gain.
+
+[modules]
+"app.rs" = 479
+"assets.rs" = 27
+"catalog.rs" = 118
+"chat_ws.rs" = 1358
+"config.rs" = 593
+"error.rs" = 484
+"gateway.rs" = 850
+"heartbeat.rs" = 465
+"lib.rs" = 53
+"main.rs" = 47
+"protocol.rs" = 614
+"provision.rs" = 839
+"push.rs" = 233
+"relay.rs" = 690
+"routes.rs" = 8
+"routes/assets.rs" = 117
+"routes/chat.rs" = 48
+"routes/health.rs" = 50
+"routes/voice.rs" = 75
+"routes/workspace.rs" = 19
+"segment.rs" = 231
+"serve.rs" = 346
+"status.rs" = 200
+"tape.rs" = 275
+"transcribe.rs" = 224
+"transcribe/engine.rs" = 237
+"transcribe/error.rs" = 39
+"transcribe/final_pass.rs" = 469
+"transcribe/prompt.rs" = 267
+"transcribe/slot.rs" = 41
+"transcribe/worker.rs" = 153
+"voice.rs" = 1315
+"workspace.rs" = 816
