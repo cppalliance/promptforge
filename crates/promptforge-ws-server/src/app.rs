@@ -253,6 +253,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/health", get(health))
         .route("/v1/models", get(relay::models))
+        .route("/profiles", get(relay::profiles))
+        .route("/profiles/switch", post(relay::switch_profile))
         .route("/chat", post(relay::chat))
         .route("/ws", get(chat_ws::upgrade))
         .route("/voice", get(voice::upgrade))
