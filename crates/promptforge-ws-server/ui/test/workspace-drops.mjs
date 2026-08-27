@@ -1,4 +1,4 @@
-// Unit test for the native workspace drop handler (src/workspace-drops.ts).
+// Unit test for the native workspace drop handler (src/ui/workspace-drops.ts).
 // Bundles the TS module with esbuild, imports it via a data URL, and drives
 // it against jsdom. Covers: browser mode never installs the grant listener;
 // in desktop mode a synthesized promptforge:file-drop event POSTs one grant
@@ -16,7 +16,7 @@ import { JSDOM } from "jsdom";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "workspace-drops.ts")],
+  entryPoints: [path.join(uiDir, "..", "src", "ui", "workspace-drops.ts")],
   bundle: true,
   write: false,
   format: "esm",

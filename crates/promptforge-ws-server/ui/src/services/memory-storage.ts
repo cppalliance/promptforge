@@ -3,7 +3,7 @@ import type {
   ChatSessionMeta,
   ChatStorage,
   PaginatedSessions,
-} from "./chat/core/types";
+} from "../chat/core/types";
 
 /**
  * ChatStorage backed by a page-local Map: sessions work within the page's

@@ -1,5 +1,5 @@
 // Integration test for the workshop zone registry and file tree
-// (src/workshop/zones.ts, panel-types.ts, workshop-panel.ts). Bundles the
+// (src/ui/workshop/zones.ts, panel-types.ts, workshop-panel.ts). Bundles the
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
 // real index.html, and drives the public API. Covers: Agent and Workshop
 // panels mount through the registry; multiple Agent panels coexist as
@@ -32,8 +32,8 @@ const bundle = await esbuild.build({
         panelIdFor,
         setZoneOverride,
         zoneOfPanel,
-      } from "./src/workshop/zones.ts";
-      export { createPanelComponent, createPanelTabComponent, isPanelType } from "./src/workshop/panel-types.ts";
+      } from "./src/ui/workshop/zones.ts";
+      export { createPanelComponent, createPanelTabComponent, isPanelType } from "./src/ui/workshop/panel-types.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",

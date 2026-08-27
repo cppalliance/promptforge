@@ -1,4 +1,4 @@
-// Unit test for the custom window title bar (src/window-chrome.ts). Bundles
+// Unit test for the custom window title bar (src/ui/window-chrome.ts). Bundles
 // the TS module with esbuild, imports it via a data URL, and drives it
 // against jsdom built from the real index.html. Covers: without the desktop
 // flag the bar is revealed but the control cluster hides and ipc stays
@@ -18,7 +18,7 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const html = await readFile(path.join(uiDir, "..", "index.html"), "utf8");
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "window-chrome.ts")],
+  entryPoints: [path.join(uiDir, "..", "src", "ui", "window-chrome.ts")],
   bundle: true,
   write: false,
   format: "esm",
