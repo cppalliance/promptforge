@@ -302,17 +302,25 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
     let webview_builder = {
         let drop_proxy = event_loop.create_proxy();
         webview_builder.with_drag_drop_handler(move |event| {
-            // Only the drop carries paths worth granting; enter, over, and
-            // leave are cursor feedback the shell does not need.
-            if let DragDropEvent::Drop { paths, .. } = event
-                && let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths))
-            {
-                eprintln!("could not forward the dropped paths to the event loop: {error}");
+            // Only the drop is consumed. Returning true tells wry to skip
+            // the platform's default handling, and on macOS wry suppresses
+            // the WKWebView superclass drag methods whenever the handler
+            // returns true - consuming Enter/Over/Leave would starve the
+            // page of dragover/drop and kill HTML5 drag-and-drop (Dockview
+            // panel drags included), so those return false and the default
+            // WebKit behavior runs.
+            match event {
+                DragDropEvent::Drop { paths, .. } => {
+                    if let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths)) {
+                        eprintln!("could not forward the dropped paths to the event loop: {error}");
+                    }
+                    // Take over the drop so the webview never navigates to
+                    // a dropped file; the page learns the paths through the
+                    // promptforge:file-drop event instead.
+                    true
+                }
+                _ => false,
             }
-            // Take over the drop so the webview never navigates to a
-            // dropped file; the page learns the paths through the
-            // promptforge:file-drop event instead.
-            true
         })
     };
     let webview = webview_builder
