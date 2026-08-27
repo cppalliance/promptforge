@@ -70,7 +70,7 @@ Two workflows:
 1. **Just cargo:** edit the TypeScript, then `cargo build` (or `cargo run -p promptforge-ws-server`). The build script re-bundles whenever `ui/src/` or the static UI files change, and debug builds read `ui/dist/` from disk on every request.
 2. **esbuild watch:** run `npm run watch` in `ui/` in one terminal and `cargo run` in another. Edit, save, refresh the browser - no Rust recompile for UI changes.
 
-`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs a jsdom smoke test that imports the built `dist/app.js` and asserts the chat UI mounts (run `npm run build` first).
+`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test`, which discovers every test under `ui/test/` plus any colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the chat UI mounts (run `npm run build` first).
 
 The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`), driven by a WebSocket provider against `GET /ws` (one persistent socket, opened on load; chat frames carry an `id` the server echoes, and unsolicited status frames ride the same connection). Its styles are bundled by esbuild into `dist/app.css`; `ui/style.css` carries the workshop shell (sidebar, picker, voice UI, status bar) and overrides.
 
