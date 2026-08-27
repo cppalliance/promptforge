@@ -84,3 +84,5 @@
 - [2026-08-26-4-workshop-idiom-refactor] bounded boot queue: Pre-ready state pushes replay in arrival order from a capped queue that is cleared on disconnect.
 - [2026-08-26-4-workshop-idiom-refactor] typed protocol twins: Rust and TypeScript protocol definitions are explicit peers; generation waits for demonstrated drift.
 - [2026-08-27-1-refresh-tree-on-drop] cache scope: Root invalidation preserves independent expansion and subdirectory caches.
+- [2026-08-27-2-workshop-server-refactor] single socket owner: One select loop owns each WebSocket and cleanup follows resource guards rather than exit-path calls.
+- [2026-08-27-2-workshop-server-refactor] bounded shutdown: Serve handles expose readiness, shutdown, stopped, and join phases with a force watchdog outside library code.

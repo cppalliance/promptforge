@@ -25,7 +25,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
-- A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 
 
 
@@ -64,6 +63,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A80. Workshop UI dependencies flow from ui to services to base; main.ts alone composes layers and builds reject reverse edges.
 
 - A81. Successful workspace grants publish one invalidation signal; tree views then refetch authoritative roots.
+
+- A82. Chat replies are ordered durable per-request traffic; status, catalog, and interim transcription are complete ephemeral snapshots.
 
 ## Principles
 
