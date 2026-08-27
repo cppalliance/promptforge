@@ -281,11 +281,23 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
       ws.send("stop");
       // The final whisper pass can take 30+ seconds on CPU; give it time.
       // The message listener closes the socket when the final reply arrives.
-      setTimeout(() => {
+      const deadline = setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.close();
         }
       }, 120_000);
+      // The post-stop socket deliberately outlives the session so the
+      // final reply can land, but the handle still owns it: disposing the
+      // tab closes the socket and cancels the deadline instead of leaving
+      // both live (and splicing into a dead textarea) for two minutes.
+      store.add(
+        toDisposable(() => {
+          clearTimeout(deadline);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+        }),
+      );
     }
   }
 

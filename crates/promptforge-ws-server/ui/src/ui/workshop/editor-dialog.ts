@@ -4,6 +4,8 @@
 // modified-time conflict and the unsaved-changes close prompt - are built
 // through this one helper so their behavior never diverges.
 
+import { toDisposable, type IDisposable } from "../../base/lifecycle";
+
 const FOCUSABLE_SELECTOR =
   'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -30,11 +32,16 @@ export interface PanelDialogOptions {
  * Opens the dialog and focuses its first button. A second call while the
  * same dialog kind is open is a no-op. Escape and Cancel-style dismissal
  * return focus to the element that was focused when the dialog opened.
+ *
+ * Returns a disposable that dismisses the dialog if it is still open, so
+ * the invoking panel owns the document-level focus trap: a panel disposed
+ * while its dialog is up tears the trap down with it.
  */
-export function showPanelDialog(options: PanelDialogOptions): void {
+export function showPanelDialog(options: PanelDialogOptions): IDisposable {
   const prefix = options.classPrefix;
   if (options.host.querySelector(`.${prefix}-overlay`) !== null) {
-    return;
+    // The open dialog is owned by the call that created it.
+    return toDisposable(() => undefined);
   }
   const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
@@ -59,7 +66,12 @@ export function showPanelDialog(options: PanelDialogOptions): void {
   const actions = document.createElement("div");
   actions.className = `${prefix}__actions`;
 
+  let dismissed = false;
   const dismiss = (): void => {
+    if (dismissed) {
+      return;
+    }
+    dismissed = true;
     document.removeEventListener("keydown", onKeydown, true);
     overlay.remove();
     invoker?.focus();
@@ -115,4 +127,5 @@ export function showPanelDialog(options: PanelDialogOptions): void {
   if (firstButton) {
     firstButton.focus();
   }
+  return toDisposable(dismiss);
 }
