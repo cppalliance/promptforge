@@ -407,7 +407,9 @@ mod tests {
     /// Opens a raw connection and wedges it mid-request: the head promises
     /// a body that never fully arrives, so the handler waits on the body,
     /// no response begins, and the connection holds axum's graceful drain
-    /// open until torn down.
+    /// open until torn down. The head must pass the cross-site guard - a
+    /// loopback `Host` and a JSON content type - or the guard answers 403
+    /// without ever polling the body and nothing wedges.
     async fn wedge_http_connection(url: &str) -> tokio::net::TcpStream {
         use tokio::io::AsyncWriteExt as _;
 
@@ -417,7 +419,7 @@ mod tests {
             .expect("the raw connection opens");
         wedged
             .write_all(
-                b"POST /chat HTTP/1.1\r\nhost: workshop\r\n\
+                b"POST /chat HTTP/1.1\r\nhost: 127.0.0.1\r\n\
                   content-type: application/json\r\ncontent-length: 64\r\n\r\n{",
             )
             .await
