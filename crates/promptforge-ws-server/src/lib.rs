@@ -46,7 +46,7 @@ pub use config::{
 };
 pub use gateway::{
     CacheEvent, CacheResponse, ChatStream, GatewayClient, GatewayError, GatewayResponse,
-    SsePayloadStream,
+    SsePayloadStream, SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
 pub use protocol::ChatRequest;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
