@@ -668,9 +668,10 @@ fn first_workshop_difference(boot: &WorkshopConfig, candidate: &WorkshopConfig) 
 /// then the boot file's sibling env file; dotenvy never overrides, so the
 /// earlier file wins and both lose to the process environment), then the
 /// profile resolves with its include chain, then the boot file's `[server]`
-/// is extracted and compared. The resolved chain is logged, with a warning
-/// when the boot file is not in it (the likely-mistake case: an operator
-/// edits the boot file and nothing changes).
+/// and `[workshop]` sections are extracted in one pass and compared. The
+/// resolved chain is logged, with a warning when the boot file is not in it
+/// (the likely-mistake case: an operator edits the boot file and nothing
+/// changes).
 fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), StartupError> {
     let profiles_dir = profiles_dir_for(&options.config_path);
 
@@ -698,11 +699,10 @@ fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), Sta
 
     let (config, chain) = Config::load_profile_with_chain(&profiles_dir, &options.profile)
         .map_err(StartupError::config)?;
-    let boot_server = promptforge_gateway_config::load_server(&options.config_path)
-        .map_err(StartupError::config)?;
+    let (boot_server, boot_workshop) =
+        promptforge_gateway_config::load_boot_sections(&options.config_path)
+            .map_err(StartupError::config)?;
     check_server_matches_boot(&boot_server, config.server(), &options.profile)
-        .map_err(StartupError::config)?;
-    let boot_workshop = promptforge_gateway_config::load_workshop(&options.config_path)
         .map_err(StartupError::config)?;
     check_workshop_matches_boot(boot_workshop.as_ref(), config.workshop(), &options.profile)
         .map_err(StartupError::config)?;

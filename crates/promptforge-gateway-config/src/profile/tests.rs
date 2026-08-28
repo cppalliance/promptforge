@@ -633,3 +633,64 @@ fn load_server_requires_a_server_section() {
     assert_eq!(err.kind(), crate::ConfigErrorKind::Validation);
     assert!(err.to_string().contains("[server]"), "got: {err}");
 }
+
+#[test]
+fn load_boot_sections_reads_both_sections_without_full_validation() {
+    // The bare catalog may fail checks that apply to a loaded profile (here a
+    // model naming an undefined endpoint); the combined loader still extracts
+    // both boot sections.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "gateway.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "boot-key"
+
+[workshop]
+bind = "127.0.0.1:7999"
+
+[[model]]
+name = "m"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["missing"]
+"#,
+    );
+
+    let (server, workshop) = load_boot_sections(&tmp.path().join("gateway.toml")).unwrap();
+    assert_eq!(server.api_key().expose(), "boot-key");
+    assert_eq!(
+        workshop
+            .expect("the [workshop] section is present")
+            .bind()
+            .to_string(),
+        "127.0.0.1:7999"
+    );
+}
+
+#[test]
+fn load_boot_sections_returns_none_workshop_when_the_section_is_absent() {
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "gateway.toml", MINIMAL_CONFIG);
+
+    let (server, workshop) = load_boot_sections(&tmp.path().join("gateway.toml")).unwrap();
+    assert_eq!(server.bind().to_string(), "127.0.0.1:8081");
+    assert!(workshop.is_none());
+}
+
+#[test]
+fn load_boot_sections_requires_a_server_section() {
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "gateway.toml",
+        "[workshop]\nopen_browser = true\n",
+    );
+
+    let err = load_boot_sections(&tmp.path().join("gateway.toml")).unwrap_err();
+    assert_eq!(err.kind(), crate::ConfigErrorKind::Validation);
+    assert!(err.to_string().contains("[server]"), "got: {err}");
+}

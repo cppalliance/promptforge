@@ -159,17 +159,7 @@ pub fn load_server(path: &Path) -> Result<ServerConfig, crate::api_error::Config
 fn load_server_repr(path: &Path) -> Result<ServerConfig, ConfigError> {
     let (mut value, _chain) = collect_config_chain(path)?;
     interpolate_value(&mut value)?;
-    let server = value
-        .as_table()
-        .and_then(|table| table.get("server"))
-        .cloned()
-        .ok_or_else(|| {
-            ConfigError::Validation(format!("no [server] section in {}", path.display()))
-        })?;
-    server.try_into().map_err(|source| ConfigError::Parse {
-        path: Some(path.to_owned()),
-        source: Box::new(source),
-    })
+    server_section(&value, path)
 }
 
 /// Loads only the `[workshop]` section of a config file: includes are
@@ -206,6 +196,68 @@ pub fn load_workshop(path: &Path) -> Result<Option<WorkshopConfig>, crate::api_e
 fn load_workshop_repr(path: &Path) -> Result<Option<WorkshopConfig>, ConfigError> {
     let (mut value, _chain) = collect_config_chain(path)?;
     interpolate_value(&mut value)?;
+    workshop_section(&value, path)
+}
+
+/// Loads both boot-owned sections of a config file in one include-resolution
+/// and interpolation pass: [`load_server`] and [`load_workshop`] combined.
+///
+/// A caller that needs both sections (the gateway's startup path) avoids
+/// parsing the same include tree twice. As with the single-section loaders,
+/// full validation is skipped: the boot file is the catalog and may
+/// legitimately fail checks that apply to a loaded profile.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) under the same conditions
+/// as [`load_server`]: the file (or an included file) cannot be read or
+/// parsed, an include cycles or exceeds depth, an interpolation fails, the
+/// `[server]` section is absent, or a present section does not deserialize.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::load_boot_sections;
+/// use std::path::Path;
+///
+/// let (server, workshop) = load_boot_sections(Path::new("gateway.toml"))?;
+/// println!("boot file binds {}", server.bind());
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn load_boot_sections(
+    path: &Path,
+) -> Result<(ServerConfig, Option<WorkshopConfig>), crate::api_error::ConfigError> {
+    load_boot_sections_repr(path).map_err(crate::api_error::ConfigError::from)
+}
+
+/// The crate-internal form of [`load_boot_sections`], returning the private
+/// representation.
+fn load_boot_sections_repr(
+    path: &Path,
+) -> Result<(ServerConfig, Option<WorkshopConfig>), ConfigError> {
+    let (mut value, _chain) = collect_config_chain(path)?;
+    interpolate_value(&mut value)?;
+    Ok((
+        server_section(&value, path)?,
+        workshop_section(&value, path)?,
+    ))
+}
+
+/// Extracts the required `[server]` section from an interpolated document.
+fn server_section(value: &Value, path: &Path) -> Result<ServerConfig, ConfigError> {
+    let server = value
+        .as_table()
+        .and_then(|table| table.get("server"))
+        .cloned()
+        .ok_or_else(|| {
+            ConfigError::Validation(format!("no [server] section in {}", path.display()))
+        })?;
+    server.try_into().map_err(|source| ConfigError::Parse {
+        path: Some(path.to_owned()),
+        source: Box::new(source),
+    })
+}
+
+/// Extracts the optional `[workshop]` section from an interpolated document.
+fn workshop_section(value: &Value, path: &Path) -> Result<Option<WorkshopConfig>, ConfigError> {
     let Some(workshop) = value
         .as_table()
         .and_then(|table| table.get("workshop"))

@@ -19,6 +19,8 @@ What it provides:
   tape-path anchoring against the boot-config directory, a loopback-adjusted
   client URL derived from `[server]` (`ServerConfig::client_url`), and
   `load_workshop` for reading the section without full validation.
+  `load_boot_sections` reads `[server]` and `[workshop]` together in a
+  single include-resolution pass.
 - [`Secret`](src/config.rs): a credential wrapper that redacts in `Debug` and
   `Display` and never serializes.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
