@@ -9,6 +9,7 @@ use crate::catalog::CatalogBus;
 use crate::config::{Config, VoiceConfig};
 use crate::gateway::{GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
+use crate::menu::MenuBus;
 use crate::protocol::Activity;
 use crate::push::Push;
 use crate::routes;
@@ -21,8 +22,9 @@ use crate::workspace::Workspace;
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
-/// tape, the status bus, and the voice transcription engine slot, filled
-/// at startup from local model files or later by the provisioning task.
+/// tape, the status, catalog, and menu buses, and the voice transcription
+/// engine slot, filled at startup from local model files or later by the
+/// provisioning task.
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub(crate) gateway: GatewayClient,
@@ -31,6 +33,7 @@ pub struct AppState {
     pub(crate) status: StatusBus,
     pub(crate) health: GatewayHealth,
     pub(crate) catalog: CatalogBus,
+    pub(crate) menu: MenuBus,
     pub(crate) workspace: Workspace,
 }
 
@@ -51,7 +54,10 @@ impl AppState {
     pub fn new(config: &Config) -> Result<Self, StateError> {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
-        let push = Push::new(status.clone(), catalog.clone());
+        // The per-profile model memory lives beside the tape file; a bad
+        // or missing memory file costs the memory, never startup.
+        let menu = MenuBus::new(catalog.clone(), config.tape.path.parent());
+        let push = Push::new(status.clone(), catalog.clone(), menu.clone());
         // Startup phases are reported as they run; with no client connected
         // yet these land on an empty bus, ready for the first session.
         push.push_status_update(
@@ -87,6 +93,7 @@ impl AppState {
             status,
             health: GatewayHealth::new(),
             catalog,
+            menu,
             workspace: Workspace::new(),
         })
     }
@@ -108,10 +115,10 @@ impl AppState {
         self.status.clone()
     }
 
-    /// The push facade over the status and catalog buses, held by every
-    /// subsystem that reports what happened.
+    /// The push facade over the status, catalog, and menu buses, held by
+    /// every subsystem that reports what happened.
     pub(crate) fn push(&self) -> Push {
-        Push::new(self.status.clone(), self.catalog.clone())
+        Push::new(self.status.clone(), self.catalog.clone(), self.menu.clone())
     }
 
     /// The gateway client, shared with the chat WebSocket sessions.
@@ -388,6 +395,14 @@ mod tests {
         );
     }
 
+    /// A push handle over fresh buses; these tests read only the status
+    /// side.
+    fn push_over(status: StatusBus) -> Push {
+        let catalog = CatalogBus::new();
+        let menu = MenuBus::new(catalog.clone(), None);
+        Push::new(status, catalog, menu)
+    }
+
     /// Drains the startup phase frames emitted before the degradation
     /// verdict and returns the verdict frame.
     fn degradation(rx: &mut tokio::sync::broadcast::Receiver<StatusBarUpdate>) -> StatusBarUpdate {
@@ -401,7 +416,7 @@ mod tests {
     fn a_missing_interim_model_with_no_source_degrades_to_disabled_voice() {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
-        let push = Push::new(status, CatalogBus::new());
+        let push = push_over(status);
         let config = VoiceConfig {
             interim_model: PathBuf::from("definitely-missing-model.bin"),
             ..VoiceConfig::default()
@@ -421,7 +436,7 @@ mod tests {
     fn a_missing_model_with_a_source_defers_to_provisioning() {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
-        let push = Push::new(status, CatalogBus::new());
+        let push = push_over(status);
         let config = VoiceConfig {
             interim_model: PathBuf::from("definitely-missing-model.bin"),
             interim_source: "https://example.com/ggml.bin".to_string(),
@@ -440,7 +455,7 @@ mod tests {
     fn a_missing_unsourced_final_model_drops_the_final_pass() {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
-        let push = Push::new(status, CatalogBus::new());
+        let push = push_over(status);
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
             final_model: PathBuf::from("definitely-missing-final-model.bin"),
@@ -461,7 +476,7 @@ mod tests {
     fn invalid_voice_tuning_degrades_instead_of_failing_startup() {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
-        let push = Push::new(status, CatalogBus::new());
+        let push = push_over(status);
         let config = VoiceConfig {
             interim_model: PathBuf::from("model.bin"),
             window_seconds: 0,

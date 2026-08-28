@@ -1,34 +1,41 @@
-//! The push facade: intent-named send methods over the status and catalog
-//! broadcast buses, so business code reports what happened and never
-//! chooses a severity or builds a bus payload (SiYuan's `PushReloadFiletree`
-//! pattern).
+//! The push facade: intent-named send methods over the status, catalog,
+//! and menu broadcast buses, so business code reports what happened and
+//! never chooses a severity or builds a bus payload (SiYuan's
+//! `PushReloadFiletree` pattern).
 //!
 //! Producers hold a [`Push`] and speak in intents - a status update, a
 //! failure, an activity pulse, determinate progress, idle, a fresh model
-//! catalog. What each intent becomes on the wire is decided here and in
-//! [`crate::protocol`], nowhere else. The buses stay the transport: every
-//! `/ws` session subscribes on [`crate::status::StatusBus`] and
-//! [`crate::catalog::CatalogBus`] and serializes what it receives.
+//! catalog, the workbench snapshot. What each intent becomes on the wire
+//! is decided here and in [`crate::protocol`], nowhere else. The buses
+//! stay the transport: every `/ws` session subscribes on
+//! [`crate::status::StatusBus`], [`crate::catalog::CatalogBus`], and
+//! [`crate::menu::MenuBus`] and serializes what it receives.
 
 use crate::catalog::CatalogBus;
+use crate::menu::MenuBus;
 use crate::protocol::{Activity, Progress};
 use crate::status::StatusBus;
 
-/// The intent-named push handle over the status and catalog buses.
+/// The intent-named push handle over the status, catalog, and menu buses.
 ///
-/// Clones are cheap (two `Arc` bumps) and every clone feeds the same
+/// Clones are cheap (a few `Arc` bumps) and every clone feeds the same
 /// buses, so producers take their own copy, exactly as they did with the
 /// buses themselves.
 #[derive(Debug, Clone)]
 pub(crate) struct Push {
     status: StatusBus,
     catalog: CatalogBus,
+    menu: MenuBus,
 }
 
 impl Push {
-    /// Wraps the two buses every unsolicited push flows through.
-    pub(crate) fn new(status: StatusBus, catalog: CatalogBus) -> Self {
-        Self { status, catalog }
+    /// Wraps the buses every unsolicited push flows through.
+    pub(crate) fn new(status: StatusBus, catalog: CatalogBus, menu: MenuBus) -> Self {
+        Self {
+            status,
+            catalog,
+            menu,
+        }
     }
 
     /// Pushes a user-visible status update: a `{"type":"status",...}`
@@ -93,9 +100,26 @@ impl Push {
 
     /// Pushes one complete model catalog snapshot: a `{"type":"models",...}`
     /// [`crate::protocol::CatalogFrame`] carrying the gateway's `data`
-    /// array verbatim.
+    /// array verbatim. The single choke point for catalog publishes: the
+    /// menu revalidates its selection against the new catalog and
+    /// republishes the workbench snapshot when it changed.
     pub(crate) fn push_models_catalog(&self, models: Vec<serde_json::Value>) {
         self.catalog.publish(models);
+        self.menu.reconcile_catalog();
+    }
+
+    /// Pushes the current workbench snapshot: a `{"type":"workbench",...}`
+    /// [`crate::protocol::WorkbenchFrame`] carrying the server-owned
+    /// Model-menu state.
+    // An `allow` rather than an `expect`: the unit tests below use this
+    // in test builds, so an expectation would be unfulfilled there and
+    // fail the -D warnings gate.
+    #[allow(
+        dead_code,
+        reason = "the heartbeat and session loop push the workbench in later steps"
+    )]
+    pub(crate) fn push_workbench(&self) {
+        self.menu.republish();
     }
 }
 
@@ -107,7 +131,7 @@ mod tests {
 
     use crate::protocol::{CatalogPush, Severity, StatusBarUpdate};
 
-    /// A push handle plus one receiver on each bus it wraps.
+    /// A push handle plus one receiver on the status and catalog buses.
     fn wired() -> (
         Push,
         broadcast::Receiver<StatusBarUpdate>,
@@ -117,7 +141,15 @@ mod tests {
         let catalog = CatalogBus::new();
         let status_rx = status.subscribe();
         let catalog_rx = catalog.subscribe();
-        (Push::new(status, catalog), status_rx, catalog_rx)
+        let menu = MenuBus::new(catalog.clone(), None);
+        (Push::new(status, catalog, menu), status_rx, catalog_rx)
+    }
+
+    /// A push handle plus the menu bus it feeds, for the workbench tests.
+    fn wired_with_menu() -> (Push, MenuBus) {
+        let catalog = CatalogBus::new();
+        let menu = MenuBus::new(catalog.clone(), None);
+        (Push::new(StatusBus::new(), catalog, menu.clone()), menu)
     }
 
     #[tokio::test]
@@ -229,5 +261,32 @@ mod tests {
         push.push_models_catalog(models.clone());
         let received = rx.recv().await.expect("the push reaches the bus");
         assert_eq!(received, CatalogPush { models });
+    }
+
+    #[test]
+    fn a_catalog_push_reconciles_the_workbench_selection() {
+        let (push, menu) = wired_with_menu();
+        push.push_models_catalog(vec![serde_json::json!({"id": "model-a"})]);
+        menu.set_selected("model-a")
+            .expect("the id is in the catalog");
+        push.push_models_catalog(vec![serde_json::json!({"id": "model-b"})]);
+        let snapshot = menu.latest().expect("the reconcile republished");
+        assert_eq!(
+            snapshot.selected_model, None,
+            "the selection the new catalog no longer holds is revalidated away"
+        );
+    }
+
+    #[tokio::test]
+    async fn push_workbench_republishes_the_retained_snapshot() {
+        let (push, menu) = wired_with_menu();
+        let mut rx = menu.subscribe();
+        push.push_workbench();
+        let pushed = rx.recv().await.expect("the push reaches the bus");
+        assert_eq!(
+            Some(pushed),
+            menu.latest(),
+            "the pushed snapshot is the retained one"
+        );
     }
 }

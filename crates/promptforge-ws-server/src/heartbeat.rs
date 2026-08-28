@@ -278,9 +278,10 @@ mod tests {
     ) -> (Heartbeat, GatewayHealth) {
         let client = GatewayClient::new(base_url, "").expect("client builds in tests");
         let health = GatewayHealth::new();
+        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
         let heartbeat = spawn(
             client,
-            Push::new(status.clone(), catalog.clone()),
+            Push::new(status.clone(), catalog.clone(), menu),
             health.clone(),
             TEST_INTERVAL,
         );
@@ -452,9 +453,11 @@ mod tests {
         // shutdown would block for the whole minute.
         let status = StatusBus::new();
         let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let catalog = CatalogBus::new();
+        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
         let heartbeat = spawn(
             client,
-            Push::new(status, CatalogBus::new()),
+            Push::new(status, catalog, menu),
             GatewayHealth::new(),
             Duration::from_secs(60),
         );

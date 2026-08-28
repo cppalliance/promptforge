@@ -447,6 +447,14 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// A push handle over fresh buses; these tests read only the status
+    /// side.
+    fn push_over(status: StatusBus) -> Push {
+        let catalog = CatalogBus::new();
+        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
+        Push::new(status, catalog, menu)
+    }
+
     /// Receives the next status update within a generous deadline.
     async fn next_update(rx: &mut broadcast::Receiver<StatusBarUpdate>) -> StatusBarUpdate {
         tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -481,7 +489,7 @@ mod tests {
         // provisioning immediately, before any publish.
         let provision = spawn(
             client,
-            Push::new(status, CatalogBus::new()),
+            push_over(status),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -524,7 +532,7 @@ mod tests {
         let health = GatewayHealth::new();
         let provision = spawn(
             client,
-            Push::new(status, CatalogBus::new()),
+            push_over(status),
             health.clone(),
             slot.clone(),
             sourced_config(),
@@ -556,7 +564,7 @@ mod tests {
         let slot = VoiceSlot::default();
         let provision = spawn(
             client,
-            Push::new(status, CatalogBus::new()),
+            push_over(status),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -574,7 +582,7 @@ mod tests {
         let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
         let provision = spawn(
             client,
-            Push::new(StatusBus::new(), CatalogBus::new()),
+            push_over(StatusBus::new()),
             GatewayHealth::new(),
             VoiceSlot::default(),
             VoiceConfig::default(),
@@ -611,7 +619,7 @@ mod tests {
         );
         let provision = spawn(
             client,
-            Push::new(StatusBus::new(), CatalogBus::new()),
+            push_over(StatusBus::new()),
             GatewayHealth::new(),
             slot,
             sourced_config(),
@@ -636,7 +644,7 @@ mod tests {
         config.final_source = String::new();
         let provision = spawn(
             client,
-            Push::new(StatusBus::new(), CatalogBus::new()),
+            push_over(StatusBus::new()),
             GatewayHealth::new(),
             slot.clone(),
             config,
@@ -667,7 +675,7 @@ mod tests {
         let slot = VoiceSlot::default();
         let provision = spawn(
             client,
-            Push::new(status, CatalogBus::new()),
+            push_over(status),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),

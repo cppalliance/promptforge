@@ -671,13 +671,15 @@ mod tests {
 
         let base_url = spawn_mock_gateway().await;
         let gateway = GatewayClient::new(&base_url, "test-key").expect("client builds in tests");
+        let catalog = CatalogBus::new();
         let state = AppState {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
             voice: VoiceSlot::default(),
             status: StatusBus::new(),
             health: GatewayHealth::new(),
-            catalog: CatalogBus::new(),
+            menu: crate::menu::MenuBus::new(catalog.clone(), None),
+            catalog,
             workspace: Workspace::new(),
         };
         let response = router(state)

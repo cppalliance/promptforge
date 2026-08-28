@@ -52,6 +52,9 @@
 //! - [`CatalogFrame`] - ephemeral. Each push carries the whole catalog
 //!   verbatim; the newest push supersedes every older one and the
 //!   catalog is resent on reconnect.
+//! - [`WorkbenchFrame`] - ephemeral. Every push is a complete snapshot
+//!   of the server-owned Model-menu state, retained and resent on
+//!   reconnect, exactly like the catalog frame.
 //!
 //! Voice socket (`/voice`):
 //!
@@ -194,6 +197,65 @@ pub(crate) struct CatalogFrame<'a> {
     #[serde(rename = "type")]
     kind: &'static str,
     models: &'a [serde_json::Value],
+}
+
+/// One pushed workbench snapshot: the server-owned Model-menu state.
+///
+/// The server computes `chat_ready` - catalog non-empty, a model
+/// selected, no switch in flight, gateway reachable - and the UI never
+/// derives it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WorkbenchSnapshot {
+    /// Every gateway profile name, in gateway order.
+    pub(crate) profiles: Vec<String>,
+    /// The profile the gateway is serving, once known.
+    pub(crate) active: Option<String>,
+    /// The profile a switch is loading, while one is in flight.
+    pub(crate) switching: Option<String>,
+    /// The model chat requests go to, once one is selected.
+    pub(crate) selected_model: Option<String>,
+    /// Whether a chat can be submitted right now.
+    pub(crate) chat_ready: bool,
+}
+
+impl WorkbenchSnapshot {
+    /// The snapshot as a wire frame: `"type": "workbench"` beside the
+    /// fields, with `selected_model` shortened to `selected` on the wire.
+    // An `allow` rather than an `expect`: the wire-shape test below uses
+    // this in test builds, so an expectation would be unfulfilled there
+    // and fail the -D warnings gate.
+    #[allow(
+        dead_code,
+        reason = "the /ws session loop serializes the frame in a later step"
+    )]
+    pub(crate) fn frame(&self) -> WorkbenchFrame<'_> {
+        WorkbenchFrame {
+            kind: "workbench",
+            profiles: &self.profiles,
+            active: self.active.as_deref(),
+            switching: self.switching.as_deref(),
+            selected: self.selected_model.as_deref(),
+            chat_ready: self.chat_ready,
+        }
+    }
+}
+
+/// The serialized shape of a workbench push on the socket, matching the
+/// chat protocol's frame taxonomy. Absent options serialize as `null`,
+/// never as omitted keys: every push is the complete menu state.
+///
+/// Delivery: ephemeral - every push is a complete snapshot of the menu
+/// state, retained and resent on reconnect, exactly like the catalog
+/// frame.
+#[derive(Debug, Serialize)]
+pub(crate) struct WorkbenchFrame<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    profiles: &'a [String],
+    active: Option<&'a str>,
+    switching: Option<&'a str>,
+    selected: Option<&'a str>,
+    chat_ready: bool,
 }
 
 /// One streamed answer-content chunk of a chat reply:
@@ -468,6 +530,30 @@ mod tests {
             serde_json::json!({
                 "type": "models",
                 "models": [{"id": "test-model", "object": "model"}],
+            }),
+            "the wire shape matches the chat protocol's frame taxonomy"
+        );
+    }
+
+    #[test]
+    fn a_workbench_snapshot_serializes_as_a_workbench_frame() {
+        let snapshot = WorkbenchSnapshot {
+            profiles: vec!["main".to_string(), "coding".to_string()],
+            active: Some("main".to_string()),
+            switching: None,
+            selected_model: Some("claude-sonnet-4-6".to_string()),
+            chat_ready: true,
+        };
+        let frame = serde_json::to_value(snapshot.frame()).expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "workbench",
+                "profiles": ["main", "coding"],
+                "active": "main",
+                "switching": null,
+                "selected": "claude-sonnet-4-6",
+                "chat_ready": true,
             }),
             "the wire shape matches the chat protocol's frame taxonomy"
         );
