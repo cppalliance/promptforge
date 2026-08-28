@@ -1,4 +1,4 @@
-//! Routes for the chat relay: model and profile passthroughs, the buffered
+//! Routes for the chat relay: the model catalog passthrough, the buffered
 //! `/chat` completion, and the `/ws` streaming chat session.
 
 use axum::Router;
@@ -13,8 +13,6 @@ use crate::{chat_ws, relay};
 pub(crate) fn routes(state: AppState) -> Router {
     Router::new()
         .route("/v1/models", get(relay::models))
-        .route("/profiles", get(relay::profiles))
-        .route("/profiles/switch", post(relay::switch_profile))
         .route("/chat", post(relay::chat))
         .route("/ws", get(chat_ws::upgrade))
         .with_state(state)

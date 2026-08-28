@@ -39,10 +39,10 @@
 "protocol.rs" = 728
 "provision.rs" = 839
 "push.rs" = 292
-"relay.rs" = 806
+"relay.rs" = 473
 "routes.rs" = 8
 "routes/assets.rs" = 117
-"routes/chat.rs" = 48
+"routes/chat.rs" = 46
 "routes/health.rs" = 50
 "routes/voice.rs" = 75
 "routes/workspace.rs" = 19
