@@ -30,9 +30,10 @@ pub(crate) use std::sync::Arc;
 pub(crate) use std::sync::Mutex;
 pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
+pub(crate) use mlua::thread::ThreadStatus;
 pub(crate) use mlua::{
-    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, StdLib, UserData,
-    UserDataFields, UserDataMethods, Value, Variadic, VmState,
+    Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue,
+    StdLib, Thread, UserData, UserDataFields, UserDataMethods, Value, Variadic, VmState,
 };
 pub(crate) use serde_json::Value as Json;
 pub(crate) use serde_json::json;

@@ -1,6 +1,6 @@
 use super::{
     Arc, AtomicU64, Error, HOOK_BUDGET, HOOK_INTERVAL, HookTriggers, Lua, MultiValue, Ordering,
-    Result, Value, VmState,
+    Result, Thread, Value, VmState,
 };
 
 /// Remove code-loading, direct output, and reflection globals the base library
@@ -62,32 +62,72 @@ end
     Ok(())
 }
 
+/// A VM's shared instruction-budget counter.
+///
+/// Instruction hooks are per-coroutine in PUC Lua: the hook installed on the
+/// main state at construction never fires inside a resumed coroutine, so
+/// every block coroutine receives the same hook (over the same counter) via
+/// [`install_on_thread`](Self::install_on_thread). One counter covers every
+/// program the VM runs, on the main state or on any thread, so splitting
+/// work across chunks cannot reset the budget.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct InstructionBudget {
+    fired: Arc<AtomicU64>,
+}
+
+impl InstructionBudget {
+    /// Installs the budget/cancellation hook on a block coroutine.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the VM rejects the hook callback.
+    pub(crate) fn install_on_thread(&self, thread: &Thread) -> Result<()> {
+        thread
+            .set_hook(
+                HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
+                budget_hook(Arc::clone(&self.fired)),
+            )
+            .map_err(Error::lua)
+    }
+}
+
+/// The every-Nth-instruction hook body shared by the main state and every
+/// block coroutine.
+fn budget_hook(
+    fired: Arc<AtomicU64>,
+) -> impl Fn(&Lua, &mlua::debug::Debug) -> mlua::Result<VmState> {
+    move |_lua, _debug| {
+        // Cooperative cancellation: abort a long-running Lua block promptly
+        // when the run's CancelHandle is signaled (mapped to
+        // Error::Interrupted at the runtime-error boundary).
+        if crate::cancel::is_cancelled() {
+            return Err(mlua::Error::RuntimeError(
+                "lua execution cancelled".to_string(),
+            ));
+        }
+        if fired.fetch_add(1, Ordering::Relaxed) >= HOOK_BUDGET {
+            return Err(mlua::Error::RuntimeError(
+                crate::error::lua_quota::INSTRUCTION.to_string(),
+            ));
+        }
+        Ok(VmState::Continue)
+    }
+}
+
 /// Install an instruction-count hook that aborts a runaway block.
+///
+/// The hook covers the main state only; coroutines need
+/// [`InstructionBudget::install_on_thread`] with the returned counter.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the VM rejects the hook callback.
-pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<()> {
-    let fired = Arc::new(AtomicU64::new(0));
+pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<InstructionBudget> {
+    let budget = InstructionBudget::default();
     lua.set_hook(
         HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
-        move |_lua, _debug| {
-            // Cooperative cancellation: abort a long-running Lua block promptly
-            // when the run's CancelHandle is signaled (mapped to
-            // Error::Interrupted at the runtime-error boundary).
-            if crate::cancel::is_cancelled() {
-                return Err(mlua::Error::RuntimeError(
-                    "lua execution cancelled".to_string(),
-                ));
-            }
-            if fired.fetch_add(1, Ordering::Relaxed) >= HOOK_BUDGET {
-                return Err(mlua::Error::RuntimeError(
-                    crate::error::lua_quota::INSTRUCTION.to_string(),
-                ));
-            }
-            Ok(VmState::Continue)
-        },
+        budget_hook(Arc::clone(&budget.fired)),
     )
-    .map_err(Error::lua)
+    .map_err(Error::lua)?;
+    Ok(budget)
 }
 
 /// Render a returned Lua scalar as the section's result string. Tables and other
