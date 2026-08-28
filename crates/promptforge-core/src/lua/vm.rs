@@ -1,13 +1,14 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
-    Function, GuardNonce, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions,
-    LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelInferHook, ModelRuntime, ModelSet,
-    ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution,
-    StdLib, StoreRef, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail,
-    guarded_var, harden, install_h2_models, install_h2_tools, install_instruction_budget,
-    install_log, install_lua_tool_calls, install_shim_prelude, install_store_table,
-    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
-    var_to_json, wrap_shimmed_handle,
+    Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json, Lua, LuaBlockResult,
+    LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
+    ModelBinding, ModelInferHook, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue,
+    Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib, StoreRef, Thread, ThreadStatus,
+    ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail, guarded_var,
+    harden, install_h2_models, install_h2_tools, install_instruction_budget, install_log,
+    install_lua_tool_calls, install_shim_prelude, install_store_table, install_untrusted,
+    log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
+    wrap_shimmed_handle,
 };
 use crate::client::ToolSchema;
 
@@ -84,6 +85,9 @@ pub(crate) struct SectionVm {
     /// model alias globals install as shim-wrapped proxy tables so
     /// `handle:infer` yields like `models.infer`.
     coro_shims: bool,
+    /// The VM's instruction-budget counter, shared with every block
+    /// coroutine's hook (hooks are per-coroutine in PUC Lua).
+    instruction_budget: InstructionBudget,
 }
 
 /// Local tool registrations owned by a section VM.
@@ -238,7 +242,7 @@ impl SectionVm {
         // bounded even when the run installs no explicit limits.
         lua.set_memory_limit(DEFAULT_LUA_MEMORY_BYTES)
             .map_err(Error::lua)?;
-        let vm = Self {
+        let mut vm = Self {
             execution: execution.to_owned(),
             lua,
             bound_tools: ToolSet::default(),
@@ -257,6 +261,7 @@ impl SectionVm {
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
             coro_shims: false,
+            instruction_budget: InstructionBudget::default(),
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -264,12 +269,12 @@ impl SectionVm {
         if let Err(error) = install_untrusted(&vm.lua, nonce) {
             return vm.construction_failed(error, observer, section);
         }
-        if let Err(error) = install_instruction_budget(&vm.lua) {
-            return vm.construction_failed(error, observer, section);
+        match install_instruction_budget(&vm.lua) {
+            Ok(budget) => vm.instruction_budget = budget,
+            Err(error) => return vm.construction_failed(error, observer, section),
         }
         Ok(vm)
     }
-
     /// Creates a section VM carrying the prompt's frozen tool and model bindings.
     ///
     /// The bindings back the validating `tools`/`models` tables that
@@ -738,7 +743,9 @@ impl SectionVm {
 
     /// Executes a compiled Lua chunk in this VM's persistent environment.
     ///
-    /// This is the one path for running a section's Lua blocks. StoreRef and
+    /// This is the legacy engine's path for running a section's Lua blocks;
+    /// the scheduler drives blocks through
+    /// [`start_block_coro`](Self::start_block_coro) instead. StoreRef and
     /// `log` reports go to the observer captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
@@ -1104,6 +1111,110 @@ impl SectionVm {
         let returned = result.map_err(|error| program.map_runtime_error(&error))?;
         Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
+
+    /// Starts one Lua block as a coroutine on this VM and resumes it to its
+    /// first yield or its end.
+    ///
+    /// This is the scheduler's chunk-execution path: one coroutine per Lua
+    /// block, created from the block's loaded function on this persistent
+    /// VM, so the VM's globals (`var`, `reply`, the conversation state)
+    /// roll forward across blocks exactly as on the legacy
+    /// [`run_chunk`](Self::run_chunk) path. Instruction hooks are
+    /// per-coroutine in PUC Lua, so the VM's budget/cancellation hook is
+    /// installed on the fresh thread; the main-state hook from construction
+    /// never fires inside a resumed coroutine.
+    ///
+    /// A coroutine that returns ends the block under the legacy contract: a
+    /// recorded jump takes precedence over the chunk's own error, genuine
+    /// failures map through [`LuaProgram::map_runtime_error`], and the
+    /// scalar-return rule applies to the return values. A coroutine that
+    /// yields suspends with the shim's request table; the driver resumes it
+    /// with [`resume_block_coro`](Self::resume_block_coro). No observation
+    /// events fire here; the driver owns the chunk observation boundaries.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the jump slot is poisoned, the program
+    /// cannot load, or the thread cannot be created or hooked; a block
+    /// failure returns the mapped runtime error.
+    // Consumed by the scheduler driver in a later step; exercised today by
+    // the coroutine chunk-execution tests.
+    #[allow(dead_code)]
+    pub(crate) fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
+        {
+            let mut slot = self
+                .jump_slot
+                .lock()
+                .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
+            *slot = None;
+        }
+        let function = program.load(&self.lua)?;
+        let thread = self.lua.create_thread(function).map_err(Error::lua)?;
+        self.instruction_budget.install_on_thread(&thread)?;
+        let result = thread.resume::<MultiValue>(());
+        self.step_block_coro(program, thread, result)
+    }
+
+    /// Resumes a suspended block coroutine with the driver's answer values.
+    ///
+    /// # Errors
+    /// Same contract as [`start_block_coro`](Self::start_block_coro).
+    // Consumed by the scheduler driver in a later step; exercised today by
+    // the coroutine chunk-execution tests.
+    #[allow(dead_code)]
+    pub(crate) fn resume_block_coro(
+        &self,
+        program: &LuaProgram,
+        thread: &Thread,
+        args: impl IntoLuaMulti,
+    ) -> Result<CoroStep> {
+        let result = thread.resume::<MultiValue>(args);
+        self.step_block_coro(program, thread.clone(), result)
+    }
+
+    fn step_block_coro(
+        &self,
+        program: &LuaProgram,
+        thread: Thread,
+        result: mlua::Result<MultiValue>,
+    ) -> Result<CoroStep> {
+        match result {
+            // A resumed thread that is still resumable suspended on a yield;
+            // the yielded values are the shim's request table.
+            Ok(values) if thread.status() == ThreadStatus::Resumable => {
+                Ok(CoroStep::Yielded(thread, values))
+            }
+            result => {
+                // A recorded jump takes precedence over the chunk's error,
+                // exactly as on the legacy path.
+                if let Some(heading) = self.take_jump()? {
+                    return Ok(CoroStep::Done(LuaBlockResult::Jump(heading)));
+                }
+                let returned = result.map_err(|error| program.map_runtime_error(&error))?;
+                Ok(CoroStep::Done(LuaBlockResult::Returned(scalar_return(
+                    returned,
+                )?)))
+            }
+        }
+    }
+}
+
+/// One step of a Lua block running on a coroutine.
+///
+/// Produced by [`SectionVm::start_block_coro`] and
+/// [`SectionVm::resume_block_coro`]; consumed by the scheduler's driver,
+/// which validates a [`Yielded`](CoroStep::Yielded) request, dispatches it,
+/// and resumes the thread with the answer.
+// Consumed by the scheduler driver in a later step; exercised today by the
+// coroutine chunk-execution tests.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) enum CoroStep {
+    /// The coroutine suspended on a shim yield; the yielded values carry
+    /// the request table.
+    Yielded(Thread, MultiValue),
+    /// The coroutine ended (return, jump, or error); the block outcome
+    /// follows the legacy `run_loaded_with_control` contract.
+    Done(LuaBlockResult),
 }
 
 /// The result of running a section's Lua block.
