@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
+#[cfg(windows)]
+use super::support::production_command;
 use super::support::{BoundedCapture, ChildSpawner};
 use super::*;
 
@@ -1255,6 +1257,38 @@ fn switch_shutdown_terminates_an_in_flight_respawned_child() {
         2,
         "shutdown must not permit a further respawn"
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn production_command_child_runs_at_below_normal_priority() {
+    // The workspace forbids unsafe_code, so a windows-sys GetPriorityClass
+    // probe cannot compile in this crate; instead the child reports its own
+    // priority class on stdout, which breaks if creation_flags is dropped or
+    // carries the wrong value.
+    let args = [
+        OsString::from("-NoProfile"),
+        OsString::from("-Command"),
+        OsString::from("(Get-Process -Id $PID).PriorityClass"),
+    ];
+    let request = SpawnRequest {
+        executable: Path::new("powershell.exe"),
+        args: &args,
+        port: 0,
+        model_alias: "priority-test",
+        api_key: "priority-test",
+    };
+    let mut child = production_command(&request)
+        .spawn()
+        .expect("spawn powershell priority probe");
+    let mut stdout = child.stdout.take().expect("child stdout is piped");
+    let mut reported = String::new();
+    stdout
+        .read_to_string(&mut reported)
+        .expect("read reported priority class");
+    let status = child.wait().expect("wait for priority probe");
+    assert!(status.success());
+    assert_eq!(reported.trim(), "BelowNormal");
 }
 
 fn process_is_alive(pid: u32) -> bool {
