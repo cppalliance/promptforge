@@ -72,6 +72,18 @@ mod hosted {
         config_path: &Path,
         bound: SocketAddr,
     ) -> Result<Option<WorkshopHandle>, StartupError> {
+        spawn_with_opener(config, config_path, bound, |url| open::that(url))
+    }
+
+    /// The testable core of [`spawn_if_configured`], with the browser
+    /// opener injected: production opens the system browser, tests record
+    /// the URL instead of opening a real one.
+    fn spawn_with_opener(
+        config: &Config,
+        config_path: &Path,
+        bound: SocketAddr,
+        open_url: impl FnOnce(&str) -> std::io::Result<()>,
+    ) -> Result<Option<WorkshopHandle>, StartupError> {
         let Some(workshop) = config.workshop() else {
             return Ok(None);
         };
@@ -95,7 +107,7 @@ mod hosted {
         if workshop.open_browser() {
             // A browser that will not open is not worth failing a serving
             // process over; the URL is logged above either way.
-            if let Err(error) = open::that(handle.url()) {
+            if let Err(error) = open_url(handle.url()) {
                 tracing::warn!(
                     "could not open the system browser at {}: {error}",
                     handle.url()
@@ -170,7 +182,7 @@ mod hosted {
         use std::net::SocketAddr;
         use std::path::Path;
 
-        use super::{client_url, spawn_if_configured, ws_config};
+        use super::{client_url, spawn_if_configured, spawn_with_opener, ws_config};
         use crate::api_error::StartupErrorKind;
         use promptforge_gateway_config::Config;
 
@@ -292,6 +304,68 @@ vocabulary = ["MCP", "GGUF"]
                 spawn_if_configured(&config, Path::new("gateway.toml"), bound("127.0.0.1:8081"))
                     .expect("no workshop section is not an error");
             assert!(hosted.is_none());
+        }
+
+        /// An ephemeral workshop config; `open_browser` as given. The
+        /// tempdir anchors the tape path outside the source tree.
+        fn opener_fixture(
+            tmp: &tempfile::TempDir,
+            open_browser: &str,
+        ) -> (Config, std::path::PathBuf) {
+            let config = config(&format!(
+                "[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\n[workshop]\nbind = \"127.0.0.1:0\"\n{open_browser}"
+            ));
+            (config, tmp.path().join("gateway.toml"))
+        }
+
+        #[test]
+        fn the_open_browser_honor_opens_the_workshop_url() {
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            let (config, config_path) = opener_fixture(&tmp, "open_browser = true\n");
+            let (tx, rx) = std::sync::mpsc::channel();
+            let hosted =
+                spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), move |url| {
+                    tx.send(url.to_string()).expect("the receiver is alive");
+                    Ok(())
+                })
+                .expect("the workshop spawns")
+                .expect("a [workshop] section hosts a workshop");
+            let opened = rx.recv().expect("the opener runs before spawn returns");
+            assert_eq!(opened, hosted.url(), "the opener gets the workshop URL");
+            hosted.shutdown();
+        }
+
+        #[test]
+        fn the_opener_never_runs_without_the_open_browser_honor() {
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            let (config, config_path) = opener_fixture(&tmp, "");
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let hosted =
+                spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), move |url| {
+                    tx.send(url.to_string()).expect("the receiver is alive");
+                    Ok(())
+                })
+                .expect("the workshop spawns")
+                .expect("a [workshop] section hosts a workshop");
+            // spawn_with_opener is synchronous: an opener call would have
+            // landed in the channel before it returned.
+            assert!(
+                rx.try_recv().is_err(),
+                "the opener runs only when open_browser is set"
+            );
+            hosted.shutdown();
+        }
+
+        #[test]
+        fn a_failing_opener_does_not_fail_the_spawn() {
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            let (config, config_path) = opener_fixture(&tmp, "open_browser = true\n");
+            let hosted = spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), |_| {
+                Err(std::io::Error::other("no display"))
+            })
+            .expect("a browser that will not open is not a startup failure")
+            .expect("a [workshop] section hosts a workshop");
+            hosted.shutdown();
         }
     }
 }
