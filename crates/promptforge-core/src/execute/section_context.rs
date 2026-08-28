@@ -37,7 +37,7 @@ use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 use super::context::RunContext;
 use super::engine::make_control_globals;
 use super::gateway::GatewaySource;
-use super::section_vm::{VmSeed, setup_section_vm};
+use super::section_vm::{VmSeed, VmSetupMode, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
 use super::tools::attach_infer_hook;
 
@@ -180,6 +180,7 @@ impl SectionContext {
             // carry a write scope.
             None,
             &section.name,
+            VmSetupMode::Legacy,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
@@ -391,6 +392,7 @@ impl SectionContext {
             },
             write_scope,
             &worker.name,
+            VmSetupMode::Legacy,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.

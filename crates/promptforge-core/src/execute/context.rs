@@ -22,7 +22,7 @@ use crate::untrusted::GuardNonce;
 
 use super::config::{RunConfig, RunLimits};
 use super::gateway::GatewaySource;
-use super::section_vm::{SectionVmSetup, VmSeed};
+use super::section_vm::{SectionVmSetup, VmSeed, VmSetupMode};
 use super::support::{now_rfc3339_checked, sys_json};
 
 /// The ambient state one run shares across the execute subtree.
@@ -288,7 +288,8 @@ impl RunContext {
     /// run-wide slots (`args`, `store`, `observer`, `shared`) from this
     /// context; the driver supplies only its own deltas: the `sys` JSON, the
     /// incoming reply, the seed, the store-write scope (a fanout arm's
-    /// identity; `None` on the walk), and the section name.
+    /// identity; `None` on the walk), the section name, and the VM-setup
+    /// mode.
     pub(crate) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
@@ -296,6 +297,7 @@ impl RunContext {
         seed: VmSeed<'a>,
         write_scope: Option<WriteScope>,
         section_name: &'a str,
+        mode: VmSetupMode,
     ) -> SectionVmSetup<'a> {
         SectionVmSetup {
             args: &self.args,
@@ -307,6 +309,7 @@ impl RunContext {
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
+            mode,
         }
     }
 

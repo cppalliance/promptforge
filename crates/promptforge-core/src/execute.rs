@@ -69,14 +69,13 @@ mod engine;
 mod error;
 mod gateway;
 mod h1;
-// Nothing outside the module calls the protocol yet: the scheduler driver and
-// the yield shims (later steps) are the only callers, and until then the
-// module is exercised by its own unit tests.
+// The scheduler driver (a later step) is the production caller; until then
+// the module is exercised by its own unit tests and the shim layer's tests.
 #[allow(dead_code, reason = "consumed by the scheduler driver in a later step")]
-mod protocol;
+pub(crate) mod protocol;
 mod scope;
 mod section_context;
-mod section_vm;
+pub(crate) mod section_vm;
 mod support;
 mod tool_loop;
 mod tools;

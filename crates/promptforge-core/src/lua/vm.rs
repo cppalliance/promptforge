@@ -5,8 +5,9 @@ use super::{
     ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution,
     StdLib, StoreRef, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail,
     guarded_var, harden, install_h2_models, install_h2_tools, install_instruction_budget,
-    install_log, install_lua_tool_calls, install_store_table, install_untrusted, log_byte_budget,
-    resolve_section_target, scalar_return, seal_sys, var_to_json,
+    install_log, install_lua_tool_calls, install_shim_prelude, install_store_table,
+    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
+    var_to_json, wrap_shimmed_handle,
 };
 use crate::client::ToolSchema;
 
@@ -79,6 +80,10 @@ pub(crate) struct SectionVm {
     log_byte_budget: Arc<AtomicUsize>,
     /// Local tools registered by Lua code, dispatched back into this VM.
     local_tools: LocalTools,
+    /// Set by [`install_coro_shims`](Self::install_coro_shims): the captured
+    /// model alias globals install as shim-wrapped proxy tables so
+    /// `handle:infer` yields like `models.infer`.
+    coro_shims: bool,
 }
 
 /// Local tool registrations owned by a section VM.
@@ -251,6 +256,7 @@ impl SectionVm {
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
+            coro_shims: false,
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -351,12 +357,17 @@ impl SectionVm {
                 .map_err(Error::lua)?;
         }
         for binding in self.bound_models.bindings() {
-            let userdata = self
-                .lua
-                .create_userdata(LuaModelHandle::from_binding(binding))
-                .map_err(Error::lua)?;
+            let handle = LuaModelHandle::from_binding(binding);
+            // Scheduler mode: the alias installs as a shim-wrapped proxy so
+            // `handle:infer` yields like `models.infer`; legacy mode keeps
+            // the bare userdata.
+            let value = if self.coro_shims {
+                wrap_shimmed_handle(&self.lua, handle)?
+            } else {
+                Value::UserData(self.lua.create_userdata(handle).map_err(Error::lua)?)
+            };
             globals
-                .raw_set(binding.alias(), userdata)
+                .raw_set(binding.alias(), value)
                 .map_err(Error::lua)?;
         }
         Ok(())
@@ -530,6 +541,52 @@ impl SectionVm {
             })
             .map_err(Error::lua)?;
         globals.raw_set("execute", execute_fn).map_err(Error::lua)?;
+        self.install_jump_global(&globals)?;
+        let fanout_fn = self
+            .lua
+            .create_function(move |lua, (worker, collection): (String, Value)| {
+                let items = crate::fanout::collection_to_items(lua, &collection)
+                    .map_err(mlua::Error::external)?;
+                let var = var_to_json(lua).map_err(mlua::Error::external)?;
+                let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
+                pack_sequence(lua, replies)
+            })
+            .map_err(Error::lua)?;
+        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
+        self.install_list_global(&globals, list_callback)
+    }
+
+    /// Installs the scheduler-mode control surface: `jump` and
+    /// `list_from_section` as Rust callbacks (neither suspends).
+    ///
+    /// The suspending calls are the yield shims installed by
+    /// [`install_coro_shims`](Self::install_coro_shims); the `fanout` shim
+    /// lands with the scheduler's fanout dispatch.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if any global cannot be installed.
+    pub(crate) fn install_scheduler_control_globals<L>(&self, list_callback: L) -> Result<()>
+    where
+        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+    {
+        let globals = self.lua.globals();
+        self.install_jump_global(&globals)?;
+        self.install_list_global(&globals, list_callback)
+    }
+
+    /// Installs the coroutine yield shims (`models.infer`, `handle:infer`,
+    /// `execute`) and marks the VM so the captured model alias globals
+    /// install as shim-wrapped proxies.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the shim prelude cannot install.
+    pub(crate) fn install_coro_shims(&mut self) -> Result<()> {
+        install_shim_prelude(&self.lua)?;
+        self.coro_shims = true;
+        Ok(())
+    }
+
+    fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {
         let jump_slot = Arc::clone(&self.jump_slot);
         let jump_fn = self
             .lua
@@ -542,18 +599,13 @@ impl SectionVm {
                 Err(mlua::Error::external("jump transfer"))
             })
             .map_err(Error::lua)?;
-        globals.raw_set("jump", jump_fn).map_err(Error::lua)?;
-        let fanout_fn = self
-            .lua
-            .create_function(move |lua, (worker, collection): (String, Value)| {
-                let items = crate::fanout::collection_to_items(lua, &collection)
-                    .map_err(mlua::Error::external)?;
-                let var = var_to_json(lua).map_err(mlua::Error::external)?;
-                let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
-                pack_sequence(lua, replies)
-            })
-            .map_err(Error::lua)?;
-        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
+        globals.raw_set("jump", jump_fn).map_err(Error::lua)
+    }
+
+    fn install_list_global<L>(&self, globals: &mlua::Table, list_callback: L) -> Result<()>
+    where
+        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+    {
         let list_fn = self
             .lua
             .create_function(move |lua, target: Value| {
@@ -908,6 +960,13 @@ impl SectionVm {
     #[cfg(test)]
     pub(crate) fn model_bag_handles(&self) -> (ModelSet, Arc<Mutex<ModelRuntime>>) {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
+    }
+
+    /// Test-only access to the inner Lua state, so the shim tests can drive
+    /// coroutines on the VM.
+    #[cfg(test)]
+    pub(crate) fn lua(&self) -> &Lua {
+        &self.lua
     }
 
     /// Calls the local tool registered under `alias` with JSON `args`.
