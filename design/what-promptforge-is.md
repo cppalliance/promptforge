@@ -1,18 +1,18 @@
 # PromptForge: Human Intent Is the Source Code
 
-An execution engine and workbench for prompt pipelines, built on the principle that everything downstream of human judgment is a build artifact.
+An execution engine and workshop for prompt pipelines, built on the principle that everything downstream of human judgment is a build artifact.
 
 Vinnie Falco, August 2026
 
 ## Executive Summary
 
-PromptForge is an execution engine that turns Markdown files into executable AI prompt pipelines, built around a Rust library that parses and runs them against any OpenAI-compatible endpoint. The Workbench is a standalone local application, now in development, that wraps the engine in an environment where every run, edit, decision, and mistake is recorded. One product, one premise: human intent is the source code, and everything downstream of it is a build artifact.
+PromptForge is an execution engine that turns Markdown files into executable AI prompt pipelines, built around a Rust library that parses and runs them against any OpenAI-compatible endpoint. The Workshop is a standalone local application, now in development, that wraps the engine in an environment where every run, edit, decision, and mistake is recorded. One product, one premise: human intent is the source code, and everything downstream of it is a build artifact.
 
 The product exists to build pipelines that survive context pressure and to build them quickly. A pipeline written as a PromptForge prompt executes with deterministic control flow, isolated sections, and a concurrency limit set in configuration rather than in a model's memory. The same pipeline that once required a chat harness's main context to act as scheduler, tracking dozens of sub-agent dispatches in prose, now runs as a program. Watch mode reruns on save, so the edit-run loop is limited by thinking rather than setup.
 
 The methodology underneath is a field manual of 120 rules, distilled from 89 working transcripts, that governed how I built prompt pipelines by hand. The engine compiles the structural half of that manual into the runtime itself. Fresh virtual machines per section, a run-scoped store, and engine-controlled fan-out enforce rules that once depended on a model remembering them under the very conditions that make models forget. A rule compiled into structure cannot silently degrade.
 
-The Workbench exists because the conversation is where human judgment happens, and every harness I have used discards it. The reasoning, the indecisions, and the mistakes that explain why the right answer is right are lost when the session ends, and they cannot be reconstructed afterward. The Workbench captures all of it into an append-only, hash-chained event store, paid once at capture time and cheap to extract forever. The data sits still while the extractors improve. The asset appreciates.
+The Workshop exists because the conversation is where human judgment happens, and every harness I have used discards it. The reasoning, the indecisions, and the mistakes that explain why the right answer is right are lost when the session ends, and they cannot be reconstructed afterward. The Workshop captures all of it into an append-only, hash-chained event store, paid once at capture time and cheap to extract forever. The data sits still while the extractors improve. The asset appreciates.
 
 ## 1. What PromptForge is
 
@@ -24,17 +24,17 @@ PromptForge answers that condition with one organizing principle, stated in the 
 
 The build-artifact framing is a discipline before it is a mechanism. Source is what a human meant; artifacts are what a machine made of it. Plans, prompts, and reports all sit downstream of the intent, so they can be regenerated whenever the intent improves. Regeneration costs a run rather than a reconstruction. What cannot be regenerated is the intent itself, which is why the system treats capturing it as the operation worth engineering for.
 
-The thesis inverts the usual hierarchy of tooling. In most tooling the generated artifact is the product and the conversation that produced it is exhaust. Here the human's judgment is the scarce resource, and the system exists to keep that judgment in the loop and on the record. Models advise and compare; humans decide. Every design decision in the product, from the engine's isolation model to the Workbench's event store, traces back to that ordering.
+The thesis inverts the usual hierarchy of tooling. In most tooling the generated artifact is the product and the conversation that produced it is exhaust. Here the human's judgment is the scarce resource, and the system exists to keep that judgment in the loop and on the record. Models advise and compare; humans decide. Every design decision in the product, from the engine's isolation model to the Workshop's event store, traces back to that ordering.
 
 A prompt is paid for on every use: every added token competes for the model's attention. A bloated prompt is not a style problem; it is a recurring cost on every run, and it dilutes the human signal the prompt exists to carry. Treating prompts as source-adjacent artifacts, engineered and versioned and regenerated, is what the economics already demanded.
 
 The premise underneath is human-first, and it is stated without apology anywhere in the design. Human judgment is the scarce resource in any AI workflow; model output is abundant and grows cheaper by the quarter. Software that respects that ordering exists to capture and serve the judgment, never to replace it. The isolation, the determinism, and the record keeping in this design are what that premise looks like taken seriously as engineering.
 
-The two halves of the product match the two halves of the problem. The engine answers reliability: how a pipeline survives the conditions that break chat-harness orchestration. The Workbench answers memory: how the judgment that built the pipeline outlives the session that contained it. Neither half is optional to the thesis. An artifact you cannot rerun and a process you cannot recall are both losses of the source.
+The two halves of the product match the two halves of the problem. The engine answers reliability: how a pipeline survives the conditions that break chat-harness orchestration. The Workshop answers memory: how the judgment that built the pipeline outlives the session that contained it. Neither half is optional to the thesis. An artifact you cannot rerun and a process you cannot recall are both losses of the source.
 
-The product stands on two claims. The first is that the engine makes pipelines reliable: deterministic control flow, structural concurrency, and isolation that keeps context pressure from accumulating across a run. The second is that the Workbench makes the process that built them remembered: a record of every run, edit, and decision that appreciates rather than disappears. If intent is the source, everything else can be regenerated, and nothing that matters should be thrown away.
+The product stands on two claims. The first is that the engine makes pipelines reliable: deterministic control flow, structural concurrency, and isolation that keeps context pressure from accumulating across a run. The second is that the Workshop makes the process that built them remembered: a record of every run, edit, and decision that appreciates rather than disappears. If intent is the source, everything else can be regenerated, and nothing that matters should be thrown away.
 
-### 1.2 The system at a glance: engine, gateway, toolchain, workbench
+### 1.2 The system at a glance: engine, gateway, toolchain, workshop
 
 The system has four layers, and the engine is the center. PromptForge turns Markdown files into executable AI prompt pipelines: a prompt is a Markdown document with YAML frontmatter, one H1, H2 sections, embedded Lua blocks, and prose blocks. promptforge-core is the Rust library that parses those files and executes them against any OpenAI-compatible endpoint. The format is deliberately boring: a prompt reads like a document and executes like a program, so the artifact a human reviews and the artifact the engine runs are the same file. The execution model is where the discipline becomes structure.
 
@@ -42,11 +42,11 @@ The gateway is the one process that talks to model backends. promptforge-gateway
 
 The toolchain makes prompts runnable and callable from wherever the work happens. promptforge-cli runs a prompt in a single process. promptforge-mcp-server makes prompts callable from agentic harnesses such as Cursor over the Model Context Protocol. promptforge-tool-picker resolves natural-language capability descriptions to tools with a compiled-in embedding model. promptforge-webfetch fetches URLs behind a four-layer SSRF boundary. promptforge-dev is the watch-mode edit-run-inspect loop. Each is a small crate with one job; each works alone, and all of them compose through the gateway.
 
-The Workbench is the fourth layer and the reason the record exists. It is a standalone local application in development: a Rust server crate with a webview shell where a prompt is a visible, editable stack of blocks and every run, edit, decision, and mistake is recorded in an append-only event store, on the premise that the record is the product and every interface is a view over it. The workspace holds more than 250 Rust source files across these crates. The Workbench is where the record becomes an environment. Figure 1 shows the four layers and how they connect: the Workbench and the toolchain sit on the engine, the engine talks only to the gateway, and the gateway fronts every model backend, local or frontier.
+The Workshop is the fourth layer and the reason the record exists. It is a standalone local application in development: a Rust server crate with a webview shell where a prompt is a visible, editable stack of blocks and every run, edit, decision, and mistake is recorded in an append-only event store, on the premise that the record is the product and every interface is a view over it. The workspace holds more than 250 Rust source files across these crates. The Workshop is where the record becomes an environment. Figure 1 shows the four layers and how they connect: the Workshop and the toolchain sit on the engine, the engine talks only to the gateway, and the gateway fronts every model backend, local or frontier.
 
 ```mermaid
 flowchart TD
-    WB["Workbench: server crate plus webview shell"] --> CORE[promptforge-core]
+    WB["Workshop: server crate plus webview shell"] --> CORE[promptforge-core]
     WB --> DB[(Append-only event store)]
     MCP[promptforge-mcp-server] --> CORE
     CLI["promptforge-cli and promptforge-dev"] --> CORE
@@ -55,7 +55,7 @@ flowchart TD
     GW --> FRONTIER[Frontier APIs]
 ```
 
-Figure 1. The PromptForge system. The engine executes prompts; the gateway fronts every model backend; the toolchain makes prompts runnable and callable; the Workbench records everything.
+Figure 1. The PromptForge system. The engine executes prompts; the gateway fronts every model backend; the toolchain makes prompts runnable and callable; the Workshop records everything.
 
 ## 2. Where it came from
 
@@ -95,7 +95,7 @@ Then came the turn. A manual binds only while the model remembers it. Context pr
 
 ### 2.4 Two measured effects: semantic blur and the fan-out asymmetry
 
-Two measurements from the apprenticeship later became design decisions in the engine and the Workbench. The first is semantic blur, from "Semantic Blur: Why Rewriting a Prompt File Degrades It," dated 2026-07-26. Three prompt files under version control were rewritten by a model over three weeks. All three grew with no new capability: the Architect from 49,831 to 59,128 characters (plus 18.7 percent), the vibe-coding how-to from 44,345 to 63,665 (plus 43.6 percent), the prompt rulebook from 10,612 to 26,089 (plus 145.8 percent). The rulebook began as 1,737 words of bullet-form rules and reached 4,325 words.
+Two measurements from the apprenticeship later became design decisions in the engine and the Workshop. The first is semantic blur, from "Semantic Blur: Why Rewriting a Prompt File Degrades It," dated 2026-07-26. Three prompt files under version control were rewritten by a model over three weeks. All three grew with no new capability: the Architect from 49,831 to 59,128 characters (plus 18.7 percent), the vibe-coding how-to from 44,345 to 63,665 (plus 43.6 percent), the prompt rulebook from 10,612 to 26,089 (plus 145.8 percent). The rulebook began as 1,737 words of bullet-form rules and reached 4,325 words.
 
 The growth concentrated in commits labeled "refactor": one commit added 83.1 percent to the rulebook in a single pass, and another added 31.2 percent to the vibe-coding how-to. The mechanism is regression toward the mean. A model asked to rewrite a file regenerates every token from its prior distribution, which favors completeness, justification, and formal register: the properties of average technical writing and the wrong properties for a compressed instruction set. The first version is sharp because it is conditioned on human intent, which sits at the tail of the model's distribution. Each rewrite conditions on the model's own prior output, nearer the center, so the human signal decays pass over pass. The prior's pull is not malicious; it is the model doing what it was trained to do, which is produce what good documents look like on average. A compressed instruction set is not an average document, and that mismatch is the whole injury.
 
@@ -135,7 +135,7 @@ Best-of-N partially escapes: expected quality grows logarithmically in the numbe
 
 > An LLM generator samples from a distribution centered on the typical. The optimum lives at the tail of that prior. The generator has no internal operator that points toward the tail, so single-shot generation returns the median of the prior conditioned on `S`, never the peak. Evaluation is ranking, which is cheaper than search, so the evaluator is stronger than the generator. All peak-quality AI output is therefore the product of a directed loop in which an evaluator steers a generator, and the whole system is bounded above by the evaluator's own calibration. A human with taste in the evaluator seat raises that ceiling; a human with taste in the generator seat, using the AI as a filter, raises it further. (high confidence)
 
-Each effect has one lesson. Semantic blur: preserve the plan and regenerate the artifact, because discrete decisions survive translation and prose does not. The fan-out asymmetry: seat the model as critic and the human as judge, because evaluation is cheaper than generation and the critic's ceiling is good-versus-great. The first lesson points to plan mode; the second points to the leaderboard, and both become Workbench machinery.
+Each effect has one lesson. Semantic blur: preserve the plan and regenerate the artifact, because discrete decisions survive translation and prose does not. The fan-out asymmetry: seat the model as critic and the human as judge, because evaluation is cheaper than generation and the critic's ceiling is good-versus-great. The first lesson points to plan mode; the second points to the leaderboard, and both become Workshop machinery.
 
 ### 2.5 The recognition: the chat is the asset
 
@@ -147,7 +147,7 @@ The design record is blunt about the economics of all this: capture is paid exac
 
 Skillgate is the working example of those economics. It ingests Chatlight's captured sessions and characterizes the operator's skill by cleverly compressing their prompts and model replies. The compression turns a pile of transcripts into a verdict about the person who produced them. Capture was paid once, when the sessions were saved; a tool like Skillgate mines the record forever. The sessions themselves do not change after the day they were captured; only the tooling that reads them does.
 
-The apprenticeship produced the engine first, because pipelines kept breaking under context pressure. The recognition produced the Workbench, because the process that built the pipelines was worth more than the pipelines. The engine came first; the Workbench is where the recognition becomes a product.
+The apprenticeship produced the engine first, because pipelines kept breaking under context pressure. The recognition produced the Workshop, because the process that built the pipelines was worth more than the pipelines. The engine came first; the Workshop is where the recognition becomes a product.
 
 ## 3. The engine: prompts as executable programs
 
@@ -233,7 +233,7 @@ The manual's own closing line has the division of labor: the human is the final 
 
 The split is not a concession; it is a correct allocation of attention. The structural rules were the ones a runtime could enforce, and enforcing them mechanically frees the operator from checking them by hand. The judgment rules are the ones worth a human's time, and they are now the only places the human's time is spent. The engine took the rules that were structure waiting to happen. The rules that remain are the ones where the human's judgment is the content.
 
-That hand-off is the Workbench's reason to exist. The rules that remain human - shaping plans, crafting prose, judging output - are the ones the Workbench is built to support. The engine's purpose and the Workbench's environment both grow out of that split.
+That hand-off is the Workshop's reason to exist. The rules that remain human - shaping plans, crafting prose, judging output - are the ones the Workshop is built to support. The engine's purpose and the Workshop's environment both grow out of that split.
 
 ## 5. What it is for
 
@@ -268,15 +268,15 @@ Each benefit reduces to its mechanism.
 - Model independence: prompts name capabilities, not vendor model strings, so backends change in one configuration file.
 - Credential hygiene: one process holds every key, with constant-time authentication and redacted secrets.
 - Interoperability: any MCP harness can call any prompt, and the tool list never changes as prompts are added.
-- The record as a byproduct: with the Workbench, every run, edit, and decision is captured without being asked for.
+- The record as a byproduct: with the Workshop, every run, edit, and decision is captured without being asked for.
 
-The last benefit is the pivot. The record is not a feature you remember to use; it is a byproduct of running. Every other benefit on this list could be adopted piecemeal; this one cannot, because a record you must remember to keep is a record with gaps. That property is the whole reason the Workbench exists; it is the environment built around the record.
+The last benefit is the pivot. The record is not a feature you remember to use; it is a byproduct of running. Every other benefit on this list could be adopted piecemeal; this one cannot, because a record you must remember to keep is a record with gaps. That property is the whole reason the Workshop exists; it is the environment built around the record.
 
-## 6. The Workbench: an environment built around the record
+## 6. The Workshop: an environment built around the record
 
 ### 6.1 The event store is the product; every interface is a view
 
-The Workbench's foundation claim, the one everything else stands on: the record is the product, and every interface is a view over it. The single source of truth is an append-only, hash-chained event log, in the design record's phrase a commit log that forbids force pushes. The block editor, the run panel, the leaderboard, and the chat window are all projections of the log and can be rebuilt from it at any time. That single decision collapses what would otherwise be a dozen features into one discipline: if the log is complete and the projections are honest, then history, comparison, and audit are all the same query.
+The Workshop's foundation claim, the one everything else stands on: the record is the product, and every interface is a view over it. The single source of truth is an append-only, hash-chained event log, in the design record's phrase a commit log that forbids force pushes. The block editor, the run panel, the leaderboard, and the chat window are all projections of the log and can be rebuilt from it at any time. That single decision collapses what would otherwise be a dozen features into one discipline: if the log is complete and the projections are honest, then history, comparison, and audit are all the same query.
 
 Two disciplines make the log trustworthy, and both are enforced at the moment of capture. The first: history is immutable while content is destructible. Events are never rewritten, but payloads are separately stored and individually revocable, because secrets get pasted and private blobs land by accident. Redaction tombstones the payload - the event records that the blob existed and when it was destroyed - while the chain stays intact. The second: everything the model sees is captured at the boundary. Every file read, web search response, and fetched page is content-addressed into the store at the moment the model sees it, because a pointer is not evidence. Content addressing deduplicates, so storage cost is proportional to what was observed rather than how often. The boundary rule exists because paths and URLs point at mutable state: the page changes, the file is edited, and only the content-addressed snapshot proves what the model actually saw when it decided.
 
@@ -294,9 +294,9 @@ Blocks and decisions have stable identifiers independent of heading, position, o
 
 ### 6.3 Two model planes, one gateway
 
-The Workbench serves two model roles, kept separate. The runtime plane serves the models a prompt uses when it executes: local and open-weight models through the existing gateway. The authoring plane is the assistant that helps develop prompts: frontier models by key at first, and eventually a fine-tuned model that speaks the PromptForge language natively. The separation is the point of the design. A prompt's execution models and the author's assistant have different jobs, different trust postures, and different futures. Sharing one gateway gives both planes the same credential hygiene without sharing a single token of context.
+The Workshop serves two model roles, kept separate. The runtime plane serves the models a prompt uses when it executes: local and open-weight models through the existing gateway. The authoring plane is the assistant that helps develop prompts: frontier models by key at first, and eventually a fine-tuned model that speaks the PromptForge language natively. The separation is the point of the design. A prompt's execution models and the author's assistant have different jobs, different trust postures, and different futures. Sharing one gateway gives both planes the same credential hygiene without sharing a single token of context.
 
-The payoff is self-reinforcing. The Workbench records every chat-to-plan-to-prompt chain with full history, and that record is the training corpus a PromptForge-speaking fine-tune needs. The extraction kinds are already named: SFT pairs, chat excerpt to plan delta and plan to prompt; preference-pair candidates from branch choices; and full process traces. The product generates its own future authoring model as a byproduct of normal use. This corpus contains what scraped data never will: the reasoning at the moment of each decision, the branch choices, the critics' verdicts, and the human's calls, all aligned to the artifacts they produced.
+The payoff is self-reinforcing. The Workshop records every chat-to-plan-to-prompt chain with full history, and that record is the training corpus a PromptForge-speaking fine-tune needs. The extraction kinds are already named: SFT pairs, chat excerpt to plan delta and plan to prompt; preference-pair candidates from branch choices; and full process traces. The product generates its own future authoring model as a byproduct of normal use. This corpus contains what scraped data never will: the reasoning at the moment of each decision, the branch choices, the critics' verdicts, and the human's calls, all aligned to the artifacts they produced.
 
 The parser serves the fine-tune twice. At training time it aligns data at block granularity, mapping a chat excerpt to the exact section that changed. At inference the model's Lua fences are grammar-constrained, so output cannot fail to parse. Custom tokenization was considered and rejected: Lua is well-represented in every code model's training data, so the embedding surgery would gain little.
 
@@ -304,17 +304,17 @@ The guardrail is plain: capture is not eligibility. Material recorded for proven
 
 ### 6.4 The window: blocks, store, and run definitions
 
-The window is concrete: three elements, and each is a renderer for something the engine already has. The block stack renders the prompt's sections as vertically stacked blocks, each showing its prose, its Lua environment, and its offered tools. Editing a block edits the section. Nothing is invented; the Workbench visualizes what promptforge-core already executes.
+The window is concrete: three elements, and each is a renderer for something the engine already has. The block stack renders the prompt's sections as vertically stacked blocks, each showing its prose, its Lua environment, and its offered tools. Editing a block edits the section. Nothing is invented; the Workshop visualizes what promptforge-core already executes.
 
 The internal filesystem is the store made visible, grouped by kind: inputs, intermediates, outputs. After a run, every file the run touched is visible, including intermediates. The run definition is a named invocation of a specific prompt: these input bindings, this model profile. Bindings are part of the record, so "same prompt, different sample input" is a first-class comparison.
 
-Fixtures replace dependencies. A prompt's frontmatter declares its inputs and outputs as store paths, and the Workbench binds declared inputs to real files the user picks; it never executes a prompt's environment dependencies. The evidence is papergate, a production PromptForge prompt that analyzes a standards paper: its companion crate links a database client purely to fetch the paper and seed the store, while the prompt itself only reads paper.md. In the Workbench, the user binds paper.md to a sample file and the database is bypassed entirely. The store is the only dependency a prompt actually has. The consequence for daily work is that testing a prompt against a new input is a binding operation rather than an environment operation. No database is provisioned, no credentials are staged, and no production system is touched. The fixture is a file, and the record holds which file it was.
+Fixtures replace dependencies. A prompt's frontmatter declares its inputs and outputs as store paths, and the Workshop binds declared inputs to real files the user picks; it never executes a prompt's environment dependencies. The evidence is papergate, a production PromptForge prompt that analyzes a standards paper: its companion crate links a database client purely to fetch the paper and seed the store, while the prompt itself only reads paper.md. In the Workshop, the user binds paper.md to a sample file and the database is bypassed entirely. The store is the only dependency a prompt actually has. The consequence for daily work is that testing a prompt against a new input is a binding operation rather than an environment operation. No database is provisioned, no credentials are staged, and no production system is touched. The fixture is a file, and the record holds which file it was.
 
 The character sheet completes the picture: an agent's personality is algorithmic. It is a prompt file plus its store manifest plus its tool set plus its model bindings, with an avatar and a one-line charter. Rulebooks are flavor packs, pre-loaded into the store. Swapping the persona is swapping the manifest: the rulebooks in the store change, the charter changes, and the machinery underneath does not. The romance of the persona is a configuration detail, and saying so is the point.
 
 ### 6.5 Plan mode is the entropy filter
 
-Prose drifts, as the semantic-blur measurement showed, and plan mode is the defense. It aggregates human intent into a plan document before any action is taken. Small design decisions accumulate across a conversation, some reversing each other; the user reviews and cleans the plan; applying it produces one clean edit instead of the conversation's raw churn. A workbench without this filter is a chat with tools.
+Prose drifts, as the semantic-blur measurement showed, and plan mode is the defense. It aggregates human intent into a plan document before any action is taken. Small design decisions accumulate across a conversation, some reversing each other; the user reviews and cleans the plan; applying it produces one clean edit instead of the conversation's raw churn. A workshop without this filter is a chat with tools.
 
 The conditioning is three layers, and the prompt is deliberately the weakest. First, the deliverable is redefined: maintaining the plan is the job, so a user instruction triggers integration, not execution. Second, the tool gate removes capability: in plan mode the harness offers reads, search, and one write target, the plan document, so compliance is structural rather than requested. Third, the prompt handles only the residue: state the invariant, teach the integration behavior, define what apply means. The ordering of the layers is where the design is honest about models. Instruction alone fails under context pressure, so instruction is given only the residue. Capability is removed before behavior is requested, and the job itself is redefined before capability is even considered. Each layer assumes the one beneath it might leak.
 
@@ -324,11 +324,11 @@ The result is measurable. An attempted blocked mutation in plan mode is an event
 
 The fan-out asymmetry is the design rationale for the whole comparison layer. Re-roll produces sibling variants under identical inputs: best-of-N sampling made a first-class gesture, with the model as critic ranking the variants. Branches are navigated by their outputs rather than by topology: the screen shows a leaderboard of artifacts with model-computed diffs and structured verdicts rather than a commit graph. The gesture matters as much as the mechanism. Re-roll is something the operator does on purpose, at the moment they judge the generator has not reached. The variants land side by side under identical inputs, so the comparison is clean. Evaluation is cheaper than generation, so the interface puts the model's effort into ranking.
 
-A verdict is not a scalar, and the Workbench treats each one as a document. Each evaluation record holds the rubric dimensions, the critic's identity and version, the deterministic checks - manifest diffs, blur metrics, counts - candidate ordering, confidence or abstention, run cost and latency, and the human's judgment, stored separately. Keeping the critic's verdict and the human's judgment apart is what allows the critic to be calibrated against the human over time. Every field in that record exists to make the critic auditable. Identity and version let a verdict be attributed. The deterministic checks separate the measurable from the judged. Confidence or abstention labels a weak verdict as one. Cost and latency keep quality from ever being cited without its cost.
+A verdict is not a scalar, and the Workshop treats each one as a document. Each evaluation record holds the rubric dimensions, the critic's identity and version, the deterministic checks - manifest diffs, blur metrics, counts - candidate ordering, confidence or abstention, run cost and latency, and the human's judgment, stored separately. Keeping the critic's verdict and the human's judgment apart is what allows the critic to be calibrated against the human over time. Every field in that record exists to make the critic auditable. Identity and version let a verdict be attributed. The deterministic checks separate the measurable from the judged. Confidence or abstention labels a weak verdict as one. Cost and latency keep quality from ever being cited without its cost.
 
 Timeline semantics are git's, and they are proven. Revisiting an earlier step always forks; a current pointer marks where you are; forks that produce byte-identical output rejoin automatically, so only real divergence persists. The rejoin rule keeps the branch space honest: a fork that changes nothing collapses back, so what the operator sees as divergence is always divergence that matters. Structured decisions replay cleanly on re-run; free-form edits are ported visibly with human review, never replayed silently.
 
-The ceiling is plain, and the design treats it as a feature. The critic tops out at good-versus-great, so the final call stays with the human. Every comparison surface in the Workbench seats the model as critic and the human as judge, and the interface is honest about which seat is which.
+The ceiling is plain, and the design treats it as a feature. The critic tops out at good-versus-great, so the final call stays with the human. Every comparison surface in the Workshop seats the model as critic and the human as judge, and the interface is honest about which seat is which.
 
 ### 6.7 Voice is an input device
 
@@ -346,15 +346,15 @@ Per-step regression detection has a written specification. In the semantic-blur 
 
 The preference-data byproduct comes with a hedge. Every branch edit creates two continuations from the same prefix, and the user's choice is a candidate preference signal rather than a clean label: users choose for hidden constraints, cost, or convenience. The database captures the context around each choice, and nothing is auto-labeled at capture time. Later extractors decide which comparisons are valid training pairs.
 
-The advantage is plain: no existing tool captures even the raw material, because no existing tool keeps the tree. The Workbench's record is not a better version of what others store; it is a category of data that does not exist anywhere else.
+The advantage is plain: no existing tool captures even the raw material, because no existing tool keeps the tree. The Workshop's record is not a better version of what others store; it is a category of data that does not exist anywhere else.
 
 ## 7. Discussion
 
-### 7.1 What the Workbench refuses to be
+### 7.1 What the Workshop refuses to be
 
-The refusals are load-bearing, and each has its reason. A general-purpose IDE is dead: it duplicates existing editors, carries extreme execution risk, and defers the interesting problem behind a million solved ones. Cursor and Zed remain the harnesses of record for general work, and the Workbench interoperates with whatever harness the user owns rather than replacing it. The refusal is also an allocation of risk: every solved problem re-solved is schedule spent not solving the unsolved one, and the unsolved problem is the record.
+The refusals are load-bearing, and each has its reason. A general-purpose IDE is dead: it duplicates existing editors, carries extreme execution risk, and defers the interesting problem behind a million solved ones. Cursor and Zed remain the harnesses of record for general work, and the Workshop interoperates with whatever harness the user owns rather than replacing it. The refusal is also an allocation of risk: every solved problem re-solved is schedule spent not solving the unsolved one, and the unsolved problem is the record.
 
-A production runtime is out of scope. The Workbench designs the prompt; finished prompts leave and run elsewhere - Cursor, cloud runs, promptforge-cli. There is one current version, the thing at HEAD, with the full immutable development lineage behind it. The Workbench tracks no releases and manages no production lineage, because that is someone else's job and doing it would dilute this one.
+A production runtime is out of scope. The Workshop designs the prompt; finished prompts leave and run elsewhere - Cursor, cloud runs, promptforge-cli. There is one current version, the thing at HEAD, with the full immutable development lineage behind it. The Workshop tracks no releases and manages no production lineage, because that is someone else's job and doing it would dilute this one.
 
 Multi-file code mutation is out of scope, and the reason comes straight from the fan-out lesson. Tests give ground truth for "works," but architecture judgment is good-versus-great territory, where the model critic weakens. Semantic codebase indexing and retrieval died with the IDE scope. Branch merge is a non-goal: branch, compare, keep; cherry-pick a turn at most. Read the list again and a pattern shows. Each refused scope is either a solved problem, someone else's problem, or a problem where the model's judgment cannot be trusted. What remains is the territory where the product's premise actually operates.
 
@@ -380,13 +380,13 @@ The fourth is the composer's prefix policy: stable-to-volatile ordering, cache b
 
 The field manual's closing line is the thesis: the human is the final compressor. A hundred and twenty rules distilled from eighty-nine transcripts, and the last one is this: the compression that matters is the one a person does.
 
-The fan-out lesson is the same boundary from the model's side. The generator knows the middle. The evaluator knows the region the training covered. The peak is outside both, and a human with taste in the evaluator seat raises the ceiling. The engine took the rules that were structure; the Workbench records the judgment that was not. Every subsystem in the product serves that division. The engine's isolation exists so the machine's part is done with full attention. The gateway's boundary exists so trust has one address. The event store exists so the human's part is never lost. The leaderboard exists so comparison stays cheap and the final call stays human.
+The fan-out lesson is the same boundary from the model's side. The generator knows the middle. The evaluator knows the region the training covered. The peak is outside both, and a human with taste in the evaluator seat raises the ceiling. The engine took the rules that were structure; the Workshop records the judgment that was not. Every subsystem in the product serves that division. The engine's isolation exists so the machine's part is done with full attention. The gateway's boundary exists so trust has one address. The event store exists so the human's part is never lost. The leaderboard exists so comparison stays cheap and the final call stays human.
 
 The design record's closing thesis is the product in one sentence: human intent is source; prompts and outputs are derived artifacts; history is retained; models advise and compare; humans decide. PromptForge exists to keep the human's judgment in the loop and on the record.
 
 ## References
 
-- The PromptForge Workbench (design record), 2026-08-24, Kimi K3 (Cursor agent).
+- The PromptForge Workshop (design record), 2026-08-24, Kimi K3 (Cursor agent).
 - PromptForge User Guide, assembled from per-crate documentation.
 - How to Build AI Tools and Prompts (how-to-falco.md), 2026-08-07, Claude Opus 4.6 (Cursor agent); distilled from 89 chat transcripts.
 - Semantic Blur: Why Rewriting a Prompt File Degrades It, 2026-07-26, Claude Opus 4.8 (Cursor agent).
