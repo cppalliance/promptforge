@@ -44,6 +44,11 @@ Every field of `workshop.toml`:
 | `voice.window_seconds` | `5` | Seconds of trailing audio each interim pass transcribes |
 | `voice.interval_ms` | `800` | Milliseconds between interim passes while a take is recording |
 
+Voice transcription is GPU-only: the build must carry a GPU whisper
+backend (the `cuda` feature on NVIDIA machines, `metal` on macOS) and
+the matching driver must be present, or the UI hides the mic rather than
+offer a take that stalls on a CPU pass.
+
 ## Routes
 
 | Route | Description |

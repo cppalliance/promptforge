@@ -39,6 +39,9 @@ whisper-rs.workspace = true
 [features]
 default = []
 cuda = ["whisper-rs/cuda"]
+# GPU transcription through whisper.cpp's Metal backend; the macOS
+# counterpart of `cuda`. Builds with the Xcode command line tools alone.
+metal = ["whisper-rs/metal"]
 # Compiles the crate-internal test fixtures and re-exports them to the
 # integration-test binary; enabled for every test build by the self
 # dev-dependency below, never by production consumers.

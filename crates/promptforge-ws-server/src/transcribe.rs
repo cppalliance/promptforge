@@ -24,6 +24,9 @@ pub use error::TranscribeError;
 pub(crate) use engine::VoiceEngine;
 pub(crate) use slot::VoiceSlot;
 
+// Only the NVIDIA driver probes look at the filesystem; macOS and the
+// fallback answer from build configuration alone.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use std::path::Path;
 
 /// PCM sample rate the voice wire format and whisper both require.
@@ -85,11 +88,12 @@ pub(crate) fn tail(buffer: &[f32], window: usize) -> &[f32] {
 }
 
 /// Returns true when voice transcription can run on the GPU: the build
-/// carries the CUDA backend and an NVIDIA driver is present. Without both,
-/// whisper falls back to a CPU pass slow enough that the UI hides the mic
-/// rather than offering a take that stalls for half a minute.
+/// carries a GPU backend (CUDA or Metal) and the matching driver is
+/// present. Without both, whisper falls back to a CPU pass slow enough
+/// that the UI hides the mic rather than offering a take that stalls for
+/// half a minute.
 pub(crate) fn gpu_transcription_available() -> bool {
-    cfg!(feature = "cuda") && gpu_driver_present()
+    cfg!(any(feature = "cuda", feature = "metal")) && gpu_driver_present()
 }
 
 /// The CUDA driver library ships with every NVIDIA display driver.
@@ -104,7 +108,13 @@ fn gpu_driver_present() -> bool {
     Path::new("/dev/nvidia0").exists()
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+/// Metal ships with macOS itself; a metal build always has its driver.
+#[cfg(target_os = "macos")]
+fn gpu_driver_present() -> bool {
+    cfg!(feature = "metal")
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn gpu_driver_present() -> bool {
     false
 }
@@ -190,8 +200,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_cuda_build_means_no_gpu_transcription() {
-        if !cfg!(feature = "cuda") {
+    fn no_gpu_backend_build_means_no_gpu_transcription() {
+        if !cfg!(any(feature = "cuda", feature = "metal")) {
             assert!(!gpu_transcription_available());
         }
     }

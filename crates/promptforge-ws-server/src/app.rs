@@ -79,10 +79,11 @@ impl AppState {
             .map_err(StateError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(StateError::Tape)?;
         let voice = VoiceSlot::default();
-        // Voice is GPU-only: without the CUDA backend and an NVIDIA driver
-        // a take stalls on a CPU pass and the UI hides the mic, so the
-        // server never loads the multi-gigabyte whisper models it could
-        // not use, and never announces voice over a mic that is not there.
+        // Voice is GPU-only: without a GPU backend (CUDA plus an NVIDIA
+        // driver, or Metal on macOS) a take stalls on a CPU pass and the
+        // UI hides the mic, so the server never loads the multi-gigabyte
+        // whisper models it could not use, and never announces voice over
+        // a mic that is not there.
         if crate::transcribe::gpu_transcription_available() {
             if let Some(engine) = startup_engine(&config.voice, &push) {
                 voice.activate(engine);

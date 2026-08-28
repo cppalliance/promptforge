@@ -48,6 +48,7 @@ zip.workspace = true
 # Node UI build into the graph.
 workshop = ["dep:promptforge-ws-server", "dep:open"]
 workshop-cuda = ["workshop", "promptforge-ws-server/cuda"]
+workshop-metal = ["workshop", "promptforge-ws-server/metal"]
 
 [dev-dependencies]
 tempfile.workspace = true

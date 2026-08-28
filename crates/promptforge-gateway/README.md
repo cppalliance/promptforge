@@ -45,10 +45,11 @@ Built with the `workshop` feature, the gateway can host the PromptForge Workshop
 cargo build -p promptforge-gateway --features workshop
 ```
 
-Two feature flags exist:
+Three feature flags exist:
 
 - `workshop` - compiles the hosted workshop in: the `promptforge-ws-server` crate and system-browser opening.
 - `workshop-cuda` - implies `workshop` and builds the whisper voice engine with CUDA acceleration.
+- `workshop-metal` - implies `workshop` and builds the whisper voice engine with Metal acceleration (macOS).
 
 The default feature set is empty, so a headless gateway build never pulls the workshop's toolchain into the graph: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
 
