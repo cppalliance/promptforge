@@ -484,6 +484,7 @@ async fn abort_fanout_arms(
 mod arm;
 mod proxies;
 
+pub(crate) use arm::ArmFinalizer;
 use arm::{ArmInputs, ArmPayload, run_one_arm};
 use proxies::{DebugMsg, ProxyDebugCapture, ProxyObserver, SIDE_CHANNEL_CAPACITY};
 

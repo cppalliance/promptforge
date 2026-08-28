@@ -41,8 +41,15 @@
 //! `max_fanout_concurrency` arms are active at once, each arm runs the
 //! same walk machinery as any chain over the worker's blocks, and the join
 //! state's preallocated per-index slots deliver the results to the parent
-//! in collection order, never finish order. A received `mcp` request is
-//! the protocol's typed reserved error.
+//! in collection order, never finish order. The fanout failure semantics
+//! match the legacy engine: an empty collection errors before any
+//! scheduling, a fatal arm error aborts the sibling arms (each aborted
+//! arm's finalizer reports `FANOUT_ARM_CANCELLED`, so exactly one terminal
+//! observation fires per arm), [`Error::ToolLoopExhausted`] soft-degrades
+//! its arm to the incomplete stub, and two arms of one fanout writing the
+//! same store path fail with the store's write-write race error while
+//! `append` stays legal with unspecified order. A received `mcp` request
+//! is the protocol's typed reserved error.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -54,6 +61,7 @@ use tokio::task::AbortHandle;
 
 use crate::client::GatewayClient;
 use crate::fanout;
+use crate::fanout::ArmFinalizer;
 use crate::lua::{
     CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, resolve_model_binding,
     shim_live_h1_models,
@@ -62,7 +70,7 @@ use crate::model::ModelBinding;
 use crate::observe::detail;
 use crate::parser::{Block, Section};
 use crate::resolve::RuntimeResolution;
-use crate::{Error, Result, cancel};
+use crate::{Error, Result, cancel, subst};
 
 use super::context::RunContext;
 use super::engine::{
@@ -189,6 +197,13 @@ struct ArmState<'a> {
     /// each of the arm's steps, so cancellation reaches the arm's running
     /// Lua through its instruction hook exactly as on the driver task.
     cancel: Option<cancel::CancelHandle>,
+    /// The arm's terminal-observation guard: the driver finishes it with
+    /// the arm's real outcome (succeeded, exhausted, or failed), and its
+    /// drop reports `FANOUT_ARM_CANCELLED` - a sibling's fatal error
+    /// aborting this arm, or the run's cancellation dropping the
+    /// scheduler, both pass through that drop. Exactly one terminal event
+    /// fires per arm (the legacy `ArmFinalizer` contract).
+    finalizer: ArmFinalizer,
 }
 
 /// A heading resolved against a chain's visible set: the slice the walk or
@@ -379,9 +394,11 @@ pub(crate) struct Scheduler<'a> {
     answer_tx: mpsc::UnboundedSender<(RequestId, Answer)>,
     /// The receive half the driver awaits when no chain is ready.
     answers: mpsc::UnboundedReceiver<(RequestId, Answer)>,
-    /// Abort handles of the in-flight leaf I/O tasks, aborted on
-    /// cancellation; aborting a completed task is a no-op.
-    io_tasks: Vec<AbortHandle>,
+    /// Abort handles of the in-flight leaf I/O tasks, keyed by request so
+    /// a fatal fanout arm can abort a sibling arm's own in-flight round;
+    /// every handle is aborted on cancellation, and aborting a completed
+    /// task is a no-op.
+    io_tasks: HashMap<RequestId, AbortHandle>,
     /// The next leaf-request id.
     next_request: u64,
     /// The next fanout id.
@@ -412,7 +429,7 @@ impl<'a> Scheduler<'a> {
             joins: HashMap::new(),
             answer_tx,
             answers,
-            io_tasks: Vec::new(),
+            io_tasks: HashMap::new(),
             next_request: 0,
             next_fanout: 0,
             client: GatewaySource::from_optional(client, ctx.limits()),
@@ -491,9 +508,12 @@ impl<'a> Scheduler<'a> {
                 // Cancellation while suspended: abort the in-flight leaf
                 // tasks and fail the run. The suspended chains' frames drop
                 // unarmed with the scheduler - the same outcome as the
-                // hook-driven path while running.
+                // hook-driven path while running - and each fanout arm's
+                // finalizer drop reports its FANOUT_ARM_CANCELLED terminal
+                // observation, so the exactly-once terminal contract holds
+                // on this path too.
                 () = cancel::wait_cancelled() => {
-                    for handle in &self.io_tasks {
+                    for handle in self.io_tasks.values() {
                         handle.abort();
                     }
                     return Err(Error::Interrupted);
@@ -504,10 +524,14 @@ impl<'a> Scheduler<'a> {
                             "the answer channel cannot close while the scheduler holds its sender",
                         ));
                     };
+                    self.io_tasks.remove(&request_id);
                     let Some(chain_id) = self.pending.remove(&request_id) else {
-                        return Err(Error::Internal(
-                            "an answer arrived for a request no chain is pending on",
-                        ));
+                        // A late answer from an I/O task whose chain was
+                        // already aborted (a fatal sibling's fanout abort
+                        // races a task that sent before the abort landed):
+                        // the abort removed the pending entry, so the answer
+                        // is moot.
+                        continue;
                     };
                     self.chains[chain_id.index()].incoming = Some(answer);
                     self.ready.push_back(chain_id);
@@ -1298,7 +1322,7 @@ impl<'a> Scheduler<'a> {
     fn dispatch_infer(&mut self, id: ChainId, prompt: String, binding: Option<ModelBinding>) {
         match self.prepare_infer(id, prompt, binding) {
             Ok((request_id, task)) => {
-                self.io_tasks.push(task.abort_handle());
+                self.io_tasks.insert(request_id, task.abort_handle());
                 self.pending.insert(request_id, id);
             }
             Err(error) => {
@@ -1580,6 +1604,15 @@ impl<'a> Scheduler<'a> {
             };
             let worker_slice = template.worker_slice;
             let worker = &worker_slice[template.worker_index];
+            // Arm creation is the dispatch boundary, so it carries the
+            // arm's STARTED observation, exactly as the legacy arm task's
+            // start did; the finalizer guards the exactly-once terminal
+            // event from here on.
+            template.ctx.observer().observe(
+                template.ctx.execution(),
+                &worker.name,
+                detail::FANOUT_ARM_STARTED,
+            );
             let arm = ArmState {
                 fanout,
                 item_index: index,
@@ -1591,6 +1624,11 @@ impl<'a> Scheduler<'a> {
                 worker_slice,
                 worker_index: template.worker_index,
                 cancel: template.cancel.clone(),
+                finalizer: ArmFinalizer::new(
+                    Arc::clone(template.ctx.observer()),
+                    template.ctx.execution().to_owned(),
+                    worker.name.clone(),
+                ),
             };
             let chain = self.start_chain(
                 template.ctx.clone(),
@@ -1612,32 +1650,35 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Applies one arm chain's end to its join: a success writes the arm's
-    /// preallocated slot (so results land in collection order) and refills
-    /// the window; the last arm's landing resumes the parent with the
-    /// packed sequence. A fatal arm error fails the join: the parent
-    /// resumes with the error and the join is removed, so a sibling that
-    /// finishes later is discarded - the legacy abort of sibling arms lands
-    /// with the fanout failure-semantics step.
-    fn complete_arm(&mut self, arm: ArmState<'a>, outcome: Result<String>) {
+    /// Applies one arm chain's end to its join, finishing the arm's
+    /// terminal observation with its real outcome: a success writes the
+    /// arm's preallocated slot (so results land in collection order) and
+    /// refills the window; the last arm's landing resumes the parent with
+    /// the packed sequence. [`Error::ToolLoopExhausted`] soft-degrades the
+    /// arm to the incomplete stub, so one stuck arm cannot kill sibling
+    /// evidence. Any other arm error is fatal: it fails the join and
+    /// aborts the sibling arms.
+    fn complete_arm(&mut self, mut arm: ArmState<'a>, outcome: Result<String>) {
         /// How the join moves on one arm's end.
         enum ArmEnd {
             /// The slot is written and arms remain: refill the window.
             Continue,
             /// The last arm landed: pack the sequence for the parent.
             Complete,
-            /// A fatal arm error: fail the fanout.
+            /// A fatal arm error: fail the fanout and abort the siblings.
             Fail(Error),
         }
         let end = {
             let Some(join) = self.joins.get_mut(&arm.fanout) else {
                 // The join already failed on a sibling's fatal error and was
-                // removed; this arm's outcome is discarded with it.
+                // removed; this arm's outcome is discarded with it, and the
+                // arm's drop reports the cancelled terminal event.
                 return;
             };
             join.active -= 1;
             match outcome {
                 Ok(text) => {
+                    arm.finalizer.finish(detail::FANOUT_ARM_SUCCEEDED);
                     join.results[arm.item_index] = Some(LuaFanoutResult::success(arm.item, text));
                     join.remaining -= 1;
                     if join.remaining == 0 {
@@ -1646,7 +1687,26 @@ impl<'a> Scheduler<'a> {
                         ArmEnd::Continue
                     }
                 }
-                Err(error) => ArmEnd::Fail(error),
+                // One stuck arm must not kill sibling evidence facets.
+                Err(Error::ToolLoopExhausted) => {
+                    let stub = format!(
+                        "## {}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)",
+                        subst::render_item(&arm.item)
+                    );
+                    arm.finalizer.finish(detail::FANOUT_ARM_EXHAUSTED);
+                    join.results[arm.item_index] =
+                        Some(LuaFanoutResult::exhausted_stub(arm.item, stub));
+                    join.remaining -= 1;
+                    if join.remaining == 0 {
+                        ArmEnd::Complete
+                    } else {
+                        ArmEnd::Continue
+                    }
+                }
+                Err(error) => {
+                    arm.finalizer.finish(detail::FANOUT_ARM_FAILED);
+                    ArmEnd::Fail(error)
+                }
             }
         };
         match end {
@@ -1679,14 +1739,92 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Fails one fanout's join: the parent resumes with the error and the
-    /// join is removed, so a sibling that finishes later is discarded.
+    /// Fails one fanout's join: the sibling arms still alive are aborted
+    /// (the legacy `JoinSet::abort_all` port - an aborted arm's frame drops
+    /// unarmed and its finalizer reports `FANOUT_ARM_CANCELLED`), the
+    /// parent resumes with the error, and the join is removed. Items never
+    /// dispatched stay unstarted: with the join gone, no refill can create
+    /// their arms.
     fn fail_fanout(&mut self, fanout: FanoutId, error: Error) {
         let Some(join) = self.joins.remove(&fanout) else {
             return;
         };
+        for sibling in self.arm_chains_of(fanout) {
+            self.abort_subtree(sibling);
+        }
         self.chains[join.parent.index()].incoming = Some(Answer::Fanout(Err(error)));
         self.ready.push_back(join.parent);
+    }
+
+    /// The arena ids of one fanout's live arm chains. An arm whose chain
+    /// already finished is absent: `finish` took its arm state, so only
+    /// arms still running, suspended, or blocked carry it.
+    fn arm_chains_of(&self, fanout: FanoutId) -> Vec<ChainId> {
+        // The arena is u32-bounded at insertion (`start_chain`), so the
+        // index conversion cannot fail.
+        self.chains
+            .iter()
+            .enumerate()
+            .filter(|(_, chain)| chain.arm.as_ref().is_some_and(|arm| arm.fanout == fanout))
+            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
+            .collect()
+    }
+
+    /// Aborts one chain and everything it transitively blocks on - its
+    /// execute children and the arms of its nested fanouts - the scheduler
+    /// port of dropping a spawned arm task: the chain leaves the ready
+    /// queue and the pending table, its in-flight leaf I/O task is aborted,
+    /// and its state drops in the teardown order (the suspended coroutine,
+    /// then the frame unarmed - no `SECTION_FINISHED` - then the arm state,
+    /// whose finalizer drop reports `FANOUT_ARM_CANCELLED`).
+    fn abort_subtree(&mut self, id: ChainId) {
+        // Nested fanouts this chain parents: their arms abort with it, and
+        // the removed join has no answer to deliver - the parent is dead.
+        let nested: Vec<FanoutId> = self
+            .joins
+            .iter()
+            .filter(|(_, join)| join.parent == id)
+            .map(|(fanout, _)| *fanout)
+            .collect();
+        for fanout in nested {
+            self.joins.remove(&fanout);
+            for arm in self.arm_chains_of(fanout) {
+                self.abort_subtree(arm);
+            }
+        }
+        // The arena is u32-bounded at insertion (`start_chain`), so the
+        // index conversion cannot fail.
+        let children: Vec<ChainId> = self
+            .chains
+            .iter()
+            .enumerate()
+            .filter(|(_, chain)| chain.parent == Some(id))
+            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainId))
+            .collect();
+        for child in children {
+            self.abort_subtree(child);
+        }
+        self.ready.retain(|ready| *ready != id);
+        let request = self
+            .pending
+            .iter()
+            .find_map(|(request, chain)| (*chain == id).then_some(*request));
+        if let Some(request) = request {
+            self.pending.remove(&request);
+            if let Some(task) = self.io_tasks.remove(&request) {
+                task.abort();
+            }
+        }
+        // A chain on the execute stack is the top here: only its own
+        // descendants sit above it, and the recursion already removed them.
+        if self.stack.last() == Some(&id) {
+            self.stack.pop();
+        }
+        let chain = &mut self.chains[id.index()];
+        chain.coroutine = None;
+        chain.incoming = None;
+        chain.frame = None;
+        chain.arm = None;
     }
 
     /// Finishes one chain: the frame's teardown boundary when the chain
