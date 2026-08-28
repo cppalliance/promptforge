@@ -145,6 +145,12 @@ impl AppState {
         self.catalog.clone()
     }
 
+    /// The menu bus, whose workbench snapshots every `/ws` session
+    /// forwards and whose mutators the session's menu events drive.
+    pub(crate) fn menu(&self) -> &MenuBus {
+        &self.menu
+    }
+
     /// The confined workspace, shared with the `/workspace/*` handlers;
     /// grants registered through `POST /workspace/grant` are visible to
     /// every clone immediately.

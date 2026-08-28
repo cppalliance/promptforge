@@ -157,13 +157,14 @@ impl JsonSocket {
         serde_json::from_str(&text).expect("the frame is JSON")
     }
 
-    /// Receives frames until one arrives whose `type` is not `status`.
-    /// Status frames are unsolicited and interleave with replies at any
-    /// point, so reply assertions skip them.
+    /// Receives frames until one arrives whose `type` is neither `status`
+    /// nor `workbench`. Both are unsolicited pushes - the heartbeat and
+    /// the menu bus interleave them with replies at any point - so reply
+    /// assertions skip them.
     pub(crate) async fn recv_non_status(&mut self) -> serde_json::Value {
         loop {
             let frame = self.recv_json().await;
-            if frame["type"] != "status" {
+            if frame["type"] != "status" && frame["type"] != "workbench" {
                 return frame;
             }
         }
