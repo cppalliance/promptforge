@@ -45,6 +45,9 @@ pub enum StartupErrorKind {
     Bind,
     /// Serving requests failed.
     Serve,
+    /// Starting the hosted workshop server failed. Produced only by builds
+    /// with the `workshop` feature.
+    Workshop,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,6 +60,9 @@ enum StartupRepr {
     Bind(#[source] std::io::Error),
     #[error("serve error")]
     Serve(#[source] ServeReprSource),
+    #[cfg(feature = "workshop")]
+    #[error("workshop startup error")]
+    Workshop(#[source] promptforge_ws_server::SpawnError),
 }
 
 impl StartupError {
@@ -68,6 +74,8 @@ impl StartupError {
             StartupRepr::Provisioning(_) => StartupErrorKind::Provisioning,
             StartupRepr::Bind(_) => StartupErrorKind::Bind,
             StartupRepr::Serve(_) => StartupErrorKind::Serve,
+            #[cfg(feature = "workshop")]
+            StartupRepr::Workshop(_) => StartupErrorKind::Workshop,
         }
     }
 
@@ -85,6 +93,11 @@ impl StartupError {
 
     pub(crate) fn serve(err: ServeError) -> Self {
         StartupError(StartupRepr::Serve(err.0))
+    }
+
+    #[cfg(feature = "workshop")]
+    pub(crate) fn workshop(err: promptforge_ws_server::SpawnError) -> Self {
+        StartupError(StartupRepr::Workshop(err))
     }
 }
 
