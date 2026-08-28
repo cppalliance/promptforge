@@ -143,7 +143,7 @@ globalThis.fetch = async (url) => {
         json: async () => ({
           path: pathParam,
           size: 7,
-          modified_ms: 100,
+          token: "t100",
           text: `text of ${pathParam}`,
         }),
       };

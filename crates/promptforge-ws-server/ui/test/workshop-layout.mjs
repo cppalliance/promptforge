@@ -104,12 +104,12 @@ window.HTMLElement.prototype.getClientRects = function getClientRects() {
 
 // A scripted workspace API: one granted root with two files; file reads
 // serve a small text per path; writes record their bodies and bump the
-// modified-time token. Any other route fails the test loudly.
+// conflict token. Any other route fails the test loudly.
 const ROOT = "C:\\project";
 const FILE_A = `${ROOT}\\a.txt`;
 const FILE_B = `${ROOT}\\b.txt`;
 const puts = [];
-let token = 100;
+let tokenSeq = 100;
 globalThis.fetch = async (url, options) => {
   const target = typeof url === "string" ? url : url.url;
   if (target.startsWith("/workspace/file") && !options) {
@@ -121,7 +121,7 @@ globalThis.fetch = async (url, options) => {
         json: async () => ({
           path: pathParam,
           size: 7,
-          modified_ms: token,
+          token: `t${tokenSeq}`,
           text: `text of ${pathParam}`,
         }),
       };
@@ -130,14 +130,14 @@ globalThis.fetch = async (url, options) => {
   if (target === "/workspace/file" && options?.method === "PUT") {
     const body = JSON.parse(options.body);
     puts.push(body);
-    token += 100;
+    tokenSeq += 100;
     return {
       ok: true,
       status: 200,
       json: async () => ({
         path: body.path,
         size: body.text.length,
-        modified_ms: token,
+        token: `t${tokenSeq}`,
         text: body.text,
       }),
     };

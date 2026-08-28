@@ -128,16 +128,16 @@ function createStubSurface() {
 function createStallingWriter() {
   const puts = [];
   let release = null;
-  let nextModifiedMs = 200;
+  let nextTokenSeq = 200;
   return {
     puts,
-    write(filePath, text, expectedModifiedMs) {
-      puts.push({ path: filePath, text, expectedModifiedMs });
+    write(filePath, text, expectedToken) {
+      puts.push({ path: filePath, text, expectedToken });
       return new Promise((resolve) => {
         release = () => {
-          const modifiedMs = nextModifiedMs;
-          nextModifiedMs += 100;
-          resolve({ path: filePath, size: text.length, modifiedMs, text });
+          const token = `t${nextTokenSeq}`;
+          nextTokenSeq += 100;
+          resolve({ path: filePath, size: text.length, token, text });
         };
       });
     },
@@ -152,7 +152,7 @@ function fakeParameters(filePath, onClose) {
   return { params: { path: filePath }, api: { setTitle() {}, close: onClose ?? (() => {}) } };
 }
 
-const readFile = async () => ({ path: FILE_PATH, size: 0, modifiedMs: 100, text: "" });
+const readFile = async () => ({ path: FILE_PATH, size: 0, token: "t100", text: "" });
 
 await assertNoLeaks(lifecycle, async () => {
   // --- Typing while a save is in flight stays dirty -------------------------
@@ -188,7 +188,7 @@ await assertNoLeaks(lifecycle, async () => {
   );
   check(
     "the second save carries the token from the first write",
-    writer.puts.at(-1).expectedModifiedMs === 200,
+    writer.puts.at(-1).expectedToken === "t200",
   );
   writer.release();
   await secondSave;
@@ -242,16 +242,16 @@ await assertNoLeaks(lifecycle, async () => {
   let failNextPut = true;
   const conflictPanel = new EditorPanel({
     createSurface: () => conflictStub,
-    readFile: async () => ({ path: FILE_PATH, size: 7, modifiedMs: 500, text: "on disk" }),
-    writeFile: (filePath, text, expectedModifiedMs) => {
+    readFile: async () => ({ path: FILE_PATH, size: 7, token: "t500", text: "on disk" }),
+    writeFile: (filePath, text, expectedToken) => {
       if (failNextPut) {
         failNextPut = false;
         return Promise.reject(new ModifiedConflictError("file changed on disk"));
       }
-      conflictPuts.push({ path: filePath, text, expectedModifiedMs });
+      conflictPuts.push({ path: filePath, text, expectedToken });
       return new Promise((resolve) => {
         releaseOverwrite = () =>
-          resolve({ path: filePath, size: text.length, modifiedMs: 900, text });
+          resolve({ path: filePath, size: text.length, token: "t900", text });
       });
     },
   });
@@ -271,7 +271,7 @@ await assertNoLeaks(lifecycle, async () => {
   await flush();
   check(
     "the Overwrite button runs despite the saving guard, with the fresh token",
-    conflictPuts.length === 1 && conflictPuts[0].expectedModifiedMs === 500,
+    conflictPuts.length === 1 && conflictPuts[0].expectedToken === "t500",
   );
 
   void conflictPanel.save();

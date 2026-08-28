@@ -106,12 +106,15 @@ async function flush() {
 
 // --- A scripted workspace file API with a token state machine -------------
 //
-// The "disk" holds text and a modified-time token. PUT with a matching
-// expected token writes and bumps the token; a stale token answers 409
-// with the server's modified_conflict code. `failNextPut` forces one
-// conflict regardless, so the test can arm the race deterministically.
+// The "disk" holds text and an opaque conflict token (a counter rendered
+// as a string, as the server's token is opaque to the client). PUT with a
+// matching expected token writes and bumps the token; a stale token
+// answers 409 with the server's modified_conflict code. `failNextPut`
+// forces one conflict regardless, so the test can arm the race
+// deterministically.
 const FILE_PATH = "C:\\project\\a.txt";
-const disk = { text: "hello\n", modifiedMs: 100, failNextPut: false };
+const disk = { text: "hello\n", tokenSeq: 100, failNextPut: false };
+const diskToken = () => `t${disk.tokenSeq}`;
 const puts = [];
 globalThis.fetch = async (url, options) => {
   const target = typeof url === "string" ? url : url.url;
@@ -122,7 +125,7 @@ globalThis.fetch = async (url, options) => {
       json: async () => ({
         path: FILE_PATH,
         size: disk.text.length,
-        modified_ms: disk.modifiedMs,
+        token: diskToken(),
         text: disk.text,
       }),
     };
@@ -130,7 +133,7 @@ globalThis.fetch = async (url, options) => {
   if (target === "/workspace/file" && options?.method === "PUT") {
     const body = JSON.parse(options.body);
     puts.push(body);
-    if (disk.failNextPut || body.expected_modified_ms !== disk.modifiedMs) {
+    if (disk.failNextPut || body.expected_token !== diskToken()) {
       disk.failNextPut = false;
       return {
         ok: false,
@@ -141,14 +144,14 @@ globalThis.fetch = async (url, options) => {
       };
     }
     disk.text = body.text;
-    disk.modifiedMs += 100;
+    disk.tokenSeq += 100;
     return {
       ok: true,
       status: 200,
       json: async () => ({
         path: FILE_PATH,
         size: disk.text.length,
-        modified_ms: disk.modifiedMs,
+        token: diskToken(),
         text: disk.text,
       }),
     };
@@ -226,7 +229,7 @@ check("typing sets the dirty state", panel.isDirty());
 check("dirty state shows in the panel title", params.titles.at(-1) === "● a.txt");
 
 await panel.save();
-check("save writes with the read token", puts.length === 1 && puts[0].expected_modified_ms === 100);
+check("save writes with the read token", puts.length === 1 && puts[0].expected_token === "t100");
 check("save sends the editor text", puts[0].text === "hello world\n");
 check("save clears the dirty state", !panel.isDirty());
 check("save restores the clean title", params.titles.at(-1) === "a.txt");
@@ -280,7 +283,7 @@ check(
   "Overwrite re-reads the token and writes the editor text",
   puts.length === putsBeforeOverwrite + 1 &&
     puts.at(-1).text === "mine\n" &&
-    puts.at(-1).expected_modified_ms === disk.modifiedMs - 100,
+    puts.at(-1).expected_token === `t${disk.tokenSeq - 100}`,
 );
 check("Overwrite wins the file", disk.text === "mine\n");
 check("Overwrite clears the dirty state", !panel.isDirty());
