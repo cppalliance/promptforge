@@ -1,7 +1,7 @@
 // The editor panel: one open document per Dockview panel, written against
 // the EditorSurface contract. The panel owns the document lifecycle -
 // loading through the workspace API, dirty state in the tab title, and
-// saving with the server's modified-time conflict token - and never
+// saving with the server's opaque conflict token - and never
 // touches the concrete editor. A save that loses the token race opens a
 // themed conflict dialog (reload the on-disk text, or overwrite it)
 // instead of silently clobbering the file.
@@ -27,7 +27,7 @@ export interface EditorPanelDeps {
   readonly writeFile?: (
     path: string,
     text: string,
-    expectedModifiedMs: number | null,
+    expectedToken: string | null,
   ) => Promise<WorkspaceFile>;
 }
 
@@ -48,7 +48,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
   private panelApi: DockviewPanelApi | null = null;
   private path: string | null = null;
   private title = "Editor";
-  private modifiedMs: number | null = null;
+  private token: string | null = null;
   private saving = false;
 
   constructor(private readonly deps: EditorPanelDeps = {}) {
@@ -107,8 +107,8 @@ export class EditorPanel extends Disposable implements IContentRenderer {
       // agree, or keystrokes typed while the PUT is in flight would be
       // baselined as saved and silently lost.
       const text = this.surface.text();
-      const written = await this.writer()(this.path, text, this.modifiedMs);
-      this.modifiedMs = written.modifiedMs;
+      const written = await this.writer()(this.path, text, this.token);
+      this.token = written.token;
       this.surface.markSaved(text);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {
@@ -128,7 +128,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
   private writer(): (
     path: string,
     text: string,
-    expectedModifiedMs: number | null,
+    expectedToken: string | null,
   ) => Promise<WorkspaceFile> {
     return this.deps.writeFile ?? writeFile;
   }
@@ -136,7 +136,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
   /** Loads the document into the surface and records its conflict token. */
   private async load(path: string): Promise<void> {
     const file = await this.reader()(path);
-    this.modifiedMs = file.modifiedMs;
+    this.token = file.token;
     this.surface.open({ path, text: file.text });
   }
 
@@ -157,7 +157,7 @@ export class EditorPanel extends Disposable implements IContentRenderer {
   }
 
   /**
-   * The modified-time conflict modal. Reload discards the editor's text
+   * The write-conflict modal. Reload discards the editor's text
    * for the on-disk text; Overwrite re-reads the fresh token and writes
    * the editor's text over the file.
    */
@@ -260,8 +260,8 @@ export class EditorPanel extends Disposable implements IContentRenderer {
     try {
       const fresh = await this.reader()(this.path);
       const text = this.surface.text();
-      const written = await this.writer()(this.path, text, fresh.modifiedMs);
-      this.modifiedMs = written.modifiedMs;
+      const written = await this.writer()(this.path, text, fresh.token);
+      this.token = written.token;
       this.surface.markSaved(text);
     } catch (error: unknown) {
       if (isModifiedConflict(error)) {
