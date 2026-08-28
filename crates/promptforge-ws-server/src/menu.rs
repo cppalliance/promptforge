@@ -244,10 +244,22 @@ impl MenuBus {
 
     /// Records the heartbeat's verdict on the gateway and publishes a
     /// fresh snapshot; `chat_ready` is false while the gateway is down.
-    #[allow(dead_code, reason = "the heartbeat wires reachability in a later step")]
     pub(crate) fn set_gateway_reachable(&self, reachable: bool) {
         let mut state = self.lock_state();
         state.gateway_reachable = reachable;
+        self.publish(&state);
+    }
+
+    /// Records the gateway's profile list and active profile and
+    /// publishes a fresh snapshot. The boot and reconnect paths feed
+    /// this from the gateway's profile endpoints; a gateway without
+    /// profile support feeds an empty list - a state, not an error.
+    /// The selection is untouched: catalog reconciliation owns
+    /// selection validity, not the profile list.
+    pub(crate) fn set_profiles(&self, profiles: Vec<String>, active: Option<String>) {
+        let mut state = self.lock_state();
+        state.profiles = profiles;
+        state.active = active;
         self.publish(&state);
     }
 
@@ -622,6 +634,45 @@ mod tests {
         catalog.publish(Vec::new());
         menu.reconcile_catalog();
         assert!(!snapshot(&menu).chat_ready, "an empty catalog forces false");
+    }
+
+    #[test]
+    fn set_profiles_publishes_the_list_and_the_active_profile() {
+        let menu = menu_of(&["model-a"]);
+        menu.set_profiles(
+            vec!["main".to_string(), "coding".to_string()],
+            Some("main".to_string()),
+        );
+        let published = snapshot(&menu);
+        assert_eq!(published.profiles, ["main", "coding"]);
+        assert_eq!(published.active.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn set_profiles_leaves_the_selection_and_readiness_alone() {
+        let menu = menu_of(&["model-a"]);
+        onto_profile(&menu, "main");
+        menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
+        let after = snapshot(&menu);
+        assert_eq!(
+            after.selected_model.as_deref(),
+            Some("model-a"),
+            "the profile list does not own selection validity"
+        );
+        assert!(after.chat_ready, "readiness survives a profile refresh");
+    }
+
+    #[test]
+    fn an_empty_profile_list_replaces_a_populated_one() {
+        let menu = menu_of(&[]);
+        menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
+        menu.set_profiles(Vec::new(), None);
+        let after = snapshot(&menu);
+        assert!(
+            after.profiles.is_empty(),
+            "a gateway without profile support publishes an empty list"
+        );
+        assert_eq!(after.active, None);
     }
 
     #[test]

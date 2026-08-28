@@ -9,7 +9,11 @@
 //! hears about transitions only - the first probe reports the initial state
 //! ("Connected to gateway" or "Gateway unreachable"), and after that a
 //! status update fires when the answer changes, so a steady state never
-//! spams the status bar.
+//! spams the status bar. Every transition also feeds the Model menu's
+//! reachability (so `chat_ready` flips with the gateway), a transition to
+//! reachable - boot's first probe included - refreshes the gateway's
+//! profile state into the workbench snapshot, and a reconnect additionally
+//! re-fetches the model catalog.
 //!
 //! The task stops through its [`Heartbeat`] handle: the signal wins the
 //! loop's selects, so shutdown never waits out a tick or an in-flight
@@ -95,8 +99,11 @@ impl Heartbeat {
 }
 
 /// Spawns the heartbeat loop against `client`, reporting transitions
-/// through `push` and publishing reachability to `health`. A transition
-/// back to reachable also re-fetches the model catalog and pushes it
+/// through `push` and publishing reachability to `health` and to the
+/// menu behind `push`, which recomputes `chat_ready` from it. A
+/// transition to reachable - boot's first probe included - refreshes the
+/// gateway's profile state into the workbench snapshot; a transition
+/// back from unreachable also re-fetches the model catalog and pushes it
 /// through the same handle. The first probe runs immediately, before the
 /// first interval elapses.
 pub(crate) fn spawn(
@@ -144,12 +151,23 @@ async fn run(
             continue;
         }
         let previous = last.replace(reachable);
+        // The menu recomputes chat_ready from reachability, so the
+        // verdict feeds it before any slower refresh work below.
+        push.menu().set_gateway_reachable(reachable);
         if reachable {
             push.push_status_update(
                 "Connected to gateway",
                 "the gateway answers its health probe",
                 Activity::General,
             );
+            // The workbench snapshot is server-owned, so boot's first
+            // reachable probe and every reconnect (re)populate the
+            // profile state here; the UI cannot fetch it into the menu
+            // itself.
+            tokio::select! {
+                _ = &mut *stop => break,
+                () = refresh_profiles(client, push) => {}
+            }
             // A gateway that was down and answers again may serve a
             // different catalog than before the outage. The initial
             // connect pushes nothing: a fresh UI fetches the catalog
@@ -201,6 +219,82 @@ async fn refresh_catalog(client: &GatewayClient, push: &Push) {
     push.push_models_catalog(models.clone());
 }
 
+/// The decoded body of `GET /admin/profiles`.
+#[derive(serde::Deserialize)]
+struct ProfileList {
+    /// Every profile name the gateway can serve, in gateway order.
+    profiles: Vec<String>,
+}
+
+/// The decoded body of `GET /admin/status`, reduced to the one field the
+/// menu needs.
+#[derive(serde::Deserialize)]
+struct ProfileStatus {
+    /// The profile the gateway is serving.
+    #[serde(default)]
+    profile: Option<String>,
+}
+
+/// Fetches the gateway's profile list and active profile and publishes
+/// them into the workbench snapshot.
+///
+/// A gateway without profile support is a state, not an error: a failed,
+/// declined, or malformed answer degrades that half to empty (logged by
+/// its fetcher), so the menu shows no profiles rather than stale names.
+async fn refresh_profiles(client: &GatewayClient, push: &Push) {
+    let (profiles, active) = tokio::join!(fetch_profile_list(client), fetch_active_profile(client));
+    push.menu()
+        .set_profiles(profiles.unwrap_or_default(), active);
+}
+
+/// The gateway's profile names from `GET /admin/profiles`, or `None`
+/// when the request fails, is declined, or answers malformed JSON - each
+/// logged and tolerated.
+async fn fetch_profile_list(client: &GatewayClient) -> Option<Vec<String>> {
+    let response = match client.list_profiles().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(%error, "profile list fetch failed");
+            return None;
+        }
+    };
+    if !response.status.is_success() {
+        tracing::warn!(status = %response.status, "profile list was declined");
+        return None;
+    }
+    match serde_json::from_slice::<ProfileList>(&response.body) {
+        Ok(list) => Some(list.profiles),
+        Err(error) => {
+            tracing::warn!(%error, "profile list was not the expected JSON");
+            None
+        }
+    }
+}
+
+/// The active profile name from `GET /admin/status`, or `None` when the
+/// request fails, is declined, or answers malformed JSON - each logged
+/// and tolerated.
+async fn fetch_active_profile(client: &GatewayClient) -> Option<String> {
+    let response = match client.profile_status().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(%error, "profile status fetch failed");
+            return None;
+        }
+    };
+    if !response.status.is_success() {
+        tracing::warn!(status = %response.status, "profile status was declined");
+        return None;
+    }
+    match serde_json::from_slice::<ProfileStatus>(&response.body) {
+        Ok(status) => status.profile,
+        Err(error) => {
+            tracing::warn!(%error, "profile status was not the expected JSON");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +310,8 @@ mod tests {
     use tokio::sync::broadcast;
 
     use crate::catalog::CatalogBus;
-    use crate::protocol::{CatalogPush, Severity, StatusBarUpdate};
+    use crate::menu::MenuBus;
+    use crate::protocol::{CatalogPush, Severity, StatusBarUpdate, WorkbenchSnapshot};
     use crate::status::StatusBus;
 
     /// Fast enough to observe transitions without real waiting, slow
@@ -244,12 +339,32 @@ mod tests {
             .into_response()
     }
 
+    /// A static mock profile list for the profile-populate tests.
+    async fn mock_profiles() -> Response {
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            r#"{"profiles":["coding","main"]}"#,
+        )
+            .into_response()
+    }
+
+    /// A static mock gateway status naming the active profile.
+    async fn mock_profile_status() -> Response {
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            r#"{"profile":"main","models":["test-model"]}"#,
+        )
+            .into_response()
+    }
+
     /// Binds a mock gateway whose `/health` flips with `healthy`, with a
-    /// static `/v1/models` beside it.
+    /// static `/v1/models` and the profile endpoints beside it.
     async fn spawn_gateway(healthy: Arc<AtomicBool>) -> String {
         let app = Router::new()
             .route("/health", get(flippable_health))
             .route("/v1/models", get(mock_models))
+            .route("/admin/profiles", get(mock_profiles))
+            .route("/admin/status", get(mock_profile_status))
             .with_state(healthy);
         serve(app).await
     }
@@ -269,23 +384,23 @@ mod tests {
     }
 
     /// Starts a heartbeat against `base_url` on the fast interval, wired to
-    /// `status` and `catalog`; returns the handle and the shared health
-    /// flag.
+    /// `status` and `catalog`; returns the handle, the shared health flag,
+    /// and the menu bus the heartbeat feeds.
     fn heartbeat_on(
         base_url: &str,
         status: &StatusBus,
         catalog: &CatalogBus,
-    ) -> (Heartbeat, GatewayHealth) {
+    ) -> (Heartbeat, GatewayHealth, MenuBus) {
         let client = GatewayClient::new(base_url, "").expect("client builds in tests");
         let health = GatewayHealth::new();
-        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
+        let menu = MenuBus::new(catalog.clone(), None);
         let heartbeat = spawn(
             client,
-            Push::new(status.clone(), catalog.clone(), menu),
+            Push::new(status.clone(), catalog.clone(), menu.clone()),
             health.clone(),
             TEST_INTERVAL,
         );
-        (heartbeat, health)
+        (heartbeat, health, menu)
     }
 
     /// Receives the next status update within a generous deadline.
@@ -305,6 +420,28 @@ mod tests {
         );
     }
 
+    /// Polls the retained menu snapshot until `accept` holds, within a
+    /// generous deadline. Polling the retained copy rather than
+    /// subscribing sidesteps the race between the heartbeat's publishes
+    /// and the test's subscription.
+    async fn snapshot_where(
+        menu: &MenuBus,
+        accept: impl Fn(&WorkbenchSnapshot) -> bool,
+    ) -> WorkbenchSnapshot {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(snapshot) = menu.latest()
+                    && accept(&snapshot)
+                {
+                    return snapshot;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a matching snapshot is retained within the deadline")
+    }
+
     #[tokio::test]
     async fn a_healthy_gateway_fires_connected_once_and_stays_quiet() {
         let healthy = Arc::new(AtomicBool::new(true));
@@ -312,7 +449,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, health, _menu) = heartbeat_on(&base_url, &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Connected to gateway");
@@ -329,7 +466,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on("http://127.0.0.1:1", &status, &catalog);
+        let (heartbeat, health, _menu) = heartbeat_on("http://127.0.0.1:1", &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Gateway unreachable");
@@ -347,7 +484,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, health, _menu) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(next_update(&mut rx).await.label, "Connected to gateway");
         healthy.store(false, Ordering::Relaxed);
@@ -368,7 +505,7 @@ mod tests {
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -410,7 +547,7 @@ mod tests {
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -436,7 +573,7 @@ mod tests {
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -444,6 +581,104 @@ mod tests {
         );
         let quiet = tokio::time::timeout(Duration::from_millis(200), catalog_rx.recv()).await;
         assert!(quiet.is_err(), "no catalog push on the initial connect");
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_initial_connect_populates_the_profile_state() {
+        // Boot populate: the first reachable probe fetches the profile
+        // endpoints, so a workshop started against a live gateway shows
+        // its profiles without waiting for an outage cycle.
+        let healthy = Arc::new(AtomicBool::new(true));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+
+        let populated = snapshot_where(&menu, |snapshot| !snapshot.profiles.is_empty()).await;
+        assert_eq!(populated.profiles, ["coding", "main"]);
+        assert_eq!(populated.active.as_deref(), Some("main"));
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_down_to_up_transition_publishes_a_populated_snapshot() {
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut status_rx = status.subscribe();
+        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Gateway unreachable"
+        );
+        healthy.store(true, Ordering::Relaxed);
+        let populated = snapshot_where(&menu, |snapshot| !snapshot.profiles.is_empty()).await;
+        assert_eq!(populated.profiles, ["coding", "main"]);
+        assert_eq!(populated.active.as_deref(), Some("main"));
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_gateway_without_profile_support_publishes_an_empty_list() {
+        // Only /health exists: the profile endpoints answer 404, which
+        // is a state, not an error - the reconnect publishes an empty
+        // list rather than keeping the stale names.
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = serve(
+            Router::new()
+                .route("/health", get(flippable_health))
+                .with_state(Arc::clone(&healthy)),
+        )
+        .await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut status_rx = status.subscribe();
+        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Gateway unreachable"
+        );
+        menu.set_profiles(vec!["stale".to_string()], Some("stale".to_string()));
+        healthy.store(true, Ordering::Relaxed);
+        let emptied = snapshot_where(&menu, |snapshot| snapshot.profiles.is_empty()).await;
+        assert_eq!(emptied.active, None, "the stale active profile clears");
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn reachability_transitions_flip_chat_ready() {
+        let healthy = Arc::new(AtomicBool::new(true));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        // Readiness needs a non-empty catalog and a selection; the mock
+        // catalog holds test-model, so a reconnect's refresh keeps it.
+        catalog.publish(vec![serde_json::json!({"id": "test-model"})]);
+        let mut status_rx = status.subscribe();
+        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Connected to gateway"
+        );
+        menu.set_selected("test-model")
+            .expect("the id is in the catalog");
+        snapshot_where(&menu, |snapshot| snapshot.chat_ready).await;
+
+        healthy.store(false, Ordering::Relaxed);
+        let down = snapshot_where(&menu, |snapshot| !snapshot.chat_ready).await;
+        assert_eq!(
+            down.selected_model.as_deref(),
+            Some("test-model"),
+            "only reachability flipped; the selection survives the outage"
+        );
+
+        healthy.store(true, Ordering::Relaxed);
+        snapshot_where(&menu, |snapshot| snapshot.chat_ready).await;
         heartbeat.shutdown().await;
     }
 
