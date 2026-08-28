@@ -1,11 +1,15 @@
 //! The `promptforge-ws` binary: the PromptForge Workshop desktop window
 //! shell.
 //!
-//! Loads `workshop.toml` (see [`discover`] for the search order),
-//! generating a default one in the profile's `.promptforge` directory on
-//! first run, starts the workshop server in-process on its own thread,
-//! waits for its health endpoint to answer, and opens a window pointed at
-//! it. Closing the window shuts the server down cleanly.
+//! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
+//! search order), generating a default config and its `default` profile in
+//! the user profile's `.promptforge` directory on first run, boots the
+//! merged gateway (which hosts the workshop UI on a second loopback
+//! listener) in-process, waits for the workshop's health endpoint to
+//! answer, and opens a window pointed at it. Closing the window shuts the
+//! gateway down cleanly. Development against an external gateway uses the
+//! standalone `promptforge-ws-server` binary and its `workshop.toml`
+//! instead of this shell.
 
 mod discover;
 // The only unsafe module in the workspace: the WebView2 COM surface that
@@ -22,9 +26,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use promptforge_ws_server::Config;
+use promptforge_gateway::{GatewayHandle, ProfileName, ServeOptions};
 
-/// How long the shell waits for the in-process server's health endpoint
+/// How long the shell waits for the hosted workshop's health endpoint
 /// before giving up.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -43,22 +47,19 @@ fn run() -> anyhow::Result<()> {
         Some(config_path) => config_path,
         None => generate_in_profile()?,
     };
-    let config =
-        Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?;
-    let server = promptforge_ws_server::spawn(config).context("start workshop server")?;
-    let url = server.url().to_string();
+    let profile =
+        ProfileName::parse(discover::DEFAULT_PROFILE).context("parse the default profile name")?;
+    let gateway = promptforge_gateway::spawn(&ServeOptions::new(config_path, profile))
+        .context("start the merged gateway")?;
 
-    // The server is shut down whether the window ran, failed, or never
+    // The gateway is shut down whether the window ran, failed, or never
     // opened because the health probe timed out.
-    let window_result = health::wait_for_health(&url, HEALTH_TIMEOUT)
-        .context("wait for the workshop server")
-        .and_then(|()| window::run(&url));
-    // Graceful-versus-forced is not actionable in an exiting shell; the
-    // bounded wait is what matters here.
-    let shutdown_result = server
-        .shutdown()
-        .map(|_termination| ())
-        .context("stop workshop server");
+    let window_result = workshop_url(&gateway).and_then(|url| {
+        health::wait_for_health(&url, HEALTH_TIMEOUT)
+            .context("wait for the hosted workshop")
+            .and_then(|()| window::run(&url))
+    });
+    let shutdown_result = gateway.shutdown().context("stop the gateway");
     // A shutdown failure stacked on a window failure is reported, not lost.
     if let (Err(_), Err(shutdown_error)) = (&window_result, &shutdown_result) {
         eprintln!("{shutdown_error:?}");
@@ -66,18 +67,25 @@ fn run() -> anyhow::Result<()> {
     window_result.and(shutdown_result)
 }
 
-/// First run: creates the profile's `.promptforge` directory if needed and
-/// writes the default `workshop.toml` into it.
+/// The hosted workshop's URL from the gateway handle. The shell compiles
+/// the gateway's `workshop` feature in, so `None` means the discovered
+/// boot config carries no `[workshop]` section - a configuration the
+/// shell has no page to open a window on.
+fn workshop_url(gateway: &GatewayHandle) -> anyhow::Result<String> {
+    gateway.workshop_url().map(str::to_string).context(
+        "the boot config has no [workshop] section, so the gateway hosts no workshop UI; \
+         add a [workshop] section to gateway.toml",
+    )
+}
+
+/// First run: writes the default `gateway.toml` and its `default` profile
+/// into the user profile's `.promptforge` directory.
 fn generate_in_profile() -> anyhow::Result<PathBuf> {
     let home = std::env::home_dir().context("locate the user profile directory")?;
     let path = discover::profile_config_path(&home);
-    let dir = path
-        .parent()
-        .context("the profile config path has no parent")?;
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     let path = discover::generate_default(&path).context("write the default configuration")?;
     eprintln!(
-        "no workshop.toml found; wrote default config to {}",
+        "no gateway.toml found; wrote default config to {}",
         path.display()
     );
     Ok(path)
