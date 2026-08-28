@@ -9,6 +9,7 @@ use super::block_walk::{BlockRunMode, SectionFlow};
 use super::context::RunContext;
 use super::gateway::ResolutionContext;
 use super::section_context::SectionContext;
+use super::section_vm::VmSetupMode;
 
 pub(crate) struct LiveH1State {
     pub(crate) var: serde_json::Value,
@@ -31,7 +32,7 @@ pub(crate) async fn execute_live_h1(
     // Construction and limits failures propagate bare, before any teardown
     // observation exists; every failure past this point drops the frame,
     // whose `Drop` tears the VM down exactly once.
-    let mut h1_frame = SectionContext::new_live_h1(ctx, client)?;
+    let mut h1_frame = SectionContext::new_live_h1(ctx, client, VmSetupMode::Legacy)?;
     // The pass owns its client slot: seeded from the run's client, created
     // lazily on the first prose block, whose construction error propagates
     // through `?` while the frame's drop owns the teardown.

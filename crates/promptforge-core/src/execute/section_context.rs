@@ -26,14 +26,16 @@ use std::sync::atomic::AtomicU32;
 
 use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
-use crate::lua::{SectionVm, ToolCallCounts};
+use crate::lua::{SectionVm, ToolCallCounts, install_live_h1_shim_base};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Section};
 use crate::store::WriteScope;
 use crate::{Error, Result};
 
-use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl, run_section_prose};
+use super::block_walk::{
+    BlockRunMode, SectionFlow, run_live_h1_prose, run_one_section_impl, run_section_prose,
+};
 use super::context::RunContext;
 use super::engine::make_control_globals;
 use super::gateway::GatewaySource;
@@ -228,22 +230,30 @@ impl SectionContext {
 
     /// Constructs the frame for the live H1 pass and runs its setup
     /// preamble: the `sys` JSON (id 0 under the prompt's title), VM
-    /// construction and limits, host injection, the host APIs, the H1
-    /// control-global stubs, and the infer hook reading the run's shared
-    /// model set, so a nested `models.infer` resolves against the bindings
-    /// recorded so far.
+    /// construction and limits, host injection, the host APIs, and the H1
+    /// control-global stubs.
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
     /// the frame seeds an empty `var`, no reply, no item, and no write
     /// scope. `client` is the run's client, cloned into the infer hook's
     /// lazy source (F5); the pass's own client slot stays with the caller.
+    /// `mode` selects the infer surface: [`VmSetupMode::Legacy`] installs
+    /// the bridged infer hook reading the run's shared model set, so a
+    /// nested `models.infer` resolves against the bindings recorded so far;
+    /// [`VmSetupMode::Scheduler`] installs the live H1 shim base instead, so
+    /// the scheduler's driver answers `models.infer`/`handle:infer` yields
+    /// through its answer channel.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    pub(crate) fn new_live_h1(ctx: &RunContext, client: Option<&GatewayClient>) -> Result<Self> {
+    pub(crate) fn new_live_h1(
+        ctx: &RunContext,
+        client: Option<&GatewayClient>,
+        mode: VmSetupMode,
+    ) -> Result<Self> {
         let title = &ctx.prompt().title;
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
@@ -267,19 +277,31 @@ impl SectionContext {
             vm.teardown(ctx.observer().as_ref(), title);
             return Err(error);
         }
-        // The infer hook carries a lazy client source (F5): a nested
-        // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it.
-        attach_infer_hook(
-            &vm,
-            GatewaySource::from_optional(client.cloned(), ctx.limits()),
-            Arc::clone(ctx.observer()),
-            ctx.debug().cloned(),
-            ctx.execution(),
-            title,
-            ctx.turns(),
-            ctx.models_arc(),
-        );
+        match mode {
+            // The infer hook carries a lazy client source (F5): a nested
+            // `models.infer` or `handle:infer` surfaces a concrete
+            // construction error on first use instead of the setup
+            // swallowing it.
+            VmSetupMode::Legacy => attach_infer_hook(
+                &vm,
+                GatewaySource::from_optional(client.cloned(), ctx.limits()),
+                Arc::clone(ctx.observer()),
+                ctx.debug().cloned(),
+                ctx.execution(),
+                title,
+                ctx.turns(),
+                ctx.models_arc(),
+            ),
+            // The scheduler answers H1's infer yields through its driver,
+            // so the bridged hook is never installed; the shim base keeps
+            // the control stubs, which raise before anything can yield.
+            VmSetupMode::Scheduler => {
+                if let Err(error) = install_live_h1_shim_base(vm.lua()) {
+                    vm.teardown(ctx.observer().as_ref(), title);
+                    return Err(error);
+                }
+            }
+        }
         Ok(Self {
             vm: Some(vm),
             name: title.clone(),
@@ -619,6 +641,66 @@ impl SectionContext {
             counts,
             completion_options,
             item.as_ref(),
+            observer.as_ref(),
+            debug.as_deref(),
+            turns.as_ref(),
+            client,
+        )
+        .await
+    }
+
+    /// Runs one live H1 prose block through the shared live prose path:
+    /// substitution, the empty-prose skip, the default model and
+    /// always-scope read from the bindings-so-far, fresh per-block counts,
+    /// and the reply written as a plain global.
+    ///
+    /// The scheduler's driver calls this directly; the legacy block loop
+    /// reaches the same path through `run_one_section_impl`.
+    ///
+    /// # Errors
+    /// Returns the [`Error`](crate::Error) of whichever step failed, as
+    /// documented on `run_live_h1_prose`.
+    // Consumed by the scheduler driver until the flip.
+    #[allow(dead_code)]
+    pub(crate) async fn run_live_h1_prose_block(
+        &mut self,
+        ctx: &RunContext,
+        name: &str,
+        text: &str,
+        loop_capable: bool,
+        client: &mut Option<GatewayClient>,
+    ) -> Result<()> {
+        let Self {
+            vm,
+            sys,
+            reply,
+            conversation,
+            observer,
+            debug,
+            turns,
+            ..
+        } = self;
+        let Some(vm) = vm.as_mut() else {
+            return Err(Error::Internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
+        let prose_mode = if loop_capable {
+            ProseMode::Loop {
+                max_tool_iterations: ctx.max_tool_iterations(),
+            }
+        } else {
+            ProseMode::SingleShot
+        };
+        run_live_h1_prose(
+            vm,
+            ctx,
+            name,
+            text,
+            prose_mode,
+            sys,
+            reply,
+            conversation,
             observer.as_ref(),
             debug.as_deref(),
             turns.as_ref(),

@@ -47,12 +47,18 @@ local function execute_section(target, input)
   return result
 end
 
-models.infer = infer
-local raw_use, raw_get = models.use, models.get
-models.use = function(alias) return wrap_handle(raw_use(alias)) end
-models.get = function(alias) return wrap_handle(raw_get(alias)) end
+-- The section install passes the section's models table; the live H1 base
+-- install passes nil (H1's live models table exists only per block, wrapped
+-- by __impl_coro_h1.lua) and takes `infer`/`wrap_handle` from the return.
+if models then
+  models.infer = infer
+  local raw_use, raw_get = models.use, models.get
+  models.use = function(alias) return wrap_handle(raw_use(alias)) end
+  models.get = function(alias) return wrap_handle(raw_get(alias)) end
+end
 
 return {
   execute = execute_section,
   wrap_handle = wrap_handle,
+  infer = infer,
 }
