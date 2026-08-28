@@ -25,21 +25,25 @@
 # the ceiling downward in the same commit to bank the gain.
 
 [modules]
-"app.rs" = 500
-"assets.rs" = 27
+"app.rs" = 544
+"assets.rs" = 66
+"atomic.rs" = 205
+"backoff.rs" = 229
 "catalog.rs" = 118
-"chat_ws.rs" = 2851
+"chat_ws.rs" = 2963
 "config.rs" = 593
+"cross_site.rs" = 338
+"deadline.rs" = 109
 "error.rs" = 484
-"gateway.rs" = 1107
-"heartbeat.rs" = 721
+"gateway.rs" = 1300
+"heartbeat.rs" = 872
 "lib.rs" = 53
 "main.rs" = 47
 "menu.rs" = 926
 "protocol.rs" = 738
 "provision.rs" = 839
 "push.rs" = 274
-"relay.rs" = 473
+"relay.rs" = 537
 "routes.rs" = 8
 "routes/assets.rs" = 117
 "routes/chat.rs" = 46
@@ -58,4 +62,4 @@
 "transcribe/slot.rs" = 41
 "transcribe/worker.rs" = 153
 "voice.rs" = 1315
-"workspace.rs" = 935
+"workspace.rs" = 1018
