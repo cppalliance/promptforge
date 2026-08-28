@@ -1,32 +1,41 @@
 // Unit test for the shared model service (src/services/model-service.ts).
-// Bundles the TS module with esbuild and imports it via a data URL.
-// Covers: catalog set/get, current-model set/get, selection
-// reconciliation on a catalog refresh (kept when it survives, first
-// entry when it does not, cleared on an empty catalog), both change
-// events firing with their payloads, re-selection firing nothing, and
-// disposed subscriptions receiving nothing.
+// Bundles the TS module with esbuild and imports it via a data URL. The
+// server owns the selection, so the service splits command from state:
+// setCurrent sends the select command through the injected function and
+// mutates nothing; applySelected applies the server's snapshot without
+// sending. Covers: catalog set/get with no selection fallback, the
+// command sending without mutating and reporting the send outcome, the
+// apply/emit cycle firing only on real changes, apply never re-sending,
+// and disposed subscriptions receiving nothing. Runs under the shared
+// disposable-leak check.
 // Run: node test/model-service.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { assertNoLeaks } from "./helpers/leak-check.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
-async function loadModule(relative) {
-  const bundle = await esbuild.build({
-    entryPoints: [path.join(uiDir, "..", "src", relative)],
-    bundle: true,
-    write: false,
-    format: "esm",
-    platform: "browser",
-    target: "es2022",
-    logLevel: "silent",
-  });
-  const code = bundle.outputFiles[0].text;
-  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
-}
-
-const { ModelService } = await loadModule(path.join("services", "model-service.ts"));
+const bundle = await esbuild.build({
+  stdin: {
+    contents: `
+      export * as lifecycle from "./src/base/lifecycle.ts";
+      export { ModelService } from "./src/services/model-service.ts";
+    `,
+    resolveDir: path.join(uiDir, ".."),
+    loader: "ts",
+  },
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  logLevel: "silent",
+});
+const code = bundle.outputFiles[0].text;
+const { lifecycle, ModelService } = await import(
+  `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
+);
 
 const failures = [];
 function check(name, condition) {
@@ -35,59 +44,87 @@ function check(name, condition) {
 
 const ids = (models) => models.map((model) => model.id).join(",");
 
-// --- Catalog and current-model state ------------------------------------------
+await assertNoLeaks(lifecycle, () => {
+  // --- Catalog state: no selection fallback --------------------------------
 
-{
-  const service = new ModelService();
-  check("a new service starts with an empty catalog", service.models.length === 0);
-  check("a new service starts with no selection", service.current === "");
-  service.setModels([{ id: "alpha", description: "the alpha model" }, { id: "beta" }]);
-  check("setModels records the catalog", ids(service.models) === "alpha,beta");
-  check("an empty selection falls back to the first entry", service.current === "alpha");
-  service.setCurrent("beta");
-  check("setCurrent records the selection", service.current === "beta");
-}
+  {
+    const sent = [];
+    const service = new ModelService((id) => (sent.push(id), true));
+    check("a new service starts with an empty catalog", service.models.length === 0);
+    check("a new service starts with no selection", service.current === "");
+    service.setModels([{ id: "alpha", description: "the alpha model" }, { id: "beta" }]);
+    check("setModels records the catalog", ids(service.models) === "alpha,beta");
+    check("a new catalog leaves the selection untouched", service.current === "");
+    check("a new catalog sends no select command", sent.length === 0);
+    service.dispose();
+  }
 
-// --- Selection reconciliation on a catalog refresh ----------------------------
+  // --- setCurrent is a command: sends without mutating ----------------------
 
-{
-  const service = new ModelService();
-  service.setModels([{ id: "alpha" }, { id: "beta" }]);
-  service.setCurrent("beta");
-  service.setModels([{ id: "beta" }, { id: "gamma" }]);
-  check("a surviving selection is kept across a refresh", service.current === "beta");
-  service.setModels([{ id: "delta" }]);
-  check("a dropped selection falls back to the first entry", service.current === "delta");
-  service.setModels([]);
-  check("an empty catalog clears the selection", service.current === "");
-}
+  {
+    const sent = [];
+    const service = new ModelService((id) => (sent.push(id), true));
+    const currents = [];
+    service.onDidChangeCurrent((id) => currents.push(id));
+    check("setCurrent reports a successful send", service.setCurrent("alpha") === true);
+    check("setCurrent puts the select command on the wire", sent.join(",") === "alpha");
+    check("the command mutates nothing", service.current === "");
+    check("the command fires no change event", currents.length === 0);
+    check(
+      "re-issuing the command sends again - the server owns dedupe",
+      service.setCurrent("alpha") === true && sent.join(",") === "alpha,alpha",
+    );
+    service.dispose();
+  }
 
-// --- Change events: payload delivery and unsubscribe ---------------------------
+  {
+    const service = new ModelService(() => false);
+    check("setCurrent reports a failed send", service.setCurrent("alpha") === false);
+    check("a failed send also mutates nothing", service.current === "");
+    service.dispose();
+  }
 
-{
-  const service = new ModelService();
-  const catalogs = [];
-  const currents = [];
-  const modelsSubscription = service.onDidChangeModels((models) => catalogs.push(ids(models)));
-  const currentSubscription = service.onDidChangeCurrent((id) => currents.push(id));
+  // --- applySelected: the apply/emit cycle -----------------------------------
 
-  service.setModels([{ id: "alpha" }]);
-  check("onDidChangeModels fires with the new catalog", catalogs.join("|") === "alpha");
-  check("the reconciled selection fires onDidChangeCurrent", currents.join("|") === "alpha");
+  {
+    const sent = [];
+    const service = new ModelService((id) => (sent.push(id), true));
+    const currents = [];
+    service.onDidChangeCurrent((id) => currents.push(id));
+    service.applySelected("alpha");
+    check("applying a snapshot selection records it", service.current === "alpha");
+    check("applying a snapshot selection fires the change event", currents.join("|") === "alpha");
+    service.applySelected("alpha");
+    check("re-applying the same selection fires nothing", currents.join("|") === "alpha");
+    service.applySelected("beta");
+    check("a changed selection fires with the new id", currents.join("|") === "alpha|beta");
+    service.applySelected(null);
+    check("a null selection clears the current model", service.current === "");
+    check("clearing fires with the empty id", currents.join("|") === "alpha|beta|");
+    check("apply never re-sends, so a snapshot cannot echo", sent.length === 0);
+    service.dispose();
+  }
 
-  service.setCurrent("alpha");
-  check("re-selecting the current model fires nothing", currents.join("|") === "alpha");
+  // --- Disposed subscriptions receive nothing ---------------------------------
 
-  service.setCurrent("beta");
-  check("onDidChangeCurrent fires with the new selection", currents.join("|") === "alpha|beta");
-
-  modelsSubscription.dispose();
-  currentSubscription.dispose();
-  service.setModels([{ id: "gamma" }]);
-  check("a disposed catalog subscription receives nothing", catalogs.join("|") === "alpha");
-  check("a disposed selection subscription receives nothing", currents.join("|") === "alpha|beta");
-  check("state still updates after subscribers leave", service.current === "gamma");
-}
+  {
+    const service = new ModelService(() => true);
+    const catalogs = [];
+    const currents = [];
+    const modelsSubscription = service.onDidChangeModels((models) => catalogs.push(ids(models)));
+    const currentSubscription = service.onDidChangeCurrent((id) => currents.push(id));
+    service.setModels([{ id: "alpha" }]);
+    service.applySelected("alpha");
+    modelsSubscription.dispose();
+    currentSubscription.dispose();
+    service.setModels([{ id: "gamma" }]);
+    service.applySelected("gamma");
+    check("a disposed catalog subscription receives nothing", catalogs.join("|") === "alpha");
+    check("a disposed selection subscription receives nothing", currents.join("|") === "alpha");
+    check("state still updates after subscribers leave", service.current === "gamma");
+    service.dispose();
+  }
+});
 
 if (failures.length > 0) {
   console.error(`model-service: ${failures.length} failure(s)`);

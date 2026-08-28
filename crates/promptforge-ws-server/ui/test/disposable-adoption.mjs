@@ -113,7 +113,7 @@ const menus = root.add(
   setupWindowMenus({
     agents: { newAgent: () => {} },
     workshop: { toggleWorkshopPanel: () => {} },
-    modelMenu: new ModelService(),
+    modelMenu: new ModelService(() => true),
   }),
 );
 check("menu setup registers document-level listeners", liveDocListeners.size > baselineListeners);
