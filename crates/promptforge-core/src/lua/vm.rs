@@ -11,6 +11,7 @@ use super::{
     wrap_shimmed_handle,
 };
 use crate::client::ToolSchema;
+use crate::execute::protocol::{Answer, Request};
 
 /// Packs owned values into a 1-based Lua sequence table.
 pub(crate) fn pack_sequence<T: mlua::IntoLua>(
@@ -1171,6 +1172,56 @@ impl SectionVm {
         self.step_block_coro(program, thread.clone(), result)
     }
 
+    /// Validates a suspended block coroutine's yielded values into the
+    /// protocol's request.
+    ///
+    /// A shim yields exactly its request table; anything else fails the
+    /// block as a hand-rolled or corrupted yield. Author code cannot reach
+    /// `coroutine.yield` (the global is stripped at shim install), so this
+    /// strict validation is defense in depth.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] with the direct-yield message when the yield
+    /// is not a well-formed request table, or the boundary conversion's own
+    /// error (see [`Request::from_yield`]).
+    // Consumed by the scheduler driver until the flip; exercised today by
+    // the scheduler tests.
+    #[allow(dead_code)]
+    pub(crate) fn request_from_yield(&self, values: &MultiValue) -> Result<Request> {
+        Request::from_yield(&self.lua, values.iter().next().unwrap_or(&Value::Nil))
+    }
+
+    /// Resumes a suspended block coroutine with the driver's answer.
+    ///
+    /// The answer renders to its `(ok, result)` envelope on this VM. On a
+    /// failure answer the envelope carries only the display string for the
+    /// shim to raise, and the typed [`Error`] the answer owned is
+    /// substituted back when the shim-raised error surfaces as the
+    /// coroutine's failure (the LUA-012 contract), so the Rust caller
+    /// receives the structured error rather than a string.
+    ///
+    /// # Errors
+    /// Same contract as [`start_block_coro`](Self::start_block_coro), plus
+    /// [`Error::Lua`] if the envelope cannot be rendered on this VM.
+    // Consumed by the scheduler driver until the flip; exercised today by
+    // the scheduler tests.
+    #[allow(dead_code)]
+    pub(crate) fn resume_block_coro_answer(
+        &self,
+        program: &LuaProgram,
+        thread: &Thread,
+        answer: Answer,
+    ) -> Result<CoroStep> {
+        let (envelope, retained) = answer.into_envelope(&self.lua).map_err(Error::lua)?;
+        match self.resume_block_coro(program, thread, envelope) {
+            Ok(step) => Ok(step),
+            Err(error) => Err(match retained {
+                Some(retained) if coroutine_failure_is(&error, &retained) => retained,
+                _ => error,
+            }),
+        }
+    }
+
     fn step_block_coro(
         &self,
         program: &LuaProgram,
@@ -1195,6 +1246,29 @@ impl SectionVm {
                 )?)))
             }
         }
+    }
+}
+
+/// Whether a block coroutine's failure is the shim's re-raise of the
+/// answer's retained typed error: the shim raises `error(result, 0)`, so the
+/// inner `mlua` runtime message's first line is exactly the retained error's
+/// display. The comparison reads the retained `mlua` source rather than the
+/// mapped message, whose `Display` carries mlua's `runtime error: ` prefix.
+/// A block that caught the shim's error and failed on its own keeps its own
+/// error.
+// Consumed by the scheduler driver until the flip.
+#[allow(dead_code)]
+fn coroutine_failure_is(failure: &Error, retained: &Error) -> bool {
+    let display = retained.to_string();
+    match failure {
+        Error::LuaRuntime { source, .. } => match source.downcast_ref::<mlua::Error>() {
+            Some(mlua::Error::RuntimeError(message)) => {
+                message.lines().next() == Some(display.as_str())
+            }
+            _ => false,
+        },
+        Error::Lua(message) => message.lines().next() == Some(display.as_str()),
+        _ => false,
     }
 }
 

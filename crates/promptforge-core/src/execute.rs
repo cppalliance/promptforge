@@ -59,8 +59,9 @@
 //! ordered block loop - the
 //! engine's walk half, shared by the live H1 pass, the walk, and the
 //! fanout arm), `engine` (the section walkers), `protocol` (the coroutine
-//! request/answer types for the yield/resume boundary), and `support` (the
-//! sync/async bridge and shared helpers).
+//! request/answer types for the yield/resume boundary), `scheduler` (the
+//! chain-stack scheduler driving the coroutine protocol), and `support`
+//! (the sync/async bridge and shared helpers).
 
 mod block_walk;
 mod config;
@@ -69,10 +70,13 @@ mod engine;
 mod error;
 mod gateway;
 mod h1;
-// The scheduler driver (a later step) is the production caller; until then
-// the module is exercised by its own unit tests and the shim layer's tests.
-#[allow(dead_code, reason = "consumed by the scheduler driver in a later step")]
+// The scheduler driver is the production caller at the flip; until then the
+// protocol and scheduler modules are exercised by their own tests and the
+// shim layer's tests.
+#[allow(dead_code, reason = "consumed by run() at the flip")]
 pub(crate) mod protocol;
+#[allow(dead_code, reason = "consumed by run() at the flip")]
+pub(crate) mod scheduler;
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;

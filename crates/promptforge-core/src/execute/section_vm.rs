@@ -66,8 +66,8 @@ pub(crate) enum VmSetupMode {
     Legacy,
     /// `jump` and `list_from_section` as Rust callbacks, plus the coroutine
     /// yield shims for `models.infer`, `handle:infer`, and `execute`.
-    // Constructed by the scheduler driver in a later step; exercised today by
-    // the shim layer's tests.
+    // Constructed by the scheduler driver, which is live at the flip;
+    // exercised today by the shim layer's and the scheduler's tests.
     #[allow(dead_code)]
     Scheduler,
 }

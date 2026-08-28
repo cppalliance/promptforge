@@ -33,12 +33,13 @@ use crate::parser::{Block, Section};
 use crate::store::WriteScope;
 use crate::{Error, Result};
 
-use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl, run_section_prose};
 use super::context::RunContext;
 use super::engine::make_control_globals;
 use super::gateway::GatewaySource;
 use super::section_vm::{VmSeed, VmSetupMode, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
+use super::tool_loop::ProseMode;
 use super::tools::attach_infer_hook;
 
 /// One section entry's owned frame within a run.
@@ -109,6 +110,9 @@ impl SectionContext {
     /// section's VM. `client` is the walk's client snapshot at this
     /// section's start: the control-global closures and the infer hook each
     /// capture a clone, so the persistent Lua closures hold no borrows.
+    /// `mode` selects the control surface: [`VmSetupMode::Legacy`] for the
+    /// legacy engine's walk, [`VmSetupMode::Scheduler`] for the scheduler's
+    /// chains (yield shims installed, the bridged infer hook skipped).
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
@@ -117,7 +121,7 @@ impl SectionContext {
     /// the teardown boundary still fires exactly once on that path.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the walk's whole driver preamble: the shared run context, the section and its home slice, its id, depth, reply seed, client snapshot, and var seed stay explicit and linear"
+        reason = "the frame's construction absorbs the walk's whole driver preamble: the shared run context, the section and its home slice, its id, depth, reply seed, client snapshot, var seed, and VM-setup mode stay explicit and linear"
     )]
     #[expect(
         clippy::ref_option,
@@ -132,6 +136,7 @@ impl SectionContext {
         incoming_reply: Option<&str>,
         client: &Option<GatewayClient>,
         var: &serde_json::Value,
+        mode: VmSetupMode,
     ) -> Result<Self> {
         let sys = ctx.sys_json(section_id, &section.name)?;
         ctx.observer()
@@ -180,7 +185,7 @@ impl SectionContext {
             // carry a write scope.
             None,
             &section.name,
-            VmSetupMode::Legacy,
+            mode,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
@@ -196,8 +201,13 @@ impl SectionContext {
         }
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it.
-        ctx.attach_infer_hook(&vm, client.clone(), &section.name);
+        // error on first use instead of the setup swallowing it. A
+        // scheduler-mode VM infers through the yield shim and the driver's
+        // answer channel instead, so the bridged hook is never consulted
+        // there.
+        if mode == VmSetupMode::Legacy {
+            ctx.attach_infer_hook(&vm, client.clone(), &section.name);
+        }
         Ok(Self {
             vm: Some(vm),
             name: section.name.clone(),
@@ -512,6 +522,109 @@ impl SectionContext {
     /// path arms it, so an error never fires `SECTION_FINISHED`.
     pub(crate) fn mark_completed(&mut self) {
         self.completed = true;
+    }
+
+    /// Borrows the frame's VM for the scheduler's coroutine driving (block
+    /// start, yield validation, answer resume) and model resolution.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] if the VM is gone, which only the frame's
+    /// own drop does - a live frame always holds it.
+    // Consumed by the scheduler driver until the flip.
+    #[allow(dead_code)]
+    pub(crate) fn vm(&self) -> Result<&SectionVm> {
+        self.vm.as_ref().ok_or(Error::Internal(
+            "the section frame's VM lives until the frame's own drop",
+        ))
+    }
+
+    /// The frame's current reply slot: seeded from the incoming reply,
+    /// rolled forward as prose produces text, and synced from the VM's
+    /// `reply` global after each of the scheduler's Lua blocks.
+    // Consumed by the scheduler driver until the flip.
+    #[allow(dead_code)]
+    pub(crate) fn reply(&self) -> Option<String> {
+        self.reply.clone()
+    }
+
+    /// Reads the VM's `reply` global back into the frame's slot and returns
+    /// it, so an author's `reply = nil` (or a custom string) steers what the
+    /// next prose substitutes and what the chain's finish reports.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`](crate::Error::Lua) when `reply` is neither nil
+    /// nor a string, or [`Error::Internal`] if the VM is gone.
+    // Consumed by the scheduler driver until the flip.
+    #[allow(dead_code)]
+    pub(crate) fn read_reply(&mut self) -> Result<Option<String>> {
+        let reply = self.vm()?.reply()?;
+        self.reply.clone_from(&reply);
+        Ok(reply)
+    }
+
+    /// Runs one prose block through the shared section prose path: the
+    /// per-block scope rebuild, substitution, the tool loop, and the
+    /// reply/`sys` roll-forward.
+    ///
+    /// The scheduler's driver calls this directly; the legacy block loop
+    /// reaches the same path through `run_one_section_impl`.
+    ///
+    /// # Errors
+    /// Returns the [`Error`](crate::Error) of whichever step failed, as
+    /// documented on `run_section_prose`.
+    // Consumed by the scheduler driver until the flip.
+    #[allow(dead_code)]
+    pub(crate) async fn run_prose_block(
+        &mut self,
+        ctx: &RunContext,
+        name: &str,
+        text: &str,
+        loop_capable: bool,
+        client: &mut Option<GatewayClient>,
+    ) -> Result<()> {
+        let Self {
+            vm,
+            sys,
+            reply,
+            conversation,
+            counts,
+            completion_options,
+            item,
+            observer,
+            debug,
+            turns,
+            ..
+        } = self;
+        let Some(vm) = vm.as_mut() else {
+            return Err(Error::Internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
+        let prose_mode = if loop_capable {
+            ProseMode::Loop {
+                max_tool_iterations: ctx.max_tool_iterations(),
+            }
+        } else {
+            ProseMode::SingleShot
+        };
+        run_section_prose(
+            vm,
+            ctx,
+            name,
+            text,
+            prose_mode,
+            sys,
+            reply,
+            conversation,
+            counts,
+            completion_options,
+            item.as_ref(),
+            observer.as_ref(),
+            debug.as_deref(),
+            turns.as_ref(),
+            client,
+        )
+        .await
     }
 }
 

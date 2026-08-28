@@ -179,6 +179,18 @@ impl Request {
     pub(crate) fn mcp_reserved() -> Error {
         Error::Lua("mcp requests are reserved: no dispatcher exists yet".to_owned())
     }
+
+    /// The typed protocol error for a received `fanout` request before the
+    /// scheduler's fanout dispatch exists.
+    ///
+    /// The `fanout` shim is not installed yet, so no call surface produces
+    /// the request; receiving one fails the chain with this error rather
+    /// than reaching an unimplemented path.
+    // Consumed by the scheduler driver until the fanout step replaces it.
+    #[allow(dead_code)]
+    pub(crate) fn fanout_reserved() -> Error {
+        Error::Lua("fanout requests are reserved: no dispatcher exists yet".to_owned())
+    }
 }
 
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::Error;
 use crate::cancel;
-use crate::client::{CompletionResult, Message};
+use crate::client::{Completion, CompletionResult, GatewayClient, Message};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{ModelInferHook, ModelRuntime, ModelsInferHook, SectionVm, resolve_model_binding};
 use crate::model::{ModelBinding, ModelView};
@@ -20,6 +20,97 @@ use crate::observe::{Observer, detail};
 
 use super::gateway::GatewaySource;
 use super::support::{advance_turn, bridge_blocking};
+
+/// Reports one completed infer round exactly like a single prose round and
+/// renders its text: the turn advance, the debug capture pair, the
+/// completion and truncation observations, and the no-tools-advertised
+/// violation check. Both infer drivers - the legacy hook's bridged round
+/// and the scheduler's spawned round - share this tail.
+fn accept_infer_completion(
+    completion: Completion,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+    execution: &str,
+    section: &str,
+    turns: &AtomicU32,
+) -> Result<String, Error> {
+    let turn = advance_turn(turns);
+    if let Some(capture) = debug {
+        capture.on_event(
+            execution,
+            section,
+            turn,
+            DebugEvent::Request {
+                body: completion.request_body,
+            },
+        );
+        capture.on_event(
+            execution,
+            section,
+            turn,
+            DebugEvent::Response {
+                body: completion.response_body.clone(),
+                finish_reason: completion.finish_reason.clone(),
+                reasoning_content: completion.reasoning_content.clone(),
+            },
+        );
+    }
+    observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
+
+    match completion.result {
+        CompletionResult::Text(text) => {
+            if completion.finish_reason.as_deref() == Some("length") {
+                observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
+            }
+            Ok(text)
+        }
+        // No tools were advertised, so a tool-call turn is a backend
+        // protocol violation rather than something to dispatch.
+        CompletionResult::ToolCalls(_) => Err(Error::Lua(
+            "model inference received tool calls but no tools were advertised".to_owned(),
+        )),
+    }
+}
+
+/// The one infer shape as an async round: a single direct, tool-free
+/// gateway call on a fresh conversation with `binding`, reported exactly
+/// like one prose round.
+///
+/// The scheduler's leaf dispatch drives this on a spawned task, so
+/// cancellation is the driver aborting the task mid-round - no
+/// `MODEL_TURN_FAILED` fires for an aborted round, matching the legacy
+/// hook's interrupted path.
+// Consumed by the scheduler driver until the flip; exercised today by the
+// scheduler tests.
+#[allow(dead_code)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the one infer round keeps the client, binding, prompt, and the frame's reporting handles explicit and linear, mirroring the legacy hook's InferContext fields"
+)]
+pub(crate) async fn infer_round(
+    client: &GatewayClient,
+    binding: &ModelBinding,
+    prompt: &str,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+    execution: &str,
+    section: &str,
+    turns: &AtomicU32,
+) -> Result<String, Error> {
+    let completion_options = binding.completion_options();
+    let conversation = [Message::user(prompt)];
+    let completion = match client
+        .complete(&conversation, None, &completion_options)
+        .await
+    {
+        Ok(completion) => completion,
+        Err(error) => {
+            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
+            return Err(Error::from(error));
+        }
+    };
+    accept_infer_completion(completion, observer, debug, execution, section, turns)
+}
 
 /// Shared context for nested inference from Lua.
 ///
@@ -61,7 +152,8 @@ impl InferContext {
     /// No schemas are advertised, and neither `reply` nor
     /// `sys.reply_finish_reason` is touched. Turn counting, observation, and
     /// debug capture match a single prose round so nested inference is not
-    /// lost (observe F1, F4).
+    /// lost (observe F1, F4): the reporting tail is the shared
+    /// [`accept_infer_completion`].
     fn infer_direct(&self, binding: &ModelBinding, prompt: &str) -> mlua::Result<String> {
         let completion_options = binding.completion_options();
         let client = self.client.resolve().map_err(mlua::Error::external)?;
@@ -84,48 +176,15 @@ impl InferContext {
                 return Err(mlua::Error::external(error));
             }
         };
-
-        let turn = advance_turn(&self.turns);
-        if let Some(capture) = self.debug.as_deref() {
-            capture.on_event(
-                &self.execution,
-                &self.section,
-                turn,
-                DebugEvent::Request {
-                    body: completion.request_body,
-                },
-            );
-            capture.on_event(
-                &self.execution,
-                &self.section,
-                turn,
-                DebugEvent::Response {
-                    body: completion.response_body.clone(),
-                    finish_reason: completion.finish_reason.clone(),
-                    reasoning_content: completion.reasoning_content.clone(),
-                },
-            );
-        }
-        self.observer
-            .observe(&self.execution, &self.section, detail::MODEL_TURN_COMPLETED);
-
-        match completion.result {
-            CompletionResult::Text(text) => {
-                if completion.finish_reason.as_deref() == Some("length") {
-                    self.observer.observe(
-                        &self.execution,
-                        &self.section,
-                        detail::MODEL_TURN_TRUNCATED,
-                    );
-                }
-                Ok(text)
-            }
-            // No tools were advertised, so a tool-call turn is a backend
-            // protocol violation rather than something to dispatch.
-            CompletionResult::ToolCalls(_) => Err(mlua::Error::external(
-                "model inference received tool calls but no tools were advertised",
-            )),
-        }
+        accept_infer_completion(
+            completion,
+            self.observer.as_ref(),
+            self.debug.as_deref(),
+            &self.execution,
+            &self.section,
+            &self.turns,
+        )
+        .map_err(mlua::Error::external)
     }
 }
 

@@ -56,6 +56,7 @@ use mlua::Value as LuaValue;
 use super::block_walk::{BlockRunMode, SectionFlow};
 use super::context::RunContext;
 use super::section_context::SectionContext;
+use super::section_vm::VmSetupMode;
 use super::support::{
     GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, next_id, now_rfc3339_checked,
 };
@@ -258,6 +259,7 @@ async fn run_one_section(
         incoming_reply,
         client,
         var,
+        VmSetupMode::Legacy,
     )?;
 
     // The walk half - the ordered block loop - reports how the section
