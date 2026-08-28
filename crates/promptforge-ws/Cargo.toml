@@ -17,7 +17,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 open.workspace = true
 png.workspace = true
-promptforge-ws-server.workspace = true
+promptforge-gateway = { workspace = true, features = ["workshop"] }
+rand.workspace = true
 serde_json.workspace = true
 tao.workspace = true
 url.workspace = true
@@ -38,7 +39,7 @@ version = "0.61"
 # cost of requiring the NVIDIA CUDA toolkit to build. A machine without it
 # builds with --no-default-features (voice then stays off at runtime).
 default = ["cuda"]
-cuda = ["promptforge-ws-server/cuda"]
+cuda = ["promptforge-gateway/workshop-cuda"]
 
 [dev-dependencies]
 tempfile.workspace = true
