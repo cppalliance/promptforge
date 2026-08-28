@@ -24,6 +24,16 @@ tao.workspace = true
 url.workspace = true
 wry.workspace = true
 
+# Loopback media capture (src/media_capture.rs): raw objc messaging to
+# clear WebKit's secure-connection gate on the workshop's http origin.
+# The versions mirror wry's, keeping one build of each crate in the tree.
+[target.'cfg(target_os = "macos")'.dependencies.objc2]
+version = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-web-kit]
+version = "0.3"
+features = ["WKWebViewConfiguration"]
+
 # Explorer path drops (src/file_drop.rs): the page posts dropped File
 # objects over the WebView2 web-message channel and the shell reads their
 # real OS paths from ICoreWebView2File. The versions mirror wry's, keeping
@@ -38,8 +48,12 @@ version = "0.61"
 # CUDA by default: the desktop app is voice-capable out of the box, at the
 # cost of requiring the NVIDIA CUDA toolkit to build. A machine without it
 # builds with --no-default-features (voice then stays off at runtime).
+# On macOS, --no-default-features --features metal keeps voice on through
+# whisper.cpp's Metal backend, with no extra toolchain beyond the Xcode
+# command line tools.
 default = ["cuda"]
 cuda = ["promptforge-gateway/workshop-cuda"]
+metal = ["promptforge-gateway/workshop-metal"]
 
 [dev-dependencies]
 tempfile.workspace = true

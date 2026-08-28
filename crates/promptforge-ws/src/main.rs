@@ -12,13 +12,19 @@
 //! instead of this shell.
 
 mod discover;
-// The only unsafe module in the workspace: the WebView2 COM surface that
-// reads real OS paths out of dropped File objects has no safe wrapper.
+// One of the two unsafe modules in the workspace: the WebView2 COM
+// surface that reads real OS paths out of dropped File objects has no
+// safe wrapper.
 // The clippy allows cover code the #[implement] macro expands in tests.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code, clippy::inline_always, clippy::ref_as_ptr)]
 mod file_drop;
 mod health;
+// The other unsafe module: flipping WebKit's secure-connection media
+// capture gate is raw objc messaging against SPI with no safe wrapper.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod media_capture;
 mod window;
 
 use std::path::PathBuf;

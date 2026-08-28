@@ -248,6 +248,27 @@ fn handle_shell_event(
 ///
 /// # Errors
 /// Returns an error if the window or the webview cannot be created.
+/// Applies a webview configuration with WebKit's secure-connection media
+/// capture gate cleared: WebKit hides `navigator.mediaDevices` on
+/// plain-http origins (no loopback exemption, unlike WebView2), so the
+/// mic's feature check fails before the permission handler is ever
+/// consulted, and the gate lives in the configuration the webview is
+/// created with. Without the SPI the builder is returned unchanged and
+/// voice capture stays unavailable in the window, never fatal.
+#[cfg(target_os = "macos")]
+fn with_media_capture_configuration(builder: wry::WebViewBuilder<'_>) -> wry::WebViewBuilder<'_> {
+    use wry::WebViewBuilderExtMacos as _;
+    if let Some(configuration) = crate::media_capture::insecure_capture_configuration() {
+        builder.with_webview_configuration(configuration)
+    } else {
+        eprintln!(
+            "voice: WebKit no longer answers _setMediaCaptureRequiresSecureConnection:; \
+             voice capture stays unavailable in the window"
+        );
+        builder
+    }
+}
+
 pub(crate) fn run(url: &str) -> anyhow::Result<()> {
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let builder = WindowBuilder::new()
@@ -323,6 +344,8 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
             }
         })
     };
+    #[cfg(target_os = "macos")]
+    let webview_builder = with_media_capture_configuration(webview_builder);
     let webview = webview_builder
         .build(&window)
         .context("create the workshop webview")?;
