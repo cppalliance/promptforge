@@ -88,3 +88,4 @@
 - [2026-08-27-2-workshop-server-refactor] bounded shutdown: Serve handles expose readiness, shutdown, stopped, and join phases with a force watchdog outside library code.
 - [2026-08-27-3-server-driven-menu-state] multiplexed chats: Tagged chats interleave with per-chat ordering and scoped cancellation while inbound events remain readable.
 - [2026-08-27-3-server-driven-menu-state] profile-local memory: The server persists each profile last selected model outside hand-edited config.
+- [2026-08-27-4-merged-gateway-workshop] config-state split: Human boot config, machine state, view layout, and append-only tape remain separate stores.
