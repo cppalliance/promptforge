@@ -31,11 +31,6 @@ import { initZones, openInZone } from "./ui/workshop/zones";
 // so the whole composition tears down with one dispose() call.
 const disposables = new DisposableStore();
 
-// The model catalog and selection live in the ModelService, not module
-// state: the title-bar Model menu and the Agent controller receive the
-// service through their constructors and observe its change events.
-const modelService = disposables.add(new ModelService());
-
 // One persistent socket carries chat frames upstream and every downstream
 // JSON frame - chat replies and the observer's status updates, which the
 // status bar renders as they arrive.
@@ -51,6 +46,16 @@ disposables.add(setupWindowChrome());
 // each path becomes a workspace grant. Inert in a plain browser.
 disposables.add(setupWorkspaceDrops(statusBar));
 const workshopSocket = disposables.add(new WorkshopSocket());
+
+// The model catalog and selection live in the ModelService, not module
+// state: the title-bar Model menu and the Agent controller receive the
+// service through their constructors and observe its change events.
+// Selecting a model is a command the socket carries to the server; the
+// selection itself changes only when a workbench snapshot arrives.
+const modelService = disposables.add(
+  new ModelService((id) => workshopSocket.selectModel(id)),
+);
+
 disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.
@@ -253,6 +258,13 @@ disposables.add(
 // A pushed catalog means the gateway returned after an outage; refresh the
 // catalog state in place so a boot-time failure heals itself.
 disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
+
+// The server-owned selection reaches the model service from workbench
+// snapshots; the full snapshot wiring (WorkbenchService into the menu and
+// the gating hook) lands in a later step.
+disposables.add(
+  workshopSocket.onWorkbench((frame) => modelService.applySelected(frame.selected)),
+);
 
 // Every push handler above is wired, so release the socket's boot queue:
 // pushes that raced this module's execution now replay in arrival order.

@@ -2,6 +2,13 @@
 // composition root constructs one instance and hands it to the Agent
 // controller and the Model menu through their constructors; consumers
 // read the state directly or subscribe to the change events.
+//
+// The server owns the selection. setCurrent is a command: it sends a
+// select_model event through the injected send function and mutates
+// nothing. State changes only when the server's workbench snapshot
+// arrives - whoever handles the socket's onWorkbench calls
+// applySelected(frame.selected), which never sends, so a snapshot can
+// never echo back onto the wire.
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable } from "../base/lifecycle";
@@ -25,6 +32,15 @@ export class ModelService extends Disposable {
   /** Fires with the new id whenever the current selection changes. */
   readonly onDidChangeCurrent: Event<string> = this._onDidChangeCurrent.event;
 
+  /**
+   * @param sendSelect Puts one select_model event on the wire (the
+   * composition root injects WorkshopSocket.selectModel); returns false
+   * when nothing was sent so the caller can surface the failure.
+   */
+  constructor(private readonly sendSelect: (id: string) => boolean) {
+    super();
+  }
+
   /** The model catalog, as fetched at boot or pushed by the server. */
   get models(): readonly CatalogModel[] {
     return this._models;
@@ -36,24 +52,34 @@ export class ModelService extends Disposable {
   }
 
   /**
-   * Records a catalog, keeping the current selection when it survives
-   * the refresh and falling back to the first entry (or none) when it
-   * does not.
+   * Records a catalog. The selection is untouched: the server owns it and
+   * reconciles it against the new catalog in its next workbench snapshot.
    */
   setModels(entries: readonly CatalogModel[]): void {
     this._models = entries;
     this._onDidChangeModels.fire(entries);
-    if (!entries.some((entry) => entry.id === this._current)) {
-      this.setCurrent(entries[0]?.id ?? "");
-    }
   }
 
-  /** Selects `id`; re-selecting the current model notifies nobody. */
-  setCurrent(id: string): void {
-    if (id === this._current) {
+  /**
+   * Asks the server to select `id`. A command, not a mutation: the
+   * selection changes only when the workbench snapshot confirming it
+   * arrives through applySelected. Returns false when the send failed.
+   */
+  setCurrent(id: string): boolean {
+    return this.sendSelect(id);
+  }
+
+  /**
+   * Applies the server-owned selection from a workbench snapshot; null
+   * means no model is selected. Fires onDidChangeCurrent only on a real
+   * change, and never sends, so applying a snapshot cannot echo.
+   */
+  applySelected(id: string | null): void {
+    const next = id ?? "";
+    if (next === this._current) {
       return;
     }
-    this._current = id;
-    this._onDidChangeCurrent.fire(id);
+    this._current = next;
+    this._onDidChangeCurrent.fire(next);
   }
 }

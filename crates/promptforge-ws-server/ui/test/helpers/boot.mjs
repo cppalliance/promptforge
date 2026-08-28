@@ -183,8 +183,9 @@ export async function bootWorkbench(name, run) {
   globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
   // A scripted fetch stands in for the model catalog. The catalog answers
-  // with one model so it auto-selects and submission is unblocked; the
-  // Workshop tree's boot fetch answers with an empty roots listing (no
+  // with one model to populate the menu; the selection itself is
+  // server-owned and arrives in the boot workbench snapshot pushed below.
+  // The Workshop tree's boot fetch answers with an empty roots listing (no
   // grants yet); any other fetch - including the retired POST /chat SSE
   // path - rejects the test.
   globalThis.fetch = (url) => {
@@ -343,6 +344,28 @@ export async function bootWorkbench(name, run) {
     wsSocket()?.onmessage?.({ data: JSON.stringify({ type: "models", models }) });
   }
 
+  // Pushes one complete workbench snapshot, as the server's /ws route
+  // does whenever its menu state changes. Fields default to the booted
+  // single-model state.
+  function emitWorkbench(overrides = {}) {
+    wsSocket()?.onmessage?.({
+      data: JSON.stringify({
+        type: "workbench",
+        profiles: [],
+        active: null,
+        switching: null,
+        selected: "test-model",
+        chat_ready: true,
+        ...overrides,
+      }),
+    });
+  }
+
+  // The server owns the model selection and announces it in a workbench
+  // snapshot on connect; without one the app has no selection and every
+  // submission stays blocked. Mirror that boot push here.
+  emitWorkbench();
+
   // Drives one chat submission through murm-ui's real form handling and
   // waits for the scripted reply to render. Returns the chat frame the
   // provider sent (undefined when submission stayed blocked).
@@ -401,6 +424,7 @@ export async function bootWorkbench(name, run) {
     recEl,
     emitStatus,
     emitModels,
+    emitWorkbench,
     submitChat,
     startTake,
     sleep,
