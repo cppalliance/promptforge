@@ -28,7 +28,7 @@
 "app.rs" = 544
 "assets.rs" = 66
 "atomic.rs" = 230
-"backoff.rs" = 229
+"backoff.rs" = 232
 "catalog.rs" = 118
 "chat_ws.rs" = 2963
 "config.rs" = 593
