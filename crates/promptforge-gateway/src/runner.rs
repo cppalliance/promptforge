@@ -578,9 +578,9 @@ pub(crate) fn check_workshop_matches_boot(
     match (boot, candidate) {
         (None, None) => Ok(()),
         (Some(boot), Some(candidate)) if boot == candidate => Ok(()),
-        (Some(_), Some(_)) => Err(ConfigError::validation(format!(
-            "profile {profile} [workshop] mismatch: the profile's workshop settings differ \
-             from the boot file's ([workshop] is boot-only)"
+        (Some(boot), Some(candidate)) => Err(ConfigError::validation(format!(
+            "profile {profile} [workshop] mismatch: {} ([workshop] is boot-only)",
+            first_workshop_difference(boot, candidate)
         ))),
         (None, Some(_)) => Err(ConfigError::validation(format!(
             "profile {profile} carries a [workshop] section but the boot file has none \
@@ -590,6 +590,41 @@ pub(crate) fn check_workshop_matches_boot(
             "profile {profile} lacks the boot file's [workshop] section ([workshop] is \
              boot-only; include the boot file or replicate the section)"
         ))),
+    }
+}
+
+/// Names the first `[workshop]` field that differs between the boot file
+/// and the profile, with both values, mirroring
+/// [`check_server_matches_boot`]. Only called when `boot != candidate`,
+/// so the fallback is unreachable until the config grows a field this
+/// check does not name yet.
+fn first_workshop_difference(boot: &WorkshopConfig, candidate: &WorkshopConfig) -> String {
+    if candidate.bind() != boot.bind() {
+        format!(
+            "bind mismatch: profile has {}, boot file has {}",
+            candidate.bind(),
+            boot.bind()
+        )
+    } else if candidate.open_browser() != boot.open_browser() {
+        format!(
+            "open_browser mismatch: profile sets {}, boot file sets {}",
+            candidate.open_browser(),
+            boot.open_browser()
+        )
+    } else if candidate.voice() != boot.voice() {
+        format!(
+            "voice mismatch: profile has {:?}, boot file has {:?}",
+            candidate.voice(),
+            boot.voice()
+        )
+    } else if candidate.tape() != boot.tape() {
+        format!(
+            "tape mismatch: profile has {:?}, boot file has {:?}",
+            candidate.tape(),
+            boot.tape()
+        )
+    } else {
+        "the settings differ in a field this check does not name yet".to_string()
     }
 }
 
@@ -946,6 +981,43 @@ endpoints = ["e"]
             dropped.to_string().contains("lacks the boot file's"),
             "got: {dropped}"
         );
+    }
+
+    #[test]
+    fn workshop_mismatch_names_the_first_differing_field() {
+        let profile = ProfileName::parse("p").unwrap();
+        let boot = workshop_of("[workshop]\nbind = \"127.0.0.1:7910\"\n");
+
+        let changed_bind = workshop_of("[workshop]\nbind = \"127.0.0.1:7911\"\n");
+        let error = check_workshop_matches_boot(boot.as_ref(), changed_bind.as_ref(), &profile)
+            .unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("bind mismatch"), "got: {text}");
+        assert!(text.contains("127.0.0.1:7911"), "profile value: {text}");
+        assert!(text.contains("127.0.0.1:7910"), "boot value: {text}");
+
+        let changed_open =
+            workshop_of("[workshop]\nbind = \"127.0.0.1:7910\"\nopen_browser = true\n");
+        let error = check_workshop_matches_boot(boot.as_ref(), changed_open.as_ref(), &profile)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("open_browser mismatch"),
+            "got: {error}"
+        );
+
+        let changed_voice = workshop_of(
+            "[workshop]\nbind = \"127.0.0.1:7910\"\n\n[workshop.voice]\nwindow_seconds = 8\n",
+        );
+        let error = check_workshop_matches_boot(boot.as_ref(), changed_voice.as_ref(), &profile)
+            .unwrap_err();
+        assert!(error.to_string().contains("voice mismatch"), "got: {error}");
+
+        let changed_tape = workshop_of(
+            "[workshop]\nbind = \"127.0.0.1:7910\"\n\n[workshop.tape]\npath = \"other.jsonl\"\n",
+        );
+        let error = check_workshop_matches_boot(boot.as_ref(), changed_tape.as_ref(), &profile)
+            .unwrap_err();
+        assert!(error.to_string().contains("tape mismatch"), "got: {error}");
     }
 
     #[test]
