@@ -6,18 +6,16 @@
 //! the tool-call counts, and the resolved completion options - and it
 //! carries the frame's effective reporting handles (observer, debug sink,
 //! turn counter) seeded out of the run context; a fanout arm's context is
-//! the fanout's fork, so the proxies reach the frame and the arm's nested
+//! the fanout's fork, so the handles reach the frame and the arm's nested
 //! chains through the one value. Each driver is one
 //! construct-run-teardown cycle: the constructor absorbs the VM
 //! construction and setup preamble ([`SectionContext::new`] for a walked
 //! section, [`SectionContext::new_live_h1`] for the live H1 pass,
-//! [`SectionContext::new_fanout_arm`] for a fanout arm),
-//! [`SectionContext::run`] is the ordered block walk, and the frame's
-//! [`Drop`] impl is the single teardown boundary.
+//! [`SectionContext::new_fanout_arm`] for a fanout arm), the scheduler's
+//! chain steps run the blocks, and the frame's [`Drop`] impl is the single
+//! teardown boundary.
 //!
-//! All three drivers - the walk's `run_one_section`, the live H1 pass, and
-//! the fanout arm - are one construct-run-teardown cycle over the frame,
-//! differing only in seed and [`BlockRunMode`]. The run-scoped inputs
+//! The run-scoped inputs
 //! (bindings, models, limits, the shared tools) arrive through the
 //! [`RunContext`].
 
@@ -29,20 +27,16 @@ use crate::debug::DebugCapture;
 use crate::lua::{SectionVm, ToolCallCounts, install_live_h1_shim_base};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
-use crate::parser::{Block, Section};
+use crate::parser::Section;
 use crate::store::WriteScope;
 use crate::{Error, Result};
 
-use super::block_walk::{
-    BlockRunMode, SectionFlow, run_live_h1_prose, run_one_section_impl, run_section_prose,
-};
+use super::block_walk::{run_live_h1_prose, run_section_prose};
 use super::context::RunContext;
-use super::engine::make_control_globals;
-use super::gateway::GatewaySource;
-use super::section_vm::{VmSeed, VmSetupMode, setup_section_vm};
+use super::engine::{list_items_from_visible, visible_sections};
+use super::section_vm::{VmSeed, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
 use super::tool_loop::ProseMode;
-use super::tools::attach_infer_hook;
 
 /// One section entry's owned frame within a run.
 ///
@@ -98,47 +92,32 @@ pub(crate) struct SectionContext {
 impl SectionContext {
     /// Constructs the frame for one walked section and runs its setup
     /// preamble: the `sys` JSON, the section-started observation, VM
-    /// construction and limits, the control globals (resolved over the
-    /// section's visible set), the shared setup half (host injection, host
-    /// APIs, the shared replay, the captured alias bindings), and the infer
-    /// hook.
+    /// construction and limits, the control surface (the `jump` and
+    /// `list_from_section` callbacks resolved over the section's visible
+    /// set, plus the coroutine yield shims for the suspending calls), the
+    /// shared setup half (host injection, host APIs, the shared replay, the
+    /// captured alias bindings).
     ///
     /// `siblings` is the caller's own walk slice, from which the section's
     /// visible set (its siblings minus itself, plus its direct children) is
-    /// built for the control globals. `section_id` is the section's
-    /// `sys.id`: the next value from the run-global counter.
+    /// built for the `list_from_section` callback. `section_id` is the
+    /// section's `sys.id`: the next value from the run-global counter.
     /// `incoming_reply` is the model reply visible to this section's first
     /// prose. `var` is the walk's current clipboard, seeded into the
-    /// section's VM. `client` is the walk's client snapshot at this
-    /// section's start: the control-global closures and the infer hook each
-    /// capture a clone, so the persistent Lua closures hold no borrows.
-    /// `mode` selects the control surface: [`VmSetupMode::Legacy`] for the
-    /// legacy engine's walk, [`VmSetupMode::Scheduler`] for the scheduler's
-    /// chains (yield shims installed, the bridged infer hook skipped).
+    /// section's VM.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the walk's whole driver preamble: the shared run context, the section and its home slice, its id, depth, reply seed, client snapshot, var seed, and VM-setup mode stay explicit and linear"
-    )]
-    #[expect(
-        clippy::ref_option,
-        reason = "the client snapshot is cloned into the control-global closures and the infer hook, so the parameter borrows the Option itself"
-    )]
     pub(crate) fn new(
         ctx: &RunContext,
         section: &Section,
         siblings: &[Section],
         section_id: u64,
-        execute_depth: usize,
         incoming_reply: Option<&str>,
-        client: &Option<GatewayClient>,
         var: &serde_json::Value,
-        mode: VmSetupMode,
     ) -> Result<Self> {
         let sys = ctx.sys_json(section_id, &section.name)?;
         ctx.observer()
@@ -160,22 +139,15 @@ impl SectionContext {
             ctx.limits().lua_logs().get(),
         )?;
         let reply = incoming_reply.map(str::to_owned);
-        // The control globals are installed once for the section's whole
-        // lifecycle; their callbacks capture an owned clone of the run
-        // context plus the client snapshot, so they hold no borrows.
-        let (execute_callback, fanout_callback, list_callback) = make_control_globals(
-            ctx,
-            client,
-            section.clone(),
-            siblings.to_vec(),
-            execute_depth,
-            reply.clone(),
-        );
+        // The `list_from_section` callback resolves over the section's
+        // visible set; the suspending calls (`execute`, `fanout`,
+        // `models.infer`) are the yield shims the setup half installs.
+        let visible = visible_sections(siblings, section);
+        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
         // The setup half of the section lifecycle - host injection, host
-        // APIs, the control globals, the shared replay, and the captured
+        // APIs, the control surface, the shared replay, and the captured
         // alias bindings - is shared with the fanout arm; only the seed, the
-        // `sys` extras, and the callbacks' parameters (home slice, caller,
-        // depth) are the walk's own.
+        // `sys` extras, and the callback's visible set are the walk's own.
         let setup = ctx.vm_setup(
             &sys,
             reply.as_deref(),
@@ -187,28 +159,12 @@ impl SectionContext {
             // carry a write scope.
             None,
             &section.name,
-            mode,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(
-            &mut vm,
-            &setup,
-            execute_callback,
-            fanout_callback,
-            list_callback,
-        ) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
             vm.teardown(ctx.observer().as_ref(), &section.name);
             return Err(error);
-        }
-        // The infer hook carries a lazy client source (F5): a nested
-        // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it. A
-        // scheduler-mode VM infers through the yield shim and the driver's
-        // answer channel instead, so the bridged hook is never consulted
-        // there.
-        if mode == VmSetupMode::Legacy {
-            ctx.attach_infer_hook(&vm, client.clone(), &section.name);
         }
         Ok(Self {
             vm: Some(vm),
@@ -230,30 +186,21 @@ impl SectionContext {
 
     /// Constructs the frame for the live H1 pass and runs its setup
     /// preamble: the `sys` JSON (id 0 under the prompt's title), VM
-    /// construction and limits, host injection, the host APIs, and the H1
-    /// control-global stubs.
+    /// construction and limits, host injection, the host APIs, the H1
+    /// control-global stubs, and the live H1 shim base.
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
     /// the frame seeds an empty `var`, no reply, no item, and no write
-    /// scope. `client` is the run's client, cloned into the infer hook's
-    /// lazy source (F5); the pass's own client slot stays with the caller.
-    /// `mode` selects the infer surface: [`VmSetupMode::Legacy`] installs
-    /// the bridged infer hook reading the run's shared model set, so a
-    /// nested `models.infer` resolves against the bindings recorded so far;
-    /// [`VmSetupMode::Scheduler`] installs the live H1 shim base instead, so
-    /// the scheduler's driver answers `models.infer`/`handle:infer` yields
-    /// through its answer channel.
+    /// scope. The scheduler answers the pass's `models.infer`/`handle:infer`
+    /// yields through its driver, so the shim base keeps the control stubs,
+    /// which raise before anything structural can yield.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    pub(crate) fn new_live_h1(
-        ctx: &RunContext,
-        client: Option<&GatewayClient>,
-        mode: VmSetupMode,
-    ) -> Result<Self> {
+    pub(crate) fn new_live_h1(ctx: &RunContext) -> Result<Self> {
         let title = &ctx.prompt().title;
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
@@ -273,34 +220,11 @@ impl SectionContext {
         )?;
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_live_h1(&mut vm, ctx, &sys, title) {
+        if let Err(error) = setup_live_h1(&mut vm, ctx, &sys, title)
+            .and_then(|()| install_live_h1_shim_base(vm.lua()))
+        {
             vm.teardown(ctx.observer().as_ref(), title);
             return Err(error);
-        }
-        match mode {
-            // The infer hook carries a lazy client source (F5): a nested
-            // `models.infer` or `handle:infer` surfaces a concrete
-            // construction error on first use instead of the setup
-            // swallowing it.
-            VmSetupMode::Legacy => attach_infer_hook(
-                &vm,
-                GatewaySource::from_optional(client.cloned(), ctx.limits()),
-                Arc::clone(ctx.observer()),
-                ctx.debug().cloned(),
-                ctx.execution(),
-                title,
-                ctx.turns(),
-                ctx.models_arc(),
-            ),
-            // The scheduler answers H1's infer yields through its driver,
-            // so the bridged hook is never installed; the shim base keeps
-            // the control stubs, which raise before anything can yield.
-            VmSetupMode::Scheduler => {
-                if let Err(error) = install_live_h1_shim_base(vm.lua()) {
-                    vm.teardown(ctx.observer().as_ref(), title);
-                    return Err(error);
-                }
-            }
         }
         Ok(Self {
             vm: Some(vm),
@@ -323,36 +247,29 @@ impl SectionContext {
     /// Constructs the frame for one fanout arm and runs its setup preamble:
     /// VM construction and limits, the `sys` JSON carrying the arm's
     /// run-global `id` and its 1-based per-fanout `index`, the control
-    /// globals (resolved over the worker's visible set: its home slice plus
-    /// its children), the shared setup half, and the infer hook.
+    /// surface (the `list_from_section` callback resolved over the worker's
+    /// visible set: its home slice plus its children; plus the yield
+    /// shims), and the shared setup half.
     ///
     /// The seed is the fanout's own: the collection `item`, the store-write
     /// scope (this fanout's token plus the arm's index, matching
-    /// `sys.index`), the caller's cloned `var`, the caller's reply, and one
-    /// execute level deeper than the caller. The effective reporting handles
-    /// are the fanout's too: the proxy observer and debug sink (report-only
-    /// traffic over the bounded side channels) and the fanout's fresh turn
-    /// counter arrive through the context's fanout fork, so the arm's nested
-    /// `execute`/`fanout` chains report through the proxies as well.
-    /// `mode` selects the control surface: [`VmSetupMode::Legacy`] for the
-    /// spawned-arm driver (Rust control globals plus the bridged infer
-    /// hook), [`VmSetupMode::Scheduler`] for the scheduler's arm chains
-    /// (yield shims, no bridged hook).
+    /// `sys.index`), the caller's cloned `var`, and the caller's reply. The
+    /// effective reporting handles
+    /// are the fanout's too: the run's own observer and debug sink with the
+    /// fanout's fresh turn counter arrive through the context's fanout fork,
+    /// so the arm's nested `execute`/`fanout` chains report through them as
+    /// well.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
     /// construction failure propagates bare - no VM exists to tear down. A
     /// limits, `sys`, or setup failure tears the fresh VM down once here:
-    /// the arm's epilogue owns the run phase's teardown boundary, so the
+    /// the chain owns the run phase's teardown boundary, so the
     /// construction phase keeps its own and every path tears down exactly
     /// once.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, depth, reply and var seeds, client snapshot, and VM-setup mode stay explicit and linear"
-    )]
-    #[expect(
-        clippy::ref_option,
-        reason = "the client snapshot is cloned into the control-global closures and the infer hook, so the parameter borrows the Option itself"
+        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, and reply and var seeds stay explicit and linear"
     )]
     pub(crate) fn new_fanout_arm(
         ctx: &RunContext,
@@ -361,11 +278,8 @@ impl SectionContext {
         index: usize,
         item: serde_json::Value,
         write_token: u64,
-        execute_depth: usize,
         incoming_reply: Option<&str>,
-        client: &Option<GatewayClient>,
         var: &serde_json::Value,
-        mode: VmSetupMode,
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
         let model_set = ctx.model_set_snapshot()?;
@@ -406,20 +320,13 @@ impl SectionContext {
         // The arm's store-write identity: this fanout's token plus the
         // arm's 1-based index, matching `sys.index`.
         let write_scope = Some(WriteScope::new(write_token, index + 1));
-        // The control globals are installed once for the arm's whole
-        // lifecycle; their callbacks capture an owned clone of the run
-        // context plus the client snapshot, so they hold no borrows.
-        let (execute_callback, fanout_callback, list_callback) = make_control_globals(
-            ctx,
-            client,
-            worker.clone(),
-            home.to_vec(),
-            execute_depth,
-            reply.clone(),
-        );
+        // The `list_from_section` callback resolves over the worker's
+        // visible set (its home slice plus its children); the suspending
+        // calls are the yield shims the setup half installs.
+        let visible = visible_sections(home, worker);
+        let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
         // The setup half is shared with the walk; only the seed, the `sys`
-        // extra, and the callbacks' parameters (home slice, caller, depth)
-        // are the arm's own.
+        // extra, and the callback's visible set are the arm's own.
         let setup = ctx.vm_setup(
             &sys,
             reply.as_deref(),
@@ -429,28 +336,12 @@ impl SectionContext {
             },
             write_scope,
             &worker.name,
-            mode,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(
-            &mut vm,
-            &setup,
-            execute_callback,
-            fanout_callback,
-            list_callback,
-        ) {
+        if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
             vm.teardown(ctx.observer().as_ref(), &worker.name);
             return Err(error);
-        }
-        // The infer hook carries a lazy client source (F5): a nested
-        // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it. A
-        // scheduler-mode arm infers through the yield shim and the driver's
-        // answer channel instead, so the bridged hook is never consulted
-        // there.
-        if mode == VmSetupMode::Legacy {
-            ctx.attach_infer_hook(&vm, client.clone(), &worker.name);
         }
         Ok(Self {
             vm: Some(vm),
@@ -468,66 +359,6 @@ impl SectionContext {
             debug: ctx.debug().cloned(),
             turns: Arc::clone(ctx.turns()),
         })
-    }
-
-    /// Runs the frame's ordered block walk: Lua chunks in place, prose
-    /// through the tool loop, the reply rolling forward.
-    ///
-    /// `ctx` supplies the run-scoped inputs (the shared tools, the
-    /// bindings, models, limits, and the tool-loop cap); everything
-    /// per-frame - the VM, the `sys` JSON, the reply, the conversation, the
-    /// counts, the completion options, and the effective reporting handles -
-    /// comes from `self`. The frame's `Drop` owns the teardown boundary: a
-    /// walk error propagates out and the frame's drop tears the VM down, so
-    /// every path tears down exactly once.
-    ///
-    /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed, as
-    /// documented on [`run_one_section_impl`].
-    pub(crate) async fn run(
-        &mut self,
-        ctx: &RunContext,
-        name: &str,
-        blocks: &[Block],
-        mode: BlockRunMode<'_>,
-        client: &mut Option<GatewayClient>,
-    ) -> Result<SectionFlow> {
-        let Self {
-            vm,
-            sys,
-            reply,
-            conversation,
-            counts,
-            completion_options,
-            item,
-            observer,
-            debug,
-            turns,
-            ..
-        } = self;
-        let Some(vm) = vm.as_mut() else {
-            return Err(Error::Internal(
-                "the section frame's VM lives until the frame's own drop",
-            ));
-        };
-        run_one_section_impl(
-            vm,
-            ctx,
-            name,
-            blocks,
-            mode,
-            sys,
-            reply,
-            conversation,
-            counts,
-            completion_options,
-            item.as_ref(),
-            observer.as_ref(),
-            debug.as_deref(),
-            turns.as_ref(),
-            client,
-        )
-        .await
     }
 
     /// Reads the section's final `var` back into the frame and returns it,
@@ -562,8 +393,6 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Internal`] if the VM is gone, which only the frame's
     /// own drop does - a live frame always holds it.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) fn vm(&self) -> Result<&SectionVm> {
         self.vm.as_ref().ok_or(Error::Internal(
             "the section frame's VM lives until the frame's own drop",
@@ -573,8 +402,6 @@ impl SectionContext {
     /// The frame's current reply slot: seeded from the incoming reply,
     /// rolled forward as prose produces text, and synced from the VM's
     /// `reply` global after each of the scheduler's Lua blocks.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) fn reply(&self) -> Option<String> {
         self.reply.clone()
     }
@@ -586,8 +413,6 @@ impl SectionContext {
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) when `reply` is neither nil
     /// nor a string, or [`Error::Internal`] if the VM is gone.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) fn read_reply(&mut self) -> Result<Option<String>> {
         let reply = self.vm()?.reply()?;
         self.reply.clone_from(&reply);
@@ -596,16 +421,12 @@ impl SectionContext {
 
     /// Runs one prose block through the shared section prose path: the
     /// per-block scope rebuild, substitution, the tool loop, and the
-    /// reply/`sys` roll-forward.
-    ///
-    /// The scheduler's driver calls this directly; the legacy block loop
-    /// reaches the same path through `run_one_section_impl`.
+    /// reply/`sys` roll-forward. The scheduler's driver calls this for a
+    /// walked section's prose block.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed, as
     /// documented on `run_section_prose`.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) async fn run_prose_block(
         &mut self,
         ctx: &RunContext,
@@ -662,16 +483,12 @@ impl SectionContext {
     /// Runs one live H1 prose block through the shared live prose path:
     /// substitution, the empty-prose skip, the default model and
     /// always-scope read from the bindings-so-far, fresh per-block counts,
-    /// and the reply written as a plain global.
-    ///
-    /// The scheduler's driver calls this directly; the legacy block loop
-    /// reaches the same path through `run_one_section_impl`.
+    /// and the reply written as a plain global. The scheduler's driver
+    /// calls this for the live H1 pass's prose block.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed, as
     /// documented on `run_live_h1_prose`.
-    // Consumed by the scheduler driver until the flip.
-    #[allow(dead_code)]
     pub(crate) async fn run_live_h1_prose_block(
         &mut self,
         ctx: &RunContext,

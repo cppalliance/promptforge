@@ -77,9 +77,7 @@ impl RunError {
             Error::ToolLoopExhausted | Error::OutOfScopeToolCall { .. } | Error::Tool { .. } => {
                 RunErrorKind::Tool
             }
-            Error::FanoutArmJoin(_) | Error::Internal(_) | Error::TimestampFormat(_) => {
-                RunErrorKind::Internal
-            }
+            Error::Internal(_) | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Bind { .. }
             | Error::BindSchema { .. }
             | Error::BindQuery { .. }

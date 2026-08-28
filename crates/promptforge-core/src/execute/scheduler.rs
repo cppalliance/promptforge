@@ -2,12 +2,13 @@
 //!
 //! One [`Scheduler`] per run, created and owned by the top-level run call
 //! and living entirely in the driver loop's stack frame: no `Arc`, no
-//! `Mutex`, no sharing. One thread runs everything, and the Lua shims only
-//! yield (they never call into Rust for suspending operations), so the
-//! scheduler state is unreachable from Lua. The driver body runs inside a
-//! [`tokio::task::LocalSet`] so leaf dispatch can `spawn_local`; on a
-//! current-thread runtime this is the whole story, and on a multi-thread
-//! runtime the run simply never leaves its one thread.
+//! `Mutex`, no sharing. One thread runs every chain step, and the Lua shims
+//! only yield (they never call into Rust for suspending operations), so the
+//! scheduler state is unreachable from Lua. Leaf dispatch spawns plain
+//! tasks: an infer task touches no scheduler state and no Lua value, so
+//! the driver future stays `Send` and the run may be spawned onto a
+//! multi-thread runtime; on a current-thread runtime the whole run stays
+//! on its one thread.
 //!
 //! The loop is `resume -> match request -> dispatch -> resume with answer`.
 //! A chain whose coroutine yields a leaf request (`infer`) is parked in the
@@ -77,9 +78,8 @@ use super::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
 use super::gateway::{GatewaySource, ResolutionContext};
-use super::protocol::{Answer, Request};
+use super::protocol::{Answer, Request, YieldParse};
 use super::section_context::SectionContext;
-use super::section_vm::VmSetupMode;
 use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, next_id, now_rfc3339_checked};
 use super::tools::infer_round;
 
@@ -407,7 +407,7 @@ pub(crate) struct Scheduler<'a> {
     /// it on first inference.
     client: GatewaySource,
     /// The live H1 pass's run-scoped capability resolution: `Some` when the
-    /// scheduler runs the H1 pass before the walk (the flip's shape),
+    /// scheduler runs the H1 pass before the walk (the run's shape),
     /// `None` for a walk-only drive whose shared sets were filled another
     /// way. One resolution serves the whole pass, so its decision cache
     /// keeps the single-flight guarantee across blocks and resumes.
@@ -459,8 +459,12 @@ impl<'a> Scheduler<'a> {
     /// [`with_live_h1`](Self::with_live_h1), then the root chain over the
     /// prompt's sections.
     ///
-    /// The driver body runs inside a [`tokio::task::LocalSet`] so leaf
-    /// dispatch can `spawn_local`.
+    /// Leaf dispatch spawns plain tasks (not `spawn_local`): an infer task
+    /// touches no scheduler state and no Lua value - it awaits one gateway
+    /// round and posts the answer to the channel - so the driver future
+    /// stays `Send` and a caller may spawn the run onto a multi-thread
+    /// runtime. On a current-thread runtime the spawned tasks run on that
+    /// one thread anyway.
     ///
     /// # Errors
     /// Returns the [`Error`] of whichever step failed: frame construction,
@@ -468,9 +472,7 @@ impl<'a> Scheduler<'a> {
     /// Returns [`Error::Interrupted`] when the run's cancellation handle is
     /// signaled while chains are running or suspended.
     pub(crate) async fn drive(&mut self) -> Result<String> {
-        tokio::task::LocalSet::new()
-            .run_until(self.drive_inner())
-            .await
+        self.drive_inner().await
     }
 
     async fn drive_inner(&mut self) -> Result<String> {
@@ -487,6 +489,15 @@ impl<'a> Scheduler<'a> {
         let mut root_result = None;
         loop {
             while let Some(id) = self.ready.pop_front() {
+                // Cancellation between steps: the instruction hook covers
+                // running Lua and the select below covers suspension, but a
+                // run whose chains never suspend on I/O would otherwise
+                // finish without ever observing the handle - the legacy
+                // fanout driver's select loop observed it at arm
+                // boundaries.
+                if cancel::is_cancelled() {
+                    return Err(Error::Interrupted);
+                }
                 if let Err(error) = self.step(id, &mut root_result).await {
                     self.finish(id, Err(error), &mut root_result);
                 }
@@ -692,11 +703,7 @@ impl<'a> Scheduler<'a> {
             // The live H1 pass enters its frame exactly once: id 0 under
             // the prompt's title, the control-stub surface, the shim base,
             // and no SECTION_STARTED - the pass is not a walked section.
-            let frame = SectionContext::new_live_h1(
-                &chain.ctx,
-                chain.client.as_ref(),
-                VmSetupMode::Scheduler,
-            )?;
+            let frame = SectionContext::new_live_h1(&chain.ctx)?;
             chain.frame = Some(frame);
             chain.block = 0;
             return Ok(true);
@@ -723,11 +730,8 @@ impl<'a> Scheduler<'a> {
                 item_index,
                 item,
                 write_token,
-                chain.execute_depth,
                 chain.reply.as_deref(),
-                &chain.client,
                 &chain.var,
-                VmSetupMode::Scheduler,
             )?;
             chain.frame = Some(frame);
             chain.block = 0;
@@ -750,11 +754,8 @@ impl<'a> Scheduler<'a> {
             &slice[index],
             slice,
             next_id(chain.ctx.ids()),
-            chain.execute_depth,
             chain.reply.as_deref(),
-            &chain.client,
             &chain.var,
-            VmSetupMode::Scheduler,
         )?;
         chain.frame = Some(frame);
         chain.block = 0;
@@ -996,6 +997,11 @@ impl<'a> Scheduler<'a> {
         chain.var = frame.read_var()?;
         frame.mark_completed();
         drop(frame);
+        if let Some(arm) = &mut chain.arm {
+            // The worker's own entry is complete; the arm's walk continues
+            // (or ends) as plain sections, exactly as after a jump out.
+            arm.at_worker = false;
+        }
         chain.index += 1;
         Ok(())
     }
@@ -1124,11 +1130,21 @@ impl<'a> Scheduler<'a> {
                     .as_ref()
                     .ok_or(Error::Internal("a live chain holds its frame"))?;
                 match frame.vm()?.request_from_yield(&values) {
-                    Ok(request) => {
+                    YieldParse::Request(request) => {
                         chain.coroutine = Some(thread);
                         self.dispatch(id, request)
                     }
-                    Err(error) => {
+                    YieldParse::Call(answer) => {
+                        // An argument-validation failure is the call's
+                        // answer: the shim raises it at the call site, so
+                        // an author `pcall` catches it exactly as on the
+                        // legacy callback path.
+                        chain.coroutine = Some(thread);
+                        chain.incoming = Some(answer);
+                        self.ready.push_back(id);
+                        Ok(())
+                    }
+                    YieldParse::Malformed(error) => {
                         observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
                         Err(error)
                     }
@@ -1371,7 +1387,7 @@ impl<'a> Scheduler<'a> {
         let request_id = RequestId(self.next_request);
         self.next_request += 1;
         let tx = self.answer_tx.clone();
-        let task = tokio::task::spawn_local(async move {
+        let task = tokio::spawn(async move {
             let result = infer_round(
                 &client,
                 &binding,

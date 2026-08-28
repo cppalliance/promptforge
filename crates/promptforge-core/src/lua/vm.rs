@@ -1,17 +1,19 @@
+#[cfg(test)]
+use super::LuaFanoutResult;
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json, Lua, LuaBlockResult,
-    LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle,
-    ModelBinding, ModelInferHook, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue,
-    Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib, StoreRef, Thread, ThreadStatus,
-    ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail, guarded_var,
-    harden, install_h2_models, install_h2_tools, install_instruction_budget, install_log,
+    LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding,
+    ModelInferHook, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex,
+    Observer, Ordering, Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding,
+    ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail, guarded_var, harden,
+    install_h2_models, install_h2_tools, install_instruction_budget, install_log,
     install_lua_tool_calls, install_shim_prelude, install_store_table, install_untrusted,
     log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
     wrap_shimmed_handle,
 };
 use crate::client::ToolSchema;
-use crate::execute::protocol::{Answer, Request};
+use crate::execute::protocol::{Answer, Request, YieldParse};
 
 /// Packs owned values into a 1-based Lua sequence table.
 pub(crate) fn pack_sequence<T: mlua::IntoLua>(
@@ -34,7 +36,7 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// library as the section's first chunk
 /// ([`replay_shared`](Self::replay_shared)), install the captured tool/model
 /// alias globals, and only then walk the section's blocks with
-/// [`run_chunk`](Self::run_chunk). [`bind_reply`](Self::bind_reply) inserts
+/// [`start_block_coro`](Self::start_block_coro). [`bind_reply`](Self::bind_reply) inserts
 /// the model reply into the same environment between chunks. A single
 /// instruction counter covers every program run by this VM, so splitting
 /// work across chunks cannot reset the budget.
@@ -160,7 +162,9 @@ impl LocalTools {
     /// The `jump` global is nilled for the handler's duration and restored
     /// afterward: a local tool runs outside any chunk's control flow, so a
     /// jump recorded here would surface stale at the next chunk boundary.
-    /// Handlers may still call `execute()`, `fanout`, and `model:infer`.
+    /// Handlers cannot call the suspending shims (`execute`, `fanout`,
+    /// `models.infer`): the handler runs outside any coroutine, so the
+    /// shim's yield fails with "attempt to yield from outside a coroutine".
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
@@ -525,6 +529,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
+    #[cfg(test)]
     pub(crate) fn install_control_globals<E, F, L>(
         &self,
         execute_callback: E,
@@ -628,10 +633,9 @@ impl SectionVm {
     /// Installs `execute`, `jump`, `fanout`, and `list_from_section` as
     /// stubs that fail with a clear error, for the live H1 VM only.
     ///
-    /// H1 runs before any section exists, so the real control globals
-    /// ([`install_control_globals`](Self::install_control_globals)) can never
-    /// operate there; without stubs a call dies with Lua's stock nil-call
-    /// error, which names no cause.
+    /// H1 runs before any section exists, so the real control globals can
+    /// never operate there; without stubs a call dies with Lua's stock
+    /// nil-call error, which names no cause.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
@@ -649,51 +653,6 @@ impl SectionVm {
             globals.raw_set(name, stub).map_err(Error::lua)?;
         }
         Ok(())
-    }
-
-    /// Executes one live H1 Lua block with call-time capability resolution.
-    ///
-    /// Resolver callbacks are scoped to this block and reinstalled for each
-    /// later H1 Lua block. Resolved Tool and Model objects remain ordinary Lua
-    /// values in the VM.
-    ///
-    /// # Errors
-    /// Returns typed capability errors captured by the runtime resolver, or the
-    /// underlying Lua execution error.
-    pub(crate) fn run_live_h1_block(
-        &self,
-        program: &LuaProgram,
-        resolution: &RuntimeResolution<'_>,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        let result = self.lua.scope(|scope| {
-            resolution
-                .install(&self.lua, scope)
-                .map_err(mlua::Error::external)?;
-            self.run_chunk(program, observer, section)
-                .map_err(mlua::Error::external)
-        });
-        let callback_error = resolution.take_callback_error()?;
-        match result {
-            Ok(LuaBlockResult::Returned(value)) => match callback_error {
-                Some(error) => Err(error),
-                None => Ok(value),
-            },
-            // The H1 VM carries only the stub control globals, which raise
-            // before anything is recorded; this arm stays defensive against
-            // a recorded jump.
-            Ok(LuaBlockResult::Jump(heading)) => match callback_error {
-                Some(error) => Err(error),
-                None => Err(Error::Lua(format!(
-                    "jump({heading}) is not available in live H1 Lua"
-                ))),
-            },
-            Err(error) => match callback_error {
-                Some(error) => Err(error),
-                None => Err(Error::lua(error)),
-            },
-        }
     }
 
     /// Replaces the sealed Lua `sys` global after scope close.
@@ -758,6 +717,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if host values have not been injected, execution
     /// fails, the shared instruction budget is exhausted, or the program
     /// returns a non-scalar value.
+    #[cfg(test)]
     pub(crate) fn run_chunk(
         &self,
         program: &LuaProgram,
@@ -1029,16 +989,6 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Installs the `model:infer` host hook for this VM's Lua state.
-    pub(crate) fn set_infer_hook(&self, hook: ModelInferHook) {
-        self.lua.set_app_data(hook);
-    }
-
-    /// Installs the `models.infer` host hook for this VM's Lua state.
-    pub(crate) fn set_models_infer_hook(&self, hook: ModelsInferHook) {
-        self.lua.set_app_data(hook);
-    }
-
     /// Clears the `model:infer` and `models.infer` host hooks.
     pub(crate) fn clear_infer_hook(&self) {
         let _ = self.lua.remove_app_data::<ModelInferHook>();
@@ -1137,9 +1087,6 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the jump slot is poisoned, the program
     /// cannot load, or the thread cannot be created or hooked; a block
     /// failure returns the mapped runtime error.
-    // Consumed by the scheduler driver in a later step; exercised today by
-    // the coroutine chunk-execution tests.
-    #[allow(dead_code)]
     pub(crate) fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
         {
             let mut slot = self
@@ -1159,9 +1106,6 @@ impl SectionVm {
     ///
     /// # Errors
     /// Same contract as [`start_block_coro`](Self::start_block_coro).
-    // Consumed by the scheduler driver in a later step; exercised today by
-    // the coroutine chunk-execution tests.
-    #[allow(dead_code)]
     pub(crate) fn resume_block_coro(
         &self,
         program: &LuaProgram,
@@ -1173,21 +1117,16 @@ impl SectionVm {
     }
 
     /// Validates a suspended block coroutine's yielded values into the
-    /// protocol's request.
+    /// boundary outcome.
     ///
-    /// A shim yields exactly its request table; anything else fails the
-    /// block as a hand-rolled or corrupted yield. Author code cannot reach
+    /// A shim yields exactly its request table; anything else is
+    /// [`YieldParse::Malformed`] and fails the block as a hand-rolled or
+    /// corrupted yield. Author code cannot reach
     /// `coroutine.yield` (the global is stripped at shim install), so this
-    /// strict validation is defense in depth.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] with the direct-yield message when the yield
-    /// is not a well-formed request table, or the boundary conversion's own
-    /// error (see [`Request::from_yield`]).
-    // Consumed by the scheduler driver until the flip; exercised today by
-    // the scheduler tests.
-    #[allow(dead_code)]
-    pub(crate) fn request_from_yield(&self, values: &MultiValue) -> Result<Request> {
+    /// strict validation is defense in depth. A well-formed call whose
+    /// argument fails validation is [`YieldParse::Call`]: the error rides
+    /// back as the answer so the shim raises it at the call site.
+    pub(crate) fn request_from_yield(&self, values: &MultiValue) -> YieldParse {
         Request::from_yield(&self.lua, values.iter().next().unwrap_or(&Value::Nil))
     }
 
@@ -1203,9 +1142,6 @@ impl SectionVm {
     /// # Errors
     /// Same contract as [`start_block_coro`](Self::start_block_coro), plus
     /// [`Error::Lua`] if the envelope cannot be rendered on this VM.
-    // Consumed by the scheduler driver until the flip; exercised today by
-    // the scheduler tests.
-    #[allow(dead_code)]
     pub(crate) fn resume_block_coro_answer(
         &self,
         program: &LuaProgram,
@@ -1256,8 +1192,6 @@ impl SectionVm {
 /// mapped message, whose `Display` carries mlua's `runtime error: ` prefix.
 /// A block that caught the shim's error and failed on its own keeps its own
 /// error.
-// Consumed by the scheduler driver until the flip.
-#[allow(dead_code)]
 fn coroutine_failure_is(failure: &Error, retained: &Error) -> bool {
     let display = retained.to_string();
     match failure {
@@ -1278,9 +1212,6 @@ fn coroutine_failure_is(failure: &Error, retained: &Error) -> bool {
 /// [`SectionVm::resume_block_coro`]; consumed by the scheduler's driver,
 /// which validates a [`Yielded`](CoroStep::Yielded) request, dispatches it,
 /// and resumes the thread with the answer.
-// Consumed by the scheduler driver in a later step; exercised today by the
-// coroutine chunk-execution tests.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum CoroStep {
     /// The coroutine suspended on a shim yield; the yielded values carry

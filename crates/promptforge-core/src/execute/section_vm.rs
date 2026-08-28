@@ -1,7 +1,7 @@
 //! The engine's setup half: one section VM's lifecycle from host injection
 //! through the captured alias bindings.
 //!
-//! Every driver of the shared engine - the walk's `run_one_section` and the
+//! Every driver of the shared engine - the walk's section entry and the
 //! fanout arm - runs the identical setup sequence: inject the host values,
 //! install the persistent host APIs, install the control globals, replay the
 //! shared library as the section's first chunk, then install the captured
@@ -10,25 +10,20 @@
 //! JSON (both drivers take the next run-global `id`; the arm adds its
 //! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
 //! `var`; an arm
-//! adds its collection `item` to the caller's cloned `var`), and
-//! parameterizes the shared control-global constructor with its own home
-//! slice, caller, and depth.
+//! adds its collection `item` to the caller's cloned `var`), and supplies
+//! the `list_from_section` callback resolved over its own visible set.
 //!
 //! VM construction and the Lua limits install stay with the driver. A
 //! construction failure's handling differs (the walk propagates, the arm
-//! finishes its finalizer), the arm's VM must outlive the cancel-scoped body
-//! so the epilogue can tear it down, and a limits failure must keep
+//! finishes its finalizer), and a limits failure must keep
 //! propagating as a bare `?` - routing it through teardown would emit
 //! `LUA_TEARDOWN_STARTED`/`SUCCEEDED` events the walk never emitted. For the
 //! same reason a failed setup returns the VM untorn-down: each driver owns
-//! its teardown boundary (the walk tears down inline, the arm's epilogue
-//! tears down once).
+//! its teardown boundary.
 
 use std::sync::Arc;
 
-use mlua::Value as LuaValue;
-
-use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm};
+use crate::lua::{LuaProgram, SectionVm};
 use crate::observe::Observer;
 use crate::store::{StoreRef, WriteScope};
 use crate::{Error, Result};
@@ -47,29 +42,6 @@ pub(crate) struct VmSeed<'a> {
     pub(crate) var: Option<&'a serde_json::Value>,
     /// The fanout arm's collection member; `None` outside an arm.
     pub(crate) item: Option<&'a serde_json::Value>,
-}
-
-/// Which control surface [`setup_section_vm`] installs.
-///
-/// The split exists until the flip: the old engine drives chunks via
-/// `Function::call` with no coroutine, so a shim's `coroutine.yield` under
-/// it errors with "attempt to yield from outside a coroutine" - installing
-/// shims unconditionally would break the legacy engine. The legacy walk
-/// selects [`Legacy`](VmSetupMode::Legacy); the scheduler's driver selects
-/// [`Scheduler`](VmSetupMode::Scheduler). The mode dies with the old engine
-/// at the flip.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum VmSetupMode {
-    /// `execute`, `jump`, `fanout`, and `list_from_section` as Rust
-    /// callbacks: exactly the legacy engine's surface.
-    #[default]
-    Legacy,
-    /// `jump` and `list_from_section` as Rust callbacks, plus the coroutine
-    /// yield shims for `models.infer`, `handle:infer`, and `execute`.
-    // Constructed by the scheduler driver, which is live at the flip;
-    // exercised today by the shim layer's and the scheduler's tests.
-    #[allow(dead_code)]
-    Scheduler,
 }
 
 /// The borrowed inputs one section VM setup shares.
@@ -98,51 +70,34 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
-    /// Which control surface to install; the legacy walk selects
-    /// [`VmSetupMode::Legacy`], the scheduler's driver
-    /// [`VmSetupMode::Scheduler`].
-    pub(crate) mode: VmSetupMode,
 }
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
 /// The sequence is fixed and shared: host injection carrying the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
-/// seed carries one, the control surface selected by the setup's
-/// [`VmSetupMode`] ([`SectionVm::install_control_globals`] for the legacy
-/// engine; [`SectionVm::install_scheduler_control_globals`] plus
-/// [`SectionVm::install_coro_shims`] for the scheduler),
+/// seed carries one, the control surface
+/// ([`SectionVm::install_scheduler_control_globals`] for `jump` and
+/// `list_from_section`, plus [`SectionVm::install_coro_shims`] for the
+/// suspending calls, which the scheduler drives as yield shims),
 /// [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
 /// limits itself before calling, so a limits failure propagates without
 /// touching the VM's teardown observation path.
 ///
 /// On failure the VM is left for the caller to tear down, so each driver's
-/// own teardown boundary (the walk's inline teardown, the arm's single
-/// epilogue) stays the one place a teardown happens.
+/// own teardown boundary stays the one place a teardown happens.
 ///
 /// # Errors
 /// Returns the [`Error`] of whichever step failed: host injection, host API
 /// install, `item` install, control-global install, the shared replay, or
 /// the captured-binding install.
-pub(crate) fn setup_section_vm<E, F, L>(
+pub(crate) fn setup_section_vm<L>(
     vm: &mut SectionVm,
     setup: &SectionVmSetup<'_>,
-    execute_callback: E,
-    fanout_callback: F,
     list_callback: L,
 ) -> Result<()>
 where
-    E: Fn(LuaValue, Option<String>, serde_json::Value) -> std::result::Result<String, Error>
-        + Send
-        + 'static,
-    F: Fn(
-            String,
-            Vec<serde_json::Value>,
-            serde_json::Value,
-        ) -> std::result::Result<Vec<LuaFanoutResult>, Error>
-        + Send
-        + 'static,
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
     vm.inject_host_with_var(
@@ -157,18 +112,8 @@ where
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }
-    match setup.mode {
-        VmSetupMode::Legacy => {
-            vm.install_control_globals(execute_callback, fanout_callback, list_callback)?;
-        }
-        VmSetupMode::Scheduler => {
-            // The scheduler drives chunks inside coroutines, so the
-            // suspending calls are Lua shims that yield request tables; the
-            // legacy `execute`/`fanout` callbacks go unused.
-            vm.install_scheduler_control_globals(list_callback)?;
-            vm.install_coro_shims()?;
-        }
-    }
+    vm.install_scheduler_control_globals(list_callback)?;
+    vm.install_coro_shims()?;
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),

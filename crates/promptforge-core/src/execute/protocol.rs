@@ -23,9 +23,14 @@ use crate::{Error, Result};
 /// loud authoring error rather than confusing the driver.
 const DIRECT_YIELD: &str = "scripts may not yield directly";
 
+/// The fixed direct-yield failure.
+fn direct_yield_error() -> Error {
+    Error::Lua(DIRECT_YIELD.to_owned())
+}
+
 /// Fails the block with the fixed direct-yield message.
 fn direct_yield<T>() -> Result<T> {
-    Err(Error::Lua(DIRECT_YIELD.to_owned()))
+    Err(direct_yield_error())
 }
 
 /// Reads one field off the request table.
@@ -36,29 +41,74 @@ fn raw_field(table: &mlua::Table, name: &str) -> Result<Value> {
     table.raw_get::<Value>(name).or_else(|_| direct_yield())
 }
 
-/// Reads a required string field.
-fn string_field(table: &mlua::Table, name: &str) -> Result<String> {
-    match raw_field(table, name)? {
-        Value::String(value) => Ok(value.to_str().or_else(|_| direct_yield())?.to_owned()),
-        _ => direct_yield(),
-    }
-}
-
-/// Reads an optional string field: absent or nil is `None`.
-fn optional_string_field(table: &mlua::Table, name: &str) -> Result<Option<String>> {
-    match raw_field(table, name)? {
-        Value::Nil => Ok(None),
-        Value::String(value) => Ok(Some(value.to_str().or_else(|_| direct_yield())?.to_owned())),
-        _ => direct_yield(),
-    }
-}
-
 /// Reads a required plain-table field as its JSON snapshot.
 fn json_field(lua: &Lua, table: &mlua::Table, name: &str) -> Result<serde_json::Value> {
     match raw_field(table, name)? {
         value @ Value::Table(_) => lua.from_value(value).or_else(|_| direct_yield()),
         _ => direct_yield(),
     }
+}
+
+/// How reading one request field failed.
+enum FieldFailure {
+    /// A shim-internal field was absent or unreadable: the shims set those
+    /// fields by construction, so the yield is malformed.
+    Malformed,
+    /// An author-supplied argument had the wrong shape: the call's error,
+    /// resumed as the answer so the shim raises it at the call site - an
+    /// author `pcall` catches it, exactly as the legacy callback's argument
+    /// error surfaced.
+    Call(Error),
+}
+
+/// Reads one author-supplied required string argument. Every wrong shape,
+/// absent included, is the call's error: the legacy callback's argument
+/// conversion failed at the call site too.
+fn call_string(table: &mlua::Table, name: &str) -> std::result::Result<String, FieldFailure> {
+    match table.raw_get::<Value>(name) {
+        Ok(Value::String(value)) => value.to_str().map(|value| value.to_owned()).map_err(|_| {
+            FieldFailure::Call(Error::Lua(format!("{name} must be a valid UTF-8 string")))
+        }),
+        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+            "{name} must be a string, got {}",
+            other.type_name()
+        )))),
+        Err(_) => Err(FieldFailure::Malformed),
+    }
+}
+
+/// Reads one author-supplied optional string argument: absent or nil is
+/// `None`, any other wrong shape is the call's error.
+fn call_optional_string(
+    table: &mlua::Table,
+    name: &str,
+) -> std::result::Result<Option<String>, FieldFailure> {
+    match table.raw_get::<Value>(name) {
+        Ok(Value::Nil) => Ok(None),
+        Ok(Value::String(value)) => {
+            value
+                .to_str()
+                .map(|value| Some(value.to_owned()))
+                .map_err(|_| {
+                    FieldFailure::Call(Error::Lua(format!("{name} must be a valid UTF-8 string")))
+                })
+        }
+        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+            "{name} must be a string, got {}",
+            other.type_name()
+        )))),
+        Err(_) => Err(FieldFailure::Malformed),
+    }
+}
+
+/// Reads the shim-produced `var` snapshot; a failure is a malformed yield,
+/// since the snapshot helper produces a plain JSON-representable table by
+/// construction.
+fn shim_var(
+    lua: &Lua,
+    table: &mlua::Table,
+) -> std::result::Result<serde_json::Value, FieldFailure> {
+    json_field(lua, table, "var").map_err(|_| FieldFailure::Malformed)
 }
 
 /// A validated suspending host call, parsed from the yielded table.
@@ -102,6 +152,10 @@ pub(crate) enum Request {
         var: serde_json::Value,
     },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
+    // The fields are read only by this module's own tests; production parses
+    // them for strict validation and never reads them until the variant
+    // gains a dispatch.
+    #[allow(dead_code)]
     Mcp {
         /// The reserved server name.
         server: String,
@@ -113,61 +167,42 @@ pub(crate) enum Request {
 }
 
 impl Request {
-    /// Validates a yielded value into a `Request`.
+    /// Validates a yielded value at the resume boundary.
     ///
     /// Every field is checked before use: the table comes from script space.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] with "scripts may not yield directly" when the
-    /// yield is not a well-formed request table: not a table, no `op`, an
-    /// unknown `op`, or a field of the wrong shape. Two boundary conversions
-    /// keep their own byte-identical errors instead: an `execute` target that
-    /// is not a string fails as `resolve_section_target` fails today, and a
-    /// fanout collection fails as `collection_to_items` fails today.
-    pub(crate) fn from_yield(lua: &Lua, yielded: &Value) -> Result<Request> {
+    /// A yield that is not a well-formed request table (not a table, no
+    /// `op`, an unknown `op`, a shim-internal field of the wrong shape) is
+    /// [`YieldParse::Malformed`] and fails the block with "scripts may not
+    /// yield directly". A well-formed shim call whose author-supplied
+    /// argument fails validation is [`YieldParse::Call`]: the error rides
+    /// back as the call's answer so the shim raises it at the call site,
+    /// keeping the legacy callback's errors catchable by an author `pcall`.
+    /// Two boundary conversions keep their own byte-identical errors: an
+    /// `execute` target that is not a string fails as
+    /// `resolve_section_target` fails, and a fanout collection fails as
+    /// `collection_to_items` fails.
+    pub(crate) fn from_yield(lua: &Lua, yielded: &Value) -> YieldParse {
         let Value::Table(table) = yielded else {
-            return direct_yield();
+            return YieldParse::Malformed(direct_yield_error());
         };
-        let op = match raw_field(table, "op")? {
-            Value::String(op) => op.to_str().or_else(|_| direct_yield())?.to_owned(),
-            _ => return direct_yield(),
+        let op = match raw_field(table, "op") {
+            Ok(Value::String(op)) => match op.to_str() {
+                Ok(op) => op.to_owned(),
+                Err(_) => return YieldParse::Malformed(direct_yield_error()),
+            },
+            _ => return YieldParse::Malformed(direct_yield_error()),
         };
         match op.as_str() {
-            "infer" => {
-                let prompt = string_field(table, "prompt")?;
-                let binding = match raw_field(table, "handle")? {
-                    Value::Nil => None,
-                    Value::UserData(userdata) => {
-                        let handle = userdata
-                            .borrow::<LuaModelHandle>()
-                            .or_else(|_| direct_yield())?;
-                        Some(handle.binding().clone())
-                    }
-                    _ => return direct_yield(),
-                };
-                Ok(Request::Infer { prompt, binding })
-            }
-            "execute" => {
-                let target =
-                    resolve_section_target(raw_field(table, "target")?).map_err(Error::lua)?;
-                let input = optional_string_field(table, "input")?;
-                let var = json_field(lua, table, "var")?;
-                Ok(Request::Execute { target, input, var })
-            }
-            "fanout" => {
-                let worker = string_field(table, "worker")?;
-                let collection = raw_field(table, "collection")?;
-                let items = crate::fanout::collection_to_items(lua, &collection)?;
-                let var = json_field(lua, table, "var")?;
-                Ok(Request::Fanout { worker, items, var })
-            }
-            "mcp" => {
-                let server = string_field(table, "server")?;
-                let tool = string_field(table, "tool")?;
-                let args = json_field(lua, table, "args")?;
-                Ok(Request::Mcp { server, tool, args })
-            }
-            _ => direct_yield(),
+            "infer" => classify(parse_infer(table), |error| Answer::Infer(Err(error))),
+            "execute" => classify(parse_execute(lua, table), |error| {
+                Answer::Execute(Err(error))
+            }),
+            "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
+            "mcp" => match parse_mcp(lua, table) {
+                Ok(request) => YieldParse::Request(request),
+                Err(_) => YieldParse::Malformed(direct_yield_error()),
+            },
+            _ => YieldParse::Malformed(direct_yield_error()),
         }
     }
 
@@ -179,6 +214,90 @@ impl Request {
     pub(crate) fn mcp_reserved() -> Error {
         Error::Lua("mcp requests are reserved: no dispatcher exists yet".to_owned())
     }
+}
+
+/// Maps one per-op parse to the boundary outcome: a validated request, an
+/// author-argument failure as the call's answer, or a malformed yield.
+fn classify(
+    parsed: std::result::Result<Request, FieldFailure>,
+    answer: impl FnOnce(Error) -> Answer,
+) -> YieldParse {
+    match parsed {
+        Ok(request) => YieldParse::Request(request),
+        Err(FieldFailure::Call(error)) => YieldParse::Call(answer(error)),
+        Err(FieldFailure::Malformed) => YieldParse::Malformed(direct_yield_error()),
+    }
+}
+
+/// Parses an `infer` request: the author-supplied `prompt`, and the
+/// shim-produced `handle` userdata whose frozen [`ModelBinding`] is cloned
+/// out of its borrow while the VM handle is live.
+fn parse_infer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let prompt = call_string(table, "prompt")?;
+    let binding = match table.raw_get::<Value>("handle") {
+        Ok(Value::Nil) => None,
+        Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
+            Ok(handle) => Some(handle.binding().clone()),
+            Err(_) => return Err(FieldFailure::Malformed),
+        },
+        _ => return Err(FieldFailure::Malformed),
+    };
+    Ok(Request::Infer { prompt, binding })
+}
+
+/// Parses an `execute` request: the author-supplied `target` (validated
+/// with the `resolve_section_target` rule, keeping its byte-identical
+/// error) and `input`, plus the shim-produced `var` snapshot.
+fn parse_execute(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let target = match table.raw_get::<Value>("target") {
+        Ok(value) => {
+            resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))?
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let input = call_optional_string(table, "input")?;
+    let var = shim_var(lua, table)?;
+    Ok(Request::Execute { target, input, var })
+}
+
+/// Parses a `fanout` request: the author-supplied `worker` heading and
+/// `collection` (converted member-wise while the VM handle is live, keeping
+/// the conversion's byte-identical errors), plus the shim-produced `var`
+/// snapshot.
+fn parse_fanout(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let worker = call_string(table, "worker")?;
+    let items = match table.raw_get::<Value>("collection") {
+        Ok(collection) => {
+            crate::fanout::collection_to_items(lua, &collection).map_err(FieldFailure::Call)?
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let var = shim_var(lua, table)?;
+    Ok(Request::Fanout { worker, items, var })
+}
+
+/// Parses a reserved `mcp` request. No call surface produces one, so every
+/// field is shim-internal by construction.
+fn parse_mcp(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let server = call_string(table, "server")?;
+    let tool = call_string(table, "tool")?;
+    let args = json_field(lua, table, "args").map_err(|_| FieldFailure::Malformed)?;
+    Ok(Request::Mcp { server, tool, args })
+}
+
+/// How one yielded value parsed at the resume boundary.
+#[derive(Debug)]
+pub(crate) enum YieldParse {
+    /// A well-formed request, ready to dispatch.
+    Request(Request),
+    /// A well-formed shim call whose author-supplied argument failed
+    /// validation: the call's answer, resumed into the caller so the shim
+    /// raises the error at the call site, exactly as the legacy callback's
+    /// argument error surfaced.
+    Call(Answer),
+    /// Not a well-formed request table: a hand-rolled or corrupted yield,
+    /// failing the block with the fixed direct-yield message.
+    Malformed(Error),
 }
 
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
@@ -294,10 +413,19 @@ mod tests {
             .expect("raw_set on a fresh table cannot fail");
     }
 
-    fn assert_direct_yield(result: Result<Request>) {
-        match result {
-            Err(Error::Lua(message)) => assert_eq!(message, "scripts may not yield directly"),
+    fn assert_direct_yield(parse: YieldParse) {
+        match parse {
+            YieldParse::Malformed(Error::Lua(message)) => {
+                assert_eq!(message, "scripts may not yield directly");
+            }
             other => panic!("expected the direct-yield Lua error, got {other:?}"),
+        }
+    }
+
+    fn expect_request(parse: YieldParse) -> Request {
+        match parse {
+            YieldParse::Request(request) => request,
+            other => panic!("expected a well-formed request, got {other:?}"),
         }
     }
 
@@ -314,8 +442,7 @@ mod tests {
         let lua = Lua::new();
         let table = request_table(&lua, "infer");
         table.raw_set("prompt", "summarize this").expect("raw_set");
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed infer parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Infer { prompt, binding } => {
                 assert_eq!(prompt, "summarize this");
@@ -333,8 +460,7 @@ mod tests {
         table
             .raw_set("handle", handle_userdata(&lua))
             .expect("raw_set");
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed infer parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Infer {
                 binding: Some(binding),
@@ -354,8 +480,7 @@ mod tests {
         table.raw_set("target", "## Child").expect("raw_set");
         table.raw_set("input", "override").expect("raw_set");
         set_var_snapshot(&lua, &table);
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed execute parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Execute { target, input, var } => {
                 assert_eq!(target, "## Child");
@@ -372,8 +497,7 @@ mod tests {
         let table = request_table(&lua, "execute");
         table.raw_set("target", "## Child").expect("raw_set");
         set_var_snapshot(&lua, &table);
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed execute parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Execute { input, .. } => assert_eq!(input, None),
             other => panic!("expected an execute request, got {other:?}"),
@@ -391,8 +515,7 @@ mod tests {
         collection.raw_set("key", true).expect("raw_set");
         table.raw_set("collection", collection).expect("raw_set");
         set_var_snapshot(&lua, &table);
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed fanout parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Fanout { worker, items, var } => {
                 assert_eq!(worker, "### Worker");
@@ -414,8 +537,7 @@ mod tests {
         table.raw_set("tool", "tl").expect("raw_set");
         let args = lua.create_table().expect("table creation cannot fail");
         table.raw_set("args", args).expect("raw_set");
-        let request =
-            Request::from_yield(&lua, &Value::Table(table)).expect("a well-formed mcp parses");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
             Request::Mcp { server, tool, args } => {
                 assert_eq!(server, "srv");
@@ -457,13 +579,26 @@ mod tests {
     }
 
     #[test]
-    fn an_infer_with_a_missing_or_non_string_prompt_is_rejected() {
+    fn an_infer_with_a_missing_or_non_string_prompt_is_the_calls_error() {
+        // The author-facing argument error rides back as the call's answer,
+        // so the shim raises it at the call site (pcall-able), exactly as
+        // the legacy callback's conversion error surfaced.
         let lua = Lua::new();
         let missing = request_table(&lua, "infer");
-        assert_direct_yield(Request::from_yield(&lua, &Value::Table(missing)));
+        match Request::from_yield(&lua, &Value::Table(missing)) {
+            YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "prompt must be a string, got nil");
+            }
+            other => panic!("expected the prompt call error, got {other:?}"),
+        }
         let typed_wrong = request_table(&lua, "infer");
         typed_wrong.raw_set("prompt", 42).expect("raw_set");
-        assert_direct_yield(Request::from_yield(&lua, &Value::Table(typed_wrong)));
+        match Request::from_yield(&lua, &Value::Table(typed_wrong)) {
+            YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "prompt must be a string, got integer");
+            }
+            other => panic!("expected the prompt call error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -491,25 +626,33 @@ mod tests {
         table.raw_set("target", 42).expect("raw_set");
         set_var_snapshot(&lua, &table);
         match Request::from_yield(&lua, &Value::Table(table)) {
-            Err(Error::LuaRuntime { message, .. }) => {
+            YieldParse::Call(Answer::Execute(Err(Error::LuaRuntime { message, .. }))) => {
                 assert!(
                     message.contains("section target must be a string, got integer"),
                     "unexpected message: {message}"
                 );
             }
-            other => panic!("expected the resolve_section_target error, got {other:?}"),
+            other => panic!("expected the resolve_section_target call error, got {other:?}"),
         }
     }
 
     #[test]
-    fn a_fanout_with_a_non_string_worker_is_rejected() {
+    fn a_fanout_with_a_non_string_worker_is_the_calls_error() {
+        // The author-facing argument error rides back as the call's answer,
+        // so the shim raises it at the call site (pcall-able), exactly as
+        // the legacy callback's conversion error surfaced.
         let lua = Lua::new();
         let table = request_table(&lua, "fanout");
         table.raw_set("worker", 42).expect("raw_set");
         let collection = lua.create_table().expect("table creation cannot fail");
         table.raw_set("collection", collection).expect("raw_set");
         set_var_snapshot(&lua, &table);
-        assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::Fanout(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "worker must be a string, got integer");
+            }
+            other => panic!("expected the worker call error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -533,11 +676,11 @@ mod tests {
         table.raw_set("collection", collection).expect("raw_set");
         set_var_snapshot(&lua, &table);
         match Request::from_yield(&lua, &Value::Table(table)) {
-            Err(Error::Lua(message)) => assert_eq!(
+            YieldParse::Call(Answer::Fanout(Err(Error::Lua(message)))) => assert_eq!(
                 message,
                 "fanout collection member at index 1 is a function; members must be data"
             ),
-            other => panic!("expected the collection member error, got {other:?}"),
+            other => panic!("expected the collection member call error, got {other:?}"),
         }
     }
 

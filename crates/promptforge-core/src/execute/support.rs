@@ -1,5 +1,5 @@
-//! Cross-cutting run helpers: the sync/async bridge, the turn counter, the
-//! checked timestamp, and the shared run constants.
+//! Cross-cutting run helpers: the turn counter, the checked timestamp, and
+//! the shared run constants.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
@@ -14,30 +14,6 @@ pub(crate) const SUPPORTED_MAJOR: u32 = 1;
 /// The run's final result when no section produced a reply: the generic
 /// completion text both fallback sites (an empty walk, an H1-only run) share.
 pub(crate) const GENERIC_COMPLETION: &str = "done";
-
-/// Bridges a section's synchronous Lua host call (`models.infer`,
-/// `handle:infer`, `execute`, `fanout`) into the async runtime.
-///
-/// The Lua VM runs synchronously on the worker thread, so a nested async host
-/// call must block that worker via [`tokio::task::block_in_place`] +
-/// [`tokio::runtime::Handle::block_on`]. `block_in_place` panics on a
-/// current-thread runtime; rather than let it panic, this detects that
-/// unsupported runtime and returns a concrete [`Error::Internal`] BEFORE
-/// entering the bridge (F3). The bridged future already yields
-/// [`Error::Interrupted`] on cancellation, so a typed interruption is preserved
-/// through this seam (F2's cancellation contract).
-pub(crate) fn bridge_blocking<F, T>(future: F) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    let handle = tokio::runtime::Handle::current();
-    if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
-        return Err(Error::Internal(
-            "a Lua host call (models.infer/handle:infer/execute/fanout) requires a multi-threaded Tokio runtime",
-        ));
-    }
-    tokio::task::block_in_place(|| handle.block_on(future))
-}
 
 /// Advances the shared turn counter with saturation, returning the 1-based
 /// index of the turn just started.
