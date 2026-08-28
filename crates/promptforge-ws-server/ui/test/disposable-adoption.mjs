@@ -171,7 +171,7 @@ const titles = [];
 const panel = root.add(
   new EditorPanel({
     createSurface: () => stub,
-    readFile: async () => ({ path: "C:\\ws\\a.txt", size: 6, modifiedMs: 1, text: "hello\n" }),
+    readFile: async () => ({ path: "C:\\ws\\a.txt", size: 6, token: "t1", text: "hello\n" }),
     writeFile: async () => {
       throw new Error("no writes in this test");
     },

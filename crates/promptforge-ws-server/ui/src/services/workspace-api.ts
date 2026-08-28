@@ -2,7 +2,7 @@
 // as unknown and is parsed field by field into a narrow type before any
 // consumer touches it; no casts. The tree panel lists directories through
 // fetchTree; the editor panel reads and writes files through fetchFile
-// and writeFile, which carry the server's modified-time conflict token.
+// and writeFile, which carry the server's opaque conflict token.
 
 /** One entry in a directory listing. */
 export interface TreeEntry {
@@ -27,8 +27,8 @@ export interface TreeListing {
 export interface WorkspaceFile {
   readonly path: string;
   readonly size: number;
-  /** Modification time in milliseconds; echoed back on write as the conflict token. */
-  readonly modifiedMs: number;
+  /** The server's opaque conflict token; echoed back verbatim on write. */
+  readonly token: string | null;
   readonly text: string;
 }
 
@@ -119,14 +119,17 @@ function parseFile(body: unknown): WorkspaceFile | null {
   if (!isRecord(body)) {
     return null;
   }
-  const { path, size, modified_ms, text } = body;
+  const { path, size, token, text } = body;
   if (typeof path !== "string" || typeof text !== "string") {
     return null;
   }
-  if (typeof size !== "number" || typeof modified_ms !== "number") {
+  if (typeof size !== "number") {
     return null;
   }
-  return { path, size, modifiedMs: modified_ms, text };
+  if (token !== null && typeof token !== "string") {
+    return null;
+  }
+  return { path, size, token, text };
 }
 
 /** The server's machine-readable error code, when the body carries one. */
@@ -138,7 +141,7 @@ function errorCode(body: unknown): string | null {
 }
 
 /**
- * Reads a confined workspace file's text with its size and modified-time
+ * Reads a confined workspace file's text with its size and conflict
  * token. Throws on transport, HTTP, and shape failures.
  */
 export async function fetchFile(path: string): Promise<WorkspaceFile> {
@@ -156,21 +159,22 @@ export async function fetchFile(path: string): Promise<WorkspaceFile> {
 }
 
 /**
- * Writes a confined workspace file. `expectedModifiedMs` is the token the
- * caller last read; the server refuses the write with a 409 when the file
- * changed on disk since, surfaced here as a ModifiedConflictError. Returns
- * the post-write metadata, including the fresh token.
+ * Writes a confined workspace file. `expectedToken` is the token the
+ * caller last read, passed back verbatim; the server refuses the write
+ * with a 409 when the file changed on disk since, surfaced here as a
+ * ModifiedConflictError. Returns the post-write metadata, including the
+ * fresh token.
  */
 export async function writeFile(
   path: string,
   text: string,
-  expectedModifiedMs: number | null,
+  expectedToken: string | null,
 ): Promise<WorkspaceFile> {
   const route = "/workspace/file";
   const response = await fetch(route, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, text, expected_modified_ms: expectedModifiedMs }),
+    body: JSON.stringify({ path, text, expected_token: expectedToken }),
   });
   const body: unknown = await response.json();
   if (!response.ok) {

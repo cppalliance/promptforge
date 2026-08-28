@@ -4,7 +4,8 @@
 //! A dropped folder becomes a granted root; a dropped file grants its parent
 //! directory. Grants live in memory for the running process only - profile
 //! persistence is a separate future consent decision. Every request path is
-//! checked lexically (no `..`, no alternate data stream names) and then
+//! checked lexically (no `..`, and on Windows no NTFS alternate data
+//! stream names) and then
 //! canonicalized and prefix-matched against the canonical grants before any
 //! filesystem operation, so traversal, symlink escapes, and UNC aliases
 //! cannot reach outside a grant. This is the same jail shape as the
@@ -13,6 +14,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
@@ -117,7 +119,7 @@ pub(crate) enum WorkspaceError {
         limit: u64,
     },
 
-    /// The on-disk modified time does not match the writer's token.
+    /// The on-disk conflict token does not match the writer's token.
     #[error("file changed on disk since it was read")]
     ModifiedConflict,
 }
@@ -163,9 +165,9 @@ pub(crate) struct FileContents {
     path: PathBuf,
     /// Byte length.
     size: u64,
-    /// Modification time in milliseconds since the Unix epoch; the token a
-    /// writer must echo back as `expected_modified_ms`.
-    modified_ms: u64,
+    /// The opaque conflict token a writer must echo back as
+    /// `expected_token`; see [`file_token`] for its derivation.
+    token: String,
     /// The file's UTF-8 text.
     text: String,
 }
@@ -237,7 +239,7 @@ impl Workspace {
         }
     }
 
-    /// Reads a confined UTF-8 text file with its size and modified-time
+    /// Reads a confined UTF-8 text file with its size and conflict
     /// token. Binary and oversized files are rejected.
     ///
     /// # Errors
@@ -260,29 +262,31 @@ impl Workspace {
         if bytes.contains(&0) {
             return Err(WorkspaceError::BinaryFile);
         }
+        let token = file_token(&metadata, &bytes);
         let text = String::from_utf8(bytes).map_err(|_| WorkspaceError::NotUtf8)?;
         Ok(FileContents {
             path: canonical,
             size: metadata.len(),
-            modified_ms: modified_ms(&metadata),
+            token,
             text,
         })
     }
 
     /// Writes `text` to a confined path, creating the file when it does not
-    /// exist. When the file exists, `expected_modified_ms` must match its
-    /// current modified-time token or the write is refused as a conflict.
+    /// exist. When the file exists, `expected_token` must match its current
+    /// conflict token or the write is refused as a conflict.
     ///
     /// # Errors
     /// Returns [`WorkspaceError::FileTooLarge`] when the text exceeds the
     /// size limit, [`WorkspaceError::ModifiedConflict`] when the token is
-    /// stale, and otherwise [`WorkspaceError`] when the path is forbidden,
-    /// outside every grant, not a regular file, or cannot be written.
+    /// stale, absent, or underivable for the existing file, and otherwise
+    /// [`WorkspaceError`] when the path is forbidden, outside every grant,
+    /// not a regular file, or cannot be written.
     pub(crate) fn write_file(
         &self,
         path: &Path,
         text: &str,
-        expected_modified_ms: Option<u64>,
+        expected_token: Option<&str>,
     ) -> Result<FileContents, WorkspaceError> {
         if text.len() as u64 > MAX_FILE_BYTES {
             return Err(WorkspaceError::FileTooLarge {
@@ -295,8 +299,11 @@ impl Workspace {
                 if !metadata.is_file() {
                     return Err(WorkspaceError::NotAFile);
                 }
-                if expected_modified_ms != Some(modified_ms(&metadata)) {
-                    return Err(WorkspaceError::ModifiedConflict);
+                // Fail closed: only a derivable on-disk token that equals
+                // the writer's token proves the file is unchanged.
+                match (current_token(&canonical, &metadata), expected_token) {
+                    (Some(current), Some(expected)) if current == expected => {}
+                    _ => return Err(WorkspaceError::ModifiedConflict),
                 }
             }
             Err(source) if source.kind() == io::ErrorKind::NotFound => {}
@@ -309,7 +316,7 @@ impl Workspace {
         Ok(FileContents {
             path: canonical,
             size: metadata.len(),
-            modified_ms: modified_ms(&metadata),
+            token: file_token(&metadata, text.as_bytes()),
             text: text.to_owned(),
         })
     }
@@ -450,11 +457,14 @@ fn canonicalize_simplified(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// Rejects the lexical tricks canonicalization would otherwise hide: `..`
-/// traversal and `:` alternate data stream names.
+/// traversal everywhere, and `:` alternate data stream names on Windows,
+/// where a colon in a name addresses an NTFS stream. Elsewhere a colon is
+/// an ordinary filename character and passes.
 fn reject_forbidden(path: &Path) -> Result<(), WorkspaceError> {
     for component in path.components() {
         match component {
             Component::ParentDir => return Err(WorkspaceError::ForbiddenComponent),
+            #[cfg(windows)]
             Component::Normal(name) if name.to_string_lossy().contains(':') => {
                 return Err(WorkspaceError::ForbiddenComponent);
             }
@@ -473,6 +483,46 @@ fn modified_ms(metadata: &fs::Metadata) -> u64 {
         .map_or(0, |duration| {
             u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
         })
+}
+
+/// The mtime half of the conflict token: full-precision modified time in
+/// nanoseconds since the Unix epoch plus the byte length. `None` when the
+/// filesystem reports no usable modified time, which callers cover with
+/// [`hash_token`] - collapsing the error to a constant would make every
+/// token on such a filesystem equal and no write would ever conflict.
+fn mtime_token(metadata: &fs::Metadata) -> Option<String> {
+    let duration = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(format!("{}-{}", duration.as_nanos(), metadata.len()))
+}
+
+/// The content-hash fallback token for filesystems without modified times.
+/// `DefaultHasher` is stable within one process run, which is all a token
+/// needs: a restart invalidates outstanding tokens toward conflict, never
+/// toward a silent overwrite.
+fn hash_token(contents: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    format!("h-{:016x}", hasher.finish())
+}
+
+/// A file's opaque conflict token from its metadata and already-read
+/// contents: the mtime form when available, otherwise the hash form.
+fn file_token(metadata: &fs::Metadata, contents: &[u8]) -> String {
+    mtime_token(metadata).unwrap_or_else(|| hash_token(contents))
+}
+
+/// The current on-disk token of an existing write target, reading the file
+/// only when the hash fallback demands it. `None` means no token could be
+/// derived - an unreadable or oversized file - and the caller must refuse
+/// the write rather than overwrite unverified contents.
+fn current_token(path: &Path, metadata: &fs::Metadata) -> Option<String> {
+    if let Some(token) = mtime_token(metadata) {
+        return Some(token);
+    }
+    if metadata.len() > MAX_FILE_BYTES {
+        return None;
+    }
+    fs::read(path).ok().map(|bytes| hash_token(&bytes))
 }
 
 /// The query string of `GET /workspace/tree`.
@@ -496,9 +546,9 @@ pub(crate) struct WriteRequest {
     path: String,
     /// The new UTF-8 contents.
     text: String,
-    /// The modified-time token the writer last read; required to match when
+    /// The conflict token the writer last read; required to match when
     /// the file already exists.
-    expected_modified_ms: Option<u64>,
+    expected_token: Option<String>,
 }
 
 /// The JSON body of `POST /workspace/grant`.
@@ -532,12 +582,16 @@ pub(crate) async fn read_file(
     respond(workspace.read_file(Path::new(&query.path)))
 }
 
-/// Writes a confined file after path, size, and modified-time validation.
+/// Writes a confined file after path, size, and conflict-token validation.
 pub(crate) async fn write_file(
     State(workspace): State<Workspace>,
     Json(body): Json<WriteRequest>,
 ) -> Response {
-    respond(workspace.write_file(Path::new(&body.path), &body.text, body.expected_modified_ms))
+    respond(workspace.write_file(
+        Path::new(&body.path),
+        &body.text,
+        body.expected_token.as_deref(),
+    ))
 }
 
 /// Registers a dropped path as a granted root for this process.
@@ -611,7 +665,7 @@ mod tests {
         let read = workspace.read_file(&file).expect("read inside the grant");
         assert_eq!(read.text, "hello");
         assert_eq!(read.size, 5);
-        assert_eq!(read.modified_ms, written.modified_ms);
+        assert_eq!(read.token, written.token);
     }
 
     #[test]
@@ -641,6 +695,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn alternate_data_stream_names_are_rejected() {
         let (workspace, dir) = granted_dir();
@@ -752,18 +807,82 @@ mod tests {
         let written = workspace
             .write_file(&file, "one", None)
             .expect("initial write");
-        let stale = written.modified_ms.wrapping_add(1);
+        let stale = format!("{}-stale", written.token);
         let error = workspace
-            .write_file(&file, "two", Some(stale))
+            .write_file(&file, "two", Some(&stale))
             .expect_err("a stale token must conflict");
         assert!(
             matches!(error, WorkspaceError::ModifiedConflict),
             "expected ModifiedConflict, got {error:?}"
         );
         let rewritten = workspace
-            .write_file(&file, "two", Some(written.modified_ms))
+            .write_file(&file, "two", Some(&written.token))
             .expect("the fresh token writes");
         assert_eq!(rewritten.text, "two");
+    }
+
+    #[test]
+    fn a_tokenless_write_to_an_existing_file_conflicts() {
+        let (workspace, dir) = granted_dir();
+        let file = dir.path().join("a.txt");
+        workspace
+            .write_file(&file, "one", None)
+            .expect("initial write");
+        let error = workspace
+            .write_file(&file, "two", None)
+            .expect_err("a write with no token over an existing file must conflict");
+        assert!(
+            matches!(error, WorkspaceError::ModifiedConflict),
+            "expected ModifiedConflict, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_token_tracks_mtime_and_length_not_write_count() {
+        let (workspace, dir) = granted_dir();
+        let file = dir.path().join("t.txt");
+        let written = workspace.write_file(&file, "one", None).expect("write");
+        let metadata = fs::metadata(&file).expect("metadata");
+        // The token is a pure function of full-precision mtime plus length:
+        // a same-content rewrite changes it exactly when the filesystem
+        // reports a new mtime or length, and never otherwise.
+        assert_eq!(Some(written.token.clone()), mtime_token(&metadata));
+        let rewritten = workspace
+            .write_file(&file, "one", Some(&written.token))
+            .expect("same-content rewrite");
+        let metadata = fs::metadata(&file).expect("metadata after rewrite");
+        assert_eq!(Some(rewritten.token), mtime_token(&metadata));
+        // Reading without a write in between re-derives the same token.
+        let reread = workspace.read_file(&file).expect("read");
+        let again = workspace.read_file(&file).expect("second read");
+        assert_eq!(reread.token, again.token);
+    }
+
+    #[test]
+    fn the_hash_fallback_token_round_trips() {
+        let token = hash_token(b"same contents");
+        assert_eq!(
+            token,
+            hash_token(b"same contents"),
+            "the fallback token must be stable for identical contents"
+        );
+        assert!(token.starts_with("h-"), "got {token}");
+        assert_ne!(token, hash_token(b"different contents"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn colon_named_files_read_and_write_on_unix() {
+        let (workspace, dir) = granted_dir();
+        let file = dir.path().join("backup-12:30.log");
+        let written = workspace
+            .write_file(&file, "ok", None)
+            .expect("a colon-named file writes on unix");
+        let read = workspace
+            .read_file(&file)
+            .expect("a colon-named file reads on unix");
+        assert_eq!(read.text, "ok");
+        assert_eq!(read.token, written.token);
     }
 
     #[test]
