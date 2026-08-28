@@ -756,7 +756,7 @@ mod tests {
     use super::{
         ServeOptions, ShutdownStep, ShutdownTrigger, check_server_matches_boot,
         check_workshop_matches_boot, classify_shutdown, failed_handshake, load_startup,
-        profiles_dir_for, shutdown_on_send, spawn,
+        panic_message, profiles_dir_for, shutdown_on_send, spawn,
     };
     use crate::api_error::{StartupError, StartupErrorKind};
     use promptforge_gateway_config::{Config, ProfileName};
@@ -1399,6 +1399,17 @@ endpoints = ["e"]
             error.kind(),
             StartupErrorKind::Bind,
             "the handshake's own error stays primary when the thread exits cleanly"
+        );
+    }
+
+    #[test]
+    fn panic_message_reads_each_payload_shape() {
+        assert_eq!(panic_message(&"borrowed"), "borrowed");
+        assert_eq!(panic_message(&String::from("owned")), "owned");
+        assert_eq!(
+            panic_message(&42_u64),
+            "non-string panic payload",
+            "a panic_any payload carries no displayable message"
         );
     }
 }
