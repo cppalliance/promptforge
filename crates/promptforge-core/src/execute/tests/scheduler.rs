@@ -7,6 +7,8 @@
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
 
+use std::num::NonZeroUsize;
+
 use super::*;
 use crate::execute::scheduler::Scheduler;
 use crate::model::{ModelBinding, ModelId, ModelInvocation};
@@ -2189,5 +2191,330 @@ async fn the_live_h1_pass_fires_no_section_boundaries() {
             .any(|(section, event)| section == "Boundaries"
                 && (event == &started || event == &finished)),
         "the live H1 pass fires no section boundaries: {observed:?}"
+    );
+}
+
+// --- Fanout on the scheduler: N arm chains interleaved by the driver ---
+// Each mirrored test names the legacy case it mirrors. The legacy cases
+// keep exercising the legacy fanout driver untouched; these prove the
+// scheduler's arm chains.
+
+/// Builds the run context for a scheduler fanout test with the given
+/// limits, so a window test can narrow the concurrency.
+fn scheduler_context_with_limits(prompt: &Prompt, limits: RunLimits) -> RunContext {
+    let ctx = RunContext::new(
+        prompt,
+        "",
+        &StoreRef::memory(),
+        LuaProgram::empty().expect("the empty chunk compiles"),
+        &RunConfig::new(EXECUTION).limits(limits),
+    );
+    *ctx.model_set()
+        .lock()
+        .expect("the model set mutex is not poisoned") = writer_models();
+    ctx
+}
+
+/// The prompt each gateway request carried, in arrival order.
+fn request_prompts(gateway: &ScriptedGateway) -> Vec<String> {
+    gateway
+        .requests()
+        .iter()
+        .map(|body| {
+            body["messages"][0]["content"]
+                .as_str()
+                .expect("an infer request carries a user message")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_results_follow_collection_order_not_finish_order() {
+    // Mirror of the legacy `results_follow_collection_order_not_finish_order`:
+    // arm "two" finishes first (one infer) while arm "one" is still parked
+    // on its second; the packed sequence must follow collection order. A
+    // join that keyed results by completion order would return "r2|r1:r3".
+    let gateway =
+        ScriptedGateway::start(vec![resp_text("r1"), resp_text("r2"), resp_text("r3")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'one', 'two'})\n\
+        return r[1].text .. '|' .. r[2].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        local first = models.infer(item .. ':1')\n\
+        if item == 'one' then\n\
+          return first .. ':' .. models.infer('one:2')\n\
+        end\n\
+        return first\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the fanout completes on the scheduler");
+
+    assert_eq!(out, "r1:r3|r2");
+    assert_eq!(
+        request_prompts(&gateway),
+        vec!["one:1", "two:1", "one:2"],
+        "both arms start before either completes, and arm one finishes last"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_arms_interleave_at_io_points_on_one_thread() {
+    // The interleaving proof: both arms reach their first infer before
+    // either resumes, so the gateway logs `one:1` then `two:1` - arms
+    // driven sequentially would log `one:1`, `one:2` first. Each arm
+    // returns its first answer, so the result is deterministic regardless
+    // of which arm's second answer lands first.
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("r1"),
+        resp_text("r2"),
+        resp_text("r3"),
+        resp_text("r4"),
+    ])
+    .await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'one', 'two'})\n\
+        return r[1].text .. '|' .. r[2].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        local a = models.infer(item .. ':1')\n\
+        local b = models.infer(item .. ':2')\n\
+        return a\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the fanout completes on the scheduler");
+
+    assert_eq!(out, "r1|r2");
+    let prompts = request_prompts(&gateway);
+    assert_eq!(prompts.len(), 4, "both arms run both infers: {prompts:?}");
+    assert_eq!(
+        prompts[..2],
+        ["one:1", "two:1"],
+        "the second arm reaches I/O before the first arm resumes: {prompts:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_concurrency_window_limits_active_arms() {
+    // The window mirror of the legacy `ArmWindow` contract: with the
+    // window at 1, each arm runs both of its infers before the next arm
+    // starts - a window that let arms overlap would interleave the
+    // requests (x:a, y:a, ...).
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("r1"),
+        resp_text("r2"),
+        resp_text("r3"),
+        resp_text("r4"),
+        resp_text("r5"),
+        resp_text("r6"),
+    ])
+    .await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'x', 'y', 'z'})\n\
+        return r[1].text .. '|' .. r[2].text .. '|' .. r[3].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        local a = models.infer(item .. ':a')\n\
+        local b = models.infer(item .. ':b')\n\
+        return a .. b\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_with_limits(
+        &prompt,
+        RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the windowed fanout completes on the scheduler");
+
+    assert_eq!(out, "r1r2|r3r4|r5r6");
+    assert_eq!(
+        request_prompts(&gateway),
+        vec!["x:a", "x:b", "y:a", "y:b", "z:a", "z:b"],
+        "with the window at 1 each arm finishes before the next starts"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
+    // Mirror of the legacy `fanout_arms_take_global_ids_and_per_fanout_index`
+    // plus the structured-result shape of `fanout_returns_structured_results`:
+    // each arm entry takes the next run-global id, `sys.index` is the
+    // 1-based per-fanout position, and the packed sequence carries `.ok`
+    // and `.item` with `__tostring` driving `table.concat`.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'a', 'b'})\n\
+        assert(r[1].ok and r[2].ok, 'both arms succeed')\n\
+        assert(r[2].item == 'b', 'the item rides the result object')\n\
+        store.append('ids.txt', 'parent:' .. sys.id .. '\\n')\n\
+        return table.concat(r, ',')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.append('ids.txt', sys.id .. ':' .. sys.index .. '\\n')\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the fanout completes on the scheduler");
+
+    assert_eq!(out, "a,b");
+    assert_eq!(
+        store.read("ids.txt").expect("the ids log"),
+        "2:1\n3:2\nparent:1\n",
+        "the arms take the next run-global ids with their per-fanout index"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_over_a_large_collection_refills_the_window() {
+    // Mirror of the legacy `fanout_accepts_a_list_over_the_old_default_cap`:
+    // a 1025-member collection runs to completion past the 8-wide default
+    // window - a refill that lost track of the next index would stall the
+    // driver or drop results.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local items = {}\n\
+        for i = 1, 1025 do items[i] = tostring(i) end\n\
+        local r = fanout('### Worker', items)\n\
+        return #r .. ':' .. r[1].text .. ':' .. r[1025].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a collection over the window width completes");
+
+    assert_eq!(out, "1025:1:1025");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
+    // Mirror of the legacy `jump_inside_a_fanout_arm_drives_a_child_walk`:
+    // the arm's remaining blocks are skipped, the walk continues on the
+    // target's own slice from the target (the run-global id sequence
+    // continues, the walk falls through to the target's following
+    // siblings), and the walk's reply becomes the arm's text. A
+    // `resolve_arm_target` that resolved over the wrong set would error
+    // the jump not-found; one that started the walk elsewhere would break
+    // the order log.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        jump('### Target')\n\
+        error('the arm remaining blocks are skipped')\n\
+        ```\n\n\
+        ### Target\n\n\
+        ```lua\n\
+        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        store.append('order.txt', 'Target\\n')\n\
+        ```\n\n\
+        ### Tail\n\n\
+        ```lua\n\
+        store.append('order.txt', 'Tail\\n')\n\
+        return 'tail-reply'\n\
+        ```\n";
+    let store = StoreRef::memory();
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a jump inside an arm drives a child walk");
+
+    assert_eq!(out, "tail-reply");
+    assert_eq!(
+        store.read("order.txt").expect("the order log"),
+        "Target\nTail\n",
+        "the child walk runs the target and falls through to its siblings"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
+    // Mirror of the legacy
+    // `jump_inside_a_fanout_arm_to_a_worker_child_walks_the_child_slice`:
+    // the descent runs the worker's child slice from the target, the target
+    // takes the next run-global id with no `item` seed (the transfer clears
+    // the arm's at-worker state, so the child walk runs as plain sections),
+    // and the walk falls through to the target's child siblings.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        jump('#### Child')\n\
+        error('the arm remaining blocks are skipped')\n\
+        ```\n\n\
+        #### Child\n\n\
+        ```lua\n\
+        assert(sys.id == 3, 'the child walk continues the run-global sys.id sequence')\n\
+        assert(item == nil, 'the child walk runs as a plain section')\n\
+        store.append('order.txt', 'Child\\n')\n\
+        ```\n\n\
+        #### ChildTail\n\n\
+        ```lua\n\
+        store.append('order.txt', 'ChildTail\\n')\n\
+        return 'child-tail-reply'\n\
+        ```\n";
+    let store = StoreRef::memory();
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a jump to a worker child walks the child slice");
+
+    assert_eq!(out, "child-tail-reply");
+    assert_eq!(
+        store.read("order.txt").expect("the order log"),
+        "Child\nChildTail\n",
+        "the child walk runs the target and falls through to its child siblings"
     );
 }

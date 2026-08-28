@@ -47,6 +47,19 @@ local function execute_section(target, input)
   return result
 end
 
+-- The collection passes through unconverted; the driver runs the
+-- member-wise conversion at the protocol boundary.
+local function fanout_collection(worker, collection)
+  local ok, result = yield({
+    op = "fanout",
+    worker = worker,
+    collection = collection,
+    var = var_snapshot(),
+  })
+  if not ok then error(result, 0) end
+  return result
+end
+
 -- The section install passes the section's models table; the live H1 base
 -- install passes nil (H1's live models table exists only per block, wrapped
 -- by __impl_coro_h1.lua) and takes `infer`/`wrap_handle` from the return.
@@ -59,6 +72,7 @@ end
 
 return {
   execute = execute_section,
+  fanout = fanout_collection,
   wrap_handle = wrap_handle,
   infer = infer,
 }

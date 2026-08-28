@@ -36,17 +36,24 @@
 //! H1 blocks as the driver loop's first chain, under the live pass's rules
 //! (id 0, no section observations, a jump is an error, a scalar return
 //! short-circuits the run), with the root walk starting from the H1 `var`
-//! hand-off. The fanout dispatch lands in a later step; a received `fanout`
-//! or `mcp` request is the protocol's typed reserved error.
+//! hand-off. A `fanout` request forks N arm chains (one per collection
+//! member) interleaved by the driver: at most the run's
+//! `max_fanout_concurrency` arms are active at once, each arm runs the
+//! same walk machinery as any chain over the worker's blocks, and the join
+//! state's preallocated per-index slots deliver the results to the parent
+//! in collection order, never finish order. A received `mcp` request is
+//! the protocol's typed reserved error.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use mlua::Thread;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
 use crate::client::GatewayClient;
+use crate::fanout;
 use crate::lua::{
     CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, resolve_model_binding,
     shim_live_h1_models,
@@ -58,7 +65,9 @@ use crate::resolve::RuntimeResolution;
 use crate::{Error, Result, cancel};
 
 use super::context::RunContext;
-use super::engine::{JumpTarget, resolve_jump_target};
+use super::engine::{
+    JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
+};
 use super::gateway::{GatewaySource, ResolutionContext};
 use super::protocol::{Answer, Request};
 use super::section_context::SectionContext;
@@ -87,19 +96,166 @@ struct RequestId(u64);
 struct FanoutId(u32);
 
 /// One live fanout's join state: the arms still running, the preallocated
-/// per-index result slots (collection order, never finish order), and the
-/// parent chain blocked on the join.
-///
-/// Defined with the scheduler's structures; exercised by the fanout step.
-#[allow(dead_code)]
-#[derive(Debug)]
-struct JoinState {
+/// per-index result slots (collection order, never finish order), the
+/// parent chain blocked on the join, the concurrency-window accounting, and
+/// the template every arm chain starts from.
+struct JoinState<'a> {
     /// Arms still running; at zero the parent resumes with the sequence.
     remaining: usize,
     /// One slot per collection index, so results land in collection order.
     results: Vec<Option<LuaFanoutResult>>,
     /// The chain that yielded the fanout, blocked until the join completes.
     parent: ChainId,
+    /// Arms currently active (unblocked or pending on I/O); bounded by
+    /// `window`.
+    active: usize,
+    /// The next collection index to start when a window slot frees.
+    next: usize,
+    /// The converted collection members, indexed by arm.
+    items: Vec<serde_json::Value>,
+    /// At most this many arms active at once: the run's
+    /// `max_fanout_concurrency`.
+    window: usize,
+    /// Everything an arm chain starts from, shared by every arm of the
+    /// fanout.
+    template: ArmTemplate<'a>,
+}
+
+/// The arm-chain construction inputs one fanout's arms share.
+#[derive(Clone)]
+struct ArmTemplate<'a> {
+    /// The fanout caller's walk position: an arm's visible set derives from
+    /// it (the caller's slice minus the caller, plus the caller's children,
+    /// minus the worker, plus the worker's children).
+    caller_slice: &'a [Section],
+    /// The caller's index in `caller_slice`.
+    caller_index: usize,
+    /// The slice the worker was resolved from (the caller's own slice or
+    /// the caller's children).
+    worker_slice: &'a [Section],
+    /// The worker's index in `worker_slice`.
+    worker_index: usize,
+    /// The fanout's run-context fork: the run's own observer and debug sink
+    /// (the legacy proxies exist to cross the spawned-task boundary, which
+    /// a chain never crosses) with a fresh turn counter, so arm turns count
+    /// against the fanout's own cap.
+    ctx: RunContext,
+    /// This fanout's store-write token: one per fanout, so the store's
+    /// write registry can tell two arms of this fanout (a write-write race)
+    /// from a later fanout's write (legal).
+    write_token: u64,
+    /// The caller's reply seed for every arm's roll-forward.
+    reply: Option<String>,
+    /// The caller's `var` snapshot; each arm seeds from its own clone and
+    /// its writes never reach the caller.
+    var: serde_json::Value,
+    /// The arms' execute depth: the fanout caller's depth plus one.
+    execute_depth: usize,
+    /// The caller's client snapshot: each arm starts from it, resolving one
+    /// lazily when absent.
+    client: Option<GatewayClient>,
+    /// The run's cancellation handle, captured at dispatch and handed to
+    /// each arm chain directly (the scheduler has no spawned arm tasks to
+    /// carry one across).
+    cancel: Option<cancel::CancelHandle>,
+}
+
+/// One arm chain's fanout state: where its result lands and what its
+/// worker entry is seeded with.
+struct ArmState<'a> {
+    /// The join this arm reports to.
+    fanout: FanoutId,
+    /// The arm's 0-based collection index: its result slot and (plus one)
+    /// its `sys.index` and write-scope arm id.
+    item_index: usize,
+    /// The arm's collection member: the `item` global and `{{ item }}`
+    /// substitution seed for the worker entry.
+    item: serde_json::Value,
+    /// This fanout's store-write token.
+    write_token: u64,
+    /// True while the worker is the chain's current section: the worker
+    /// entry gets the arm seeds, and a control transfer out of the worker
+    /// resolves over the arm's visible set. Cleared by the first jump.
+    at_worker: bool,
+    /// The fanout caller's walk position, as on the template.
+    caller_slice: &'a [Section],
+    /// The caller's index in `caller_slice`.
+    caller_index: usize,
+    /// The resolved worker's home slice position.
+    worker_slice: &'a [Section],
+    /// The worker's index in `worker_slice`.
+    worker_index: usize,
+    /// The run's cancellation handle, installed as the task-local around
+    /// each of the arm's steps, so cancellation reaches the arm's running
+    /// Lua through its instruction hook exactly as on the driver task.
+    cancel: Option<cancel::CancelHandle>,
+}
+
+/// A heading resolved against a chain's visible set: the slice the walk or
+/// a contained chain continues on, the target's index in it, and whether
+/// the target is a direct child of the current section (a descent).
+struct ChainTarget<'a> {
+    /// The slice the walk or chain continues on.
+    slice: &'a [Section],
+    /// The target's index in `slice`.
+    index: usize,
+    /// True when the target is a direct child of the current section.
+    child: bool,
+}
+
+/// Resolves `heading` against an at-worker arm's visible set: the fanout
+/// caller's visible set minus the worker, plus the worker's children - the
+/// set the legacy arm's control globals resolve over, built with the same
+/// helpers so resolution and its error listings match exactly.
+///
+/// A sibling-level target walks its own prompt slice from its index: the
+/// worker's home slice when it lives there, else the caller's children or
+/// the caller's slice. The resolved `(level, name)` pair is unique across
+/// the visible set (an ambiguous resolve already failed), so at most one
+/// slice contains it. One legacy edge narrows here: the legacy arm walks
+/// its materialized home slice (the caller's slice minus the caller and
+/// the worker, concatenated with the caller's children), so a target that
+/// precedes the worker never falls through back into it, and a
+/// level-matched member of the caller's sibling slice walks on into the
+/// caller's children; the scheduler walks the target's own prompt slice
+/// instead.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the heading is malformed, matches no
+/// visible section, or matches more than one (see
+/// [`fanout::resolve_sibling`]); [`Error::Internal`] when a resolved
+/// target is absent from every home slice (an invariant violation).
+fn resolve_arm_target<'a>(
+    caller_slice: &'a [Section],
+    caller_index: usize,
+    worker_slice: &'a [Section],
+    worker_index: usize,
+    heading: &str,
+) -> Result<ChainTarget<'a>> {
+    let caller = &caller_slice[caller_index];
+    let worker = &worker_slice[worker_index];
+    let mut visible = home_without(&visible_sections(caller_slice, caller), worker);
+    visible.extend(worker.children.iter().cloned());
+    let target = fanout::resolve_sibling(heading, &visible)?;
+    if let Some(index) = section_position(&worker.children, target) {
+        return Ok(ChainTarget {
+            slice: &worker.children,
+            index,
+            child: true,
+        });
+    }
+    for slice in [worker_slice, caller.children.as_slice(), caller_slice] {
+        if let Some(index) = section_position(slice, target) {
+            return Ok(ChainTarget {
+                slice,
+                index,
+                child: false,
+            });
+        }
+    }
+    Err(Error::Internal(
+        "a resolved arm target is absent from its home slices",
+    ))
 }
 
 /// One chain: a contained line of section execution, the scheduler's
@@ -165,6 +321,10 @@ struct Chain<'a> {
     client: Option<GatewayClient>,
     /// The execute parent blocked on this chain, if any.
     parent: Option<ChainId>,
+    /// The fanout-arm state when this chain is a fanout arm: the arm runs
+    /// the same walk machinery as any chain, and its finish writes its
+    /// join's result slot instead of an execute answer.
+    arm: Option<ArmState<'a>>,
     /// The live H1 pass marker: the prompt's H1 blocks under its title.
     /// `Some` chains run the live pass's rules instead of the walk's: the
     /// frame keeps id 0, no section observations fire, a recorded jump is
@@ -212,10 +372,7 @@ pub(crate) struct Scheduler<'a> {
     /// One entry per in-flight leaf request, mapping it to the parked chain.
     pending: HashMap<RequestId, ChainId>,
     /// One join state per live fanout.
-    ///
-    /// Defined with the scheduler's structures; exercised by the fanout step.
-    #[allow(dead_code)]
-    joins: HashMap<FanoutId, JoinState>,
+    joins: HashMap<FanoutId, JoinState<'a>>,
     /// The send half every spawned leaf task posts its answer to. The
     /// channel is unbounded: each task sends exactly once, and the in-flight
     /// count is already bounded by the chains that produced them.
@@ -228,9 +385,6 @@ pub(crate) struct Scheduler<'a> {
     /// The next leaf-request id.
     next_request: u64,
     /// The next fanout id.
-    ///
-    /// Defined with the scheduler's structures; exercised by the fanout step.
-    #[allow(dead_code)]
     next_fanout: u32,
     /// The run's gateway source: chains resolve their client slot through
     /// it on first inference.
@@ -364,15 +518,17 @@ impl<'a> Scheduler<'a> {
 
     /// Creates one chain over `slice` from `index` and returns its id. The
     /// chain enters its first section on its first step; `addressed` marks
-    /// an addressed arrival (an execute target), which runs even when the
-    /// section is marked off-walk. The chain's `var` slot seeds from `var`
-    /// (an execute chain's caller snapshot, discarded with the chain).
+    /// an addressed arrival (an execute target or a fanout arm's worker),
+    /// which runs even when the section is marked off-walk. The chain's
+    /// `var` slot seeds from `var` (an execute chain's or arm's caller
+    /// snapshot, discarded with the chain). `arm` carries the fanout-arm
+    /// state for an arm chain.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain keeps its context fork, position, entry mode, parent, var seed, and depth explicit and linear"
+        reason = "the chain keeps its context fork, position, entry mode, parent, var seed, depth, and arm state explicit and linear"
     )]
     fn start_chain(
         &mut self,
@@ -383,6 +539,7 @@ impl<'a> Scheduler<'a> {
         parent: Option<ChainId>,
         var: &serde_json::Value,
         execute_depth: usize,
+        arm: Option<ArmState<'a>>,
     ) -> Result<ChainId> {
         let id = ChainId(
             u32::try_from(self.chains.len())
@@ -403,6 +560,7 @@ impl<'a> Scheduler<'a> {
             execute_depth,
             client: None,
             parent,
+            arm,
             h1: None,
         });
         Ok(id)
@@ -415,7 +573,7 @@ impl<'a> Scheduler<'a> {
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
     fn start_root_walk(&mut self, sections: &'a [Section], var: &serde_json::Value) -> Result<()> {
-        let root = self.start_chain(self.ctx.clone(), sections, 0, false, None, var, 0)?;
+        let root = self.start_chain(self.ctx.clone(), sections, 0, false, None, var, 0, None)?;
         // Seed the root chain's client slot from the run's configured
         // client, as the legacy walk's slot is seeded from run()'s client:
         // a prose block before any infer must use it rather than fall back
@@ -454,6 +612,7 @@ impl<'a> Scheduler<'a> {
             execute_depth: 0,
             client,
             parent: None,
+            arm: None,
             h1: Some(self.ctx.prompt().h1_blocks.as_slice()),
         });
         Ok(id)
@@ -487,7 +646,7 @@ impl<'a> Scheduler<'a> {
         // H1's binds already landed in the shared sets the views read.
         let when = now_rfc3339_checked()?;
         let walk_ctx = self.ctx.with_walk_state(&when);
-        let root = self.start_chain(walk_ctx, sections, 0, false, None, &var, 0)?;
+        let root = self.start_chain(walk_ctx, sections, 0, false, None, &var, 0, None)?;
         self.chains[root.index()].client = self.client.ready().cloned();
         self.ready.push_back(root);
         Ok(())
@@ -512,6 +671,38 @@ impl<'a> Scheduler<'a> {
             let frame = SectionContext::new_live_h1(
                 &chain.ctx,
                 chain.client.as_ref(),
+                VmSetupMode::Scheduler,
+            )?;
+            chain.frame = Some(frame);
+            chain.block = 0;
+            return Ok(true);
+        }
+        // A fanout arm's first entry constructs the worker frame with the
+        // arm's own seeds: the collection item, the store-write scope, the
+        // caller's cloned `var`, and the worker's visible set for the
+        // `list_from_section` callback. Later entries of the arm's walk
+        // (after a jump) are plain sections on the walk path below.
+        if let Some(arm) = &chain.arm
+            && arm.at_worker
+        {
+            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
+            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
+            let (item_index, item, write_token) =
+                (arm.item_index, arm.item.clone(), arm.write_token);
+            let worker = &worker_slice[worker_index];
+            let caller = &caller_slice[caller_index];
+            let home = home_without(&visible_sections(caller_slice, caller), worker);
+            let frame = SectionContext::new_fanout_arm(
+                &chain.ctx,
+                worker,
+                &home,
+                item_index,
+                item,
+                write_token,
+                chain.execute_depth,
+                chain.reply.as_deref(),
+                &chain.client,
+                &chain.var,
                 VmSetupMode::Scheduler,
             )?;
             chain.frame = Some(frame);
@@ -546,12 +737,30 @@ impl<'a> Scheduler<'a> {
         Ok(true)
     }
 
+    /// Runs one ready chain to its next suspension point. An arm chain's
+    /// step runs inside the arm's own cancel scope: the handle is the
+    /// run's, cloned at dispatch, so the scope re-installs the same
+    /// task-local the driver already runs under - the per-arm wiring the
+    /// legacy engine needed a spawn boundary crossing for (PF-CANCEL-002).
+    async fn step(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+        let cancel = self.chains[id.index()]
+            .arm
+            .as_ref()
+            .and_then(|arm| arm.cancel.clone());
+        // Boxed so the driver future carries a pointer, not the step body.
+        cancel::maybe_scope(cancel, Box::pin(self.step_inner(id, root_result))).await
+    }
+
     /// Runs one ready chain to its next suspension point: resume a
     /// suspended coroutine with its delivered answer, or advance the walk -
     /// entering the next section, starting the next Lua block's coroutine,
     /// running one prose block inline, or falling through at a section's
     /// end.
-    async fn step(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
+    async fn step_inner(
+        &mut self,
+        id: ChainId,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
@@ -773,9 +982,9 @@ impl<'a> Scheduler<'a> {
     /// rolled forward; the armed drop firing `SECTION_FINISHED`, a jump
     /// being a completion), resolves the heading against the jumper's
     /// visible set, and moves the walk. A sibling target sets the index
-    /// within the same slice, addressed; a child target pushes the current
-    /// position onto the chain's position stack and descends into the
-    /// jumper's child slice from the target, addressed.
+    /// within the target's slice, addressed; a child target pushes the
+    /// current position onto the chain's position stack and descends into
+    /// the jumper's child slice from the target, addressed.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the reply or `var` read-back fails (the
@@ -796,25 +1005,67 @@ impl<'a> Scheduler<'a> {
             drop(frame);
             (chain.slice, chain.index)
         };
-        // `slice` borrows the prompt tree, not the arena, so the jumper and
-        // its child slice outlive the chain borrow above.
+        let target = self.resolve_chain_target(id, heading)?;
+        let chain = &mut self.chains[id.index()];
+        if let Some(arm) = &mut chain.arm {
+            // The worker's own entry is left behind by the transfer; later
+            // entries of the arm's walk are plain sections.
+            arm.at_worker = false;
+        }
+        if target.child {
+            chain.positions.push((slice, index));
+        }
+        chain.slice = target.slice;
+        chain.index = target.index;
+        chain.addressed = true;
+        Ok(())
+    }
+
+    /// Resolves `heading` against the chain's current section's visible set
+    /// and returns the slice the walk or a contained chain continues on:
+    /// the jumper's child slice for a direct child, the target's own slice
+    /// otherwise.
+    ///
+    /// For an arm chain still at its worker, the visible set is the fanout
+    /// caller's visible set minus the worker, plus the worker's children -
+    /// the set the legacy arm's control globals resolve over.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the heading is malformed, matches no
+    /// visible section, or matches more than one (see
+    /// [`fanout::resolve_sibling`]).
+    fn resolve_chain_target(&self, id: ChainId, heading: &str) -> Result<ChainTarget<'a>> {
+        let chain = &self.chains[id.index()];
+        if let Some(arm) = &chain.arm
+            && arm.at_worker
+        {
+            let (caller_slice, caller_index) = (arm.caller_slice, arm.caller_index);
+            let (worker_slice, worker_index) = (arm.worker_slice, arm.worker_index);
+            return resolve_arm_target(
+                caller_slice,
+                caller_index,
+                worker_slice,
+                worker_index,
+                heading,
+            );
+        }
+        let slice = chain.slice;
+        let index = chain.index;
+        // `slice` borrows the prompt tree, not the arena, so the jumper
+        // outlives the chain borrow above.
         let jumper = &slice[index];
         match resolve_jump_target(heading, slice, jumper)? {
-            JumpTarget::Sibling(target) => {
-                let chain = &mut self.chains[id.index()];
-                chain.index = target;
-                chain.addressed = true;
-            }
-            JumpTarget::Child(child) => {
-                let children = jumper.children.as_slice();
-                let chain = &mut self.chains[id.index()];
-                chain.positions.push((slice, index));
-                chain.slice = children;
-                chain.index = child;
-                chain.addressed = true;
-            }
+            JumpTarget::Child(child) => Ok(ChainTarget {
+                slice: &jumper.children,
+                index: child,
+                child: true,
+            }),
+            JumpTarget::Sibling(sibling) => Ok(ChainTarget {
+                slice,
+                index: sibling,
+                child: false,
+            }),
         }
-        Ok(())
     }
 
     /// Applies one Lua block coroutine's outcome: parks a yielded chain on
@@ -1019,8 +1270,8 @@ impl<'a> Scheduler<'a> {
     /// Dispatches one validated request from a suspended chain.
     ///
     /// # Errors
-    /// Returns the typed protocol error for a received `fanout` or `mcp`
-    /// request, which no call surface produces yet.
+    /// Returns the typed protocol error for a received `mcp` request, which
+    /// no call surface produces yet.
     fn dispatch(&mut self, id: ChainId, request: Request) -> Result<()> {
         match request {
             Request::Infer { prompt, binding } => {
@@ -1031,7 +1282,10 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_execute(id, &target, input.as_deref(), &var);
                 Ok(())
             }
-            Request::Fanout { .. } => Err(Request::fanout_reserved()),
+            Request::Fanout { worker, items, var } => {
+                self.dispatch_fanout(id, &worker, &items, &var);
+                Ok(())
+            }
             Request::Mcp { .. } => Err(Request::mcp_reserved()),
         }
     }
@@ -1163,27 +1417,282 @@ impl<'a> Scheduler<'a> {
                 "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
             )));
         }
-        let slice = chain.slice;
-        let index = chain.index;
         let args = input.unwrap_or_else(|| chain.ctx.args()).to_owned();
         let child_ctx = chain.ctx.with_args(&args);
         let client = chain.client.clone();
-        // `chain`'s arena borrow ends here; `slice` borrows the prompt tree.
-        let caller = &slice[index];
-        let (child_slice, start) = match resolve_jump_target(target, slice, caller)? {
-            JumpTarget::Child(child_index) => (caller.children.as_slice(), child_index),
-            JumpTarget::Sibling(sibling_index) => (slice, sibling_index),
-        };
-        let child = self.start_chain(child_ctx, child_slice, start, true, Some(id), var, depth)?;
+        // `chain`'s arena borrow ends here; the resolution borrows the
+        // prompt tree, so the target's slice outlives it.
+        let target_section = self.resolve_chain_target(id, target)?;
+        let child = self.start_chain(
+            child_ctx,
+            target_section.slice,
+            target_section.index,
+            true,
+            Some(id),
+            var,
+            depth,
+            None,
+        )?;
         // The child inherits the caller's client slot: an already-resolved
         // client is shared, an unresolved one stays lazy.
         self.chains[child.index()].client = client;
         Ok(child)
     }
 
+    /// Dispatches a `fanout` request: resolves the worker, creates the join
+    /// state with its preallocated per-index result slots, and starts the
+    /// first window of arm chains; the parent blocks until the join
+    /// completes. Every dispatch failure - the depth cap, an empty
+    /// collection, worker resolution - is the call's answer, resumed into
+    /// the caller so an author `pcall` can catch it exactly as on the
+    /// legacy callback path.
+    fn dispatch_fanout(
+        &mut self,
+        id: ChainId,
+        worker: &str,
+        items: &[serde_json::Value],
+        var: &serde_json::Value,
+    ) {
+        match self.prepare_fanout(id, worker, items, var) {
+            Ok(()) => {}
+            Err(error) => {
+                self.chains[id.index()].incoming = Some(Answer::Fanout(Err(error)));
+                self.ready.push_back(id);
+            }
+        }
+    }
+
+    /// The fallible half of fanout dispatch: the depth cap checked against
+    /// the caller's execute-depth field (each arm runs one level deeper),
+    /// the empty collection rejected before any scheduling, the worker
+    /// resolved over the caller's visible set, and the join state and
+    /// first window of arm chains created.
+    fn prepare_fanout(
+        &mut self,
+        id: ChainId,
+        worker_name: &str,
+        items: &[serde_json::Value],
+        var: &serde_json::Value,
+    ) -> Result<()> {
+        let chain = &self.chains[id.index()];
+        if chain.h1.is_some() {
+            // Unreachable: the H1 control stubs raise before anything can
+            // yield. A panic on the empty walk slice would be worse than
+            // the typed invariant error.
+            return Err(Error::Internal(
+                "the live H1 pass cannot dispatch a fanout request",
+            ));
+        }
+        let depth = chain.execute_depth + 1;
+        if depth > MAX_EXECUTE_DEPTH {
+            return Err(Error::Lua(format!(
+                "fanout recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+            )));
+        }
+        // An empty collection runs zero arms; that is an authoring bug (a
+        // list section that parsed empty, a wrong variable), not a valid
+        // run.
+        if items.is_empty() {
+            return Err(Error::Lua(
+                "fanout over an empty collection: no work is likely a bug".to_owned(),
+            ));
+        }
+        // An at-worker arm's fanout resolves over the worker's visible set
+        // (handled inside `resolve_chain_target`); the new arms in turn
+        // treat the worker as their caller.
+        let (caller_slice, caller_index) = match &chain.arm {
+            Some(arm) if arm.at_worker => (arm.worker_slice, arm.worker_index),
+            _ => (chain.slice, chain.index),
+        };
+        let ctx = chain.ctx.clone();
+        let reply = chain.reply.clone();
+        let client = chain.client.clone();
+        // `chain`'s arena borrow ends here; the resolution borrows the
+        // prompt tree, so the worker's slice outlives it.
+        let target = self.resolve_chain_target(id, worker_name)?;
+        let worker = &target.slice[target.index];
+        if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
+            return Err(Error::Lua(format!(
+                "section `{}` is a list section, not a worker template",
+                worker.name
+            )));
+        }
+        let fanout_id = FanoutId(self.next_fanout);
+        self.next_fanout += 1;
+        self.joins.insert(
+            fanout_id,
+            JoinState {
+                remaining: items.len(),
+                results: vec![None; items.len()],
+                parent: id,
+                active: 0,
+                next: 0,
+                items: items.to_vec(),
+                window: ctx.limits().fanout_concurrency().get(),
+                template: ArmTemplate {
+                    caller_slice,
+                    caller_index,
+                    worker_slice: target.slice,
+                    worker_index: target.index,
+                    // Arms report through the run's own observer and debug
+                    // sink directly - the legacy proxies exist to cross the
+                    // spawned-task boundary, which a chain never crosses -
+                    // while the fanout's turn counter stays fresh, so arm
+                    // turns count against the fanout's own cap.
+                    ctx: ctx.with_effective_handles(
+                        Arc::clone(ctx.observer()),
+                        ctx.debug().cloned(),
+                        Arc::new(AtomicU32::new(0)),
+                    ),
+                    write_token: ctx.store().next_write_token(),
+                    reply,
+                    var: var.clone(),
+                    execute_depth: depth,
+                    client,
+                    cancel: cancel::current(),
+                },
+            },
+        );
+        self.refill_fanout(fanout_id)
+    }
+
+    /// Starts arm chains for one fanout while a window slot is free and
+    /// items remain, enqueuing each on the ready queue. Each arm is a chain
+    /// over the worker alone (a singleton slice), addressed so an off-walk
+    /// worker runs; a jump out of the worker retargets the arm's walk.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the join is not live or the run's
+    /// chain count exceeds `u32`.
+    fn refill_fanout(&mut self, fanout: FanoutId) -> Result<()> {
+        loop {
+            let (index, item, template) = {
+                let Some(join) = self.joins.get_mut(&fanout) else {
+                    return Err(Error::Internal("a window refill implies a live join"));
+                };
+                if join.next >= join.items.len() || join.active >= join.window {
+                    return Ok(());
+                }
+                let index = join.next;
+                join.next += 1;
+                join.active += 1;
+                (index, join.items[index].clone(), join.template.clone())
+            };
+            let worker_slice = template.worker_slice;
+            let worker = &worker_slice[template.worker_index];
+            let arm = ArmState {
+                fanout,
+                item_index: index,
+                item,
+                write_token: template.write_token,
+                at_worker: true,
+                caller_slice: template.caller_slice,
+                caller_index: template.caller_index,
+                worker_slice,
+                worker_index: template.worker_index,
+                cancel: template.cancel.clone(),
+            };
+            let chain = self.start_chain(
+                template.ctx.clone(),
+                std::slice::from_ref(worker),
+                0,
+                true,
+                None,
+                &template.var,
+                template.execute_depth,
+                Some(arm),
+            )?;
+            // The arm inherits the caller's reply seed and client slot, as
+            // the legacy arm's payload carries them.
+            self.chains[chain.index()].reply.clone_from(&template.reply);
+            self.chains[chain.index()]
+                .client
+                .clone_from(&template.client);
+            self.ready.push_back(chain);
+        }
+    }
+
+    /// Applies one arm chain's end to its join: a success writes the arm's
+    /// preallocated slot (so results land in collection order) and refills
+    /// the window; the last arm's landing resumes the parent with the
+    /// packed sequence. A fatal arm error fails the join: the parent
+    /// resumes with the error and the join is removed, so a sibling that
+    /// finishes later is discarded - the legacy abort of sibling arms lands
+    /// with the fanout failure-semantics step.
+    fn complete_arm(&mut self, arm: ArmState<'a>, outcome: Result<String>) {
+        /// How the join moves on one arm's end.
+        enum ArmEnd {
+            /// The slot is written and arms remain: refill the window.
+            Continue,
+            /// The last arm landed: pack the sequence for the parent.
+            Complete,
+            /// A fatal arm error: fail the fanout.
+            Fail(Error),
+        }
+        let end = {
+            let Some(join) = self.joins.get_mut(&arm.fanout) else {
+                // The join already failed on a sibling's fatal error and was
+                // removed; this arm's outcome is discarded with it.
+                return;
+            };
+            join.active -= 1;
+            match outcome {
+                Ok(text) => {
+                    join.results[arm.item_index] = Some(LuaFanoutResult::success(arm.item, text));
+                    join.remaining -= 1;
+                    if join.remaining == 0 {
+                        ArmEnd::Complete
+                    } else {
+                        ArmEnd::Continue
+                    }
+                }
+                Err(error) => ArmEnd::Fail(error),
+            }
+        };
+        match end {
+            ArmEnd::Continue => {
+                if let Err(error) = self.refill_fanout(arm.fanout) {
+                    self.fail_fanout(arm.fanout, error);
+                }
+            }
+            ArmEnd::Complete => {
+                let Some(join) = self.joins.remove(&arm.fanout) else {
+                    return;
+                };
+                // Every slot is Some here: `remaining` reached zero, so
+                // every arm wrote its slot. The `ok_or_else` keeps that
+                // invariant guarded, mirroring the legacy driver's check.
+                let results = join
+                    .results
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, slot)| {
+                        slot.ok_or_else(|| {
+                            Error::Lua(format!("fanout arm {} finished without a reply", index + 1))
+                        })
+                    })
+                    .collect();
+                self.chains[join.parent.index()].incoming = Some(Answer::Fanout(results));
+                self.ready.push_back(join.parent);
+            }
+            ArmEnd::Fail(error) => self.fail_fanout(arm.fanout, error),
+        }
+    }
+
+    /// Fails one fanout's join: the parent resumes with the error and the
+    /// join is removed, so a sibling that finishes later is discarded.
+    fn fail_fanout(&mut self, fanout: FanoutId, error: Error) {
+        let Some(join) = self.joins.remove(&fanout) else {
+            return;
+        };
+        self.chains[join.parent.index()].incoming = Some(Answer::Fanout(Err(error)));
+        self.ready.push_back(join.parent);
+    }
+
     /// Finishes one chain: the frame's teardown boundary when the chain
     /// ends mid-section, then the outcome's delivery - the run's result for
-    /// the root chain, the execute answer for a child chain.
+    /// the root chain, the execute answer for a child chain, the join
+    /// slot's result for a fanout arm.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
     /// walk that ran off its slice's last section (the chain's reply slot
@@ -1196,6 +1705,7 @@ impl<'a> Scheduler<'a> {
     ) {
         let chain = &mut self.chains[id.index()];
         let parent = chain.parent;
+        let arm = chain.arm.take();
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
@@ -1210,9 +1720,9 @@ impl<'a> Scheduler<'a> {
             // A chain ending mid-section (a scalar return) reads its final
             // var back before teardown, exactly as a completed section does
             // at fall-through (the walk rolls it forward; an execute chain
-            // discards its clone), and arms the completion flag so the
-            // frame's drop fires SECTION_FINISHED. A failure - the
-            // read-back's included - drops the frame unarmed.
+            // or a fanout arm discards its clone), and arms the completion
+            // flag so the frame's drop fires SECTION_FINISHED. A failure -
+            // the read-back's included - drops the frame unarmed.
             if let Some(frame) = frame.as_mut() {
                 frame.read_var()?;
                 if !is_h1 {
@@ -1224,9 +1734,9 @@ impl<'a> Scheduler<'a> {
                 None => match reply {
                     Some(reply) => reply,
                     // The legacy mapping: the top-level chain falls back to
-                    // the shared generic completion, an execute chain to the
-                    // empty string.
-                    None if parent.is_none() => GENERIC_COMPLETION.to_owned(),
+                    // the shared generic completion; an execute chain or a
+                    // fanout arm to the empty string.
+                    None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
                     None => String::new(),
                 },
             };
@@ -1234,6 +1744,10 @@ impl<'a> Scheduler<'a> {
         });
         // The frame drops here: the single teardown boundary.
         drop(frame);
+        if let Some(arm) = arm {
+            self.complete_arm(arm, outcome);
+            return;
+        }
         match parent {
             None => *root_result = Some(outcome),
             Some(parent_id) => {
