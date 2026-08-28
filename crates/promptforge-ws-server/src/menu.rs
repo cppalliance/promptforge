@@ -73,6 +73,27 @@ struct MenuState {
 }
 
 impl MenuState {
+    /// Applies the remembered-else-first selection rule for `profile`:
+    /// the remembered model when `models` still holds it, else the first
+    /// catalog model. Records the choice in per-profile memory and
+    /// returns its pending write when a model was selected. Shared by
+    /// [`MenuBus::finish_switch`] and [`MenuBus::restore_selection`].
+    #[must_use]
+    fn select_for_profile(
+        &mut self,
+        profile: String,
+        models: &[serde_json::Value],
+    ) -> Option<PendingWrite> {
+        self.selected_model = self
+            .last_selected
+            .get(&profile)
+            .filter(|id| models_contain(models, id))
+            .cloned()
+            .or_else(|| first_model_id(models));
+        let id = self.selected_model.clone()?;
+        self.remember(profile, id)
+    }
+
     /// Records `id` as the remembered model for `profile` and snapshots
     /// the serialized memory as a [`PendingWrite`] for the caller to
     /// perform once the state lock is released - the mutators run on the
@@ -227,15 +248,38 @@ impl MenuBus {
         if outcome == SwitchOutcome::Completed {
             state.active = Some(target.clone());
             let models = self.catalog_models();
-            state.selected_model = state
-                .last_selected
-                .get(&target)
-                .filter(|id| models_contain(&models, id))
-                .cloned()
-                .or_else(|| first_model_id(&models));
-            if let Some(id) = state.selected_model.clone() {
-                pending = state.remember(target, id);
-            }
+            pending = state.select_for_profile(target, &models);
+        }
+        self.publish(&state);
+        drop(state);
+        store_pending(pending);
+    }
+
+    /// Restores a boot-time selection: when nothing is selected and the
+    /// catalog holds a model, selects the remembered model for the
+    /// active profile when the catalog still holds it, else the first
+    /// catalog model - the rule [`MenuBus::finish_switch`] applies - and
+    /// publishes a fresh snapshot. With a selection already applied, or
+    /// no selectable catalog model, this is a no-op and publishes
+    /// nothing. The heartbeat calls this after its boot and reconnect
+    /// refreshes settle, so a reconnect whose selection survived the
+    /// outage changes nothing.
+    pub(crate) fn restore_selection(&self) {
+        let mut state = self.lock_state();
+        if state.selected_model.is_some() {
+            return;
+        }
+        let models = self.catalog_models();
+        let pending = if let Some(profile) = state.active.clone() {
+            state.select_for_profile(profile, &models)
+        } else {
+            // No active profile means no memory to consult and none to
+            // record; fall straight back to the first catalog model.
+            state.selected_model = first_model_id(&models);
+            None
+        };
+        if state.selected_model.is_none() {
+            return;
         }
         self.publish(&state);
         drop(state);
@@ -797,6 +841,86 @@ mod tests {
             snapshot(&menu).selected_model.as_deref(),
             Some("model-a"),
             "a remembered model the catalog no longer holds falls back to the first"
+        );
+    }
+
+    #[test]
+    fn restore_selection_picks_the_remembered_model_for_the_active_profile() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join(WORKSHOP_STATE_FILE),
+            r#"{"last_selected":{"main":"model-b"}}"#,
+        )
+        .expect("write fixture");
+        let menu = MenuBus::new(catalog_of(&["model-a", "model-b"]), Some(dir.path()));
+        menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
+        menu.restore_selection();
+        assert_eq!(
+            snapshot(&menu).selected_model.as_deref(),
+            Some("model-b"),
+            "boot restores the remembered model for the active profile"
+        );
+    }
+
+    #[test]
+    fn restore_selection_falls_back_to_the_first_model_when_memory_is_stale() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join(WORKSHOP_STATE_FILE),
+            r#"{"last_selected":{"main":"retired-model"}}"#,
+        )
+        .expect("write fixture");
+        let menu = MenuBus::new(catalog_of(&["model-a", "model-b"]), Some(dir.path()));
+        menu.set_profiles(vec!["main".to_string()], Some("main".to_string()));
+        menu.restore_selection();
+        assert_eq!(
+            snapshot(&menu).selected_model.as_deref(),
+            Some("model-a"),
+            "a remembered model the catalog lacks falls back to the first"
+        );
+    }
+
+    #[test]
+    fn restore_selection_without_an_active_profile_picks_the_first_model() {
+        let menu = menu_of(&["model-a", "model-b"]);
+        menu.restore_selection();
+        assert_eq!(
+            snapshot(&menu).selected_model.as_deref(),
+            Some("model-a"),
+            "with no active profile there is no memory; the first model serves"
+        );
+    }
+
+    #[test]
+    fn restore_selection_with_a_selection_applied_publishes_nothing() {
+        let menu = menu_of(&["model-a", "model-b"]);
+        menu.set_selected("model-b")
+            .expect("the id is in the catalog");
+        let mut receiver = menu.subscribe();
+        menu.restore_selection();
+        assert!(
+            matches!(receiver.try_recv(), Err(TryRecvError::Empty)),
+            "an existing selection makes the restore a no-op"
+        );
+        assert_eq!(
+            snapshot(&menu).selected_model.as_deref(),
+            Some("model-b"),
+            "the surviving selection is untouched"
+        );
+    }
+
+    #[test]
+    fn restore_selection_with_an_empty_catalog_publishes_nothing() {
+        let menu = menu_of(&[]);
+        let mut receiver = menu.subscribe();
+        menu.restore_selection();
+        assert!(
+            matches!(receiver.try_recv(), Err(TryRecvError::Empty)),
+            "an empty catalog leaves nothing to restore"
+        );
+        assert!(
+            menu.latest().is_none(),
+            "a no-op restore retains no snapshot"
         );
     }
 }
