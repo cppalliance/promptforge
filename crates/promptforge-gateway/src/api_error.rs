@@ -43,6 +43,9 @@ pub enum StartupErrorKind {
     Provisioning,
     /// Binding the listener failed.
     Bind,
+    /// Spawning the gateway thread failed, or the thread exited or
+    /// panicked before binding the listener.
+    Thread,
     /// Serving requests failed.
     Serve,
     /// Starting the hosted workshop server failed. Produced only by builds
@@ -58,6 +61,8 @@ enum StartupRepr {
     Provisioning(#[source] LocalError),
     #[error("failed to bind the listener")]
     Bind(#[source] std::io::Error),
+    #[error("gateway thread error")]
+    Thread(#[source] std::io::Error),
     #[error("serve error")]
     Serve(#[source] ServeReprSource),
     #[cfg(feature = "workshop")]
@@ -73,6 +78,7 @@ impl StartupError {
             StartupRepr::Config(_) => StartupErrorKind::Config,
             StartupRepr::Provisioning(_) => StartupErrorKind::Provisioning,
             StartupRepr::Bind(_) => StartupErrorKind::Bind,
+            StartupRepr::Thread(_) => StartupErrorKind::Thread,
             StartupRepr::Serve(_) => StartupErrorKind::Serve,
             #[cfg(feature = "workshop")]
             StartupRepr::Workshop(_) => StartupErrorKind::Workshop,
@@ -89,6 +95,10 @@ impl StartupError {
 
     pub(crate) fn bind(err: std::io::Error) -> Self {
         StartupError(StartupRepr::Bind(err))
+    }
+
+    pub(crate) fn thread(err: std::io::Error) -> Self {
+        StartupError(StartupRepr::Thread(err))
     }
 
     pub(crate) fn serve(err: ServeError) -> Self {
@@ -165,5 +175,9 @@ mod tests {
         let bind = StartupError::bind(std::io::Error::other("x"));
         assert_eq!(bind.kind(), StartupErrorKind::Bind);
         assert!(bind.source().is_some());
+
+        let thread = StartupError::thread(std::io::Error::other("x"));
+        assert_eq!(thread.kind(), StartupErrorKind::Thread);
+        assert!(thread.source().is_some());
     }
 }

@@ -297,7 +297,7 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
     let thread = std::thread::Builder::new()
         .name("promptforge-gateway".to_string())
         .spawn(move || serve_thread(&options, &ready_tx, shutdown_rx))
-        .map_err(StartupError::bind)?;
+        .map_err(StartupError::thread)?;
     match ready_rx.recv() {
         Ok(Ok(ready)) => Ok(GatewayHandle {
             url: ready.url,
@@ -305,17 +305,49 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         }),
-        Ok(Err(error)) => {
-            let _ = thread.join();
-            Err(error)
-        }
-        Err(_) => {
-            let _ = thread.join();
-            Err(StartupError::bind(std::io::Error::other(
-                "gateway thread exited before binding",
-            )))
+        Ok(Err(error)) => Err(failed_handshake(thread, Some(error))),
+        Err(_) => Err(failed_handshake(thread, None)),
+    }
+}
+
+/// The error [`spawn`] returns after the readiness handshake fails. The
+/// gateway thread is joined first, and a panic payload is downcast into
+/// the error text: a panicked thread is the one way the readiness channel
+/// closes with no message ([`serve_thread`] reports every early exit
+/// through it), and a discarded join result would lose the message of the
+/// very panic that broke the handshake.
+fn failed_handshake(
+    thread: JoinHandle<Result<(), StartupError>>,
+    reported: Option<StartupError>,
+) -> StartupError {
+    match thread.join() {
+        Ok(_) => reported.unwrap_or_else(|| {
+            StartupError::thread(std::io::Error::other(
+                "gateway thread exited before binding without reporting an error",
+            ))
+        }),
+        Err(payload) => {
+            // `&payload` would unsize the Box itself into `dyn Any`,
+            // hiding the real payload type from the downcasts.
+            let panic = panic_message(&*payload);
+            let message = match &reported {
+                Some(error) => format!("{error}; the gateway thread then panicked: {panic}"),
+                None => format!("gateway thread panicked before binding: {panic}"),
+            };
+            StartupError::thread(std::io::Error::other(message))
         }
     }
+}
+
+/// The message carried by a panic payload: the `panic!` string when there
+/// is one, or a note that the payload is not a string (a `panic_any`
+/// call), which carries no displayable message.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic payload")
 }
 
 /// The gateway thread's body: load config, provision, build a runtime, bind,
@@ -654,9 +686,10 @@ mod tests {
 
     use super::{
         ServeOptions, ShutdownTrigger, check_server_matches_boot, check_workshop_matches_boot,
-        classify_shutdown, load_startup, profiles_dir_for, shutdown_on_send, spawn,
+        classify_shutdown, failed_handshake, load_startup, profiles_dir_for, shutdown_on_send,
+        spawn,
     };
-    use crate::api_error::StartupErrorKind;
+    use crate::api_error::{StartupError, StartupErrorKind};
     use promptforge_gateway_config::{Config, ProfileName};
 
     #[test]
@@ -1174,5 +1207,53 @@ endpoints = ["e"]
         let (_tmp, options) = spawn_fixture(&catalog);
         let error = spawn(&options).expect_err("a taken port must fail spawn");
         assert_eq!(error.kind(), StartupErrorKind::Bind);
+    }
+
+    #[test]
+    fn a_panicked_gateway_thread_folds_its_panic_message_into_the_error() {
+        let thread = std::thread::Builder::new()
+            .name("gateway-panic-fixture".to_string())
+            .spawn(|| -> Result<(), StartupError> {
+                panic!("the gateway thread lost its config");
+            })
+            .expect("the fixture thread spawns");
+        let error = failed_handshake(thread, None);
+        assert_eq!(error.kind(), StartupErrorKind::Thread);
+        let text = error_text(&error);
+        assert!(
+            text.contains("the gateway thread lost its config"),
+            "the panic message survives the join: {text}"
+        );
+        assert!(
+            !text.contains("failed to bind the listener"),
+            "a pre-bind panic is not misnamed a bind failure: {text}"
+        );
+    }
+
+    #[test]
+    fn a_silent_thread_exit_is_thread_kind_not_bind_kind() {
+        let thread = std::thread::Builder::new()
+            .name("gateway-exit-fixture".to_string())
+            .spawn(|| -> Result<(), StartupError> { Ok(()) })
+            .expect("the fixture thread spawns");
+        let error = failed_handshake(thread, None);
+        assert_eq!(error.kind(), StartupErrorKind::Thread);
+        let text = error_text(&error);
+        assert!(text.contains("exited before binding"), "got: {text}");
+    }
+
+    #[test]
+    fn a_reported_handshake_error_survives_the_join_unchanged() {
+        let thread = std::thread::Builder::new()
+            .name("gateway-report-fixture".to_string())
+            .spawn(|| -> Result<(), StartupError> { Ok(()) })
+            .expect("the fixture thread spawns");
+        let reported = StartupError::bind(std::io::Error::other("port taken"));
+        let error = failed_handshake(thread, Some(reported));
+        assert_eq!(
+            error.kind(),
+            StartupErrorKind::Bind,
+            "the handshake's own error stays primary when the thread exits cleanly"
+        );
     }
 }
