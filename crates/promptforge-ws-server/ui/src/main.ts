@@ -55,8 +55,9 @@ disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.
 disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
-// An aborted chat recycles the socket, so no terminal status frame for it
-// ever arrives; the bar clears its own activity LED instead.
+// An aborted chat rides a cancel frame the server answers with nothing, so
+// no terminal status frame for it ever arrives; the bar clears its own
+// activity LED instead.
 disposables.add(workshopSocket.onAbort(() => statusBar.clearActivity()));
 workshopSocket.connect();
 

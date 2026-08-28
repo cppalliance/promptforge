@@ -27,6 +27,22 @@ export interface ModelsFrame {
   models: CatalogModel[];
 }
 
+/**
+ * One pushed workbench snapshot: the server-owned Model-menu state.
+ * Absent options are `null`, never omitted keys - every push is the
+ * complete menu state. The server computes `chat_ready` (catalog
+ * non-empty, a model selected, no switch in flight, gateway reachable);
+ * the UI never derives it.
+ */
+export interface WorkbenchFrame {
+  type: "workbench";
+  profiles: string[];
+  active: string | null;
+  switching: string | null;
+  selected: string | null;
+  chat_ready: boolean;
+}
+
 /** The chat payload sent upstream in one `{"type":"chat",...}` frame. */
 export interface ChatPayload {
   model: string;

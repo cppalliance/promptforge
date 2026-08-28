@@ -1,9 +1,9 @@
 // Stop mid-stream: with a generation hanging (one delta, no done), the
 // send button becomes a stop button and the observer's thinking frame
-// holds the amber LED. Pressing Stop aborts the chat and recycles the
-// socket, so no terminal status frame ever arrives for it; the bar must
-// clear its own activity LED on the abort and stay idle once the stream's
-// leftover pulse timers settle.
+// holds the amber LED. Pressing Stop aborts the chat, which rides a cancel
+// frame the server answers with nothing, so no terminal status frame ever
+// arrives for it; the bar must clear its own activity LED on the abort and
+// stay idle once the stream's leftover pulse timers settle.
 // Run: node test/stop-mid-stream.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
