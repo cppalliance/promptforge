@@ -55,10 +55,13 @@ mod tests {
 
     use crate::app::fixtures::body_bytes;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn a_stalled_route_answers_408_at_its_deadline() {
         // The handler stalls far past the deadline; the layer must answer
-        // for it rather than let the caller hang.
+        // for it rather than let the caller hang. Time is paused, so the
+        // stall and the deadline advance virtually and cost no wall clock;
+        // the socketless oneshot does no real I/O that paused time would
+        // freeze.
         let app = with_deadline(
             Router::new().route(
                 "/stalled",
