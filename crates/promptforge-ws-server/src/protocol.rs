@@ -19,6 +19,16 @@
 //! completion is dropped and the tape records the abandonment, while
 //! every other chat on the socket streams on. A cancel naming no live
 //! chat is ignored, because a cancel racing its own `done` is normal.
+//! A cancel gets no reply frame of any kind - no acknowledgment, and no
+//! terminal `done` or `error` for the chat it tore down - so the client
+//! settles the canceled chat locally when it sends the frame.
+//!
+//! A chat without an `id` occupies the single untagged slot, and a
+//! second untagged chat sent while one is live is refused with an
+//! id-less `error` frame. That refusal is indistinguishable on the wire
+//! from a terminal error of the live untagged chat - both are
+//! `{"type":"error","message":...}` with no `id` - so a client should
+//! never run a second untagged chat; tag every concurrent chat instead.
 //!
 //! `{"type":"select_model","model":"..."}` selects the chat model: the
 //! menu validates the id against the retained catalog and publishes a
