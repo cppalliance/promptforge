@@ -251,10 +251,12 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     { id: "alpha", description: "the alpha model" },
     { id: "beta" },
   ];
-  const modelMenu = new ModelService();
-  modelMenu.setModels(catalog);
   const selections = [];
-  modelMenu.onDidChangeCurrent((id) => selections.push(id));
+  const modelMenu = new ModelService((id) => (selections.push(id), true));
+  modelMenu.setModels(catalog);
+  // The selection is server-owned: it arrives as a snapshot, never from
+  // the catalog itself.
+  modelMenu.applySelected("alpha");
   const { menus, itemsOf, isOpen } = scenario({ modelMenu });
   menus.model.click();
   check("the Model menu opens", isOpen("model"));
@@ -279,8 +281,11 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     rows[0].title === "the alpha model",
   );
   rows[1].click();
-  check("clicking a model row dispatches selectModel", selections.join(",") === "beta");
+  check("clicking a model row sends the select command", selections.join(",") === "beta");
   check("selecting a model closes the menu", !isOpen("model"));
+  // The server answers the command with a snapshot; only then does the
+  // selection move.
+  modelMenu.applySelected("beta");
   menus.model.click();
   check(
     "the rebuilt menu marks the new selection",
@@ -289,7 +294,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
 }
 
 {
-  const { menus, itemsOf, isOpen } = scenario({ modelMenu: new ModelService() });
+  const { menus, itemsOf, isOpen } = scenario({ modelMenu: new ModelService(() => true) });
   menus.model.click();
   const rows = itemsOf("model");
   check(
@@ -305,7 +310,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
 // --- Model menu: gateway profiles section -------------------------------------
 
 {
-  const modelMenu = new ModelService();
+  const modelMenu = new ModelService(() => true);
   modelMenu.setModels([{ id: "alpha" }]);
   const switches = [];
   const profileMenu = {
@@ -345,7 +350,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
 }
 
 {
-  const modelMenu = new ModelService();
+  const modelMenu = new ModelService(() => true);
   modelMenu.setModels([{ id: "alpha" }]);
   const profileMenu = { profiles: ["main"], active: "main", switchTo: () => {} };
   const { menus, itemsOf } = scenario({ modelMenu, profileMenu });
@@ -366,7 +371,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     active: "qwen38",
     switchTo: (name) => switches.push(name),
   };
-  const { menus, itemsOf } = scenario({ modelMenu: new ModelService(), profileMenu });
+  const { menus, itemsOf } = scenario({ modelMenu: new ModelService(() => true), profileMenu });
   menus.model.click();
   const rows = itemsOf("model");
   const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;

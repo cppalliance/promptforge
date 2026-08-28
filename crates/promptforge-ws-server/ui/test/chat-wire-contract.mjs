@@ -1,6 +1,6 @@
 // The wire contract of a chat submission against /ws: the app opens exactly
-// one persistent socket on boot, the boot catalog auto-selects its first
-// entry so the frame carries that model id, the frame is the OpenAI shape
+// one persistent socket on boot, the boot workbench snapshot's selection
+// carries into the frame's model id, the frame is the OpenAI shape
 // (type "chat", numeric id, messages, no stream flag), and the rendered
 // reply's markdown link comes out of the sanitizer stamped target="_blank"
 // rel="noopener". Run: node test/chat-wire-contract.mjs (after `npm run
@@ -41,7 +41,7 @@ await bootWorkbench("a chat submission honors the /ws wire contract", async ({ c
   if (request.type !== "chat") failures.push("the frame is not a chat frame");
   if (typeof request.id !== "number") failures.push("chat frame carried no numeric id");
   if (request.model !== "test-model") {
-    failures.push("the boot catalog's first entry was not auto-selected");
+    failures.push("the boot workbench snapshot's selection did not reach the chat frame");
   }
   if ("stream" in request) failures.push("chat frame must not carry a stream flag");
   const first = request.messages?.[0];

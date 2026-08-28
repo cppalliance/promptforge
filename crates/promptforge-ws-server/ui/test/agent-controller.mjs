@@ -179,8 +179,10 @@ const dock = createDockview(window.document.getElementById("dock"), {
 initZones(dock);
 
 let pluginBuilds = 0;
-const models = new ModelService();
-models.setCurrent("model-a");
+// The selection is server-owned: applySelected stands in for the
+// workbench snapshot that would carry it.
+const models = new ModelService(() => true);
+models.applySelected("model-a");
 const agents = new AgentController({
   dock,
   provider: {},
@@ -218,7 +220,7 @@ check("a second tab leaves the first agent live", !chatA.destroyed);
 
 // Through the service, not applyModel directly: this covers the
 // controller's onDidChangeCurrent subscription.
-models.setCurrent("model-b");
+models.applySelected("model-b");
 check(
   "a model change broadcasts to every live engine",
   lastModel(chatA) === "model-b" && lastModel(chatB) === "model-b",
