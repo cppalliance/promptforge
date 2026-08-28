@@ -22,7 +22,7 @@ import "./window-menu.css";
 import type { Event } from "../base/event";
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import { showAboutDialog } from "./about-dialog";
-import type { ModelService } from "../services/model-service";
+import type { CatalogModel } from "../services/protocol";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
@@ -57,6 +57,23 @@ export interface WorkshopMenuCommands {
  */
 export interface AgentMenuCommands {
   readonly newAgent: () => void;
+}
+
+/**
+ * The model-catalog surface the Model menu reads and dispatches through:
+ * the menu lists every catalog model with the selected one checked, and
+ * clicking another asks the server to select it. setCurrent returns
+ * nothing here: the view surfaces a failed send itself (the composition
+ * root routes it to the status bar), the same seam
+ * ProfileMenuService.switchTo uses for a failed switch.
+ */
+export interface ModelMenuService {
+  /** The model catalog, as pushed by the server. */
+  readonly models: readonly CatalogModel[];
+  /** The selected model's id, or "" when no model is selected. */
+  readonly current: string;
+  /** Asks the server to select the model; the view surfaces a failed send. */
+  setCurrent(id: string): void;
 }
 
 /**
@@ -184,7 +201,7 @@ export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
   readonly workshop: WorkshopMenuCommands;
   /** The shared model state the dynamic Model menu reads and writes. */
-  readonly modelMenu?: ModelService;
+  readonly modelMenu?: ModelMenuService;
   /** The gateway-profile state the Model menu's Profiles section reads. */
   readonly profileMenu?: ProfileMenuService;
 }): WindowMenuCommands & IDisposable {
@@ -342,22 +359,36 @@ export function setupWindowMenus(options: {
     const service = options.modelMenu;
     const profileService = options.profileMenu;
     const isIdle = (): boolean => !profileService?.switching;
+    // Wiping the popover destroys the focused row and drops keyboard
+    // focus to body, so a snapshot arriving mid-navigation would yank a
+    // screen-reader user's position. Remember the focused row by its
+    // stable identity (model id / profile name, never index) and restore
+    // focus onto the equivalent new row after the rebuild.
+    const focusedKey = handle.rows.find(
+      (row) => row.element === document.activeElement,
+    )?.element.dataset["menuRowKey"];
     handle.popover.textContent = "";
     handle.rows.length = 0;
     const models = service ? service.models : [];
-    const appendRow = (def: CommandItem, extras: (element: HTMLButtonElement) => void): void => {
+    const appendRow = (
+      key: string,
+      def: CommandItem,
+      extras: (element: HTMLButtonElement) => void,
+    ): void => {
       const row = buildCommandRow(def, extras);
+      row.element.dataset["menuRowKey"] = key;
       handle.rows.push(row);
       handle.popover.appendChild(row.element);
     };
     const appendRadioRow = (
+      key: string,
       label: string,
       isSelected: boolean,
       isPending: boolean,
       tooltip: string | undefined,
       run: () => void,
     ): void => {
-      appendRow({ kind: "command", label, run, enabled: isIdle }, (element) => {
+      appendRow(key, { kind: "command", label, run, enabled: isIdle }, (element) => {
         element.classList.add("window-titlebar__item--checkable");
         element.setAttribute("role", "menuitemradio");
         element.setAttribute("aria-checked", isSelected ? "true" : "false");
@@ -368,6 +399,11 @@ export function setupWindowMenus(options: {
         check.className = "window-titlebar__item-check";
         if (isPending) {
           check.classList.add("window-titlebar__item-check--pending");
+          // The "…" mark is aria-hidden and aria-checked stays false
+          // until the server confirms, so without this the switch target
+          // is indistinguishable from the other disabled rows for
+          // assistive tech. The next settle rebuilds rows without it.
+          element.setAttribute("aria-busy", "true");
         }
         check.setAttribute("aria-hidden", "true");
         check.textContent = isPending ? "…" : isSelected ? "✓" : "";
@@ -376,14 +412,20 @@ export function setupWindowMenus(options: {
     };
     if (!service || models.length === 0) {
       appendRow(
+        "empty",
         { kind: "command", label: "No models available", run: () => {}, enabled: () => false },
         () => {},
       );
     } else {
       const selected = service.current;
       for (const model of models) {
-        appendRadioRow(model.id, model.id === selected, false, model.description, () =>
-          service.setCurrent(model.id),
+        appendRadioRow(
+          `model:${model.id}`,
+          model.id,
+          model.id === selected,
+          false,
+          model.description,
+          () => service.setCurrent(model.id),
         );
       }
     }
@@ -391,25 +433,35 @@ export function setupWindowMenus(options: {
     // choice; a single-profile (or profile-less) gateway keeps the menu as
     // it was.
     const profiles = profileService ? profileService.profiles : [];
-    if (!profileService || profiles.length < 2) {
-      return;
-    }
-    const separator = document.createElement("div");
-    separator.className = "window-titlebar__separator";
-    separator.setAttribute("role", "separator");
-    handle.popover.appendChild(separator);
-    appendRow(
-      { kind: "command", label: "Profiles", run: () => {}, enabled: () => false },
-      () => {},
-    );
-    for (const profile of profiles) {
-      appendRadioRow(
-        profile,
-        profile === profileService.active,
-        !isIdle() && profile === profileService.switching,
-        undefined,
-        () => profileService.switchTo(profile),
+    if (profileService && profiles.length >= 2) {
+      const separator = document.createElement("div");
+      separator.className = "window-titlebar__separator";
+      separator.setAttribute("role", "separator");
+      handle.popover.appendChild(separator);
+      appendRow(
+        "profiles-header",
+        { kind: "command", label: "Profiles", run: () => {}, enabled: () => false },
+        () => {},
       );
+      for (const profile of profiles) {
+        appendRadioRow(
+          `profile:${profile}`,
+          profile,
+          profile === profileService.active,
+          !isIdle() && profile === profileService.switching,
+          undefined,
+          () => profileService.switchTo(profile),
+        );
+      }
+    }
+    // Only when a row held focus before the wipe: a rebuild while focus
+    // is elsewhere must not grab it. The snapshot may have dropped the
+    // focused row entirely; the first row is the fallback.
+    if (focusedKey !== undefined) {
+      const restored =
+        handle.rows.find((row) => row.element.dataset["menuRowKey"] === focusedKey) ??
+        handle.rows[0];
+      restored?.element.focus();
     }
   }
 

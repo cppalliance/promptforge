@@ -3,8 +3,9 @@
 // concurrent generations by request id, so two Agent tabs can stream at
 // the same time. Drives two provider streams over a scripted fake socket
 // with interleaved id-tagged delta frames and checks each stream renders
-// only its own content, one stream's done frame leaves the other
-// streaming, and both settle on their own terminal frames.
+// only its own content, one stream's done frame settles its promise while
+// the other is still mid-flight (settlements are independent, not held
+// until every stream ends), and both settle on their own terminal frames.
 // Run: node test/chat-concurrent-streams.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -122,6 +123,17 @@ await assertNoLeaks(lifecycle, async () => {
   wire.message({ type: "delta", content: "alpha-2 ", id: idA });
   wire.message({ type: "delta", content: "beta-2", id: idB });
   wire.message({ type: "done", id: idB });
+
+  // Independent settlement: B's promise must resolve on its own done
+  // frame while A is still mid-flight (its final delta not yet sent). A
+  // bug holding every settlement until all streams end would leave B
+  // pending here and lose the race to the timeout.
+  const bSettledMidFlight = await Promise.race([
+    streamB.then(() => true),
+    sleep(500).then(() => false),
+  ]);
+  check("one stream's done frame settles its promise while the other still streams", bSettledMidFlight);
+
   wire.message({ type: "delta", content: "alpha-3", id: idA });
   wire.message({ type: "done", id: idA });
 
@@ -131,10 +143,6 @@ await assertNoLeaks(lifecycle, async () => {
     events.filter((event) => event.type === "text_delta").map((event) => event.delta).join("");
   check("the first tab's stream carries only its own deltas", text(eventsA) === "alpha-1 alpha-2 alpha-3");
   check("the second tab's stream carries only its own deltas", text(eventsB) === "beta-1 beta-2");
-  check(
-    "one stream's done frame leaves the other streaming",
-    eventsA.some((event) => event.type === "text_delta" && event.delta === "alpha-3"),
-  );
   check(
     "both streams finish on their own terminal frames",
     eventsA.at(-1)?.type === "finish" && eventsB.at(-1)?.type === "finish",

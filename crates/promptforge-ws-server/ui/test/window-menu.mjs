@@ -7,9 +7,10 @@
 // command), the Window menu's Workshop Panel toggle and its sharing of
 // the visible controls' command path, the Model menu's dynamic catalog
 // rows, selection marking, and empty state, the switching-state
-// rendering (all rows disabled, pending mark on the switch target) and
-// the live rebuild while the popover is open, Edit target preservation
-// and disabled commands, the About dialog's focus trap and close, and
+// rendering (all rows disabled, pending mark and aria-busy on the switch
+// target), the live rebuild while the popover is open (including
+// keyboard focus surviving the rebuild by row identity), Edit target
+// preservation and disabled commands, the About dialog's focus trap and close, and
 // the browser-mode popover wiring with inert native window commands.
 // Run: node test/window-menu.mjs
 import { readFile } from "node:fs/promises";
@@ -422,6 +423,11 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     "the pending row stays a radio item for assistive tech",
     rows[3].getAttribute("role") === "menuitemradio",
   );
+  check(
+    "only the switch target is announced busy",
+    rows[3].getAttribute("aria-busy") === "true" &&
+      rows.filter((row) => row.getAttribute("aria-busy") === "true").length === 1,
+  );
   rows[3].click();
   check("a disabled profile row cannot dispatch another switch", switches.length === 0);
   rows[0].click();
@@ -459,6 +465,10 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     isOpen("model") && rows.every((row) => row.getAttribute("aria-disabled") === "true"),
   );
   check("the pending mark appears without reopening", markOf(rows[3]).textContent === "…");
+  check(
+    "the switch target is announced busy without reopening",
+    rows[3].getAttribute("aria-busy") === "true",
+  );
   // The switch completes: the final snapshot restores truth, including
   // the server-owned model selection.
   profileMenu.switching = "";
@@ -481,11 +491,72 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     "the checked model row tracks the snapshot selection",
     rows[0].getAttribute("aria-checked") === "true" && markOf(rows[0]).textContent === "✓",
   );
+  check(
+    "the busy announcement clears when the switch settles",
+    rows.every((row) => row.getAttribute("aria-busy") === null),
+  );
   menus.model.click();
   check(
     "closing the menu disposes the workbench subscription",
     !isOpen("model") && listeners.size === 0,
   );
+}
+
+// --- Model menu: keyboard focus survives a live rebuild ------------------------
+
+{
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }, { id: "beta" }]);
+  const listeners = new Set();
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switching: "",
+    onDidChange: (listener) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    switchTo: () => {},
+  };
+  const { window, menus, itemsOf, keydown } = scenario({ modelMenu, profileMenu });
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  menus.model.click();
+  // No row focused yet: a snapshot must not grab focus into the popover.
+  const before = window.document.activeElement;
+  for (const listener of listeners) listener();
+  check(
+    "a snapshot with no row focused leaves focus alone",
+    window.document.activeElement === before,
+  );
+  keydown("ArrowDown");
+  keydown("ArrowDown");
+  check(
+    "focus sits on the second model row before the snapshot",
+    window.document.activeElement === itemsOf("model")[1] &&
+      rowLabel(itemsOf("model")[1]) === "beta",
+  );
+  for (const listener of listeners) listener();
+  check(
+    "a snapshot mid-navigation re-focuses the equivalent new row",
+    window.document.activeElement === itemsOf("model")[1] &&
+      rowLabel(itemsOf("model")[1]) === "beta",
+  );
+  keydown("ArrowDown");
+  check(
+    "keyboard navigation continues from the restored row",
+    window.document.activeElement === itemsOf("model")[2],
+  );
+  keydown("ArrowUp");
+  // The snapshot replaced the catalog and the focused row is gone: focus
+  // falls back to the first row, never to body.
+  modelMenu.setModels([{ id: "gamma" }]);
+  for (const listener of listeners) listener();
+  check(
+    "a snapshot that drops the focused row falls back to the first row",
+    window.document.activeElement === itemsOf("model")[0] &&
+      rowLabel(itemsOf("model")[0]) === "gamma",
+  );
+  menus.model.click();
 }
 
 // --- Help menu: About dialog --------------------------------------------------

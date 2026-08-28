@@ -19,7 +19,7 @@ import { WorkshopSocket } from "./services/workshop-socket";
 import { StatusBar } from "./ui/status-bar";
 import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./ui/voice";
 import { setupWindowChrome } from "./ui/window-chrome";
-import { setupWindowMenus, type ProfileMenuService } from "./ui/window-menu";
+import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/window-menu";
 import { setupWorkspaceDrops } from "./ui/workspace-drops";
 import { AgentController } from "./ui/workshop/agent-controller";
 import { restoreLayout, startLayoutPersistence } from "./ui/workshop/layout-persistence";
@@ -223,6 +223,25 @@ const profileMenu: ProfileMenuService = {
   },
 };
 
+// The Model menu's catalog section: a thin view over the model service.
+// Selecting a model is a command on the socket - the confirmed selection
+// arrives back in a workbench snapshot - so, exactly as with a profile
+// switch above, the only local message is for the failure the server can
+// never report: the socket is down and nothing went out.
+const modelMenu: ModelMenuService = {
+  get models() {
+    return modelService.models;
+  },
+  get current() {
+    return modelService.current;
+  },
+  setCurrent(id: string): void {
+    if (!modelService.setCurrent(id)) {
+      statusBar.showLocal(`Could not select ${id}: the workshop socket is down`, "error");
+    }
+  },
+};
+
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the model service's catalog and writes the selection back
@@ -233,7 +252,7 @@ disposables.add(
   setupWindowMenus({
     agents,
     workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
-    modelMenu: modelService,
+    modelMenu,
     profileMenu,
   }),
 );
