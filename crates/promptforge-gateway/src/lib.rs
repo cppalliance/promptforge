@@ -67,7 +67,7 @@ use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse, RerankRequest,
     RerankResponse,
 };
-use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig};
+use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig, WorkshopConfig};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -99,15 +99,26 @@ pub(crate) struct ProfileSelection {
     pub(crate) model_allowlist: Option<Vec<String>>,
 }
 
+/// The boot file's boot-owned sections, fixed for the process lifetime and
+/// enforced against every profile switch.
+#[derive(Debug, Clone)]
+pub(crate) struct BootOwned {
+    /// The boot `[server]`: the socket and the gateway bearer key.
+    pub(crate) server: ServerConfig,
+    /// The boot `[workshop]`, when present: the hosted workshop is started
+    /// once at boot and cannot be moved, reconfigured, or removed mid-run.
+    pub(crate) workshop: Option<WorkshopConfig>,
+}
+
 /// Shared handler state: live routing/key/local runtime, the boot-owned
-/// `[server]` settings, and optional profiles dir.
+/// `[server]` and `[workshop]` settings, and optional profiles dir.
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
     profiles: Option<Arc<AdminProfiles>>,
-    /// The boot file's `[server]`, retained so profile switches can enforce
-    /// the boot-owned `[server]` rule (fixed socket and bearer key).
-    boot_server: Arc<ServerConfig>,
+    /// The boot-owned sections, retained so profile switches can refuse a
+    /// profile that changes them.
+    boot: Arc<BootOwned>,
     /// Serializes profile switches so two concurrent switches cannot interleave
     /// their reads and writes of the live state.
     switch: Arc<tokio::sync::Mutex<()>>,
@@ -123,7 +134,7 @@ impl AppState {
         web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
         selection: ProfileSelection,
-        boot_server: ServerConfig,
+        boot: BootOwned,
     ) -> AppState {
         AppState {
             live: Arc::new(RwLock::new(LiveState {
@@ -135,7 +146,7 @@ impl AppState {
                 model_allowlist: selection.model_allowlist,
             })),
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
-            boot_server: Arc::new(boot_server),
+            boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -462,10 +473,12 @@ async fn admin_switch_profile(
 /// itself (the boot file's env file is already in the process environment
 /// from startup). Configuration is loaded and validated off the live lock;
 /// a config or routing failure returns an error and leaves the live state
-/// untouched. The boot file owns `[server]`: a profile whose merged
-/// `[server]` differs from the boot `[server]` is rejected, so the socket
-/// and the gateway bearer key are fixed for the process lifetime and a
-/// switch never rotates the admin credential. The routing and web-search
+/// untouched. The boot file owns `[server]` and `[workshop]`: a profile
+/// whose merged `[server]` or `[workshop]` differs from the boot file's is
+/// rejected - the refusal reaches the caller as the switch stream's terminal
+/// error event - so the socket, the gateway bearer key, and the hosted
+/// workshop's settings are fixed for the process lifetime and a switch never
+/// rotates the admin credential. The routing and web-search
 /// settings of the new profile are committed only after the new local
 /// runtime starts successfully, via a single atomic swap under the write
 /// lock. Because old and new `llama-server` children must not both hold
@@ -497,8 +510,14 @@ async fn run_switch(
     // here returns before mutating live state at all (LIB-009).
     let config = Config::load_profile(&dir, &name)
         .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
-    crate::runner::check_server_matches_boot(&state.boot_server, config.server(), &name)
+    crate::runner::check_server_matches_boot(&state.boot.server, config.server(), &name)
         .map_err(|e| GatewayError::switch_failed("server-mismatch", e))?;
+    crate::runner::check_workshop_matches_boot(
+        state.boot.workshop.as_ref(),
+        config.workshop(),
+        &name,
+    )
+    .map_err(|e| GatewayError::switch_failed("workshop-mismatch", e))?;
     let remote_routing = Routing::from_config(&config)
         .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
     let new_web_search = config

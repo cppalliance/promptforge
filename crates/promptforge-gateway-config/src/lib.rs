@@ -14,10 +14,10 @@
 //! [`Config::load_profile`] loads a named profile from a profiles directory,
 //! and [`Config::from_toml_str`] parses a TOML string.
 //! [`Config::load_profile_with_chain`] additionally returns the resolved
-//! include chain, and [`load_server`] reads only a boot file's `[server]`
-//! section (includes and interpolation, without full validation). Failures
-//! are reported as the opaque [`ConfigError`]; classify them with
-//! [`ConfigError::kind`].
+//! include chain, and [`load_server`] and [`load_workshop`] read only a boot
+//! file's `[server]` and `[workshop]` sections (includes and interpolation,
+//! without full validation). Failures are reported as the opaque
+//! [`ConfigError`]; classify them with [`ConfigError::kind`].
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -42,6 +42,9 @@ pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
+    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig, WorkshopConfig,
+    WorkshopTapeConfig, WorkshopVoiceConfig,
 };
-pub use crate::profile::{ProfileName, ProfileNameError, list_profiles, load_server};
+pub use crate::profile::{
+    ProfileName, ProfileNameError, list_profiles, load_server, load_workshop,
+};

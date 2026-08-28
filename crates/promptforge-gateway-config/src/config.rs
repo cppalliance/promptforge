@@ -10,10 +10,12 @@ mod accessors;
 mod imp;
 mod interpolate;
 mod validate;
+mod workshop;
 
 #[cfg(test)]
 pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
+pub use workshop::{WorkshopConfig, WorkshopTapeConfig, WorkshopVoiceConfig};
 
 #[cfg(test)]
 use crate::error::ConfigError;
@@ -142,6 +144,9 @@ pub struct Config {
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     tools: Option<ToolsConfig>,
+    /// Optional hosted-workshop configuration. Absent when no `[workshop]`
+    /// section is present. Boot-only, like `[server]`.
+    workshop: Option<WorkshopConfig>,
 }
 
 /// Private deserialization DTO for [`Config`]. Holds the raw TOML shape before
@@ -166,6 +171,8 @@ struct RawConfig {
     model_allowlist: Option<Vec<String>>,
     #[serde(default)]
     tools: Option<ToolsConfig>,
+    #[serde(default)]
+    workshop: Option<WorkshopConfig>,
 }
 
 impl From<RawConfig> for Config {
@@ -179,6 +186,7 @@ impl From<RawConfig> for Config {
             local_models: raw.local_models,
             model_allowlist: raw.model_allowlist,
             tools: raw.tools,
+            workshop: raw.workshop,
         }
     }
 }
