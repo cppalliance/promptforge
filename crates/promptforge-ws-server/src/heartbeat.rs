@@ -10,10 +10,11 @@
 //! ("Connected to gateway" or "Gateway unreachable"), and after that a
 //! status update fires when the answer changes, so a steady state never
 //! spams the status bar. Every transition also feeds the Model menu's
-//! reachability (so `chat_ready` flips with the gateway), a transition to
-//! reachable - boot's first probe included - refreshes the gateway's
-//! profile state into the workbench snapshot, and a reconnect additionally
-//! re-fetches the model catalog.
+//! reachability (so `chat_ready` flips with the gateway), and a
+//! transition to reachable - boot's first probe included - refreshes the
+//! gateway's profile state and model catalog into their buses and then
+//! restores a model selection when none is applied, so a fresh boot
+//! lands ready to chat without a manual pick.
 //!
 //! The task stops through its [`Heartbeat`] handle: the signal wins the
 //! loop's selects, so shutdown never waits out a tick or an in-flight
@@ -102,10 +103,9 @@ impl Heartbeat {
 /// through `push` and publishing reachability to `health` and to the
 /// menu behind `push`, which recomputes `chat_ready` from it. A
 /// transition to reachable - boot's first probe included - refreshes the
-/// gateway's profile state into the workbench snapshot; a transition
-/// back from unreachable also re-fetches the model catalog and pushes it
-/// through the same handle. The first probe runs immediately, before the
-/// first interval elapses.
+/// gateway's profile state and model catalog through the same handle,
+/// then restores a model selection when none is applied. The first probe
+/// runs immediately, before the first interval elapses.
 pub(crate) fn spawn(
     client: GatewayClient,
     push: Push,
@@ -150,7 +150,7 @@ async fn run(
         if last == Some(reachable) {
             continue;
         }
-        let previous = last.replace(reachable);
+        last = Some(reachable);
         // The menu recomputes chat_ready from reachability, so the
         // verdict feeds it before any slower refresh work below.
         push.menu().set_gateway_reachable(reachable);
@@ -160,24 +160,25 @@ async fn run(
                 "the gateway answers its health probe",
                 Activity::General,
             );
-            // The workbench snapshot is server-owned, so boot's first
-            // reachable probe and every reconnect (re)populate the
-            // profile state here; the UI cannot fetch it into the menu
-            // itself.
+            // All menu state is server-owned and reaches the UI via
+            // socket pushes - the UI fetches nothing on boot - so every
+            // transition into reachable, boot's first probe included,
+            // (re)populates the profile state and the model catalog. A
+            // gateway that was down and answers again may also serve a
+            // different catalog than before the outage. The refreshes
+            // are independent fetches, joined as the profile-switch
+            // task joins them.
             tokio::select! {
                 _ = &mut *stop => break,
-                () = refresh_profiles(client, push) => {}
+                () = async {
+                    tokio::join!(refresh_profiles(client, push), refresh_catalog(client, push));
+                } => {}
             }
-            // A gateway that was down and answers again may serve a
-            // different catalog than before the outage. The initial
-            // connect pushes nothing: a fresh UI fetches the catalog
-            // itself on boot.
-            if previous == Some(false) {
-                tokio::select! {
-                    _ = &mut *stop => break,
-                    () = refresh_catalog(client, push) => {}
-                }
-            }
+            // A fresh boot has no selection, so restore the remembered
+            // model for the now-known active profile (else the first
+            // catalog model); a reconnect whose selection survived the
+            // outage is a no-op.
+            push.menu().restore_selection();
         } else {
             push.push_status_update(
                 "Gateway unreachable",
@@ -192,29 +193,30 @@ async fn run(
 ///
 /// A failed, declined, or malformed catalog is logged and skipped rather
 /// than pushed: pushing a bad snapshot would clear pickers that still hold
-/// a usable list. Shared with the profile-switch task in
+/// a usable list. Runs on every transition into reachable (boot and
+/// reconnect) and is shared with the profile-switch task in
 /// [`crate::chat_ws`], which refetches after a switch settles.
 pub(crate) async fn refresh_catalog(client: &GatewayClient, push: &Push) {
     let response = match client.list_models().await {
         Ok(response) => response,
         Err(error) => {
-            tracing::warn!(%error, "catalog refresh after reconnect failed");
+            tracing::warn!(%error, "catalog refresh failed");
             return;
         }
     };
     if !response.status.is_success() {
-        tracing::warn!(status = %response.status, "catalog refresh after reconnect was declined");
+        tracing::warn!(status = %response.status, "catalog refresh was declined");
         return;
     }
     let body: serde_json::Value = match serde_json::from_slice(&response.body) {
         Ok(body) => body,
         Err(error) => {
-            tracing::warn!(%error, "catalog refresh after reconnect was not JSON");
+            tracing::warn!(%error, "catalog refresh was not JSON");
             return;
         }
     };
     let Some(models) = body.get("data").and_then(serde_json::Value::as_array) else {
-        tracing::warn!("catalog refresh after reconnect carried no data array");
+        tracing::warn!("catalog refresh carried no data array");
         return;
     };
     push.push_models_catalog(models.clone());
@@ -567,23 +569,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_initial_connect_pushes_no_catalog() {
-        // A fresh UI fetches the catalog itself on boot; the push exists
-        // for reconnects only.
+    async fn the_initial_connect_pushes_the_catalog_and_readies_chat() {
+        // Boot populate: all state reaches the UI via socket pushes, so
+        // the first reachable probe fetches the catalog and restores a
+        // model selection - a workshop booted against a live gateway is
+        // ready to chat with no user interaction.
         let healthy = Arc::new(AtomicBool::new(true));
         let base_url = spawn_gateway(Arc::clone(&healthy)).await;
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
-        let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
 
+        let push: CatalogPush = tokio::time::timeout(Duration::from_secs(5), catalog_rx.recv())
+            .await
+            .expect("the boot catalog arrives within the deadline")
+            .expect("the catalog bus is open");
         assert_eq!(
-            next_update(&mut status_rx).await.label,
-            "Connected to gateway"
+            push.models,
+            serde_json::json!([{"id": "test-model", "object": "model", "owned_by": "promptforge"}])
+                .as_array()
+                .expect("the fixture is an array")
+                .clone(),
+            "the push carries the gateway's data array verbatim"
         );
-        let quiet = tokio::time::timeout(Duration::from_millis(200), catalog_rx.recv()).await;
-        assert!(quiet.is_err(), "no catalog push on the initial connect");
+        let ready = snapshot_where(&menu, |snapshot| snapshot.chat_ready).await;
+        assert_eq!(
+            ready.selected_model.as_deref(),
+            Some("test-model"),
+            "boot restores a selection without any user interaction"
+        );
         heartbeat.shutdown().await;
     }
 
