@@ -1,6 +1,9 @@
 //! Scheduler-side tests: the decision-gate scenario (nested execute plus
 //! inference end-to-end on a current-thread runtime), cancellation while
-//! suspended on an infer, and the per-chain execute-depth cap.
+//! suspended on an infer, the per-chain execute-depth cap, and the core
+//! walk rules mirrored from the legacy suite (fall-through order, off-walk
+//! skips, reply roll-forward, `var` discipline, the run-global id
+//! counter).
 
 use super::*;
 use crate::execute::scheduler::Scheduler;
@@ -29,12 +32,22 @@ fn writer_models() -> ModelSet {
 /// Builds the run context for a scheduler test: the parsed prompt, an empty
 /// shared library, and the model set pre-filled.
 fn scheduler_context(prompt: &Prompt) -> RunContext {
+    scheduler_context_on(prompt, &StoreRef::memory(), Arc::new(NullObserver))
+}
+
+/// Builds the run context on the given store and observer, so a walk test
+/// can inspect the store's contents and the observation stream afterward.
+fn scheduler_context_on(
+    prompt: &Prompt,
+    store: &StoreRef,
+    observer: Arc<dyn Observer>,
+) -> RunContext {
     let ctx = RunContext::new(
         prompt,
         "",
-        &StoreRef::memory(),
+        store,
         LuaProgram::empty().expect("the empty chunk compiles"),
-        &RunConfig::new(EXECUTION),
+        &RunConfig::new(EXECUTION).observer(observer),
     );
     *ctx.model_set()
         .lock()
@@ -238,5 +251,434 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
     assert!(
         out.contains("not found"),
         "the caught error is the target resolution failure, got {out:?}"
+    );
+}
+
+// --- Walk translation: the core rules mirrored from the legacy suite ---
+// Each test names the legacy case it mirrors. The legacy cases keep
+// exercising the legacy engine untouched; these prove the scheduler.
+
+#[tokio::test(flavor = "current_thread")]
+async fn sections_run_in_fall_through_order() {
+    // Mirror of the legacy `falls_through_to_next_section`, strengthened
+    // with an order log: a section without a return falls through to the
+    // next section in document order.
+    let store = StoreRef::memory();
+    let md = "---\nname: walk\ndescription: d\npromptforge: 1\n---\n\n\
+        # Walk\n\n\
+        ## First\n\n\
+        ```lua\nstore.append('order.txt', 'First\\n')\n```\n\n\
+        ## Second\n\n\
+        ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the walk falls through in document order");
+
+    assert_eq!(out, "First\nSecond\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn generic_result_when_nothing_produced() {
+    // Mirror of the legacy `generic_result_when_nothing_produced`: a walk
+    // that exhausts its slice with no reply yields the shared generic
+    // completion.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Generic\n\n\
+        ## Only\n\n\
+        ```lua\nlocal x = 1\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the empty walk completes");
+
+    assert_eq!(out, "done");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sys_id_increments_per_section() {
+    // Mirror of the legacy `sys_id_increments_per_section`: every section
+    // entry takes the next run-global id.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Ids\n\n\
+        ## First\n\n\
+        ```lua\nlocal x = 1\n```\n\n\
+        ## Second\n\n\
+        ```lua\nreturn tostring(sys.id)\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("each section entry takes the next id");
+
+    assert_eq!(out, "2");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn off_walk_section_is_never_visited_by_the_walk() {
+    // Mirror of the legacy case of the same name: an off-walk section is
+    // skipped without a frame - no execution, no observation - while
+    // `sys.section_count` still counts it.
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Skip\n\n\
+        ## Hidden\n\n\
+        ---\n\n\
+        ```lua\nerror('hidden must not run')\n```\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        assert(sys.section_count == 2)\n\
+        return 'main-ran'\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the walk must skip the off-walk section");
+
+    assert_eq!(out, "main-ran");
+    let records = recorder.records();
+    assert!(
+        records.iter().all(|(_, section, _)| section != "Hidden"),
+        "an off-walk section must produce no observations: {records:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn off_walk_sections_run_only_when_addressed() {
+    // Mirror of the legacy case of the same name: A executes B and C (both
+    // off-walk), D unmarked - the walk visits A then D, and the off-walk
+    // sections run when addressed.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Addressed\n\n\
+        ## A\n\n\
+        ```lua\n\
+        local rb = execute('## B')\n\
+        local rc = execute('## C')\n\
+        store.write('order.txt', rb .. ',' .. rc)\n\
+        ```\n\n\
+        ## B\n\n\
+        ---\n\n\
+        ```lua\nreturn 'b-ran'\n```\n\n\
+        ## C\n\n\
+        ---\n\n\
+        ```lua\nreturn 'c-ran'\n```\n\n\
+        ## D\n\n\
+        ```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("off-walk sections must run when addressed");
+
+    // A walked B or C would end the run early with its own scalar return.
+    assert_eq!(out, "d-ran:b-ran,c-ran");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
+    // Mirror of the legacy case of the same name: a contained chain skips
+    // off-walk sections in fall-through like any walk - only addressing
+    // runs a marked section.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Contained\n\n\
+        ## A\n\n\
+        ```lua\n\
+        local r = execute('## Sub')\n\
+        return r\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\nstore.append('order.txt', 'Sub\\n')\n```\n\n\
+        ## Hidden\n\n\
+        ---\n\n\
+        ```lua\nstore.append('order.txt', 'Hidden\\n')\n```\n\n\
+        ## Tail\n\n\
+        ```lua\n\
+        store.append('order.txt', 'Tail\\n')\n\
+        return 'tail-reply'\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the chain must skip the off-walk section in fall-through");
+
+    assert_eq!(out, "tail-reply");
+    assert_eq!(store.read("order.txt").expect("order log"), "Sub\nTail\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
+    // Mirror of the legacy case of the same name: A executes the off-walk
+    // S1, which runs because it is addressed; the chain falls through to
+    // S2, and S2's reply returns to A. The main walk ends at B and never
+    // runs S1 or S2.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Siblings\n\n\
+        ## A\n\n\
+        ```lua\n\
+        local r = execute('## S1')\n\
+        store.append('order.txt', 'A:' .. r .. '\\n')\n\
+        ```\n\n\
+        ## B\n\n\
+        ```lua\n\
+        store.append('order.txt', 'B\\n')\n\
+        return store.read('order.txt')\n\
+        ```\n\n\
+        ## S1\n\n\
+        ---\n\n\
+        ```lua\nstore.append('order.txt', 'S1\\n')\n```\n\n\
+        ## S2\n\n\
+        ```lua\n\
+        store.append('order.txt', 'S2\\n')\n\
+        return 's2-reply'\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the chain must run the addressed off-walk target and fall through");
+
+    assert_eq!(out, "S1\nS2\nA:s2-reply\nB\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reply_carries_forward_to_next_section() {
+    // Mirror of the legacy `reply_carries_forward_to_next_section_prologue`:
+    // one section's prose-produced reply seeds the next section's VM.
+    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Reply\n\n\
+        ## First\n\n\
+        Ask the model.\n\n\
+        ## Second\n\n\
+        ```lua\nreturn reply\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the reply must carry forward across the section boundary");
+
+    assert_eq!(out, "hello from the mock");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reply_assignment_in_lua_carries_to_next_section() {
+    // Mirror of the legacy case of the same name: the global IS the reply,
+    // so an author's `reply = "custom"` carries to the next section exactly
+    // like a prose-produced reply.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Assign\n\n\
+        ## Source\n\n\
+        ```lua\nreply = 'custom'\n```\n\n\
+        ## Next\n\n\
+        ```lua\n\
+        assert(reply == 'custom', 'a Lua reply assignment must carry to the next section')\n\
+        return reply\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a Lua reply assignment must carry to the next section");
+
+    assert_eq!(out, "custom");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reply_nil_before_fall_through_clears_reply_for_next_section() {
+    // Mirror of the legacy case of the same name: `reply = nil` as a
+    // section's last word clears the reply the next section on the walk
+    // sees.
+    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Clear\n\n\
+        ## Source\n\n\
+        Ask something.\n\n\
+        ```lua\nreply = nil\n```\n\n\
+        ## Next\n\n\
+        ```lua\n\
+        assert(reply == nil, 'reply = nil at fall-through must clear what the next section sees')\n\
+        return 'cleared'\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("reply = nil at fall-through must clear the reply the next section sees");
+
+    assert_eq!(out, "cleared");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn var_persists_across_sections_in_fall_through() {
+    // Mirror of the fall-through half of the legacy
+    // `var_persists_across_sections_fallthrough_and_jump` (its jump half
+    // lands with the jump translation): one section's `var` writes reach
+    // the next across fall-through.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Var\n\n\
+        ## A\n\n\
+        ```lua\nvar.from_a = 'a'\n```\n\n\
+        ## B\n\n\
+        ```lua\n\
+        assert(var.from_a == 'a', 'fall-through keeps the walk var')\n\
+        var.from_b = 'b'\n\
+        ```\n\n\
+        ## C\n\n\
+        ```lua\nreturn var.from_a .. var.from_b\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("var must persist across the walk");
+
+    assert_eq!(out, "ab");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_clones_var_in_and_discards_child_writes() {
+    // Mirror of the legacy case of the same name: `execute` clones the
+    // caller's `var` in; the contained chain reads the clone, and its
+    // writes are discarded when the chain ends.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Clone\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        var.shared = 'caller'\n\
+        local r = execute('## Sub')\n\
+        assert(r == 'sub saw caller', 'the child reads the cloned var')\n\
+        assert(var.child_write == nil, 'child writes must not reach the caller')\n\
+        return 'ok'\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        var.child_write = 'sub'\n\
+        return 'sub saw ' .. var.shared\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("execute must clone var in and discard child writes");
+
+    assert_eq!(out, "ok");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_execute_chain_continues_the_global_sys_id_sequence() {
+    // Mirror of the legacy case of the same name: the contained chain's
+    // entries take the next run-global ids, and the outer walk resumes the
+    // same sequence when the chain ends.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Sequence\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        assert(sys.id == 1, 'the first walked section takes id 1')\n\
+        local r = execute('## Sub')\n\
+        store.append('order.txt', r .. '\\n')\n\
+        ```\n\n\
+        ## B\n\n\
+        ```lua\n\
+        assert(sys.id == 4, 'the outer walk resumes the global sequence')\n\
+        return store.read('order.txt')\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\n\
+        assert(sys.id == 2, 'the contained chain continues the global sequence')\n\
+        ```\n\n\
+        ## Tail\n\n\
+        ```lua\n\
+        assert(sys.id == 3, 'the chain fall-through takes the next global id')\n\
+        return 'tail-reply'\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("an execute chain must continue the global sys.id sequence");
+
+    assert_eq!(out, "tail-reply\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn entering_the_same_section_twice_takes_two_ids() {
+    // Mirror of the legacy case of the same name: entering the same
+    // section twice hands out two run-global `sys.id` values.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Twice\n\n\
+        ## Main\n\n\
+        ```lua\n\
+        local a = execute('## Sub')\n\
+        local b = execute('## Sub')\n\
+        return a .. ',' .. b\n\
+        ```\n\n\
+        ## Sub\n\n\
+        ```lua\nreturn tostring(sys.id)\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("re-entering a section must take a fresh id");
+
+    assert_eq!(out, "2,3");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fall_through_fires_section_finished_before_the_next_section_starts() {
+    // The boundary half of the legacy
+    // `a_two_section_run_reports_the_exact_observation_sequence`: each
+    // entered section's armed frame drop fires SECTION_FINISHED at the
+    // fall-through, before the next section's SECTION_STARTED.
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Boundaries\n\n\
+        ## One\n\n\
+        ```lua\nlocal x = 1\n```\n\n\
+        ## Two\n\n\
+        ```lua\nreturn 'two-ran'\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the walk completes both sections");
+
+    assert_eq!(out, "two-ran");
+    let started = detail::SECTION_STARTED.to_string();
+    let finished = detail::SECTION_FINISHED.to_string();
+    let boundaries: Vec<(String, String)> = recorder
+        .events()
+        .into_iter()
+        .filter(|(_, event)| event == &started || event == &finished)
+        .collect();
+    assert_eq!(
+        boundaries,
+        vec![
+            ("One".to_owned(), started.clone()),
+            ("One".to_owned(), finished.clone()),
+            ("Two".to_owned(), started.clone()),
+            ("Two".to_owned(), finished.clone()),
+        ]
     );
 }
