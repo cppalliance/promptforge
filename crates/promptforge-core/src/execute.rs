@@ -58,7 +58,8 @@
 //! driver constructs, runs, and tears down), `block_walk` (the
 //! ordered block loop - the
 //! engine's walk half, shared by the live H1 pass, the walk, and the
-//! fanout arm), `engine` (the section walkers), and `support` (the
+//! fanout arm), `engine` (the section walkers), `protocol` (the coroutine
+//! request/answer types for the yield/resume boundary), and `support` (the
 //! sync/async bridge and shared helpers).
 
 mod block_walk;
@@ -68,6 +69,11 @@ mod engine;
 mod error;
 mod gateway;
 mod h1;
+// Nothing outside the module calls the protocol yet: the scheduler driver and
+// the yield shims (later steps) are the only callers, and until then the
+// module is exercised by its own unit tests.
+#[allow(dead_code, reason = "consumed by the scheduler driver in a later step")]
+mod protocol;
 mod scope;
 mod section_context;
 mod section_vm;
