@@ -24,13 +24,19 @@
 //! so untagged chats stay singular: at most one untagged chat streams at
 //! a time, and a second is refused with an `error` frame naming the rule,
 //! as is a chat reusing a live id. A `{"type":"cancel","id":N}` frame
-//! tears down that one chat - dropping its payload stream cancels the
-//! upstream completion and its tape guard records the abandonment - while
-//! every other chat streams on; a cancel naming no live chat is ignored
-//! with a debug log, because a cancel racing its own `done` is normal.
-//! The session imposes no concurrency cap of its own: the gateway's
-//! per-dominion queue is the limiter, and per-delta scheduling keeps the
-//! socket fair.
+//! tears down that one chat - dropping its gateway work, the pending
+//! open or the payload stream, cancels the upstream completion and its
+//! tape guard records the abandonment - while every other chat streams
+//! on; a cancel naming no live chat is ignored with a debug log, because
+//! a cancel racing its own `done` is normal. The session imposes no
+//! concurrency cap of its own: the gateway's per-dominion queue is the
+//! limiter, and per-delta scheduling keeps the socket fair. Waiting in
+//! that queue is therefore an expected state, so a chat joins the
+//! in-flight map the moment its request is posted and awaits the
+//! gateway's answer as a non-blocking `Opening` entry of the same merged
+//! poll: a queue parked at capacity never stalls the socket, and the
+//! deltas of live chats, the bus pushes, and the cancel that would free
+//! the slot all keep flowing.
 //!
 //! Beside chats, the socket carries the Model-menu events.
 //! `{"type":"select_model","model":"..."}` selects the chat model: the
@@ -66,8 +72,11 @@
 //! holding `done` or `error` can trust the tape to hold the exchange. A
 //! client that disconnects mid-stream drops every in-flight chat's guard,
 //! and each tapes its own `client disconnected` note beside its partial
-//! content. The idle status push fires when the last in-flight chat
-//! settles, not after each one.
+//! content. While the session lives, the idle status push fires when the
+//! last in-flight chat settles, not after each one; on a disconnect each
+//! abandoned chat's guard pushes idle after its own tape write - a
+//! repeat of an idempotent Ready snapshot, accepted so the drop guards
+//! stay independent of each other.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -77,7 +86,8 @@ use std::time::Instant;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
-use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
+use futures_util::{FutureExt, StreamExt};
 use tokio::sync::broadcast;
 
 use crate::app::AppState;
@@ -211,8 +221,10 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
             // branch preserves per-chat stream order and delivers exactly -
             // the contract's direct-reply case, which needs no Notify or
             // cursor because no shared transcript state exists to index.
-            (index, payload) = next_payload(&mut chats) => {
-                if !advance_chat(&mut chats, index, payload, &mut socket, &push).await {
+            // Chats still waiting for gateway admission resolve here too,
+            // as non-blocking entries of the same merged poll.
+            (index, event) = next_event(&mut chats) => {
+                if !advance_chat(&mut chats, index, event, &mut socket, &push).await {
                     break;
                 }
             }
@@ -233,15 +245,31 @@ impl Drop for SessionLog {
 }
 
 /// One chat in flight - one entry of the session's chat map: the
-/// gateway's SSE payload stream beside the state its settle paths need.
-/// Everything here releases on drop - dropping the payload stream cancels
-/// the upstream completion, and the tape guard records the abandoned
-/// exchange.
+/// gateway work in whichever phase it is in, beside the state the settle
+/// paths need. Everything here releases on drop - dropping the work
+/// cancels the upstream completion (a pending open aborts its HTTP
+/// request, a stream closes its body), and the tape guard records the
+/// abandoned exchange.
 struct ActiveChat {
-    payloads: SsePayloadStream,
+    work: ChatWork,
     /// The request's `id`, echoed on every frame of this chat's reply.
     id: Option<serde_json::Value>,
     tape: StreamTape,
+}
+
+/// The gateway side of one in-flight chat, in lifecycle order. A chat
+/// spends its whole admission wait in `Opening` - the expected state
+/// while the gateway's per-dominion queue is at capacity - and the
+/// session loop keeps polling everything else meanwhile, because both
+/// phases are driven by the same merged [`next_event`] branch.
+enum ChatWork {
+    /// The completion is posted but the gateway has not answered its
+    /// response headers yet. Dropping the future abandons the request:
+    /// reqwest cancels the in-flight HTTP exchange on drop, which frees
+    /// the gateway's queue slot.
+    Opening(BoxFuture<'static, Result<ChatStream, GatewayError>>),
+    /// The gateway accepted the stream; SSE payloads arrive in order.
+    Streaming(SsePayloadStream),
 }
 
 /// The demux key of one in-flight chat. Reply frames without an `id`
@@ -323,39 +351,87 @@ impl Chats {
     }
 }
 
-/// The next SSE payload across every in-flight chat, paired with the map
-/// index of the chat that yielded it - the merged stream the session loop
-/// selects over. Each chat's payloads arrive in stream order; distinct
-/// chats are polled round-robin from a rotating cursor, one delta per
-/// turn. A `None` payload is a chat's terminal marker - its stream ended
-/// and the caller runs its settle path. Pending forever while no chat is
-/// in flight, so the select! branch simply never fires.
-async fn next_payload(chats: &mut Chats) -> (usize, Option<Result<String, GatewayError>>) {
+/// One step of one in-flight chat, yielded by the merged poll.
+enum ChatEvent {
+    /// The chat's open resolved: the gateway answered the request's
+    /// headers, declined it, or the request failed in transport.
+    Opened(Result<ChatStream, GatewayError>),
+    /// One item of the chat's payload stream; `None` is the terminal
+    /// marker - the stream ended and the caller runs the settle path.
+    Payload(Option<Result<String, GatewayError>>),
+}
+
+/// The next event across every in-flight chat, paired with the map index
+/// of the chat that yielded it - the merged future the session loop
+/// selects over. An `Opening` chat yields its resolved open; a
+/// `Streaming` chat yields payloads in stream order. Distinct chats are
+/// polled round-robin from a rotating cursor, one event per turn, so
+/// neither a hot stream nor a parked admission can starve its neighbors.
+/// Pending forever while no chat is in flight, so the select! branch
+/// simply never fires.
+async fn next_event(chats: &mut Chats) -> (usize, ChatEvent) {
     std::future::poll_fn(|context| {
         let count = chats.entries.len();
         for step in 0..count {
             let index = (chats.cursor + step) % count;
-            if let Poll::Ready(item) = chats.entries[index].1.payloads.poll_next_unpin(context) {
-                chats.cursor = (index + 1) % count;
-                return Poll::Ready((index, item));
-            }
+            let event = match &mut chats.entries[index].1.work {
+                ChatWork::Opening(open) => match open.poll_unpin(context) {
+                    Poll::Ready(outcome) => ChatEvent::Opened(outcome),
+                    Poll::Pending => continue,
+                },
+                ChatWork::Streaming(payloads) => match payloads.poll_next_unpin(context) {
+                    Poll::Ready(item) => ChatEvent::Payload(item),
+                    Poll::Pending => continue,
+                },
+            };
+            chats.cursor = (index + 1) % count;
+            return Poll::Ready((index, event));
         }
         Poll::Pending
     })
     .await
 }
 
-/// Advances the chat at `index` by one payload outcome: forwards deltas,
-/// settles the chat when its stream ends or fails. A `false` return means
-/// the client is gone and the session loop should end; every abandoned
-/// chat's guard then tapes the disconnect.
+/// Advances the chat at `index` by one event: transitions a resolved
+/// open into its stream (or settles it on refusal or failure), forwards
+/// deltas, settles the chat when its stream ends or fails. A `false`
+/// return means the client is gone and the session loop should end;
+/// every abandoned chat's guard then tapes the disconnect.
 async fn advance_chat(
     chats: &mut Chats,
     index: usize,
-    payload: Option<Result<String, GatewayError>>,
+    event: ChatEvent,
     socket: &mut WebSocket,
     push: &Push,
 ) -> bool {
+    let payload = match event {
+        ChatEvent::Opened(Ok(ChatStream::Stream { payloads, .. })) => {
+            push.push_status_update(
+                "Streaming response...",
+                "the gateway is streaming the reply",
+                Activity::Thinking,
+            );
+            chats.entries[index].1.work = ChatWork::Streaming(payloads);
+            return true;
+        }
+        ChatEvent::Opened(Ok(ChatStream::Relay(upstream))) => {
+            let ActiveChat { id, tape, .. } = chats.entries.remove(index).1;
+            declined_stream(tape, upstream, id.as_ref(), push, socket).await;
+            return true;
+        }
+        ChatEvent::Opened(Err(error)) => {
+            let ActiveChat { id, tape, .. } = chats.entries.remove(index).1;
+            // No response ever arrived, so no exchange happened and
+            // nothing is taped - the same no-tape rule as a chat the
+            // heartbeat short-circuits.
+            tape.discard();
+            let message = error.to_string();
+            push.push_failure("Connection lost", message.clone(), Activity::General);
+            send_error(socket, id.as_ref(), message).await;
+            return true;
+        }
+        ChatEvent::Payload(payload) => payload,
+    };
     match payload {
         Some(Ok(payload)) => {
             // The terminal sentinel ends the wire stream but carries no
@@ -390,11 +466,16 @@ async fn advance_chat(
     }
 }
 
-/// Handles one inbound text frame: a well-formed `chat` frame opens a
-/// streamed completion and joins the in-flight map, a `cancel` frame
-/// tears down the chat it names, `select_model` and `switch_profile`
-/// drive the Model menu, and anything else is answered with an
-/// `error` frame.
+/// Handles one inbound text frame: a well-formed `chat` frame posts a
+/// streamed completion and joins the in-flight map in `Opening` state
+/// (the refusals that need no gateway round-trip - untagged collision,
+/// duplicate id, malformed request, gateway known down - are answered
+/// here, immediately), a `cancel` frame tears down the chat it names,
+/// `select_model` and `switch_profile` drive the Model menu, and
+/// anything else is answered with an `error` frame. Nothing here awaits
+/// the gateway: the open resolves in the session loop's merged branch,
+/// so a request parked in the gateway's admission queue never blocks
+/// this socket.
 async fn handle_frame(
     state: &AppState,
     session: u64,
@@ -460,14 +541,14 @@ async fn handle_frame(
         send_error(socket, id.as_ref(), "Gateway unreachable").await;
         return;
     }
-    if let Some(active) = open_chat(state, request, frame, id, socket).await {
-        chats.insert(key, active);
-    }
+    chats.insert(key, begin_chat(state, request, frame, id));
 }
 
-/// Tears down the one chat a `cancel` frame names: dropping its payload
-/// stream cancels the upstream completion, and its tape records the
-/// abandonment beside the partial content - the same teardown a
+/// Tears down the one chat a `cancel` frame names: dropping its gateway
+/// work cancels the upstream completion - a streaming chat closes its
+/// payload stream, a chat still waiting for admission aborts its queued
+/// request - and its tape records the abandonment beside the partial
+/// content (empty for a chat that never streamed) - the same teardown a
 /// disconnect performs, scoped to one chat. A cancel for an unknown or
 /// already-settled chat is ignored with a debug log, because a cancel
 /// racing its own `done` is normal.
@@ -481,10 +562,10 @@ async fn cancel_chat(session: u64, id: Option<&serde_json::Value>, chats: &mut C
         );
         return;
     };
-    let ActiveChat { payloads, tape, .. } = active;
+    let ActiveChat { work, tape, .. } = active;
     // The upstream completion dies before the tape write, exactly as it
     // does when a disconnect drops the whole map.
-    drop(payloads);
+    drop(work);
     tape.record(Some("chat canceled by client".to_string()))
         .await;
     // A cancel that ends the last in-flight chat is the last settle.
@@ -640,17 +721,20 @@ fn switch_refusal(refusal: &GatewayResponse) -> String {
         )
 }
 
-/// Opens one streaming chat completion against the gateway: returns the
-/// in-flight chat when the gateway streams, or settles immediately - an
-/// `error` frame, plus a tape event where an exchange happened - and
-/// returns nothing.
-async fn open_chat(
+/// Posts one streaming chat completion to the gateway and returns the
+/// chat in `Opening` state, its tape guard already armed. Nothing is
+/// awaited here: the returned chat's open future resolves in the session
+/// loop's merged branch, where [`advance_chat`] either transitions it to
+/// `Streaming` or settles it - an `error` frame, plus a tape event where
+/// an exchange happened. Arming the guard before the gateway answers is
+/// what gives a chat canceled or abandoned while still queued its one
+/// tape event.
+fn begin_chat(
     state: &AppState,
     request: ChatRequest,
     frame: serde_json::Value,
     id: Option<serde_json::Value>,
-    socket: &mut WebSocket,
-) -> Option<ActiveChat> {
+) -> ActiveChat {
     let started = Instant::now();
     let push = state.push();
     push.push_status_update(
@@ -658,50 +742,19 @@ async fn open_chat(
         format!("a streaming chat completion from {}", request.model),
         Activity::Thinking,
     );
-    let chat_stream = match state
-        .gateway_client()
-        .chat_completion_stream(&request)
-        .await
-    {
-        Ok(chat_stream) => chat_stream,
-        Err(error) => {
-            push.push_failure("Connection lost", error.to_string(), Activity::General);
-            send_error(socket, id.as_ref(), error.to_string()).await;
-            return None;
-        }
-    };
-    match chat_stream {
-        ChatStream::Stream { payloads, .. } => {
-            push.push_status_update(
-                "Streaming response...",
-                "the gateway is streaming the reply",
-                Activity::Thinking,
-            );
-            Some(ActiveChat {
-                payloads,
-                id,
-                tape: StreamTape::open(
-                    Arc::clone(state.tape()),
-                    request.model,
-                    frame,
-                    started,
-                    push,
-                ),
-            })
-        }
-        ChatStream::Relay(upstream) => {
-            declined_stream(
-                state,
-                request.model,
-                frame,
-                upstream,
-                started,
-                id.as_ref(),
-                socket,
-            )
-            .await;
-            None
-        }
+    let tape = StreamTape::open(
+        Arc::clone(state.tape()),
+        request.model.clone(),
+        frame,
+        started,
+        push,
+    );
+    let client = state.gateway_client().clone();
+    let open = async move { client.chat_completion_stream(&request).await }.boxed();
+    ActiveChat {
+        work: ChatWork::Opening(open),
+        id,
+        tape,
     }
 }
 
@@ -754,23 +807,14 @@ async fn forward_payload(
 /// the envelope is taped like a buffered chat and reported as an `error`
 /// frame and an error status.
 async fn declined_stream(
-    state: &AppState,
-    model: String,
-    frame: serde_json::Value,
+    tape: StreamTape,
     upstream: GatewayResponse,
-    started: Instant,
     id: Option<&serde_json::Value>,
+    push: &Push,
     socket: &mut WebSocket,
 ) {
     let response = value_from_bytes(&upstream.body);
-    tape_round_trip(
-        state.tape(),
-        model,
-        frame,
-        response.clone(),
-        started.elapsed(),
-    )
-    .await;
+    tape.record_envelope(response.clone()).await;
     let message = response
         .get("error")
         .and_then(|error| error.get("message"))
@@ -784,7 +828,7 @@ async fn declined_stream(
             },
             str::to_string,
         );
-    state.push().push_failure(
+    push.push_failure(
         format!("Gateway error: {}", upstream.status),
         message.clone(),
         Activity::General,
@@ -894,6 +938,28 @@ impl StreamTape {
         if let Some(entry) = self.entry.take() {
             entry.write(error).await;
         }
+    }
+
+    /// Writes the declined-stream tape event: the gateway's buffered
+    /// error envelope verbatim, in place of an assembled response.
+    async fn record_envelope(mut self, response: serde_json::Value) {
+        if let Some(entry) = self.entry.take() {
+            let TapeEntry {
+                tape,
+                model,
+                request,
+                started,
+                ..
+            } = entry;
+            tape_round_trip(&tape, model, request, response, started.elapsed()).await;
+        }
+    }
+
+    /// Disarms the guard without taping: the open failed before any
+    /// response arrived, so no exchange happened and nothing is taped -
+    /// matching the heartbeat short-circuit's no-tape rule.
+    fn discard(mut self) {
+        self.entry = None;
     }
 }
 
@@ -1966,6 +2032,199 @@ mod tests {
                 .any(|event| event["response"] == "c1-0c1-1c1-2c1-3"),
             "the surviving chat taped its full assembly: {events:?}"
         );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// A mock gateway whose admission is scripted by the request's user
+    /// message: `"drip"` streams a long drip immediately, `"park"` holds
+    /// the response headers - no bytes at all, the exact shape of a
+    /// request waiting in a per-dominion queue at capacity - until the
+    /// test fires the Notify, then streams `STREAM_BODY`.
+    async fn mock_chat_stream_admission(
+        State(gate): State<Arc<tokio::sync::Notify>>,
+        headers: HeaderMap,
+        body: String,
+    ) -> Response {
+        assert!(authorized(&headers));
+        let body: serde_json::Value = serde_json::from_str(&body).expect("the request is JSON");
+        assert_eq!(body["stream"], true, "the stream flag is forwarded");
+        if body["messages"][0]["content"] == "drip" {
+            let chunks = stream::unfold(0u8, |step| async move {
+                if step >= 40 {
+                    return None;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let payload = format!(
+                    "data: {{\"choices\":[{{\"delta\":{{\"content\":\"x{step}\"}}}}]}}\n\n"
+                );
+                Some((
+                    Ok::<_, std::io::Error>(axum::body::Bytes::from(payload)),
+                    step + 1,
+                ))
+            });
+            return (
+                [(header::CONTENT_TYPE, "text/event-stream")],
+                Body::from_stream(chunks),
+            )
+                .into_response();
+        }
+        if body["messages"][0]["content"] == "park" {
+            gate.notified().await;
+        }
+        ([(header::CONTENT_TYPE, "text/event-stream")], STREAM_BODY).into_response()
+    }
+
+    /// Spawns the chat server against the scripted-admission gateway,
+    /// returning the release handle for its parked requests.
+    async fn spawn_admission_server() -> (String, tempfile::TempDir, Arc<tokio::sync::Notify>) {
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let base_url = spawn_gateway(
+            Router::new()
+                .route("/v1/chat/completions", post(mock_chat_stream_admission))
+                .with_state(Arc::clone(&gate)),
+        )
+        .await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
+        (url, tape_dir, gate)
+    }
+
+    /// Sends one chat frame tagged with `id` whose user message is
+    /// `content`, scripting the admission mock's behavior.
+    async fn send_marked_chat<S>(socket: &mut S, id: u64, content: &str)
+    where
+        S: futures_util::Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin,
+    {
+        let frame = serde_json::json!({
+            "type": "chat",
+            "id": id,
+            "model": "test-model",
+            "messages": [{"role": "user", "content": content}],
+        })
+        .to_string();
+        socket
+            .send(tungstenite::Message::Text(frame.into()))
+            .await
+            .expect("the chat frame is sent");
+    }
+
+    /// Polls the tape until it holds `expected` events, within a
+    /// deadline, and returns them.
+    async fn tape_events_when(
+        tape_dir: &tempfile::TempDir,
+        expected: usize,
+    ) -> Vec<serde_json::Value> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(raw) = std::fs::read_to_string(tape_dir.path().join("tape.jsonl")) {
+                    let events: Vec<serde_json::Value> = raw
+                        .lines()
+                        .map(|line| {
+                            serde_json::from_str(line).expect("the tape line is valid JSON")
+                        })
+                        .collect();
+                    if events.len() >= expected {
+                        break events;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("the tape holds the expected events within the deadline")
+    }
+
+    #[tokio::test]
+    async fn a_chat_parked_at_gateway_admission_never_blocks_the_session() {
+        let (url, tape_dir, gate) = spawn_admission_server().await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_marked_chat(&mut socket, 1, "drip").await;
+        let first = read_non_status_frame(&mut socket).await;
+        assert_eq!(first["id"], 1, "chat 1 streams before chat 2 is sent");
+
+        // Chat 2 posts and parks: the mock holds its response headers,
+        // exactly as the gateway's queue does at max_concurrency.
+        send_marked_chat(&mut socket, 2, "park").await;
+        // Chat 1's deltas keep flowing while chat 2 waits for admission:
+        // the session loop did not block on the parked open.
+        for _ in 0..3 {
+            let frame =
+                tokio::time::timeout(Duration::from_secs(10), read_non_status_frame(&mut socket))
+                    .await
+                    .expect("chat 1 keeps streaming while chat 2 is parked");
+            assert_eq!(frame["type"], "delta");
+            assert_eq!(frame["id"], 1, "only chat 1 streams while chat 2 is parked");
+        }
+
+        // A cancel for chat 1 - the one action that frees real capacity -
+        // is read and processed while chat 2 is still parked: its tape
+        // note lands without any release of the gate.
+        send_cancel(&mut socket, 1).await;
+        let events = tape_events_when(&tape_dir, 1).await;
+        assert_eq!(
+            events[0]["response"]["error"], "chat canceled by client",
+            "the cancel settles while chat 2 waits for admission: {events:?}"
+        );
+
+        // Release chat 2's admission; it streams to completion.
+        gate.notify_one();
+        let replies = replies_until_dones(&mut socket, 1).await;
+        let terminal = replies.last().expect("the done frame was collected");
+        assert_eq!(
+            terminal["id"], 2,
+            "chat 2 settles once admitted: {replies:?}"
+        );
+        assert!(
+            replies
+                .iter()
+                .any(|frame| frame["type"] == "delta" && frame["id"] == 2),
+            "chat 2 streamed its deltas after release: {replies:?}"
+        );
+        let events = tape_events(&tape_dir);
+        assert_eq!(events.len(), 2, "one tape event per chat");
+        assert!(
+            events.iter().any(|event| event["response"] == "pong"),
+            "the released chat taped its full assembly: {events:?}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_cancel_for_a_chat_still_opening_removes_it_cleanly() {
+        let (url, tape_dir, _gate) = spawn_admission_server().await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        // Chat 1 parks before its headers and is canceled there; the
+        // gate is never released, so only the cancel can settle it.
+        send_marked_chat(&mut socket, 1, "park").await;
+        send_cancel(&mut socket, 1).await;
+
+        // The cancel tapes the abandonment exactly once, with nothing
+        // streamed yet.
+        let events = tape_events_when(&tape_dir, 1).await;
+        assert_eq!(events.len(), 1, "the canceled open tapes exactly once");
+        assert_eq!(
+            events[0]["response"]["error"], "chat canceled by client",
+            "the abandonment is taped: {events:?}"
+        );
+        assert_eq!(
+            events[0]["response"]["content"], "",
+            "a chat canceled while opening streamed nothing"
+        );
+
+        // The canceled chat produces no frames afterward: a fresh chat
+        // is admitted immediately (only "park" requests are held) and
+        // every reply frame carries its id alone.
+        send_marked_chat(&mut socket, 2, "ping").await;
+        let replies = replies_until_dones(&mut socket, 1).await;
+        assert!(
+            replies.iter().all(|frame| frame["id"] == 2),
+            "no frame of the canceled chat ever arrives: {replies:?}"
+        );
+        let events = tape_events(&tape_dir);
+        assert_eq!(events.len(), 2, "the canceled chat's note stays single");
         socket.close(None).await.expect("close the socket");
     }
 
