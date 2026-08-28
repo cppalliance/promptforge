@@ -94,6 +94,14 @@ pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Respons
     let result = state.gateway.chat_completion(&request).await;
     report_gateway_outcome(&push, &result, "POST /v1/chat/completions");
     let latency = started.elapsed();
+    // A completed completion is useful work: the reconnect backoff
+    // returns to its base. A declined or failed one is not - only real
+    // delivery may reset the anti-flap escalation.
+    if let Ok(upstream) = &result
+        && upstream.status.is_success()
+    {
+        state.backoff().record_useful_work();
+    }
     if let Ok(upstream) = &result {
         let response_value = value_from_bytes(&upstream.body);
         tape_round_trip(
@@ -425,6 +433,61 @@ mod tests {
         assert_eq!(event["response"], "gateway replied in plain text");
     }
 
+    /// Declines a buffered chat with the gateway's error envelope.
+    async fn mock_chat_declines(headers: HeaderMap) -> Response {
+        assert!(authorized(&headers));
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            UPSTREAM_ERROR,
+        )
+            .into_response()
+    }
+
+    /// Draws a few delays so the backoff stands escalated, as it would
+    /// after an outage.
+    fn escalate(state: &AppState) {
+        let _ = state.backoff().next_delay();
+        let _ = state.backoff().next_delay();
+        assert!(state.backoff().is_escalated_for_test());
+    }
+
+    #[tokio::test]
+    async fn a_successful_buffered_completion_resets_the_backoff() {
+        let base_url = spawn_mock_gateway().await;
+        let (state, _tape_dir) = state_for(&base_url);
+        escalate(&state);
+        let response = router(state.clone())
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            !state.backoff().is_escalated_for_test(),
+            "a completed completion is useful work and resets the backoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_declined_completion_does_not_reset_the_backoff() {
+        // The gateway answered - it connected - but delivered nothing, so
+        // the anti-flap escalation must stand.
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_declines)))
+                .await;
+        let (state, _tape_dir) = state_for(&base_url);
+        escalate(&state);
+        let response = router(state.clone())
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            state.backoff().is_escalated_for_test(),
+            "an answer without delivery must not reset the backoff"
+        );
+    }
+
     #[tokio::test]
     async fn a_streaming_chat_request_is_rejected_with_bad_request() {
         let (state, _tape_dir) = state_for("http://127.0.0.1:1");
@@ -459,6 +522,7 @@ mod tests {
             voice: VoiceSlot::default(),
             status: StatusBus::new(),
             health: GatewayHealth::new(),
+            backoff: crate::backoff::ReconnectBackoff::new(),
             menu: crate::menu::MenuBus::new(catalog.clone(), None),
             catalog,
             workspace: Workspace::new(),
