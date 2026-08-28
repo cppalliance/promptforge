@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::client::GatewayClient;
 use crate::execute::{
     BlockRunMode, RunContext, SectionContext, SectionFlow, drive_contained_chain,
+    section_vm::VmSetupMode,
 };
 use crate::lua::LuaFanoutResult;
 use crate::observe::{Observation, Observer, detail};
@@ -207,6 +208,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             inputs.last_reply.as_deref(),
             &inputs.client,
             &inputs.var,
+            VmSetupMode::Legacy,
         )
     })
     .await

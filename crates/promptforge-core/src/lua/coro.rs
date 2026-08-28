@@ -2,7 +2,7 @@
 //! suspending host calls.
 //!
 //! Yield cannot cross the C boundary, so `models.infer`, `handle:infer`,
-//! and `execute` are Lua shims (source in `__impl_coro.lua` beside this
+//! `execute`, and `fanout` are Lua shims (source in `__impl_coro.lua` beside this
 //! file) that `coroutine.yield` a request table and interpret the two
 //! resume values as the `(ok, result)` envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
@@ -62,7 +62,8 @@ static H1_SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = Lazy
 /// validation. The `models` table is passed to the shim chunk as an
 /// argument, so the chunk never reads a global; the chunk shims
 /// `models.infer` and wraps the `models.use`/`models.get` returns, and the
-/// `execute` shim and `wrap_handle` come back for the host to install.
+/// `execute`/`fanout` shims and `wrap_handle` come back for the host to
+/// install.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -85,6 +86,8 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .map_err(Error::lua)?;
     let execute: Function = shims.raw_get("execute").map_err(Error::lua)?;
     globals.raw_set("execute", execute).map_err(Error::lua)?;
+    let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
+    globals.raw_set("fanout", fanout).map_err(Error::lua)?;
     let wrap_handle: Function = shims.raw_get("wrap_handle").map_err(Error::lua)?;
     lua.set_named_registry_value(WRAP_HANDLE_REGISTRY, wrap_handle)
         .map_err(Error::lua)?;
@@ -218,10 +221,24 @@ mod tests {
         }
     }
 
-    /// Builds a section VM through the real scheduler-mode setup path:
-    /// construction, host injection, the shim install, the shared replay,
-    /// and the captured alias bindings.
-    fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
+    /// Builds a section VM through the real setup path in the given mode:
+    /// construction, host injection, the mode's control surface, the
+    /// shared replay, and the captured alias bindings.
+    fn vm_with_mode<F>(
+        models: &ModelSet,
+        var: Option<&serde_json::Value>,
+        mode: VmSetupMode,
+        fanout_callback: F,
+    ) -> SectionVm
+    where
+        F: Fn(
+                String,
+                Vec<serde_json::Value>,
+                serde_json::Value,
+            ) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+            + Send
+            + 'static,
+    {
         let observer: Arc<dyn Observer> = Arc::new(NullObserver);
         let mut vm = SectionVm::new_for_section(
             &GuardNonce::fresh(),
@@ -245,7 +262,7 @@ mod tests {
             observer_arc: &observer,
             section_name: "Test",
             shared: &shared,
-            mode: VmSetupMode::Scheduler,
+            mode,
         };
         let execute_callback = |_: Value,
                                 _: Option<String>,
@@ -253,14 +270,6 @@ mod tests {
          -> std::result::Result<String, Error> {
             Err(Error::Internal(
                 "the legacy execute callback is unreachable in scheduler mode",
-            ))
-        };
-        let fanout_callback = |_: String,
-                               _: Vec<serde_json::Value>,
-                               _: serde_json::Value|
-         -> std::result::Result<Vec<LuaFanoutResult>, Error> {
-            Err(Error::Internal(
-                "the legacy fanout callback is unreachable in scheduler mode",
             ))
         };
         let list_callback =
@@ -272,8 +281,23 @@ mod tests {
             fanout_callback,
             list_callback,
         )
-        .expect("scheduler-mode setup installs");
+        .expect("the mode's setup installs");
         vm
+    }
+
+    /// Builds a section VM through the real scheduler-mode setup path:
+    /// construction, host injection, the shim install, the shared replay,
+    /// and the captured alias bindings.
+    fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
+        let fanout_callback = |_: String,
+                               _: Vec<serde_json::Value>,
+                               _: serde_json::Value|
+         -> std::result::Result<Vec<LuaFanoutResult>, Error> {
+            Err(Error::Internal(
+                "the legacy fanout callback is unreachable in scheduler mode",
+            ))
+        };
+        vm_with_mode(models, var, VmSetupMode::Scheduler, fanout_callback)
     }
 
     /// Starts `source` as a coroutine on the VM and runs it to its first
@@ -337,6 +361,50 @@ mod tests {
                 assert_eq!(var, json!({ "k": 1 }));
             }
             other => panic!("expected an execute request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fanout_yields_a_well_formed_request() {
+        // The fanout shim is installed in scheduler mode: the global exists
+        // and its yield parses into the protocol's Fanout variant, with the
+        // collection converted member-wise at the boundary.
+        let vm = scheduler_vm(&ModelSet::default(), None);
+        match yielded_request(&vm, r####"return fanout("### Worker", {"a", "b"})"####) {
+            Request::Fanout { worker, items, var } => {
+                assert_eq!(worker, "### Worker");
+                assert_eq!(items, vec![json!("a"), json!("b")]);
+                assert_eq!(var, json!({}));
+            }
+            other => panic!("expected a fanout request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_mode_keeps_the_rust_fanout_global() {
+        // The coexistence pin: a legacy-mode VM still gets the Rust fanout
+        // callback - the old engine drives chunks with `Function::call`,
+        // where a shim's yield would error - so the legacy fanout path
+        // stays itself until the flip.
+        let fanout_callback = |_: String,
+                               _: Vec<serde_json::Value>,
+                               _: serde_json::Value|
+         -> std::result::Result<Vec<LuaFanoutResult>, Error> {
+            Ok(vec![LuaFanoutResult::success(json!("x"), "legacy text")])
+        };
+        let vm = vm_with_mode(
+            &ModelSet::default(),
+            None,
+            VmSetupMode::Legacy,
+            fanout_callback,
+        );
+        let program = compile_block("local r = fanout('### W', {'x'})\nreturn r[1].text");
+        match vm
+            .run_chunk(&program, &NullObserver, "Test")
+            .expect("the legacy fanout global runs the Rust callback")
+        {
+            LuaBlockResult::Returned(Some(text)) => assert_eq!(text, "legacy text"),
+            other => panic!("expected the packed fanout result, got {other:?}"),
         }
     }
 

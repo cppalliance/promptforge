@@ -565,9 +565,9 @@ impl SectionVm {
     /// Installs the scheduler-mode control surface: `jump` and
     /// `list_from_section` as Rust callbacks (neither suspends).
     ///
-    /// The suspending calls are the yield shims installed by
-    /// [`install_coro_shims`](Self::install_coro_shims); the `fanout` shim
-    /// lands with the scheduler's fanout dispatch.
+    /// The suspending calls (`models.infer`, `handle:infer`, `execute`,
+    /// `fanout`) are the yield shims installed by
+    /// [`install_coro_shims`](Self::install_coro_shims).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.

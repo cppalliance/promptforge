@@ -334,6 +334,10 @@ impl SectionContext {
     /// traffic over the bounded side channels) and the fanout's fresh turn
     /// counter arrive through the context's fanout fork, so the arm's nested
     /// `execute`/`fanout` chains report through the proxies as well.
+    /// `mode` selects the control surface: [`VmSetupMode::Legacy`] for the
+    /// spawned-arm driver (Rust control globals plus the bridged infer
+    /// hook), [`VmSetupMode::Scheduler`] for the scheduler's arm chains
+    /// (yield shims, no bridged hook).
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
@@ -344,7 +348,7 @@ impl SectionContext {
     /// once.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, depth, reply and var seeds, and client snapshot stay explicit and linear"
+        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, depth, reply and var seeds, client snapshot, and VM-setup mode stay explicit and linear"
     )]
     #[expect(
         clippy::ref_option,
@@ -361,6 +365,7 @@ impl SectionContext {
         incoming_reply: Option<&str>,
         client: &Option<GatewayClient>,
         var: &serde_json::Value,
+        mode: VmSetupMode,
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
         let model_set = ctx.model_set_snapshot()?;
@@ -424,7 +429,7 @@ impl SectionContext {
             },
             write_scope,
             &worker.name,
-            VmSetupMode::Legacy,
+            mode,
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
@@ -440,8 +445,13 @@ impl SectionContext {
         }
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it.
-        ctx.attach_infer_hook(&vm, client.clone(), &worker.name);
+        // error on first use instead of the setup swallowing it. A
+        // scheduler-mode arm infers through the yield shim and the driver's
+        // answer channel instead, so the bridged hook is never consulted
+        // there.
+        if mode == VmSetupMode::Legacy {
+            ctx.attach_infer_hook(&vm, client.clone(), &worker.name);
+        }
         Ok(Self {
             vm: Some(vm),
             name: worker.name.clone(),

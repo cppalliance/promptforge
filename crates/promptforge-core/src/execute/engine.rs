@@ -286,7 +286,7 @@ async fn run_one_section(
 
 /// The index of `target` in `slice`, matched on the parser-unique
 /// `(level, name)` pair; `None` when the slice does not contain it.
-fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
+pub(super) fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
     slice
         .iter()
         .position(|s| s.level == target.level && s.name == target.name)
@@ -301,7 +301,7 @@ fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
 /// visible set comes out as exactly the home slice plus the worker's
 /// children (pinned by the arm control-global tests in
 /// `execute/tests/exec_flow.rs`).
-fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
+pub(super) fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
     let caller_index = section_position(home, caller);
     home.iter()
         .enumerate()
@@ -316,7 +316,7 @@ fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
 /// The parent, aunts/uncles, nieces/nephews, and grandchildren are never in
 /// the set, so a resolution error that lists the set cannot leak the rest of
 /// the document's structure.
-fn visible_sections(home: &[Section], caller: &Section) -> Vec<Section> {
+pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Section> {
     home_without(home, caller)
         .into_iter()
         .chain(caller.children.iter().cloned())
