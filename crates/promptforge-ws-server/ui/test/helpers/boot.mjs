@@ -353,10 +353,13 @@ export async function bootWorkbench(name, run) {
     });
   }
 
-  // The server pushes the model catalog and a workbench snapshot on
-  // connect - the app makes no HTTP state fetches at boot. Mirror both
-  // pushes here: the catalog populates the Model menu, and without the
-  // snapshot's selection every submission stays blocked.
+  // The server pushes the retained status, the model catalog, and a
+  // workbench snapshot on connect, in that order (chat_ws.rs) - the app
+  // makes no HTTP state fetches at boot. Mirror all three pushes here:
+  // the status seeds the status bar, the catalog populates the Model
+  // menu, and without the snapshot's selection every submission stays
+  // blocked.
+  emitStatus();
   emitModels([{ id: "test-model", description: "scripted" }]);
   emitWorkbench();
 
