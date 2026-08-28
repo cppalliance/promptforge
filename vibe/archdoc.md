@@ -46,7 +46,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A74. Voice takes replace a captured composer selection while editing is locked; submit discards the active take and every late frame.
 
 - A75. Gateway clients bound connection and buffered-request waits; streaming uses lifecycle cancellation instead of a whole-request deadline.
 
@@ -67,6 +66,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A84. Gateway and Workshop may share a process but retain their loopback protocol boundary; headless builds omit Workshop.
 
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
+
+- A86. A merged process completes Workshop shutdown before signaling gateway shutdown.
 
 ## Principles
 
