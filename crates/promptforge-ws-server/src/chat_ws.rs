@@ -448,7 +448,8 @@ struct DeltaFields {
 /// contribute nothing to the assembled response. Reasoning models stream
 /// their scratch work under `reasoning_content` (or the `reasoning` /
 /// `thinking` synonyms, matching promptforge-core's normalization); the
-/// first non-empty synonym wins.
+/// first non-empty synonym wins, so a present-but-empty key falls
+/// through to a populated one instead of masking it.
 fn delta_fields(payload: &str) -> DeltaFields {
     let empty = DeltaFields {
         content: None,
@@ -471,8 +472,8 @@ fn delta_fields(payload: &str) -> DeltaFields {
         .map(str::to_string);
     let reasoning = ["reasoning_content", "reasoning", "thinking"]
         .iter()
-        .find_map(|key| delta.get(*key).and_then(serde_json::Value::as_str))
-        .filter(|text| !text.is_empty())
+        .filter_map(|key| delta.get(*key).and_then(serde_json::Value::as_str))
+        .find(|text| !text.is_empty())
         .map(str::to_string);
     DeltaFields { content, reasoning }
 }
@@ -639,6 +640,24 @@ mod tests {
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ng\"}}]}\n\n",
         "data: [DONE]\n\n",
     );
+
+    #[test]
+    fn an_empty_reasoning_synonym_falls_through_to_a_populated_one() {
+        let fields = delta_fields(
+            r#"{"choices":[{"index":0,"delta":{"reasoning_content":"","reasoning":"actual scratch work"}}]}"#,
+        );
+        assert_eq!(fields.reasoning.as_deref(), Some("actual scratch work"));
+        assert_eq!(fields.content, None);
+    }
+
+    #[test]
+    fn all_empty_reasoning_synonyms_yield_no_reasoning() {
+        let fields = delta_fields(
+            r#"{"choices":[{"index":0,"delta":{"reasoning_content":"","reasoning":"","thinking":"","content":"answer"}}]}"#,
+        );
+        assert!(fields.reasoning.is_none());
+        assert_eq!(fields.content.as_deref(), Some("answer"));
+    }
 
     fn authorized(headers: &HeaderMap) -> bool {
         headers
