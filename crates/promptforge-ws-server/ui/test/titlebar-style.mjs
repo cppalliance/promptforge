@@ -101,6 +101,11 @@ check(
   /background:\s*var\(--titlebar-hover,/.test(neutralHover),
 );
 
+// The maximize/restore glyphs are SVG, outside the UA [hidden] rule's
+// HTML-namespace scope, so the sheet must hide them itself.
+const glyphHidden = ruleBlock(".window-titlebar__glyph--maximize[hidden]");
+check("the glyph [hidden] rule hides the swapped-out SVG", /display:\s*none/.test(glyphHidden));
+
 const closeHover = ruleBlock(".window-titlebar__control--close:hover");
 check("Close hover is the red danger fill", /background:\s*var\(--titlebar-close-hover,/.test(closeHover));
 check(
@@ -198,6 +203,22 @@ if (barEl) {
     "--titlebar-height resolves to a fixed pixel value",
     /^\d+px$/.test(revealed.getPropertyValue("--titlebar-height").trim()),
   );
+  const restoreGlyph = barEl.querySelector(".window-titlebar__glyph--restore");
+  const maximizeGlyph = barEl.querySelector(".window-titlebar__glyph--maximize");
+  check(
+    "the restore glyph ships with the hidden attribute",
+    restoreGlyph !== null && restoreGlyph.hasAttribute("hidden"),
+  );
+  if (restoreGlyph && maximizeGlyph) {
+    check(
+      "the [hidden] restore glyph computes to display:none",
+      window.getComputedStyle(restoreGlyph).display === "none",
+    );
+    check(
+      "the visible maximize glyph does not compute to display:none",
+      window.getComputedStyle(maximizeGlyph).display !== "none",
+    );
+  }
 }
 
 if (failures.length > 0) {

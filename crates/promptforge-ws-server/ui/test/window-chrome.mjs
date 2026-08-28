@@ -120,9 +120,17 @@ function scenario({ desktop }) {
     posted.map((message) => message.command).join(",") === "toggle-maximize",
   );
 
+  // The glyphs are SVG, so visibility is the hidden *attribute* - an
+  // SVGSVGElement has no `hidden` IDL property, and assigning one would
+  // only create an inert expando that no stylesheet can see.
   const maximize = bar.querySelector('[data-command="toggle-maximize"]');
   const maximizeGlyph = maximize.querySelector(".window-titlebar__glyph--maximize");
   const restoreGlyph = maximize.querySelector(".window-titlebar__glyph--restore");
+
+  check(
+    "boot shows the maximize glyph and hides the restore glyph",
+    !maximizeGlyph.hasAttribute("hidden") && restoreGlyph.hasAttribute("hidden"),
+  );
 
   window.dispatchEvent(
     new window.CustomEvent("promptforge:maximized", { detail: { maximized: true } }),
@@ -131,8 +139,14 @@ function scenario({ desktop }) {
     "maximized event switches the label to Restore",
     maximize.getAttribute("aria-label") === "Restore",
   );
-  check("maximized event hides the maximize glyph", maximizeGlyph.hidden === true);
-  check("maximized event shows the restore glyph", restoreGlyph.hidden === false);
+  check(
+    "maximized event hides the maximize glyph via the hidden attribute",
+    maximizeGlyph.hasAttribute("hidden"),
+  );
+  check(
+    "maximized event shows the restore glyph by removing the hidden attribute",
+    !restoreGlyph.hasAttribute("hidden"),
+  );
 
   window.dispatchEvent(
     new window.CustomEvent("promptforge:maximized", { detail: { maximized: false } }),
@@ -143,7 +157,7 @@ function scenario({ desktop }) {
   );
   check(
     "restore event restores the glyphs",
-    maximizeGlyph.hidden === false && restoreGlyph.hidden === true,
+    !maximizeGlyph.hasAttribute("hidden") && restoreGlyph.hasAttribute("hidden"),
   );
 
   window.dispatchEvent(
@@ -154,8 +168,8 @@ function scenario({ desktop }) {
   check(
     "malformed maximized events leave the control alone",
     maximize.getAttribute("aria-label") === "Maximize" &&
-      maximizeGlyph.hidden === false &&
-      restoreGlyph.hidden === true,
+      !maximizeGlyph.hasAttribute("hidden") &&
+      restoreGlyph.hasAttribute("hidden"),
   );
 }
 
