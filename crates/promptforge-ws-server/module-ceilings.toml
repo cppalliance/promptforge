@@ -33,7 +33,7 @@
 "chat_ws.rs" = 2963
 "config.rs" = 593
 "cross_site.rs" = 338
-"deadline.rs" = 109
+"deadline.rs" = 112
 "error.rs" = 484
 "gateway.rs" = 1300
 "heartbeat.rs" = 872

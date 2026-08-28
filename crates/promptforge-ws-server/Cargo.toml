@@ -51,6 +51,7 @@ test-fixtures = ["dep:hound"]
 promptforge-ws-server = { path = ".", features = ["test-fixtures"] }
 tempfile.workspace = true
 time = { workspace = true, features = ["parsing"] }
+tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 tower.workspace = true
 
