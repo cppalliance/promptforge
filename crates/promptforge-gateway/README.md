@@ -26,6 +26,17 @@ Embedding hosts use the library API instead of the binary: `spawn` starts the ga
 
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
+## The `[server]` section
+
+The boot config's `[server]` section is required and has no defaults. Both fields accept `${VAR}` interpolation from the process environment.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `bind` | required | Socket address the gateway listener binds. |
+| `api_key` | required | Shared bearer key every `/v1/*` request must present. |
+
+Like `[workshop]`, the section is owned by the boot config: a profile whose merged `[server]` differs from the boot file's is refused at startup or, on a mid-run switch, with the running state left untouched.
+
 ## Hosting the workshop
 
 Built with the `workshop` feature, the gateway can host the PromptForge Workshop UI server on a second, loopback-only listener in the same process. Hosting is switched on by a `[workshop]` section in the boot config; without the section (or without the feature) the gateway runs headless.
