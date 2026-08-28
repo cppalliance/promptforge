@@ -16,7 +16,8 @@
 //! [`Config::load_profile_with_chain`] additionally returns the resolved
 //! include chain, and [`load_server`] and [`load_workshop`] read only a boot
 //! file's `[server]` and `[workshop]` sections (includes and interpolation,
-//! without full validation). Failures are reported as the opaque
+//! without full validation); [`load_boot_sections`] reads both in one pass.
+//! Failures are reported as the opaque
 //! [`ConfigError`]; classify them with [`ConfigError::kind`].
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
@@ -46,5 +47,5 @@ pub use crate::config::{
     WorkshopTapeConfig, WorkshopVoiceConfig,
 };
 pub use crate::profile::{
-    ProfileName, ProfileNameError, list_profiles, load_server, load_workshop,
+    ProfileName, ProfileNameError, list_profiles, load_boot_sections, load_server, load_workshop,
 };
