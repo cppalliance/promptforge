@@ -23,8 +23,11 @@ dotenvy.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
 indicatif.workspace = true
+# Optional: opens the system browser at the hosted workshop URL.
+open = { workspace = true, optional = true }
 promptforge-core.workspace = true
 promptforge-gateway-config.workspace = true
+promptforge-ws-server = { workspace = true, optional = true }
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -38,6 +41,13 @@ tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 zip.workspace = true
+
+[features]
+# Host the workshop UI server on a second loopback listener. The default
+# stays empty so headless gateway builds never pull whisper, CUDA, or the
+# Node UI build into the graph.
+workshop = ["dep:promptforge-ws-server", "dep:open"]
+workshop-cuda = ["workshop", "promptforge-ws-server/cuda"]
 
 [dev-dependencies]
 tempfile.workspace = true

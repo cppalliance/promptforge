@@ -22,6 +22,7 @@ use promptforge_gateway_config::{Config, ConfigError, ProfileName, ServerConfig,
 use crate::api_error::{ServeError, StartupError};
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
+use crate::workshop::{self, WorkshopHandle};
 use crate::{AppState, build_router};
 
 /// Options for running the gateway. Built by the binary from parsed args.
@@ -171,11 +172,16 @@ impl Gateway {
 
 /// A running gateway on its own thread, returned by [`spawn`].
 ///
+/// When the boot config carries a `[workshop]` section and the `workshop`
+/// feature is compiled in, the handle also holds the hosted workshop
+/// server, reachable at [`GatewayHandle::workshop_url`].
+///
 /// Dropping the handle without calling [`GatewayHandle::shutdown`] still
-/// signals the gateway to stop, but does not wait for it.
+/// signals both servers to stop, but does not wait for them.
 #[derive(Debug)]
 pub struct GatewayHandle {
     url: String,
+    workshop: Option<WorkshopHandle>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<Result<(), StartupError>>>,
 }
@@ -188,12 +194,27 @@ impl GatewayHandle {
         &self.url
     }
 
+    /// Returns the base URL of the hosted workshop listener, or `None`
+    /// when the gateway hosts no workshop (the `workshop` feature is not
+    /// compiled in, or the boot config has no `[workshop]` section).
+    #[must_use]
+    pub fn workshop_url(&self) -> Option<&str> {
+        self.workshop.as_ref().map(WorkshopHandle::url)
+    }
+
     /// Signals graceful shutdown and waits for the gateway thread to finish.
+    ///
+    /// A hosted workshop stops first - waiting out its own bounded drain -
+    /// while the gateway still serves, so the workshop's final gateway
+    /// calls never hit a dead socket; only then does the gateway drain.
     ///
     /// # Errors
     /// Returns [`StartupError`] when serving failed or the gateway thread
     /// panicked.
     pub fn shutdown(mut self) -> Result<(), StartupError> {
+        if let Some(workshop) = self.workshop.take() {
+            workshop.shutdown();
+        }
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -225,10 +246,22 @@ impl GatewayHandle {
 
 impl Drop for GatewayHandle {
     fn drop(&mut self) {
+        // Same order as shutdown(): the workshop's stop is signaled before
+        // the gateway's, though drop waits for neither.
+        drop(self.workshop.take());
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
     }
+}
+
+/// What the gateway thread reports through the readiness channel: the
+/// bound gateway URL, plus the hosted workshop's handle when the boot
+/// config asked for one.
+#[derive(Debug)]
+struct Ready {
+    url: String,
+    workshop: Option<WorkshopHandle>,
 }
 
 /// Spawns the gateway on a dedicated thread and blocks until the listener
@@ -266,8 +299,9 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
         .spawn(move || serve_thread(&options, &ready_tx, shutdown_rx))
         .map_err(StartupError::bind)?;
     match ready_rx.recv() {
-        Ok(Ok(url)) => Ok(GatewayHandle {
-            url,
+        Ok(Ok(ready)) => Ok(GatewayHandle {
+            url: ready.url,
+            workshop: ready.workshop,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         }),
@@ -291,7 +325,7 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
 /// become the thread's return value.
 fn serve_thread(
     options: &ServeOptions,
-    ready: &mpsc::Sender<Result<String, StartupError>>,
+    ready: &mpsc::Sender<Result<Ready, StartupError>>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), StartupError> {
     let (config, profiles) = match load_startup(options) {
@@ -319,30 +353,41 @@ fn serve_thread(
             return Ok(());
         }
     };
-    runtime.block_on(async move {
-        let listener = match TcpListener::bind(bind).await {
-            Ok(listener) => listener,
-            Err(error) => {
-                let _ = ready.send(Err(StartupError::bind(error)));
-                return Ok(());
-            }
-        };
-        // The configured bind may carry port 0; the bound local_addr is the
-        // real address the readiness signal must report.
-        let address = match listener.local_addr() {
-            Ok(address) => address,
-            Err(error) => {
-                let _ = ready.send(Err(StartupError::bind(error)));
-                return Ok(());
-            }
-        };
-        tracing::info!("promptforge-gateway serving on {address}");
-        let _ = ready.send(Ok(format!("http://{address}")));
-        gateway
-            .serve(listener, shutdown_on_send(shutdown))
-            .await
-            .map_err(StartupError::serve)
-    })
+    // The bind runs apart from the serve future so the workshop can start
+    // between the two: after the gateway listener exists (a failed gateway
+    // bind must not leave a workshop running) and on this plain thread,
+    // where the workshop's blocking startup stalls no executor.
+    let listener = match runtime.block_on(TcpListener::bind(bind)) {
+        Ok(listener) => listener,
+        Err(error) => {
+            let _ = ready.send(Err(StartupError::bind(error)));
+            return Ok(());
+        }
+    };
+    // The configured bind may carry port 0; the bound local_addr is the
+    // real address the readiness signal must report.
+    let address = match listener.local_addr() {
+        Ok(address) => address,
+        Err(error) => {
+            let _ = ready.send(Err(StartupError::bind(error)));
+            return Ok(());
+        }
+    };
+    let workshop = match workshop::spawn_if_configured(&config, &options.config_path, address) {
+        Ok(workshop) => workshop,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return Ok(());
+        }
+    };
+    tracing::info!("promptforge-gateway serving on {address}");
+    let _ = ready.send(Ok(Ready {
+        url: format!("http://{address}"),
+        workshop,
+    }));
+    runtime
+        .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
+        .map_err(StartupError::serve)
 }
 
 /// Resolves only on an explicit shutdown send. A sender dropped without
@@ -366,18 +411,22 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
 pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
     let mut handle = spawn(options)?;
     if let Some(shutdown) = handle.shutdown.take() {
-        install_ctrl_c_handler(shutdown);
+        install_ctrl_c_handler(handle.workshop.take(), shutdown);
     }
     handle.join()
 }
 
-/// Installs the Ctrl-C handler on its own thread: a genuine interrupt sends
-/// the graceful-shutdown signal, while every failure path sends nothing -
-/// [`shutdown_signal`] never resolves on a handler-install failure, and a
-/// thread or runtime that fails to start merely drops the sender, which
-/// [`shutdown_on_send`] ignores - so no failure can masquerade as an
-/// interrupt and stop the server.
-fn install_ctrl_c_handler(shutdown: tokio::sync::oneshot::Sender<()>) {
+/// Installs the Ctrl-C handler on its own thread: a genuine interrupt stops
+/// a hosted workshop first (bounded by the workshop's own drain watchdog)
+/// and then sends the gateway's graceful-shutdown signal, while every
+/// failure path sends nothing - [`shutdown_signal`] never resolves on a
+/// handler-install failure, and a thread or runtime that fails to start
+/// merely drops the sender, which [`shutdown_on_send`] ignores - so no
+/// failure can masquerade as an interrupt and stop the gateway.
+fn install_ctrl_c_handler(
+    workshop: Option<WorkshopHandle>,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+) {
     let handler = std::thread::Builder::new()
         .name("gateway-ctrl-c".to_string())
         .spawn(move || {
@@ -390,14 +439,26 @@ fn install_ctrl_c_handler(shutdown: tokio::sync::oneshot::Sender<()>) {
                     tracing::error!(
                         "failed to build the Ctrl-C signal runtime: {error}; continuing to serve"
                     );
+                    // Leak the workshop handle: dropping it would signal a
+                    // workshop stop, and a signal-runtime failure must leave
+                    // both listeners serving until the process is killed.
+                    std::mem::forget(workshop);
                     return;
                 }
             };
             runtime.block_on(shutdown_signal());
+            if let Some(workshop) = workshop {
+                workshop.shutdown();
+            }
             let _ = shutdown.send(());
         });
     if let Err(error) = handler {
-        tracing::error!("failed to spawn the Ctrl-C handler thread: {error}; continuing to serve");
+        // The dropped closure signals a hosted workshop's stop, so only the
+        // gateway listener is certain to continue.
+        tracing::error!(
+            "failed to spawn the Ctrl-C handler thread: {error}; the gateway continues to serve \
+             (a hosted workshop may stop)"
+        );
     }
 }
 
@@ -1042,6 +1103,59 @@ endpoints = ["e"]
             shutdown_on_send(receiver).now_or_never().is_some(),
             "an explicit send is the shutdown signal"
         );
+    }
+
+    /// The ephemeral catalog plus a `[workshop]` section on its own
+    /// ephemeral loopback port.
+    fn catalog_with_workshop() -> String {
+        format!("{CATALOG_EPHEMERAL}\n[workshop]\nbind = \"127.0.0.1:0\"\n")
+    }
+
+    #[test]
+    #[cfg(feature = "workshop")]
+    fn the_hosted_workshop_serves_and_stops_with_the_gateway() {
+        let (_tmp, options) = spawn_fixture(&catalog_with_workshop());
+        let gateway = spawn(&options).expect("gateway spawns");
+        let workshop_url = gateway
+            .workshop_url()
+            .expect("a [workshop] boot hosts a workshop")
+            .to_string();
+        assert!(
+            workshop_url.starts_with("http://127.0.0.1:"),
+            "the workshop URL carries the bound loopback address: {workshop_url}"
+        );
+
+        let response = http_get(&workshop_url, "/health");
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+
+        let strip = |url: &str| {
+            url.strip_prefix("http://")
+                .expect("the URL is http")
+                .to_string()
+        };
+        let gateway_address = strip(gateway.url());
+        let workshop_address = strip(&workshop_url);
+        gateway.shutdown().expect("graceful shutdown succeeds");
+        assert!(
+            std::net::TcpStream::connect(&workshop_address).is_err(),
+            "nothing may accept on the workshop address {workshop_address} after shutdown"
+        );
+        assert!(
+            std::net::TcpStream::connect(&gateway_address).is_err(),
+            "nothing may accept on the gateway address {gateway_address} after shutdown"
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "workshop"))]
+    fn a_workshop_section_is_ignored_without_the_feature() {
+        let (_tmp, options) = spawn_fixture(&catalog_with_workshop());
+        let gateway = spawn(&options).expect("gateway spawns without hosting");
+        assert!(
+            gateway.workshop_url().is_none(),
+            "no workshop is hosted without the workshop feature"
+        );
+        gateway.shutdown().expect("graceful shutdown succeeds");
     }
 
     #[test]
