@@ -265,113 +265,24 @@ pub(crate) async fn run_one_section_impl(
                         }
                     }
                     BlockRunMode::Section => {
-                        let tool_set = ctx.tool_set_snapshot()?;
-                        let effective_bindings =
-                            current_tool_bindings(&tool_set, &vm.tool_runtime)?;
-                        if counts.is_none() {
-                            *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
-                            let resolved_model =
-                                crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
-                            if let Some(binding) = resolved_model.as_ref() {
-                                let current = vm.current_sys(sys)?;
-                                let enriched = crate::lua::enrich_sys_model(&current, binding);
-                                vm.re_seal_sys(&enriched)?;
-                                *sys = enriched;
-                                *completion_options = Some(binding.completion_options());
-                            }
-                        }
-                        let local_schemas = vm.local_tool_schemas()?;
-                        // Seed aliases added since the first prose block (via
-                        // `tools.add` or `tools.add_local`) so the tool loop can
-                        // count their calls; `ensure` is idempotent on existing
-                        // aliases.
-                        if let Some(counts) = counts.as_ref() {
-                            let new_aliases = effective_bindings
-                                .iter()
-                                .map(ToolBinding::alias)
-                                .chain(local_schemas.iter().map(|schema| schema.name.as_str()));
-                            for alias in new_aliases {
-                                counts.ensure(alias)?;
-                            }
-                        }
-                        let (schemas, dispatch) = prepare_effective_scope(
-                            &effective_bindings,
-                            &local_schemas,
-                            ctx.execution(),
-                            observer,
+                        run_section_prose(
+                            vm,
+                            ctx,
                             name,
-                        )?;
-
-                        let var = vm.var()?;
-                        let prose = subst::substitute(
                             text,
-                            ctx.args(),
-                            reply.as_deref(),
-                            item,
-                            &var,
-                            sys,
-                            &|name| vm.global_json(name),
-                        )?;
-                        if prose.trim().is_empty() {
-                            continue;
-                        }
-                        let Some(options) = completion_options.as_ref() else {
-                            return Err(Error::ModelRequired {
-                                section: name.to_owned(),
-                            });
-                        };
-                        if client.is_none() {
-                            *client = Some(env_client_with_limits(ctx.limits())?);
-                        }
-                        let Some(active_client) = client.as_ref() else {
-                            // The block just above guarantees a client exists
-                            // here; a `None` is an internal invariant violation,
-                            // not a reason to silently skip this section's prose.
-                            return Err(Error::Internal(
-                                "model-facing prose reached inference with no gateway client",
-                            ));
-                        };
-                        // The alias map is derived on demand from the
-                        // bindings list; the analysis type that precomputed
-                        // it at the H1 boundary is gone.
-                        let global_aliases: BTreeMap<String, ToolId> = tool_set
-                            .bindings()
-                            .iter()
-                            .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
-                            .collect();
-                        let global_aliases = Some(&global_aliases);
-                        // Local tools are Lua functions on this section VM; route
-                        // their calls back into it rather than to a bound tool.
-                        let local_dispatch =
-                            |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
-                        let outcome = run_prose_inference(
-                            active_client,
-                            &schemas,
-                            &dispatch,
-                            conversation,
-                            prose,
                             prose_mode,
-                            ctx.execution(),
+                            sys,
+                            reply,
+                            conversation,
+                            counts,
+                            completion_options,
+                            item,
                             observer,
-                            name,
-                            turns,
                             debug,
-                            options,
-                            ctx.nonce(),
-                            counts.as_ref(),
-                            global_aliases,
-                            Some(&local_dispatch),
+                            turns,
+                            client,
                         )
                         .await?;
-                        *sys = crate::lua::enrich_sys_reply_finish_reason(
-                            sys,
-                            outcome.finish_reason.as_deref(),
-                        );
-                        vm.re_seal_sys(sys)?;
-                        if let Some(text) = outcome.text {
-                            vm.bind_reply(&text, observer, name)?;
-                            *reply = Some(text);
-                        }
                     }
                 }
             }
@@ -381,4 +292,145 @@ pub(crate) async fn run_one_section_impl(
     Ok(SectionFlow::FellThrough {
         reply: reply.clone(),
     })
+}
+
+/// Runs one section-mode prose block: the per-block scope rebuild, the
+/// one-time counts and model install, substitution, the tool loop, and the
+/// reply/`sys` roll-forward.
+///
+/// This is the `BlockRunMode::Section` prose arm of
+/// [`run_one_section_impl`], extracted so the scheduler's driver runs the
+/// identical prose path through the frame's `run_prose_block`. An
+/// empty substituted prose skips inference after the scope rebuild, exactly
+/// as the loop's `continue` did. `counts` doubles as the one-time gate: it
+/// is `Some` exactly after the first prose block installed the counts and
+/// resolved the model.
+///
+/// # Errors
+/// Returns the [`Error`] of whichever step failed: the tool-scope rebuild,
+/// prose substitution, lazy client construction, the tool loop, or a
+/// `sys`/reply re-seal. Returns [`Error::ModelRequired`] when model-facing
+/// prose has no resolved model binding, and [`Error::Internal`] when prose
+/// reaches inference with no gateway client.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one prose block keeps the VM, the shared run context, the frame's borrowed state, the effective reporting handles, and the client slot explicit and linear"
+)]
+pub(crate) async fn run_section_prose(
+    vm: &SectionVm,
+    ctx: &RunContext,
+    name: &str,
+    text: &str,
+    prose_mode: ProseMode,
+    sys: &mut serde_json::Value,
+    reply: &mut Option<String>,
+    conversation: &mut Vec<Message>,
+    counts: &mut Option<ToolCallCounts>,
+    completion_options: &mut Option<CompletionOptions>,
+    item: Option<&serde_json::Value>,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+    turns: &AtomicU32,
+    client: &mut Option<GatewayClient>,
+) -> Result<()> {
+    let tool_set = ctx.tool_set_snapshot()?;
+    let effective_bindings = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
+    if counts.is_none() {
+        *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
+        let resolved_model = crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
+        if let Some(binding) = resolved_model.as_ref() {
+            let current = vm.current_sys(sys)?;
+            let enriched = crate::lua::enrich_sys_model(&current, binding);
+            vm.re_seal_sys(&enriched)?;
+            *sys = enriched;
+            *completion_options = Some(binding.completion_options());
+        }
+    }
+    let local_schemas = vm.local_tool_schemas()?;
+    // Seed aliases added since the first prose block (via `tools.add` or
+    // `tools.add_local`) so the tool loop can count their calls; `ensure`
+    // is idempotent on existing aliases.
+    if let Some(counts) = counts.as_ref() {
+        let new_aliases = effective_bindings
+            .iter()
+            .map(ToolBinding::alias)
+            .chain(local_schemas.iter().map(|schema| schema.name.as_str()));
+        for alias in new_aliases {
+            counts.ensure(alias)?;
+        }
+    }
+    let (schemas, dispatch) = prepare_effective_scope(
+        &effective_bindings,
+        &local_schemas,
+        ctx.execution(),
+        observer,
+        name,
+    )?;
+
+    let var = vm.var()?;
+    let prose = subst::substitute(
+        text,
+        ctx.args(),
+        reply.as_deref(),
+        item,
+        &var,
+        sys,
+        &|name| vm.global_json(name),
+    )?;
+    if prose.trim().is_empty() {
+        return Ok(());
+    }
+    let Some(options) = completion_options.as_ref() else {
+        return Err(Error::ModelRequired {
+            section: name.to_owned(),
+        });
+    };
+    if client.is_none() {
+        *client = Some(env_client_with_limits(ctx.limits())?);
+    }
+    let Some(active_client) = client.as_ref() else {
+        // The block just above guarantees a client exists here; a `None` is
+        // an internal invariant violation, not a reason to silently skip
+        // this section's prose.
+        return Err(Error::Internal(
+            "model-facing prose reached inference with no gateway client",
+        ));
+    };
+    // The alias map is derived on demand from the bindings list; the
+    // analysis type that precomputed it at the H1 boundary is gone.
+    let global_aliases: BTreeMap<String, ToolId> = tool_set
+        .bindings()
+        .iter()
+        .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
+        .collect();
+    let global_aliases = Some(&global_aliases);
+    // Local tools are Lua functions on this section VM; route their calls
+    // back into it rather than to a bound tool.
+    let local_dispatch = |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
+    let outcome = run_prose_inference(
+        active_client,
+        &schemas,
+        &dispatch,
+        conversation,
+        prose,
+        prose_mode,
+        ctx.execution(),
+        observer,
+        name,
+        turns,
+        debug,
+        options,
+        ctx.nonce(),
+        counts.as_ref(),
+        global_aliases,
+        Some(&local_dispatch),
+    )
+    .await?;
+    *sys = crate::lua::enrich_sys_reply_finish_reason(sys, outcome.finish_reason.as_deref());
+    vm.re_seal_sys(sys)?;
+    if let Some(text) = outcome.text {
+        vm.bind_reply(&text, observer, name)?;
+        *reply = Some(text);
+    }
+    Ok(())
 }

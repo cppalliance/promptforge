@@ -1653,5 +1653,6 @@ mod live_infer;
 mod local_tools;
 mod model_and_reply;
 mod observations;
+mod scheduler;
 mod tool_loop;
 mod tool_scoping;
