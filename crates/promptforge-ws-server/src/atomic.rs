@@ -17,6 +17,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// orphans by it.
 const TEMP_SUFFIX: &str = ".pf-tmp";
 
+/// Fixed temp name the pre-helper menu scheme wrote beside the workshop
+/// state file; a crash under that scheme left this orphan, which the
+/// sweep also removes.
+const LEGACY_TEMP_NAME: &str = "workshop-state.json.tmp";
+
 /// Process-wide counter making each temp name unique, so two concurrent
 /// writes to the same target never interleave inside one temp file: each
 /// writer fills its own temp completely and the last rename wins whole.
@@ -63,9 +68,10 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Removes temp files a crashed write left behind in `dir`, without
-/// recursing. Every failure - a missing or unreadable directory, an
-/// unreadable entry, an unremovable file - is logged and tolerated: the
-/// sweep is cleanup and must never cost startup.
+/// recursing. A missing directory is tolerated silently: the server has
+/// simply never written there. Every other failure - an unreadable
+/// directory or entry, an unremovable file - is logged and tolerated:
+/// the sweep is cleanup and must never cost startup.
 pub(crate) fn sweep_orphaned_temps(dir: &Path) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -92,7 +98,9 @@ pub(crate) fn sweep_orphaned_temps(dir: &Path) {
                 continue;
             }
         };
-        if !entry.file_name().to_string_lossy().ends_with(TEMP_SUFFIX) {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(TEMP_SUFFIX) && name != LEGACY_TEMP_NAME {
             continue;
         }
         match fs::remove_file(entry.path()) {
@@ -183,6 +191,23 @@ mod tests {
             dir_names(dir.path()),
             ["state.json"],
             "the sweep removes the orphan and spares the real file"
+        );
+    }
+
+    #[test]
+    fn the_sweep_removes_a_legacy_menu_temp_orphan() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let target = dir.path().join("workshop-state.json");
+        fs::write(&target, b"good").expect("the seed write succeeds");
+        // A crash under the pre-helper menu scheme leaves exactly this:
+        // the fixed-name temp beside an intact state file.
+        let orphan = dir.path().join(LEGACY_TEMP_NAME);
+        fs::write(&orphan, b"partial").expect("the simulated legacy residue writes");
+        sweep_orphaned_temps(dir.path());
+        assert_eq!(
+            dir_names(dir.path()),
+            ["workshop-state.json"],
+            "the sweep removes the legacy orphan and spares the real file"
         );
     }
 
