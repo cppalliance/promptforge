@@ -6,9 +6,10 @@
 //!
 //! The module is split into cohesive units: [`assets`] (release table),
 //! [`digest`] (hashing + pin validation), [`archive`] (extraction),
-//! [`confine`] (cache-root path safety), [`progress`] (download reporting), and
-//! [`download`] (HTTP transfer + scoped HF auth). This file owns
-//! [`ArtifactStore`], the orchestration that ties them together.
+//! [`confine`] (cache-root path safety), [`progress`] (download reporting),
+//! [`download`] (HTTP transfer + scoped HF auth), and [`verified`]
+//! (verified-digest markers). This file owns [`ArtifactStore`], the
+//! orchestration that ties them together.
 
 mod archive;
 mod assets;
@@ -16,6 +17,7 @@ mod confine;
 mod digest;
 mod download;
 mod progress;
+mod verified;
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -29,7 +31,8 @@ use crate::local::error::LocalError;
 use archive::{extract_archive, find_executable, require_executable};
 use assets::{ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
-use digest::{file_digest, tree_digest};
+use digest::tree_digest;
+use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker};
 
 // Re-exports consumed elsewhere in the crate (`local/mod.rs`, `local/cache.rs`,
 // `testsupport.rs`). Test-only helpers are imported directly from their
@@ -120,14 +123,8 @@ impl ArtifactStore {
         }
         if let Some(expected) = sha256 {
             let expected = parse_expected_digest(expected)?;
-            let actual = file_digest(&path)?;
-            if actual != expected {
-                return Err(LocalError::DigestMismatch {
-                    name: path.display().to_string(),
-                    expected,
-                    actual,
-                });
-            }
+            let marker = path_source_marker(&self.cache, &path)?;
+            let _outcome = verify_blob(&self.cache, &path, &expected, &marker)?;
         }
         Ok(path)
     }
@@ -230,10 +227,16 @@ impl ArtifactStore {
         if destination.is_file() {
             match expected_digest.as_deref() {
                 Some(expected) => {
-                    if file_digest(destination)? == expected {
-                        return Ok(());
+                    let marker = blob_marker_path(destination);
+                    match verify_blob(&self.cache, destination, expected, &marker) {
+                        Ok(_) => return Ok(()),
+                        // A pin mismatch on a cached blob is repaired by
+                        // re-downloading; every other failure propagates.
+                        Err(LocalError::DigestMismatch { .. }) => {
+                            remove_cache_entry(&self.cache, destination)?;
+                        }
+                        Err(error) => return Err(error),
                     }
-                    remove_cache_entry(&self.cache, destination)?;
                 }
                 None => return Ok(()),
             }
@@ -265,7 +268,13 @@ impl ArtifactStore {
                 actual,
             });
         }
-        rename_confined(&self.cache, &staging, destination)
+        rename_confined(&self.cache, &staging, destination)?;
+        if let Some(expected) = expected_digest.as_deref() {
+            let marker = blob_marker_path(destination);
+            validate_cache_path(&self.cache, &marker)?;
+            write_marker(&marker, destination, expected)?;
+        }
+        Ok(())
     }
 
     fn download(&self, url: &str, destination: &Path) -> Result<String> {
