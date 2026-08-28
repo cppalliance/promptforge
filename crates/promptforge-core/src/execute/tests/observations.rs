@@ -5,6 +5,10 @@ use super::*;
 const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
 
+const SECOND_SECTION_ERRORS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## First\n\n```lua\nlocal x = 1\n```\n\n\
+## Second\n\n```lua\nerror('expected failure')\n```\n";
+
 #[tokio::test]
 async fn a_two_section_run_reports_the_exact_observation_sequence() {
     let (result, records) = run_recorded(TWO_SECTIONS).await;
@@ -203,6 +207,35 @@ async fn an_erroring_section_reports_started_but_not_finished() {
         !observed
             .iter()
             .any(|(_, event)| event == &detail::SECTION_FINISHED.to_string()),
+        "the erroring section must never report finished: {observed:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_erroring_section_tears_down_exactly_once_without_finishing() {
+    // The RAII teardown contract on the error path: the frame's drop fires
+    // the teardown pair exactly once, and the disarmed completion flag
+    // keeps SECTION_FINISHED from firing for the erroring section.
+    let (result, records) = run_recorded(SECOND_SECTION_ERRORS).await;
+    assert!(result.is_err());
+
+    let observed = events(&records);
+    for event in [
+        detail::LUA_TEARDOWN_STARTED.to_string(),
+        detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+    ] {
+        let count = observed
+            .iter()
+            .filter(|(section, observed_event)| section == "Second" && observed_event == &event)
+            .count();
+        assert_eq!(
+            count, 1,
+            "the erroring section must tear down exactly once ({event}): {observed:?}"
+        );
+    }
+    assert!(
+        !observed.iter().any(|(section, event)| section == "Second"
+            && event == &detail::SECTION_FINISHED.to_string()),
         "the erroring section must never report finished: {observed:?}"
     );
 }

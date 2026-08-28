@@ -43,13 +43,12 @@
 //! [`SectionContext`]: construction absorbs VM construction, the Lua limits
 //! install (a limits failure propagates bare, before any teardown
 //! observation exists), the setup half, and the infer hook; the block walk
-//! runs as the frame's `run`; and the driver owns the teardown boundary, so
-//! every path tears the VM down exactly once.
+//! runs as the frame's `run`; and the frame's `Drop` owns the teardown
+//! boundary, so every path tears the VM down exactly once.
 
 use crate::client::GatewayClient;
 use crate::fanout;
 use crate::lua::{LuaFanoutResult, resolve_section_target};
-use crate::observe::detail;
 use crate::parser::Section;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
@@ -224,8 +223,8 @@ async fn walk_siblings(
 /// This is the single engine every chain drives: it constructs the
 /// section's [`SectionContext`] (VM construction and limits, the control
 /// globals, the setup half, the infer hook), runs the block walk on the
-/// frame, then owns the teardown boundary and the section-finished
-/// observation.
+/// frame, and lets the frame's `Drop` own the teardown boundary and the
+/// section-finished observation.
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
@@ -262,10 +261,11 @@ async fn run_one_section(
     )?;
 
     // The walk half - the ordered block loop - reports how the section
-    // ended. The teardown boundary stays here: every path out of the walk
-    // tears the VM down exactly once, and SECTION_FINISHED fires only when
-    // the walk completed (a jump or return included), never on an error.
-    let flow = match section_frame
+    // ended. The frame's Drop is the teardown boundary: every path out of
+    // the walk drops the frame and tears the VM down exactly once, and
+    // SECTION_FINISHED fires from that drop only when the walk completed
+    // (a jump or return included), never on an error.
+    let flow = section_frame
         .run(
             ctx,
             &section.name,
@@ -273,22 +273,12 @@ async fn run_one_section(
             BlockRunMode::Section,
             client,
         )
-        .await
-    {
-        Ok(flow) => flow,
-        Err(error) => {
-            section_frame.teardown(&section.name);
-            return Err(error);
-        }
-    };
-    // Read the section's final var back before teardown so the walk rolls it
-    // forward; the write guard keeps this conversion from failing in
-    // practice.
-    let final_var = section_frame.read_var();
-    section_frame.teardown(&section.name);
-    let final_var = final_var?;
-    ctx.observer()
-        .observe(ctx.execution(), &section.name, detail::SECTION_FINISHED);
+        .await?;
+    // Read the section's final var back while the VM is live, so the walk
+    // rolls it forward; the write guard keeps this conversion from failing
+    // in practice.
+    let final_var = section_frame.read_var()?;
+    section_frame.mark_completed();
     Ok((flow, final_var))
 }
 

@@ -283,9 +283,10 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     let outcome: Result<(LuaFanoutResult, Observation)> =
         cancel::maybe_scope(inputs.cancel.clone(), body).await;
 
-    // Single epilogue: tear the frame's VM down once, then record exactly one
-    // terminal observation matching the arm's real outcome.
-    frame.teardown(&worker.name);
+    // Single epilogue: drop the frame so its `Drop` tears the VM down once,
+    // then record exactly one terminal observation matching the arm's real
+    // outcome.
+    drop(frame);
     match outcome {
         Ok((result, event)) => {
             finalizer.finish(event);

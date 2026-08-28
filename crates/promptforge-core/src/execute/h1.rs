@@ -29,49 +29,36 @@ pub(crate) async fn execute_live_h1(
         ctx.model_set(),
     );
     // Construction and limits failures propagate bare, before any teardown
-    // observation exists; every failure past this point tears the frame's
-    // VM down exactly once.
+    // observation exists; every failure past this point drops the frame,
+    // whose `Drop` tears the VM down exactly once.
     let mut h1_frame = SectionContext::new_live_h1(ctx, client)?;
-    macro_rules! h1_try {
-        ($expression:expr) => {
-            match $expression {
-                Ok(value) => value,
-                Err(error) => {
-                    h1_frame.teardown(&ctx.prompt().title);
-                    return Err(error);
-                }
-            }
-        };
-    }
     // The pass owns its client slot: seeded from the run's client, created
     // lazily on the first prose block, whose construction error propagates
-    // through `h1_try!`.
+    // through `?` while the frame's drop owns the teardown.
     let mut active_client = client.cloned();
-    let flow = h1_try!(
-        h1_frame
-            .run(
-                ctx,
-                &ctx.prompt().title,
-                &ctx.prompt().h1_blocks,
-                BlockRunMode::LiveH1(&runtime),
-                &mut active_client,
-            )
-            .await
-    );
+    let flow = h1_frame
+        .run(
+            ctx,
+            &ctx.prompt().title,
+            &ctx.prompt().h1_blocks,
+            BlockRunMode::LiveH1(&runtime),
+            &mut active_client,
+        )
+        .await?;
     let (returned, reply) = match flow {
         SectionFlow::Returned(value) => (Some(value), None),
         SectionFlow::FellThrough { reply } => (None, reply),
         // `run_live_h1_block` turns a recorded jump into an error, so live
         // mode never yields a jump flow.
         SectionFlow::Jumped { .. } => {
-            h1_frame.teardown(&ctx.prompt().title);
             return Err(Error::Internal("live H1 block walk reported a jump"));
         }
     };
-    let var = h1_try!(h1_frame.read_var());
+    let var = h1_frame.read_var()?;
     // The bindings need no extraction: H1's binds already landed in the
-    // run's shared sets, which the walk reads through the views.
-    h1_frame.teardown(&ctx.prompt().title);
+    // run's shared sets, which the walk reads through the views. The H1
+    // frame is never marked completed: SECTION_FINISHED is a walked
+    // section's boundary, not the setup pass's.
     Ok(LiveH1State {
         var,
         returned,
