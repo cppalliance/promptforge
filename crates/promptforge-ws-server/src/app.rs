@@ -7,6 +7,7 @@ use axum::Router;
 
 use crate::catalog::CatalogBus;
 use crate::config::{Config, VoiceConfig};
+use crate::deadline::{DEFAULT_DEADLINE, with_deadline};
 use crate::gateway::{GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
 use crate::menu::MenuBus;
@@ -260,17 +261,22 @@ fn degrade(config: &VoiceConfig, push: &Push, error: &TranscribeError) -> Option
 /// group narrowed to the one service its handlers use. The API routes sit
 /// behind the [`crate::cross_site`] guard; `/health` and the UI assets
 /// stay outside it so the shell probe, heartbeat, and initial navigation
-/// keep working.
+/// keep working. Every HTTP route carries a [`crate::deadline`] tier -
+/// the default here, the relay tier inside [`routes::chat`] - and the
+/// WebSocket upgrades carry none.
 pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
     let api = Router::new()
         .merge(routes::chat::routes(state.clone()))
         .merge(routes::voice::routes(state))
-        .merge(routes::workspace::routes(workspace))
+        .merge(with_deadline(
+            routes::workspace::routes(workspace),
+            DEFAULT_DEADLINE,
+        ))
         .layer(axum::middleware::from_fn(crate::cross_site::guard));
     Router::new()
-        .merge(routes::assets::routes())
-        .merge(routes::health::routes())
+        .merge(with_deadline(routes::assets::routes(), DEFAULT_DEADLINE))
+        .merge(with_deadline(routes::health::routes(), DEFAULT_DEADLINE))
         .merge(api)
 }
 

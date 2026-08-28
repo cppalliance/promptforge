@@ -447,6 +447,48 @@ mod tests {
         .expect("a matching snapshot is retained within the deadline")
     }
 
+    #[test]
+    fn the_probe_bound_is_shorter_than_the_heartbeat_interval() {
+        assert!(
+            crate::gateway::HEALTH_PROBE_TIMEOUT < HEARTBEAT_INTERVAL,
+            "a probe outlasting the interval would back the heartbeat up \
+             behind a stalled gateway"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_gateway_reads_unreachable_within_the_probe_bound() {
+        // A stub that completes TCP handshakes and never answers: without
+        // a bounded probe, the first probe would hang forever and the
+        // heartbeat would never report at all.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stalled stub");
+        let addr = listener.local_addr().expect("stalled stub address");
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        let client = GatewayClient::new(&format!("http://{addr}"), "")
+            .expect("client builds in tests")
+            .with_timeouts_for_test(Duration::from_millis(100), Duration::from_millis(100));
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let menu = MenuBus::new(catalog.clone(), None);
+        let mut rx = status.subscribe();
+        let heartbeat = spawn(
+            client,
+            Push::new(status.clone(), catalog, menu),
+            GatewayHealth::new(),
+            TEST_INTERVAL,
+        );
+        let update = next_update(&mut rx).await;
+        assert_eq!(update.label, "Gateway unreachable");
+        heartbeat.shutdown().await;
+    }
+
     #[tokio::test]
     async fn a_healthy_gateway_fires_connected_once_and_stays_quiet() {
         let healthy = Arc::new(AtomicBool::new(true));

@@ -16,21 +16,23 @@ use serde::Deserialize;
 
 use crate::protocol::ChatRequest;
 
-/// Bound on a single `GET /health` probe: a gateway that accepts the
-/// connection but never answers must still read as unreachable, and two
+/// Default bound on a single `GET /health` probe: a gateway that accepts
+/// the connection but never answers must still read as unreachable, and two
 /// seconds keeps the probe well under the heartbeat interval it serves.
-const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// TCP connect timeout applied to every request. A gateway that is down or
 /// unreachable should fail fast rather than hanging for the OS default (~21 s
 /// on Linux, ~75 s on Windows).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Whole-request timeout for non-streaming operations: model catalog fetch,
-/// buffered chat completions, and the initial cache API handshake. Streaming
-/// responses (SSE chat, cache downloads, and profile switches) use no
-/// whole-request timeout since they can legitimately run for minutes.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default whole-request timeout for non-streaming operations: model
+/// catalog fetch, buffered chat completions, and the initial cache API
+/// handshake. Streaming responses (SSE chat, cache downloads, and profile
+/// switches) can legitimately run for minutes, so the same bound covers
+/// only their header phase (see `send_bounded`) and the body stream stays
+/// open-ended.
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A gateway HTTP response captured for verbatim relay.
 #[derive(Debug)]
@@ -293,6 +295,11 @@ pub struct GatewayClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
+    /// Whole-request bound for buffered calls; header-phase bound for
+    /// streaming calls.
+    request_timeout: Duration,
+    /// Whole-request bound for the health probe.
+    health_timeout: Duration,
 }
 
 // Manual so the bearer key is never written to logs.
@@ -323,7 +330,37 @@ impl GatewayClient {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
+            request_timeout: REQUEST_TIMEOUT,
+            health_timeout: HEALTH_PROBE_TIMEOUT,
         })
+    }
+
+    /// Overrides the request and probe bounds, so tests can trip them
+    /// without waiting out the production values.
+    #[cfg(test)]
+    pub(crate) fn with_timeouts_for_test(mut self, request: Duration, health: Duration) -> Self {
+        self.request_timeout = request;
+        self.health_timeout = health;
+        self
+    }
+
+    /// Sends `request`, bounding the wait for the response headers on the
+    /// client's request timeout.
+    ///
+    /// The streaming calls use this instead of a whole-request timeout: a
+    /// gateway that accepts the connection and then stalls must fail the
+    /// call rather than hang its caller, but an accepted stream may
+    /// legitimately run for minutes, so only the header phase is bounded
+    /// and the body stream stays open-ended.
+    async fn send_bounded(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, GatewayError> {
+        match tokio::time::timeout(self.request_timeout, request.send()).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(source)) => Err(GatewayError::Transport(Box::new(source))),
+            Err(elapsed) => Err(GatewayError::Transport(Box::new(elapsed))),
+        }
     }
 
     /// Applies bearer authentication to `request`, unless the client was
@@ -342,13 +379,13 @@ impl GatewayClient {
     /// Returns `true` only when the gateway answers with a success status:
     /// a transport failure, a probe timeout, or a non-success answer all
     /// read as unreachable. The request never carries the client's API key
-    /// (the endpoint is unauthenticated by design) and is capped at
-    /// `HEALTH_PROBE_TIMEOUT`.
+    /// (the endpoint is unauthenticated by design) and is capped at the
+    /// probe bound (`HEALTH_PROBE_TIMEOUT` by default).
     pub async fn health(&self) -> bool {
         let probe = self
             .http
             .get(format!("{}/health", self.base_url))
-            .timeout(HEALTH_PROBE_TIMEOUT);
+            .timeout(self.health_timeout);
         match probe.send().await {
             Ok(response) => response.status().is_success(),
             Err(_) => false,
@@ -367,7 +404,7 @@ impl GatewayClient {
     pub async fn list_models(&self) -> Result<GatewayResponse, GatewayError> {
         let response = self
             .authorize(self.http.get(format!("{}/v1/models", self.base_url)))
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -386,7 +423,7 @@ impl GatewayClient {
     pub async fn list_profiles(&self) -> Result<GatewayResponse, GatewayError> {
         let response = self
             .authorize(self.http.get(format!("{}/admin/profiles", self.base_url)))
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -406,7 +443,7 @@ impl GatewayClient {
     pub async fn profile_status(&self) -> Result<GatewayResponse, GatewayError> {
         let response = self
             .authorize(self.http.get(format!("{}/admin/status", self.base_url)))
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -418,26 +455,25 @@ impl GatewayClient {
     /// An accepted switch answers `text/event-stream` and returns
     /// [`SwitchResponse::Switching`], whose payload stream carries stage
     /// markers and then a terminal `ready` or `error` event (decode it with
-    /// [`switch_events`]). The call carries no whole-request timeout:
-    /// loading model weights into VRAM legitimately runs for minutes, and
-    /// the stream reports progress the whole way. A non-success or
-    /// non-streaming answer is buffered and returned, not reported as an
-    /// error.
+    /// [`switch_events`]). Only the wait for the response headers is
+    /// bounded: loading model weights into VRAM legitimately runs for
+    /// minutes and the stream reports progress the whole way, so the
+    /// stream itself carries no deadline. A non-success or non-streaming
+    /// answer is buffered and returned, not reported as an error.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed and [`GatewayError::ReadBody`] if a buffered answer's body
-    /// cannot be read.
+    /// completed (the header bound elapsing included) and
+    /// [`GatewayError::ReadBody`] if a buffered answer's body cannot be
+    /// read.
     pub async fn switch_profile(&self, name: &str) -> Result<SwitchResponse, GatewayError> {
-        let response = self
+        let request = self
             .authorize(
                 self.http
                     .post(format!("{}/admin/switch-profile", self.base_url)),
             )
-            .json(&serde_json::json!({ "name": name }))
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+            .json(&serde_json::json!({ "name": name }));
+        let response = self.send_bounded(request).await?;
         let status = response.status();
         if status.is_success() && is_event_stream(&response) {
             return Ok(SwitchResponse::Switching {
@@ -468,7 +504,7 @@ impl GatewayClient {
                     .post(format!("{}/v1/chat/completions", self.base_url)),
             )
             .json(request)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(self.request_timeout)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -481,13 +517,15 @@ impl GatewayClient {
     /// A success status yields [`ChatStream::Stream`] carrying the SSE
     /// payload stream; any other status is buffered and returned as
     /// [`ChatStream::Relay`] so the caller can relay the gateway's error
-    /// envelope verbatim.
+    /// envelope verbatim. Only the wait for the response headers is
+    /// bounded; the accepted stream itself carries no deadline.
     ///
     /// # Errors
     /// Returns [`GatewayError::Serialize`] if the request cannot be
     /// serialized, [`GatewayError::Transport`] if the request cannot be
-    /// completed, and [`GatewayError::ReadBody`] if a declined stream's
-    /// error body cannot be read.
+    /// completed (the header bound elapsing included), and
+    /// [`GatewayError::ReadBody`] if a declined stream's error body cannot
+    /// be read.
     pub async fn chat_completion_stream(
         &self,
         request: &ChatRequest,
@@ -497,15 +535,13 @@ impl GatewayClient {
         if let Some(object) = body.as_object_mut() {
             object.insert("stream".to_string(), serde_json::Value::Bool(true));
         }
-        let response = self
+        let request = self
             .authorize(
                 self.http
                     .post(format!("{}/v1/chat/completions", self.base_url)),
             )
-            .json(&body)
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+            .json(&body);
+        let response = self.send_bounded(request).await?;
         let status = response.status();
         if !status.is_success() {
             return read(response).await.map(ChatStream::Relay);
@@ -522,21 +558,21 @@ impl GatewayClient {
     /// A cache hit answers a buffered JSON `ready` event
     /// ([`CacheResponse::Buffered`] on a success status); a miss answers
     /// `text/event-stream` and returns [`CacheResponse::Download`], whose
-    /// payload stream ends in a terminal `ready` or `error` event. A
-    /// non-success status is buffered and returned, not reported as an
-    /// error.
+    /// payload stream ends in a terminal `ready` or `error` event. Only
+    /// the wait for the response headers is bounded; a download stream
+    /// itself carries no deadline. A non-success status is buffered and
+    /// returned, not reported as an error.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed and [`GatewayError::ReadBody`] if a buffered answer's body
-    /// cannot be read.
+    /// completed (the header bound elapsing included) and
+    /// [`GatewayError::ReadBody`] if a buffered answer's body cannot be
+    /// read.
     pub async fn cache_ensure(&self, source: &str) -> Result<CacheResponse, GatewayError> {
-        let response = self
+        let request = self
             .authorize(self.http.post(format!("{}/v1/cache", self.base_url)))
-            .json(&serde_json::json!({ "source": source }))
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+            .json(&serde_json::json!({ "source": source }));
+        let response = self.send_bounded(request).await?;
         let status = response.status();
         if status.is_success() && is_event_stream(&response) {
             return Ok(CacheResponse::Download {
@@ -819,6 +855,88 @@ mod tests {
                 .expect("mock gateway serves");
         });
         format!("http://{addr}")
+    }
+
+    /// Binds a stub that completes TCP handshakes and then never answers,
+    /// modeling a gateway that is up but wedged.
+    async fn spawn_stalled_gateway() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stalled stub");
+        let addr = listener.local_addr().expect("stalled stub address");
+        tokio::spawn(async move {
+            // Sockets are held open and never answered until the test's
+            // runtime tears the task down.
+            let mut held = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                held.push(socket);
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// A client against `base_url` whose bounds are tight enough to trip
+    /// inside a test.
+    fn impatient_client(base_url: &str) -> GatewayClient {
+        GatewayClient::new(base_url, "")
+            .expect("client builds in tests")
+            .with_timeouts_for_test(Duration::from_millis(100), Duration::from_millis(100))
+    }
+
+    #[tokio::test]
+    async fn a_stalled_gateway_trips_the_request_timeout() {
+        let base_url = spawn_stalled_gateway().await;
+        let error = impatient_client(&base_url)
+            .list_models()
+            .await
+            .expect_err("a gateway that never answers must trip the request timeout");
+        assert!(
+            matches!(error, GatewayError::Transport(_)),
+            "expected Transport, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_gateway_trips_the_buffered_chat_timeout() {
+        let base_url = spawn_stalled_gateway().await;
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+        };
+        let error = impatient_client(&base_url)
+            .chat_completion(&request)
+            .await
+            .expect_err("a gateway that never answers must trip the request timeout");
+        assert!(
+            matches!(error, GatewayError::Transport(_)),
+            "expected Transport, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_gateway_trips_the_stream_header_bound() {
+        let base_url = spawn_stalled_gateway().await;
+        let request = ChatRequest {
+            model: "test-model".to_string(),
+            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+        };
+        let error = impatient_client(&base_url)
+            .chat_completion_stream(&request)
+            .await
+            .expect_err("a gateway that never sends headers must trip the header bound");
+        assert!(
+            matches!(error, GatewayError::Transport(_)),
+            "expected Transport, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stalled_gateway_probe_reads_unreachable() {
+        let base_url = spawn_stalled_gateway().await;
+        assert!(
+            !impatient_client(&base_url).health().await,
+            "a gateway that accepts but never answers must read unreachable"
+        );
     }
 
     #[tokio::test]

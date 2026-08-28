@@ -5,17 +5,24 @@ use axum::Router;
 use axum::routing::{get, post};
 
 use crate::app::AppState;
+use crate::deadline::{RELAY_DEADLINE, with_deadline};
 use crate::{chat_ws, relay};
 
 /// The chat relay routes. They take the whole [`AppState`]: the handlers
 /// reach the gateway client, the tape, the health flag, and the status and
-/// catalog buses.
+/// catalog buses. The buffered relay routes wait on a gateway call, so
+/// they carry the relay deadline; `/ws` is added after the layer and
+/// carries none - the upgrade answers immediately and the session then
+/// outlives any deadline.
 pub(crate) fn routes(state: AppState) -> Router {
-    Router::new()
-        .route("/v1/models", get(relay::models))
-        .route("/chat", post(relay::chat))
-        .route("/ws", get(chat_ws::upgrade))
-        .with_state(state)
+    with_deadline(
+        Router::new()
+            .route("/v1/models", get(relay::models))
+            .route("/chat", post(relay::chat)),
+        RELAY_DEADLINE,
+    )
+    .route("/ws", get(chat_ws::upgrade))
+    .with_state(state)
 }
 
 #[cfg(test)]

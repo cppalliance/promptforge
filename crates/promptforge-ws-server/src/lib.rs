@@ -13,6 +13,7 @@ mod catalog;
 mod chat_ws;
 mod config;
 mod cross_site;
+mod deadline;
 mod error;
 mod gateway;
 mod heartbeat;
