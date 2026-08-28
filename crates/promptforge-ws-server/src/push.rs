@@ -5,7 +5,9 @@
 //!
 //! Producers hold a [`Push`] and speak in intents - a status update, a
 //! failure, an activity pulse, determinate progress, idle, a fresh model
-//! catalog, the workbench snapshot. What each intent becomes on the wire
+//! catalog; workbench producers drive the Model-menu mutators through
+//! [`Push::menu`], and every mutation publishes its own snapshot. What
+//! each intent becomes on the wire
 //! is decided here and in [`crate::protocol`], nowhere else. The buses
 //! stay the transport: every `/ws` session subscribes on
 //! [`crate::status::StatusBus`], [`crate::catalog::CatalogBus`], and
@@ -106,20 +108,6 @@ impl Push {
     pub(crate) fn push_models_catalog(&self, models: Vec<serde_json::Value>) {
         self.catalog.publish(models);
         self.menu.reconcile_catalog();
-    }
-
-    /// Pushes the current workbench snapshot: a `{"type":"workbench",...}`
-    /// [`crate::protocol::WorkbenchFrame`] carrying the server-owned
-    /// Model-menu state.
-    // An `allow` rather than an `expect`: the unit tests below use this
-    // in test builds, so an expectation would be unfulfilled there and
-    // fail the -D warnings gate.
-    #[allow(
-        dead_code,
-        reason = "the heartbeat and session loop push the workbench in later steps"
-    )]
-    pub(crate) fn push_workbench(&self) {
-        self.menu.republish();
     }
 
     /// The menu bus behind the facade, for producers that drive the
@@ -281,19 +269,6 @@ mod tests {
         assert_eq!(
             snapshot.selected_model, None,
             "the selection the new catalog no longer holds is revalidated away"
-        );
-    }
-
-    #[tokio::test]
-    async fn push_workbench_republishes_the_retained_snapshot() {
-        let (push, menu) = wired_with_menu();
-        let mut rx = menu.subscribe();
-        push.push_workbench();
-        let pushed = rx.recv().await.expect("the push reaches the bus");
-        assert_eq!(
-            Some(pushed),
-            menu.latest(),
-            "the pushed snapshot is the retained one"
         );
     }
 }

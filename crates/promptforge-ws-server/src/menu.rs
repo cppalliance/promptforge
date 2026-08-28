@@ -73,15 +73,32 @@ struct MenuState {
 }
 
 impl MenuState {
-    /// Records `id` as the remembered model for `profile` and persists
-    /// the memory file. A failed write costs the memory, not the process
-    /// (zone two).
-    fn remember(&mut self, profile: String, id: String) {
+    /// Records `id` as the remembered model for `profile` and snapshots
+    /// the serialized memory as a [`PendingWrite`] for the caller to
+    /// perform once the state lock is released - the mutators run on the
+    /// async runtime, and file IO under the guard would block the
+    /// executor. `None` when persistence is disabled.
+    #[must_use]
+    fn remember(&mut self, profile: String, id: String) -> Option<PendingWrite> {
         self.last_selected.insert(profile, id);
-        if let Some(path) = &self.memory_path {
-            store_memory(path, &self.last_selected);
-        }
+        let path = self.memory_path.clone()?;
+        let payload = serde_json::json!({ "last_selected": &self.last_selected });
+        Some(PendingWrite {
+            path,
+            bytes: payload.to_string().into_bytes(),
+        })
     }
+}
+
+/// One serialized memory snapshot awaiting its write: the bytes and path
+/// are captured under the state lock, and the write runs after the guard
+/// drops, off the async executor.
+#[derive(Debug)]
+struct PendingWrite {
+    /// Where the memory persists.
+    path: PathBuf,
+    /// The serialized [`WORKSHOP_STATE_FILE`] contents.
+    bytes: Vec<u8>,
 }
 
 /// A refused menu mutation. A refusal is a state to report, not an error
@@ -165,10 +182,13 @@ impl MenuBus {
         }
         let mut state = self.lock_state();
         state.selected_model = Some(id.to_string());
-        if let Some(profile) = state.active.clone() {
-            state.remember(profile, id.to_string());
-        }
+        let pending = state
+            .active
+            .clone()
+            .and_then(|profile| state.remember(profile, id.to_string()));
         self.publish(&state);
+        drop(state);
+        store_pending(pending);
         Ok(())
     }
 
@@ -203,6 +223,7 @@ impl MenuBus {
             tracing::warn!("finish_switch with no switch in flight; ignored");
             return;
         };
+        let mut pending = None;
         if outcome == SwitchOutcome::Completed {
             state.active = Some(target.clone());
             let models = self.catalog_models();
@@ -213,10 +234,12 @@ impl MenuBus {
                 .cloned()
                 .or_else(|| first_model_id(&models));
             if let Some(id) = state.selected_model.clone() {
-                state.remember(target, id);
+                pending = state.remember(target, id);
             }
         }
         self.publish(&state);
+        drop(state);
+        store_pending(pending);
     }
 
     /// Records the heartbeat's verdict on the gateway and publishes a
@@ -256,13 +279,6 @@ impl MenuBus {
         if self.latest().as_ref() != Some(&snapshot) {
             self.send(snapshot);
         }
-    }
-
-    /// Publishes the current snapshot unconditionally, for producers that
-    /// want the menu resent rather than changed.
-    pub(crate) fn republish(&self) {
-        let state = self.lock_state();
-        self.publish(&state);
     }
 
     /// The state guard, recovering a lock poisoned by a panicking peer
@@ -377,15 +393,34 @@ fn load_memory(path: &Path) -> HashMap<String, String> {
     }
 }
 
-/// Writes the per-profile model memory. A failed write costs the memory,
-/// not the process (zone two): logged and tolerated.
-fn store_memory(path: &Path, last_selected: &HashMap<String, String>) {
-    let payload = serde_json::json!({ "last_selected": last_selected });
-    let text = payload.to_string();
-    if let Err(error) = std::fs::write(path, text) {
+/// Performs a pending memory write off the async executor. On a runtime
+/// the file IO moves to the blocking pool and completes in the
+/// background - the memory file is a best-effort cache, so no caller
+/// awaits it. Outside a runtime (the unit tests drive the mutators
+/// synchronously) the write runs inline instead.
+fn store_pending(pending: Option<PendingWrite>) {
+    let Some(pending) = pending else { return };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn_blocking(move || store_memory(&pending));
+        }
+        Err(_) => store_memory(&pending),
+    }
+}
+
+/// Writes one per-profile model-memory snapshot, atomically: the bytes
+/// land in a sibling temp file that is then renamed over
+/// [`WORKSHOP_STATE_FILE`], so a crash mid-write cannot leave a
+/// truncated file. A failed write costs the memory, not the process
+/// (zone two): logged and tolerated.
+fn store_memory(pending: &PendingWrite) {
+    let temp = pending.path.with_extension("json.tmp");
+    let result =
+        std::fs::write(&temp, &pending.bytes).and_then(|()| std::fs::rename(&temp, &pending.path));
+    if let Err(error) = result {
         tracing::warn!(
             %error,
-            path = %path.display(),
+            path = %pending.path.display(),
             "workshop state write failed; model memory not persisted"
         );
     }
@@ -611,6 +646,18 @@ mod tests {
         catalog.publish(Vec::new());
         menu.reconcile_catalog();
         assert!(!snapshot(&menu).chat_ready, "an empty catalog forces false");
+    }
+
+    #[test]
+    fn chat_ready_is_false_before_the_heartbeat_reports_reachability() {
+        let menu = menu_of(&["model-a"]);
+        menu.set_selected("model-a")
+            .expect("the id is in the catalog");
+        assert!(
+            !snapshot(&menu).chat_ready,
+            "a fresh menu boots unreachable: catalog and selection alone \
+             must not open chat before the heartbeat's first verdict"
+        );
     }
 
     #[test]
