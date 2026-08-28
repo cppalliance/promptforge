@@ -23,10 +23,10 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
     Ok(function.dump(false))
 }
 
-/// Compiled Lua 5.4 source that can be loaded into multiple process-local VMs.
+/// Compiled Lua 5.5 source that can be loaded into multiple process-local VMs.
 ///
 /// A program retains its original source for diagnostics and stores bytecode
-/// produced once by Lua 5.4. The bytecode is an in-memory implementation detail:
+/// produced once by Lua 5.5. The bytecode is an in-memory implementation detail:
 /// it is not a stable or portable serialization format and must not be persisted.
 ///
 /// Compilation does not execute the source. Loading a program (a crate-internal
@@ -85,7 +85,7 @@ pub struct LuaProgram {
 }
 
 impl LuaProgram {
-    /// Compiles `source` as Lua 5.4 bytecode without executing it.
+    /// Compiles `source` as Lua 5.5 bytecode without executing it.
     ///
     /// `location` identifies the source region in diagnostics. Compilation
     /// reports contain only fixed strings and never include `source` or

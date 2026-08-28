@@ -231,7 +231,7 @@ pub(crate) enum Error {
         source_line: u32,
         /// The retained source that failed to compile.
         lua_source: String,
-        /// The Lua 5.4 compiler diagnostic.
+        /// The Lua 5.5 compiler diagnostic.
         message: String,
         /// The originating `mlua` compile error, kept as the cause.
         #[source]

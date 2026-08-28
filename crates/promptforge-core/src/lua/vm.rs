@@ -255,7 +255,9 @@ impl SectionVm {
         if let Err(error) = install_untrusted(&vm.lua, nonce) {
             return vm.construction_failed(error, observer, section);
         }
-        install_instruction_budget(&vm.lua);
+        if let Err(error) = install_instruction_budget(&vm.lua) {
+            return vm.construction_failed(error, observer, section);
+        }
         Ok(vm)
     }
 
