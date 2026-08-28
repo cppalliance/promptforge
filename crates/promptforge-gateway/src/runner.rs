@@ -184,6 +184,19 @@ pub struct GatewayHandle {
     workshop: Option<WorkshopHandle>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<Result<(), StartupError>>>,
+    #[cfg(test)]
+    observer: Option<std::sync::mpsc::Sender<ShutdownStep>>,
+}
+
+/// One step in [`GatewayHandle::shutdown`]'s ordering, reported through
+/// the [`GatewayHandle::observe_shutdown`] test seam.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShutdownStep {
+    /// The hosted workshop finished its bounded drain and is fully stopped.
+    WorkshopStopped,
+    /// The gateway's graceful-shutdown signal was sent.
+    GatewaySignaled,
 }
 
 impl GatewayHandle {
@@ -214,11 +227,30 @@ impl GatewayHandle {
     pub fn shutdown(mut self) -> Result<(), StartupError> {
         if let Some(workshop) = self.workshop.take() {
             workshop.shutdown();
+            #[cfg(test)]
+            self.record(ShutdownStep::WorkshopStopped);
         }
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
+            #[cfg(test)]
+            self.record(ShutdownStep::GatewaySignaled);
         }
         self.join_inner()
+    }
+
+    /// Test seam: records the shutdown sequence, so a test can assert
+    /// that a hosted workshop is fully stopped before the gateway's own
+    /// shutdown is signaled.
+    #[cfg(test)]
+    pub(crate) fn observe_shutdown(&mut self, observer: std::sync::mpsc::Sender<ShutdownStep>) {
+        self.observer = Some(observer);
+    }
+
+    #[cfg(test)]
+    fn record(&self, step: ShutdownStep) {
+        if let Some(observer) = &self.observer {
+            let _ = observer.send(step);
+        }
     }
 
     /// Waits for the gateway thread to finish on its own, without signaling
@@ -304,6 +336,8 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
             workshop: ready.workshop,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
+            #[cfg(test)]
+            observer: None,
         }),
         Ok(Err(error)) => Err(failed_handshake(thread, Some(error))),
         Err(_) => Err(failed_handshake(thread, None)),
@@ -720,9 +754,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        ServeOptions, ShutdownTrigger, check_server_matches_boot, check_workshop_matches_boot,
-        classify_shutdown, failed_handshake, load_startup, profiles_dir_for, shutdown_on_send,
-        spawn,
+        ServeOptions, ShutdownStep, ShutdownTrigger, check_server_matches_boot,
+        check_workshop_matches_boot, classify_shutdown, failed_handshake, load_startup,
+        profiles_dir_for, shutdown_on_send, spawn,
     };
     use crate::api_error::{StartupError, StartupErrorKind};
     use promptforge_gateway_config::{Config, ProfileName};
@@ -1248,6 +1282,45 @@ endpoints = ["e"]
         assert!(
             std::net::TcpStream::connect(&gateway_address).is_err(),
             "nothing may accept on the gateway address {gateway_address} after shutdown"
+        );
+    }
+
+    #[test]
+    fn shutdown_without_a_workshop_signals_the_gateway_only() {
+        let (_tmp, options) = spawn_fixture(CATALOG_EPHEMERAL);
+        let mut gateway = spawn(&options).expect("gateway spawns");
+        let (tx, rx) = std::sync::mpsc::channel();
+        gateway.observe_shutdown(tx);
+        gateway.shutdown().expect("graceful shutdown succeeds");
+        let steps: Vec<ShutdownStep> = rx.try_iter().collect();
+        assert_eq!(
+            steps,
+            [ShutdownStep::GatewaySignaled],
+            "no workshop is hosted, so only the gateway signal is recorded"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "workshop")]
+    fn shutdown_drains_the_workshop_before_signaling_the_gateway() {
+        let (_tmp, options) = spawn_fixture(&catalog_with_workshop());
+        let mut gateway = spawn(&options).expect("gateway spawns");
+        assert!(
+            gateway.workshop_url().is_some(),
+            "a [workshop] boot hosts a workshop"
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        gateway.observe_shutdown(tx);
+        gateway.shutdown().expect("graceful shutdown succeeds");
+
+        // Both steps are recorded synchronously inside shutdown(), before
+        // it returns, so there is nothing to wait for.
+        let steps: Vec<ShutdownStep> = rx.try_iter().collect();
+        assert_eq!(
+            steps,
+            [ShutdownStep::WorkshopStopped, ShutdownStep::GatewaySignaled],
+            "the workshop's drain completes before the gateway's shutdown is signaled"
         );
     }
 
