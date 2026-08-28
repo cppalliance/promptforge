@@ -92,6 +92,7 @@ use futures_util::{FutureExt, StreamExt};
 use tokio::sync::broadcast;
 
 use crate::app::AppState;
+use crate::backoff::ReconnectBackoff;
 use crate::cross_site;
 use crate::error::AppError;
 use crate::gateway::{
@@ -237,7 +238,9 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
             // Chats still waiting for gateway admission resolve here too,
             // as non-blocking entries of the same merged poll.
             (index, event) = next_event(&mut chats) => {
-                if !advance_chat(&mut chats, index, event, &mut socket, &push).await {
+                if !advance_chat(&mut chats, index, event, &mut socket, &push, state.backoff())
+                    .await
+                {
                     break;
                 }
             }
@@ -416,6 +419,7 @@ async fn advance_chat(
     event: ChatEvent,
     socket: &mut WebSocket,
     push: &Push,
+    backoff: &ReconnectBackoff,
 ) -> bool {
     let payload = match event {
         ChatEvent::Opened(Ok(ChatStream::Stream { payloads, .. })) => {
@@ -452,7 +456,9 @@ async fn advance_chat(
             if payload == "[DONE]" {
                 return true;
             }
-            match forward_payload(&payload, &mut chats.entries[index].1, socket, push).await {
+            match forward_payload(&payload, &mut chats.entries[index].1, socket, push, backoff)
+                .await
+            {
                 Forward::Sent => true,
                 Forward::ClientGone => false,
             }
@@ -787,9 +793,17 @@ async fn forward_payload(
     active: &mut ActiveChat,
     socket: &mut WebSocket,
     push: &Push,
+    backoff: &ReconnectBackoff,
 ) -> Forward {
     let ActiveChat { id, tape, .. } = active;
     let fields = delta_fields(payload);
+    // A delivered token is the useful work that resets the reconnect
+    // backoff - the gateway proved it streams, not merely connects.
+    // Whether the frame then reaches our own client says nothing about
+    // the gateway, so the reset precedes the sends.
+    if fields.content.is_some() || fields.reasoning.is_some() {
+        backoff.record_useful_work();
+    }
     if let Some(text) = fields.reasoning {
         push.push_activity(
             "Streaming response...",
@@ -1274,6 +1288,61 @@ mod tests {
         raw.lines()
             .map(|line| serde_json::from_str(line).expect("the tape line is valid JSON"))
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_delivered_token_resets_the_backoff() {
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
+                .await;
+        let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+        // The backoff stands escalated, as after an outage; the first
+        // streamed token is the useful work that returns it to base.
+        let _ = state.backoff().next_delay();
+        let _ = state.backoff().next_delay();
+        assert!(state.backoff().is_escalated_for_test());
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_chat(&mut socket).await;
+
+        let first = read_non_status_frame(&mut socket).await;
+        assert_eq!(first, serde_json::json!({"type": "delta", "content": "po"}));
+        assert!(
+            !state.backoff().is_escalated_for_test(),
+            "a delivered token is useful work and resets the backoff"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_delivered_reasoning_token_resets_the_backoff() {
+        let base_url = spawn_gateway(
+            Router::new().route("/v1/chat/completions", post(mock_chat_stream_reasons)),
+        )
+        .await;
+        let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+        // The reasoning side channel streams before any answer content,
+        // so a reset observed on its first chunk proves a reasoning
+        // token counts as useful work on its own.
+        let _ = state.backoff().next_delay();
+        let _ = state.backoff().next_delay();
+        assert!(state.backoff().is_escalated_for_test());
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_chat(&mut socket).await;
+
+        let first = read_non_status_frame(&mut socket).await;
+        assert_eq!(
+            first,
+            serde_json::json!({"type": "reasoning", "content": "hmm "})
+        );
+        assert!(
+            !state.backoff().is_escalated_for_test(),
+            "a streamed reasoning token is useful work and resets the backoff"
+        );
+        socket.close(None).await.expect("close the socket");
     }
 
     #[tokio::test]
@@ -2397,6 +2466,13 @@ mod tests {
             state.push(),
             state.health().clone(),
             Duration::from_millis(25),
+            // A fast schedule so the down-phase retry lands within a few
+            // ticks instead of the production seconds.
+            ReconnectBackoff::with_schedule(
+                Duration::from_millis(10),
+                Duration::from_millis(40),
+                Duration::from_secs(60),
+            ),
         );
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await

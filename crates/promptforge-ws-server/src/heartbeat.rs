@@ -2,19 +2,26 @@
 //! `GET /health` endpoint and publishing reachability to the rest of the
 //! server.
 //!
-//! One task is spawned with the server ([`spawn`]) and loops on the fixed
-//! [`HEARTBEAT_INTERVAL`]: each tick probes the gateway through
-//! [`GatewayClient::health`] and publishes the outcome to the shared
-//! [`GatewayHealth`] flag the gateway-dependent routes read. The observer
-//! hears about transitions only - the first probe reports the initial state
-//! ("Connected to gateway" or "Gateway unreachable"), and after that a
-//! status update fires when the answer changes, so a steady state never
-//! spams the status bar. Every transition also feeds the Model menu's
-//! reachability (so `chat_ready` flips with the gateway), and a
-//! transition to reachable - boot's first probe included - refreshes the
-//! gateway's profile state and model catalog into their buses and then
-//! restores a model selection when none is applied, so a fresh boot
-//! lands ready to chat without a manual pick.
+//! One task is spawned with the server ([`spawn`]): while the gateway
+//! answers, it probes through [`GatewayClient::health`] on the fixed
+//! [`HEARTBEAT_INTERVAL`] and publishes the outcome to the shared
+//! [`GatewayHealth`] flag the gateway-dependent routes read; while the
+//! gateway is unreachable, the next probe instead waits out a delay
+//! drawn from the shared [`ReconnectBackoff`] - jittered, escalating,
+//! and reset only by useful work elsewhere (a delivered token or a
+//! successful completion), never by a probe that merely connects, so a
+//! gateway that flaps without delivering keeps escalating. When the
+//! backoff's total-delay budget exhausts, the loop reports the give-up
+//! on the status bus and stops probing for the life of the process.
+//! The observer hears about transitions only - the first probe reports
+//! the initial state ("Connected to gateway" or "Gateway unreachable"),
+//! and after that a status update fires when the answer changes, so a
+//! steady state never spams the status bar. Every transition also feeds
+//! the Model menu's reachability (so `chat_ready` flips with the
+//! gateway), and a transition to reachable (boot's first probe included)
+//! refreshes the gateway's profile state and model catalog into their
+//! buses and then restores a model selection when none is applied, so a
+//! fresh boot lands ready to chat without a manual pick.
 //!
 //! The task stops through its [`Heartbeat`] handle: the signal wins the
 //! loop's selects, so shutdown never waits out a tick or an in-flight
@@ -24,12 +31,14 @@ use std::time::Duration;
 
 use tokio::sync::{oneshot, watch};
 
+use crate::backoff::ReconnectBackoff;
 use crate::gateway::GatewayClient;
 use crate::protocol::Activity;
 use crate::push::Push;
 
-/// How often the heartbeat probes the gateway. Hardcoded for now; a
-/// configuration knob may follow once someone needs one.
+/// How often the heartbeat probes a reachable gateway. Hardcoded for
+/// now; a configuration knob may follow once someone needs one. Probes
+/// of an unreachable gateway follow the [`ReconnectBackoff`] instead.
 pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Shared gateway reachability, written by the heartbeat and read by the
@@ -105,16 +114,19 @@ impl Heartbeat {
 /// transition to reachable - boot's first probe included - refreshes the
 /// gateway's profile state and model catalog through the same handle,
 /// then restores a model selection when none is applied. The first probe
-/// runs immediately, before the first interval elapses.
+/// runs immediately; later probes follow `interval` while the gateway
+/// answers and draw from `backoff` while it does not, ending the loop
+/// when the backoff's budget exhausts.
 pub(crate) fn spawn(
     client: GatewayClient,
     push: Push,
     health: GatewayHealth,
     interval: Duration,
+    backoff: ReconnectBackoff,
 ) -> Heartbeat {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&client, &push, &health, interval, &mut stopped).await;
+        run(&client, &push, &health, interval, &backoff, &mut stopped).await;
     });
     Heartbeat {
         stop: Some(stop),
@@ -122,25 +134,43 @@ pub(crate) fn spawn(
     }
 }
 
-/// The probe loop: one probe per interval, a status update per transition,
-/// and the stop signal wins over the tick, an in-flight probe, an
-/// in-flight profile refresh, and an in-flight catalog refresh.
+/// The probe loop: a status update per transition, with the stop signal
+/// winning over the wait, an in-flight probe, an in-flight profile
+/// refresh, and an in-flight catalog refresh. The wait before each probe
+/// is `interval` while the gateway answered last time (measured from the
+/// previous probe's completion, so a slow probe never bunches into a
+/// catch-up burst) and the backoff's next delay while it did not; a
+/// successful probe deliberately never resets the backoff - only useful
+/// work does, elsewhere - and an exhausted budget ends the loop with a
+/// give-up report.
 async fn run(
     client: &GatewayClient,
     push: &Push,
     health: &GatewayHealth,
     interval: Duration,
+    backoff: &ReconnectBackoff,
     stop: &mut oneshot::Receiver<()>,
 ) {
-    let mut ticks = tokio::time::interval(interval);
-    // A probe slower than the interval (the health timeout bounds it at two
-    // seconds) must not bunch the missed ticks into a catch-up burst.
-    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last: Option<bool> = None;
     loop {
-        tokio::select! {
-            _ = &mut *stop => break,
-            _ = ticks.tick() => {}
+        // The first probe runs immediately; every later one waits here.
+        if let Some(reachable) = last {
+            let wait = if reachable {
+                interval
+            } else if let Some(delay) = backoff.next_delay() {
+                delay
+            } else {
+                push.push_failure(
+                    "Gateway reconnect stopped",
+                    "the reconnect budget is exhausted; restart the workshop to retry",
+                    Activity::General,
+                );
+                break;
+            };
+            tokio::select! {
+                _ = &mut *stop => break,
+                () = tokio::time::sleep(wait) => {}
+            }
         }
         let reachable = tokio::select! {
             _ = &mut *stop => break,
@@ -388,24 +418,36 @@ mod tests {
         format!("http://{addr}")
     }
 
+    /// A backoff fast enough that a down-phase probe retries within a few
+    /// ticks, with a budget no test exhausts by accident.
+    fn test_backoff() -> ReconnectBackoff {
+        ReconnectBackoff::with_schedule(
+            Duration::from_millis(10),
+            Duration::from_millis(40),
+            Duration::from_secs(60),
+        )
+    }
+
     /// Starts a heartbeat against `base_url` on the fast interval, wired to
     /// `status` and `catalog`; returns the handle, the shared health flag,
-    /// and the menu bus the heartbeat feeds.
+    /// the menu bus the heartbeat feeds, and its reconnect backoff.
     fn heartbeat_on(
         base_url: &str,
         status: &StatusBus,
         catalog: &CatalogBus,
-    ) -> (Heartbeat, GatewayHealth, MenuBus) {
+    ) -> (Heartbeat, GatewayHealth, MenuBus, ReconnectBackoff) {
         let client = GatewayClient::new(base_url, "").expect("client builds in tests");
         let health = GatewayHealth::new();
         let menu = MenuBus::new(catalog.clone(), None);
+        let backoff = test_backoff();
         let heartbeat = spawn(
             client,
             Push::new(status.clone(), catalog.clone(), menu.clone()),
             health.clone(),
             TEST_INTERVAL,
+            backoff.clone(),
         );
-        (heartbeat, health, menu)
+        (heartbeat, health, menu, backoff)
     }
 
     /// Receives the next status update within a generous deadline.
@@ -483,6 +525,7 @@ mod tests {
             Push::new(status.clone(), catalog, menu),
             GatewayHealth::new(),
             TEST_INTERVAL,
+            test_backoff(),
         );
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Gateway unreachable");
@@ -496,7 +539,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health, _menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, health, _menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Connected to gateway");
@@ -513,7 +556,8 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health, _menu) = heartbeat_on("http://127.0.0.1:1", &status, &catalog);
+        let (heartbeat, health, _menu, _backoff) =
+            heartbeat_on("http://127.0.0.1:1", &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Gateway unreachable");
@@ -531,7 +575,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health, _menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, health, _menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(next_update(&mut rx).await.label, "Connected to gateway");
         healthy.store(false, Ordering::Relaxed);
@@ -552,7 +596,7 @@ mod tests {
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, _menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -594,7 +638,7 @@ mod tests {
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health, _menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, _menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -621,7 +665,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut catalog_rx = catalog.subscribe();
-        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         let push: CatalogPush = tokio::time::timeout(Duration::from_secs(5), catalog_rx.recv())
             .await
@@ -653,7 +697,7 @@ mod tests {
         let base_url = spawn_gateway(Arc::clone(&healthy)).await;
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
-        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         let populated = snapshot_where(&menu, |snapshot| !snapshot.profiles.is_empty()).await;
         assert_eq!(populated.profiles, ["coding", "main"]);
@@ -668,7 +712,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
-        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -696,7 +740,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut status_rx = status.subscribe();
-        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -719,7 +763,7 @@ mod tests {
         // catalog holds test-model, so a reconnect's refresh keeps it.
         catalog.publish(vec![serde_json::json!({"id": "test-model"})]);
         let mut status_rx = status.subscribe();
-        let (heartbeat, _health, menu) = heartbeat_on(&base_url, &status, &catalog);
+        let (heartbeat, _health, menu, _backoff) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(
             next_update(&mut status_rx).await.label,
@@ -743,6 +787,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_mere_connect_keeps_the_backoff_escalated() {
+        // The anti-flap rule this step exists for: an outage escalates the
+        // backoff, and a gateway that answers its probe again (connects
+        // without delivering any useful work) must leave the escalation
+        // standing, so the next outage keeps the slow schedule.
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut rx = status.subscribe();
+        let (heartbeat, health, _menu, backoff) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(next_update(&mut rx).await.label, "Gateway unreachable");
+        healthy.store(true, Ordering::Relaxed);
+        assert_eq!(next_update(&mut rx).await.label, "Connected to gateway");
+        assert!(health.is_reachable());
+        assert!(
+            backoff.is_escalated_for_test(),
+            "reconnecting without useful work must not reset the backoff"
+        );
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_budget_stops_reconnect_probes_with_a_give_up_report() {
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut rx = status.subscribe();
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let health = GatewayHealth::new();
+        let menu = MenuBus::new(catalog.clone(), None);
+        // A budget of a few schedule steps: exhausted within a handful of
+        // failed probes, well inside the test deadline.
+        let backoff = ReconnectBackoff::with_schedule(
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+            Duration::from_millis(50),
+        );
+        let heartbeat = spawn(
+            client,
+            Push::new(status.clone(), catalog, menu),
+            health.clone(),
+            TEST_INTERVAL,
+            backoff,
+        );
+
+        assert_eq!(next_update(&mut rx).await.label, "Gateway unreachable");
+        let report = next_update(&mut rx).await;
+        assert_eq!(report.label, "Gateway reconnect stopped");
+        assert_eq!(report.severity, Severity::Error);
+        // The gateway coming back after the give-up changes nothing: the
+        // loop has ended, so no probe ever notices.
+        healthy.store(true, Ordering::Relaxed);
+        assert_quiet(&mut rx).await;
+        assert!(
+            !health.is_reachable(),
+            "an ended loop leaves the last verdict standing"
+        );
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn shutdown_stops_the_task_without_waiting_out_the_interval() {
         // A long interval: if the stop signal did not win the select, the
         // shutdown would block for the whole minute.
@@ -755,6 +863,7 @@ mod tests {
             Push::new(status, catalog, menu),
             GatewayHealth::new(),
             Duration::from_secs(60),
+            ReconnectBackoff::new(),
         );
         tokio::time::timeout(Duration::from_secs(5), heartbeat.shutdown())
             .await
