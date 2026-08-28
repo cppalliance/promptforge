@@ -8,7 +8,7 @@ import "dockview/dist/styles/dockview.css";
 
 import { createDockview, themeDark } from "dockview";
 
-import { DisposableStore } from "./base/lifecycle";
+import { DisposableStore, type IDisposable } from "./base/lifecycle";
 import type { ChatPlugin } from "./chat/core/types";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
@@ -58,9 +58,8 @@ const modelService = disposables.add(
 
 // The rest of the server-owned workbench state - profiles, switch
 // progress, chat gating - lives in the WorkbenchService, fed from the
-// same snapshots. The Model menu's Profiles section reads it below;
-// later steps hand it to the menu's switching-state rendering and the
-// chat-gating hook.
+// same snapshots. The Model menu's Profiles section reads it below, and
+// the voice plugin gates sending and recording on its chatReady.
 const workbenchService = disposables.add(new WorkbenchService());
 
 disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
@@ -80,38 +79,66 @@ workshopSocket.connect();
 // the handle is per-tab so recording in one tab never touches another.
 function createVoicePlugin(): ChatPlugin {
   let voiceHandle: VoiceHandle | null = null;
+  let mic: HTMLButtonElement | null = null;
+  let workbenchListener: IDisposable | null = null;
   return {
     name: "voice",
-    onInputMount({ form, input }) {
+    onInputMount({ form, input, requestSubmitStateSync }) {
+      // Chat gating follows the server's chat_ready: the mic disables,
+      // and a live take is discarded - whisper on the workshop server
+      // could still transcribe it, but a take that cannot be sent is a
+      // trap. The subscription is per-mount, so each Agent tab's dies
+      // with its own tab; the send button re-evaluates through the
+      // composer's own sync, never by touching it directly.
+      workbenchListener = workbenchService.onDidChangeSnapshot((snapshot) => {
+        if (mic) {
+          mic.disabled = !snapshot.chatReady;
+        }
+        if (!snapshot.chatReady) {
+          voiceHandle?.discardIfRecording();
+        }
+        requestSubmitStateSync();
+      });
       void voiceGpuAvailable().then((gpu) => {
         if (!gpu) {
           return;
         }
-        const mic = document.createElement("button");
-        mic.type = "button";
-        mic.className = "voice-mic mur-form-icon-btn";
-        mic.title = "Push to talk";
-        mic.setAttribute("aria-label", "Push to talk");
-        mic.setAttribute("aria-pressed", "false");
-        mic.innerHTML =
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "voice-mic mur-form-icon-btn";
+        button.title = "Push to talk";
+        button.setAttribute("aria-label", "Push to talk");
+        button.setAttribute("aria-pressed", "false");
+        button.innerHTML =
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
-        form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
+        // The mic can mount after workbench snapshots already arrived
+        // (the GPU probe is a fetch), so it starts from the held one.
+        button.disabled = !workbenchService.snapshot.chatReady;
+        form.insertBefore(button, form.querySelector(".mur-form-footer-right"));
 
-        voiceHandle = setupVoice({ mic, input }, statusBar);
+        voiceHandle = setupVoice({ mic: button, input }, statusBar);
+        mic = button;
       });
     },
     onUserSubmit() {
       voiceHandle?.discardIfRecording();
     },
     // Closing a tab destroys its ChatUI, which fires this hook: the mic
-    // unwires and a live take is discarded with the tab that owned it.
+    // unwires, a live take is discarded with the tab that owned it, and
+    // the workbench subscription is disposed beside the handle.
     destroy() {
+      workbenchListener?.dispose();
+      workbenchListener = null;
       voiceHandle?.dispose();
       voiceHandle = null;
     },
-    // With no model selected there is nothing to send to; the old UI disabled
-    // the send button in the same situation.
-    isSubmitBlocked: () => !modelService.current,
+    // While the server says chat is not usable (empty catalog, no model
+    // selected, a profile switch in flight, gateway unreachable) there is
+    // nothing to send to. The pre-boot empty snapshot gates chat off, so
+    // sending stays blocked until the first workbench frame - the same
+    // posture the old !modelService.current check had. The status bar
+    // carries the server's own reason; the UI adds no local message.
+    isSubmitBlocked: () => !workbenchService.snapshot.chatReady,
   };
 }
 
