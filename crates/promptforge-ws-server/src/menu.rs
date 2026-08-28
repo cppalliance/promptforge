@@ -452,16 +452,12 @@ fn store_pending(pending: Option<PendingWrite>) {
     }
 }
 
-/// Writes one per-profile model-memory snapshot, atomically: the bytes
-/// land in a sibling temp file that is then renamed over
-/// [`WORKSHOP_STATE_FILE`], so a crash mid-write cannot leave a
-/// truncated file. A failed write costs the memory, not the process
-/// (zone two): logged and tolerated.
+/// Writes one per-profile model-memory snapshot through the shared
+/// atomic-write helper, so a crash mid-write cannot leave a truncated
+/// [`WORKSHOP_STATE_FILE`]. A failed write costs the memory, not the
+/// process (zone two): logged and tolerated.
 fn store_memory(pending: &PendingWrite) {
-    let temp = pending.path.with_extension("json.tmp");
-    let result =
-        std::fs::write(&temp, &pending.bytes).and_then(|()| std::fs::rename(&temp, &pending.path));
-    if let Err(error) = result {
+    if let Err(error) = crate::atomic::write_atomic(&pending.path, &pending.bytes) {
         tracing::warn!(
             %error,
             path = %pending.path.display(),

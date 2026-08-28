@@ -56,7 +56,14 @@ impl AppState {
         let catalog = CatalogBus::new();
         // The per-profile model memory lives beside the tape file; a bad
         // or missing memory file costs the memory, never startup.
-        let menu = MenuBus::new(catalog.clone(), config.tape.path.parent());
+        let state_dir = config.tape.path.parent();
+        if let Some(dir) = state_dir {
+            // A crash between an atomic write's temp file and its rename
+            // orphans the temp; boot is the one moment the directory is
+            // known and quiet, so it is swept here.
+            crate::atomic::sweep_orphaned_temps(dir);
+        }
+        let menu = MenuBus::new(catalog.clone(), state_dir);
         let push = Push::new(status.clone(), catalog.clone(), menu.clone());
         // Startup phases are reported as they run; with no client connected
         // yet these land on an empty bus, ready for the first session.
@@ -391,6 +398,21 @@ mod tests {
     #[test]
     fn default_bind_is_loopback_port_7910() {
         assert_eq!(DEFAULT_ADDR, "127.0.0.1:7910");
+    }
+
+    #[test]
+    fn startup_sweeps_orphaned_temp_files_beside_the_tape() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        // Residue of a write that crashed between its temp file and its
+        // rename in a previous run.
+        let orphan = dir.path().join("workshop-state.json.42-7.pf-tmp");
+        std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
+        let config = config_for("http://127.0.0.1:1", &dir.path().join("tape.jsonl"));
+        let _state = AppState::new(&config).expect("state builds");
+        assert!(
+            !orphan.exists(),
+            "state construction sweeps orphaned temp files from the state directory"
+        );
     }
 
     #[test]
