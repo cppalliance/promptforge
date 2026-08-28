@@ -8,6 +8,7 @@
 
 mod app;
 mod assets;
+mod atomic;
 mod catalog;
 mod chat_ws;
 mod config;
