@@ -970,9 +970,9 @@ impl SectionVm {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
     }
 
-    /// Test-only access to the inner Lua state, so the shim tests can drive
-    /// coroutines on the VM.
-    #[cfg(test)]
+    /// Borrows the inner Lua state, so the shim installs and the
+    /// scheduler's scoped H1 steps can drive coroutines on the VM.
+    #[must_use]
     pub(crate) fn lua(&self) -> &Lua {
         &self.lua
     }
