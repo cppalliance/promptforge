@@ -859,7 +859,11 @@ struct DeltaFields {
 /// Extracts the content and reasoning deltas from one gateway SSE payload.
 ///
 /// Role-priming and usage events have no `choices[0].delta.content` and
-/// contribute nothing to the assembled response. Reasoning models stream
+/// contribute nothing to the assembled response. An empty-string content
+/// delta (the common `{"role":"assistant","content":""}` priming chunk)
+/// is filtered like an absent one: forwarding it would emit an empty
+/// `delta` frame that closes the UI's Thinking block and flips the
+/// activity LED before any answer text exists. Reasoning models stream
 /// their scratch work under `reasoning_content` (or the `reasoning` /
 /// `thinking` synonyms, matching promptforge-core's normalization); the
 /// first non-empty synonym wins, so a present-but-empty key falls
@@ -883,6 +887,7 @@ fn delta_fields(payload: &str) -> DeltaFields {
     let content = delta
         .get("content")
         .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.is_empty())
         .map(str::to_string);
     let reasoning = ["reasoning_content", "reasoning", "thinking"]
         .iter()
@@ -1093,6 +1098,24 @@ mod tests {
         );
         assert!(fields.reasoning.is_none());
         assert_eq!(fields.content.as_deref(), Some("answer"));
+    }
+
+    #[test]
+    fn an_empty_content_delta_is_filtered_like_an_absent_one() {
+        // The common role-priming chunk carries `content: ""`; forwarding
+        // it would emit an empty delta frame that closes the UI's Thinking
+        // block and flips the activity LED before any answer text exists.
+        let fields =
+            delta_fields(r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}"#);
+        assert_eq!(fields.content, None);
+        assert!(fields.reasoning.is_none());
+        // An empty content beside live reasoning must not mask the
+        // reasoning nor emit an answer frame mid-think.
+        let fields = delta_fields(
+            r#"{"choices":[{"index":0,"delta":{"content":"","reasoning_content":"scratch"}}]}"#,
+        );
+        assert_eq!(fields.content, None);
+        assert_eq!(fields.reasoning.as_deref(), Some("scratch"));
     }
 
     fn authorized(headers: &HeaderMap) -> bool {
