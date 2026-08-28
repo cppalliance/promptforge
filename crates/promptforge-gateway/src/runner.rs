@@ -1,13 +1,19 @@
-//! Application entry points: the [`run`] function and the assembled [`Gateway`].
+//! Application entry points: [`spawn`], [`run`], and the assembled [`Gateway`].
 //!
-//! `run` is the binary path: it loads configuration, provisions local children,
-//! binds, and serves until Ctrl-C. `Gateway` is the in-process assembly seam
-//! used by `run` and by integration tests, which bind their own listener and
-//! drive [`Gateway::serve`] with a caller-owned shutdown signal.
+//! [`spawn`] is the embedding seam: it loads configuration, provisions local
+//! children, and serves on a dedicated thread with its own tokio runtime, so
+//! an embedding binary keeps its main thread. The call blocks until the
+//! listener is bound - that bind is the readiness signal - and the returned
+//! [`GatewayHandle`] carries the bound URL and a graceful-shutdown switch.
+//! [`run`] is the binary path: a thin wrapper that spawns, installs the
+//! Ctrl-C handler, and joins. `Gateway` is the in-process assembly seam used
+//! by both and by integration tests, which bind their own listener and drive
+//! [`Gateway::serve`] with a caller-owned shutdown signal.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
+use std::thread::JoinHandle;
 
 use tokio::net::TcpListener;
 
@@ -159,30 +165,236 @@ impl Gateway {
     }
 }
 
+/// A running gateway on its own thread, returned by [`spawn`].
+///
+/// Dropping the handle without calling [`GatewayHandle::shutdown`] still
+/// signals the gateway to stop, but does not wait for it.
+#[derive(Debug)]
+pub struct GatewayHandle {
+    url: String,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<JoinHandle<Result<(), StartupError>>>,
+}
+
+impl GatewayHandle {
+    /// Returns the base URL of the bound gateway address, for example
+    /// `http://127.0.0.1:8081`.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Signals graceful shutdown and waits for the gateway thread to finish.
+    ///
+    /// # Errors
+    /// Returns [`StartupError`] when serving failed or the gateway thread
+    /// panicked.
+    pub fn shutdown(mut self) -> Result<(), StartupError> {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        self.join_inner()
+    }
+
+    /// Waits for the gateway thread to finish on its own, without signaling
+    /// shutdown.
+    ///
+    /// # Errors
+    /// Returns [`StartupError`] when serving failed or the gateway thread
+    /// panicked.
+    pub fn join(mut self) -> Result<(), StartupError> {
+        self.join_inner()
+    }
+
+    fn join_inner(&mut self) -> Result<(), StartupError> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        match thread.join() {
+            Ok(result) => result,
+            Err(_) => Err(StartupError::serve(crate::api_error::ServeError::io(
+                std::io::Error::other("gateway thread panicked"),
+            ))),
+        }
+    }
+}
+
+impl Drop for GatewayHandle {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+}
+
+/// Spawns the gateway on a dedicated thread and blocks until the listener
+/// is bound.
+///
+/// Config loading, provisioning, and binding all run on the gateway thread;
+/// their failures are reported back through this call's return value. The
+/// bound listener is the readiness signal: when this returns `Ok`, the
+/// gateway is accepting connections at [`GatewayHandle::url`].
+///
+/// # Errors
+/// Returns [`StartupError`] when config loading, provisioning, binding, or
+/// starting the gateway thread fails; classify with [`StartupError::kind`].
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway::{ProfileName, ServeOptions, spawn};
+/// use std::path::PathBuf;
+///
+/// let options = ServeOptions::new(
+///     PathBuf::from("/etc/promptforge/gateway.toml"),
+///     ProfileName::parse("dev").unwrap(),
+/// );
+/// let gateway = spawn(&options)?;
+/// println!("serving on {}", gateway.url());
+/// gateway.shutdown()?;
+/// # Ok::<(), promptforge_gateway::StartupError>(())
+/// ```
+pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let options = options.clone();
+    let thread = std::thread::Builder::new()
+        .name("promptforge-gateway".to_string())
+        .spawn(move || serve_thread(&options, &ready_tx, shutdown_rx))
+        .map_err(StartupError::bind)?;
+    match ready_rx.recv() {
+        Ok(Ok(url)) => Ok(GatewayHandle {
+            url,
+            shutdown: Some(shutdown_tx),
+            thread: Some(thread),
+        }),
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            Err(error)
+        }
+        Err(_) => {
+            let _ = thread.join();
+            Err(StartupError::bind(std::io::Error::other(
+                "gateway thread exited before binding",
+            )))
+        }
+    }
+}
+
+/// The gateway thread's body: load config, provision, build a runtime, bind,
+/// signal readiness through `ready`, then serve until `shutdown` resolves.
+///
+/// Startup failures are reported through `ready`; only serving failures
+/// become the thread's return value.
+fn serve_thread(
+    options: &ServeOptions,
+    ready: &mpsc::Sender<Result<String, StartupError>>,
+    shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), StartupError> {
+    let (config, profiles) = match load_startup(options) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return Ok(());
+        }
+    };
+    let bind = config.bind_addr();
+    let gateway = match Gateway::from_config(&config, profiles) {
+        Ok(gateway) => gateway,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return Ok(());
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = ready.send(Err(StartupError::bind(error)));
+            return Ok(());
+        }
+    };
+    runtime.block_on(async move {
+        let listener = match TcpListener::bind(bind).await {
+            Ok(listener) => listener,
+            Err(error) => {
+                let _ = ready.send(Err(StartupError::bind(error)));
+                return Ok(());
+            }
+        };
+        // The configured bind may carry port 0; the bound local_addr is the
+        // real address the readiness signal must report.
+        let address = match listener.local_addr() {
+            Ok(address) => address,
+            Err(error) => {
+                let _ = ready.send(Err(StartupError::bind(error)));
+                return Ok(());
+            }
+        };
+        tracing::info!("promptforge-gateway serving on {address}");
+        let _ = ready.send(Ok(format!("http://{address}")));
+        gateway
+            .serve(listener, shutdown_on_send(shutdown))
+            .await
+            .map_err(StartupError::serve)
+    })
+}
+
+/// Resolves only on an explicit shutdown send. A sender dropped without
+/// sending - the Ctrl-C handler thread or its runtime failed on the [`run`]
+/// path - must keep the server up, never stop it.
+async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
+    if shutdown.await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
 /// Load config, provision local children, bind, and serve until Ctrl-C.
 ///
-/// Owns the tokio runtime; the binary stays a thin arg-parsing shell.
+/// A thin wrapper over [`spawn`]: the gateway runs on its own thread, a
+/// Ctrl-C handler signals its graceful shutdown, and this call blocks until
+/// serving ends. The binary stays a thin arg-parsing shell.
 ///
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// serving fails; classify with [`StartupError::kind`].
 pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
-    let (config, profiles) = load_startup(options)?;
-    let bind = config.bind_addr();
-    let gateway = Gateway::from_config(&config, profiles)?;
+    let mut handle = spawn(options)?;
+    if let Some(shutdown) = handle.shutdown.take() {
+        install_ctrl_c_handler(shutdown);
+    }
+    handle.join()
+}
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(StartupError::bind)?;
-    runtime.block_on(async move {
-        let listener = TcpListener::bind(bind).await.map_err(StartupError::bind)?;
-        tracing::info!("promptforge-gateway serving on {bind}");
-        gateway
-            .serve(listener, shutdown_signal())
-            .await
-            .map_err(StartupError::serve)
-    })
+/// Installs the Ctrl-C handler on its own thread: a genuine interrupt sends
+/// the graceful-shutdown signal, while every failure path sends nothing -
+/// [`shutdown_signal`] never resolves on a handler-install failure, and a
+/// thread or runtime that fails to start merely drops the sender, which
+/// [`shutdown_on_send`] ignores - so no failure can masquerade as an
+/// interrupt and stop the server.
+fn install_ctrl_c_handler(shutdown: tokio::sync::oneshot::Sender<()>) {
+    let handler = std::thread::Builder::new()
+        .name("gateway-ctrl-c".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::error!(
+                        "failed to build the Ctrl-C signal runtime: {error}; continuing to serve"
+                    );
+                    return;
+                }
+            };
+            runtime.block_on(shutdown_signal());
+            let _ = shutdown.send(());
+        });
+    if let Err(error) = handler {
+        tracing::error!("failed to spawn the Ctrl-C handler thread: {error}; continuing to serve");
+    }
 }
 
 /// What awaiting the Ctrl-C signal produced.
@@ -345,8 +557,9 @@ mod tests {
 
     use super::{
         ServeOptions, ShutdownTrigger, check_server_matches_boot, classify_shutdown, load_startup,
-        profiles_dir_for,
+        profiles_dir_for, shutdown_on_send, spawn,
     };
+    use crate::api_error::StartupErrorKind;
     use promptforge_gateway_config::{Config, ProfileName};
 
     #[test]
@@ -559,5 +772,163 @@ endpoints = ["e"]
         let same = Config::from_toml_str(CATALOG).unwrap().server().clone();
         let profile = ProfileName::parse("p").unwrap();
         check_server_matches_boot(&boot, &same, &profile).unwrap();
+    }
+
+    /// A boot catalog on an ephemeral port, so spawn tests never collide.
+    const CATALOG_EPHEMERAL: &str = r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "boot-key"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["e"]
+"#;
+
+    /// A tempdir with the given boot catalog and a `main` profile that
+    /// includes it, plus the spawn options that boot into it.
+    fn spawn_fixture(catalog: &str) -> (tempfile::TempDir, ServeOptions) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write(tmp.path(), "gateway.toml", catalog);
+        let profiles = tmp.path().join("profiles");
+        std::fs::create_dir(&profiles).unwrap();
+        write(&profiles, "main.toml", "include = [\"../gateway.toml\"]\n");
+        let options = ServeOptions::new(
+            tmp.path().join("gateway.toml"),
+            ProfileName::parse("main").unwrap(),
+        );
+        (tmp, options)
+    }
+
+    /// A raw HTTP/1.1 GET against `url`, returning the full response text.
+    /// Keeps an HTTP client out of the crate's dev-dependencies.
+    fn http_get(url: &str, path: &str) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let address = url.strip_prefix("http://").expect("the URL is http");
+        let mut stream = std::net::TcpStream::connect(address).expect("the gateway accepts");
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: gateway\r\nConnection: close\r\n\r\n"
+        )
+        .expect("the request sends");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("the response reads");
+        response
+    }
+
+    #[test]
+    fn spawn_readiness_means_the_health_endpoint_answers() {
+        let (_tmp, options) = spawn_fixture(CATALOG_EPHEMERAL);
+        let gateway = spawn(&options).expect("gateway spawns");
+        assert!(
+            gateway.url().starts_with("http://127.0.0.1:"),
+            "the URL carries the bound loopback address: {}",
+            gateway.url()
+        );
+
+        let response = http_get(gateway.url(), "/health");
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(
+            response.contains(r#""status":"serving""#),
+            "got: {response}"
+        );
+
+        gateway.shutdown().expect("graceful shutdown succeeds");
+    }
+
+    #[test]
+    fn shutdown_stops_serving_and_releases_the_port() {
+        let (_tmp, options) = spawn_fixture(CATALOG_EPHEMERAL);
+        let gateway = spawn(&options).expect("gateway spawns");
+        let address = gateway
+            .url()
+            .strip_prefix("http://")
+            .expect("the URL is http")
+            .to_string();
+
+        gateway.shutdown().expect("graceful shutdown succeeds");
+
+        assert!(
+            std::net::TcpStream::connect(&address).is_err(),
+            "nothing may accept on {address} after shutdown"
+        );
+        drop(std::net::TcpListener::bind(&address).expect("the port is free after shutdown"));
+    }
+
+    #[test]
+    fn dropping_the_handle_signals_shutdown() {
+        let (_tmp, options) = spawn_fixture(CATALOG_EPHEMERAL);
+        let gateway = spawn(&options).expect("gateway spawns");
+        let address = gateway
+            .url()
+            .strip_prefix("http://")
+            .expect("the URL is http")
+            .to_string();
+
+        drop(gateway);
+
+        // Drop signals shutdown but does not wait, so poll with a deadline.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::net::TcpStream::connect(&address).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the gateway still accepts on {address} after the handle dropped"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_dropped_shutdown_sender_never_resolves_the_serve_future() {
+        use futures_util::FutureExt as _;
+
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        drop(sender);
+        assert!(
+            shutdown_on_send(receiver).now_or_never().is_none(),
+            "a sender dropped without sending (a failed Ctrl-C handler) must not stop the server"
+        );
+    }
+
+    #[test]
+    fn an_explicit_shutdown_send_resolves_the_serve_future() {
+        use futures_util::FutureExt as _;
+
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        sender.send(()).expect("the receiver is alive");
+        assert!(
+            shutdown_on_send(receiver).now_or_never().is_some(),
+            "an explicit send is the shutdown signal"
+        );
+    }
+
+    #[test]
+    fn spawn_returns_config_errors_through_the_handshake() {
+        let (_tmp, config_path) = boot_fixture();
+        let options = ServeOptions::new(config_path, ProfileName::parse("ghost").unwrap());
+        let error = spawn(&options).expect_err("an unknown profile must fail spawn");
+        assert_eq!(error.kind(), StartupErrorKind::Config);
+    }
+
+    #[test]
+    fn a_bind_conflict_fails_spawn_with_bind_kind() {
+        let blocker = std::net::TcpListener::bind("127.0.0.1:0").expect("bind blocker");
+        let address = blocker.local_addr().expect("blocker address");
+        let catalog = CATALOG_EPHEMERAL.replace("127.0.0.1:0", &address.to_string());
+        let (_tmp, options) = spawn_fixture(&catalog);
+        let error = spawn(&options).expect_err("a taken port must fail spawn");
+        assert_eq!(error.kind(), StartupErrorKind::Bind);
     }
 }

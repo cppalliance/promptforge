@@ -22,6 +22,8 @@ Boot requires two things: a config path and a profile name. The config path come
 
 Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`.
 
+Embedding hosts use the library API instead of the binary: `spawn` starts the gateway on a dedicated thread with its own runtime and blocks until the listener is bound, returning a `GatewayHandle` that carries the bound URL and a graceful-shutdown switch (`url()`, `shutdown()`, `join()`).
+
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
 ## Minimum Rust Version
