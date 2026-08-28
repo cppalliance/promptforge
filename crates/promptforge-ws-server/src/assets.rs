@@ -25,3 +25,42 @@ pub(crate) fn ui_asset(path: &str, content_type: &'static str) -> Response {
         None => AppError::AssetMissing(path.to_string()).into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::*;
+
+    /// Asserts an asset name answers 404 rather than file contents.
+    fn assert_asset_misses(path: &str) {
+        let response = ui_asset(path, "text/plain; charset=utf-8");
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "{path:?} must not escape the asset root"
+        );
+    }
+
+    // These pin traversal parity between the two build profiles: release
+    // misses the embed map by construction, while a debug build reads
+    // `ui/dist/` from disk at request time and must refuse names resolving
+    // outside it. Each target is this crate's own manifest - a file that
+    // exists on disk - so the debug path can only fail on containment,
+    // never on a missing file.
+
+    #[test]
+    fn relative_traversal_answers_not_found() {
+        assert_asset_misses("../../Cargo.toml");
+    }
+
+    #[test]
+    fn backslash_traversal_answers_not_found() {
+        assert_asset_misses(r"..\..\Cargo.toml");
+    }
+
+    #[test]
+    fn absolute_path_answers_not_found() {
+        assert_asset_misses(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
+    }
+}
