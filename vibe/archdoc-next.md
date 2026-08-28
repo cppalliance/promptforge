@@ -90,3 +90,4 @@
 - [2026-08-27-3-server-driven-menu-state] profile-local memory: The server persists each profile last selected model outside hand-edited config.
 - [2026-08-27-4-merged-gateway-workshop] config-state split: Human boot config, machine state, view layout, and append-only tape remain separate stores.
 - [2026-08-28-1-fix-open-vibe-findings] single boot parse: Gateway startup resolves the include chain once for both server and Workshop boot sections.
+- [2026-08-28-2-coroutine-protocol-executor] cooperative scheduler boundary: One prompt run interleaves chains only at host I/O yields while keeping scheduler state exclusively owned.

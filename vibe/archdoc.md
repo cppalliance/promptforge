@@ -25,30 +25,11 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 - A64. Endpoints bind by id to one shared dominion admission queue; local dominions also enforce complete VRAM co-residency budgets.
 
 - A65. Clients and core speak one canonical protocol; per-model backend dialect translation exists only inside the gateway and grows by demonstrated need.
 
-
-
-
-
-
 - A75. Gateway clients bound connection and buffered-request waits; streaming uses lifecycle cancellation instead of a whole-request deadline.
-
 
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
 
@@ -57,7 +38,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A79. Model stream channels retain their semantics end to end; reasoning is neither dropped nor folded into answer content.
 
 - A80. Workshop UI dependencies flow from ui to services to base; main.ts alone composes layers and builds reject reverse edges.
-
 
 - A82. Chat replies are ordered durable per-request traffic; status, catalog, and interim transcription are complete ephemeral snapshots.
 
@@ -68,6 +48,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
 
 - A86. A merged process completes Workshop shutdown before signaling gateway shutdown.
+
+- A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
 
 ## Principles
 
