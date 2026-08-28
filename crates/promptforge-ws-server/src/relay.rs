@@ -10,7 +10,9 @@ use axum::response::{IntoResponse, Response};
 
 use crate::app::AppState;
 use crate::error::AppError;
-use crate::gateway::{GatewayError, GatewayResponse};
+use crate::gateway::{
+    GatewayError, GatewayResponse, SsePayloadStream, SwitchEvent, SwitchResponse, switch_events,
+};
 use crate::protocol::{Activity, ChatRequest};
 use crate::push::Push;
 use crate::tape::{Tape, TapeEvent};
@@ -76,9 +78,14 @@ struct SwitchProfileBody {
     name: String,
 }
 
-/// Forwards a profile switch to the gateway and relays its answer
-/// verbatim. The active model catalog changes with the profile; the UI
-/// refetches `/v1/models` after a successful switch.
+/// Forwards a profile switch to the gateway and relays its outcome. The
+/// active model catalog changes with the profile; the UI refetches
+/// `/v1/models` after a successful switch.
+///
+/// The gateway now streams the switch; this buffered route consumes the
+/// stream to its terminal event ([`switch_outcome`]) and answers as it
+/// always has. The stage-by-stage progress consumer lands on the WebSocket
+/// path, not here.
 pub(crate) async fn switch_profile(State(state): State<AppState>, body: String) -> Response {
     let request: SwitchProfileBody = match serde_json::from_str(&body) {
         Ok(request) => request,
@@ -93,9 +100,53 @@ pub(crate) async fn switch_profile(State(state): State<AppState>, body: String) 
         "the gateway is loading another profile",
         Activity::General,
     );
-    let result = state.gateway.switch_profile(&request.name).await;
+    let result = match state.gateway.switch_profile(&request.name).await {
+        Ok(SwitchResponse::Buffered(answer)) => Ok(answer),
+        Ok(SwitchResponse::Switching { payloads, .. }) => switch_outcome(payloads).await,
+        Err(error) => Err(error),
+    };
     report_gateway_outcome(&push, &result, "POST /admin/switch-profile");
     relay(result)
+}
+
+/// Consumes a switch stream to its terminal event, discarding stage
+/// markers, and shapes the outcome as the buffered reply this route has
+/// always relayed: `{"ok":true,"profile":...}` on ready, a 400
+/// `switch_failed` envelope on error.
+async fn switch_outcome(payloads: SsePayloadStream) -> Result<GatewayResponse, GatewayError> {
+    use futures_util::StreamExt as _;
+
+    let mut events = switch_events(payloads);
+    while let Some(event) = events.next().await {
+        match event? {
+            SwitchEvent::Stage { .. } => {}
+            SwitchEvent::Ready { profile } => {
+                return Ok(GatewayResponse {
+                    status: reqwest::StatusCode::OK,
+                    body: serde_json::json!({ "ok": true, "profile": profile })
+                        .to_string()
+                        .into_bytes(),
+                });
+            }
+            SwitchEvent::Error { message } => {
+                return Ok(GatewayResponse {
+                    status: reqwest::StatusCode::BAD_REQUEST,
+                    body: serde_json::json!({
+                        "error": {
+                            "message": message,
+                            "type": "invalid_request_error",
+                            "code": "switch_failed",
+                        }
+                    })
+                    .to_string()
+                    .into_bytes(),
+                });
+            }
+        }
+    }
+    Err(GatewayError::ReadBody(Box::new(std::io::Error::other(
+        "the switch stream ended without a terminal event",
+    ))))
 }
 
 /// Reports a gateway call's outcome on the status bus: back to idle on
@@ -471,6 +522,69 @@ mod tests {
             &body_bytes(response).await[..],
             br#"{"ok":true,"profile":"qwen38"}"#
         );
+    }
+
+    /// A mock gateway whose switch route streams `events` as SSE.
+    async fn spawn_streaming_switch_gateway(events: &'static str) -> String {
+        spawn_gateway(Router::new().route(
+            "/admin/switch-profile",
+            post(move || async move {
+                ([(header::CONTENT_TYPE, "text/event-stream")], events).into_response()
+            }),
+        ))
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_streaming_switch_is_consumed_to_its_terminal_ready() {
+        let base_url = spawn_streaming_switch_gateway(concat!(
+            "data: {\"stage\":\"loading-profile\"}\n\n",
+            "data: {\"stage\":\"stopping-models\"}\n\n",
+            "data: {\"stage\":\"starting-models\"}\n\n",
+            "data: {\"status\":\"ready\",\"profile\":\"qwen38\"}\n\n",
+        ))
+        .await;
+        let (state, _tape_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/profiles/switch")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"qwen38"}"#))
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["profile"], "qwen38");
+    }
+
+    #[tokio::test]
+    async fn a_streaming_switch_failure_relays_the_terminal_error() {
+        let base_url = spawn_streaming_switch_gateway(concat!(
+            "data: {\"stage\":\"loading-profile\"}\n\n",
+            "data: {\"status\":\"error\",\"message\":\"profile not found: ghost\"}\n\n",
+        ))
+        .await;
+        let (state, _tape_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/profiles/switch")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"ghost"}"#))
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "switch_failed");
+        assert_eq!(json["error"]["message"], "profile not found: ghost");
     }
 
     #[tokio::test]
