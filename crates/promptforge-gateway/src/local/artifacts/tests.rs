@@ -92,21 +92,24 @@ fn extract_zip_rejects_traversal_entry_and_cleans_up() {
     assert!(!dir.path().join("escape.txt").exists());
 }
 
-fn tar_gz_with_symlink() -> Vec<u8> {
+/// Builds a tar.gz from `(entry_type, name, link_target, contents)` rows.
+fn tar_gz_with_entries(entries: &[(tar::EntryType, &str, Option<&str>, &[u8])]) -> Vec<u8> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
     let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-    let mut header = tar::Header::new_gnu();
-    header.set_entry_type(tar::EntryType::Symlink);
-    header.set_size(0);
-    header.set_mode(0o777);
-    header.set_path("evil-link").expect("set path");
-    header.set_link_name("/etc/passwd").expect("set link");
-    header.set_cksum();
-    builder
-        .append(&header, io::empty())
-        .expect("append symlink");
+    for (entry_type, name, link, contents) in entries {
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(*entry_type);
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o755);
+        header.set_path(name).expect("set path");
+        if let Some(link) = link {
+            header.set_link_name(link).expect("set link");
+        }
+        header.set_cksum();
+        builder.append(&header, *contents).expect("append entry");
+    }
     builder
         .into_inner()
         .expect("finish tar")
@@ -115,17 +118,95 @@ fn tar_gz_with_symlink() -> Vec<u8> {
 }
 
 #[test]
-fn extract_tar_gz_rejects_symlink_entries() {
-    // ART-007: a tar entry that is neither a regular file nor a directory (here
-    // a symlink) is rejected rather than materialized in the cache tree.
+fn extract_tar_gz_rejects_symlink_with_absolute_target() {
+    // ART-007: a symlink entry whose target is an absolute path is rejected
+    // rather than materialized in the cache tree.
     let dir = TempDir::new().expect("tempdir");
     let archive = dir.path().join("evil.tar.gz");
-    std::fs::write(&archive, tar_gz_with_symlink()).expect("write archive");
+    let entries: &[(tar::EntryType, &str, Option<&str>, &[u8])] = &[(
+        tar::EntryType::Symlink,
+        "evil-link",
+        Some("/etc/passwd"),
+        b"",
+    )];
+    std::fs::write(&archive, tar_gz_with_entries(entries)).expect("write archive");
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).expect("mkdir dest");
     let result = extract_archive(&archive, &dest, ArchiveKind::TarGz);
     assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
     assert!(!dest.join("evil-link").exists());
+}
+
+#[test]
+fn extract_tar_gz_materializes_symlink_chains_as_copies() {
+    // macOS llama.cpp archives ship dylibs behind versioned symlink chains,
+    // with the links stored before their targets. Each link lands as a
+    // regular-file copy of its final target so the extracted tree stays
+    // symlink-free (ART-006).
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("dylibs.tar.gz");
+    let body: &[u8] = b"dylib-bytes";
+    let entries: &[(tar::EntryType, &str, Option<&str>, &[u8])] = &[
+        (
+            tar::EntryType::Symlink,
+            "pkg/libggml.dylib",
+            Some("libggml.0.dylib"),
+            b"",
+        ),
+        (
+            tar::EntryType::Symlink,
+            "pkg/libggml.0.dylib",
+            Some("libggml.0.17.0.dylib"),
+            b"",
+        ),
+        (
+            tar::EntryType::Regular,
+            "pkg/libggml.0.17.0.dylib",
+            None,
+            body,
+        ),
+    ];
+    std::fs::write(&archive, tar_gz_with_entries(entries)).expect("write archive");
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+    extract_archive(&archive, &dest, ArchiveKind::TarGz).expect("extract");
+    for name in ["libggml.dylib", "libggml.0.dylib", "libggml.0.17.0.dylib"] {
+        let path = dest.join("pkg").join(name);
+        let metadata = std::fs::symlink_metadata(&path).expect("metadata");
+        assert!(metadata.is_file(), "{name} must be a regular file");
+        assert_eq!(std::fs::read(&path).expect("read"), body, "{name}");
+    }
+}
+
+#[test]
+fn extract_tar_gz_rejects_traversal_dangling_and_cyclic_symlinks() {
+    // ART-007: a symlink target that climbs out of the destination, one
+    // nothing in the archive provides, and a link cycle are each rejected.
+    let cases: &[&[(tar::EntryType, &str, Option<&str>, &[u8])]] = &[
+        &[(tar::EntryType::Symlink, "pkg/evil", Some("../outside"), b"")],
+        &[(
+            tar::EntryType::Symlink,
+            "pkg/dangling",
+            Some("missing.bin"),
+            b"",
+        )],
+        &[
+            (tar::EntryType::Symlink, "pkg/a", Some("b"), b""),
+            (tar::EntryType::Symlink, "pkg/b", Some("a"), b""),
+        ],
+    ];
+    for entries in cases {
+        let dir = TempDir::new().expect("tempdir");
+        let archive = dir.path().join("evil.tar.gz");
+        std::fs::write(&archive, tar_gz_with_entries(entries)).expect("write archive");
+        let dest = dir.path().join("out");
+        std::fs::create_dir(&dest).expect("mkdir dest");
+        let result = extract_archive(&archive, &dest, ArchiveKind::TarGz);
+        assert!(
+            matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })),
+            "{entries:?} should be rejected, got {result:?}"
+        );
+    }
 }
 
 fn tar_gz_entry(entry_type: tar::EntryType, name: &str, link: Option<&str>) -> Vec<u8> {
@@ -167,8 +248,8 @@ fn zip_symlink(name: &str, target: &str) -> Vec<u8> {
 #[test]
 fn extract_rejects_every_non_regular_entry_class() {
     // ART-007: table-driven rejection of each unsafe/unsupported archive entry
-    // class - tar symlink/hardlink/char/block/fifo and a zip symlink - so none
-    // is materialized in the cache tree.
+    // class - a tar symlink with an absolute target, hardlink/char/block/fifo,
+    // and a zip symlink - so none is materialized in the cache tree.
     let tar_cases: &[(tar::EntryType, Option<&str>)] = &[
         (tar::EntryType::Symlink, Some("/etc/passwd")),
         (tar::EntryType::Link, Some("llama-server")),

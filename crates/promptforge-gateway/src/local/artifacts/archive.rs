@@ -1,5 +1,12 @@
 //! Archive extraction (tar.gz/zip) with traversal and entry-type confinement.
+//!
+//! Tar symlink entries are materialized as regular-file copies of their
+//! targets, never as links: the cache confinement (ART-006) refuses
+//! symlinks anywhere under the root, and the macOS llama.cpp release
+//! archives ship their dylibs behind versioned symlink chains. Zip
+//! symlinks remain unsupported.
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, BufReader};
@@ -34,6 +41,7 @@ fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
         archive: archive.display().to_string(),
         source,
     })?;
+    let mut links: Vec<(PathBuf, PathBuf)> = Vec::new();
     for entry in entries {
         let mut entry = entry.map_err(|source| LocalError::Archive {
             archive: archive.display().to_string(),
@@ -46,9 +54,30 @@ fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
                 source,
             })?
             .into_owned();
-        if !safe_archive_path(&entry_path)
-            || !(entry.header().entry_type().is_file() || entry.header().entry_type().is_dir())
-        {
+        if !safe_archive_path(&entry_path) {
+            return Err(LocalError::UnsafeArchiveEntry {
+                archive: archive.display().to_string(),
+                entry: entry_path.display().to_string(),
+            });
+        }
+        if entry.header().entry_type().is_symlink() {
+            let target = entry.link_name().map_err(|source| LocalError::Archive {
+                archive: archive.display().to_string(),
+                source,
+            })?;
+            let resolved = target
+                .as_deref()
+                .and_then(|target| resolve_link_target(&entry_path, target));
+            let Some(resolved) = resolved else {
+                return Err(LocalError::UnsafeArchiveEntry {
+                    archive: archive.display().to_string(),
+                    entry: entry_path.display().to_string(),
+                });
+            };
+            links.push((entry_path, resolved));
+            continue;
+        }
+        if !(entry.header().entry_type().is_file() || entry.header().entry_type().is_dir()) {
             return Err(LocalError::UnsafeArchiveEntry {
                 archive: archive.display().to_string(),
                 entry: entry_path.display().to_string(),
@@ -72,6 +101,73 @@ fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
             });
         }
         validate_tree_path(destination, &output)?;
+    }
+    materialize_symlinks(archive, destination, &links)
+}
+
+/// Longest symlink chain the extractor follows before calling it a cycle.
+const MAX_LINK_HOPS: usize = 32;
+
+/// Lexically resolves a symlink entry's target against the entry's parent
+/// directory, returning `None` unless both the target and the resolved
+/// path are safe relative paths that stay inside the archive root.
+fn resolve_link_target(entry_path: &Path, target: &Path) -> Option<PathBuf> {
+    if !safe_archive_path(target) {
+        return None;
+    }
+    let parent = entry_path.parent().unwrap_or(Path::new(""));
+    let resolved = parent.join(target);
+    safe_archive_path(&resolved).then_some(resolved)
+}
+
+/// Copies each recorded symlink entry's final target to the link's own
+/// path, following chains through other recorded links. Runs after every
+/// regular entry has landed, so link-before-target archive order works.
+///
+/// # Errors
+/// Returns [`LocalError::UnsafeArchiveEntry`] for a dangling target, a
+/// chain past [`MAX_LINK_HOPS`] (a cycle), or a target that is not a
+/// regular file; copy failures surface as [`LocalError::Io`].
+fn materialize_symlinks(
+    archive: &Path,
+    destination: &Path,
+    links: &[(PathBuf, PathBuf)],
+) -> Result<()> {
+    let targets: HashMap<&Path, &Path> = links
+        .iter()
+        .map(|(link, target)| (link.as_path(), target.as_path()))
+        .collect();
+    for (link, target) in links {
+        let unsafe_entry = || LocalError::UnsafeArchiveEntry {
+            archive: archive.display().to_string(),
+            entry: link.display().to_string(),
+        };
+        let mut resolved = target.as_path();
+        let mut hops = 0;
+        while let Some(next) = targets.get(resolved) {
+            hops += 1;
+            if hops > MAX_LINK_HOPS {
+                return Err(unsafe_entry());
+            }
+            resolved = next;
+        }
+        let target_path = destination.join(resolved);
+        validate_tree_path(destination, &target_path)?;
+        let is_regular_file =
+            fs::symlink_metadata(&target_path).is_ok_and(|metadata| metadata.is_file());
+        if !is_regular_file {
+            return Err(unsafe_entry());
+        }
+        let output = destination.join(link);
+        validate_tree_path(destination, &output)?;
+        if let Some(parent) = output.parent() {
+            ensure_cache_directory(destination, parent)?;
+        }
+        fs::copy(&target_path, &output).map_err(|source| LocalError::Io {
+            operation: "materialize archive symlink",
+            path: output.clone(),
+            source,
+        })?;
     }
     Ok(())
 }
