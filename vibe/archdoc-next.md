@@ -91,3 +91,4 @@
 - [2026-08-27-4-merged-gateway-workshop] config-state split: Human boot config, machine state, view layout, and append-only tape remain separate stores.
 - [2026-08-28-1-fix-open-vibe-findings] single boot parse: Gateway startup resolves the include chain once for both server and Workshop boot sections.
 - [2026-08-28-2-coroutine-protocol-executor] cooperative scheduler boundary: One prompt run interleaves chains only at host I/O yields while keeping scheduler state exclusively owned.
+- [2026-08-28-3-digest-marker-child-priority] child process priority: Below-normal llama-server priority improves CPU and I/O responsiveness but cannot cure display-driver contention.
