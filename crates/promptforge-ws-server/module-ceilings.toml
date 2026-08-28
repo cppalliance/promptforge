@@ -27,7 +27,7 @@
 [modules]
 "app.rs" = 544
 "assets.rs" = 66
-"atomic.rs" = 205
+"atomic.rs" = 230
 "backoff.rs" = 229
 "catalog.rs" = 118
 "chat_ws.rs" = 2963
