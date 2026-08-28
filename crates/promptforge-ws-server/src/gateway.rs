@@ -707,6 +707,8 @@ mod tests {
 
     use axum::response::IntoResponse;
 
+    use crate::backoff::xorshift;
+
     #[test]
     fn trailing_slash_is_trimmed_from_base_url() {
         let client = GatewayClient::new("http://127.0.0.1:8081/", "k").expect("client builds");
@@ -837,14 +839,6 @@ mod tests {
 
     #[test]
     fn decoder_is_chunking_invariant_under_random_splits() {
-        /// xorshift64: a tiny deterministic generator, so the test needs
-        /// no dependency and each failure names its seed.
-        fn xorshift(state: &mut u64) -> u64 {
-            *state ^= *state << 13;
-            *state ^= *state >> 7;
-            *state ^= *state << 17;
-            *state
-        }
         let wire = MULTIBYTE_WIRE.as_bytes();
         let expected = multibyte_payloads();
         for seed in [0x9E37_79B9_7F4A_7C15_u64, 42, 7_777_777] {
