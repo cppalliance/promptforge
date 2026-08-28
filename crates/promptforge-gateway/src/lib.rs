@@ -38,6 +38,7 @@ mod tools;
 mod upstream;
 mod web_search_process;
 mod wire;
+mod workshop;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};
