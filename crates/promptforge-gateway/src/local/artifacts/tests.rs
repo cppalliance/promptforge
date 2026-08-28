@@ -8,8 +8,10 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use super::archive::safe_archive_path;
+use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
 use super::progress::{DownloadProgress, download_label, progress_for_download};
+use super::verified::{VerifyOutcome, blob_marker_path, verify_blob};
 use super::*;
 use crate::testsupport::{FakeServer, hex_sha256};
 
@@ -722,4 +724,146 @@ fn reuses_unpinned_blob_without_redownload() {
         .expect("reuse");
     assert_eq!(first, second);
     assert_eq!(server.requests(), 1);
+}
+
+/// A cache root holding one pinned blob, returning `(root, blob, digest, marker)`.
+fn pinned_blob_fixture(body: &[u8]) -> (TempDir, PathBuf, String, PathBuf) {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir cache");
+    let blob = root.join("m.gguf");
+    std::fs::write(&blob, body).expect("write blob");
+    let marker = blob_marker_path(&blob);
+    (dir, blob, hex_sha256(body), marker)
+}
+
+#[test]
+fn first_verification_hashes_and_writes_marker() {
+    // With no marker present the blob is hashed and a correct three-line
+    // marker (digest, size, mtime) is written.
+    let body = b"blob-bytes";
+    let (dir, blob, digest, marker) = pinned_blob_fixture(body);
+    let root = dir.path().join("cache");
+
+    let outcome = verify_blob(&root, &blob, &digest, &marker).expect("verify");
+    assert_eq!(outcome, VerifyOutcome::Hashed);
+    let text = std::fs::read_to_string(&marker).expect("marker");
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some(digest.as_str()));
+    assert_eq!(lines.next(), Some(body.len().to_string().as_str()));
+    let mtime = lines.next().expect("mtime line");
+    assert!(mtime.split_once('.').is_some(), "mtime is `<secs>.<nanos>`");
+    assert!(lines.next().is_none(), "marker has exactly three lines");
+}
+
+#[test]
+fn second_verification_hits_marker_without_rehash() {
+    // The VerifyOutcome return is the seam: once the marker exists, the second
+    // verification is a MarkerHit, which by construction performs no hash pass.
+    let (dir, blob, digest, marker) = pinned_blob_fixture(b"blob-bytes");
+    let root = dir.path().join("cache");
+
+    let first = verify_blob(&root, &blob, &digest, &marker).expect("first");
+    assert_eq!(first, VerifyOutcome::Hashed);
+    let second = verify_blob(&root, &blob, &digest, &marker).expect("second");
+    assert_eq!(second, VerifyOutcome::MarkerHit);
+}
+
+#[test]
+fn changed_content_rehashes_and_mismatches() {
+    // Rewriting the blob (new size and mtime) invalidates the marker, so the
+    // blob is re-hashed and the pin mismatch still raises DigestMismatch; the
+    // stale marker is deleted.
+    let (dir, blob, digest, marker) = pinned_blob_fixture(b"blob-bytes");
+    let root = dir.path().join("cache");
+    let first = verify_blob(&root, &blob, &digest, &marker).expect("first");
+    assert_eq!(first, VerifyOutcome::Hashed);
+
+    std::fs::write(&blob, b"different-longer-bytes").expect("rewrite blob");
+    let err = verify_blob(&root, &blob, &digest, &marker).expect_err("mismatch");
+    assert!(matches!(err, LocalError::DigestMismatch { .. }));
+    assert!(!marker.exists(), "stale marker must be deleted");
+}
+
+#[test]
+fn wrong_pin_or_corrupt_marker_falls_back_to_hashing() {
+    // A corrupt marker and a marker recording a different digest are cache
+    // misses, never errors: both fall through to hashing, which succeeds and
+    // refreshes the marker.
+    let (dir, blob, digest, marker) = pinned_blob_fixture(b"blob-bytes");
+    let root = dir.path().join("cache");
+
+    std::fs::write(&marker, b"not-a-marker").expect("corrupt marker");
+    let outcome = verify_blob(&root, &blob, &digest, &marker).expect("verify over corrupt");
+    assert_eq!(outcome, VerifyOutcome::Hashed);
+
+    let wrong = format!("{}\n10\n0.0\n", "0".repeat(64));
+    std::fs::write(&marker, wrong).expect("wrong-pin marker");
+    let outcome = verify_blob(&root, &blob, &digest, &marker).expect("verify over wrong pin");
+    assert_eq!(outcome, VerifyOutcome::Hashed);
+    let text = std::fs::read_to_string(&marker).expect("refreshed marker");
+    assert_eq!(text.lines().next(), Some(digest.as_str()));
+}
+
+#[test]
+fn post_download_success_writes_marker() {
+    // A successful pinned download leaves a marker beside the blob, and the
+    // next ensure_model is a cache hit with no re-download.
+    let body = b"marker-after-download";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+
+    let path = store.ensure_model(&url, Some(&digest)).expect("download");
+    let marker = blob_marker_path(&path);
+    let text = std::fs::read_to_string(&marker).expect("marker written after download");
+    assert_eq!(text.lines().next(), Some(digest.as_str()));
+
+    let second = store.ensure_model(&url, Some(&digest)).expect("cache hit");
+    assert_eq!(path, second);
+    assert_eq!(server.requests(), 1);
+}
+
+#[test]
+fn path_source_uses_marker_on_second_call() {
+    // A pinned path source records its marker under `<cache>/markers/`; the
+    // second ensure_model verifies through the marker and does not rewrite it.
+    let body = b"path-source-bytes";
+    let digest = hex_sha256(body);
+    let source_dir = TempDir::new().expect("source dir");
+    let source = source_dir.path().join("local.gguf");
+    std::fs::write(&source, body).expect("write source");
+    let source_str = source.to_str().expect("utf-8 source path");
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+
+    let first = store
+        .ensure_model(source_str, Some(&digest))
+        .expect("first");
+    assert_eq!(first, source);
+    let marker = temp.path().join("markers").join(format!(
+        "{}.verified",
+        source_cache_key(&source.to_string_lossy())
+    ));
+    let text = std::fs::read_to_string(&marker).expect("path-source marker");
+    assert_eq!(text.lines().next(), Some(digest.as_str()));
+
+    let marker_mtime = std::fs::metadata(&marker)
+        .expect("marker metadata")
+        .modified()
+        .expect("marker mtime");
+    let second = store
+        .ensure_model(source_str, Some(&digest))
+        .expect("second");
+    assert_eq!(second, source);
+    let after = std::fs::metadata(&marker)
+        .expect("marker metadata")
+        .modified()
+        .expect("marker mtime");
+    assert_eq!(
+        marker_mtime, after,
+        "a marker hit must not refresh the marker"
+    );
 }
