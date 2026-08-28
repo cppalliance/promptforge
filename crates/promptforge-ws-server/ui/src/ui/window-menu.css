@@ -101,6 +101,12 @@
   color: var(--accent, #7c7fd4);
 }
 
+/* The pending mark: an ellipsis on the profile a switch is loading,
+   muted where the settled check is accented. */
+.window-titlebar__item-check--pending {
+  color: var(--text-muted, #8b90a0);
+}
+
 .window-titlebar__separator {
   height: 1px;
   margin: var(--space-xs, 4px) 0;

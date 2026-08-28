@@ -6,9 +6,11 @@
 // dispatch through the agent surface (the only new-conversation
 // command), the Window menu's Workshop Panel toggle and its sharing of
 // the visible controls' command path, the Model menu's dynamic catalog
-// rows, selection marking, and empty state, Edit target preservation and
-// disabled commands, the About dialog's focus trap and close, and the
-// browser-mode popover wiring with inert native window commands.
+// rows, selection marking, and empty state, the switching-state
+// rendering (all rows disabled, pending mark on the switch target) and
+// the live rebuild while the popover is open, Edit target preservation
+// and disabled commands, the About dialog's focus trap and close, and
+// the browser-mode popover wiring with inert native window commands.
 // Run: node test/window-menu.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -381,6 +383,109 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   );
   rows[2].click();
   check("a profile can be switched out of an empty catalog", switches.join(",") === "main");
+}
+
+// --- Model menu: a switch in flight -------------------------------------------
+
+{
+  const selections = [];
+  const modelMenu = new ModelService((id) => (selections.push(id), true));
+  modelMenu.setModels([{ id: "alpha" }]);
+  modelMenu.applySelected("alpha");
+  const switches = [];
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switching: "qwen38",
+    switchTo: (name) => switches.push(name),
+  };
+  const { menus, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  const rows = itemsOf("model");
+  const markOf = (row) => row.querySelector(".window-titlebar__item-check");
+  check(
+    "a switch in flight disables every model and profile row",
+    rows.every((row) => row.getAttribute("aria-disabled") === "true"),
+  );
+  check(
+    "the switch target shows the pending mark instead of a check",
+    markOf(rows[3]).textContent === "…" &&
+      markOf(rows[3]).classList.contains("window-titlebar__item-check--pending"),
+  );
+  check(
+    "the still-active profile keeps its check while the switch runs",
+    markOf(rows[2]).textContent === "✓" &&
+      rows[2].getAttribute("aria-checked") === "true" &&
+      rows[3].getAttribute("aria-checked") === "false",
+  );
+  check(
+    "the pending row stays a radio item for assistive tech",
+    rows[3].getAttribute("role") === "menuitemradio",
+  );
+  rows[3].click();
+  check("a disabled profile row cannot dispatch another switch", switches.length === 0);
+  rows[0].click();
+  check("a disabled model row cannot send a selection", selections.length === 0);
+  check("clicking disabled rows keeps the menu open", isOpen("model"));
+}
+
+// --- Model menu: live rebuild while the popover is open -----------------------
+
+{
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }]);
+  const listeners = new Set();
+  const profileMenu = {
+    profiles: ["main", "qwen38"],
+    active: "main",
+    switching: "",
+    onDidChange: (listener) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+    switchTo: () => {},
+  };
+  const { menus, itemsOf, isOpen } = scenario({ modelMenu, profileMenu });
+  menus.model.click();
+  check("opening the Model menu subscribes to workbench changes", listeners.size === 1);
+  // The server starts the switch: a switching=<target> snapshot arrives
+  // while the popover is open.
+  profileMenu.switching = "qwen38";
+  for (const listener of listeners) listener();
+  let rows = itemsOf("model");
+  const markOf = (row) => row.querySelector(".window-titlebar__item-check");
+  check(
+    "a snapshot while open disables the rows without reopening",
+    isOpen("model") && rows.every((row) => row.getAttribute("aria-disabled") === "true"),
+  );
+  check("the pending mark appears without reopening", markOf(rows[3]).textContent === "…");
+  // The switch completes: the final snapshot restores truth, including
+  // the server-owned model selection.
+  profileMenu.switching = "";
+  profileMenu.active = "qwen38";
+  modelMenu.applySelected("alpha");
+  for (const listener of listeners) listener();
+  rows = itemsOf("model");
+  check(
+    "the completing snapshot moves the check to the new profile",
+    rows[3].getAttribute("aria-checked") === "true" &&
+      markOf(rows[3]).textContent === "✓" &&
+      rows[2].getAttribute("aria-checked") === "false",
+  );
+  check(
+    "rows re-enable when the switch completes",
+    rows[0].getAttribute("aria-disabled") === "false" &&
+      rows[2].getAttribute("aria-disabled") === "false",
+  );
+  check(
+    "the checked model row tracks the snapshot selection",
+    rows[0].getAttribute("aria-checked") === "true" && markOf(rows[0]).textContent === "✓",
+  );
+  menus.model.click();
+  check(
+    "closing the menu disposes the workbench subscription",
+    !isOpen("model") && listeners.size === 0,
+  );
 }
 
 // --- Help menu: About dialog --------------------------------------------------
