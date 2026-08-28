@@ -13,7 +13,7 @@ import type { ChatPlugin } from "./chat/core/types";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
 import { ModelService } from "./services/model-service";
-import type { CatalogModel } from "./services/protocol";
+import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopProvider } from "./services/workshop-provider";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { StatusBar } from "./ui/status-bar";
@@ -55,6 +55,13 @@ const workshopSocket = disposables.add(new WorkshopSocket());
 const modelService = disposables.add(
   new ModelService((id) => workshopSocket.selectModel(id)),
 );
+
+// The rest of the server-owned workbench state - profiles, switch
+// progress, chat gating - lives in the WorkbenchService, fed from the
+// same snapshots. The Model menu's Profiles section reads it below;
+// later steps hand it to the menu's switching-state rendering and the
+// chat-gating hook.
+const workbenchService = disposables.add(new WorkbenchService());
 
 disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
@@ -166,86 +173,31 @@ agents.ensureAgent();
 disposables.add(startLayoutPersistence(dock));
 disposables.add(installShortcuts(dock));
 
-async function loadModels(): Promise<void> {
-  try {
-    const response = await fetch("/v1/models");
-    if (!response.ok) {
-      throw new Error(`GET /v1/models answered ${response.status}`);
-    }
-    const catalog = (await response.json()) as { data?: CatalogModel[] };
-    modelService.setModels(Array.isArray(catalog.data) ? catalog.data : []);
-  } catch (error) {
-    // The Model menu shows its empty state until a pushed catalog heals
-    // the failed boot fetch.
-    console.error("Could not load the model catalog:", error);
-  }
-}
-
-// The gateway-profile catalog behind the Model menu's Profiles section.
-// State lives here rather than in a service: the menu is the only reader,
-// and it reads synchronously at open time.
-const profileCatalog = { profiles: [] as readonly string[], active: "" };
-
-async function loadProfiles(): Promise<void> {
-  try {
-    const response = await fetch("/profiles");
-    if (!response.ok) {
-      throw new Error(`GET /profiles answered ${response.status}`);
-    }
-    const catalog = (await response.json()) as { profiles?: unknown; active?: unknown };
-    profileCatalog.profiles = Array.isArray(catalog.profiles)
-      ? catalog.profiles.filter((entry): entry is string => typeof entry === "string")
-      : [];
-    profileCatalog.active = typeof catalog.active === "string" ? catalog.active : "";
-  } catch (error) {
-    // A gateway without profile support (or an outage) leaves the section
-    // hidden; the menu's model rows are unaffected.
-    console.error("Could not load the gateway profiles:", error);
-  }
-}
-
-// Switching swaps the gateway's whole model catalog, so a successful
-// switch refetches both the profiles (for the new active name) and the
-// models; the model service keeps or replaces the selection as the new
-// catalog dictates. Progress and failure paint the status bar - a switch
-// that starts local model children can take minutes.
-async function switchToProfile(name: string): Promise<void> {
-  statusBar.showLocal(`Switching to profile ${name}...`, "info");
-  const response = await fetch("/profiles/switch", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    throw new Error(body?.error?.message ?? `POST /profiles/switch answered ${response.status}`);
-  }
-  await Promise.all([loadProfiles(), loadModels()]);
-  statusBar.showLocal(`Profile ${name} is active`, "info");
-}
-
+// The Model menu's Profiles section: a thin view over the workbench
+// snapshots the server pushes. Switching is a command on the socket -
+// progress and failure arrive back as server status frames, so the only
+// local message is for the failure the server can never report: the
+// socket is down and nothing went out.
 const profileMenu: ProfileMenuService = {
   get profiles() {
-    return profileCatalog.profiles;
+    return workbenchService.snapshot.profiles;
   },
   get active() {
-    return profileCatalog.active;
+    return workbenchService.snapshot.active ?? "";
   },
   switchTo(name: string): void {
-    switchToProfile(name).catch((error: unknown) => {
-      statusBar.showLocal(`Could not switch to ${name}: ${(error as Error).message}`, "error");
-    });
+    if (!workshopSocket.switchProfile(name)) {
+      statusBar.showLocal(`Could not switch to ${name}: the workshop socket is down`, "error");
+    }
   },
 };
 
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the model service's catalog and writes the selection back
-// into it, and its Profiles section reads the profile catalog above.
-// File > New Agent opens a fresh tab; Window > Workshop Panel shares
-// Ctrl+B's toggle.
+// into it, and its Profiles section reads the workbench service through
+// the profileMenu view above. File > New Agent opens a fresh tab;
+// Window > Workshop Panel shares Ctrl+B's toggle.
 disposables.add(
   setupWindowMenus({
     agents,
@@ -259,16 +211,16 @@ disposables.add(
 // catalog state in place so a boot-time failure heals itself.
 disposables.add(workshopSocket.onModels((models) => modelService.setModels(models)));
 
-// The server-owned selection reaches the model service from workbench
-// snapshots; the full snapshot wiring (WorkbenchService into the menu and
-// the gating hook) lands in a later step.
+// The server-owned selection and the rest of the workbench state arrive
+// in the same snapshot: the model service takes the selection, the
+// workbench service the whole frame.
 disposables.add(
-  workshopSocket.onWorkbench((frame) => modelService.applySelected(frame.selected)),
+  workshopSocket.onWorkbench((frame) => {
+    modelService.applySelected(frame.selected);
+    workbenchService.applySnapshot(frame);
+  }),
 );
 
 // Every push handler above is wired, so release the socket's boot queue:
 // pushes that raced this module's execution now replay in arrival order.
 workshopSocket.ready();
-
-void loadModels();
-void loadProfiles();

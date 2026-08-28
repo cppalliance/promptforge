@@ -182,21 +182,13 @@ export async function bootWorkbench(name, run) {
   window.AudioWorkletNode = FakeAudioWorkletNode;
   globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
-  // A scripted fetch stands in for the model catalog. The catalog answers
-  // with one model to populate the menu; the selection itself is
-  // server-owned and arrives in the boot workbench snapshot pushed below.
-  // The Workshop tree's boot fetch answers with an empty roots listing (no
-  // grants yet); any other fetch - including the retired POST /chat SSE
-  // path - rejects the test.
+  // The workbench state (models, profiles, selection) arrives only over
+  // the socket, so a booted workbench fetches nothing but the Workshop
+  // tree's roots listing (answered empty: no grants yet) and the voice
+  // GPU capability probe. Any other fetch - including the retired
+  // /v1/models and /profiles boot fetches and the POST /chat SSE path -
+  // rejects the test.
   globalThis.fetch = (url) => {
-    if (url === "/v1/models") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ data: [{ id: "test-model", description: "scripted" }] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    }
     if (url === "/workspace/tree") {
       return Promise.resolve(
         new Response(JSON.stringify({ path: null, entries: [] }), {
@@ -361,9 +353,11 @@ export async function bootWorkbench(name, run) {
     });
   }
 
-  // The server owns the model selection and announces it in a workbench
-  // snapshot on connect; without one the app has no selection and every
-  // submission stays blocked. Mirror that boot push here.
+  // The server pushes the model catalog and a workbench snapshot on
+  // connect - the app makes no HTTP state fetches at boot. Mirror both
+  // pushes here: the catalog populates the Model menu, and without the
+  // snapshot's selection every submission stays blocked.
+  emitModels([{ id: "test-model", description: "scripted" }]);
   emitWorkbench();
 
   // Drives one chat submission through murm-ui's real form handling and
