@@ -17,7 +17,7 @@ use std::thread::JoinHandle;
 
 use tokio::net::TcpListener;
 
-use promptforge_gateway_config::{Config, ConfigError, ProfileName, ServerConfig};
+use promptforge_gateway_config::{Config, ConfigError, ProfileName, ServerConfig, WorkshopConfig};
 
 use crate::api_error::{ServeError, StartupError};
 use crate::local::LocalRuntime;
@@ -78,9 +78,10 @@ pub struct Gateway {
 impl Gateway {
     /// Assemble from a validated config. Provisions and starts local models.
     ///
-    /// The config's `[server]` is retained as the boot-owned server settings;
-    /// profile switches are checked against it (the socket and the gateway
-    /// bearer key are fixed for the process lifetime).
+    /// The config's `[server]` and `[workshop]` are retained as the
+    /// boot-owned settings; profile switches are checked against them (the
+    /// socket, the gateway bearer key, and the hosted workshop's settings
+    /// are fixed for the process lifetime).
     ///
     /// # Errors
     /// Returns [`StartupError`] when local provisioning or routing construction
@@ -131,7 +132,10 @@ impl Gateway {
                 name: profiles.active.map(|name| name.to_string()),
                 model_allowlist: config.model_allowlist().map(<[String]>::to_vec),
             },
-            config.server().clone(),
+            crate::BootOwned {
+                server: config.server().clone(),
+                workshop: config.workshop().cloned(),
+            },
         );
         Ok(Gateway { state })
     }
@@ -468,6 +472,34 @@ pub(crate) fn check_server_matches_boot(
     Ok(())
 }
 
+/// The boot-only `[workshop]` rule: like `[server]`, the section lives in
+/// the boot config, and a profile's merged `[workshop]` must equal the boot
+/// file's as values - present with equal settings, or absent on both sides.
+/// The hosted workshop is started once at boot, so a switch can never move,
+/// reconfigure, or remove it mid-run.
+pub(crate) fn check_workshop_matches_boot(
+    boot: Option<&WorkshopConfig>,
+    candidate: Option<&WorkshopConfig>,
+    profile: &ProfileName,
+) -> Result<(), ConfigError> {
+    match (boot, candidate) {
+        (None, None) => Ok(()),
+        (Some(boot), Some(candidate)) if boot == candidate => Ok(()),
+        (Some(_), Some(_)) => Err(ConfigError::validation(format!(
+            "profile {profile} [workshop] mismatch: the profile's workshop settings differ \
+             from the boot file's ([workshop] is boot-only)"
+        ))),
+        (None, Some(_)) => Err(ConfigError::validation(format!(
+            "profile {profile} carries a [workshop] section but the boot file has none \
+             ([workshop] is boot-only)"
+        ))),
+        (Some(_), None) => Err(ConfigError::validation(format!(
+            "profile {profile} lacks the boot file's [workshop] section ([workshop] is \
+             boot-only; include the boot file or replicate the section)"
+        ))),
+    }
+}
+
 /// Boot into the named profile and build the admin profiles context.
 ///
 /// Order matters: the two env files load first (the profile's `<name>.env`,
@@ -507,6 +539,10 @@ fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), Sta
     let boot_server = promptforge_gateway_config::load_server(&options.config_path)
         .map_err(StartupError::config)?;
     check_server_matches_boot(&boot_server, config.server(), &options.profile)
+        .map_err(StartupError::config)?;
+    let boot_workshop = promptforge_gateway_config::load_workshop(&options.config_path)
+        .map_err(StartupError::config)?;
+    check_workshop_matches_boot(boot_workshop.as_ref(), config.workshop(), &options.profile)
         .map_err(StartupError::config)?;
 
     let rendered = chain
@@ -556,8 +592,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        ServeOptions, ShutdownTrigger, check_server_matches_boot, classify_shutdown, load_startup,
-        profiles_dir_for, shutdown_on_send, spawn,
+        ServeOptions, ShutdownTrigger, check_server_matches_boot, check_workshop_matches_boot,
+        classify_shutdown, load_startup, profiles_dir_for, shutdown_on_send, spawn,
     };
     use crate::api_error::StartupErrorKind;
     use promptforge_gateway_config::{Config, ProfileName};
@@ -772,6 +808,100 @@ endpoints = ["e"]
         let same = Config::from_toml_str(CATALOG).unwrap().server().clone();
         let profile = ProfileName::parse("p").unwrap();
         check_server_matches_boot(&boot, &same, &profile).unwrap();
+    }
+
+    /// Parses the catalog plus `extra` and returns its `[workshop]` section.
+    fn workshop_of(extra: &str) -> Option<promptforge_gateway_config::WorkshopConfig> {
+        Config::from_toml_str(&format!("{CATALOG}{extra}"))
+            .unwrap()
+            .workshop()
+            .cloned()
+    }
+
+    #[test]
+    fn workshop_check_accepts_equal_or_absent_sections() {
+        let profile = ProfileName::parse("p").unwrap();
+        check_workshop_matches_boot(None, None, &profile).unwrap();
+
+        let boot = workshop_of("[workshop]\nbind = \"127.0.0.1:7910\"\n");
+        let same = workshop_of("[workshop]\nbind = \"127.0.0.1:7910\"\n");
+        check_workshop_matches_boot(boot.as_ref(), same.as_ref(), &profile).unwrap();
+    }
+
+    #[test]
+    fn workshop_check_rejects_a_differing_or_one_sided_section() {
+        let profile = ProfileName::parse("p").unwrap();
+        let boot = workshop_of("[workshop]\nbind = \"127.0.0.1:7910\"\n");
+        let changed = workshop_of("[workshop]\nbind = \"127.0.0.1:7911\"\n");
+
+        let differing =
+            check_workshop_matches_boot(boot.as_ref(), changed.as_ref(), &profile).unwrap_err();
+        assert!(
+            differing.to_string().contains("[workshop] mismatch"),
+            "got: {differing}"
+        );
+
+        let added = check_workshop_matches_boot(None, boot.as_ref(), &profile).unwrap_err();
+        assert!(
+            added.to_string().contains("boot file has none"),
+            "got: {added}"
+        );
+
+        let dropped = check_workshop_matches_boot(boot.as_ref(), None, &profile).unwrap_err();
+        assert!(
+            dropped.to_string().contains("lacks the boot file's"),
+            "got: {dropped}"
+        );
+    }
+
+    #[test]
+    fn boot_accepts_a_profile_inheriting_the_boot_workshop() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "gateway.toml",
+            &format!("{CATALOG}[workshop]\nbind = \"127.0.0.1:7910\"\n"),
+        );
+        let profiles = tmp.path().join("profiles");
+        std::fs::create_dir(&profiles).unwrap();
+        write(&profiles, "main.toml", "include = [\"../gateway.toml\"]\n");
+
+        let options = ServeOptions::new(
+            tmp.path().join("gateway.toml"),
+            ProfileName::parse("main").unwrap(),
+        );
+        let (config, _context) = load_startup(&options).unwrap();
+        assert_eq!(
+            config
+                .workshop()
+                .map(|workshop| workshop.bind().to_string()),
+            Some("127.0.0.1:7910".to_string())
+        );
+    }
+
+    #[test]
+    fn boot_refuses_a_profile_with_a_differing_workshop() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "gateway.toml",
+            &format!("{CATALOG}[workshop]\nbind = \"127.0.0.1:7910\"\n"),
+        );
+        let profiles = tmp.path().join("profiles");
+        std::fs::create_dir(&profiles).unwrap();
+        write(
+            &profiles,
+            "main.toml",
+            "include = [\"../gateway.toml\"]\n\n[workshop]\nbind = \"127.0.0.1:7911\"\n",
+        );
+
+        let options = ServeOptions::new(
+            tmp.path().join("gateway.toml"),
+            ProfileName::parse("main").unwrap(),
+        );
+        let error = load_startup(&options).unwrap_err();
+        let text = error_text(&error);
+        assert!(text.contains("[workshop] mismatch"), "got: {text}");
     }
 
     /// A boot catalog on an ephemeral port, so spawn tests never collide.

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use toml::Value;
 
-use crate::config::{Config, ServerConfig, interpolate_value};
+use crate::config::{Config, ServerConfig, WorkshopConfig, interpolate_value};
 use crate::error::ConfigError;
 
 /// Maximum `include` nesting depth (guards against runaway trees).
@@ -170,6 +170,56 @@ fn load_server_repr(path: &Path) -> Result<ServerConfig, ConfigError> {
         path: Some(path.to_owned()),
         source: Box::new(source),
     })
+}
+
+/// Loads only the `[workshop]` section of a config file: includes are
+/// resolved and `${VAR}` references interpolated, but full validation is
+/// skipped. Returns `None` when the section is absent, which is the common
+/// case for a headless gateway.
+///
+/// Like [`load_server`], this serves callers enforcing a boot-owned section
+/// rule: the boot file is the catalog and may legitimately fail checks that
+/// apply to a loaded profile.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) when the file (or an
+/// included file) cannot be read or parsed, an include cycles or exceeds
+/// depth, an interpolation fails, or a present `[workshop]` section does not
+/// deserialize (for example a malformed `bind` or an unknown field).
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::load_workshop;
+/// use std::path::Path;
+///
+/// if let Some(workshop) = load_workshop(Path::new("gateway.toml"))? {
+///     println!("workshop binds {}", workshop.bind());
+/// }
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn load_workshop(path: &Path) -> Result<Option<WorkshopConfig>, crate::api_error::ConfigError> {
+    load_workshop_repr(path).map_err(crate::api_error::ConfigError::from)
+}
+
+/// The crate-internal form of [`load_workshop`], returning the private
+/// representation.
+fn load_workshop_repr(path: &Path) -> Result<Option<WorkshopConfig>, ConfigError> {
+    let (mut value, _chain) = collect_config_chain(path)?;
+    interpolate_value(&mut value)?;
+    let Some(workshop) = value
+        .as_table()
+        .and_then(|table| table.get("workshop"))
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    workshop
+        .try_into()
+        .map(Some)
+        .map_err(|source| ConfigError::Parse {
+            path: Some(path.to_owned()),
+            source: Box::new(source),
+        })
 }
 
 /// Loads a config TOML path with recursive include resolution.
