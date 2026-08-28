@@ -415,7 +415,7 @@ fn serve_thread(
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = ready.send(Err(StartupError::bind(error)));
+            let _ = ready.send(Err(StartupError::thread(error)));
             return Ok(());
         }
     };

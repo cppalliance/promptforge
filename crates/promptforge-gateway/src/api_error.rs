@@ -43,8 +43,8 @@ pub enum StartupErrorKind {
     Provisioning,
     /// Binding the listener failed.
     Bind,
-    /// Spawning the gateway thread failed, or the thread exited or
-    /// panicked before binding the listener.
+    /// Spawning the gateway thread failed, or the thread failed to build
+    /// its runtime, exited, or panicked before binding the listener.
     Thread,
     /// Serving requests failed.
     Serve,
