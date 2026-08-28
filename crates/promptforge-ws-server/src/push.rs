@@ -121,6 +121,13 @@ impl Push {
     pub(crate) fn push_workbench(&self) {
         self.menu.republish();
     }
+
+    /// The menu bus behind the facade, for producers that drive the
+    /// Model-menu mutators directly: the heartbeat feeds reachability
+    /// and the gateway's profile state through this handle.
+    pub(crate) fn menu(&self) -> &MenuBus {
+        &self.menu
+    }
 }
 
 #[cfg(test)]

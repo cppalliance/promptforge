@@ -32,10 +32,10 @@
 "config.rs" = 593
 "error.rs" = 484
 "gateway.rs" = 1106
-"heartbeat.rs" = 465
+"heartbeat.rs" = 703
 "lib.rs" = 53
 "main.rs" = 47
-"menu.rs" = 720
+"menu.rs" = 778
 "protocol.rs" = 693
 "provision.rs" = 839
 "push.rs" = 292
