@@ -70,7 +70,10 @@ fn openai_score(evidence: &DialectEvidence) -> Option<u8> {
     // plus a call or result marker.
     let mistral_tools = template.contains("[AVAILABLE_TOOLS]")
         && (template.contains("[TOOL_CALLS]") || template.contains("[TOOL_RESULTS]"));
-    (chatml_tools || mistral_tools).then_some(70)
+    // Gemma-4: pipe-wrapped request and response markers; the ChatML
+    // conjunction misses these because the template has no `<|im_start|>`.
+    let gemma4_tools = template.contains("<|tool_call|>") && template.contains("<|tool_response|>");
+    (chatml_tools || mistral_tools || gemma4_tools).then_some(70)
 }
 
 /// Scores the Gemma3 `tool_code` fence dialect against the evidence.
@@ -281,19 +284,35 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
         .and_then(Value::as_str)
         .map(String::from);
 
-    // `total_slots` and capabilities are top-level in /props. When the server
-    // was launched with `--jinja` and the template declares tool support, the
-    // /v1/models response carries `meta.has_tool_call_capability`. A probe
-    // failure is surfaced (the server just passed readiness, so it is an
-    // anomaly), while a reachable response whose field is absent yields `None`
-    // rather than a bogus definitive `false`. (MOD-003)
-    let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key())?;
+    // Props-first precedence: `chat_template_caps.supports_tool_calls` is the
+    // authoritative capability source when present; only its absence falls
+    // back to the /v1/models probe. When the server was launched with
+    // `--jinja` and the template declares tool support, the /v1/models
+    // response carries `meta.has_tool_call_capability`. A probe failure is
+    // surfaced (the server just passed readiness, so it is an anomaly), while
+    // a reachable response whose field is absent yields `None` rather than a
+    // bogus definitive `false`. (MOD-003)
+    let supports_tool_calls = match props_supports_tool_calls(&props) {
+        Some(supported) => Some(supported),
+        None => fetch_tool_call_capability(&client, &base, guard.api_key())?,
+    };
 
     Ok(DialectEvidence {
         supports_tool_calls,
         chat_template,
         model_id,
     })
+}
+
+/// Extracts `chat_template_caps.supports_tool_calls` from a `/props` body.
+///
+/// Returns `None` when the field is absent, so callers can fall back to the
+/// `/v1/models` capability probe (props-first precedence, MOD-003).
+fn props_supports_tool_calls(props: &Value) -> Option<bool> {
+    props
+        .get("chat_template_caps")
+        .and_then(|caps| caps.get("supports_tool_calls"))
+        .and_then(Value::as_bool)
 }
 
 /// Reads native tool-call capability from `/v1/models`.
@@ -488,5 +507,82 @@ mod tests {
     fn dialect_none_is_hard_fail() {
         let result = resolve_dialect(&DialectEvidence::default());
         assert!(result.is_err(), "empty evidence must hard-fail");
+    }
+
+    #[test]
+    fn gemma4_template_markers_resolve_to_openai() {
+        // Gemma-4 uses pipe-wrapped markers with no `<|im_start|>` and no
+        // `<start_of_turn>`; without the Gemma-4 conjunction this evidence
+        // hard-fails with NoMatch when both capability probes are silent.
+        let evidence = DialectEvidence {
+            chat_template: Some(
+                "<|turn>user\n{{ content }}<|tool_call|>call<|tool_response|>result".to_owned(),
+            ),
+            ..DialectEvidence::default()
+        };
+        assert_eq!(
+            resolve_dialect(&evidence).expect("should resolve"),
+            "openai"
+        );
+    }
+
+    #[test]
+    fn gemma4_markers_outscore_gemma_model_fingerprint() {
+        // Regression: a "gemma" model id alone would score for
+        // gemma3_tool_code; the Gemma-4 template conjunction must outrank it.
+        let evidence = DialectEvidence {
+            chat_template: Some("<|turn>user<|tool_call|><|tool_response|>".to_owned()),
+            model_id: Some("gemma-4-31b-it".to_owned()),
+            ..DialectEvidence::default()
+        };
+        assert_eq!(
+            resolve_dialect(&evidence).expect("should resolve"),
+            "openai"
+        );
+    }
+
+    #[test]
+    fn props_supports_tool_calls_distinguishes_absent_from_false() {
+        // Props-first precedence: a present field is authoritative, so the
+        // parse must not collapse absent into Some(false).
+        let present_true = serde_json::json!({"chat_template_caps": {"supports_tool_calls": true}});
+        let present_false =
+            serde_json::json!({"chat_template_caps": {"supports_tool_calls": false}});
+        let absent = serde_json::json!({"chat_template": "x"});
+        let wrong_type = serde_json::json!({"chat_template_caps": {"supports_tool_calls": "yes"}});
+        assert_eq!(props_supports_tool_calls(&present_true), Some(true));
+        assert_eq!(props_supports_tool_calls(&present_false), Some(false));
+        assert_eq!(props_supports_tool_calls(&absent), None);
+        assert_eq!(props_supports_tool_calls(&wrong_type), None);
+    }
+
+    #[test]
+    fn props_caps_true_resolves_to_openai() {
+        // The /props capability field feeds the same evidence field the
+        // /v1/models probe fills, so Some(true) selects the native dialect.
+        let props = serde_json::json!({"chat_template_caps": {"supports_tool_calls": true}});
+        let evidence = DialectEvidence {
+            supports_tool_calls: props_supports_tool_calls(&props),
+            ..DialectEvidence::default()
+        };
+        assert_eq!(
+            resolve_dialect(&evidence).expect("should resolve"),
+            "openai"
+        );
+    }
+
+    #[test]
+    fn gemma4_markers_resolve_despite_unreliable_caps_false() {
+        // Regression for the existing fall-through: a Some(false) capability
+        // is an unreliable negative, so template evidence still decides.
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            chat_template: Some("<|turn>user<|tool_call|><|tool_response|>".to_owned()),
+            ..DialectEvidence::default()
+        };
+        assert_eq!(
+            resolve_dialect(&evidence).expect("should resolve"),
+            "openai"
+        );
     }
 }
