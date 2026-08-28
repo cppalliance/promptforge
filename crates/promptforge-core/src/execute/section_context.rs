@@ -12,8 +12,8 @@
 //! construction and setup preamble ([`SectionContext::new`] for a walked
 //! section, [`SectionContext::new_live_h1`] for the live H1 pass,
 //! [`SectionContext::new_fanout_arm`] for a fanout arm),
-//! [`SectionContext::run`] is the ordered block walk, and
-//! [`SectionContext::teardown`] is the single teardown boundary.
+//! [`SectionContext::run`] is the ordered block walk, and the frame's
+//! [`Drop`] impl is the single teardown boundary.
 //!
 //! All three drivers - the walk's `run_one_section`, the live H1 pass, and
 //! the fanout arm - are one construct-run-teardown cycle over the frame,
@@ -24,14 +24,14 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use crate::Result;
 use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
 use crate::lua::{SectionVm, ToolCallCounts};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Section};
-use crate::store::{StoreRef, WriteScope};
+use crate::store::WriteScope;
+use crate::{Error, Result};
 
 use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 use super::context::RunContext;
@@ -50,10 +50,21 @@ use super::tools::attach_infer_hook;
 /// No derives: the VM and the trait-object handles support neither `Clone`
 /// nor `Debug`.
 pub(crate) struct SectionContext {
-    /// The frame's engine: the owned section VM. `SectionVm` stays a
-    /// standalone type in `lua/` with its own test suite - composition, not
-    /// merger.
-    vm: SectionVm,
+    /// The frame's engine: the owned section VM, `Some` from construction
+    /// until the frame's `Drop` takes it for the teardown boundary.
+    /// `SectionVm` stays a standalone type in `lua/` with its own test
+    /// suite - composition, not merger.
+    vm: Option<SectionVm>,
+    /// The section's own name, retained so `Drop` reports the teardown
+    /// boundary and the completion observation without a parameter.
+    name: String,
+    /// The run's execution id, retained for the completion observation
+    /// `Drop` fires on the armed path.
+    execution: String,
+    /// Armed by [`SectionContext::mark_completed`] on the success path
+    /// only, so `Drop` fires `SECTION_FINISHED` on completion (a jump or
+    /// return included) and never on an error.
+    completed: bool,
     /// The section's `sys` JSON, enriched in place by the walk (the model
     /// binding, each outcome's finish reason).
     sys: serde_json::Value,
@@ -72,12 +83,6 @@ pub(crate) struct SectionContext {
     counts: Option<ToolCallCounts>,
     /// The resolved model's per-call fields, set at the first prose block.
     completion_options: Option<CompletionOptions>,
-    /// The store-write identity of a fanout arm; `None` on the walk, whose
-    /// store writes stay untracked.
-    write_scope: Option<WriteScope>,
-    /// The section's `execute()` nesting depth, checked at the control
-    /// globals the frame installs.
-    execute_depth: usize,
     /// The frame's effective observer handle: the run's own on the walk, a
     /// fanout arm's proxy in a fanout.
     observer: Arc<dyn Observer>,
@@ -133,7 +138,7 @@ impl SectionContext {
             .observe(ctx.execution(), &section.name, detail::SECTION_STARTED);
         let tool_set = ctx.tool_set_snapshot()?;
         let model_set = ctx.model_set_snapshot()?;
-        let vm = SectionVm::new_for_section(
+        let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
             &tool_set,
             &model_set,
@@ -147,23 +152,7 @@ impl SectionContext {
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        let mut section_frame = Self {
-            vm,
-            sys,
-            var: var.clone(),
-            item: None,
-            reply: incoming_reply.map(str::to_owned),
-            conversation: Vec::new(),
-            counts: None,
-            completion_options: None,
-            // Walk-section store writes are untracked; only fanout arms
-            // carry a write scope.
-            write_scope: None,
-            execute_depth,
-            observer: Arc::clone(ctx.observer()),
-            debug: ctx.debug().cloned(),
-            turns: Arc::clone(ctx.turns()),
-        };
+        let reply = incoming_reply.map(str::to_owned);
         // The control globals are installed once for the section's whole
         // lifecycle; their callbacks capture an owned clone of the run
         // context plus the client snapshot, so they hold no borrows.
@@ -172,8 +161,8 @@ impl SectionContext {
             client,
             section.clone(),
             siblings.to_vec(),
-            section_frame.execute_depth,
-            section_frame.reply.clone(),
+            execute_depth,
+            reply.clone(),
         );
         // The setup half of the section lifecycle - host injection, host
         // APIs, the control globals, the shared replay, and the captured
@@ -181,30 +170,49 @@ impl SectionContext {
         // `sys` extras, and the callbacks' parameters (home slice, caller,
         // depth) are the walk's own.
         let setup = ctx.vm_setup(
-            &section_frame.sys,
-            section_frame.reply.as_deref(),
+            &sys,
+            reply.as_deref(),
             VmSeed {
-                var: Some(&section_frame.var),
-                item: section_frame.item.as_ref(),
+                var: Some(var),
+                item: None,
             },
-            section_frame.write_scope,
+            // Walk-section store writes are untracked; only fanout arms
+            // carry a write scope.
+            None,
             &section.name,
         );
+        // Setup runs on the bare VM so a failure tears it down here: the
+        // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(
-            &mut section_frame.vm,
+            &mut vm,
             &setup,
             execute_callback,
             fanout_callback,
             list_callback,
         ) {
-            section_frame.teardown(&section.name);
+            vm.teardown(ctx.observer().as_ref(), &section.name);
             return Err(error);
         }
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
         // error on first use instead of the setup swallowing it.
-        ctx.attach_infer_hook(&section_frame.vm, client.clone(), &section.name);
-        Ok(section_frame)
+        ctx.attach_infer_hook(&vm, client.clone(), &section.name);
+        Ok(Self {
+            vm: Some(vm),
+            name: section.name.clone(),
+            execution: ctx.execution().to_owned(),
+            completed: false,
+            sys,
+            var: var.clone(),
+            item: None,
+            reply,
+            conversation: Vec::new(),
+            counts: None,
+            completion_options: None,
+            observer: Arc::clone(ctx.observer()),
+            debug: ctx.debug().cloned(),
+            turns: Arc::clone(ctx.turns()),
+        })
     }
 
     /// Constructs the frame for the live H1 pass and runs its setup
@@ -235,15 +243,37 @@ impl SectionContext {
             ctx.execution(),
             ctx.prompt().sections.len(),
         );
-        let vm = SectionVm::new(ctx.nonce(), ctx.execution(), ctx.observer().as_ref(), title)?;
+        let mut vm = SectionVm::new(ctx.nonce(), ctx.execution(), ctx.observer().as_ref(), title)?;
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(
             ctx.limits().lua_memory().get(),
             ctx.limits().lua_logs().get(),
         )?;
-        let mut h1_frame = Self {
-            vm,
+        // Setup runs on the bare VM so a failure tears it down here: the
+        // frame does not exist yet, so its `Drop` cannot own this path.
+        if let Err(error) = setup_live_h1(&mut vm, ctx, &sys, title) {
+            vm.teardown(ctx.observer().as_ref(), title);
+            return Err(error);
+        }
+        // The infer hook carries a lazy client source (F5): a nested
+        // `models.infer` or `handle:infer` surfaces a concrete construction
+        // error on first use instead of the setup swallowing it.
+        attach_infer_hook(
+            &vm,
+            GatewaySource::from_optional(client.cloned(), ctx.limits()),
+            Arc::clone(ctx.observer()),
+            ctx.debug().cloned(),
+            ctx.execution(),
+            title,
+            ctx.turns(),
+            ctx.models_arc(),
+        );
+        Ok(Self {
+            vm: Some(vm),
+            name: title.clone(),
+            execution: ctx.execution().to_owned(),
+            completed: false,
             sys,
             var: serde_json::json!({}),
             item: None,
@@ -251,44 +281,10 @@ impl SectionContext {
             conversation: Vec::new(),
             counts: None,
             completion_options: None,
-            write_scope: None,
-            // H1 installs the control-global stubs, not the callbacks, so
-            // no depth check ever reads this.
-            execute_depth: 0,
             observer: Arc::clone(ctx.observer()),
             debug: ctx.debug().cloned(),
             turns: Arc::clone(ctx.turns()),
-        };
-        if let Err(error) = h1_frame.setup_live_h1(ctx.args(), ctx.store(), title) {
-            h1_frame.teardown(title);
-            return Err(error);
-        }
-        // The infer hook carries a lazy client source (F5): a nested
-        // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it.
-        attach_infer_hook(
-            &h1_frame.vm,
-            GatewaySource::from_optional(client.cloned(), ctx.limits()),
-            Arc::clone(&h1_frame.observer),
-            h1_frame.debug.clone(),
-            ctx.execution(),
-            title,
-            &h1_frame.turns,
-            ctx.models_arc(),
-        );
-        Ok(h1_frame)
-    }
-
-    /// The fallible setup half of the live H1 lifecycle: host injection,
-    /// the host APIs, and the control-global stubs. One method, so the
-    /// constructor's single teardown-on-error branch covers every step.
-    ///
-    /// # Errors
-    /// Returns the [`Error`](crate::Error) of whichever step failed.
-    fn setup_live_h1(&mut self, args: &str, store: &StoreRef, title: &str) -> Result<()> {
-        self.vm.inject_host(args, &self.sys, store, None)?;
-        self.vm.install_host_apis(&self.observer, title)?;
-        self.vm.install_h1_control_stubs()
+        })
     }
 
     /// Constructs the frame for one fanout arm and runs its setup preamble:
@@ -335,7 +331,7 @@ impl SectionContext {
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
         let model_set = ctx.model_set_snapshot()?;
-        let vm = SectionVm::new_for_section(
+        let mut vm = SectionVm::new_for_section(
             ctx.nonce(),
             &tool_set,
             &model_set,
@@ -367,23 +363,11 @@ impl SectionContext {
                 return Err(error);
             }
         };
-        let mut arm_frame = Self {
-            vm,
-            sys,
-            var: var.clone(),
-            item: Some(item),
-            reply: incoming_reply.map(str::to_owned),
-            conversation: Vec::new(),
-            counts: None,
-            completion_options: None,
-            // The arm's store-write identity: this fanout's token plus the
-            // arm's 1-based index, matching `sys.index`.
-            write_scope: Some(WriteScope::new(write_token, index + 1)),
-            execute_depth,
-            observer: Arc::clone(ctx.observer()),
-            debug: ctx.debug().cloned(),
-            turns: Arc::clone(ctx.turns()),
-        };
+        let reply = incoming_reply.map(str::to_owned);
+        let item = Some(item);
+        // The arm's store-write identity: this fanout's token plus the
+        // arm's 1-based index, matching `sys.index`.
+        let write_scope = Some(WriteScope::new(write_token, index + 1));
         // The control globals are installed once for the arm's whole
         // lifecycle; their callbacks capture an owned clone of the run
         // context plus the client snapshot, so they hold no borrows.
@@ -392,37 +376,54 @@ impl SectionContext {
             client,
             worker.clone(),
             home.to_vec(),
-            arm_frame.execute_depth,
-            arm_frame.reply.clone(),
+            execute_depth,
+            reply.clone(),
         );
         // The setup half is shared with the walk; only the seed, the `sys`
         // extra, and the callbacks' parameters (home slice, caller, depth)
         // are the arm's own.
         let setup = ctx.vm_setup(
-            &arm_frame.sys,
-            arm_frame.reply.as_deref(),
+            &sys,
+            reply.as_deref(),
             VmSeed {
-                var: Some(&arm_frame.var),
-                item: arm_frame.item.as_ref(),
+                var: Some(var),
+                item: item.as_ref(),
             },
-            arm_frame.write_scope,
+            write_scope,
             &worker.name,
         );
+        // Setup runs on the bare VM so a failure tears it down here: the
+        // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(
-            &mut arm_frame.vm,
+            &mut vm,
             &setup,
             execute_callback,
             fanout_callback,
             list_callback,
         ) {
-            arm_frame.teardown(&worker.name);
+            vm.teardown(ctx.observer().as_ref(), &worker.name);
             return Err(error);
         }
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
         // error on first use instead of the setup swallowing it.
-        ctx.attach_infer_hook(&arm_frame.vm, client.clone(), &worker.name);
-        Ok(arm_frame)
+        ctx.attach_infer_hook(&vm, client.clone(), &worker.name);
+        Ok(Self {
+            vm: Some(vm),
+            name: worker.name.clone(),
+            execution: ctx.execution().to_owned(),
+            completed: false,
+            sys,
+            var: var.clone(),
+            item,
+            reply,
+            conversation: Vec::new(),
+            counts: None,
+            completion_options: None,
+            observer: Arc::clone(ctx.observer()),
+            debug: ctx.debug().cloned(),
+            turns: Arc::clone(ctx.turns()),
+        })
     }
 
     /// Runs the frame's ordered block walk: Lua chunks in place, prose
@@ -432,9 +433,9 @@ impl SectionContext {
     /// bindings, models, limits, and the tool-loop cap); everything
     /// per-frame - the VM, the `sys` JSON, the reply, the conversation, the
     /// counts, the completion options, and the effective reporting handles -
-    /// comes from `self`. The caller owns the teardown boundary: a walk
-    /// error propagates without tearing the VM down, so the driver's single
-    /// teardown covers every path.
+    /// comes from `self`. The frame's `Drop` owns the teardown boundary: a
+    /// walk error propagates out and the frame's drop tears the VM down, so
+    /// every path tears down exactly once.
     ///
     /// # Errors
     /// Returns the [`Error`](crate::Error) of whichever step failed, as
@@ -447,47 +448,103 @@ impl SectionContext {
         mode: BlockRunMode<'_>,
         client: &mut Option<GatewayClient>,
     ) -> Result<SectionFlow> {
+        let Self {
+            vm,
+            sys,
+            reply,
+            conversation,
+            counts,
+            completion_options,
+            item,
+            observer,
+            debug,
+            turns,
+            ..
+        } = self;
+        let Some(vm) = vm.as_mut() else {
+            return Err(Error::Internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
         run_one_section_impl(
-            &mut self.vm,
+            vm,
             ctx,
             name,
             blocks,
             mode,
-            &mut self.sys,
-            &mut self.reply,
-            &mut self.conversation,
-            &mut self.counts,
-            &mut self.completion_options,
-            self.item.as_ref(),
-            self.observer.as_ref(),
-            self.debug.as_deref(),
-            self.turns.as_ref(),
+            sys,
+            reply,
+            conversation,
+            counts,
+            completion_options,
+            item.as_ref(),
+            observer.as_ref(),
+            debug.as_deref(),
+            turns.as_ref(),
             client,
         )
         .await
     }
 
     /// Reads the section's final `var` back into the frame and returns it,
-    /// so the walk rolls it forward. Must run before
-    /// [`teardown`](Self::teardown): the read goes through the live VM.
+    /// so the walk rolls it forward. Must run while the frame is live,
+    /// before its drop: the read goes through the live VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`](crate::Error::Lua) if the VM's `var` cannot be
     /// converted back to JSON (the write guard keeps this conversion from
     /// failing in practice).
     pub(crate) fn read_var(&mut self) -> Result<serde_json::Value> {
-        self.var = self.vm.var()?;
+        let Some(vm) = self.vm.as_mut() else {
+            return Err(Error::Internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
+        self.var = vm.var()?;
         Ok(self.var.clone())
     }
 
-    /// Tears the frame's VM down, reporting the teardown through the frame's
-    /// observer.
-    ///
-    /// Consumes the frame: one section entry tears its VM down exactly once,
-    /// at the driver's teardown boundary. This stays a method, never `Drop` -
-    /// a fanout arm's VM must outlive its cancel-scoped body so the epilogue
-    /// can finalize first.
-    pub(crate) fn teardown(self, name: &str) {
-        self.vm.teardown(self.observer.as_ref(), name);
+    /// Arms the completion flag: the block walk completed (a jump or
+    /// return included) and the final `var` is read back, so the frame's
+    /// drop fires `SECTION_FINISHED` after the teardown pair. No error
+    /// path arms it, so an error never fires `SECTION_FINISHED`.
+    pub(crate) fn mark_completed(&mut self) {
+        self.completed = true;
+    }
+}
+
+/// The fallible setup half of the live H1 lifecycle: host injection, the
+/// host APIs, and the control-global stubs. One function, so the
+/// constructor's single teardown-on-error branch covers every step.
+///
+/// # Errors
+/// Returns the [`Error`](crate::Error) of whichever step failed.
+fn setup_live_h1(
+    vm: &mut SectionVm,
+    ctx: &RunContext,
+    sys: &serde_json::Value,
+    title: &str,
+) -> Result<()> {
+    vm.inject_host(ctx.args(), sys, ctx.store(), None)?;
+    vm.install_host_apis(ctx.observer(), title)?;
+    vm.install_h1_control_stubs()
+}
+
+impl Drop for SectionContext {
+    fn drop(&mut self) {
+        // The single teardown boundary: every exit path - success, error,
+        // or early return - drops the frame, so the VM tears down exactly
+        // once here. `SECTION_FINISHED` follows only on the armed
+        // (completed) path; an error reports the teardown pair alone. The
+        // `let-else` is defensive: `Drop` runs once, so the VM is always
+        // here, and the destructor stays infallible.
+        let Some(vm) = self.vm.take() else {
+            return;
+        };
+        vm.teardown(self.observer.as_ref(), &self.name);
+        if self.completed {
+            self.observer
+                .observe(&self.execution, &self.name, detail::SECTION_FINISHED);
+        }
     }
 }
