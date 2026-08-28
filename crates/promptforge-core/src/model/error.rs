@@ -110,7 +110,6 @@ impl CompletionError {
             | Error::ModelRequired { .. }
             | Error::UnsupportedVersion(_)
             | Error::Tool { .. }
-            | Error::FanoutArmJoin(_)
             | Error::Internal(_)
             | Error::LuaQuota { .. }
             | Error::TimestampFormat(_) => CompletionErrorKind::Config,

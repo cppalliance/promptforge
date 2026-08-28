@@ -2430,6 +2430,118 @@ async fn fanout_over_a_large_collection_refills_the_window() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn pre_cancelled_fanout_returns_interrupted() {
+    // Mirror of the legacy `pre_cancelled_fanout_returns_interrupted`: a
+    // fanout entered under an already-cancelled handle fails the run with
+    // Error::Interrupted instead of running the arms.
+    use crate::cancel::{self, CancelHandle};
+
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\nreturn item\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let cancel = CancelHandle::new();
+    cancel.cancel();
+    let result = cancel::scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+    assert!(
+        matches!(result, Err(Error::Interrupted)),
+        "a pre-cancelled fanout must interrupt the run, got {result:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn model_required_when_arm_prose_has_no_binding() {
+    // Mirror of the legacy `model_required_when_arm_prose_has_no_binding`:
+    // an arm whose prose needs a model the run never bound fails the fanout
+    // with Error::ModelRequired naming the worker section. The context is
+    // built directly so the model set stays empty - the shared test context
+    // pre-fills a default binding.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        fanout('### Worker', {'alpha'})\n\
+        ```\n\n\
+        ### Worker\n\n\
+        Ask the model about {{ item }}.\n";
+    let prompt = parse(md);
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
+    let ctx = RunContext::new(
+        &prompt,
+        "",
+        &StoreRef::memory(),
+        shared,
+        &RunConfig::new(EXECUTION),
+    );
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("non-empty arm prose without a model binding must fail");
+    assert!(
+        matches!(error, Error::ModelRequired { .. }),
+        "expected ModelRequired, got {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("model binding required for section Worker"),
+        "error must name the worker section: {error}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_shared_replay_sees_the_arm_item() {
+    // Mirror of the legacy `the_shared_replay_sees_the_arm_item`: the `item`
+    // global installs before `replay_shared`, so the shared library's
+    // top-level code may read `item`; moving the install after the replay
+    // would capture nil in the arm and fail this test. The context carries
+    // the prompt's real compiled shared library, not the empty stand-in the
+    // other scheduler tests use.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ```lua shared\n\
+        captured_by_shared = item\n\
+        ```\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        return tostring(captured_by_shared) .. '|' .. tostring(item)\n\
+        ```\n";
+    let prompt = parse(md);
+    let shared = prompt
+        .replay
+        .clone()
+        .expect("the prompt's shared chunk compiles at parse");
+    let ctx = RunContext::new(
+        &prompt,
+        "",
+        &StoreRef::memory(),
+        shared,
+        &RunConfig::new(EXECUTION),
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the arm must succeed");
+
+    assert_eq!(
+        out, "alpha|alpha",
+        "the shared chunk captured the item before the worker ran"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
     // Mirror of the legacy `jump_inside_a_fanout_arm_drives_a_child_walk`:
     // the arm's remaining blocks are skipped, the walk continues on the

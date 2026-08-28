@@ -11,9 +11,8 @@ use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use crate::Result;
-use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
-use crate::lua::{LuaProgram, SectionVm, ToolSet, ToolView};
+use crate::lua::{LuaProgram, ToolSet, ToolView};
 use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
 use crate::parser::Prompt;
@@ -21,8 +20,7 @@ use crate::store::{StoreRef, WriteScope};
 use crate::untrusted::GuardNonce;
 
 use super::config::{RunConfig, RunLimits};
-use super::gateway::GatewaySource;
-use super::section_vm::{SectionVmSetup, VmSeed, VmSetupMode};
+use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
 
 /// The ambient state one run shares across the execute subtree.
@@ -203,13 +201,6 @@ impl RunContext {
         &*self.models
     }
 
-    /// The run's model set as a shared read-only handle: the infer hook's
-    /// `models.infer` resolution is captured into Lua closures that outlive
-    /// the installer.
-    pub(crate) fn models_arc(&self) -> Arc<dyn ModelView> {
-        Arc::clone(&self.models)
-    }
-
     /// The concrete handle behind the models view, for the live H1 binding
     /// producer; its clones die with the H1 VM, after which the set is
     /// structurally frozen.
@@ -288,8 +279,7 @@ impl RunContext {
     /// run-wide slots (`args`, `store`, `observer`, `shared`) from this
     /// context; the driver supplies only its own deltas: the `sys` JSON, the
     /// incoming reply, the seed, the store-write scope (a fanout arm's
-    /// identity; `None` on the walk), the section name, and the VM-setup
-    /// mode.
+    /// identity; `None` on the walk), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
@@ -297,7 +287,6 @@ impl RunContext {
         seed: VmSeed<'a>,
         write_scope: Option<WriteScope>,
         section_name: &'a str,
-        mode: VmSetupMode,
     ) -> SectionVmSetup<'a> {
         SectionVmSetup {
             args: &self.args,
@@ -309,7 +298,6 @@ impl RunContext {
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,
-            mode,
         }
     }
 
@@ -330,28 +318,6 @@ impl RunContext {
             &self.execution,
             self.section_count(),
         ))
-    }
-
-    /// Installs the infer hook both engine drivers share, sourcing every
-    /// run-wide slot from this context; the driver supplies only its client
-    /// snapshot and the section name. The handed client (or the environment)
-    /// is wrapped in the lazy [`GatewaySource`].
-    pub(crate) fn attach_infer_hook(
-        &self,
-        vm: &SectionVm,
-        client: Option<GatewayClient>,
-        section_name: &str,
-    ) {
-        super::tools::attach_infer_hook(
-            vm,
-            GatewaySource::from_optional(client, self.limits),
-            Arc::clone(&self.observer),
-            self.debug.clone(),
-            &self.execution,
-            section_name,
-            &self.turns,
-            Arc::clone(&self.models),
-        );
     }
 }
 

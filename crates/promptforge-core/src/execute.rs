@@ -50,18 +50,15 @@
 //! (`RunConfig`/`RunLimits`), `context` (the ambient `RunContext` run
 //! state), `gateway` (client acquisition and [`ResolutionContext`]),
 //! `scope` (tool-scope validation and schema/dispatch preparation),
-//! `tools` (the
-//! nested-inference hook), `tool_loop` (the model tool loop), `h1` (the
-//! live H1 pass), `section_vm` (the section VM setup half shared by the
-//! walk and the fanout arm), `section_context` (the per-section
-//! `SectionContext` frame the walk's
-//! driver constructs, runs, and tears down), `block_walk` (the
-//! ordered block loop - the
-//! engine's walk half, shared by the live H1 pass, the walk, and the
-//! fanout arm), `engine` (the section walkers), `protocol` (the coroutine
-//! request/answer types for the yield/resume boundary), `scheduler` (the
-//! chain-stack scheduler driving the coroutine protocol), and `support`
-//! (the sync/async bridge and shared helpers).
+//! `tools` (the nested-inference round), `tool_loop` (the model tool
+//! loop), `section_vm` (the section VM setup half shared by the walk and
+//! the fanout arm), `section_context` (the per-section `SectionContext`
+//! frame the scheduler's chains construct, run, and tear down),
+//! `block_walk` (the per-block prose paths), `engine` (the walk-target
+//! resolution helpers), `protocol` (the coroutine request/answer types
+//! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
+//! driving the coroutine protocol: the live H1 pass, the walk, execute
+//! chains, and fanout), and `support` (shared helpers).
 
 mod block_walk;
 mod config;
@@ -69,13 +66,7 @@ mod context;
 mod engine;
 mod error;
 mod gateway;
-mod h1;
-// The scheduler driver is the production caller at the flip; until then the
-// protocol and scheduler modules are exercised by their own tests and the
-// shim layer's tests.
-#[allow(dead_code, reason = "consumed by run() at the flip")]
 pub(crate) mod protocol;
-#[allow(dead_code, reason = "consumed by run() at the flip")]
 pub(crate) mod scheduler;
 mod scope;
 mod section_context;
@@ -90,18 +81,11 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// The engine's `drive_contained_chain` and the
-// `SectionContext` frame are consumed by `fanout`; `run_sections` and
-// `execute_live_h1` serve only `run` below and stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
-pub(crate) use block_walk::{BlockRunMode, SectionFlow};
 pub(crate) use context::RunContext;
-pub(crate) use engine::drive_contained_chain;
-pub(crate) use section_context::SectionContext;
 
-use engine::run_sections;
-use h1::execute_live_h1;
+use scheduler::Scheduler;
 
 // Everything the executor's own tests reach through `use super::super::*`
 // (and that `tests/mod.rs` does not itself import): executor-internal items,
@@ -127,7 +111,7 @@ pub(crate) use serde_json::json;
 #[cfg(test)]
 pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
-pub(crate) use support::{advance_turn, bridge_blocking, now_rfc3339_checked};
+pub(crate) use support::{advance_turn, now_rfc3339_checked};
 #[cfg(test)]
 pub(crate) use tool_loop::{LocalDispatch, ProseMode, run_prose_inference};
 
@@ -136,7 +120,7 @@ use crate::cancel;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::StoreRef;
-use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
+use support::SUPPORTED_MAJOR;
 
 // Re-exported for the executor test glob.
 #[cfg(test)]
@@ -252,14 +236,10 @@ pub async fn run(
     observer.observe(&execution, &prompt.title, detail::RUN_STARTED);
 
     let run_body = async {
-        let h1 = execute_live_h1(&ctx, resolution, client.as_ref()).await?;
-        if let Some(value) = h1.returned {
-            return Ok(value);
-        }
-        if prompt.sections.is_empty() {
-            return Ok(h1.reply.unwrap_or_else(|| GENERIC_COMPLETION.to_string()));
-        }
-        run_sections(&ctx, Some(&h1.var), client.as_ref()).await
+        Scheduler::new(&ctx, client)
+            .with_live_h1(resolution)
+            .drive()
+            .await
     };
 
     // Explicit cancellation: when the caller supplies a handle it is installed

@@ -42,7 +42,6 @@ pub(crate) use crate::lua_models::{LuaModelHandle, ModelInferHook, ModelsInferHo
 pub(crate) use crate::lua_models::{ModelRuntime, install_h2_models, install_live_models};
 pub(crate) use crate::model::{ModelBinding, ModelResolver, ModelSet, ModelView};
 pub(crate) use crate::observe::{Observation, Observer, detail};
-pub(crate) use crate::resolve::RuntimeResolution;
 pub(crate) use crate::store::{StoreRef, WriteScope};
 pub(crate) use crate::tools::{Tool, ToolCatalog, ToolId};
 pub(crate) use crate::untrusted::GuardNonce;

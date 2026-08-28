@@ -1,28 +1,23 @@
-//! The engine's walk half: one ordered block loop.
+//! The engine's prose paths: one per driver mode.
 //!
-//! [`run_one_section_impl`] runs the block lifecycle every driver of the
-//! shared engine shares - Lua chunks in place, prose through the tool loop -
-//! and returns a [`SectionFlow`] telling the driver how the walk ended.
-//! The driver owns everything around the loop: VM construction and limits,
-//! the setup half (`section_vm`), the infer hook, and the teardown boundary,
-//! so a walk error propagates bare and the driver tears the VM down exactly
-//! once on every path. Each driver (the live H1 pass, the section walk's
-//! `run_one_section`, the fanout arm) hands the loop the same borrowed
-//! [`RunContext`] plus its per-frame state borrows and a [`BlockRunMode`]:
-//! H1-vs-section is a caller-set mode,
-//! not a second loop. Live mode reads only the context's run-scoped values;
-//! the walk-scoped values it never touches stay empty until the walk starts.
+//! [`run_section_prose`] runs one walked section's prose block (the
+//! per-block scope rebuild, the one-time counts and model install,
+//! substitution, the tool loop, and the reply/`sys` roll-forward);
+//! [`run_live_h1_prose`] runs one live H1 prose block (substitution, the
+//! empty-prose skip, the default model and the always-scope read from the
+//! bindings-so-far, fresh per-block counts, and the reply written as a
+//! plain global). The scheduler's driver calls both through the frame
+//! ([`SectionContext`](super::section_context::SectionContext)); each takes
+//! the borrowed [`RunContext`] plus the frame's own state borrows.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU32;
 
 use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
-use crate::lua::{LuaBlockResult, SectionVm, ToolBinding, ToolCallCounts, current_tool_bindings};
+use crate::lua::{SectionVm, ToolBinding, ToolCallCounts, current_tool_bindings};
 use crate::model::CompletionOptions;
 use crate::observe::Observer;
-use crate::parser::Block;
-use crate::resolve::RuntimeResolution;
 use crate::subst;
 use crate::tools::ToolId;
 use crate::{Error, Result};
@@ -32,208 +27,14 @@ use super::gateway::env_client_with_limits;
 use super::scope::{prepare_effective_scope, prepare_scoped_tools};
 use super::tool_loop::{ProseMode, run_prose_inference};
 
-/// How one section's block walk ended.
-pub(crate) enum SectionFlow {
-    /// Ran off the section end, carrying the reply produced within it (if any).
-    FellThrough { reply: Option<String> },
-    /// A scalar early return ended the section (and the chain it fired in).
-    Returned(String),
-    /// A `jump(target)` requested control transfer (any walked level).
-    Jumped {
-        heading: String,
-        reply: Option<String>,
-    },
-}
-
-/// Which driver the shared block loop is serving.
-///
-/// H1-vs-section is a caller-set mode, not a second loop: the ordered walk,
-/// the lazy client, and the reply roll-forward are shared, and each mode
-/// keeps its own block handling exactly where the two drivers differ.
-#[derive(Clone, Copy)]
-pub(crate) enum BlockRunMode<'a> {
-    /// The live H1 pass. Lua blocks run through
-    /// [`SectionVm::run_live_h1_block`] with capability resolvers scoped to
-    /// each block; prose binds the default model from the shared set's
-    /// bindings-so-far (read through the run's model view), prepares the
-    /// `always` scope without analysis, counts tool calls into a fresh
-    /// per-block [`ToolCallCounts`], and writes the reply as a plain
-    /// global - no `sys` enrichment, no local dispatch, no global aliases.
-    LiveH1(&'a RuntimeResolution<'a>),
-    /// An H2 section: the top-level walk, an `execute` chain, or a fanout
-    /// arm.
-    Section,
-}
-
-/// Walks one ordered block sequence on its prepared VM and reports how the
-/// walk ended.
-///
-/// This is the engine's walk half, the per-block loop every driver of the
-/// shared engine runs. `name`/`blocks` are the driver's heading and block
-/// sequence (a section's, or the prompt's title and H1 blocks for the live
-/// H1 pass); `mode` selects the per-block behavior (see [`BlockRunMode`]).
-/// The per-frame state arrives as borrows out of the driver's frame: `sys`,
-/// `reply`, `conversation`, `counts`, and `completion_options` are the
-/// frame's slots (the driver's `SectionContext` fields), and
-/// `observer`/`debug`/`turns` are the frame's effective reporting handles.
-///
-/// In section mode a Lua chunk executes in place and may end the walk early
-/// (a scalar return or a `jump`); a prose block rebuilds its effective tool
-/// scope (so `tools.add`/`tools.add_local` between blocks reach the next
-/// model turn), substitutes against the rolling reply, and runs the tool
-/// loop. The conversation, the tool-call counts, and the one-time model
-/// resolution (with its `sys` model enrichment) are installed at the first
-/// prose block. The reply starts at the driver's seed
-/// and rolls forward as prose produces text; after each Lua chunk the walk
-/// reads the VM's `reply` global back, so an author's `reply = nil` (or a
-/// custom string) steers what a jump target or the next section sees.
-/// `sys` arrives as the driver's
-/// JSON and is enriched in place with the model binding and each outcome's
-/// finish reason. Prose substitution resolves `{{ item }}` against
-/// `item`, which is `Some` only when the driver is a fanout arm, and an
-/// unknown first path segment against the VM's bare globals via
-/// [`SectionVm::global_json`].
-///
-/// The caller owns the teardown boundary: an error propagates without
-/// tearing the VM down, so the driver's single teardown covers every path.
-///
-/// # Errors
-/// Returns the [`Error`] of whichever step failed: a Lua chunk, the
-/// tool-scope rebuild, prose substitution, lazy client construction, the
-/// tool loop, or a `sys`/reply re-seal. Returns [`Error::ModelRequired`]
-/// when model-facing prose has no resolved model binding, and
-/// [`Error::Internal`] when prose reaches inference with no gateway client.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the loop keeps the VM, the shared run context, the block sequence, the mode, the frame's borrowed state, the effective reporting handles, and the client slot explicit and linear"
-)]
-pub(crate) async fn run_one_section_impl(
-    vm: &mut SectionVm,
-    ctx: &RunContext,
-    name: &str,
-    blocks: &[Block],
-    mode: BlockRunMode<'_>,
-    sys: &mut serde_json::Value,
-    reply: &mut Option<String>,
-    conversation: &mut Vec<Message>,
-    counts: &mut Option<ToolCallCounts>,
-    completion_options: &mut Option<CompletionOptions>,
-    item: Option<&serde_json::Value>,
-    observer: &dyn Observer,
-    debug: Option<&dyn DebugCapture>,
-    turns: &AtomicU32,
-    client: &mut Option<GatewayClient>,
-) -> Result<SectionFlow> {
-    // Section mode: `counts` doubles as the one-time gate: it is `Some`
-    // exactly after the first prose block installed the counts and resolved
-    // the model. Schemas and dispatch rebuild on EVERY prose block so
-    // `tools.add`/`tools.add_local` between blocks reach the next model turn.
-    // `completion_options` is set at the first prose block exactly when a
-    // model binding resolved, so its `None` check below is the one
-    // model-required gate. The reply rolls forward as prose produces text,
-    // and after each section-mode Lua chunk it is read back from the VM's
-    // `reply` global, so both the `{{reply}}` substitution and the Lua
-    // `reply` global stay consistent within a walk and an author's
-    // `reply = nil` takes effect.
-    for block in blocks {
-        match block {
-            Block::Lua(program) => match mode {
-                // Live H1 Lua runs with call-time capability resolution
-                // scoped to the block; `run_live_h1_block` already turns a
-                // recorded jump into an error, so only a scalar return ends
-                // the pass.
-                BlockRunMode::LiveH1(runtime) => {
-                    if let Some(value) = vm.run_live_h1_block(program, runtime, observer, name)? {
-                        return Ok(SectionFlow::Returned(value));
-                    }
-                }
-                BlockRunMode::Section => {
-                    match vm.run_chunk(program, observer, name)? {
-                        LuaBlockResult::Returned(Some(value)) => {
-                            return Ok(SectionFlow::Returned(value));
-                        }
-                        // The `reply` global is the author-writable shadow of
-                        // the walk-local reply: seeded at host injection and
-                        // rebound after prose, so reading it back after each
-                        // chunk honors an author's `reply = nil` (or a custom
-                        // string) at fall-through and across a jump.
-                        LuaBlockResult::Returned(None) => {
-                            *reply = vm.reply()?;
-                        }
-                        LuaBlockResult::Jump(heading) => {
-                            return Ok(SectionFlow::Jumped {
-                                heading,
-                                reply: vm.reply()?,
-                            });
-                        }
-                    }
-                }
-            },
-            Block::Prose { text, loop_capable } => {
-                let prose_mode = if *loop_capable {
-                    ProseMode::Loop {
-                        max_tool_iterations: ctx.max_tool_iterations(),
-                    }
-                } else {
-                    ProseMode::SingleShot
-                };
-                match mode {
-                    BlockRunMode::LiveH1(..) => {
-                        run_live_h1_prose(
-                            vm,
-                            ctx,
-                            name,
-                            text,
-                            prose_mode,
-                            sys,
-                            reply,
-                            conversation,
-                            observer,
-                            debug,
-                            turns,
-                            client,
-                        )
-                        .await?;
-                    }
-                    BlockRunMode::Section => {
-                        run_section_prose(
-                            vm,
-                            ctx,
-                            name,
-                            text,
-                            prose_mode,
-                            sys,
-                            reply,
-                            conversation,
-                            counts,
-                            completion_options,
-                            item,
-                            observer,
-                            debug,
-                            turns,
-                            client,
-                        )
-                        .await?;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(SectionFlow::FellThrough {
-        reply: reply.clone(),
-    })
-}
-
 /// Runs one live H1 prose block: substitution against the rolling reply,
 /// the empty-prose skip, the default model and the always-scope read from
 /// the bindings-so-far (through the run's views, which H1's binds write),
 /// fresh per-block tool-call counts, and the reply written back as a plain
 /// global - no `sys` enrichment, no local dispatch, no global aliases.
 ///
-/// This is the `BlockRunMode::LiveH1` prose arm of
-/// [`run_one_section_impl`], extracted so the scheduler's driver runs the
-/// identical prose path through the frame's `run_live_h1_prose_block`.
+/// This is the live H1 prose path; the scheduler's driver runs it through
+/// the frame's `run_live_h1_prose_block`.
 ///
 /// # Errors
 /// Returns the [`Error`] of whichever step failed: prose substitution, the
@@ -342,11 +143,9 @@ pub(crate) async fn run_live_h1_prose(
 /// one-time counts and model install, substitution, the tool loop, and the
 /// reply/`sys` roll-forward.
 ///
-/// This is the `BlockRunMode::Section` prose arm of
-/// [`run_one_section_impl`], extracted so the scheduler's driver runs the
-/// identical prose path through the frame's `run_prose_block`. An
-/// empty substituted prose skips inference after the scope rebuild, exactly
-/// as the loop's `continue` did. `counts` doubles as the one-time gate: it
+/// This is the section prose path; the scheduler's driver runs it through
+/// the frame's `run_prose_block`. An
+/// empty substituted prose skips inference after the scope rebuild. `counts` doubles as the one-time gate: it
 /// is `Some` exactly after the first prose block installed the counts and
 /// resolved the model.
 ///

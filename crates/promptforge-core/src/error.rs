@@ -477,15 +477,6 @@ pub(crate) enum Error {
         source: BoxedSource,
     },
 
-    /// A spawned fanout arm task failed to join (it panicked or was aborted
-    /// abnormally rather than returning a normal `Result`).
-    ///
-    /// The [`tokio::task::JoinError`] is preserved as the `#[source]` cause so
-    /// the structured join failure survives; it is only stringified at the outer
-    /// Lua callback boundary, never here.
-    #[error("fanout arm join failed")]
-    FanoutArmJoin(#[source] tokio::task::JoinError),
-
     /// An internal runtime invariant was violated (a state the surrounding code
     /// has already guaranteed cannot occur). Surfaced as a concrete error rather
     /// than silently skipping work, so an impossible state cannot masquerade as a

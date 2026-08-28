@@ -149,8 +149,6 @@ pub(crate) fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
 /// # Errors
 /// Returns [`Error::Lua`] if the base install never ran on this VM, the
 /// live models table is absent, or the wrap chunk fails.
-// Consumed by the scheduler driver until the flip.
-#[allow(dead_code)]
 pub(crate) fn shim_live_h1_models(lua: &Lua) -> Result<()> {
     let wrap_handle: Function = lua
         .named_registry_value(WRAP_HANDLE_REGISTRY)
@@ -197,8 +195,8 @@ mod tests {
 
     use super::*;
     use crate::execute::protocol::Request;
-    use crate::execute::section_vm::{SectionVmSetup, VmSeed, VmSetupMode, setup_section_vm};
-    use crate::lua::{CoroStep, LuaBlockResult, LuaFanoutResult, SectionVm, ToolSet};
+    use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
+    use crate::lua::{CoroStep, LuaBlockResult, SectionVm, ToolSet};
     use crate::model::{ModelBinding, ModelId, ModelInvocation, ModelSet};
     use crate::observe::{NullObserver, Observer};
     use crate::store::StoreRef;
@@ -221,24 +219,10 @@ mod tests {
         }
     }
 
-    /// Builds a section VM through the real setup path in the given mode:
-    /// construction, host injection, the mode's control surface, the
-    /// shared replay, and the captured alias bindings.
-    fn vm_with_mode<F>(
-        models: &ModelSet,
-        var: Option<&serde_json::Value>,
-        mode: VmSetupMode,
-        fanout_callback: F,
-    ) -> SectionVm
-    where
-        F: Fn(
-                String,
-                Vec<serde_json::Value>,
-                serde_json::Value,
-            ) -> std::result::Result<Vec<LuaFanoutResult>, Error>
-            + Send
-            + 'static,
-    {
+    /// Builds a section VM through the real setup path: construction, host
+    /// injection, the control surface with the yield shims, the shared
+    /// replay, and the captured alias bindings.
+    fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
         let observer: Arc<dyn Observer> = Arc::new(NullObserver);
         let mut vm = SectionVm::new_for_section(
             &GuardNonce::fresh(),
@@ -262,42 +246,11 @@ mod tests {
             observer_arc: &observer,
             section_name: "Test",
             shared: &shared,
-            mode,
-        };
-        let execute_callback = |_: Value,
-                                _: Option<String>,
-                                _: serde_json::Value|
-         -> std::result::Result<String, Error> {
-            Err(Error::Internal(
-                "the legacy execute callback is unreachable in scheduler mode",
-            ))
         };
         let list_callback =
             |_: String| -> std::result::Result<Vec<String>, Error> { Ok(Vec::new()) };
-        setup_section_vm(
-            &mut vm,
-            &setup,
-            execute_callback,
-            fanout_callback,
-            list_callback,
-        )
-        .expect("the mode's setup installs");
+        setup_section_vm(&mut vm, &setup, list_callback).expect("the setup installs");
         vm
-    }
-
-    /// Builds a section VM through the real scheduler-mode setup path:
-    /// construction, host injection, the shim install, the shared replay,
-    /// and the captured alias bindings.
-    fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
-        let fanout_callback = |_: String,
-                               _: Vec<serde_json::Value>,
-                               _: serde_json::Value|
-         -> std::result::Result<Vec<LuaFanoutResult>, Error> {
-            Err(Error::Internal(
-                "the legacy fanout callback is unreachable in scheduler mode",
-            ))
-        };
-        vm_with_mode(models, var, VmSetupMode::Scheduler, fanout_callback)
     }
 
     /// Starts `source` as a coroutine on the VM and runs it to its first
@@ -321,7 +274,10 @@ mod tests {
     fn yielded_request(vm: &SectionVm, source: &str) -> Request {
         let (_thread, yielded) = start(vm, source);
         let value = yielded.into_iter().next().expect("one yielded value");
-        Request::from_yield(vm.lua(), &value).expect("the shim yield is a well-formed request")
+        match Request::from_yield(vm.lua(), &value) {
+            crate::execute::protocol::YieldParse::Request(request) => request,
+            other => panic!("the shim yield is a well-formed request, got {other:?}"),
+        }
     }
 
     /// Compiles one author block the way the parser's prologue chunks are
@@ -377,34 +333,6 @@ mod tests {
                 assert_eq!(var, json!({}));
             }
             other => panic!("expected a fanout request, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn legacy_mode_keeps_the_rust_fanout_global() {
-        // The coexistence pin: a legacy-mode VM still gets the Rust fanout
-        // callback - the old engine drives chunks with `Function::call`,
-        // where a shim's yield would error - so the legacy fanout path
-        // stays itself until the flip.
-        let fanout_callback = |_: String,
-                               _: Vec<serde_json::Value>,
-                               _: serde_json::Value|
-         -> std::result::Result<Vec<LuaFanoutResult>, Error> {
-            Ok(vec![LuaFanoutResult::success(json!("x"), "legacy text")])
-        };
-        let vm = vm_with_mode(
-            &ModelSet::default(),
-            None,
-            VmSetupMode::Legacy,
-            fanout_callback,
-        );
-        let program = compile_block("local r = fanout('### W', {'x'})\nreturn r[1].text");
-        match vm
-            .run_chunk(&program, &NullObserver, "Test")
-            .expect("the legacy fanout global runs the Rust callback")
-        {
-            LuaBlockResult::Returned(Some(text)) => assert_eq!(text, "legacy text"),
-            other => panic!("expected the packed fanout result, got {other:?}"),
         }
     }
 
@@ -599,8 +527,10 @@ mod tests {
             panic!("the shim yield must suspend the pcall'd block");
         };
         let value = values.into_iter().next().expect("one yielded value");
-        let request =
-            Request::from_yield(vm.lua(), &value).expect("the shim yield is a well-formed request");
+        let request = match Request::from_yield(vm.lua(), &value) {
+            crate::execute::protocol::YieldParse::Request(request) => request,
+            other => panic!("the shim yield is a well-formed request, got {other:?}"),
+        };
         assert!(matches!(request, Request::Infer { .. }));
         match vm
             .resume_block_coro(&program, &thread, (true, "answer"))

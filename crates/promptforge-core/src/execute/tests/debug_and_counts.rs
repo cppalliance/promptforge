@@ -49,24 +49,6 @@ async fn debug_capture_receives_request_and_response_when_set() {
 }
 
 #[test]
-fn bridge_blocking_rejects_a_current_thread_runtime_instead_of_panicking() {
-    // F3: the sync-to-async bridge must NOT panic on a current-thread runtime
-    // (as raw `block_in_place` would); it returns a concrete error first.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("current-thread runtime builds");
-    let result: Result<()> = rt.block_on(async { bridge_blocking(async { Ok::<(), Error>(()) }) });
-    match result {
-        Err(Error::Internal(message)) => assert!(
-            message.contains("multi-threaded"),
-            "the error must explain the runtime requirement: {message}"
-        ),
-        other => panic!("expected a concrete Internal error, got {other:?}"),
-    }
-}
-
-#[test]
 fn gateway_source_resolves_ready_and_preserves_the_env_error() {
     // F5: lazy client acquisition is centralized. A ready source resolves to its
     // client; a missing client becomes an `Env` source whose resolution mirrors
