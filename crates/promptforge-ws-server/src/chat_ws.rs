@@ -85,12 +85,15 @@ use std::time::Instant;
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
 use futures_util::future::BoxFuture;
 use futures_util::{FutureExt, StreamExt};
 use tokio::sync::broadcast;
 
 use crate::app::AppState;
+use crate::cross_site;
+use crate::error::AppError;
 use crate::gateway::{
     ChatStream, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream, SwitchEvent,
     SwitchResponse, switch_events,
@@ -105,8 +108,18 @@ use crate::tape::Tape;
 /// Chat session ids for log correlation, handed out in connection order.
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
-/// Upgrades a `GET /ws` request to a WebSocket chat session.
-pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
+/// Upgrades a `GET /ws` request to a WebSocket chat session. A foreign
+/// `Origin` is refused with 403: WS upgrades bypass Sec-Fetch in older
+/// browsers, so the loopback allowlist in [`crate::cross_site`] guards the
+/// upgrade itself.
+pub(crate) async fn upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if !cross_site::origin_allowed(&headers) {
+        return AppError::CrossSite.into_response();
+    }
     ws.on_upgrade(move |socket| run_session(socket, state))
 }
 

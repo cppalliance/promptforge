@@ -55,6 +55,17 @@ pub(crate) enum AppError {
     #[error("streaming moved to GET /ws; POST /chat is buffered only")]
     StreamUnsupported,
 
+    /// The request arrived from a cross-site browser context: a
+    /// `Sec-Fetch-Site: cross-site` marking, a non-loopback `Host`
+    /// (DNS rebinding), or a foreign WebSocket `Origin` (see
+    /// [`crate::cross_site`]).
+    #[error("cross-site request refused")]
+    CrossSite,
+
+    /// A body-bearing request did not declare an `application/json` body.
+    #[error("request body is not application/json")]
+    NotJson,
+
     /// A granted workspace path could not be canonicalized.
     #[error("grant path cannot be resolved")]
     ResolveGrant {
@@ -156,9 +167,11 @@ impl AppError {
             | Self::StreamUnsupported
             | Self::NotADirectory
             | Self::NotAFile => StatusCode::BAD_REQUEST,
-            Self::OutsideGrants | Self::ForbiddenComponent => StatusCode::FORBIDDEN,
+            Self::OutsideGrants | Self::ForbiddenComponent | Self::CrossSite => {
+                StatusCode::FORBIDDEN
+            }
             Self::NotFound | Self::AssetMissing(_) => StatusCode::NOT_FOUND,
-            Self::BinaryFile | Self::NotUtf8 => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Self::BinaryFile | Self::NotUtf8 | Self::NotJson => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::ModifiedConflict => StatusCode::CONFLICT,
             Self::ResolveGrant { .. }
@@ -177,6 +190,8 @@ impl AppError {
             Self::GatewayUnreachable | Self::Gateway(_) => Some("gateway_unreachable"),
             Self::BadRequest(_) => Some("bad_request"),
             Self::StreamUnsupported => Some("stream_unsupported"),
+            Self::CrossSite => Some("cross_site"),
+            Self::NotJson => Some("not_json"),
             Self::ResolveGrant { .. } => Some("resolve_grant"),
             Self::ResolvePath { .. } => Some("resolve_path"),
             Self::InspectPath { .. } => Some("inspect_path"),
