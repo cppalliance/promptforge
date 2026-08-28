@@ -565,6 +565,62 @@ fn load_server_interpolates_from_the_process_environment() {
 }
 
 #[test]
+fn load_workshop_reads_section_without_full_validation() {
+    // The bare catalog may fail checks that apply to a loaded profile (here a
+    // model naming an undefined endpoint); load_workshop still extracts
+    // [workshop].
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "gateway.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "boot-key"
+
+[workshop]
+bind = "127.0.0.1:7999"
+
+[[model]]
+name = "m"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["missing"]
+"#,
+    );
+
+    let workshop = load_workshop(&tmp.path().join("gateway.toml"))
+        .unwrap()
+        .expect("the [workshop] section is present");
+    assert_eq!(workshop.bind().to_string(), "127.0.0.1:7999");
+}
+
+#[test]
+fn load_workshop_returns_none_when_the_section_is_absent() {
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "gateway.toml", MINIMAL_CONFIG);
+    assert!(
+        load_workshop(&tmp.path().join("gateway.toml"))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn load_workshop_resolves_the_boot_files_own_include_chain() {
+    // The boot file's [workshop] may itself come from an include.
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "base.toml", "[workshop]\nopen_browser = true\n");
+    write(tmp.path(), "gateway.toml", "include = [\"base.toml\"]\n");
+
+    let workshop = load_workshop(&tmp.path().join("gateway.toml"))
+        .unwrap()
+        .expect("the included [workshop] section is present");
+    assert!(workshop.open_browser());
+}
+
+#[test]
 fn load_server_requires_a_server_section() {
     let tmp = TempDir::new().unwrap();
     write(

@@ -233,6 +233,73 @@ endpoints = ["fake"]
     server.shutdown().await;
 }
 
+/// The boot config owns `[workshop]`: a profile whose merged `[workshop]`
+/// differs is rejected at switch time - a terminal error event on the
+/// stream - leaving the live profile fully intact. The hosted workshop is
+/// started once at boot, so a switch can never move or reconfigure it.
+#[tokio::test]
+async fn switch_profile_with_mismatched_workshop_section_fails() {
+    let backend = fake_backend().await;
+    let profiles = tempfile::tempdir().unwrap();
+
+    let profile_toml = |model: &str, workshop_bind: &str| {
+        format!(
+            r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[workshop]
+bind = "{workshop_bind}"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "{model}"
+description = "{model} catalog entry"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+        )
+    };
+    fs::write(
+        profiles.path().join("alpha.toml"),
+        profile_toml("alpha-model", "127.0.0.1:7910"),
+    )
+    .unwrap();
+    fs::write(
+        profiles.path().join("beta.toml"),
+        profile_toml("beta-model", "127.0.0.1:7911"),
+    )
+    .unwrap();
+
+    let alpha = ProfileName::parse("alpha").unwrap();
+    let config = Config::load_profile(profiles.path(), &alpha).unwrap();
+    let context = ProfilesContext::new(Some(profiles.path().to_path_buf()), Some(alpha));
+    let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
+    let http = reqwest::Client::new();
+
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    assert!(
+        terminal["message"]
+            .as_str()
+            .expect("message")
+            .contains("switch profile failed at workshop-mismatch"),
+        "terminal event: {terminal}"
+    );
+
+    // The live profile is untouched: same catalog, same working bearer key.
+    assert_eq!(catalog_ids(&http, server.addr).await, vec!["alpha-model"]);
+    server.shutdown().await;
+}
+
 /// A catalog with two remote models and two local models bound to one
 /// 24 GiB local dominion, over-booked in total (14 + 14 > 24). `{backend}`
 /// is substituted with the fake backend address.

@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use super::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
+    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig, WorkshopConfig,
 };
 
 impl Config {
@@ -223,6 +223,29 @@ impl Config {
     pub fn tools(&self) -> Option<&ToolsConfig> {
         self.tools.as_ref()
     }
+
+    /// Returns the `[workshop]` configuration, or `None` when the section is
+    /// absent.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [workshop]
+    /// # bind = "127.0.0.1:7910"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(config.workshop().is_some());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn workshop(&self) -> Option<&WorkshopConfig> {
+        self.workshop.as_ref()
+    }
 }
 
 impl ServerConfig {
@@ -262,6 +285,44 @@ impl ServerConfig {
     #[must_use]
     pub fn api_key(&self) -> &Secret {
         &self.api_key
+    }
+
+    /// Returns the base URL a same-host client uses to reach this server,
+    /// loopback-adjusted: an unspecified bind IP (`0.0.0.0` or `::`) is not
+    /// a reachable destination, so it becomes the matching loopback address;
+    /// every other address is kept verbatim.
+    ///
+    /// This is how the hosted workshop derives its gateway `base_url` from
+    /// `[server]` at boot (paired with the same `api_key`), so no credential
+    /// or address is duplicated in `[workshop]`.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "0.0.0.0:8081"
+    /// # api_key = "secret"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.server().client_url(), "http://127.0.0.1:8081");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn client_url(&self) -> String {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        let mut addr = self.bind;
+        match addr.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => {
+                addr.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            }
+            IpAddr::V6(ip) if ip.is_unspecified() => {
+                addr.set_ip(IpAddr::V6(Ipv6Addr::LOCALHOST));
+            }
+            _ => {}
+        }
+        format!("http://{addr}")
     }
 }
 

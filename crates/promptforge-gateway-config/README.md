@@ -14,6 +14,11 @@ What it provides:
   including file, with cycle detection), keyed-array merging by `id`/`name`,
   and the [`ProfileName`](src/profile/name.rs) confinement type that keeps a
   profile selection inside the profiles directory.
+- The boot-only `[workshop]` section ([`WorkshopConfig`](src/config/workshop.rs)):
+  the hosted workshop UI's bind and optional voice/tape sub-tables, with
+  tape-path anchoring against the boot-config directory, a loopback-adjusted
+  client URL derived from `[server]` (`ServerConfig::client_url`), and
+  `load_workshop` for reading the section without full validation.
 - [`Secret`](src/config.rs): a credential wrapper that redacts in `Debug` and
   `Display` and never serializes.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
