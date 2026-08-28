@@ -32,16 +32,33 @@
 //! per-dominion queue is the limiter, and per-delta scheduling keeps the
 //! socket fair.
 //!
+//! Beside chats, the socket carries the Model-menu events.
+//! `{"type":"select_model","model":"..."}` selects the chat model: the
+//! menu validates the id against the retained catalog and publishes the
+//! fresh workbench snapshot, handled inline because a map lookup and a
+//! broadcast send cost microseconds between two deltas; an unknown
+//! model is refused with an `error` frame. `{"type":"switch_profile",
+//! "name":"..."}` starts a gateway profile switch: `begin_switch`
+//! publishes the pending snapshot (`switching` set, `chat_ready` false)
+//! before the frame handler returns, and the switch itself runs on its
+//! own task - it consumes the gateway's stage stream into determinate
+//! status-bar progress, refetches the profile state and model catalog,
+//! and settles the menu. A second switch while one runs is refused with
+//! an `error` frame. Both events echo an `id` on their refusals when
+//! the frame carried one, exactly as a chat's is.
+//!
 //! One task owns the socket: a single `select!` loop reads inbound frames
 //! and writes every outbound frame itself - no outbox channel, no writer
 //! task. The in-flight chats' gateway payloads arrive as one merged
 //! branch of the same loop, polled round-robin so a hot stream cannot
-//! monopolize the socket, and status updates from [`crate::status`] and
-//! catalog pushes from [`crate::catalog`] keep flowing between deltas
-//! while chats stream. On connect the session first sends the retained
-//! status and catalog snapshots, honoring the delivery contract's resend
-//! promise (see [`crate::protocol`]); after that both buses forward as
-//! they publish, and a session too slow to drain them skips ahead to the
+//! monopolize the socket, and status updates from [`crate::status`],
+//! catalog pushes from [`crate::catalog`], and workbench snapshots from
+//! [`crate::menu`] keep flowing between deltas while chats stream. On
+//! connect the session first sends the retained status, catalog, and
+//! workbench snapshots, honoring the delivery contract's resend promise
+//! (see [`crate::protocol`]) - the UI boots from this socket alone, with
+//! zero HTTP state fetches; after that the buses forward as they
+//! publish, and a session too slow to drain them skips ahead to the
 //! newest snapshot rather than slowing the producers.
 //!
 //! Exactly one tape event is written per chat frame, after that chat's
@@ -64,7 +81,12 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 
 use crate::app::AppState;
-use crate::gateway::{ChatStream, GatewayError, GatewayResponse, SsePayloadStream};
+use crate::gateway::{
+    ChatStream, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream, SwitchEvent,
+    SwitchResponse, switch_events,
+};
+use crate::heartbeat::{refresh_catalog, refresh_profiles};
+use crate::menu::SwitchOutcome;
 use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
 use crate::push::Push;
 use crate::relay::{tape_round_trip, value_from_bytes};
@@ -91,8 +113,10 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
     // status and catalog frames are complete snapshots.
     let mut status_rx = state.status().subscribe();
     let mut catalog_rx = state.catalog().subscribe();
-    // The delivery contract resends the current status and catalog on
-    // reconnect; the buses retain the newest copy for exactly this send.
+    let mut menu_rx = state.menu().subscribe();
+    // The delivery contract resends the current status, catalog, and
+    // workbench snapshots on reconnect; the buses retain the newest copy
+    // for exactly this send, so the UI boots with zero HTTP state fetches.
     if let Some(update) = state.status().latest()
         && !send_frame(&mut socket, &update.frame()).await
     {
@@ -103,12 +127,18 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
     {
         return;
     }
+    if let Some(snapshot) = state.menu().latest()
+        && !send_frame(&mut socket, &snapshot.frame()).await
+    {
+        return;
+    }
 
     let mut chats = Chats::new();
     // The buses close only when the server state tears down; a closed bus
     // disables its branch rather than spinning the loop on `Closed`.
     let mut status_open = true;
     let mut catalog_open = true;
+    let mut menu_open = true;
 
     loop {
         tokio::select! {
@@ -146,6 +176,17 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
                     tracing::debug!(session, skipped, "catalog receiver lagged; skipped pushes");
                 }
                 Err(broadcast::error::RecvError::Closed) => catalog_open = false,
+            },
+            received = menu_rx.recv(), if menu_open => match received {
+                Ok(snapshot) => {
+                    if !send_frame(&mut socket, &snapshot.frame()).await {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(session, skipped, "menu receiver lagged; skipped snapshots");
+                }
+                Err(broadcast::error::RecvError::Closed) => menu_open = false,
             },
             // Inbound is read unconditionally: chats multiplex, so a later
             // frame never waits for an earlier chat's stream; a client
@@ -351,7 +392,8 @@ async fn advance_chat(
 
 /// Handles one inbound text frame: a well-formed `chat` frame opens a
 /// streamed completion and joins the in-flight map, a `cancel` frame
-/// tears down the chat it names, and anything else is answered with an
+/// tears down the chat it names, `select_model` and `switch_profile`
+/// drive the Model menu, and anything else is answered with an
 /// `error` frame.
 async fn handle_frame(
     state: &AppState,
@@ -376,11 +418,20 @@ async fn handle_frame(
         cancel_chat(session, id.as_ref(), chats, &state.push()).await;
         return;
     }
+    if kind == Some("select_model") {
+        select_model(state, id.as_ref(), &frame, socket).await;
+        return;
+    }
+    if kind == Some("switch_profile") {
+        start_switch(state, id.as_ref(), &frame, socket).await;
+        return;
+    }
     if kind != Some("chat") {
         send_error(
             socket,
             id.as_ref(),
-            "unknown frame type; expected \"chat\" or \"cancel\"",
+            "unknown frame type; expected \"chat\", \"cancel\", \"select_model\", \
+             or \"switch_profile\"",
         )
         .await;
         return;
@@ -440,6 +491,153 @@ async fn cancel_chat(session: u64, id: Option<&serde_json::Value>, chats: &mut C
     if chats.is_empty() {
         push.push_idle();
     }
+}
+
+/// Handles a `select_model` frame: the menu validates the id against
+/// the retained catalog and publishes the fresh workbench snapshot,
+/// which reaches this client through its own menu branch. Handled
+/// inline in the session loop - a map lookup and a broadcast send cost
+/// microseconds between two deltas. A refusal (an unknown model, a
+/// missing field) is answered with an `error` frame and the session
+/// continues (zone two).
+async fn select_model(
+    state: &AppState,
+    id: Option<&serde_json::Value>,
+    frame: &serde_json::Value,
+    socket: &mut WebSocket,
+) {
+    let Some(model) = frame.get("model").and_then(serde_json::Value::as_str) else {
+        send_error(socket, id, "select_model needs a \"model\" string").await;
+        return;
+    };
+    if let Err(refusal) = state.menu().set_selected(model) {
+        send_error(socket, id, refusal.to_string()).await;
+    }
+}
+
+/// Handles a `switch_profile` frame: `begin_switch` publishes the
+/// pending snapshot (`switching` set, `chat_ready` false) before this
+/// returns, and the switch itself runs on its own task. A refusal (a
+/// switch already in flight, a missing field) is answered with an
+/// `error` frame and the session continues (zone two).
+async fn start_switch(
+    state: &AppState,
+    id: Option<&serde_json::Value>,
+    frame: &serde_json::Value,
+    socket: &mut WebSocket,
+) {
+    let Some(name) = frame.get("name").and_then(serde_json::Value::as_str) else {
+        send_error(socket, id, "switch_profile needs a \"name\" string").await;
+        return;
+    };
+    if let Err(refusal) = state.menu().begin_switch(name) {
+        send_error(socket, id, refusal.to_string()).await;
+        return;
+    }
+    // Deliberately not client-scoped - a stated exception to the crate's
+    // drop-guard cancellation rule: a profile switch is global server
+    // state, not work held on behalf of one client, so it runs to
+    // completion (and settles the menu) even if the clicking client
+    // disconnects mid-switch.
+    let client = state.gateway_client().clone();
+    let push = state.push();
+    let name = name.to_string();
+    tokio::spawn(async move {
+        run_switch(&client, &push, &name).await;
+    });
+}
+
+/// How many stage markers the gateway's switch stream emits, in
+/// execution order: `loading-profile`, `stopping-models`,
+/// `starting-models`.
+const SWITCH_STAGES: u64 = 3;
+
+/// Runs one profile switch to its end: drives the gateway's stage
+/// stream into determinate status-bar progress, refetches the profile
+/// state and model catalog, and settles the menu - the remembered model
+/// selected and `chat_ready` recomputed on success, the truthful
+/// pre-switch state restored on failure - before pushing the idle or
+/// failure status.
+async fn run_switch(client: &GatewayClient, push: &Push, name: &str) {
+    let outcome = drive_switch(client, push, name).await;
+    // The gateway's serving state may have changed even on a failed
+    // switch (its documented degraded state can lose local children),
+    // so both paths refetch before the menu settles; the final
+    // workbench snapshot then reads a fresh catalog and profile list.
+    tokio::join!(
+        refresh_profiles(client, push),
+        refresh_catalog(client, push)
+    );
+    match outcome {
+        Ok(()) => {
+            push.menu().finish_switch(SwitchOutcome::Completed);
+            push.push_idle();
+        }
+        Err(message) => {
+            push.menu().finish_switch(SwitchOutcome::Failed);
+            push.push_failure("Profile switch failed", message, Activity::General);
+        }
+    }
+}
+
+/// Posts the switch and consumes its stage stream, pushing each stage
+/// marker as determinate progress, until the terminal event: `Ok` on
+/// `ready`, the failure's description on everything else - a terminal
+/// `error`, a buffered refusal, a transport failure, or a stream that
+/// ends without a terminal event.
+async fn drive_switch(client: &GatewayClient, push: &Push, name: &str) -> Result<(), String> {
+    let payloads = match client.switch_profile(name).await {
+        Ok(SwitchResponse::Switching { payloads, .. }) => payloads,
+        Ok(SwitchResponse::Buffered(refusal)) => return Err(switch_refusal(&refusal)),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut events = switch_events(payloads);
+    while let Some(item) = events.next().await {
+        match item {
+            Ok(SwitchEvent::Stage { stage }) => push_stage(push, name, &stage),
+            Ok(SwitchEvent::Ready { .. }) => return Ok(()),
+            Ok(SwitchEvent::Error { message }) => return Err(message),
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err("the switch stream ended without a terminal event".to_string())
+}
+
+/// Pushes one stage marker as determinate status-bar progress - stage
+/// n of [`SWITCH_STAGES`] with a label naming the stage. A stage this
+/// build does not know is logged and skipped: the gateway may grow
+/// stages, and a lost progress update never degrades the switch
+/// (zone two).
+fn push_stage(push: &Push, name: &str, stage: &str) {
+    let (label, current) = match stage {
+        "loading-profile" => ("Loading profile...", 1),
+        "stopping-models" => ("Stopping models...", 2),
+        "starting-models" => ("Starting models...", 3),
+        other => {
+            tracing::debug!(stage = other, "unknown switch stage; no progress pushed");
+            return;
+        }
+    };
+    push.push_progress(
+        label,
+        format!("switching to profile {name}"),
+        current,
+        SWITCH_STAGES,
+        Activity::General,
+    );
+}
+
+/// The failure description of a buffered switch refusal: the gateway's
+/// own error message when its envelope carries one, else the status.
+fn switch_refusal(refusal: &GatewayResponse) -> String {
+    value_from_bytes(&refusal.body)
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || format!("gateway declined the switch with status {}", refusal.status),
+            str::to_string,
+        )
 }
 
 /// Opens one streaming chat completion against the gateway: returns the
@@ -1977,6 +2175,418 @@ mod tests {
             labels.iter().any(|label| label.contains("Streaming")),
             "a Streaming status frame arrived: {labels:?}"
         );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// Reads frames until `accept` holds, within a generous deadline,
+    /// returning every frame read - the accepted one last.
+    async fn frames_until<S>(
+        socket: &mut S,
+        accept: impl Fn(&serde_json::Value) -> bool,
+    ) -> Vec<serde_json::Value>
+    where
+        S: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
+    {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            let mut frames = Vec::new();
+            loop {
+                let frame = read_frame(socket).await;
+                let found = accept(&frame);
+                frames.push(frame);
+                if found {
+                    return frames;
+                }
+            }
+        })
+        .await
+        .expect("the expected frame arrives within the deadline")
+    }
+
+    #[tokio::test]
+    async fn a_new_session_receives_the_retained_workbench_snapshot() {
+        let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        // Both retained copies exist before anyone connects, so only the
+        // connect-time sends can deliver them below - the boot-with-zero-
+        // HTTP-fetches promise.
+        state
+            .catalog()
+            .publish(vec![serde_json::json!({"id": "test-model"})]);
+        state.menu().set_profiles(
+            vec!["main".to_string(), "coding".to_string()],
+            Some("main".to_string()),
+        );
+
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        let first = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut socket))
+            .await
+            .expect("the status snapshot arrives unprompted");
+        assert_eq!(first["type"], "status", "the retained status arrives first");
+        let second = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut socket))
+            .await
+            .expect("the catalog snapshot arrives unprompted");
+        assert_eq!(second["type"], "models", "the retained catalog follows");
+        let third = tokio::time::timeout(Duration::from_secs(10), read_frame(&mut socket))
+            .await
+            .expect("the workbench snapshot arrives unprompted");
+        assert_eq!(
+            third,
+            serde_json::json!({
+                "type": "workbench",
+                "profiles": ["main", "coding"],
+                "active": "main",
+                "switching": null,
+                "selected": null,
+                "chat_ready": false,
+            }),
+            "the retained workbench snapshot completes the boot state"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_select_model_event_round_trips_and_refusals_answer_errors() {
+        let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        state
+            .catalog()
+            .publish(vec![serde_json::json!({"id": "test-model"})]);
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+
+        let select = serde_json::json!({"type": "select_model", "model": "test-model"}).to_string();
+        socket
+            .send(tungstenite::Message::Text(select.into()))
+            .await
+            .expect("the select frame is sent");
+        let frames = frames_until(&mut socket, |frame| frame["type"] == "workbench").await;
+        let published = frames.last().expect("the accepted frame is last");
+        assert_eq!(
+            published["selected"], "test-model",
+            "the selection round-trips as a workbench push"
+        );
+
+        let unknown =
+            serde_json::json!({"type": "select_model", "model": "bogus", "id": 3}).to_string();
+        socket
+            .send(tungstenite::Message::Text(unknown.into()))
+            .await
+            .expect("the select frame is sent");
+        let frames = frames_until(&mut socket, |frame| frame["type"] == "error").await;
+        let refusal = frames.last().expect("the refusal is last");
+        assert_eq!(refusal["id"], 3, "the refusal echoes the event id");
+        assert!(
+            refusal["message"]
+                .as_str()
+                .expect("the refusal names the rule")
+                .contains("unknown model"),
+            "the refusal names the unknown-model rule: {refusal}"
+        );
+
+        let missing = serde_json::json!({"type": "select_model"}).to_string();
+        socket
+            .send(tungstenite::Message::Text(missing.into()))
+            .await
+            .expect("the select frame is sent");
+        let frames = frames_until(&mut socket, |frame| frame["type"] == "error").await;
+        let refusal = frames.last().expect("the refusal is last");
+        assert!(
+            refusal["message"]
+                .as_str()
+                .expect("the refusal names the field")
+                .contains("model"),
+            "a field-less select is refused, not fatal: {refusal}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// Streams the full stage ladder then the terminal ready.
+    async fn mock_switch_succeeds() -> Response {
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            concat!(
+                "data: {\"stage\":\"loading-profile\"}\n\n",
+                "data: {\"stage\":\"stopping-models\"}\n\n",
+                "data: {\"stage\":\"starting-models\"}\n\n",
+                "data: {\"status\":\"ready\",\"profile\":\"beta\"}\n\n",
+            ),
+        )
+            .into_response()
+    }
+
+    /// Streams one stage then the terminal error.
+    async fn mock_switch_fails() -> Response {
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            concat!(
+                "data: {\"stage\":\"loading-profile\"}\n\n",
+                "data: {\"status\":\"error\",\"message\":\"start-local failed\"}\n\n",
+            ),
+        )
+            .into_response()
+    }
+
+    /// The profile endpoints the switch task's refetch hits.
+    fn profile_routes(active: &'static str) -> Router {
+        Router::new()
+            .route(
+                "/admin/profiles",
+                get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "application/json")],
+                        r#"{"profiles":["main","beta"]}"#,
+                    )
+                }),
+            )
+            .route(
+                "/admin/status",
+                get(move || async move {
+                    (
+                        [(header::CONTENT_TYPE, "application/json")],
+                        format!(r#"{{"profile":"{active}"}}"#),
+                    )
+                }),
+            )
+            .route("/v1/models", get(mock_models))
+    }
+
+    #[tokio::test]
+    async fn a_switch_profile_event_streams_progress_and_settles_the_menu() {
+        let base_url = spawn_gateway(
+            Router::new()
+                .route("/admin/switch-profile", post(mock_switch_succeeds))
+                .merge(profile_routes("beta")),
+        )
+        .await;
+        let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+        // Readiness needs a non-empty catalog and reachability; seed both
+        // so the settled snapshot recomputes chat_ready to true. The seed
+        // matches the refetched catalog so the reconcile stays a no-op.
+        state.catalog().publish(vec![serde_json::json!(
+            {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        )]);
+        state.menu().set_gateway_reachable(true);
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+
+        let switch = serde_json::json!({"type": "switch_profile", "name": "beta"}).to_string();
+        socket
+            .send(tungstenite::Message::Text(switch.into()))
+            .await
+            .expect("the switch frame is sent");
+        let frames = frames_until(&mut socket, |frame| {
+            frame["type"] == "workbench"
+                && frame["switching"].is_null()
+                && frame["active"] == "beta"
+        })
+        .await;
+
+        let pending = frames
+            .iter()
+            .find(|frame| frame["type"] == "workbench" && frame["switching"] == "beta")
+            .expect("the pending snapshot was pushed before the settle");
+        assert_eq!(
+            pending["chat_ready"], false,
+            "a switch in flight blocks chat: {pending}"
+        );
+
+        let progress: Vec<(String, u64, u64)> = frames
+            .iter()
+            .filter(|frame| frame["type"] == "status" && !frame["progress"].is_null())
+            .map(|frame| {
+                (
+                    frame["label"]
+                        .as_str()
+                        .expect("a progress frame carries a label")
+                        .to_string(),
+                    frame["progress"]["current"]
+                        .as_u64()
+                        .expect("current is an integer"),
+                    frame["progress"]["total"]
+                        .as_u64()
+                        .expect("total is an integer"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            progress,
+            [
+                ("Loading profile...".to_string(), 1, 3),
+                ("Stopping models...".to_string(), 2, 3),
+                ("Starting models...".to_string(), 3, 3),
+            ],
+            "each stage arrives as determinate progress, in execution order"
+        );
+
+        assert!(
+            frames.iter().any(|frame| frame["type"] == "models"),
+            "the refetched catalog arrives as a models frame: {frames:?}"
+        );
+
+        let settled = frames.last().expect("the settled snapshot is last");
+        assert_eq!(
+            settled["selected"], "test-model",
+            "the settled snapshot selects the profile's model"
+        );
+        assert_eq!(
+            settled["chat_ready"], true,
+            "readiness recomputes once the switch settles"
+        );
+        assert_eq!(
+            settled["profiles"],
+            serde_json::json!(["main", "beta"]),
+            "the refetched profile list rides into the snapshot"
+        );
+
+        // The idle push follows the settle; it may already have arrived
+        // interleaved with the frames above.
+        if !frames
+            .iter()
+            .any(|frame| frame["type"] == "status" && frame["label"] == "Ready")
+        {
+            frames_until(&mut socket, |frame| {
+                frame["type"] == "status" && frame["label"] == "Ready"
+            })
+            .await;
+        }
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_failed_switch_restores_the_menu_and_reports_the_failure() {
+        let base_url = spawn_gateway(
+            Router::new()
+                .route("/admin/switch-profile", post(mock_switch_fails))
+                // The gateway still serves the previous profile after the
+                // failure, so its status endpoint keeps naming it.
+                .merge(profile_routes("main")),
+        )
+        .await;
+        let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+        state.catalog().publish(vec![serde_json::json!(
+            {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        )]);
+        state.menu().set_gateway_reachable(true);
+        state.menu().set_profiles(
+            vec!["main".to_string(), "beta".to_string()],
+            Some("main".to_string()),
+        );
+        state
+            .menu()
+            .set_selected("test-model")
+            .expect("the id is in the catalog");
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+
+        let switch = serde_json::json!({"type": "switch_profile", "name": "beta"}).to_string();
+        socket
+            .send(tungstenite::Message::Text(switch.into()))
+            .await
+            .expect("the switch frame is sent");
+        frames_until(&mut socket, |frame| {
+            frame["type"] == "workbench" && frame["switching"] == "beta"
+        })
+        .await;
+        let mut frames = frames_until(&mut socket, |frame| {
+            frame["type"] == "workbench" && frame["switching"].is_null()
+        })
+        .await;
+
+        let restored = frames.last().expect("the restored snapshot is last");
+        assert_eq!(
+            restored["active"], "main",
+            "the previous profile still serves: {restored}"
+        );
+        assert_eq!(
+            restored["selected"], "test-model",
+            "the selection survives the failed switch"
+        );
+        assert_eq!(
+            restored["chat_ready"], true,
+            "readiness returns to its truthful pre-switch state"
+        );
+
+        // The failure status and the restored snapshot ride different
+        // buses, so their wire order is not pinned; read on if needed.
+        let is_failure =
+            |frame: &serde_json::Value| frame["type"] == "status" && frame["severity"] == "error";
+        if !frames.iter().any(is_failure) {
+            frames.extend(frames_until(&mut socket, is_failure).await);
+        }
+        let failure = frames
+            .iter()
+            .find(|frame| is_failure(frame))
+            .expect("the failure status was pushed");
+        assert_eq!(failure["label"], "Profile switch failed");
+        assert_eq!(
+            failure["description"], "start-local failed",
+            "the gateway's own message is reported"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_switch_while_one_runs_is_refused_with_an_error_frame() {
+        let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        state
+            .menu()
+            .begin_switch("running")
+            .expect("no switch is in flight");
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+
+        let switch =
+            serde_json::json!({"type": "switch_profile", "name": "beta", "id": 9}).to_string();
+        socket
+            .send(tungstenite::Message::Text(switch.into()))
+            .await
+            .expect("the switch frame is sent");
+        let frames = frames_until(&mut socket, |frame| frame["type"] == "error").await;
+        let refusal = frames.last().expect("the refusal is last");
+        assert_eq!(refusal["id"], 9, "the refusal echoes the event id");
+        assert!(
+            refusal["message"]
+                .as_str()
+                .expect("the refusal names the rule")
+                .contains("already in progress"),
+            "the refusal names the single-flight rule: {refusal}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_menu_event_lands_and_answers_while_a_chat_streams() {
+        let (url, _tape_dir, state) = spawn_indexed_drip_server().await;
+        state
+            .catalog()
+            .publish(vec![serde_json::json!({"id": "test-model"})]);
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_tagged_chat(&mut socket, 1).await;
+        frames_until(&mut socket, |frame| frame["type"] == "delta").await;
+
+        let select = serde_json::json!({"type": "select_model", "model": "test-model"}).to_string();
+        socket
+            .send(tungstenite::Message::Text(select.into()))
+            .await
+            .expect("the select frame is sent");
+        let frames = frames_until(&mut socket, |frame| frame["type"] == "workbench").await;
+        assert!(
+            frames.iter().all(|frame| frame["type"] != "done"),
+            "the selection answered while the chat still streamed: {frames:?}"
+        );
+        assert_eq!(
+            frames.last().expect("the workbench push is last")["selected"],
+            "test-model"
+        );
+
+        // The chat is untouched by the menu event and streams to its done.
+        frames_until(&mut socket, |frame| frame["type"] == "done").await;
         socket.close(None).await.expect("close the socket");
     }
 }

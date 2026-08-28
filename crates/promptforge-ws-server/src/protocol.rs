@@ -19,7 +19,19 @@
 //! completion is dropped and the tape records the abandonment, while
 //! every other chat on the socket streams on. A cancel naming no live
 //! chat is ignored, because a cancel racing its own `done` is normal.
-//! Neither frame is pushed by the server, so neither takes a delivery
+//!
+//! `{"type":"select_model","model":"..."}` selects the chat model: the
+//! menu validates the id against the retained catalog and publishes a
+//! fresh [`WorkbenchFrame`] on success; an unknown model is refused
+//! with an `error` frame. `{"type":"switch_profile","name":"..."}`
+//! starts a gateway profile switch: the pending snapshot publishes
+//! immediately, stage progress arrives as [`StatusFrame`]s, and the
+//! settled menu publishes a final [`WorkbenchFrame`] and a
+//! [`CatalogFrame`]; a switch requested while one runs is refused with
+//! an `error` frame. Both events may carry an optional `id`, echoed on
+//! the `error` frame that refuses them, exactly as a chat's is.
+//!
+//! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
 //!
 //! # Delivery contract
@@ -67,7 +79,10 @@
 //!   catalog is resent on reconnect.
 //! - [`WorkbenchFrame`] - ephemeral. Every push is a complete snapshot
 //!   of the server-owned Model-menu state, retained and resent on
-//!   reconnect, exactly like the catalog frame.
+//!   reconnect, exactly like the catalog frame. The connect-time send -
+//!   the retained snapshot follows the status and catalog snapshots on
+//!   every new session, so the UI boots with zero HTTP state fetches -
+//!   is that resend promise, not a third delivery class.
 //!
 //! Chat replies multiplex on one socket, and their ordering promise is
 //! per chat: frames within one chat are strictly ordered - deltas in
@@ -241,13 +256,6 @@ pub(crate) struct WorkbenchSnapshot {
 impl WorkbenchSnapshot {
     /// The snapshot as a wire frame: `"type": "workbench"` beside the
     /// fields, with `selected_model` shortened to `selected` on the wire.
-    // An `allow` rather than an `expect`: the wire-shape test below uses
-    // this in test builds, so an expectation would be unfulfilled there
-    // and fail the -D warnings gate.
-    #[allow(
-        dead_code,
-        reason = "the /ws session loop serializes the frame in a later step"
-    )]
     pub(crate) fn frame(&self) -> WorkbenchFrame<'_> {
         WorkbenchFrame {
             kind: "workbench",

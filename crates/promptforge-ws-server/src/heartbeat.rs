@@ -192,8 +192,9 @@ async fn run(
 ///
 /// A failed, declined, or malformed catalog is logged and skipped rather
 /// than pushed: pushing a bad snapshot would clear pickers that still hold
-/// a usable list.
-async fn refresh_catalog(client: &GatewayClient, push: &Push) {
+/// a usable list. Shared with the profile-switch task in
+/// [`crate::chat_ws`], which refetches after a switch settles.
+pub(crate) async fn refresh_catalog(client: &GatewayClient, push: &Push) {
     let response = match client.list_models().await {
         Ok(response) => response,
         Err(error) => {
@@ -241,7 +242,9 @@ struct ProfileStatus {
 /// A gateway without profile support is a state, not an error: a failed,
 /// declined, or malformed answer degrades that half to empty (logged by
 /// its fetcher), so the menu shows no profiles rather than stale names.
-async fn refresh_profiles(client: &GatewayClient, push: &Push) {
+/// Shared with the profile-switch task in [`crate::chat_ws`], which
+/// refetches after a switch settles.
+pub(crate) async fn refresh_profiles(client: &GatewayClient, push: &Push) {
     let (profiles, active) = tokio::join!(fetch_profile_list(client), fetch_active_profile(client));
     push.menu()
         .set_profiles(profiles.unwrap_or_default(), active);
