@@ -26,7 +26,7 @@
 
 [modules]
 "app.rs" = 544
-"assets.rs" = 66
+"assets.rs" = 69
 "atomic.rs" = 230
 "backoff.rs" = 232
 "catalog.rs" = 118
