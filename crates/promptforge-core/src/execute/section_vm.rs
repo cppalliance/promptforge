@@ -49,6 +49,29 @@ pub(crate) struct VmSeed<'a> {
     pub(crate) item: Option<&'a serde_json::Value>,
 }
 
+/// Which control surface [`setup_section_vm`] installs.
+///
+/// The split exists until the flip: the old engine drives chunks via
+/// `Function::call` with no coroutine, so a shim's `coroutine.yield` under
+/// it errors with "attempt to yield from outside a coroutine" - installing
+/// shims unconditionally would break the legacy engine. The legacy walk
+/// selects [`Legacy`](VmSetupMode::Legacy); the scheduler's driver selects
+/// [`Scheduler`](VmSetupMode::Scheduler). The mode dies with the old engine
+/// at the flip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum VmSetupMode {
+    /// `execute`, `jump`, `fanout`, and `list_from_section` as Rust
+    /// callbacks: exactly the legacy engine's surface.
+    #[default]
+    Legacy,
+    /// `jump` and `list_from_section` as Rust callbacks, plus the coroutine
+    /// yield shims for `models.infer`, `handle:infer`, and `execute`.
+    // Constructed by the scheduler driver in a later step; exercised today by
+    // the shim layer's tests.
+    #[allow(dead_code)]
+    Scheduler,
+}
+
 /// The borrowed inputs one section VM setup shares.
 ///
 /// Bundled so the walk and the fanout arm each thread one linear set of
@@ -75,15 +98,21 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) section_name: &'a str,
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
+    /// Which control surface to install; the legacy walk selects
+    /// [`VmSetupMode::Legacy`], the scheduler's driver
+    /// [`VmSetupMode::Scheduler`].
+    pub(crate) mode: VmSetupMode,
 }
 
 /// Runs one section VM's setup sequence against a constructed, limited VM.
 ///
 /// The sequence is fixed and shared: host injection carrying the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
-/// seed carries one, [`SectionVm::install_control_globals`] with the
-/// callbacks the driver built from the shared `make_control_globals`
-/// constructor, [`SectionVm::replay_shared`], and
+/// seed carries one, the control surface selected by the setup's
+/// [`VmSetupMode`] ([`SectionVm::install_control_globals`] for the legacy
+/// engine; [`SectionVm::install_scheduler_control_globals`] plus
+/// [`SectionVm::install_coro_shims`] for the scheduler),
+/// [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
 /// limits itself before calling, so a limits failure propagates without
 /// touching the VM's teardown observation path.
@@ -128,7 +157,18 @@ where
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }
-    vm.install_control_globals(execute_callback, fanout_callback, list_callback)?;
+    match setup.mode {
+        VmSetupMode::Legacy => {
+            vm.install_control_globals(execute_callback, fanout_callback, list_callback)?;
+        }
+        VmSetupMode::Scheduler => {
+            // The scheduler drives chunks inside coroutines, so the
+            // suspending calls are Lua shims that yield request tables; the
+            // legacy `execute`/`fanout` callbacks go unused.
+            vm.install_scheduler_control_globals(list_callback)?;
+            vm.install_coro_shims()?;
+        }
+    }
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),

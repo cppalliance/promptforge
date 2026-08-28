@@ -69,6 +69,8 @@ fn log_byte_budget(log_events: u32) -> usize {
 
 mod hardening;
 pub(crate) use hardening::*;
+mod coro;
+pub(crate) use coro::*;
 mod sys;
 pub(crate) use sys::*;
 mod host;

@@ -247,14 +247,16 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
     Ok(proxy)
 }
 
-/// Reads the hidden `var` data table back as JSON.
+/// Returns the hidden `var` data table as a plain deep-copied table.
+///
+/// The guarded `var` proxy itself serializes empty; this reads what
+/// [`var_to_json`] reads, materializing nested proxies, for the coroutine
+/// shim's `var_snapshot` capture: an `execute` or `fanout` request carries
+/// the caller's `var` as a clone.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the data table is absent (host values were
-/// never injected), if the author reassigned the `var` global (the proxy is
-/// no longer reachable, so the hidden table no longer reflects it), or if
-/// the data cannot be represented as JSON.
-pub(crate) fn var_to_json(lua: &Lua) -> Result<Json> {
+/// Returns [`Error::Lua`] under the same conditions as [`var_to_json`].
+pub(crate) fn var_snapshot_table(lua: &Lua) -> Result<mlua::Table> {
     let proxy: mlua::Table = lua
         .named_registry_value(VAR_PROXY_REGISTRY)
         .map_err(Error::lua)?;
@@ -273,7 +275,21 @@ pub(crate) fn var_to_json(lua: &Lua) -> Result<Json> {
     let guarded_data: mlua::Table = lua
         .named_registry_value(VAR_GUARDED_DATA_REGISTRY)
         .map_err(Error::lua)?;
-    let plain =
-        materialize_guarded_value(lua, Value::Table(data), &guarded_data).map_err(Error::lua)?;
-    lua.from_value(plain).map_err(Error::lua)
+    match materialize_guarded_value(lua, Value::Table(data), &guarded_data).map_err(Error::lua)? {
+        Value::Table(plain) => Ok(plain),
+        // The root data value is always a table; `guarded_var` builds it.
+        _ => Err(Error::Internal("guarded var data table was not a table")),
+    }
+}
+
+/// Reads the hidden `var` data table back as JSON.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the data table is absent (host values were
+/// never injected), if the author reassigned the `var` global (the proxy is
+/// no longer reachable, so the hidden table no longer reflects it), or if
+/// the data cannot be represented as JSON.
+pub(crate) fn var_to_json(lua: &Lua) -> Result<Json> {
+    lua.from_value(Value::Table(var_snapshot_table(lua)?))
+        .map_err(Error::lua)
 }

@@ -174,6 +174,31 @@ impl LuaProgram {
         })
     }
 
+    /// Compiles an internal chunk (the coroutine shim prelude) without
+    /// observations.
+    ///
+    /// Internal chunks are crate source, not author prompt source, so like
+    /// [`empty`](Self::empty) the compilation is bookkeeping and emits no
+    /// observations. `location` is the chunk name verbatim; an `@`-prefixed
+    /// name renders as a file path in errors, which the line mapper never
+    /// rewrites (it only touches a section's own `[string "{location}"]:`
+    /// marker).
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created
+    /// or the source fails to compile.
+    pub(crate) fn compile_internal(source: &str, location: &str) -> Result<Self> {
+        let bytecode = compile_chunk(source, location).map_err(|error| match error {
+            CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
+        })?;
+        Ok(Self {
+            source: source.to_owned(),
+            bytecode,
+            location: location.to_owned(),
+            source_line: NonZeroU32::MIN,
+        })
+    }
+
     /// Returns the original Lua source retained for diagnostics.
     #[must_use]
     pub fn source(&self) -> &str {
