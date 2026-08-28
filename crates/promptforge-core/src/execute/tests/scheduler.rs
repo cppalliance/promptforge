@@ -6,6 +6,11 @@
 //! counter), plus the control-transfer rules: jump targets (sibling moves
 //! and child descents with the parent resuming after the jumper), the
 //! scalar return's chain scoping, and the section-boundary observations.
+//! The fanout coverage mirrors the legacy engine's mechanics (ordering,
+//! the concurrency window, interleaving) and its failure semantics (the
+//! store write-write race as a hard error, unordered-legal appends, the
+//! fatal-arm sibling abort, the `ToolLoopExhausted` soft-degrade, the
+//! pre-scheduling guards, and cancellation while suspended in an arm).
 
 use std::num::NonZeroUsize;
 
@@ -2516,5 +2521,586 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         store.read("order.txt").expect("the order log"),
         "Child\nChildTail\n",
         "the child walk runs the target and falls through to its child siblings"
+    );
+}
+
+// --- Fanout failure semantics on the scheduler ---
+// Each mirrored test names the legacy case it mirrors. The legacy cases
+// keep exercising the legacy fanout driver untouched; these prove the
+// scheduler's arm chains.
+
+/// Counts one terminal observation kind in the recorder's event stream.
+fn terminal_count(recorder: &Recorder, event: &Observation) -> usize {
+    let rendered = event.to_string();
+    recorder
+        .events()
+        .iter()
+        .filter(|(_, event)| event == &rendered)
+        .count()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_empty_collection_errors_before_any_scheduling() {
+    // Pin of the pre-scheduling guard, mirroring the legacy
+    // `fanout_collection_empty_errors` and
+    // `an_empty_collection_is_rejected_before_any_scheduling`: the fanout
+    // errors before any arm is created - no STARTED observation, and the
+    // worker's store tripwire never fires.
+    let store = StoreRef::memory();
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\nfanout('### Worker', {})\n```\n\n\
+        ### Worker\n\n\
+        ```lua\nstore.write('ran.txt', 'yes')\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, recorder.clone());
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("an empty collection must error");
+
+    assert!(
+        error.to_string().contains("empty collection"),
+        "error was: {error}"
+    );
+    assert!(
+        store.read("ran.txt").is_err(),
+        "the worker never ran: the rejection precedes scheduling"
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        0,
+        "no arm was ever started: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_worker_that_is_a_list_section_errors() {
+    // Pin of the worker-template guard, mirroring the legacy case of the
+    // same name: a resolved list section is not a worker template.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\nfanout('### Items', {'x'})\n```\n\n\
+        ### Items\n\n\
+        - a\n\
+        - b\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("a list section is not a worker template");
+
+    assert!(
+        error
+            .to_string()
+            .contains("is a list section, not a worker template"),
+        "error was: {error}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fanout_depth_cap_reads_the_chain_field() {
+    // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong executes
+    // down the chain stack, and the chain that lands at depth 8 calls
+    // fanout - each arm would run one level deeper, so the cap fires from
+    // the requesting chain's execute-depth field with the fanout message,
+    // not the execute one.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Depth\n\n\
+        ## Alpha\n\n\
+        ```lua\n\
+        var.n = (var.n or 0) + 1\n\
+        if var.n >= 9 then return fanout('### Worker', {'x'}) end\n\
+        return execute('## Beta')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\nreturn item\n```\n\n\
+        ## Beta\n\n\
+        ```lua\n\
+        var.n = var.n + 1\n\
+        return execute('## Alpha')\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("the fanout depth cap must fail the run");
+
+    match &error {
+        Error::Lua(message) => assert_eq!(message, "fanout recursion exceeded cap of 8"),
+        other => panic!("expected the typed fanout depth-cap Lua error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_arms_writing_one_path_fail_with_a_write_race() {
+    // Mirror of the legacy `two_arms_writing_one_path_fail_with_a_write_race`:
+    // two arms of one fanout calling `store.write` on the same path is a
+    // hard write-write race; the store's registry is the semantic guard
+    // (one thread runs everything, so no locks are involved), and the race
+    // is fatal to the arm and fails the fanout.
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.write('shared.txt', item)\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("two arms writing one path must fail the fanout");
+
+    let text = error.to_string();
+    assert!(text.contains("write-write race"), "error was: {text}");
+    assert!(text.contains("shared.txt"), "error was: {text}");
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        1,
+        "the first arm's write landed: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        1,
+        "the second arm's write raced: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_arms_appending_one_path_succeed() {
+    // Mirror of the legacy case of the same name: `append` is untracked, so
+    // concurrent appends to one path are legal; only the relative order is
+    // unspecified.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha', 'beta'})\n\
+        return table.concat(r, ',')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.append('log.txt', item .. ';')\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("concurrent appends to one path must succeed");
+
+    assert_eq!(out, "alpha,beta");
+    let log = store.read("log.txt").expect("both arms appended");
+    assert!(log.contains("alpha;"), "log was: {log:?}");
+    assert!(log.contains("beta;"), "log was: {log:?}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_arm_rewriting_its_own_path_succeeds() {
+    // Mirror of the legacy case of the same name: the registry records
+    // (fanout token, arm index), so the same arm writing the same path
+    // again is a rewrite, not a race.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'only'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.write('own.txt', 'first')\n\
+        store.write('own.txt', 'second')\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("an arm rewriting its own path must succeed");
+
+    assert_eq!(out, "only");
+    assert_eq!(store.read("own.txt").expect("the arm wrote"), "second");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sequential_fanouts_may_write_one_path() {
+    // Mirror of the legacy case of the same name: a later fanout carries a
+    // fresh write token, so its write overwrites the earlier fanout's
+    // registry record instead of racing against it.
+    let store = StoreRef::memory();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local a = fanout('### Worker', {'one'})\n\
+        local b = fanout('### Worker', {'two'})\n\
+        return b[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.write('seq.txt', item)\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a sequential fanout may write the same path");
+
+    assert_eq!(out, "two");
+    assert_eq!(store.read("seq.txt").expect("both fanouts wrote"), "two");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fatal_arm_aborts_queued_siblings() {
+    // Mirror of the legacy `fatal_arm_aborts_and_drops_blocked_siblings`:
+    // with the window at 1 the siblings stay queued, and once the first
+    // arm fails fatally they are never created - proven by the store
+    // side-channel only the fatal arm ever wrote to, and by the terminal
+    // observations: one FAILED, nothing else.
+    let store = StoreRef::memory();
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\nfanout('### Worker', {'boom', 'beta', 'gamma'})\n```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        store.append('log.txt', item .. '\\n')\n\
+        if item == 'boom' then error('fatal arm error') end\n\
+        return item\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = RunContext::new(
+        &prompt,
+        "",
+        &store,
+        LuaProgram::empty().expect("the empty chunk compiles"),
+        &RunConfig::new(EXECUTION)
+            .limits(
+                RunLimits::new()
+                    .max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+            )
+            .observer(recorder.clone()),
+    );
+    *ctx.model_set()
+        .lock()
+        .expect("the model set mutex is not poisoned") = writer_models();
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("a fatal arm must fail the whole fanout");
+
+    assert!(
+        !matches!(error, Error::Interrupted),
+        "expected a fatal arm error, got {error}"
+    );
+    let log = store.read("log.txt").expect("the fatal arm wrote its item");
+    assert_eq!(log, "boom\n", "blocked siblings must never run: {log:?}");
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        1,
+        "only the fatal arm was ever started: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        1,
+        "the fatal arm reports failed: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        0,
+        "no arm succeeded: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fatal_arm_aborts_an_in_flight_sibling() {
+    // The sibling-abort port: the failing arm and a sibling parked on a
+    // slow infer are both live when the failure lands. The abort removes
+    // the sibling from the pending table and aborts its I/O task, so the
+    // sibling's CANCELLED terminal observation fires BEFORE the parent's
+    // chunk failure - a scheduler that only discarded late siblings at the
+    // join would report it only when the scheduler dropped, after the
+    // parent. The 30-second sibling answer and the timeout guard prove the
+    // driver never waits on the aborted arm.
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("boom-answer"),
+        resp_delayed_text("slow-answer", std::time::Duration::from_secs(30)),
+    ])
+    .await;
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\nfanout('### Worker', {'boom', 'slow'})\n```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        local a = models.infer(item .. ':1')\n\
+        if item == 'boom' then error('fatal arm error') end\n\
+        return a\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        Scheduler::new(&ctx, Some(gateway_client(gateway.addr()))).drive(),
+    )
+    .await
+    .expect("the aborted sibling must not stall the driver");
+    let error = result.expect_err("a fatal arm must fail the whole fanout");
+
+    assert!(
+        !matches!(error, Error::Interrupted),
+        "expected a fatal arm error, got {error}"
+    );
+    assert!(
+        error.to_string().contains("fatal arm error"),
+        "the arm's own error surfaces: {error}"
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_FAILED),
+        1,
+        "the fatal arm reports failed: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        1,
+        "the in-flight sibling reports cancelled: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        0,
+        "no arm succeeded: {:?}",
+        recorder.events()
+    );
+    let events = recorder.events();
+    let cancelled_at = events
+        .iter()
+        .position(|(_, event)| event == &detail::FANOUT_ARM_CANCELLED.to_string())
+        .expect("the sibling's cancelled event fired");
+    let parent_failed_at = events
+        .iter()
+        .position(|(section, event)| {
+            section == "Parent" && event == &detail::LUA_CHUNK_FAILED.to_string()
+        })
+        .expect("the parent's chunk failed on the fanout error");
+    assert!(
+        cancelled_at < parent_failed_at,
+        "the sibling abort precedes the parent's resume with the error: {events:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_caught_fanout_failure_lets_the_caller_continue() {
+    // The fanout error is the call's answer resumed through the envelope,
+    // so an author `pcall` catches it exactly as on the legacy callback
+    // path; the run then continues - including past a stale answer the
+    // aborted sibling's already-completed I/O task may have posted, which
+    // the driver must discard rather than fail on.
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("boom-answer"),
+        resp_text("slow-answer"),
+        resp_text("after-answer"),
+    ])
+    .await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local ok, err = pcall(fanout, '### Worker', {'boom', 'slow'})\n\
+        assert(not ok, 'the fatal arm error reaches the caller')\n\
+        local a = models.infer('after')\n\
+        return 'caught:' .. a\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\n\
+        local a = models.infer(item .. ':1')\n\
+        if item == 'boom' then error('fatal arm error') end\n\
+        return a\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the caught fanout failure lets the caller continue");
+
+    assert_eq!(out, "caught:after-answer");
+    assert_eq!(
+        request_prompts(&gateway),
+        vec!["boom:1", "slow:1", "after"],
+        "both arms dispatched before the failure, then the caller's own infer"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn tool_loop_exhausted_arm_soft_degrades() {
+    // Mirror of the legacy `fanout_exhausted_arm_exposes_failure_metadata`:
+    // `Error::ToolLoopExhausted` soft-degrades the arm to the incomplete
+    // stub (`.ok = false`, `.exhausted = true`, the "section incomplete:
+    // tool loop exhausted" text) so one stuck arm cannot kill sibling
+    // evidence, and the arm emits exactly one EXHAUSTED terminal event,
+    // never a succeeded.
+    let gateway =
+        ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha'})\n\
+        assert(r[1].ok == false)\n\
+        assert(r[1].exhausted == true)\n\
+        assert(r[1].item == 'alpha')\n\
+        assert(r[1].text:find('tool loop exhausted', 1, true))\n\
+        assert(tostring(r[1]) == r[1].text)\n\
+        return 'ok'\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\ntools.add('echo')\n```\n\n\
+        Loop forever on {{ item }}.\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    *ctx.tool_set()
+        .lock()
+        .expect("the tool set mutex is not poisoned") = crate::lua::ToolSet::for_test(
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+        Vec::new(),
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("a soft-degraded fanout still returns structured results");
+
+    assert_eq!(out, "ok");
+    let events = recorder.events();
+    let exhausted = detail::FANOUT_ARM_EXHAUSTED.to_string();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(section, event)| section == "Worker" && event == &exhausted)
+            .count(),
+        1,
+        "exactly one exhausted terminal event per exhausted arm: {events:?}"
+    );
+    let succeeded = detail::FANOUT_ARM_SUCCEEDED.to_string();
+    assert!(
+        !events
+            .iter()
+            .any(|(section, event)| section == "Worker" && event == &succeeded),
+        "an exhausted arm never emits succeeded: {events:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
+    // Cancellation while suspended in an arm: both arms are parked on slow
+    // infers when the cancel lands, so the driver aborts the in-flight I/O
+    // tasks and fails the run with Error::Interrupted, and each arm's
+    // finalizer drop reports its CANCELLED terminal observation - the
+    // exactly-once terminal contract holds on the cancellation path. The
+    // 30-second answers and the timeout guard prove the aborted I/O is
+    // never awaited.
+    use crate::cancel::{self, CancelHandle};
+
+    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+        "too late",
+        std::time::Duration::from_secs(30),
+    )])
+    .await;
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'one', 'two'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\nreturn models.infer('hang ' .. item)\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let cancel = CancelHandle::new();
+    let canceller = cancel.clone();
+    let calls = Arc::clone(&gateway.calls);
+    tokio::spawn(async move {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while calls.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        canceller.cancel();
+    });
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        cancel::scope(cancel, async {
+            Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+                .drive()
+                .await
+        }),
+    )
+    .await
+    .expect("cancellation must not wait on the aborted in-flight I/O");
+
+    assert!(
+        matches!(result, Err(Error::Interrupted)),
+        "cancelling suspended arms must interrupt the run, got {result:?}"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        2,
+        "both arms were suspended on their infers when the cancel landed"
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        2,
+        "both arms started: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        2,
+        "each suspended arm reports cancelled exactly once: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        0,
+        "no arm succeeded: {:?}",
+        recorder.events()
     );
 }
