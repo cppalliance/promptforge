@@ -8,7 +8,8 @@
 // the popovers, future keyboard shortcuts, and any future menu surface
 // all call the same actions. The Window menu reuses the window command
 // functions from window-chrome.ts. The Model menu is dynamic: it
-// rebuilds its rows from the model service's catalog on every open.
+// rebuilds its rows from the model service's catalog on every open, and
+// again on every workbench snapshot that arrives while it stays open.
 //
 // Edit commands go through document.execCommand: WebView2 hosts the page
 // as application content with clipboard access, and execCommand preserves
@@ -18,6 +19,7 @@
 
 import "./window-menu.css";
 
+import type { Event } from "../base/event";
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import { showAboutDialog } from "./about-dialog";
 import type { ModelService } from "../services/model-service";
@@ -60,15 +62,22 @@ export interface AgentMenuCommands {
 /**
  * The gateway-profile surface the Model menu reads and dispatches
  * through: the menu lists every profile with the active one checked, and
- * selecting another asks the gateway to switch. The catalog is read at
- * open time, so a switch completed while the menu was closed shows on
- * the next open.
+ * selecting another asks the gateway to switch. The state is read at
+ * open time and re-read on every onDidChange while the menu stays open,
+ * so a switch's progress shows without reopening.
  */
 export interface ProfileMenuService {
   /** Every profile the gateway can load, by name. */
   readonly profiles: readonly string[];
   /** The active profile's name, or "" when unknown. */
   readonly active: string;
+  /** The profile a switch is loading, or "" when no switch is running. */
+  readonly switching: string;
+  /**
+   * Fires when the state behind this view changes; the open Model
+   * popover rebuilds its rows on each firing. Absent on a static view.
+   */
+  readonly onDidChange?: Event<unknown>;
   /** Asks the gateway to switch to the named profile. */
   switchTo(name: string): void;
 }
@@ -326,8 +335,13 @@ export function setupWindowMenus(options: {
   // disabled row when the catalog is empty or no service was provided.
   // Below the models, a Profiles section lists the gateway's loadable
   // profiles the same way; selecting one switches the whole catalog.
+  // While a switch is loading, every row - model and profile alike -
+  // disables (the rows describe a catalog about to be replaced) and the
+  // switch target shows a pending mark where its check would land.
   function rebuildModelRows(handle: MenuHandle): void {
     const service = options.modelMenu;
+    const profileService = options.profileMenu;
+    const isIdle = (): boolean => !profileService?.switching;
     handle.popover.textContent = "";
     handle.rows.length = 0;
     const models = service ? service.models : [];
@@ -339,10 +353,11 @@ export function setupWindowMenus(options: {
     const appendRadioRow = (
       label: string,
       isSelected: boolean,
+      isPending: boolean,
       tooltip: string | undefined,
       run: () => void,
     ): void => {
-      appendRow({ kind: "command", label, run }, (element) => {
+      appendRow({ kind: "command", label, run, enabled: isIdle }, (element) => {
         element.classList.add("window-titlebar__item--checkable");
         element.setAttribute("role", "menuitemradio");
         element.setAttribute("aria-checked", isSelected ? "true" : "false");
@@ -351,8 +366,11 @@ export function setupWindowMenus(options: {
         }
         const check = document.createElement("span");
         check.className = "window-titlebar__item-check";
+        if (isPending) {
+          check.classList.add("window-titlebar__item-check--pending");
+        }
         check.setAttribute("aria-hidden", "true");
-        check.textContent = isSelected ? "✓" : "";
+        check.textContent = isPending ? "…" : isSelected ? "✓" : "";
         element.appendChild(check);
       });
     };
@@ -364,7 +382,7 @@ export function setupWindowMenus(options: {
     } else {
       const selected = service.current;
       for (const model of models) {
-        appendRadioRow(model.id, model.id === selected, model.description, () =>
+        appendRadioRow(model.id, model.id === selected, false, model.description, () =>
           service.setCurrent(model.id),
         );
       }
@@ -372,7 +390,6 @@ export function setupWindowMenus(options: {
     // The Profiles section only appears when the gateway actually offers a
     // choice; a single-profile (or profile-less) gateway keeps the menu as
     // it was.
-    const profileService = options.profileMenu;
     const profiles = profileService ? profileService.profiles : [];
     if (!profileService || profiles.length < 2) {
       return;
@@ -386,8 +403,12 @@ export function setupWindowMenus(options: {
       () => {},
     );
     for (const profile of profiles) {
-      appendRadioRow(profile, profile === profileService.active, undefined, () =>
-        profileService.switchTo(profile),
+      appendRadioRow(
+        profile,
+        profile === profileService.active,
+        !isIdle() && profile === profileService.switching,
+        undefined,
+        () => profileService.switchTo(profile),
       );
     }
   }
@@ -399,11 +420,27 @@ export function setupWindowMenus(options: {
     }
   }
 
+  // Alive only while the Model popover is open: each workbench snapshot
+  // rebuilds the rows in place, so the check and pending marks move
+  // without reopening. closeMenu and teardown both dispose it.
+  let modelWatch: IDisposable | null = null;
+  store.add(
+    toDisposable(() => {
+      modelWatch?.dispose();
+      modelWatch = null;
+    }),
+  );
+
   function openMenu(id: MenuId, focusFirst: boolean): void {
     closeMenu();
     const handle = handleFor(id);
     if (id === "model") {
       rebuildModelRows(handle);
+      modelWatch =
+        options.profileMenu?.onDidChange?.(() => {
+          rebuildModelRows(handle);
+          refreshEnabled(handle);
+        }) ?? null;
     }
     refreshEnabled(handle);
     // Align the popover under its button; absolute positioning keeps the
@@ -421,6 +458,8 @@ export function setupWindowMenus(options: {
     if (openId === null) {
       return;
     }
+    modelWatch?.dispose();
+    modelWatch = null;
     const handle = handleFor(openId);
     handle.popover.hidden = true;
     handle.button.setAttribute("aria-expanded", "false");
