@@ -343,7 +343,7 @@ mod absent {
     /// Hosts nothing: the `workshop` feature is not compiled in. A boot
     /// config that carries `[workshop]` anyway gets a warning, not an
     /// error, because the section is legal input for every build.
-    #[allow(
+    #[expect(
         clippy::unnecessary_wraps,
         reason = "the signature mirrors the workshop-feature variant"
     )]
