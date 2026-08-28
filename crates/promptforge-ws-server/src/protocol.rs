@@ -9,6 +9,19 @@
 //! shape change touches both or neither. The wire shapes are additionally
 //! frozen end to end by the characterization tests in `tests/it`.
 //!
+//! # Inbound chat-socket frames
+//!
+//! `{"type":"chat","id":N,"model":"...","messages":[...]}` opens one
+//! streaming completion: [`ChatRequest`] carries the fields forwarded
+//! upstream, and the optional `id` names the chat on every frame of its
+//! reply. `{"type":"cancel","id":N}` tears down the in-flight chat with
+//! that id (the untagged chat when the id is absent): the upstream
+//! completion is dropped and the tape records the abandonment, while
+//! every other chat on the socket streams on. A cancel naming no live
+//! chat is ignored, because a cancel racing its own `done` is normal.
+//! Neither frame is pushed by the server, so neither takes a delivery
+//! classification; the reply frames they trigger are classified below.
+//!
 //! # Delivery contract
 //!
 //! Every frame the server pushes carries exactly one of two delivery
@@ -55,6 +68,13 @@
 //! - [`WorkbenchFrame`] - ephemeral. Every push is a complete snapshot
 //!   of the server-owned Model-menu state, retained and resent on
 //!   reconnect, exactly like the catalog frame.
+//!
+//! Chat replies multiplex on one socket, and their ordering promise is
+//! per chat: frames within one chat are strictly ordered - deltas in
+//! stream order, the terminal `done` or `error` after every delta of its
+//! chat - while distinct chats stream concurrently and interleave
+//! freely, demuxed by the echoed `id`. The interleaving changes nothing
+//! about the durable classification of the chat reply frames above.
 //!
 //! Voice socket (`/voice`):
 //!
