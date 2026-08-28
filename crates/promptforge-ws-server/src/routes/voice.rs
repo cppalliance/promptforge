@@ -7,15 +7,21 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 
 use crate::app::AppState;
+use crate::deadline::{DEFAULT_DEADLINE, with_deadline};
 use crate::voice;
 
 /// The voice routes. They take the whole [`AppState`]: the session reaches
-/// the engine slot, the status bus, and the tape.
+/// the engine slot, the status bus, and the tape. The capability probe is
+/// local and instant, so it carries the default deadline; `/voice` is
+/// added after the layer and carries none - the upgrade answers
+/// immediately and the session then outlives any deadline.
 pub(crate) fn routes(state: AppState) -> Router {
-    Router::new()
-        .route("/voice", get(voice::upgrade))
-        .route("/voice/capability", get(voice_capability))
-        .with_state(state)
+    with_deadline(
+        Router::new().route("/voice/capability", get(voice_capability)),
+        DEFAULT_DEADLINE,
+    )
+    .route("/voice", get(voice::upgrade))
+    .with_state(state)
 }
 
 /// Reports whether voice transcription can run on the GPU, so the UI can
