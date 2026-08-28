@@ -110,13 +110,6 @@ pub(crate) enum SwitchOutcome {
     /// The gateway finished loading the target profile.
     Completed,
     /// The switch failed; the previously active profile still serves.
-    // An `allow` rather than an `expect`: the unit tests below construct
-    // this in test builds, so an expectation would be unfulfilled there
-    // and fail the -D warnings gate.
-    #[allow(
-        dead_code,
-        reason = "the switch runner reports failures in a later step"
-    )]
     Failed,
 }
 
@@ -145,10 +138,6 @@ impl MenuBus {
     }
 
     /// Subscribes to every snapshot published from this call onward.
-    // An `allow` rather than an `expect`: the unit tests below use this
-    // in test builds, so an expectation would be unfulfilled there and
-    // fail the -D warnings gate.
-    #[allow(dead_code, reason = "the /ws session loop subscribes in a later step")]
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<WorkbenchSnapshot> {
         self.sender.subscribe()
     }
@@ -170,10 +159,6 @@ impl MenuBus {
     /// # Errors
     /// Returns [`MenuRefusal::UnknownModel`] when `id` is not in the
     /// current catalog; the refused selection is not applied.
-    #[allow(
-        dead_code,
-        reason = "the /ws session loop wires the mutators in a later step"
-    )]
     pub(crate) fn set_selected(&self, id: &str) -> Result<(), MenuRefusal> {
         if !self.catalog_has(id) {
             return Err(MenuRefusal::UnknownModel { id: id.to_string() });
@@ -194,10 +179,6 @@ impl MenuBus {
     /// Returns [`MenuRefusal::SwitchInProgress`] while another switch
     /// runs - switches are single-flight because the gateway loads one
     /// profile at a time.
-    #[allow(
-        dead_code,
-        reason = "the /ws session loop wires the mutators in a later step"
-    )]
     pub(crate) fn begin_switch(&self, name: &str) -> Result<(), MenuRefusal> {
         let mut state = self.lock_state();
         if let Some(running) = &state.switching {
@@ -216,10 +197,6 @@ impl MenuBus {
     /// catalog still holds that model, else to the first catalog model.
     /// On [`SwitchOutcome::Failed`] the previous profile stays active. A
     /// finish with no switch in flight is logged and ignored (zone two).
-    #[allow(
-        dead_code,
-        reason = "the /ws session loop wires the mutators in a later step"
-    )]
     pub(crate) fn finish_switch(&self, outcome: SwitchOutcome) {
         let mut state = self.lock_state();
         let Some(target) = state.switching.take() else {
