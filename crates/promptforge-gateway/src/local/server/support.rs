@@ -40,11 +40,7 @@ impl ChildSpawner {
 
     pub(super) fn production() -> Self {
         Self::new(|request: &SpawnRequest<'_>| {
-            Command::new(request.executable)
-                .args(request.args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+            production_command(request)
                 .spawn()
                 .map_err(|source| LocalError::Spawn {
                     executable: request.executable.to_owned(),
@@ -65,6 +61,33 @@ impl std::fmt::Debug for ChildSpawner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ChildSpawner")
     }
+}
+
+/// Win32 `BELOW_NORMAL_PRIORITY_CLASS`. The raw value is a stable ABI
+/// constant, so naming it here avoids a `windows-sys` dependency in the main
+/// build.
+#[cfg(windows)]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+
+/// Builds the production `Command` for one `llama-server` launch attempt.
+///
+/// On Windows the child is created at `BELOW_NORMAL_PRIORITY_CLASS` so weight
+/// loading and inference yield CPU and I/O scheduling to interactive desktop
+/// processes. Non-Windows is a documented no-op: a `nice` port would need
+/// libc or `pre_exec` unsafe and is deferred.
+pub(super) fn production_command(request: &SpawnRequest<'_>) -> Command {
+    let mut command = Command::new(request.executable);
+    command
+        .args(request.args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    command
 }
 
 /// A narrow view of the `llama-server` `/v1/models` readiness response.
