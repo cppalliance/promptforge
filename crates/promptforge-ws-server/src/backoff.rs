@@ -103,12 +103,13 @@ impl ReconnectBackoff {
         let raw = state.current;
         let floor = raw / 2;
         // Delays are capped at the ceiling (a minute), so the span always
-        // fits; the fallback only guards the arithmetic.
+        // fits; the fallback only guards the arithmetic, and the
+        // saturating add keeps even the u64::MAX fallback from overflowing.
         let span = u64::try_from(raw.saturating_sub(floor).as_nanos()).unwrap_or(u64::MAX);
         let jitter = if span == 0 {
             0
         } else {
-            xorshift(&mut state.rng) % (span + 1)
+            xorshift(&mut state.rng) % span.saturating_add(1)
         };
         let delay = floor + Duration::from_nanos(jitter);
         state.spent = state.spent.saturating_add(delay);
@@ -142,8 +143,10 @@ impl ReconnectBackoff {
 }
 
 /// xorshift64: a tiny deterministic generator; jitter needs spread, not
-/// cryptography, and this keeps the dependency tree unchanged.
-fn xorshift(state: &mut u64) -> u64 {
+/// cryptography, and this keeps the dependency tree unchanged. Shared
+/// with the gateway tests, which seed it explicitly so each randomized
+/// failure names its seed.
+pub(crate) fn xorshift(state: &mut u64) -> u64 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
     *state ^= *state << 17;
