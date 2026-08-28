@@ -111,8 +111,11 @@ export function setupWindowChrome(): IDisposable {
   if (!drag || !minimize || !maximize || !close) {
     throw new Error("DOM Error: the title bar is missing a drag region or a window control.");
   }
-  const maximizeGlyph = maximize.querySelector<HTMLElement>(".window-titlebar__glyph--maximize");
-  const restoreGlyph = maximize.querySelector<HTMLElement>(".window-titlebar__glyph--restore");
+  // The glyphs are <svg>, which has no `hidden` IDL attribute, so visibility
+  // is toggled through the content attribute (with a matching [hidden] rule
+  // in window-chrome.css, since the UA rule covers only HTML elements).
+  const maximizeGlyph = maximize.querySelector<SVGSVGElement>(".window-titlebar__glyph--maximize");
+  const restoreGlyph = maximize.querySelector<SVGSVGElement>(".window-titlebar__glyph--restore");
   if (!maximizeGlyph || !restoreGlyph) {
     throw new Error("DOM Error: the maximize control is missing its glyphs.");
   }
@@ -142,8 +145,8 @@ export function setupWindowChrome(): IDisposable {
       return;
     }
     maximize.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
-    maximizeGlyph.hidden = maximized;
-    restoreGlyph.hidden = !maximized;
+    maximizeGlyph.toggleAttribute("hidden", maximized);
+    restoreGlyph.toggleAttribute("hidden", !maximized);
   };
   window.addEventListener(MAXIMIZED_EVENT, onMaximized);
   store.add(toDisposable(() => window.removeEventListener(MAXIMIZED_EVENT, onMaximized)));

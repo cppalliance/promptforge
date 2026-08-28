@@ -87,3 +87,11 @@
   background: var(--titlebar-close-hover, #b0606a);
   color: var(--titlebar-close-glyph-hover, #ffffff);
 }
+
+/* The maximize control swaps its two SVG glyphs via the hidden attribute;
+   the UA [hidden] rule covers only HTML-namespace elements, so SVG needs
+   an explicit rule. */
+.window-titlebar__glyph--maximize[hidden],
+.window-titlebar__glyph--restore[hidden] {
+  display: none;
+}
