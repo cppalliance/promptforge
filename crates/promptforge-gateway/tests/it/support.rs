@@ -111,6 +111,26 @@ pub(crate) async fn json_within(response: reqwest::Response) -> Value {
         .expect("HTTP body was not valid JSON")
 }
 
+/// Reads a full text body bounded by [`PHASE_TIMEOUT`] (IT-003), for SSE
+/// responses whose stream ends when the work behind them completes.
+pub(crate) async fn text_within(response: reqwest::Response) -> String {
+    tokio::time::timeout(PHASE_TIMEOUT, response.text())
+        .await
+        .expect("SSE body exceeded the phase timeout")
+        .expect("SSE body read failed")
+}
+
+/// Parses an SSE body into its `data:` JSON payloads.
+pub(crate) fn parse_sse(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter(|chunk| !chunk.trim().is_empty())
+        .map(|chunk| {
+            let data = chunk.trim().strip_prefix("data: ").expect("data prefix");
+            serde_json::from_str(data).expect("json event")
+        })
+        .collect()
+}
+
 /// Joins a spawned task bounded by [`PHASE_TIMEOUT`] (IT-003).
 pub(crate) async fn join_within<T>(handle: JoinHandle<T>) -> T {
     tokio::time::timeout(PHASE_TIMEOUT, handle)

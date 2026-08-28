@@ -14,7 +14,8 @@
 //! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
 //! gateway-owned local generative inference via a managed `llama-server`
 //! subprocess (`[[local_model]]`), named profiles with recursive `include`
-//! and immediate `POST /admin/switch-profile`, a bearer-authed
+//! and immediate `POST /admin/switch-profile` streaming its stages over
+//! SSE, a bearer-authed
 //! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, an on-demand blob cache
 //! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
@@ -423,7 +424,38 @@ async fn admin_status(
     })))
 }
 
-/// Immediately switches to another named profile.
+/// Immediately switches to another named profile, streaming its progress.
+///
+/// The reply is `text/event-stream`: a `{"stage": ...}` event opens each
+/// phase in execution order - `loading-profile` around config load and
+/// validation, `stopping-models` before the old local children shut down,
+/// `starting-models` before the new children load their weights into VRAM
+/// (the long pole) - and the stream ends with exactly one terminal event,
+/// `{"status": "ready", "profile": ...}` or `{"status": "error",
+/// "message": ...}`. There is no drain stage because the gateway does not
+/// drain. A refusal before the switch starts (bad auth, no profiles
+/// directory, a malformed name) stays a buffered JSON error envelope.
+///
+/// The switch itself runs on its own task ([`run_switch`]) and always runs
+/// to completion: a client disconnect drops only the response body and the
+/// stage receiver, never the half-finished switch.
+async fn admin_switch_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SwitchProfileRequest>,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let dir = profiles_dir(&state)?.to_path_buf();
+    let name = ProfileName::parse(&request.name)
+        .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
+    // Three stage markers into a bound of eight: try_send never drops here,
+    // and even a dropped marker would cost a progress line, not the switch.
+    let (stages, rx) = tokio::sync::mpsc::channel(8);
+    let switch = tokio::spawn(run_switch(state, dir, name, stages));
+    Ok(switch_sse_response(rx, switch))
+}
+
+/// Executes a profile switch, marking each phase on the `stages` channel.
 ///
 /// Switches are serialized by a dedicated mutex, so two concurrent requests
 /// cannot interleave. The new profile's env file loads before the profile
@@ -441,19 +473,16 @@ async fn admin_status(
 /// failure therefore leaves the previous profile authenticated and
 /// remote-routable but without its local models (a documented degraded
 /// state) rather than a half-applied new profile.
-async fn admin_switch_profile(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(request): Json<SwitchProfileRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
-    let dir = profiles_dir(&state)?.to_path_buf();
-    let name = ProfileName::parse(&request.name)
-        .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
-
+async fn run_switch(
+    state: AppState,
+    dir: PathBuf,
+    name: ProfileName,
+    stages: tokio::sync::mpsc::Sender<&'static str>,
+) -> Result<String, GatewayError> {
     // Serialize switches for the whole operation (LIB-008).
     let _switch = state.switch.lock().await;
 
+    let _ = stages.try_send("loading-profile");
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
         return Err(GatewayError::ProfileNotFound(name.to_string()));
@@ -482,6 +511,7 @@ async fn admin_switch_profile(
     // Stop the previous local children before starting new ones so the two
     // never hold VRAM simultaneously. The bearer key, routing, and web-search
     // settings are left untouched here, so auth stays stable if start fails.
+    let _ = stages.try_send("stopping-models");
     let old_local = {
         let mut live = state.live.write().await;
         std::mem::replace(&mut live.local, LocalRuntime::empty())
@@ -506,6 +536,7 @@ async fn admin_switch_profile(
         Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
     }
 
+    let _ = stages.try_send("starting-models");
     let new_local = match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
         Ok(Ok(runtime)) => runtime,
         Ok(Err(e)) => {
@@ -532,10 +563,63 @@ async fn admin_switch_profile(
     }
 
     tracing::info!(profile = %name, "switched profile");
-    Ok(Json(serde_json::json!({
-        "ok": true,
-        "profile": name.to_string(),
-    })))
+    Ok(name.to_string())
+}
+
+/// Builds the switch-profile SSE response: stage events drained from the
+/// channel, then the terminal event from the switch task's join result, so
+/// the outcome can never be lost to channel backpressure.
+///
+/// The channel closes when [`run_switch`] drops its sender, so the stage
+/// stream ends before the terminal event is awaited - the same ordering
+/// contract as the cache download stream.
+fn switch_sse_response(
+    mut rx: tokio::sync::mpsc::Receiver<&'static str>,
+    switch: tokio::task::JoinHandle<Result<String, GatewayError>>,
+) -> Response {
+    use futures_util::StreamExt as _;
+
+    let stages = futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx)).map(|stage| {
+        Ok::<_, std::convert::Infallible>(format!(
+            "data: {}\n\n",
+            serde_json::json!({ "stage": stage })
+        ))
+    });
+    let terminal = futures_util::stream::once(async move {
+        let payload = match switch.await {
+            Ok(Ok(profile)) => serde_json::json!({ "status": "ready", "profile": profile }),
+            Ok(Err(error)) => serde_json::json!({
+                "status": "error",
+                "message": error_chain(&error),
+            }),
+            Err(join_error) => serde_json::json!({
+                "status": "error",
+                "message": format!("switch task failed: {join_error}"),
+            }),
+        };
+        Ok::<_, std::convert::Infallible>(format!("data: {payload}\n\n"))
+    });
+    let mut response = Response::new(Body::from_stream(stages.chain(terminal)));
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+}
+
+/// Renders `error` with its full source chain for the terminal SSE error
+/// event: the stream has a single `message` field where the JSON envelope
+/// had `message` plus `code`, and a bare `switch profile failed at
+/// load-profile` without its cause tells the operator nothing.
+fn error_chain(error: &GatewayError) -> String {
+    use std::fmt::Write as _;
+
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        let _ = write!(message, ": {cause}");
+        source = cause.source();
+    }
+    message
 }
 
 fn profiles_dir(state: &AppState) -> Result<&Path, GatewayError> {

@@ -5,14 +5,15 @@ use std::fs;
 use promptforge_gateway::{Config, Gateway, ProfileName, ProfilesContext};
 use serde_json::Value;
 
-use crate::support::{TestServer, catalog_ids, fake_backend, json_within, send_within};
+use crate::support::{
+    TestServer, catalog_ids, fake_backend, json_within, parse_sse, send_within, text_within,
+};
 
-/// Switch-profile rebuilds the catalog from a remote-only profile (no llama spawn).
-#[tokio::test]
-async fn switch_profile_updates_models_catalog() {
+/// Two remote-only profiles, `alpha` (alpha-model) and `beta` (beta-model),
+/// with a gateway started on alpha; the tempdir is the profiles directory.
+async fn alpha_beta_server() -> (tempfile::TempDir, TestServer) {
     let backend = fake_backend().await;
     let profiles = tempfile::tempdir().unwrap();
-
     let profile_toml = |model: &str, context: u32| {
         format!(
             r#"
@@ -49,8 +50,38 @@ endpoints = ["fake"]
     let alpha = ProfileName::parse("alpha").unwrap();
     let config = Config::load_profile(profiles.path(), &alpha).unwrap();
     let context = ProfilesContext::new(Some(profiles.path().to_path_buf()), Some(alpha));
-    let gateway = Gateway::from_config(&config, context).unwrap();
-    let server = TestServer::start(gateway).await;
+    let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
+    (profiles, server)
+}
+
+/// Posts a switch for `name` and returns the parsed SSE events, asserting
+/// the stream handshake: an accepted switch is 200 `text/event-stream`.
+async fn switch_stream_events(
+    http: &reqwest::Client,
+    addr: std::net::SocketAddr,
+    name: &str,
+) -> Vec<Value> {
+    let response = send_within(
+        http.post(format!("http://{addr}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": name })),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+    parse_sse(&text_within(response).await)
+}
+
+/// Switch-profile rebuilds the catalog from a remote-only profile (no llama spawn).
+#[tokio::test]
+async fn switch_profile_updates_models_catalog() {
+    let (_profiles, server) = alpha_beta_server().await;
     let http = reqwest::Client::new();
 
     let ids = catalog_ids(&http, server.addr).await;
@@ -66,13 +97,11 @@ endpoints = ["fake"]
     .await;
     assert_eq!(listed["profiles"], serde_json::json!(["alpha", "beta"]));
 
-    let switched = send_within(
-        http.post(format!("http://{}/admin/switch-profile", server.addr))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "beta" })),
-    )
-    .await;
-    assert_eq!(switched.status().as_u16(), 200);
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    assert_eq!(
+        events.last(),
+        Some(&serde_json::json!({ "status": "ready", "profile": "beta" }))
+    );
 
     let ids = catalog_ids(&http, server.addr).await;
     assert_eq!(ids, vec!["beta-model"]);
@@ -90,54 +119,51 @@ endpoints = ["fake"]
     server.shutdown().await;
 }
 
-/// A failed switch (missing profile) leaves the live profile fully intact:
-/// same catalog, same working bearer key (LIB-009 stable credential), and a
-/// stable machine code on the 404 (IT-008).
+/// The switch stream carries its stage markers in execution order -
+/// loading-profile, then stopping-models, then starting-models - and ends
+/// with the terminal ready event naming the new profile. No drain stage
+/// exists because the gateway does not drain.
 #[tokio::test]
-async fn failed_switch_leaves_live_profile_intact() {
-    let backend = fake_backend().await;
-    let profiles = tempfile::tempdir().unwrap();
-    let alpha_toml = format!(
-        r#"
-[server]
-bind = "127.0.0.1:0"
-api_key = "test-token"
-
-[[endpoint]]
-id = "fake"
-protocol = "openai"
-base_url = "http://{backend}"
-api_key = ""
-
-[[model]]
-name = "alpha-model"
-description = "alpha catalog entry"
-context = 8192
-upstream = "backend-model"
-endpoints = ["fake"]
-"#
-    );
-    fs::write(profiles.path().join("alpha.toml"), alpha_toml).unwrap();
-
-    let alpha = ProfileName::parse("alpha").unwrap();
-    let config = Config::load_profile(profiles.path(), &alpha).unwrap();
-    let context = ProfilesContext::new(Some(profiles.path().to_path_buf()), Some(alpha));
-    let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
+async fn switch_profile_streams_stages_in_order_then_ready() {
+    let (_profiles, server) = alpha_beta_server().await;
     let http = reqwest::Client::new();
 
-    // Switch to a profile that does not exist: expect 404, no state change.
-    let missing = send_within(
-        http.post(format!("http://{}/admin/switch-profile", server.addr))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "ghost" })),
-    )
-    .await;
-    assert_eq!(missing.status().as_u16(), 404);
-    let body = json_within(missing).await;
+    let events = switch_stream_events(&http, server.addr, "beta").await;
     assert_eq!(
-        body.pointer("/error/code").and_then(Value::as_str),
-        Some("profile_not_found")
+        events,
+        vec![
+            serde_json::json!({ "stage": "loading-profile" }),
+            serde_json::json!({ "stage": "stopping-models" }),
+            serde_json::json!({ "stage": "starting-models" }),
+            serde_json::json!({ "status": "ready", "profile": "beta" }),
+        ]
     );
+    server.shutdown().await;
+}
+
+/// A failed switch (missing profile) leaves the live profile fully intact:
+/// same catalog, same working bearer key (LIB-009 stable credential). The
+/// failure arrives as the stream's terminal error event, after only the
+/// loading-profile stage - no child was stopped or started.
+#[tokio::test]
+async fn failed_switch_leaves_live_profile_intact() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    // Switch to a profile that does not exist: a terminal error event, no
+    // state change.
+    let events = switch_stream_events(&http, server.addr, "ghost").await;
+    assert_eq!(
+        events.first(),
+        Some(&serde_json::json!({ "stage": "loading-profile" }))
+    );
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    assert_eq!(
+        terminal["message"].as_str().expect("message"),
+        "profile not found: ghost"
+    );
+    assert_eq!(events.len(), 2, "no stopping or starting stage: {events:?}");
 
     // The original catalog and bearer key still work unchanged.
     assert_eq!(catalog_ids(&http, server.addr).await, vec!["alpha-model"]);
@@ -145,7 +171,8 @@ endpoints = ["fake"]
 }
 
 /// The boot file owns `[server]`: a profile whose merged `[server]` differs
-/// is rejected at switch time, leaving the live profile fully intact.
+/// is rejected at switch time - a terminal error event on the stream -
+/// leaving the live profile fully intact.
 #[tokio::test]
 async fn switch_profile_with_mismatched_server_section_fails() {
     let backend = fake_backend().await;
@@ -190,17 +217,15 @@ endpoints = ["fake"]
     let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
     let http = reqwest::Client::new();
 
-    let response = send_within(
-        http.post(format!("http://{}/admin/switch-profile", server.addr))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "beta" })),
-    )
-    .await;
-    assert_eq!(response.status().as_u16(), 400);
-    let body = json_within(response).await;
-    assert_eq!(
-        body.pointer("/error/code").and_then(Value::as_str),
-        Some("switch_failed")
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    assert!(
+        terminal["message"]
+            .as_str()
+            .expect("message")
+            .contains("switch profile failed at server-mismatch"),
+        "terminal event: {terminal}"
     );
 
     // The live profile is untouched: same catalog, same working bearer key.
@@ -310,13 +335,11 @@ async fn switch_profile_changes_the_loaded_set() {
     assert_eq!(status["profile"], "alpha");
     assert_eq!(status["model_allowlist"], serde_json::json!(["remote-a"]));
 
-    let switched = send_within(
-        http.post(format!("http://{}/admin/switch-profile", server.addr))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "beta" })),
-    )
-    .await;
-    assert_eq!(switched.status().as_u16(), 200);
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    assert_eq!(
+        events.last(),
+        Some(&serde_json::json!({ "status": "ready", "profile": "beta" }))
+    );
 
     let ids = catalog_ids(&http, server.addr).await;
     assert_eq!(ids, vec!["remote-b"]);
@@ -355,19 +378,24 @@ async fn switch_profile_runs_vram_check_on_the_new_loaded_set() {
     let http = reqwest::Client::new();
 
     // gamma selects both local models, over-booking gpu0 (14 + 14 > 24): the
-    // switch fails at config load, before any llama-server child starts.
-    let response = send_within(
-        http.post(format!("http://{}/admin/switch-profile", server.addr))
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({ "name": "gamma" })),
-    )
-    .await;
-    assert_eq!(response.status().as_u16(), 400);
-    let body = json_within(response).await;
+    // switch fails at config load - after the loading-profile stage but
+    // before any stopping or starting stage, so no llama-server child was
+    // touched - and the stream ends with a terminal error event.
+    let events = switch_stream_events(&http, server.addr, "gamma").await;
     assert_eq!(
-        body.pointer("/error/code").and_then(Value::as_str),
-        Some("switch_failed")
+        events.first(),
+        Some(&serde_json::json!({ "stage": "loading-profile" }))
     );
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    assert!(
+        terminal["message"]
+            .as_str()
+            .expect("message")
+            .contains("switch profile failed at load-profile"),
+        "terminal event: {terminal}"
+    );
+    assert_eq!(events.len(), 2, "no stopping or starting stage: {events:?}");
 
     // The live profile is untouched.
     assert_eq!(catalog_ids(&http, server.addr).await, vec!["remote-a"]);

@@ -28,14 +28,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Whole-request timeout for non-streaming operations: model catalog fetch,
 /// buffered chat completions, and the initial cache API handshake. Streaming
-/// responses (SSE chat and cache downloads) use no whole-request timeout
-/// since they can legitimately run for minutes.
+/// responses (SSE chat, cache downloads, and profile switches) use no
+/// whole-request timeout since they can legitimately run for minutes.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Whole-request timeout for a profile switch: the gateway tears down and
-/// starts local model children synchronously inside the call, and loading
-/// a large model into VRAM can take minutes.
-const SWITCH_PROFILE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// A gateway HTTP response captured for verbatim relay.
 #[derive(Debug)]
@@ -161,6 +156,107 @@ pub enum CacheEvent {
         /// The gateway's description of the failure.
         message: String,
     },
+}
+
+/// The gateway's answer to a profile switch, `POST /admin/switch-profile`.
+///
+/// An accepted switch answers `text/event-stream`: stage markers as the
+/// switch proceeds, then exactly one terminal `ready` or `error` event, all
+/// decoding as [`SwitchEvent`]. A refusal before the switch starts (bad
+/// auth, a malformed name, no profiles directory) is buffered rather than
+/// reported as an error, matching the relay contract of the other client
+/// methods.
+#[non_exhaustive]
+pub enum SwitchResponse {
+    /// The gateway accepted the switch and is streaming its progress.
+    #[non_exhaustive]
+    Switching {
+        /// The gateway's success status.
+        status: reqwest::StatusCode,
+        /// The SSE payload stream of [`SwitchEvent`] JSON documents, ending
+        /// in a terminal `ready` or `error` event.
+        payloads: SsePayloadStream,
+    },
+
+    /// A refusal, buffered: the gateway's error envelope.
+    #[non_exhaustive]
+    Buffered(GatewayResponse),
+}
+
+// Manual because the boxed payload stream has no `Debug` impl.
+impl std::fmt::Debug for SwitchResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Switching { status, .. } => f
+                .debug_struct("SwitchResponse::Switching")
+                .field("status", status)
+                .finish_non_exhaustive(),
+            Self::Buffered(response) => f
+                .debug_tuple("SwitchResponse::Buffered")
+                .field(response)
+                .finish(),
+        }
+    }
+}
+
+/// One event of the gateway's switch-profile stream: a stage marker as the
+/// switch proceeds, then exactly one terminal event.
+///
+/// Stage markers arrive in execution order - `loading-profile`,
+/// `stopping-models`, `starting-models` (the long pole: weights loading
+/// into VRAM). The stage stays a string so a gateway that grows a new
+/// stage never breaks the decode.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum SwitchEvent {
+    /// A phase of the switch is beginning.
+    #[non_exhaustive]
+    Stage {
+        /// The gateway's name for the phase, e.g. `starting-models`.
+        stage: String,
+    },
+
+    /// Terminal: the switch committed and `profile` is live.
+    #[non_exhaustive]
+    Ready {
+        /// The now-active profile name.
+        profile: String,
+    },
+
+    /// Terminal: the switch failed. The previous profile stays
+    /// authenticated and remote-routable, but its local children may
+    /// already be gone (the gateway's documented degraded state).
+    #[non_exhaustive]
+    Error {
+        /// The gateway's description of the failure.
+        message: String,
+    },
+}
+
+/// A stream of decoded [`SwitchEvent`]s, as produced by [`switch_events`].
+pub type SwitchEventStream = Pin<Box<dyn Stream<Item = Result<SwitchEvent, GatewayError>> + Send>>;
+
+/// Decodes a switch-profile payload stream into typed [`SwitchEvent`]s.
+///
+/// A payload that does not parse as a switch event is logged and skipped -
+/// a malformed line from the gateway degrades one progress update, never
+/// the switch - and the stream continues to its terminal event. A transport
+/// failure passes through and ends the stream.
+#[must_use]
+pub fn switch_events(payloads: SsePayloadStream) -> SwitchEventStream {
+    Box::pin(payloads.filter_map(|item| async move {
+        match item {
+            Ok(payload) => match serde_json::from_str::<SwitchEvent>(&payload) {
+                Ok(event) => Some(Ok(event)),
+                Err(error) => {
+                    tracing::warn!(%error, payload, "skipping a malformed switch-profile event");
+                    None
+                }
+            },
+            Err(error) => Some(Err(error)),
+        }
+    }))
 }
 
 /// A gateway request failure.
@@ -317,30 +413,39 @@ impl GatewayClient {
         read(response).await
     }
 
-    /// Posts a profile switch to `POST /admin/switch-profile`. The call is
-    /// capped at `SWITCH_PROFILE_TIMEOUT` rather than the ordinary
-    /// request timeout: the gateway restarts its local model children
-    /// inside the call.
+    /// Posts a profile switch to `POST /admin/switch-profile`.
     ///
-    /// A non-success status is relayed in the returned
-    /// [`GatewayResponse`], not reported as an error.
+    /// An accepted switch answers `text/event-stream` and returns
+    /// [`SwitchResponse::Switching`], whose payload stream carries stage
+    /// markers and then a terminal `ready` or `error` event (decode it with
+    /// [`switch_events`]). The call carries no whole-request timeout:
+    /// loading model weights into VRAM legitimately runs for minutes, and
+    /// the stream reports progress the whole way. A non-success or
+    /// non-streaming answer is buffered and returned, not reported as an
+    /// error.
     ///
     /// # Errors
     /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed and [`GatewayError::ReadBody`] if the response body cannot
-    /// be read.
-    pub async fn switch_profile(&self, name: &str) -> Result<GatewayResponse, GatewayError> {
+    /// completed and [`GatewayError::ReadBody`] if a buffered answer's body
+    /// cannot be read.
+    pub async fn switch_profile(&self, name: &str) -> Result<SwitchResponse, GatewayError> {
         let response = self
             .authorize(
                 self.http
                     .post(format!("{}/admin/switch-profile", self.base_url)),
             )
             .json(&serde_json::json!({ "name": name }))
-            .timeout(SWITCH_PROFILE_TIMEOUT)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
-        read(response).await
+        let status = response.status();
+        if status.is_success() && is_event_stream(&response) {
+            return Ok(SwitchResponse::Switching {
+                status,
+                payloads: payload_stream(response),
+            });
+        }
+        read(response).await.map(SwitchResponse::Buffered)
     }
 
     /// Posts a non-streaming chat completion to
@@ -433,12 +538,7 @@ impl GatewayClient {
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
         let status = response.status();
-        let streaming = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/event-stream"));
-        if status.is_success() && streaming {
+        if status.is_success() && is_event_stream(&response) {
             return Ok(CacheResponse::Download {
                 status,
                 payloads: payload_stream(response),
@@ -446,6 +546,15 @@ impl GatewayClient {
         }
         read(response).await.map(CacheResponse::Buffered)
     }
+}
+
+/// Whether the gateway answered with an SSE body.
+fn is_event_stream(response: &reqwest::Response) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"))
 }
 
 /// Captures the status and raw body of a gateway response.
@@ -821,6 +930,154 @@ mod tests {
             ],
             "the stream carries progress samples then the terminal ready"
         );
+    }
+
+    #[test]
+    fn switch_event_decodes_each_wire_shape() {
+        let stage: SwitchEvent =
+            serde_json::from_str(r#"{"stage":"stopping-models"}"#).expect("a stage marker decodes");
+        assert_eq!(
+            stage,
+            SwitchEvent::Stage {
+                stage: "stopping-models".to_string()
+            }
+        );
+        let ready: SwitchEvent =
+            serde_json::from_str(r#"{"status":"ready","profile":"beta"}"#).expect("ready decodes");
+        assert_eq!(
+            ready,
+            SwitchEvent::Ready {
+                profile: "beta".to_string()
+            }
+        );
+        let error: SwitchEvent =
+            serde_json::from_str(r#"{"status":"error","message":"boom"}"#).expect("error decodes");
+        assert_eq!(
+            error,
+            SwitchEvent::Error {
+                message: "boom".to_string()
+            }
+        );
+    }
+
+    /// Collects the typed events of a switch stream, panicking on a
+    /// transport error item.
+    async fn collect_switch_events(payloads: SsePayloadStream) -> Vec<SwitchEvent> {
+        let mut events = Vec::new();
+        let mut typed = switch_events(payloads);
+        while let Some(item) = typed.next().await {
+            events.push(item.expect("the stream is clean"));
+        }
+        events
+    }
+
+    #[tokio::test]
+    async fn an_accepted_switch_streams_stages_then_the_terminal_event() {
+        let app = axum::Router::new().route(
+            "/admin/switch-profile",
+            axum::routing::post(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    concat!(
+                        "data: {\"stage\":\"loading-profile\"}\n\n",
+                        "data: {\"stage\":\"stopping-models\"}\n\n",
+                        "data: {\"stage\":\"starting-models\"}\n\n",
+                        "data: {\"status\":\"ready\",\"profile\":\"beta\"}\n\n",
+                    ),
+                )
+            }),
+        );
+        let base_url = serve(app).await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let response = client
+            .switch_profile("beta")
+            .await
+            .expect("the request completes");
+        let SwitchResponse::Switching { payloads, .. } = response else {
+            panic!("an accepted switch streams, got {response:?}");
+        };
+        assert_eq!(
+            collect_switch_events(payloads).await,
+            [
+                SwitchEvent::Stage {
+                    stage: "loading-profile".to_string()
+                },
+                SwitchEvent::Stage {
+                    stage: "stopping-models".to_string()
+                },
+                SwitchEvent::Stage {
+                    stage: "starting-models".to_string()
+                },
+                SwitchEvent::Ready {
+                    profile: "beta".to_string()
+                },
+            ],
+            "the stream carries stage markers in order then the terminal ready"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_switch_event_is_skipped_and_the_stream_continues() {
+        let app = axum::Router::new().route(
+            "/admin/switch-profile",
+            axum::routing::post(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    concat!(
+                        "data: {\"stage\":\"loading-profile\"}\n\n",
+                        "data: this is not json\n\n",
+                        "data: {\"unrelated\":true}\n\n",
+                        "data: {\"status\":\"error\",\"message\":\"start-local failed\"}\n\n",
+                    ),
+                )
+            }),
+        );
+        let base_url = serve(app).await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let response = client
+            .switch_profile("beta")
+            .await
+            .expect("the request completes");
+        let SwitchResponse::Switching { payloads, .. } = response else {
+            panic!("an accepted switch streams, got {response:?}");
+        };
+        assert_eq!(
+            collect_switch_events(payloads).await,
+            [
+                SwitchEvent::Stage {
+                    stage: "loading-profile".to_string()
+                },
+                SwitchEvent::Error {
+                    message: "start-local failed".to_string()
+                },
+            ],
+            "malformed payloads are skipped; the terminal event still arrives"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_declined_switch_is_buffered_not_an_error() {
+        let app = axum::Router::new().route(
+            "/admin/switch-profile",
+            axum::routing::post(|| async {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    axum::Json(serde_json::json!({
+                        "error": {"message": "bad name", "code": "switch_failed"}
+                    })),
+                )
+            }),
+        );
+        let base_url = serve(app).await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let response = client
+            .switch_profile("../escape")
+            .await
+            .expect("a declined request still completes");
+        let SwitchResponse::Buffered(answer) = response else {
+            panic!("a declined switch is buffered, got {response:?}");
+        };
+        assert_eq!(answer.status, reqwest::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

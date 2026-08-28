@@ -19,7 +19,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use crate::support::{PHASE_TIMEOUT, TestServer, json_within, send_within, spawn_backend};
+use crate::support::{TestServer, json_within, parse_sse, send_within, spawn_backend, text_within};
 
 /// Starts the gateway with `[local].cache_dir` rooted at `cache_dir`.
 ///
@@ -169,17 +169,6 @@ async fn fake_file_server(body: &[u8]) -> (SocketAddr, Arc<FileServerState>) {
     (spawn_backend(router).await, state)
 }
 
-/// Parses an SSE body into its `data:` JSON payloads.
-fn parse_sse(body: &str) -> Vec<Value> {
-    body.split("\n\n")
-        .filter(|chunk| !chunk.trim().is_empty())
-        .map(|chunk| {
-            let data = chunk.trim().strip_prefix("data: ").expect("data prefix");
-            serde_json::from_str(data).expect("json event")
-        })
-        .collect()
-}
-
 /// Every regular file under `root`, recursively.
 fn all_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -218,10 +207,7 @@ async fn post_cache_streams_progress_then_ready_and_caches_the_blob() {
         response.headers().get(CONTENT_TYPE).unwrap(),
         "text/event-stream"
     );
-    let text = tokio::time::timeout(PHASE_TIMEOUT, response.text())
-        .await
-        .expect("SSE body exceeded the phase timeout")
-        .expect("SSE body read failed");
+    let text = text_within(response).await;
     let events = parse_sse(&text);
     assert!(
         events.len() >= 2,
@@ -298,10 +284,7 @@ async fn post_cache_digest_mismatch_streams_an_error_event() {
         response.headers().get(CONTENT_TYPE).unwrap(),
         "text/event-stream"
     );
-    let text = tokio::time::timeout(PHASE_TIMEOUT, response.text())
-        .await
-        .expect("SSE body exceeded the phase timeout")
-        .expect("SSE body read failed");
+    let text = text_within(response).await;
     let events = parse_sse(&text);
     let terminal = events.last().expect("a terminal event");
     assert_eq!(terminal["status"], "error");
