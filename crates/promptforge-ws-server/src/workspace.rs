@@ -309,7 +309,7 @@ impl Workspace {
             Err(source) if source.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(WorkspaceError::InspectPath { source }),
         }
-        fs::write(&canonical, text.as_bytes())
+        crate::atomic::write_atomic(&canonical, text.as_bytes())
             .map_err(|source| WorkspaceError::WriteFile { source })?;
         let metadata =
             fs::metadata(&canonical).map_err(|source| WorkspaceError::InspectPath { source })?;
@@ -679,6 +679,33 @@ mod tests {
         assert_eq!(read.text, "hello");
         assert_eq!(read.size, 5);
         assert_eq!(read.token, written.token);
+    }
+
+    #[test]
+    fn writes_leave_no_temp_file_behind() {
+        let (workspace, dir) = granted_dir();
+        let file = dir.path().join("notes.txt");
+        let written = workspace
+            .write_file(&file, "one", None)
+            .expect("the create write succeeds");
+        workspace
+            .write_file(&file, "two", Some(&written.token))
+            .expect("the overwrite succeeds");
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .expect("the granted directory is listable")
+            .map(|entry| {
+                entry
+                    .expect("the entry is readable")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            ["notes.txt"],
+            "the atomic write's temp file must not survive the write"
+        );
     }
 
     #[test]
