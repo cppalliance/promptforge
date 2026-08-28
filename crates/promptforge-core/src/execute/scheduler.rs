@@ -24,10 +24,13 @@
 //! callbacks, while the scheduler must stay unreachable from the callback
 //! layer.
 //!
-//! This module proves the scheduler core: a single section's blocks, infer,
-//! and nested execute. The full walk rules (fall-through order, off-walk
-//! skips, jumps) and the fanout dispatch land in later steps; a received
-//! `fanout` or `mcp` request is the protocol's typed reserved error.
+//! This module carries the scheduler core plus the core walk rules:
+//! sections run in fall-through order, a section marked off-walk is skipped
+//! unless the arrival is addressed (an execute target runs anyway), and the
+//! reply and `var` roll forward across sections while every section entry
+//! takes the next run-global id. Jumps and the fanout dispatch land in
+//! later steps; a received `fanout` or `mcp` request is the protocol's
+//! typed reserved error.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -93,21 +96,28 @@ struct JoinState {
 ///
 /// The chain owns its per-section frame and adds the chain position (the
 /// sibling slice being walked plus the current index), the coroutine handle
-/// for the in-flight Lua block, and the walk-scoped seeds (the reply and
-/// `var` the frame was seeded with). One section entry is one frame;
-/// advancing the walk tears the old frame down and constructs the next.
+/// for the in-flight Lua block, and the walk-scoped slots: the reply rolled
+/// forward across sections and the `var` clipboard. One section entry is
+/// one frame; the fall-through advance tears the old frame down and the
+/// next entry constructs the next.
 struct Chain<'a> {
     /// The chain's fork of the run context: the run's own for the root
     /// chain, `with_args` for an execute chain's input override.
     ctx: RunContext,
-    /// The per-section frame (VM, `sys`, conversation, counts); `Some`
-    /// until the chain's single finish takes it for the teardown boundary.
+    /// The per-section frame (VM, `sys`, conversation, counts): `Some`
+    /// while a section is entered, `None` before the first entry and
+    /// between sections.
     frame: Option<SectionContext>,
     /// The sibling slice the chain walks, borrowed from the prompt tree,
     /// which outlives the scheduler.
     slice: &'a [Section],
-    /// The section of `slice` the chain is running.
+    /// The section of `slice` the chain is running, or the next entry
+    /// candidate while the chain is between sections.
     index: usize,
+    /// Set when the next entry is an addressed arrival (an execute target):
+    /// an addressed section runs even when marked off-walk. One entry
+    /// consumes the flag; fall-through arrival is never addressed.
+    addressed: bool,
     /// The section's in-flight or next Lua/prose block: while `coroutine`
     /// is `Some` this is the suspended block's index, otherwise the next
     /// block to start.
@@ -117,6 +127,16 @@ struct Chain<'a> {
     coroutine: Option<Thread>,
     /// The answer delivered for a suspended coroutine, consumed at resume.
     incoming: Option<Answer>,
+    /// The walk-scoped reply slot: seeds each section's frame at entry and
+    /// is replaced by the section's final reply at its end, so the reply
+    /// crosses section boundaries.
+    reply: Option<String>,
+    /// The walk's clipboard: seeds each section's VM at entry; the
+    /// section's final `var` is read back before teardown and replaces the
+    /// slot. An execute chain's slot seeds from the caller's snapshot and
+    /// is discarded with the chain, so the caller never sees the chain's
+    /// writes.
+    var: serde_json::Value,
     /// The chain's execute nesting depth: each execute child runs one level
     /// deeper. The recursion cap checks this field, never the chain-stack
     /// length - fanout arms live on the ready queue, not the stack, so only
@@ -221,6 +241,7 @@ impl<'a> Scheduler<'a> {
             self.ctx.clone(),
             sections,
             0,
+            false,
             None,
             &serde_json::json!({}),
             0,
@@ -280,46 +301,43 @@ impl<'a> Scheduler<'a> {
         }
     }
 
-    /// Constructs one chain over `slice` from `index` and returns its id:
-    /// the frame construction (VM, limits, the scheduler-mode setup with
-    /// the yield shims) under the chain's own context fork, depth, and
-    /// `var` seed.
+    /// Creates one chain over `slice` from `index` and returns its id. The
+    /// chain enters its first section on its first step; `addressed` marks
+    /// an addressed arrival (an execute target), which runs even when the
+    /// section is marked off-walk. The chain's `var` slot seeds from `var`
+    /// (an execute chain's caller snapshot, discarded with the chain).
     ///
     /// # Errors
-    /// Returns the [`Error`] of frame construction, as documented on
-    /// [`SectionContext::new`].
+    /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the chain keeps its context fork, position, entry mode, parent, var seed, and depth explicit and linear"
+    )]
     fn start_chain(
         &mut self,
         ctx: RunContext,
         slice: &'a [Section],
         index: usize,
+        addressed: bool,
         parent: Option<ChainId>,
         var: &serde_json::Value,
         execute_depth: usize,
     ) -> Result<ChainId> {
-        let frame = SectionContext::new(
-            &ctx,
-            &slice[index],
-            slice,
-            next_id(ctx.ids()),
-            execute_depth,
-            None,
-            &None,
-            var,
-            VmSetupMode::Scheduler,
-        )?;
         let id = ChainId(
             u32::try_from(self.chains.len())
                 .map_err(|_| Error::Internal("a run's chain count cannot exceed u32"))?,
         );
         self.chains.push(Chain {
             ctx,
-            frame: Some(frame),
+            frame: None,
             slice,
             index,
+            addressed,
             block: 0,
             coroutine: None,
             incoming: None,
+            reply: None,
+            var: var.clone(),
             execute_depth,
             client: None,
             parent,
@@ -327,22 +345,66 @@ impl<'a> Scheduler<'a> {
         Ok(id)
     }
 
+    /// Enters the chain's next section and reports whether one was entered:
+    /// skips off-walk sections on fall-through arrival (an addressed
+    /// arrival runs its target anyway, and one entry consumes the flag),
+    /// then constructs the frame with the next run-global id, seeded from
+    /// the chain's reply, `var`, and client slots. `Ok(false)` means the
+    /// slice is exhausted and the chain ends.
+    ///
+    /// # Errors
+    /// Returns the [`Error`] of frame construction, as documented on
+    /// [`SectionContext::new`].
+    fn enter_section(&mut self, id: ChainId) -> Result<bool> {
+        let chain = &mut self.chains[id.index()];
+        let mut index = chain.index;
+        while index < chain.slice.len() && !chain.addressed && chain.slice[index].is_off_walk() {
+            index += 1;
+        }
+        chain.index = index;
+        chain.addressed = false;
+        if index >= chain.slice.len() {
+            return Ok(false);
+        }
+        // `slice` borrows the prompt tree, not the arena, so the frame
+        // construction can borrow the chain's own context and slots.
+        let slice = chain.slice;
+        let frame = SectionContext::new(
+            &chain.ctx,
+            &slice[index],
+            slice,
+            next_id(chain.ctx.ids()),
+            chain.execute_depth,
+            chain.reply.as_deref(),
+            &chain.client,
+            &chain.var,
+            VmSetupMode::Scheduler,
+        )?;
+        chain.frame = Some(frame);
+        chain.block = 0;
+        Ok(true)
+    }
+
     /// Runs one ready chain to its next suspension point: resume a
-    /// suspended coroutine with its delivered answer, or advance the block
-    /// walk - the next Lua block's coroutine, one prose block inline, or
-    /// the chain's finish when the section's blocks are exhausted.
+    /// suspended coroutine with its delivered answer, or advance the walk -
+    /// entering the next section, starting the next Lua block's coroutine,
+    /// running one prose block inline, or falling through at a section's
+    /// end.
     async fn step(&mut self, id: ChainId, root_result: &mut Option<Result<String>>) -> Result<()> {
         /// What the chain does next, decided under the chain borrow so the
         /// action phase can touch the scheduler's other fields.
         enum Advance {
             /// Resume the suspended coroutine with its delivered answer.
             Resume(Thread, Answer),
+            /// The chain is between sections: enter the next section, or
+            /// end the chain when the slice is exhausted.
+            EnterSection,
             /// Start the current Lua block as a fresh coroutine.
             StartLua,
             /// Run the current prose block inline.
             RunProse,
-            /// The section's blocks are exhausted.
-            Finish,
+            /// The section's blocks are exhausted: fall through.
+            SectionEnd,
         }
         let advance = {
             let chain = &mut self.chains[id.index()];
@@ -357,8 +419,10 @@ impl<'a> Scheduler<'a> {
                 return Err(Error::Internal(
                     "a ready chain's suspended coroutine waits on its answer",
                 ));
+            } else if chain.frame.is_none() {
+                Advance::EnterSection
             } else if chain.block >= chain.slice[chain.index].blocks.len() {
-                Advance::Finish
+                Advance::SectionEnd
             } else {
                 match &chain.slice[chain.index].blocks[chain.block] {
                     Block::Lua(_) => Advance::StartLua,
@@ -367,6 +431,7 @@ impl<'a> Scheduler<'a> {
             }
         };
         match advance {
+            Advance::EnterSection => self.advance_entry(id, root_result),
             Advance::Resume(thread, answer) => {
                 let chain = &self.chains[id.index()];
                 let slice = chain.slice;
@@ -429,11 +494,56 @@ impl<'a> Scheduler<'a> {
                 self.ready.push_back(id);
                 Ok(())
             }
-            Advance::Finish => {
-                self.finish(id, Ok(None), root_result);
+            Advance::SectionEnd => {
+                self.end_section(id)?;
+                self.ready.push_back(id);
                 Ok(())
             }
         }
+    }
+
+    /// Enters the chain's next section and requeues it, or finishes the
+    /// chain when its slice is exhausted.
+    ///
+    /// # Errors
+    /// Returns the [`Error`] of frame construction, as documented on
+    /// [`SectionContext::new`].
+    fn advance_entry(
+        &mut self,
+        id: ChainId,
+        root_result: &mut Option<Result<String>>,
+    ) -> Result<()> {
+        if self.enter_section(id)? {
+            self.ready.push_back(id);
+        } else {
+            // The walk ran off the slice's last section: the chain ends,
+            // carrying its reply slot.
+            self.finish(id, Ok(None), root_result);
+        }
+        Ok(())
+    }
+
+    /// Falls the chain through at its section's end: the reply crosses the
+    /// section boundary and the section's final `var` replaces the chain's
+    /// clipboard, both read back while the VM is live; the frame's drop is
+    /// the teardown boundary, firing `SECTION_FINISHED` for this completed
+    /// section; then the walk advances to the next section.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the final `var` read-back fails (the
+    /// frame drops unarmed, as on the legacy path), or
+    /// [`Error::Internal`] when the chain holds no frame.
+    fn end_section(&mut self, id: ChainId) -> Result<()> {
+        let chain = &mut self.chains[id.index()];
+        let Some(mut frame) = chain.frame.take() else {
+            return Err(Error::Internal("a section end implies a live frame"));
+        };
+        chain.reply = frame.reply();
+        chain.var = frame.read_var()?;
+        frame.mark_completed();
+        drop(frame);
+        chain.index += 1;
+        Ok(())
     }
 
     /// Applies one Lua block coroutine's outcome: parks a yielded chain on
@@ -662,20 +772,20 @@ impl<'a> Scheduler<'a> {
             JumpTarget::Child(child_index) => (caller.children.as_slice(), child_index),
             JumpTarget::Sibling(sibling_index) => (slice, sibling_index),
         };
-        let child = self.start_chain(child_ctx, child_slice, start, Some(id), var, depth)?;
+        let child = self.start_chain(child_ctx, child_slice, start, true, Some(id), var, depth)?;
         // The child inherits the caller's client slot: an already-resolved
         // client is shared, an unresolved one stays lazy.
         self.chains[child.index()].client = client;
         Ok(child)
     }
 
-    /// Finishes one chain: the frame's teardown boundary, then the
-    /// outcome's delivery - the run's result for the root chain, the
-    /// execute answer for a child chain.
+    /// Finishes one chain: the frame's teardown boundary when the chain
+    /// ends mid-section, then the outcome's delivery - the run's result for
+    /// the root chain, the execute answer for a child chain.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
-    /// block walk that ran off its section's end (the final reply is the
-    /// text), or the chain's failure.
+    /// walk that ran off its slice's last section (the chain's reply slot
+    /// is the text), or the chain's failure.
     fn finish(
         &mut self,
         id: ChainId,
@@ -684,17 +794,24 @@ impl<'a> Scheduler<'a> {
     ) {
         let chain = &mut self.chains[id.index()];
         let parent = chain.parent;
-        let Some(mut frame) = chain.frame.take() else {
-            // finish runs once per chain; a missing frame is a driver bug.
-            *root_result = Some(Err(Error::Internal(
-                "a chain's frame lives until its single finish",
-            )));
-            return;
-        };
+        // `None` when the chain ended by exhausting its slice: the last
+        // section's frame already dropped at the fall-through.
+        let mut frame = chain.frame.take();
+        let reply = chain.reply.clone();
         let outcome = outcome.and_then(|returned| {
+            // A chain ending mid-section (a scalar return) reads its final
+            // var back before teardown, exactly as a completed section does
+            // at fall-through (the walk rolls it forward; an execute chain
+            // discards its clone), and arms the completion flag so the
+            // frame's drop fires SECTION_FINISHED. A failure - the
+            // read-back's included - drops the frame unarmed.
+            if let Some(frame) = frame.as_mut() {
+                frame.read_var()?;
+                frame.mark_completed();
+            }
             let text = match returned {
                 Some(value) => value,
-                None => match frame.reply() {
+                None => match reply {
                     Some(reply) => reply,
                     // The legacy mapping: the top-level chain falls back to
                     // the shared generic completion, an execute chain to the
@@ -703,13 +820,6 @@ impl<'a> Scheduler<'a> {
                     None => String::new(),
                 },
             };
-            // The completed chain reads its final var back before teardown
-            // (the walk rolls it forward; an execute chain discards its
-            // clone) and arms the completion flag so the frame's drop fires
-            // SECTION_FINISHED. A failure - the read-back's included - drops
-            // the frame unarmed.
-            frame.read_var()?;
-            frame.mark_completed();
             Ok(text)
         });
         // The frame drops here: the single teardown boundary.
