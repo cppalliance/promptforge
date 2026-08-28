@@ -1,14 +1,14 @@
 // The persistent workshop socket: one WebSocket to /ws carries every
 // downstream JSON frame - chat replies for in-flight generations and
-// unsolicited status updates from the server's observer. Chat requests are
-// multiplexed by an incrementing id the server echoes on that chat's
-// delta/done/error frames; the UI runs one chat at a time, so the pending
-// map holds at most one entry in practice. The frame shapes themselves live
-// in protocol.ts.
+// unsolicited status, catalog, and workbench pushes from the server. Chat
+// requests are multiplexed by an incrementing id the server echoes on that
+// chat's delta/done/error frames, so several chats can stream on the socket
+// at once, each held in the pending map until its own terminal frame. The
+// frame shapes themselves live in protocol.ts.
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type { CatalogModel, ChatPayload, StatusFrame } from "./protocol";
+import type { CatalogModel, ChatPayload, StatusFrame, WorkbenchFrame } from "./protocol";
 
 /** The per-chat stream callbacks handed to `streamChat`. */
 export interface ChatStreamHandlers {
@@ -54,10 +54,11 @@ export const BOOT_QUEUE_CAP = 32;
 
 type QueuedPush =
   | { kind: "status"; frame: StatusFrame }
-  | { kind: "models"; models: CatalogModel[] };
+  | { kind: "models"; models: CatalogModel[] }
+  | { kind: "workbench"; frame: WorkbenchFrame };
 
 /**
- * Unsolicited server pushes (status, models) that arrive before `ready()`
+ * Unsolicited server pushes (status, models, workbench) that arrive before `ready()`
  * is called are held in a queue bounded at `BOOT_QUEUE_CAP` (drop-oldest)
  * and replayed in arrival order when the composition root declares itself
  * ready - handlers attached at different points of boot would otherwise
@@ -83,24 +84,28 @@ export class WorkshopSocket extends Disposable {
   /** Fires for every pushed model catalog. */
   readonly onModels: Event<CatalogModel[]> = this._onModels.event;
 
+  private readonly _onWorkbench = this._register(new Emitter<WorkbenchFrame>());
+  /** Fires for every pushed workbench snapshot. */
+  readonly onWorkbench: Event<WorkbenchFrame> = this._onWorkbench.event;
+
   private readonly _onDisconnect = this._register(new Emitter<void>());
   /** Fires when the socket disconnects. */
   readonly onDisconnect: Event<void> = this._onDisconnect.event;
 
   private readonly _onAbort = this._register(new Emitter<void>());
   /**
-   * Fires when an in-flight chat is aborted. The recycled socket cannot
-   * see the server's terminal status frame for the aborted chat, so
-   * listeners must clear local activity state themselves.
+   * Fires when an in-flight chat is aborted. The server answers a cancel
+   * with no reply frame, so no terminal status frame for the aborted chat
+   * ever arrives; listeners must clear local activity state themselves.
    */
   readonly onAbort: Event<void> = this._onAbort.event;
 
   constructor(private readonly url: string = defaultUrl()) {
     super();
-    // Disposal silences the socket before closing it (onclose detached the
-    // way reopen() does), so teardown is never mistaken for a dropout: no
-    // disconnect fan-out, no reconnect backoff. In-flight chats settle the
-    // same way a close would, so no caller awaits a reply forever.
+    // Disposal silences the socket before closing it (onclose detached
+    // first), so teardown is never mistaken for a dropout: no disconnect
+    // fan-out, no reconnect backoff. In-flight chats settle the same way a
+    // close would, so no caller awaits a reply forever.
     this._register(
       toDisposable(() => {
         if (this.reconnectTimer !== null) {
@@ -148,8 +153,9 @@ export class WorkshopSocket extends Disposable {
    * arrives. Rejects on an `error` frame, or on a socket close before any
    * answer content streamed (reasoning alone does not count); a close after
    * answer content started resolves, mirroring an SSE body that ends early.
-   * Aborting the signal detaches the chat and recycles the socket, which
-   * is what makes the server drop the orphaned gateway stream.
+   * Aborting the signal sends a cancel frame for this chat's id - the
+   * server drops that stream and answers with nothing - and settles this
+   * chat locally, while every other chat on the socket streams on.
    */
   async streamChat(
     payload: ChatPayload,
@@ -165,8 +171,10 @@ export class WorkshopSocket extends Disposable {
     await new Promise<void>((resolve, reject) => {
       const onAbort = (): void => {
         if (!this.pending.has(id)) return;
+        // When the socket is already down, its close settled or will settle
+        // everything server-side too, so the local settle is the whole job.
+        this.sendFrame({ type: "cancel", id });
         this.settle(id, (chat) => chat.resolve());
-        this.reopen();
         this._onAbort.fire(undefined);
       };
       const finish = (): void => signal.removeEventListener("abort", onAbort);
@@ -256,18 +264,39 @@ export class WorkshopSocket extends Disposable {
     }, delay);
   }
 
-  /** Closes the current socket and opens a fresh one. */
-  private reopen(): void {
+  /**
+   * Sends one `select_model` event frame naming the chat model. Returns
+   * false without sending when the socket is down, so the caller can show
+   * a status-bar error instead of the request vanishing silently; a
+   * refusal from the server arrives as an error frame, not here.
+   */
+  selectModel(id: string): boolean {
+    return this.sendFrame({ type: "select_model", model: id });
+  }
+
+  /**
+   * Sends one `switch_profile` event frame starting a gateway profile
+   * switch. The failure contract matches `selectModel`: false when the
+   * socket is down, nothing sent.
+   */
+  switchProfile(name: string): boolean {
+    return this.sendFrame({ type: "switch_profile", name });
+  }
+
+  /** Sends one JSON frame; false when the socket is down or the send threw. */
+  private sendFrame(frame: Record<string, unknown>): boolean {
     const socket = this.socket;
-    if (socket) {
-      // An intentional recycle, not a dropout: skip the disconnect
-      // handlers and the reconnect backoff for this close.
-      socket.onclose = null;
-      socket.close();
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
     }
-    // Same contract as `connect`: a failed reopen is retried by the next
-    // `streamChat`.
-    void this.ensureOpen().catch(() => {});
+    try {
+      socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      // A send that throws mid-close is the same failure as a closed
+      // socket; the close handler carries the cleanup.
+      return false;
+    }
   }
 
   private route(event: MessageEvent): void {
@@ -285,6 +314,10 @@ export class WorkshopSocket extends Disposable {
     if (frame.type === "models") {
       const models = Array.isArray(frame.models) ? (frame.models as CatalogModel[]) : [];
       this.deliverPush({ kind: "models", models });
+      return;
+    }
+    if (frame.type === "workbench") {
+      this.deliverPush({ kind: "workbench", frame: frame as unknown as WorkbenchFrame });
       return;
     }
     if (typeof frame.id !== "number") return;
@@ -335,8 +368,10 @@ export class WorkshopSocket extends Disposable {
   private emitPush(push: QueuedPush): void {
     if (push.kind === "status") {
       this._onStatus.fire(push.frame);
-    } else {
+    } else if (push.kind === "models") {
       this._onModels.fire(push.models);
+    } else {
+      this._onWorkbench.fire(push.frame);
     }
   }
 
