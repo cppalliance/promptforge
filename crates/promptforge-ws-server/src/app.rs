@@ -250,15 +250,21 @@ fn degrade(config: &VoiceConfig, push: &Push, error: &TranscribeError) -> Option
 
 /// Returns the workshop server router with every route mounted: each
 /// feature router from [`crate::routes`] built and merged, the workspace
-/// group narrowed to the one service its handlers use.
+/// group narrowed to the one service its handlers use. The API routes sit
+/// behind the [`crate::cross_site`] guard; `/health` and the UI assets
+/// stay outside it so the shell probe, heartbeat, and initial navigation
+/// keep working.
 pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
-    Router::new()
-        .merge(routes::assets::routes())
-        .merge(routes::health::routes())
+    let api = Router::new()
         .merge(routes::chat::routes(state.clone()))
         .merge(routes::voice::routes(state))
         .merge(routes::workspace::routes(workspace))
+        .layer(axum::middleware::from_fn(crate::cross_site::guard));
+    Router::new()
+        .merge(routes::assets::routes())
+        .merge(routes::health::routes())
+        .merge(api)
 }
 
 /// Shared fixtures for the router tests here and in [`crate::relay`],
