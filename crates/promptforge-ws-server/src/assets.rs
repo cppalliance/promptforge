@@ -45,9 +45,12 @@ mod tests {
     // These pin traversal parity between the two build profiles: release
     // misses the embed map by construction, while a debug build reads
     // `ui/dist/` from disk at request time and must refuse names resolving
-    // outside it. Each target is this crate's own manifest - a file that
-    // exists on disk - so the debug path can only fail on containment,
-    // never on a missing file.
+    // outside it. That guarantee covers request-supplied names only:
+    // rust-embed 8.12.0 deliberately still serves an out-of-root symlink
+    // planted inside `ui/dist/`, a bypass outside the parity pinned here.
+    // Each target is this crate's own manifest - a file that exists on
+    // disk - so the debug path can only fail on containment, never on a
+    // missing file.
 
     #[test]
     fn relative_traversal_answers_not_found() {
