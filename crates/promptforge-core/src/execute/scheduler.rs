@@ -24,12 +24,15 @@
 //! callbacks, while the scheduler must stay unreachable from the callback
 //! layer.
 //!
-//! This module carries the scheduler core plus the core walk rules:
-//! sections run in fall-through order, a section marked off-walk is skipped
-//! unless the arrival is addressed (an execute target runs anyway), and the
-//! reply and `var` roll forward across sections while every section entry
-//! takes the next run-global id. Jumps and the fanout dispatch land in
-//! later steps; a received `fanout` or `mcp` request is the protocol's
+//! This module carries the scheduler core plus the walk rules: sections run
+//! in fall-through order, a section marked off-walk is skipped unless the
+//! arrival is addressed (a jump or execute target runs anyway), the reply
+//! and `var` roll forward across sections and jumps, every section entry
+//! takes the next run-global id, and a jump transfers control - a sibling
+//! move within the chain's slice, or a descent into the jumper's child
+//! slice with the parent position suspended on the chain's own position
+//! stack until the child level exhausts. The fanout dispatch lands in a
+//! later step; a received `fanout` or `mcp` request is the protocol's
 //! typed reserved error.
 
 use std::collections::{HashMap, VecDeque};
@@ -109,11 +112,17 @@ struct Chain<'a> {
     /// between sections.
     frame: Option<SectionContext>,
     /// The sibling slice the chain walks, borrowed from the prompt tree,
-    /// which outlives the scheduler.
+    /// which outlives the scheduler. A jump to a child swaps this to the
+    /// jumper's child slice until the child level exhausts.
     slice: &'a [Section],
     /// The section of `slice` the chain is running, or the next entry
     /// candidate while the chain is between sections.
     index: usize,
+    /// The suspended parent positions of the chain's jump-started child
+    /// walks: the parent slice plus the jumper's index in it. A jump to a
+    /// child pushes the current position and descends; when the child
+    /// level exhausts, the pop resumes the parent after the jumper.
+    positions: Vec<(&'a [Section], usize)>,
     /// Set when the next entry is an addressed arrival (an execute target):
     /// an addressed section runs even when marked off-walk. One entry
     /// consumes the flag; fall-through arrival is never addressed.
@@ -332,6 +341,7 @@ impl<'a> Scheduler<'a> {
             frame: None,
             slice,
             index,
+            positions: Vec::new(),
             addressed,
             block: 0,
             coroutine: None,
@@ -515,12 +525,33 @@ impl<'a> Scheduler<'a> {
     ) -> Result<()> {
         if self.enter_section(id)? {
             self.ready.push_back(id);
+        } else if self.pop_position(id) {
+            // A jump-started child level exhausted: the parent walk resumes
+            // after the jumper with the child walk's last reply (already
+            // the chain's reply slot, shared across the descent).
+            self.ready.push_back(id);
         } else {
             // The walk ran off the slice's last section: the chain ends,
             // carrying its reply slot.
             self.finish(id, Ok(None), root_result);
         }
         Ok(())
+    }
+
+    /// Resumes a jump-suspended parent position when a child level
+    /// exhausts, returning `false` when the chain holds no suspended
+    /// position - meaning its own root slice exhausted and the chain ends.
+    /// The reply and `var` slots need no handling: the child walk shared
+    /// them, so they already carry the child level's last values.
+    fn pop_position(&mut self, id: ChainId) -> bool {
+        let chain = &mut self.chains[id.index()];
+        let Some((slice, jumper)) = chain.positions.pop() else {
+            return false;
+        };
+        chain.slice = slice;
+        chain.index = jumper + 1;
+        chain.addressed = false;
+        true
     }
 
     /// Falls the chain through at its section's end: the reply crosses the
@@ -543,6 +574,56 @@ impl<'a> Scheduler<'a> {
         frame.mark_completed();
         drop(frame);
         chain.index += 1;
+        Ok(())
+    }
+
+    /// Applies a jump's control transfer: closes the jumper's frame as
+    /// completed (the reply read back from the jumper's VM, so an author's
+    /// `reply = nil` or custom string steers the target; the final `var`
+    /// rolled forward; the armed drop firing `SECTION_FINISHED`, a jump
+    /// being a completion), resolves the heading against the jumper's
+    /// visible set, and moves the walk. A sibling target sets the index
+    /// within the same slice, addressed; a child target pushes the current
+    /// position onto the chain's position stack and descends into the
+    /// jumper's child slice from the target, addressed.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the reply or `var` read-back fails (the
+    /// frame drops unarmed, as on the legacy path) or when the heading
+    /// matches no visible section or more than one - the jumper's frame has
+    /// already closed as completed, exactly as the legacy walk resolves
+    /// after the jumper's teardown.
+    fn apply_jump(&mut self, id: ChainId, heading: &str) -> Result<()> {
+        let (slice, index) = {
+            let chain = &mut self.chains[id.index()];
+            let Some(mut frame) = chain.frame.take() else {
+                return Err(Error::Internal("a jump implies a live frame"));
+            };
+            frame.read_reply()?;
+            chain.reply = frame.reply();
+            chain.var = frame.read_var()?;
+            frame.mark_completed();
+            drop(frame);
+            (chain.slice, chain.index)
+        };
+        // `slice` borrows the prompt tree, not the arena, so the jumper and
+        // its child slice outlive the chain borrow above.
+        let jumper = &slice[index];
+        match resolve_jump_target(heading, slice, jumper)? {
+            JumpTarget::Sibling(target) => {
+                let chain = &mut self.chains[id.index()];
+                chain.index = target;
+                chain.addressed = true;
+            }
+            JumpTarget::Child(child) => {
+                let children = jumper.children.as_slice();
+                let chain = &mut self.chains[id.index()];
+                chain.positions.push((slice, index));
+                chain.slice = children;
+                chain.index = child;
+                chain.addressed = true;
+            }
+        }
         Ok(())
     }
 
@@ -588,15 +669,14 @@ impl<'a> Scheduler<'a> {
                     }
                 }
             }
-            CoroStep::Done(LuaBlockResult::Jump(_)) => {
-                // The chunk completed with a jump transfer marker, so the
-                // chunk boundary reports success; the walk translation that
-                // makes a jump a control transfer lands in a later step.
+            CoroStep::Done(LuaBlockResult::Jump(heading)) => {
+                // A jump is a control transfer, not a failure: the chunk
+                // boundary reports success and the walk moves to the
+                // resolved target.
                 observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
-                Err(Error::Lua(
-                    "the scheduler does not walk jumps yet: the walk translation lands in a later step"
-                        .to_owned(),
-                ))
+                self.apply_jump(id, &heading)?;
+                self.ready.push_back(id);
+                Ok(())
             }
             CoroStep::Done(LuaBlockResult::Returned(value)) => {
                 observer.observe(&execution, &name, detail::LUA_CHUNK_SUCCEEDED);
