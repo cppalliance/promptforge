@@ -31,14 +31,14 @@
 "chat_ws.rs" = 2851
 "config.rs" = 593
 "error.rs" = 484
-"gateway.rs" = 1106
+"gateway.rs" = 1107
 "heartbeat.rs" = 706
 "lib.rs" = 53
 "main.rs" = 47
-"menu.rs" = 755
+"menu.rs" = 802
 "protocol.rs" = 738
 "provision.rs" = 839
-"push.rs" = 292
+"push.rs" = 274
 "relay.rs" = 473
 "routes.rs" = 8
 "routes/assets.rs" = 117

@@ -123,8 +123,8 @@ pub(crate) fn spawn(
 }
 
 /// The probe loop: one probe per interval, a status update per transition,
-/// and the stop signal wins over the tick, an in-flight probe, and an
-/// in-flight catalog refresh.
+/// and the stop signal wins over the tick, an in-flight probe, an
+/// in-flight profile refresh, and an in-flight catalog refresh.
 async fn run(
     client: &GatewayClient,
     push: &Push,
