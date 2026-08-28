@@ -52,7 +52,7 @@
 //! `append` stays legal with unspecified order. A received `mcp` request
 //! is the protocol's typed reserved error.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
@@ -399,6 +399,19 @@ pub(crate) struct Scheduler<'a> {
     /// every handle is aborted on cancellation, and aborting a completed
     /// task is a no-op.
     io_tasks: HashMap<RequestId, AbortHandle>,
+    /// The request ids whose in-flight tasks an abort discarded: a task
+    /// that posted its answer before the abort landed delivers it late,
+    /// and the driver discards exactly those answers. An unknown id that
+    /// was never aborted means the driver dropped a pending entry early -
+    /// answer loss that fails loudly rather than passing silently. An id
+    /// leaves the set when its late answer arrives, so the set stays
+    /// bounded by the aborts whose answers have not landed.
+    aborted_requests: HashSet<RequestId>,
+    /// The most chains one run may start: the arena indexes chains by
+    /// `u32`, so the count is bounded by the index space. A field rather
+    /// than a constant so a test can shrink the bound and drive the
+    /// overflow path without allocating the real one.
+    max_chains: usize,
     /// The next leaf-request id.
     next_request: u64,
     /// The next fanout id.
@@ -430,6 +443,8 @@ impl<'a> Scheduler<'a> {
             answer_tx,
             answers,
             io_tasks: HashMap::new(),
+            aborted_requests: HashSet::new(),
+            max_chains: u32::MAX as usize,
             next_request: 0,
             next_fanout: 0,
             client: GatewaySource::from_optional(client, ctx.limits()),
@@ -452,6 +467,22 @@ impl<'a> Scheduler<'a> {
             self.ctx.model_set(),
         ));
         self
+    }
+
+    /// Shrinks the chain-count bound so a test can drive the
+    /// [`start_chain`](Self::start_chain) overflow path.
+    #[cfg(test)]
+    pub(crate) fn set_max_chains_for_test(&mut self, limit: usize) {
+        self.max_chains = limit;
+    }
+
+    /// Posts an answer for an arbitrary request id, so a test can drive
+    /// the driver's unknown-answer paths directly.
+    #[cfg(test)]
+    pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer) {
+        self.answer_tx
+            .send((RequestId(request), answer))
+            .expect("the scheduler holds its own receiver");
     }
 
     /// Drives the run until it ends and returns the run's result: the live
@@ -540,9 +571,16 @@ impl<'a> Scheduler<'a> {
                         // A late answer from an I/O task whose chain was
                         // already aborted (a fatal sibling's fanout abort
                         // races a task that sent before the abort landed):
-                        // the abort removed the pending entry, so the answer
-                        // is moot.
-                        continue;
+                        // the abort recorded the request id, so the answer
+                        // is moot. Any other unknown id means the driver
+                        // dropped a pending entry early - answer loss that
+                        // must fail loudly, not pass silently.
+                        if self.aborted_requests.remove(&request_id) {
+                            continue;
+                        }
+                        return Err(Error::Internal(
+                            "an answer arrived for a request with no pending entry and no recorded abort",
+                        ));
                     };
                     self.chains[chain_id.index()].incoming = Some(answer);
                     self.ready.push_back(chain_id);
@@ -576,6 +614,9 @@ impl<'a> Scheduler<'a> {
         execute_depth: usize,
         arm: Option<ArmState<'a>>,
     ) -> Result<ChainId> {
+        if self.chains.len() >= self.max_chains {
+            return Err(Error::Internal("a run's chain count cannot exceed u32"));
+        }
         let id = ChainId(
             u32::try_from(self.chains.len())
                 .map_err(|_| Error::Internal("a run's chain count cannot exceed u32"))?,
@@ -1593,7 +1634,22 @@ impl<'a> Scheduler<'a> {
                 },
             },
         );
-        self.refill_fanout(fanout_id)
+        // A mid-refill failure (the run's chain count exceeding the bound)
+        // must not propagate with the join live and a partial window
+        // enqueued: the caller resumes with this error as the fanout's
+        // answer, and a late arm completion against the live join would
+        // resume the parent a second time. Tear the fanout down instead -
+        // the join goes and the started arms abort, each finalizer drop
+        // reporting FANOUT_ARM_CANCELLED exactly as on fail_fanout's path -
+        // and leave the parent's answer to the caller.
+        if let Err(error) = self.refill_fanout(fanout_id) {
+            self.joins.remove(&fanout_id);
+            for arm in self.arm_chains_of(fanout_id) {
+                self.abort_subtree(arm);
+            }
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Starts arm chains for one fanout while a window slot is free and
@@ -1827,6 +1883,11 @@ impl<'a> Scheduler<'a> {
             .find_map(|(request, chain)| (*chain == id).then_some(*request));
         if let Some(request) = request {
             self.pending.remove(&request);
+            // Record the aborted request so its task's late answer (a send
+            // that landed before the abort) is the one unknown-id answer
+            // the driver discards; anything else stays a loud invariant
+            // failure.
+            self.aborted_requests.insert(request);
             if let Some(task) = self.io_tasks.remove(&request) {
                 task.abort();
             }

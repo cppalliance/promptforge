@@ -26,8 +26,10 @@ mod tools;
 
 /// Parses arguments, runs the requested command, and maps its result to a
 /// process exit status. `clap` owns usage failures and their status; this
-/// returns 130 for a cancelled run and 1 for any other failure.
-#[tokio::main]
+/// returns 130 for a cancelled run and 1 for any other failure. The
+/// current-thread flavor suffices: the executor interleaves a run's chains
+/// on the driver task's one thread.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let cancel = install_cancel();

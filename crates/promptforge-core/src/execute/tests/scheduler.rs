@@ -15,6 +15,7 @@
 use std::num::NonZeroUsize;
 
 use super::*;
+use crate::execute::protocol::Answer;
 use crate::execute::scheduler::Scheduler;
 use crate::model::{ModelBinding, ModelId, ModelInvocation};
 
@@ -3214,5 +3215,94 @@ async fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
         0,
         "no arm succeeded: {:?}",
         recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_mid_refill_arm_start_failure_tears_down_the_join() {
+    // With the chain-count bound shrunk so the second arm's start fails
+    // mid-refill, the fanout dispatch must discard the join and abort the
+    // partial window: the parent resumes with the error answer exactly
+    // once, and no late arm completion against a still-live join can
+    // re-resume it while it sits suspended on its own infer. The second
+    // arm's half-built state drops at the failure (STARTED then
+    // CANCELLED), and the first arm aborts with the torn-down join.
+    let gateway = ScriptedGateway::start(vec![resp_text("after-answer")]).await;
+    let recorder = Arc::new(Recorder::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Fanout\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local ok, err = pcall(fanout, '### Worker', {'one', 'two', 'three'})\n\
+        assert(not ok, 'the refill failure reaches the caller')\n\
+        return 'caught:' .. models.infer('after')\n\
+        ```\n\n\
+        ### Worker\n\n\
+        ```lua\nreturn 'worked:' .. item\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context_on(&prompt, &StoreRef::memory(), recorder.clone());
+    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    // The root walk chain is id 0 and the first arm id 1; the second arm's
+    // start trips the bound.
+    scheduler.set_max_chains_for_test(2);
+    let out = scheduler
+        .drive()
+        .await
+        .expect("the caught refill failure lets the caller continue");
+
+    assert_eq!(out, "caught:after-answer");
+    assert_eq!(
+        request_prompts(&gateway),
+        vec!["after"],
+        "no arm ran an infer; only the caller's own request fired"
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_STARTED),
+        2,
+        "both window arms reached the dispatch boundary: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_CANCELLED),
+        2,
+        "the half-built arm drops at the failure and the started arm aborts: {:?}",
+        recorder.events()
+    );
+    assert_eq!(
+        terminal_count(&recorder, &detail::FANOUT_ARM_SUCCEEDED),
+        0,
+        "no arm ran to completion: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_answer_for_an_unknown_request_id_fails_loudly() {
+    // An answer arriving with no pending entry and no recorded abort means
+    // the driver dropped a pending entry early: the run must fail with
+    // Error::Internal rather than silently discard the answer. Only an
+    // abort-recorded id (a fatal sibling's late I/O answer, covered by
+    // `a_caught_fanout_failure_lets_the_caller_continue`) may be
+    // discarded.
+    let gateway = ScriptedGateway::start(vec![resp_text("real-answer")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Infer\n\n\
+        ## Only\n\n\
+        ```lua\nreturn models.infer('ask')\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let mut scheduler = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())));
+    // Posted before the drive, so the channel delivers it first: the
+    // driver reaches the select with the phantom answer ahead of the real
+    // infer's.
+    scheduler.post_answer_for_test(u64::MAX, Answer::Infer(Ok("phantom".to_owned())));
+    let error = scheduler
+        .drive()
+        .await
+        .expect_err("an answer no pending entry explains must fail the run");
+
+    assert!(
+        matches!(error, Error::Internal(message) if message.contains("no pending entry")),
+        "the unknown answer is a loud invariant failure: {error}"
     );
 }

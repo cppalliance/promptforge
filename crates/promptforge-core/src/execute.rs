@@ -43,6 +43,16 @@
 //! Lua `jump(target)` transfers control to a named section: the conversation
 //! is cleared and the current reply carries across the jump.
 //!
+//! # Runtime
+//!
+//! One driver task runs a whole prompt: section Lua yields request messages
+//! to the chain-stack scheduler, which awaits I/O without blocking a worker
+//! thread and resumes the chain with the answer, so a run needs no
+//! particular Tokio runtime flavor - a current-thread runtime runs any
+//! prompt, host calls included. Concurrency (a fanout's arms) comes from
+//! interleaving chains at I/O points on the driver's thread, not from
+//! worker threads.
+//!
 //! # Module layout
 //!
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
@@ -152,12 +162,12 @@ pub(crate) use crate::model::ModelSet;
 /// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
 /// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
 /// - [`RunErrorKind::Cancelled`] - the host cancelled the run.
-/// - [`RunErrorKind::Internal`] - an internal invariant failed (for example a
-///   Lua host call reached on a current-thread runtime, which returns this
-///   rather than panicking).
+/// - [`RunErrorKind::Internal`] - an internal invariant failed.
 ///
 /// # Examples
-/// A no-network, Lua-only prompt whose H1 block returns a value:
+/// A no-network prompt whose walk makes a nested host call: `execute` is a
+/// structural request the scheduler drives on the run's one thread, so the
+/// current-thread runtime below runs the whole prompt, host calls included:
 /// ```
 /// use promptforge_core::execute::{run, RunConfig, ResolutionContext};
 /// use promptforge_core::model::ModelCatalog;
@@ -170,8 +180,10 @@ pub(crate) use crate::model::ModelSet;
 /// let source = concat!(
 ///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
 ///     "# Title\n\n",
-///     "```lua\nreturn 'hello'\n```\n\n",
-///     "## Only\n\ndone\n",
+///     "## Calls\n\n",
+///     "```lua\nreturn execute('## Answers')\n```\n\n",
+///     "## Answers\n\n",
+///     "```lua\nreturn 'hello'\n```\n",
 /// );
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 /// let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
@@ -191,11 +203,14 @@ pub(crate) use crate::model::ModelSet;
 /// ```
 ///
 /// # Runtime
-/// Nested Lua host calls (`model:infer`, `execute`, `fanout`) bridge synchronous
-/// Lua into async work via `tokio::task::block_in_place`, which requires the
-/// multi-threaded Tokio runtime. Reaching such a call on a current-thread
-/// runtime returns [`RunErrorKind::Internal`] rather than panicking (a prompt
-/// with no nested host calls, like the example above, runs on either runtime).
+/// A run needs no particular Tokio runtime flavor. Every chain step - all
+/// Lua, the walk, execute chains, and fanout joins - executes inside the
+/// one driver task, and suspending Lua host calls (`models.infer`,
+/// `execute`, `fanout`) are coroutine yields the scheduler answers, so no
+/// host call parks a worker thread. Concurrency (a fanout's arms) comes
+/// from interleaving chains at I/O points, not from threads; on a
+/// multi-thread runtime only the leaf I/O waits, which never touch Lua or
+/// scheduler state, may run on other workers.
 pub async fn run(
     prompt: &Prompt,
     args: &str,
