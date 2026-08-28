@@ -40,7 +40,7 @@ mod web_search_process;
 mod wire;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
-pub use crate::runner::{Gateway, ProfilesContext, ServeOptions, run};
+pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};
 pub use promptforge_gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
 };
