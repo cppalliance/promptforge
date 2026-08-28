@@ -4097,6 +4097,7 @@ dependencies = [
  "futures-util",
  "hound",
  "open",
+ "percent-encoding",
  "promptforge-ws-server",
  "reqwest 0.12.28",
  "rust-embed",
@@ -4112,6 +4113,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
  "whisper-rs",
 ]
 

@@ -50,10 +50,13 @@ use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::http::HeaderMap;
+use axum::response::{IntoResponse, Response};
 use tokio::sync::watch;
 
 use crate::app::AppState;
+use crate::cross_site;
+use crate::error::AppError;
 use crate::protocol::{Activity, FinalFrame, InterimFrame, StreamFrame, VOICE_START, VOICE_STOP};
 use crate::push::Push;
 use crate::segment::Segmenter;
@@ -68,7 +71,17 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Upgrades a `GET /voice` request to a WebSocket voice-capture session.
-pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
+/// A foreign `Origin` is refused with 403: WS upgrades bypass Sec-Fetch in
+/// older browsers, so the loopback allowlist in [`crate::cross_site`]
+/// guards the upgrade itself.
+pub(crate) async fn upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if !cross_site::origin_allowed(&headers) {
+        return AppError::CrossSite.into_response();
+    }
     let engine = state.voice_engine();
     let push = state.push();
     ws.on_upgrade(move |socket| run_session(socket, engine, push))

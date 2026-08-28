@@ -27,6 +27,8 @@ htmd = "0.5"
 mime = "0.3"
 encoding_rs = "0.8"
 url = "2"
+# Percent-decoding for path parameters; already in the tree as url's own core.
+percent-encoding = "2"
 ipnet = "2"
 dunce = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }

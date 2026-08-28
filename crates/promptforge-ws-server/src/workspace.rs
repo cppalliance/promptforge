@@ -565,13 +565,25 @@ pub(crate) struct GrantResponse {
     granted: PathBuf,
 }
 
+/// Percent-decodes a workspace path parameter before validation. The query
+/// layer already decoded once, so any surviving `%XX` sequence is a second
+/// encoding layer - decoding it here means an encoded traversal (`%2e%2e`)
+/// reaches the lexical `..` check as a literal `..` however the client
+/// encoded it. Invalid sequences pass through unchanged.
+fn decode_path_param(raw: &str) -> String {
+    percent_encoding::percent_decode_str(raw)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
 /// Lists one level of a workspace directory, or the granted roots when the
 /// query carries no path.
 pub(crate) async fn tree(
     State(workspace): State<Workspace>,
     Query(query): Query<TreeQuery>,
 ) -> Response {
-    respond(workspace.tree(query.path.as_deref().map(Path::new)))
+    let path = query.path.as_deref().map(decode_path_param);
+    respond(workspace.tree(path.as_deref().map(Path::new)))
 }
 
 /// Reads a confined UTF-8 text file with its metadata.
@@ -579,7 +591,8 @@ pub(crate) async fn read_file(
     State(workspace): State<Workspace>,
     Query(query): Query<FileQuery>,
 ) -> Response {
-    respond(workspace.read_file(Path::new(&query.path)))
+    let path = decode_path_param(&query.path);
+    respond(workspace.read_file(Path::new(&path)))
 }
 
 /// Writes a confined file after path, size, and conflict-token validation.
@@ -917,6 +930,49 @@ mod tests {
             root.file_name().expect("leaf").to_string_lossy()
         );
         assert_eq!(listing.entries[0].kind, EntryKind::Directory);
+    }
+
+    #[test]
+    fn percent_sequences_decode_before_validation() {
+        assert_eq!(decode_path_param("%2e%2e/x"), "../x");
+        assert_eq!(decode_path_param("plain.txt"), "plain.txt");
+        // An invalid sequence is not an encoding; the literal survives.
+        assert_eq!(decode_path_param("100%.txt"), "100%.txt");
+    }
+
+    /// A double-encoded traversal (`%252e%252e` in the raw query) survives
+    /// the query layer's single decode as `%2e%2e`; the handler's explicit
+    /// decode must still reveal it to the lexical `..` check.
+    #[tokio::test]
+    async fn an_encoded_traversal_in_the_query_is_rejected() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt as _;
+
+        let (workspace, _dir) = granted_dir();
+        let router = crate::routes::workspace::routes(workspace);
+        for uri in [
+            "/workspace/file?path=%252e%252e%2Fsecret.txt",
+            "/workspace/tree?path=%252e%252e",
+        ] {
+            let request = Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("static request parts are valid");
+            let response = router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "for {uri}");
+            let body = crate::app::fixtures::body_bytes(response).await;
+            let json: serde_json::Value =
+                serde_json::from_slice(&body).expect("the envelope is JSON");
+            assert_eq!(
+                json["error"]["code"], "forbidden_component",
+                "the traversal must be caught lexically, not by a lookup miss: {uri}"
+            );
+        }
     }
 
     #[test]
