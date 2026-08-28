@@ -227,6 +227,7 @@ fn serve_thread(
             state.push(),
             state.health().clone(),
             heartbeat::HEARTBEAT_INTERVAL,
+            state.backoff().clone(),
         );
         // Voice is GPU-only (see AppState::new): without GPU transcription
         // the provisioning task gets an empty config and exits immediately,

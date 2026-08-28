@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::Router;
 
+use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;
 use crate::config::{Config, VoiceConfig};
 use crate::deadline::{DEFAULT_DEADLINE, with_deadline};
@@ -33,6 +34,7 @@ pub struct AppState {
     pub(crate) voice: VoiceSlot,
     pub(crate) status: StatusBus,
     pub(crate) health: GatewayHealth,
+    pub(crate) backoff: ReconnectBackoff,
     pub(crate) catalog: CatalogBus,
     pub(crate) menu: MenuBus,
     pub(crate) workspace: Workspace,
@@ -100,6 +102,7 @@ impl AppState {
             voice,
             status,
             health: GatewayHealth::new(),
+            backoff: ReconnectBackoff::new(),
             catalog,
             menu,
             workspace: Workspace::new(),
@@ -144,6 +147,13 @@ impl AppState {
     /// is down.
     pub(crate) fn health(&self) -> &GatewayHealth {
         &self.health
+    }
+
+    /// The shared reconnect backoff: the heartbeat draws probe delays
+    /// from it while the gateway is down, and the chat paths reset it on
+    /// useful work - a delivered token or a successful completion.
+    pub(crate) fn backoff(&self) -> &ReconnectBackoff {
+        &self.backoff
     }
 
     /// The catalog bus, which the heartbeat publishes the refreshed model
