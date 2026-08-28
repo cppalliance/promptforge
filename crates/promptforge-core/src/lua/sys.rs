@@ -88,7 +88,7 @@ fn guarded_table(
     )?;
     metatable.set("__newindex", newindex)?;
     metatable.set("__metatable", "var is guarded")?;
-    proxy.set_metatable(Some(metatable));
+    proxy.set_metatable(Some(metatable))?;
     Ok(proxy)
 }
 
@@ -190,7 +190,7 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
         .set("__metatable", "sys is sealed")
         .map_err(Error::lua)?;
 
-    proxy.set_metatable(Some(metatable));
+    proxy.set_metatable(Some(metatable)).map_err(Error::lua)?;
     Ok(proxy)
 }
 

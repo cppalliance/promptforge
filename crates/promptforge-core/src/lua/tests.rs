@@ -1873,7 +1873,7 @@ async fn long_running_lua_block_cancels_cooperatively() {
     let outcome = cancel::scope(handle, async {
         tokio::task::block_in_place(|| {
             let lua = Lua::new();
-            install_instruction_budget(&lua);
+            install_instruction_budget(&lua).expect("hook installs on a fresh VM");
             let func = program.load(&lua).expect("bytecode loads");
             func.call::<()>(())
                 .map_err(|e| program.map_runtime_error(&e))

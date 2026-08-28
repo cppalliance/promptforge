@@ -53,7 +53,7 @@ pub(crate) fn install_lua_tool_calls(
         .map_err(Error::lua)?;
     meta.set("__newindex", newindex_err).map_err(Error::lua)?;
 
-    calls_inner.set_metatable(Some(meta));
+    calls_inner.set_metatable(Some(meta)).map_err(Error::lua)?;
 
     tools.set("calls", calls_inner).map_err(Error::lua)?;
     Ok(())

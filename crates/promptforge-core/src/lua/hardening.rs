@@ -63,7 +63,10 @@ end
 }
 
 /// Install an instruction-count hook that aborts a runaway block.
-pub(crate) fn install_instruction_budget(lua: &Lua) {
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the VM rejects the hook callback.
+pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<()> {
     let fired = Arc::new(AtomicU64::new(0));
     lua.set_hook(
         HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
@@ -83,7 +86,8 @@ pub(crate) fn install_instruction_budget(lua: &Lua) {
             }
             Ok(VmState::Continue)
         },
-    );
+    )
+    .map_err(Error::lua)
 }
 
 /// Render a returned Lua scalar as the section's result string. Tables and other
