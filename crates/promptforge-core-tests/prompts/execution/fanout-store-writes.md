@@ -18,9 +18,14 @@ return tostring(#files) .. ":" .. table.concat(replies, ",")
 
 ```lua
 -- Rendezvous: both arms must be live before either writes its reply path.
--- Sequential fanout never reaches two ready files and hangs until the test times out.
+-- Each poll iteration yields through `execute`, giving the sibling arm its
+-- I/O points: under the scheduler "concurrent" means interleaving at yield
+-- points, not preemption. A sequential driver (arm 2 starting only after
+-- arm 1 finishes) never reaches two ready files, and the loop spins until
+-- the instruction budget trips.
 store.write("ready-" .. sys.index .. ".md", "1")
 while #store.glob("ready-*.md") < 2 do
+  execute("## Yield")
 end
 store.write("arm-" .. sys.index .. ".md", item)
 return item
@@ -32,3 +37,9 @@ Write to store.
 
 - alpha
 - beta
+
+## Yield
+
+```lua
+return "yielded"
+```

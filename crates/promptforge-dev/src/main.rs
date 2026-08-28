@@ -66,7 +66,7 @@ enum Drive {
     SignalError(anyhow::Error),
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     // Parse arguments first so a syntactically bad invocation reports the usage
     // error rather than an unrelated missing-credentials message.
@@ -121,9 +121,10 @@ async fn main() -> ExitCode {
 /// Runs `dispatch` while watching for a Ctrl-C signal.
 ///
 /// If `dispatch` finishes first, its result is returned. If the signal fires
-/// first, the run is cancelled cooperatively and awaited so its blocking fanout
-/// join is not abandoned, then reported as interrupted. A signal-handler
-/// installation error is returned rather than silently dropped.
+/// first, the run is cancelled cooperatively and awaited so it unwinds
+/// through its own cancellation path rather than being dropped mid-flight,
+/// then reported as interrupted. A signal-handler installation error is
+/// returned rather than silently dropped.
 async fn drive<D, S>(dispatch: D, signal: S, cancel: &CancelHandle) -> Drive
 where
     D: Future<Output = Result<()>>,

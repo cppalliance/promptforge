@@ -1,9 +1,11 @@
 //! Cooperative cancellation for long-running execute paths.
 //!
-//! Fanout runs inside [`tokio::task::block_in_place`], so dropping the outer
-//! `select!` on Ctrl-C does not stop in-flight arms. Hosts install a
-//! [`CancelHandle`] with [`scope`] and call [`CancelHandle::cancel`] from a
-//! Ctrl-C task; fanout and model turns poll [`wait_cancelled`].
+//! Dropping the outer future on Ctrl-C would abandon a run mid-step, so
+//! hosts install a [`CancelHandle`] with [`scope`] and call
+//! [`CancelHandle::cancel`] from a Ctrl-C task instead. Running Lua
+//! observes the handle through its instruction hook, the scheduler
+//! observes it between chain steps and while chains are suspended, and
+//! model turns poll [`wait_cancelled`].
 
 use std::future::Future;
 use std::sync::Arc;
@@ -21,8 +23,8 @@ tokio::task_local! {
 ///
 /// - **Shared state / propagation.** [`Clone`] produces another handle over the
 ///   *same* cancellation state. Cancelling any clone cancels every clone, so a
-///   handle can be cloned into spawned tasks (for example fanout arms) and each
-///   observes the same cancellation.
+///   handle can be cloned into spawned tasks (for example a Ctrl-C listener)
+///   and each observes the same cancellation.
 /// - **Idempotent.** Calling [`cancel`](Self::cancel) more than once is a no-op
 ///   after the first call.
 /// - **Irreversible.** Once cancelled, a handle never returns to the
