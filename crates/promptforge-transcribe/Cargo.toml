@@ -10,6 +10,7 @@ publish = false
 description = "PromptForge Whisper transcription engine: model ownership, inference workers, segmentation, and silence gating"
 
 [dependencies]
+promptforge-progress.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -30,6 +31,7 @@ test-fixtures = ["dep:hound"]
 # The crate dev-depends on itself so every test target builds the library
 # with test-fixtures enabled, without gate commands needing a --features flag.
 promptforge-transcribe = { path = ".", features = ["test-fixtures"] }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

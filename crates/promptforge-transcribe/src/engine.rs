@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use promptforge_progress::ProgressHandle;
+
 use crate::SAMPLE_RATE;
 use crate::error::TranscribeError;
 use crate::final_pass::FinalTranscriber;
@@ -50,6 +52,28 @@ impl VoiceEngine {
     /// loaded, and [`TranscribeError::SpawnWorker`] when a worker thread
     /// cannot be started.
     pub fn new(config: &EngineConfig) -> Result<Self, TranscribeError> {
+        Self::new_with_progress(config, None)
+    }
+
+    /// [`VoiceEngine::new`] plus progress reporting: `progress` gains one
+    /// child per loaded model (`interim`, `final`), each with a byte-counted
+    /// `prewarm` leaf and an indeterminate `init` leaf completed when the
+    /// whisper context is ready. Both worker threads prewarm and load in
+    /// parallel.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::InvalidConfig`] when the window or interval
+    /// is zero, [`TranscribeError::LoadModel`] when a model file cannot be
+    /// loaded, and [`TranscribeError::SpawnWorker`] when a worker thread
+    /// cannot be started.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the caller hands its leaf handle to the engine, which registers per-model children on it"
+    )]
+    pub fn new_with_progress(
+        config: &EngineConfig,
+        progress: Option<ProgressHandle>,
+    ) -> Result<Self, TranscribeError> {
         if config.window_seconds == 0 {
             return Err(TranscribeError::InvalidConfig(
                 "voice.window_seconds must be at least 1".to_string(),
@@ -68,10 +92,34 @@ impl VoiceEngine {
                 "voice.window_seconds is too large".to_string(),
             ));
         };
-        let transcriber = Transcriber::load(&config.interim_model, &config.vocabulary)?;
-        let final_pass = match &config.final_model {
+        let interim_progress = progress.as_ref().map(|handle| handle.child("interim", 1.0));
+        let final_progress = match (&config.final_model, &progress) {
+            (Some(_), Some(handle)) => Some(handle.child("final", 1.0)),
+            _ => None,
+        };
+        // Both workers prewarm and load concurrently; the waits below only
+        // collect the outcomes, with the interim outcome reported first.
+        let (transcriber, interim_init) =
+            Transcriber::spawn(&config.interim_model, &config.vocabulary, interim_progress)?;
+        let final_spawned = match &config.final_model {
             None => None,
-            Some(final_model) => Some(FinalTranscriber::load(final_model, &config.vocabulary)?),
+            Some(final_model) => Some(FinalTranscriber::spawn(
+                final_model,
+                &config.vocabulary,
+                final_progress,
+            )?),
+        };
+        interim_init
+            .recv()
+            .map_err(|_| TranscribeError::WorkerGone)??;
+        let final_pass = match final_spawned {
+            None => None,
+            Some((final_transcriber, final_init)) => {
+                final_init
+                    .recv()
+                    .map_err(|_| TranscribeError::WorkerGone)??;
+                Some(final_transcriber)
+            }
         };
         Ok(Self {
             transcriber,
@@ -249,6 +297,26 @@ mod tests {
             ..EngineConfig::default()
         };
         let err = VoiceEngine::new(&config).expect_err("a missing model must fail");
+        assert!(
+            matches!(err, TranscribeError::LoadModel { .. }),
+            "expected LoadModel, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("definitely-missing-model.bin"),
+            "error names the path: {err}"
+        );
+    }
+
+    #[test]
+    fn new_with_progress_without_a_handle_behaves_like_new() {
+        let config = EngineConfig {
+            interim_model: PathBuf::from("definitely-missing-model.bin"),
+            window_seconds: 12,
+            interval_ms: 500,
+            ..EngineConfig::default()
+        };
+        let err =
+            VoiceEngine::new_with_progress(&config, None).expect_err("a missing model must fail");
         assert!(
             matches!(err, TranscribeError::LoadModel { .. }),
             "expected LoadModel, got {err:?}"
