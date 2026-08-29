@@ -89,7 +89,12 @@ pub fn compiler_cmake_path(build_dir: &Path) -> anyhow::Result<PathBuf> {
 ///
 /// Project libraries are static, CUDA is on, upstream tests, examples, the
 /// app, the web UI, OpenSSL, LLGuidance, and OpenMP are off, and the
-/// architecture list is exactly the detected set. `LLAMA_BUILD_TOOLS` stays
+/// architecture list is exactly the detected set. `GGML_CUDA_FA_ALL_QUANTS`
+/// is on because the gateway launches `llama-server` with mixed KV cache
+/// types (`--cache-type-k q8_0 --cache-type-v q4_0`), and the CUDA flash
+/// attention kernel rejects mixed K/V quant types unless every quant
+/// combination is compiled in; without it FLASH_ATTN_EXT falls back to the
+/// CPU backend on every layer. `LLAMA_BUILD_TOOLS` stays
 /// on because the pin only defines the `llama-server` target from the tools
 /// tree; the build step compiles that target alone, so unrelated upstream
 /// programs are configured but never built. `LLAMA_USE_PREBUILT_UI` is off
@@ -105,6 +110,7 @@ pub fn configure_options(archs: &[String], nvcc: &Path) -> Vec<String> {
         "-DGGML_CCACHE=OFF".to_string(),
         "-DGGML_CUDA=ON".to_string(),
         "-DGGML_CUDA_FA=ON".to_string(),
+        "-DGGML_CUDA_FA_ALL_QUANTS=ON".to_string(),
         "-DGGML_CUDA_GRAPHS=ON".to_string(),
         "-DGGML_CUDA_NCCL=OFF".to_string(),
         "-DGGML_LTO=OFF".to_string(),
@@ -234,6 +240,8 @@ mod tests {
         );
         for required in [
             "-DGGML_CUDA=ON",
+            "-DGGML_CUDA_FA=ON",
+            "-DGGML_CUDA_FA_ALL_QUANTS=ON",
             "-DGGML_STATIC=ON",
             "-DGGML_NATIVE=OFF",
             "-DGGML_BACKEND_DL=OFF",
@@ -257,6 +265,23 @@ mod tests {
                 "missing {required}"
             );
         }
+    }
+
+    #[test]
+    fn configure_options_enable_all_flash_attention_quants() {
+        // The gateway runs llama-server with mixed KV cache types
+        // (--cache-type-k q8_0 --cache-type-v q4_0); without
+        // GGML_CUDA_FA_ALL_QUANTS the CUDA flash attention kernel rejects
+        // the combination and FLASH_ATTN_EXT silently falls back to the CPU
+        // backend on every layer.
+        let options = configure_options(
+            &["120a-real".to_string()],
+            Path::new("C:/CUDA/bin/nvcc.exe"),
+        );
+        assert!(
+            options.contains(&"-DGGML_CUDA_FA_ALL_QUANTS=ON".to_string()),
+            "dropping GGML_CUDA_FA_ALL_QUANTS returns flash attention to CPU fallback"
+        );
     }
 
     #[test]
