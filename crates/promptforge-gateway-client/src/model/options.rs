@@ -14,11 +14,11 @@ const TEMPERATURE_MAX: f64 = 2.0;
 
 /// A validated sampling temperature: finite and within `[0.0, 2.0]`.
 ///
-/// Building a [`Temperature`] is the only in-crate way to place a temperature
+/// Building a [`Temperature`] is the only way to place a temperature
 /// into a request, so a `NaN`, an infinity, or an out-of-range value is
 /// unrepresentable rather than serialized into a backend-invalid request.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Temperature(f64);
+pub struct Temperature(f64);
 
 impl Temperature {
     /// Builds a temperature, rejecting non-finite and out-of-range values.
@@ -26,7 +26,7 @@ impl Temperature {
     /// # Errors
     /// Returns [`TemperatureError`] when `value` is not finite or falls outside
     /// `[0.0, 2.0]`.
-    pub(crate) fn new(value: f64) -> std::result::Result<Temperature, TemperatureError> {
+    pub fn new(value: f64) -> std::result::Result<Temperature, TemperatureError> {
         if !value.is_finite() {
             return Err(TemperatureError::NotFinite);
         }
@@ -38,7 +38,7 @@ impl Temperature {
 
     /// Returns the validated value.
     #[must_use]
-    pub(crate) fn get(self) -> f64 {
+    pub fn get(self) -> f64 {
         self.0
     }
 }
@@ -72,7 +72,7 @@ pub enum TemperatureError {
 /// # Examples
 ///
 /// ```
-/// use promptforge_core::model::ThinkingMode;
+/// use promptforge_gateway_client::model::ThinkingMode;
 ///
 /// // Deserialized from the lowercase gateway wire form.
 /// let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
@@ -114,7 +114,7 @@ impl ModelDescriptor {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_core::model::{ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge_gateway_client::model::{ModelDescriptor, ModelId, ThinkingMode};
     ///
     /// let context = NonZeroU32::new(131_072).ok_or("context is non-zero")?;
     /// let model = ModelDescriptor::new(
@@ -172,25 +172,25 @@ impl ModelDescriptor {
 /// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
 /// and a requested `thinking` switch ride on each completion for the binding.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct ModelBindOpts {
+pub struct ModelBindOpts {
     /// When set, filters models by thinking capability and freezes the switch.
-    pub(crate) thinking: Option<bool>,
+    pub thinking: Option<bool>,
     /// Minimum context window size in tokens.
     ///
     /// A [`NonZeroU32`] (MODEL-003): a zero-token minimum is a nonsensical
     /// constraint and is unrepresentable, rejected at the parse boundary.
-    pub(crate) context: Option<NonZeroU32>,
+    pub context: Option<NonZeroU32>,
     /// Sampling temperature for every complete under this binding.
     ///
     /// A validated [`Temperature`] (PF-LM-004): a non-finite or out-of-range
     /// value is unrepresentable, so an invalid temperature can never reach the
     /// binding or the wire.
-    pub(crate) temperature: Option<Temperature>,
+    pub temperature: Option<Temperature>,
     /// Maximum generation tokens for every complete under this binding.
     ///
     /// A [`NonZeroU32`] (MODEL-003): a zero-token generation cap would forbid
     /// all output, so it is unrepresentable and rejected at the parse boundary.
-    pub(crate) max_tokens: Option<NonZeroU32>,
+    pub max_tokens: Option<NonZeroU32>,
 }
 
 // No `Eq`: `temperature` is a `Temperature` (an `f64` newtype), so equality is
@@ -198,13 +198,13 @@ pub(crate) struct ModelBindOpts {
 
 /// Frozen per-request fields carried by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ModelInvocation {
+pub struct ModelInvocation {
     /// Sampling temperature, when the bind declared one.
-    pub(crate) temperature: Option<Temperature>,
+    pub temperature: Option<Temperature>,
     /// Maximum generation tokens, when the bind declared one (always non-zero).
-    pub(crate) max_tokens: Option<NonZeroU32>,
+    pub max_tokens: Option<NonZeroU32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
-    pub(crate) thinking: Option<bool>,
+    pub thinking: Option<bool>,
 }
 
 // No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
@@ -222,7 +222,7 @@ impl From<&ModelBindOpts> for ModelInvocation {
 /// One prompt-local alias bound to a model identity and frozen invocation.
 // No `Eq`: the frozen invocation carries an `f64` temperature.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ModelBinding {
+pub struct ModelBinding {
     alias: String,
     description: String,
     id: ModelId,
@@ -237,7 +237,7 @@ impl ModelBinding {
     /// is no zero-context sentinel patched in by a later setter, so a binding
     /// cannot exist in a half-initialized state.
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         alias: impl Into<String>,
         description: impl Into<String>,
         id: ModelId,
@@ -255,37 +255,37 @@ impl ModelBinding {
 
     /// Returns the exact prompt-local alias.
     #[must_use]
-    pub(crate) fn alias(&self) -> &str {
+    pub fn alias(&self) -> &str {
         &self.alias
     }
 
     /// Returns the declared capability description.
     #[must_use]
-    pub(crate) fn description(&self) -> &str {
+    pub fn description(&self) -> &str {
         &self.description
     }
 
     /// Returns the selected stable identity.
     #[must_use]
-    pub(crate) fn id(&self) -> &ModelId {
+    pub fn id(&self) -> &ModelId {
         &self.id
     }
 
     /// Returns the frozen per-request fields.
     #[must_use]
-    pub(crate) fn invocation(&self) -> &ModelInvocation {
+    pub fn invocation(&self) -> &ModelInvocation {
         &self.invocation
     }
 
     /// Returns the catalog context window size in tokens (always non-zero).
     #[must_use]
-    pub(crate) fn context(&self) -> NonZeroU32 {
+    pub fn context(&self) -> NonZeroU32 {
         self.context
     }
 
     /// Builds [`CompletionOptions`] for every complete under this binding.
     #[must_use]
-    pub(crate) fn completion_options(&self) -> CompletionOptions {
+    pub fn completion_options(&self) -> CompletionOptions {
         CompletionOptions {
             model: self.id.name().to_owned(),
             temperature: self.invocation.temperature,
@@ -324,7 +324,7 @@ impl CompletionOptions {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_core::model::CompletionOptions;
+    /// use promptforge_gateway_client::model::CompletionOptions;
     ///
     /// let options = CompletionOptions::new("analyst")
     ///     .with_temperature(0.2)?
@@ -379,31 +379,33 @@ impl CompletionOptions {
 /// execution plus the prompt-wide `default` alias.
 // No `Eq`: bindings carry `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct ModelSet {
-    pub(crate) bindings: Vec<ModelBinding>,
+pub struct ModelSet {
+    /// The bindings in declaration order.
+    pub bindings: Vec<ModelBinding>,
     /// The prompt-wide default alias set by `models.default`, if any. No
     /// inherent `default()` accessor: it would shadow `Default::default()`
     /// at every construction site; readers use the field or the
     /// [`ModelView`] trait.
-    pub(crate) default: Option<String>,
+    pub default: Option<String>,
 }
 
 impl ModelSet {
     /// Reassembles a set from owned snapshots of its two parts (the
     /// [`ModelView`] read pair).
     #[must_use]
-    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, default: Option<String>) -> Self {
+    pub fn from_parts(bindings: Vec<ModelBinding>, default: Option<String>) -> Self {
         Self { bindings, default }
     }
 
     /// Returns bindings in declaration order.
     #[must_use]
-    pub(crate) fn bindings(&self) -> &[ModelBinding] {
+    pub fn bindings(&self) -> &[ModelBinding] {
         &self.bindings
     }
 
     /// Returns the binding for `alias`, if it was declared.
-    pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
+    #[must_use]
+    pub fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
 }
@@ -416,32 +418,32 @@ impl ModelSet {
 /// mutation, so post-H1 frozenness is structural. Every method locks
 /// briefly and returns an owned snapshot: a mutex guard cannot outlive the
 /// call.
-pub(crate) trait ModelView: Send + Sync {
+pub trait ModelView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
     fn bindings(&self) -> Result<Vec<ModelBinding>>;
 
     /// Returns the prompt-wide default alias set by `models.default`, if any.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
     fn default(&self) -> Result<Option<String>>;
 
     /// Returns an owned clone of the binding for `alias`, if it was
     /// declared.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    /// Returns the crate's model-set lock error if the set's mutex is poisoned.
     fn binding(&self, alias: &str) -> Result<Option<ModelBinding>>;
 }
 
-/// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
-/// in the Lua host layer.
+/// Maps a poisoned set lock to the crate's model-set lock error, matching the
+/// wording every other mutex in the host layer uses.
 fn lock_model_set(set: &Mutex<ModelSet>) -> Result<std::sync::MutexGuard<'_, ModelSet>> {
     set.lock()
-        .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))
+        .map_err(|_| Error::ModelSetLock("model set mutex was poisoned".to_owned()))
 }
 
 impl ModelView for Mutex<ModelSet> {

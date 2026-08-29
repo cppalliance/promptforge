@@ -14,5 +14,10 @@ Lua runtime, the model catalog, and the run machinery.
   the contract crate verbatim and must not grow new vocabulary. The concrete
   `WebSearch` provider is re-exported from `promptforge-web-search` under its
   historical path; this crate must not reacquire provider code.
+- The gateway model client (`GatewayClient`, the wire types, the model
+  catalog and binding vocabulary) lives in `promptforge-gateway-client`.
+  Compatibility re-exports under `promptforge_core::client` and
+  `promptforge_core::model` follow the `tools` precedent: verbatim
+  re-exports only, no new vocabulary.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

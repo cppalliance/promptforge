@@ -63,8 +63,14 @@ fn accept_infer_completion(
         }
         // No tools were advertised, so a tool-call turn is a backend
         // protocol violation rather than something to dispatch.
+        // `CompletionResult` is `#[non_exhaustive]` across the crate boundary:
+        // an unrecognized future outcome is the same violation.
         CompletionResult::ToolCalls(_) => Err(Error::Lua(
             "model inference received tool calls but no tools were advertised".to_owned(),
+        )),
+        _ => Err(Error::Lua(
+            "model inference received an unrecognized outcome but no tools were advertised"
+                .to_owned(),
         )),
     }
 }

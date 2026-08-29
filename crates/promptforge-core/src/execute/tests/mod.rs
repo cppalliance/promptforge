@@ -94,12 +94,7 @@ fn test_model_catalog() -> ModelCatalog {
 }
 
 fn test_completion_options() -> CompletionOptions {
-    CompletionOptions {
-        model: "claude-sonnet-4-6".to_owned(),
-        temperature: None,
-        max_tokens: None,
-        thinking: None,
-    }
+    CompletionOptions::new("claude-sonnet-4-6")
 }
 
 fn ensure_model_h1(md: &str) -> String {

@@ -8,15 +8,16 @@
 //! shared key; the vendor credential lives in the gateway, so the executor
 //! never sees it. Point `PROMPTFORGE_GATEWAY_URL` at a local server or another
 //! gateway to retarget it.
-//!
-//! The implementation lives in the `promptforge-gateway-client` crate and is
-//! re-exported here unchanged, so existing `promptforge_core::client::*` paths
-//! keep working.
 
-pub use promptforge_gateway_client::client::{
-    Completion, CompletionResult, GatewayClient, GatewayEndpoint, Message, SecretError,
-    SecretString, ToolArguments, ToolCall, ToolSchema,
-};
+mod config;
+mod transport;
+mod wire;
+
+pub use config::{GatewayEndpoint, SecretError, SecretString};
+pub use transport::GatewayClient;
+#[doc(hidden)]
+pub use wire::ToolSchemaError;
+pub use wire::{Completion, CompletionResult, Message, ToolArguments, ToolCall, ToolSchema};
 
 #[cfg(test)]
-pub(crate) use promptforge_gateway_client::client::ToolSchemaError;
+mod tests;

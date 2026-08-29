@@ -109,7 +109,7 @@ fn record_bind_binding(
     let selection = match resolver.resolve(description, opts) {
         Ok(sel) => sel,
         Err(error) => {
-            record_callback_error(errors, error)?;
+            record_callback_error(errors, Error::from(error))?;
             return Err(mlua::Error::external("model capability resolution failed"));
         }
     };

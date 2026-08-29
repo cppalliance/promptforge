@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Lua, Scope};
+use promptforge_gateway_client::Error as GatewayClientError;
 use promptforge_tool_picker::ToolId as PickerToolId;
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 
@@ -80,11 +81,15 @@ impl<'a> RuntimeResolution<'a> {
 }
 
 impl ModelResolver for RuntimeResolution<'_> {
-    fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
+    fn resolve(
+        &self,
+        description: &str,
+        opts: &ModelBindOpts,
+    ) -> std::result::Result<ResolvedModel, GatewayClientError> {
         // An empty catalog resolves every bind as absent without touching the
         // picker at all.
         if self.models.is_empty() {
-            return Err(Error::ModelAbsent {
+            return Err(GatewayClientError::ModelAbsent {
                 capability: description.to_owned(),
             });
         }
@@ -408,7 +413,7 @@ mod tests {
             Arc::new(Mutex::new(ModelSet::default())),
         );
         let model_resolver = |description: &str, _: &ModelBindOpts| {
-            Err(Error::ModelAbsent {
+            Err(GatewayClientError::ModelAbsent {
                 capability: description.to_owned(),
             })
         };
@@ -538,7 +543,7 @@ mod tests {
             Arc::new(Mutex::new(ModelSet::default())),
         );
         let model_resolver = |description: &str, _: &ModelBindOpts| {
-            Err(Error::ModelAbsent {
+            Err(GatewayClientError::ModelAbsent {
                 capability: description.to_owned(),
             })
         };

@@ -14,6 +14,7 @@ promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
 promptforge-desktop-shell = { path = "crates/promptforge-desktop-shell", version = "0.1.0" }
 promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.1.0" }
 promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.1.0" }
+promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.1.0" }
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.1.0" }
 promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.1.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }

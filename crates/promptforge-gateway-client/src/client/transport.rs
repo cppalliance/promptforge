@@ -24,9 +24,9 @@ pub struct GatewayClient {
     max_response_bytes: u64,
 }
 
-/// Default per-request timeout, matching [`crate::execute::RunLimits`].
+/// Default per-request timeout, matching the executor's run limits.
 pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
-/// Default response-body ceiling, matching [`crate::execute::RunLimits`].
+/// Default response-body ceiling, matching the executor's run limits.
 const DEFAULT_MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -96,9 +96,9 @@ impl GatewayClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # async fn run() -> Result<(), promptforge_core::model::CompletionError> {
-    /// use promptforge_core::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
-    /// use promptforge_core::model::CompletionOptions;
+    /// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
+    /// use promptforge_gateway_client::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
+    /// use promptforge_gateway_client::model::CompletionOptions;
     ///
     /// let client = GatewayClient::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
@@ -132,8 +132,8 @@ impl GatewayClient {
     ///
     /// ```
     /// # async fn run() {
-    /// use promptforge_core::client::{GatewayClient, Message};
-    /// use promptforge_core::model::{CompletionErrorKind, CompletionOptions};
+    /// use promptforge_gateway_client::client::{GatewayClient, Message};
+    /// use promptforge_gateway_client::model::{CompletionErrorKind, CompletionOptions};
     ///
     /// let client = GatewayClient::disabled();
     /// let options = CompletionOptions::new("m");
@@ -167,7 +167,7 @@ impl GatewayClient {
     /// use std::num::NonZeroU64;
     /// use std::time::Duration;
     ///
-    /// use promptforge_core::client::GatewayClient;
+    /// use promptforge_gateway_client::client::GatewayClient;
     ///
     /// let cap = NonZeroU64::new(1024 * 1024).ok_or("cap is non-zero")?;
     /// let client = GatewayClient::disabled().with_request_limits(Duration::from_secs(30), cap);

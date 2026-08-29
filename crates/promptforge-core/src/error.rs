@@ -7,6 +7,8 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
+use promptforge_gateway_client::Error as GatewayClientError;
+
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 
@@ -152,7 +154,7 @@ pub(crate) enum Error {
     /// Reading a non-success backend response body failed at the transport
     /// layer.
     ///
-    /// Retains the [`reqwest::Error`] as the `#[source]` cause (MODEL-010)
+    /// Retains the `reqwest::Error` as the `#[source]` cause (MODEL-010)
     /// rather than flattening the read failure into display text, so the error
     /// chain (timeout, connection reset) survives. The status the backend had
     /// already returned is preserved for classification.
@@ -527,11 +529,6 @@ impl Error {
         }
     }
 
-    /// Wrap a transport-layer error, hiding its concrete type from the API.
-    pub(crate) fn http(source: reqwest::Error) -> Error {
-        Error::Http(Box::new(source))
-    }
-
     /// Wrap an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
     /// `#[source]` cause (F4) rather than flattening it to a string.
     pub(crate) fn lua(source: mlua::Error) -> Error {
@@ -554,6 +551,68 @@ impl Error {
 impl From<crate::subst::SubstitutionError> for Error {
     fn from(error: crate::subst::SubstitutionError) -> Error {
         Error::Substitution(Box::new(error))
+    }
+}
+
+/// Maps the gateway-client substrate back onto this substrate variant for
+/// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
+/// classification are unchanged by the extraction. The client crate's
+/// substrate is not `#[non_exhaustive]` (the two crates version together), so
+/// this match is total.
+impl From<GatewayClientError> for Error {
+    fn from(error: GatewayClientError) -> Error {
+        match error {
+            GatewayClientError::MissingEnv(name) => Error::MissingEnv(name),
+            GatewayClientError::InvalidEnv(name) => Error::InvalidEnv(name),
+            GatewayClientError::InvalidConfig(detail) => Error::InvalidConfig(detail),
+            GatewayClientError::Config { message, source } => Error::Config { message, source },
+            GatewayClientError::GatewayDisabled => Error::GatewayDisabled,
+            GatewayClientError::Http(source) => Error::Http(source),
+            GatewayClientError::Backend { status, body } => Error::Backend { status, body },
+            GatewayClientError::MalformedResponse(message) => Error::MalformedResponse(message),
+            GatewayClientError::MalformedResponseSource { message, source } => {
+                Error::MalformedResponseSource { message, source }
+            }
+            GatewayClientError::BackendBodyRead { status, source } => {
+                Error::BackendBodyRead { status, source }
+            }
+            GatewayClientError::EmptyModelReply {
+                detail,
+                finish_reason,
+            } => Error::EmptyModelReply {
+                detail,
+                finish_reason,
+            },
+            GatewayClientError::ModelBind { capability, detail } => {
+                Error::ModelBind { capability, detail }
+            }
+            GatewayClientError::ModelBindQuery { capability, source } => Error::ModelBindQuery {
+                capability,
+                source: SharedSource::new(source),
+            },
+            GatewayClientError::ModelAbsent { capability } => Error::ModelAbsent { capability },
+            GatewayClientError::ModelDuplicate {
+                capability,
+                candidates,
+            } => Error::ModelDuplicate {
+                capability,
+                candidates,
+            },
+            GatewayClientError::ModelAmbiguous {
+                capability,
+                candidates,
+            } => Error::ModelAmbiguous {
+                capability,
+                candidates,
+            },
+            GatewayClientError::ModelSetLock(message) => Error::Lua(message),
+        }
+    }
+}
+
+impl From<crate::model::CompletionError> for Error {
+    fn from(error: crate::model::CompletionError) -> Error {
+        Error::from(GatewayClientError::from(error))
     }
 }
 
