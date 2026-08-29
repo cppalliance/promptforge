@@ -151,17 +151,17 @@ pub(crate) const VOICE_STOP: &str = "stop";
 /// by skipping intermediates. `label` is the short text rendered in the
 /// status bar; `description` is the longer tooltip shown on hover.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub(crate) struct StatusBarUpdate {
+pub struct StatusBarUpdate {
     /// Short text rendered in the status bar.
-    pub(crate) label: String,
+    pub label: String,
     /// Longer text shown as the bar's tooltip.
-    pub(crate) description: String,
+    pub description: String,
     /// Determinate progress, when the activity can report it.
-    pub(crate) progress: Option<Progress>,
+    pub progress: Option<Progress>,
     /// How loudly the update speaks; the UI ignores `Debug` updates.
-    pub(crate) severity: Severity,
+    pub severity: Severity,
     /// Which subsystem is active, driving the bar's activity indicator.
-    pub(crate) activity: Activity,
+    pub activity: Activity,
 }
 
 impl StatusBarUpdate {
@@ -176,17 +176,17 @@ impl StatusBarUpdate {
 
 /// A determinate progress report for the status bar's progress slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub(crate) struct Progress {
+pub struct Progress {
     /// Units completed so far.
-    pub(crate) current: u64,
+    pub current: u64,
     /// Units expected in total.
-    pub(crate) total: u64,
+    pub total: u64,
 }
 
 /// How loudly a status update speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Severity {
+pub enum Severity {
     /// User-visible status text.
     Info,
     /// Internal instrumentation; the UI ignores it for display.
@@ -198,7 +198,7 @@ pub(crate) enum Severity {
 /// The subsystem an update belongs to, driving the activity indicator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Activity {
+pub enum Activity {
     /// No specific subsystem; the activity LED stays dark.
     General,
     /// A model turn in flight: amber on the activity LED.

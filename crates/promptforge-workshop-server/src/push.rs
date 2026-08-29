@@ -24,7 +24,7 @@ use crate::status::StatusBus;
 /// buses, so producers take their own copy, exactly as they did with the
 /// buses themselves.
 #[derive(Debug, Clone)]
-pub(crate) struct Push {
+pub struct Push {
     status: StatusBus,
     catalog: CatalogBus,
     menu: MenuBus,

@@ -25,7 +25,7 @@ const CATALOG_CHANNEL_CAPACITY: usize = 4;
 /// The shared catalog bus: a cloneable handle onto the broadcast channel,
 /// mirroring [`crate::status::StatusBus`].
 #[derive(Debug, Clone)]
-pub(crate) struct CatalogBus {
+pub struct CatalogBus {
     sender: broadcast::Sender<CatalogPush>,
     latest: Arc<Mutex<Option<CatalogPush>>>,
 }
@@ -57,7 +57,7 @@ impl CatalogBus {
 
     /// Broadcasts one catalog. With no subscribers this is a no-op; a slow
     /// subscriber skips ahead rather than applying backpressure.
-    pub(crate) fn publish(&self, models: Vec<serde_json::Value>) {
+    pub fn publish(&self, models: Vec<serde_json::Value>) {
         let push = CatalogPush { models };
         // The retained copy (a second owner, hence the clone) is written
         // before the send, so a session that subscribes after the send

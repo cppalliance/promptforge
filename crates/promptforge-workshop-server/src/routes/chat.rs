@@ -6,7 +6,7 @@ use axum::routing::{get, post};
 
 use crate::app::AppState;
 use crate::deadline::{RELAY_DEADLINE, with_deadline};
-use crate::{chat_ws, relay};
+use crate::{relay, session};
 
 /// The chat relay routes. They take the whole [`AppState`]: the handlers
 /// reach the gateway client, the tape, the health flag, and the status and
@@ -21,7 +21,7 @@ pub(crate) fn routes(state: AppState) -> Router {
             .route("/chat", post(relay::chat)),
         RELAY_DEADLINE,
     )
-    .route("/ws", get(chat_ws::upgrade))
+    .route("/ws", get(session::upgrade))
     .with_state(state)
 }
 
@@ -36,7 +36,7 @@ mod tests {
 
     /// A plain GET to `/ws` without upgrade headers is rejected with 400,
     /// which proves the route is mounted; the WebSocket chat flow is covered
-    /// by the `chat_ws` module's own tests over a live socket.
+    /// by the integration binary's `chat` modules over a live socket.
     #[tokio::test]
     async fn ws_route_rejects_a_non_upgrade_get() {
         let (state, _tape_dir) = state_for("http://127.0.0.1:1");

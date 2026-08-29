@@ -123,18 +123,21 @@ impl AppState {
 
     /// The status bus, which every `/ws` session subscribes to so it can
     /// forward updates; producers report through [`AppState::push`].
-    pub(crate) fn status(&self) -> StatusBus {
+    #[must_use]
+    pub fn status(&self) -> StatusBus {
         self.status.clone()
     }
 
     /// The push facade over the status, catalog, and menu buses, held by
     /// every subsystem that reports what happened.
-    pub(crate) fn push(&self) -> Push {
+    #[must_use]
+    pub fn push(&self) -> Push {
         Push::new(self.status.clone(), self.catalog.clone(), self.menu.clone())
     }
 
     /// The gateway client, shared with the chat WebSocket sessions.
-    pub(crate) fn gateway_client(&self) -> &GatewayClient {
+    #[must_use]
+    pub fn gateway_client(&self) -> &GatewayClient {
         &self.gateway
     }
 
@@ -146,27 +149,31 @@ impl AppState {
     /// Shared gateway reachability, published by the heartbeat; the
     /// gateway-dependent routes read it to short-circuit while the gateway
     /// is down.
-    pub(crate) fn health(&self) -> &GatewayHealth {
+    #[must_use]
+    pub fn health(&self) -> &GatewayHealth {
         &self.health
     }
 
     /// The shared reconnect backoff: the heartbeat draws probe delays
     /// from it while the gateway is down, and the chat paths reset it on
     /// useful work - a delivered token or a successful completion.
-    pub(crate) fn backoff(&self) -> &ReconnectBackoff {
+    #[must_use]
+    pub fn backoff(&self) -> &ReconnectBackoff {
         &self.backoff
     }
 
     /// The catalog bus, which the heartbeat publishes the refreshed model
     /// catalog to on a gateway reconnect and every `/ws` session forwards
     /// from.
-    pub(crate) fn catalog(&self) -> CatalogBus {
+    #[must_use]
+    pub fn catalog(&self) -> CatalogBus {
         self.catalog.clone()
     }
 
     /// The menu bus, whose workbench snapshots every `/ws` session
     /// forwards and whose mutators the session's menu events drive.
-    pub(crate) fn menu(&self) -> &MenuBus {
+    #[must_use]
+    pub fn menu(&self) -> &MenuBus {
         &self.menu
     }
 
@@ -293,8 +300,8 @@ pub fn router(state: AppState) -> Router {
         .merge(api)
 }
 
-/// Shared fixtures for the router tests here and in [`crate::relay`],
-/// [`crate::chat_ws`], and the [`crate::routes`] feature modules: state
+/// Shared fixtures for the router tests here and in [`crate::relay`]
+/// and the [`crate::routes`] feature modules: state
 /// construction against a stub gateway address and
 /// the small helpers every route test leans on. [`fixtures::spawn_gateway`]
 /// is additionally re-exported to the integration-test binary through the

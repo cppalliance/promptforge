@@ -354,7 +354,7 @@ export async function bootWorkbench(name, run) {
   }
 
   // The server pushes the retained status, the model catalog, and a
-  // workbench snapshot on connect, in that order (chat_ws.rs) - the app
+  // workbench snapshot on connect, in that order (session.rs) - the app
   // makes no HTTP state fetches at boot. Mirror all three pushes here:
   // the status seeds the status bar, the catalog populates the Model
   // menu, and without the snapshot's selection every submission stays

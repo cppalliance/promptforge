@@ -40,11 +40,11 @@ const TOTAL_DELAY_BUDGET: Duration = Duration::from_secs(24 * 60 * 60);
 ///
 /// The heartbeat calls [`ReconnectBackoff::next_delay`] before each
 /// probe while the gateway reads unreachable; the chat paths call
-/// [`ReconnectBackoff::record_useful_work`] when the gateway proves
+/// `record_useful_work` when the gateway proves
 /// itself. Nothing else mutates the schedule - in particular, a probe
 /// that merely connects leaves it untouched.
 #[derive(Debug, Clone)]
-pub(crate) struct ReconnectBackoff {
+pub struct ReconnectBackoff {
     base: Duration,
     max: Duration,
     budget: Duration,
@@ -72,7 +72,8 @@ impl ReconnectBackoff {
     }
 
     /// A backoff on an explicit schedule, so tests run in milliseconds.
-    pub(crate) fn with_schedule(base: Duration, max: Duration, budget: Duration) -> Self {
+    #[must_use]
+    pub fn with_schedule(base: Duration, max: Duration, budget: Duration) -> Self {
         debug_assert!(!base.is_zero(), "a zero base would hand out zero delays");
         // std's RandomState is randomly seeded per process, which is all
         // the entropy jitter needs; `| 1` dodges xorshift's zero fixed
@@ -95,7 +96,8 @@ impl ReconnectBackoff {
     /// step), with the step then doubled up to the ceiling. Answers
     /// `None` once the cumulative delay handed out since the last useful
     /// work has crossed the budget - the signal to stop reconnecting.
-    pub(crate) fn next_delay(&self) -> Option<Duration> {
+    #[must_use]
+    pub fn next_delay(&self) -> Option<Duration> {
         let mut state = self.lock_state();
         if state.spent >= self.budget {
             return None;
@@ -129,8 +131,9 @@ impl ReconnectBackoff {
 
     /// Whether the schedule has escalated past its base since the last
     /// useful work.
-    #[cfg(test)]
-    pub(crate) fn is_escalated_for_test(&self) -> bool {
+    #[cfg(any(test, feature = "test-fixtures"))]
+    #[must_use]
+    pub fn is_escalated_for_test(&self) -> bool {
         self.lock_state().current > self.base
     }
 

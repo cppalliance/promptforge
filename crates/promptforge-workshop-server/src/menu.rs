@@ -43,7 +43,7 @@ const WORKSHOP_STATE_FILE: &str = "workshop-state.json";
 /// Clones are cheap (a few `Arc` bumps) and share one state, one retained
 /// snapshot, and one channel.
 #[derive(Debug, Clone)]
-pub(crate) struct MenuBus {
+pub struct MenuBus {
     sender: broadcast::Sender<WorkbenchSnapshot>,
     latest: Arc<Mutex<Option<WorkbenchSnapshot>>>,
     state: Arc<Mutex<MenuState>>,
@@ -126,7 +126,7 @@ struct PendingWrite {
 /// to escalate (zone two): the caller relays it and the applied state is
 /// untouched.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum MenuRefusal {
+pub enum MenuRefusal {
     /// The requested model id is not in the current catalog.
     #[error("unknown model {id:?}: not in the current catalog")]
     UnknownModel {
@@ -197,7 +197,7 @@ impl MenuBus {
     /// # Errors
     /// Returns [`MenuRefusal::UnknownModel`] when `id` is not in the
     /// current catalog; the refused selection is not applied.
-    pub(crate) fn set_selected(&self, id: &str) -> Result<(), MenuRefusal> {
+    pub fn set_selected(&self, id: &str) -> Result<(), MenuRefusal> {
         if !self.catalog_has(id) {
             return Err(MenuRefusal::UnknownModel { id: id.to_string() });
         }
@@ -220,7 +220,7 @@ impl MenuBus {
     /// Returns [`MenuRefusal::SwitchInProgress`] while another switch
     /// runs - switches are single-flight because the gateway loads one
     /// profile at a time.
-    pub(crate) fn begin_switch(&self, name: &str) -> Result<(), MenuRefusal> {
+    pub fn begin_switch(&self, name: &str) -> Result<(), MenuRefusal> {
         let mut state = self.lock_state();
         if let Some(running) = &state.switching {
             return Err(MenuRefusal::SwitchInProgress {
@@ -288,7 +288,7 @@ impl MenuBus {
 
     /// Records the heartbeat's verdict on the gateway and publishes a
     /// fresh snapshot; `chat_ready` is false while the gateway is down.
-    pub(crate) fn set_gateway_reachable(&self, reachable: bool) {
+    pub fn set_gateway_reachable(&self, reachable: bool) {
         let mut state = self.lock_state();
         state.gateway_reachable = reachable;
         self.publish(&state);
@@ -300,7 +300,7 @@ impl MenuBus {
     /// profile support feeds an empty list - a state, not an error.
     /// The selection is untouched: catalog reconciliation owns
     /// selection validity, not the profile list.
-    pub(crate) fn set_profiles(&self, profiles: Vec<String>, active: Option<String>) {
+    pub fn set_profiles(&self, profiles: Vec<String>, active: Option<String>) {
         let mut state = self.lock_state();
         state.profiles = profiles;
         state.active = active;
