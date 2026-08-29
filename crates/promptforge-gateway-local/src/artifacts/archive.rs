@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
+use promptforge_progress::ProgressHandle;
+
 use super::Result;
 use super::assets::ArchiveKind;
 use super::confine::{ensure_cache_directory, safe_relative_path, validate_tree_path};
@@ -17,13 +19,36 @@ use crate::error::LocalError;
 /// # Errors
 /// Returns [`LocalError`] on unsafe entries or extraction failures.
 pub(super) fn extract_archive(archive: &Path, destination: &Path, kind: ArchiveKind) -> Result<()> {
+    extract_archive_with_progress(archive, destination, kind, None)
+}
+
+/// [`extract_archive`] variant that reports extracted-entry counts into
+/// `progress`, when given.
+///
+/// # Errors
+/// Returns [`LocalError`] on unsafe entries or extraction failures.
+pub(super) fn extract_archive_with_progress(
+    archive: &Path,
+    destination: &Path,
+    kind: ArchiveKind,
+    progress: Option<&ProgressHandle>,
+) -> Result<()> {
     match kind {
-        ArchiveKind::TarGz => extract_tar_gz(archive, destination),
-        ArchiveKind::Zip => extract_zip(archive, destination),
+        ArchiveKind::TarGz => extract_tar_gz(archive, destination, progress),
+        ArchiveKind::Zip => extract_zip(archive, destination, progress),
     }
 }
 
-fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
+/// Reports `done` of `total` entries into `progress`, when both are known.
+fn report_entries(progress: Option<&ProgressHandle>, total: Option<u64>, done: u64) {
+    if let (Some(handle), Some(total)) = (progress, total) {
+        handle.set_units(done, total);
+    }
+}
+
+/// Counts the entries of a tar.gz stream. A tar archive has no central
+/// directory, so the entry total for progress reporting costs its own pass.
+fn count_tar_gz_entries(archive: &Path) -> Result<u64> {
     let file = File::open(archive).map_err(|source| LocalError::Io {
         operation: "open archive",
         path: archive.to_owned(),
@@ -34,6 +59,37 @@ fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
         archive: archive.display().to_string(),
         source,
     })?;
+    let mut count = 0_u64;
+    for entry in entries {
+        entry.map_err(|source| LocalError::Archive {
+            archive: archive.display().to_string(),
+            source,
+        })?;
+        count = count.saturating_add(1);
+    }
+    Ok(count)
+}
+
+fn extract_tar_gz(
+    archive: &Path,
+    destination: &Path,
+    progress: Option<&ProgressHandle>,
+) -> Result<()> {
+    let total = match progress {
+        Some(_) => Some(count_tar_gz_entries(archive)?),
+        None => None,
+    };
+    let file = File::open(archive).map_err(|source| LocalError::Io {
+        operation: "open archive",
+        path: archive.to_owned(),
+        source,
+    })?;
+    let mut tar = tar::Archive::new(GzDecoder::new(BufReader::new(file)));
+    let entries = tar.entries().map_err(|source| LocalError::Archive {
+        archive: archive.display().to_string(),
+        source,
+    })?;
+    let mut done = 0_u64;
     for entry in entries {
         let mut entry = entry.map_err(|source| LocalError::Archive {
             archive: archive.display().to_string(),
@@ -72,11 +128,20 @@ fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
             });
         }
         validate_tree_path(destination, &output)?;
+        done = done.saturating_add(1);
+        report_entries(progress, total, done);
+    }
+    if let Some(handle) = progress {
+        handle.complete();
     }
     Ok(())
 }
 
-fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
+fn extract_zip(
+    archive: &Path,
+    destination: &Path,
+    progress: Option<&ProgressHandle>,
+) -> Result<()> {
     let file = File::open(archive).map_err(|source| LocalError::Io {
         operation: "open archive",
         path: archive.to_owned(),
@@ -87,6 +152,8 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
             archive: archive.display().to_string(),
             source: io::Error::other(source),
         })?;
+    let total = progress.map(|_| zip.len() as u64);
+    let mut done = 0_u64;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index).map_err(|source| LocalError::Archive {
             archive: archive.display().to_string(),
@@ -115,6 +182,8 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
         validate_tree_path(destination, &output)?;
         if entry.is_dir() {
             ensure_cache_directory(destination, &output)?;
+            done = done.saturating_add(1);
+            report_entries(progress, total, done);
             continue;
         }
         let Some(parent) = output.parent() else {
@@ -134,6 +203,11 @@ fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
         })?;
         drop(file);
         apply_archive_mode(&output, mode)?;
+        done = done.saturating_add(1);
+        report_entries(progress, total, done);
+    }
+    if let Some(handle) = progress {
+        handle.complete();
     }
     Ok(())
 }

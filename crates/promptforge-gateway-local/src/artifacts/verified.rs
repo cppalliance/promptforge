@@ -18,8 +18,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use promptforge_progress::ProgressHandle;
+
 use super::confine::{ensure_cache_directory, validate_cache_path, write_synced};
-use super::digest::file_digest;
+use super::digest::file_digest_with_progress;
 use super::{Result, source_cache_key};
 use crate::error::LocalError;
 
@@ -41,7 +43,7 @@ pub(super) enum VerifyOutcome {
 /// A marker hit requires the recorded digest to equal `expected` and the
 /// blob's size and mtime to match the record exactly; anything else (missing,
 /// stale, truncated, or unparseable marker) is a cache miss, never an error,
-/// and falls through to [`file_digest`]. On a hash match the marker is
+/// and falls through to [`file_digest_with_progress`]. On a hash match the marker is
 /// written or refreshed best-effort via [`write_marker_best_effort`]: the
 /// marker only skips a future re-hash, so a persistence failure is logged and
 /// never fails the verification. On mismatch the stale marker is
@@ -60,6 +62,26 @@ pub(super) fn verify_blob(
     expected: &str,
     marker: &Path,
 ) -> Result<VerifyOutcome> {
+    verify_blob_with_progress(cache_root, path, expected, marker, None)
+}
+
+/// [`verify_blob`] variant that reports hash-pass bytes read into `progress`,
+/// when given. A marker hit reads nothing and reports no updates, but still
+/// completes the leaf: every exit path owes the terminal event.
+///
+/// # Errors
+/// Returns [`LocalError::UnsafeCachePath`] when `marker` (or `path`, when it
+/// lies under `cache_root`) escapes the cache root, [`LocalError::Io`] when
+/// reading the marker or hashing or inspecting the blob fails, and
+/// [`LocalError::DigestMismatch`] when the blob's actual digest does not
+/// match `expected`.
+pub(super) fn verify_blob_with_progress(
+    cache_root: &Path,
+    path: &Path,
+    expected: &str,
+    marker: &Path,
+    progress: Option<&ProgressHandle>,
+) -> Result<VerifyOutcome> {
     validate_cache_path(cache_root, marker)?;
     // A path source lives outside the cache by design; only confine the blob
     // when it is a cache resident.
@@ -67,9 +89,19 @@ pub(super) fn verify_blob(
         validate_cache_path(cache_root, path)?;
     }
     if marker_matches(marker, path, expected)? {
+        // The verify work is done with nothing to measure; the leaf still
+        // owes its terminal event on every exit path.
+        if let Some(handle) = progress {
+            handle.complete();
+        }
         return Ok(VerifyOutcome::MarkerHit);
     }
-    let actual = file_digest(path)?;
+    let actual = file_digest_with_progress(path, progress)?;
+    // The hash pass is the leaf's measurable work and is done whether or not
+    // the digest matches; the mismatch error carries the failure.
+    if let Some(handle) = progress {
+        handle.complete();
+    }
     if actual != expected {
         let _ignored = fs::remove_file(marker);
         return Err(LocalError::DigestMismatch {
