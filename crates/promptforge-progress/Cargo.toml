@@ -1,0 +1,27 @@
+[package]
+name = "promptforge-progress"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge progress vocabulary: operation-scoped weighted trees, a process hub, coalesced events, and remote import"
+
+[dependencies]
+# `time` backs the emission coalescer's clock so tests can pause it through
+# tokio's test-util; `sync` carries the hub's broadcast channel.
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[lints]
+workspace = true
