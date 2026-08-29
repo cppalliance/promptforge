@@ -69,6 +69,7 @@ impl<'a> RuntimeResolution<'a> {
     ) -> Result<()> {
         self.producer
             .install(lua, scope, &self.tool_resolver, self.tools, self)
+            .map_err(Error::from)
     }
 
     /// Returns the first typed error captured by a resolver callback.
@@ -76,7 +77,11 @@ impl<'a> RuntimeResolution<'a> {
     /// # Errors
     /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
     pub(crate) fn take_callback_error(&self) -> Result<Option<Error>> {
-        self.producer.take_callback_error()
+        Ok(self
+            .producer
+            .take_callback_error()
+            .map_err(Error::from)?
+            .map(Error::from))
     }
 }
 
@@ -144,25 +149,25 @@ impl CachedDecision {
         }
     }
 
-    fn result(&self, capability: &str) -> Result<ToolId> {
+    fn result(&self, capability: &str) -> std::result::Result<ToolId, promptforge_lua::Error> {
         match self {
             Self::Bind(id) => Ok(id.clone()),
-            Self::Absent => Err(Error::Absent {
+            Self::Absent => Err(promptforge_lua::Error::Absent {
                 capability: capability.to_owned(),
             }),
-            Self::Duplicate(ids) => Err(Error::Duplicate {
-                capability: capability.to_owned(),
-                candidates: ids.clone(),
-            }),
-            Self::Ambiguous(ids) => Err(Error::Ambiguous {
+            Self::Duplicate(ids) => Err(promptforge_lua::Error::Duplicate {
                 capability: capability.to_owned(),
                 candidates: ids.clone(),
             }),
-            Self::QueryFailed(source) => Err(Error::BindQuery {
+            Self::Ambiguous(ids) => Err(promptforge_lua::Error::Ambiguous {
+                capability: capability.to_owned(),
+                candidates: ids.clone(),
+            }),
+            Self::QueryFailed(source) => Err(promptforge_lua::Error::BindQuery {
                 capability: capability.to_owned(),
                 source: source.clone(),
             }),
-            Self::Unrecognized => Err(Error::Bind {
+            Self::Unrecognized => Err(promptforge_lua::Error::Bind {
                 capability: capability.to_owned(),
                 detail: "the picker reported an unrecognized outcome".to_owned(),
             }),
@@ -233,10 +238,15 @@ impl<'a, S: ?Sized> PickerResolver<'a, S> {
 
     /// Locks the decision cache, mapping a poisoned lock to a resolver-state
     /// error (F3) rather than mislabeling it as a Lua authoring failure.
-    fn lock_decisions(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, DecisionCell>>> {
-        self.decisions
-            .lock()
-            .map_err(|_| Error::Internal("tool picker resolver cache was poisoned"))
+    fn lock_decisions(
+        &self,
+    ) -> std::result::Result<
+        std::sync::MutexGuard<'_, BTreeMap<String, DecisionCell>>,
+        promptforge_lua::Error,
+    > {
+        self.decisions.lock().map_err(|_| {
+            promptforge_lua::Error::Internal("tool picker resolver cache was poisoned")
+        })
     }
 }
 
@@ -244,7 +254,7 @@ impl<S> ToolResolver for PickerResolver<'_, S>
 where
     S: DecisionSource + ?Sized,
 {
-    fn resolve(&self, capability: &str) -> Result<ToolId> {
+    fn resolve(&self, capability: &str) -> std::result::Result<ToolId, promptforge_lua::Error> {
         // Fetch or create this capability's single-flight cell under a short
         // lock that touches only the map, never the picker query.
         let cell = {
@@ -266,7 +276,10 @@ where
         decision.result(capability)
     }
 
-    fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<(ToolId, ToolId, f32)>> {
+    fn near_duplicates(
+        &self,
+        ids: &[ToolId],
+    ) -> std::result::Result<Vec<(ToolId, ToolId, f32)>, promptforge_lua::Error> {
         let picker_ids = ids
             .iter()
             .map(|id| PickerToolId::new(id.server(), id.name()))
@@ -285,7 +298,7 @@ where
                     })
                     .collect()
             })
-            .map_err(|source| Error::ToolScopeAnalysisSource {
+            .map_err(|source| promptforge_lua::Error::ToolScopeAnalysisSource {
                 source: Box::new(source),
             })
     }
@@ -425,17 +438,21 @@ mod tests {
             lua.load(code).exec()
         });
         assert!(result.is_err(), "fixture must fail at the Lua callback");
-        producer
-            .take_callback_error()
-            .expect("callback recorder must remain usable")
-            .expect("typed callback error must be retained")
+        Error::from(
+            producer
+                .take_callback_error()
+                .expect("callback recorder must remain usable")
+                .expect("typed callback error must be retained"),
+        )
     }
 
     #[test]
     fn picker_outcomes_preserve_typed_errors_and_candidate_order() {
-        let duplicate = CachedDecision::Duplicate(vec![tid("first"), tid("second")])
-            .result("duplicate")
-            .expect_err("duplicate must fail");
+        let duplicate = Error::from(
+            CachedDecision::Duplicate(vec![tid("first"), tid("second")])
+                .result("duplicate")
+                .expect_err("duplicate must fail"),
+        );
         assert!(matches!(
             duplicate,
             Error::Duplicate { capability, candidates }
@@ -446,21 +463,25 @@ mod tests {
                     ]
         ));
         assert!(matches!(
-            CachedDecision::Absent.result("absent"),
+            CachedDecision::Absent.result("absent").map_err(Error::from),
             Err(Error::Absent { capability }) if capability == "absent"
         ));
         assert!(matches!(
-            CachedDecision::Ambiguous(vec![tid("first"), tid("second")]).result("ambiguous"),
+            CachedDecision::Ambiguous(vec![tid("first"), tid("second")])
+                .result("ambiguous")
+                .map_err(Error::from),
             Err(Error::Ambiguous { capability, candidates })
                 if capability == "ambiguous" && candidates.len() == 2
         ));
         // F4: a picker query failure keeps the typed cause as a private
         // `#[source]` rather than flattening it into a string.
-        let query_failed = CachedDecision::QueryFailed(SharedSource::new(std::io::Error::other(
-            "embedding backend down",
-        )))
-        .result("failed")
-        .expect_err("a query failure must be an error");
+        let query_failed = Error::from(
+            CachedDecision::QueryFailed(SharedSource::new(std::io::Error::other(
+                "embedding backend down",
+            )))
+            .result("failed")
+            .expect_err("a query failure must be an error"),
+        );
         assert!(matches!(
             &query_failed,
             Error::BindQuery { capability, .. } if capability == "failed"
@@ -473,7 +494,9 @@ mod tests {
 
         // The defensive unrecognized-outcome decision maps to a sourceless bind.
         assert!(matches!(
-            CachedDecision::Unrecognized.result("weird"),
+            CachedDecision::Unrecognized
+                .result("weird")
+                .map_err(Error::from),
             Err(Error::Bind { capability, detail })
                 if capability == "weird" && detail.contains("unrecognized")
         ));
@@ -661,8 +684,8 @@ mod tests {
         // A failing capability is likewise cached: decided once, stable error.
         let miss_a = resolver.resolve("absent").expect_err("absent fails");
         let miss_b = resolver.resolve("absent").expect_err("absent fails again");
-        assert!(matches!(miss_a, Error::Absent { .. }));
-        assert!(matches!(miss_b, Error::Absent { .. }));
+        assert!(matches!(miss_a, promptforge_lua::Error::Absent { .. }));
+        assert!(matches!(miss_b, promptforge_lua::Error::Absent { .. }));
         assert_eq!(
             source.count("absent"),
             1,

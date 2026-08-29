@@ -92,10 +92,10 @@ fn resolve_live_declarations_for_test(
         lua.load(source.source()).exec()
     });
     if let Some(error) = producer.take_callback_error()? {
-        return Err(error);
+        return Err(Error::from(error));
     }
     result.map_err(Error::lua)?;
-    producer.bindings()
+    producer.bindings().map_err(Error::from)
 }
 
 fn section_vm_with_model_bindings(
@@ -121,7 +121,7 @@ fn section_vm_with_model_bindings(
 /// frozen set, mirroring the engine's read path.
 fn resolve_section_model(vm: &SectionVm) -> Result<Option<ModelBinding>> {
     let (models, runtime) = vm.model_bag_handles();
-    resolve_model_binding(&Mutex::new(models), &runtime)
+    resolve_model_binding(&Mutex::new(models), &runtime).map_err(Error::from)
 }
 
 mod always;

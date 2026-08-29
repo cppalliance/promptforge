@@ -197,7 +197,7 @@ impl RunConfig {
     pub fn new(execution: impl Into<String>) -> RunConfig {
         RunConfig {
             execution: execution.into(),
-            observer: Arc::new(NullObserver),
+            observer: Arc::new(NullObserver::default()),
             debug: None,
             client: None,
             cancel: None,

@@ -42,7 +42,11 @@ fn writer_models() -> ModelSet {
 /// Builds the run context for a scheduler test: the parsed prompt, an empty
 /// shared library, and the model set pre-filled.
 fn scheduler_context(prompt: &Prompt) -> RunContext {
-    scheduler_context_on(prompt, &StoreRef::memory(), Arc::new(NullObserver))
+    scheduler_context_on(
+        prompt,
+        &StoreRef::memory(),
+        Arc::new(NullObserver::default()),
+    )
 }
 
 /// Builds the run context on the given store and observer, so a walk test
@@ -281,7 +285,7 @@ async fn sections_run_in_fall_through_order() {
         ## Second\n\n\
         ```lua\nstore.append('order.txt', 'Second\\n')\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -383,7 +387,7 @@ async fn off_walk_sections_run_only_when_addressed() {
         ## D\n\n\
         ```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -417,7 +421,7 @@ async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -455,7 +459,7 @@ async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
         return 's2-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -621,7 +625,7 @@ async fn an_execute_chain_continues_the_global_sys_id_sequence() {
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -719,7 +723,7 @@ async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
         return 'helped:' .. store.read('seen.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -983,7 +987,7 @@ async fn jump_to_a_child_starts_the_child_level_walk() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1061,7 +1065,7 @@ async fn child_walk_recurses_to_h4() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1090,7 +1094,7 @@ async fn off_walk_child_is_skipped_by_the_child_walk() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1119,7 +1123,7 @@ async fn jump_to_an_off_walk_child_runs_it() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1151,7 +1155,7 @@ async fn running_child_addresses_its_own_siblings_and_children() {
         ## B\n\n\
         ```lua\nreturn store.read('order.txt')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1236,7 +1240,7 @@ async fn sys_id_counts_sections_entered_run_wide() {
         return store.read('ids.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1321,7 +1325,7 @@ async fn jump_inside_an_execute_chain_moves_within_the_chain() {
         return 'tail-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1370,7 +1374,7 @@ async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
         Ask S2.\n\n\
         ```lua\nstore.append('order.txt', 'S2\\n')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
@@ -1405,7 +1409,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         return 'p'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1438,7 +1442,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         ## After\n\n\
         ```lua\nerror('a return must end the chain before fall-through')\n```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1469,7 +1473,7 @@ async fn execute_to_a_child_starts_a_contained_chain() {
         return 'after-reply'\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1504,7 +1508,7 @@ async fn a_jump_descent_does_not_consume_execute_depth() {
         return execute('### X')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let error = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1540,7 +1544,7 @@ async fn walk_never_descends_into_children() {
         return store.read('order.txt')\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -1582,7 +1586,11 @@ async fn a_failed_jump_resolution_still_finishes_the_jumper() {
 /// set starts empty - the live H1 pass under test records its own
 /// bindings, exactly as the legacy run's H1 hand-off leaves them.
 fn h1_context(prompt: &Prompt) -> RunContext {
-    h1_context_on(prompt, &StoreRef::memory(), Arc::new(NullObserver))
+    h1_context_on(
+        prompt,
+        &StoreRef::memory(),
+        Arc::new(NullObserver::default()),
+    )
 }
 
 /// Builds the H1 run context on the given store and observer, so a pass
@@ -1747,7 +1755,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
         ```lua\nreturn 'unexpected'\n```\n";
     let prompt = parse(md);
     let store = StoreRef::memory();
-    let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = h1_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let resolution = H1Resolution::empty();
     let error = Scheduler::new(&ctx, None)
         .with_live_h1(resolution.context())
@@ -2387,7 +2395,7 @@ async fn fanout_arms_take_global_ids_per_fanout_index_and_structured_results() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2576,7 +2584,7 @@ async fn a_jump_inside_a_fanout_arm_drives_a_child_walk() {
         ```\n";
     let store = StoreRef::memory();
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2623,7 +2631,7 @@ async fn a_jump_from_an_arm_to_a_worker_child_walks_the_child_slice() {
         ```\n";
     let store = StoreRef::memory();
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2814,7 +2822,7 @@ async fn two_arms_appending_one_path_succeed() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2846,7 +2854,7 @@ async fn an_arm_rewriting_its_own_path_succeeds() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
@@ -2876,7 +2884,7 @@ async fn sequential_fanouts_may_write_one_path() {
         return item\n\
         ```\n";
     let prompt = parse(md);
-    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver));
+    let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await

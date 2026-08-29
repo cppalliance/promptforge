@@ -58,7 +58,7 @@ fn parse(md: &str) -> Prompt {
     } else {
         md.replacen("---\n\n", "---\n\n# Test prompt\n\n", 1)
     };
-    Prompt::parse(&source, EXECUTION, &NullObserver).unwrap()
+    Prompt::parse(&source, EXECUTION, &NullObserver::default()).unwrap()
 }
 
 struct TestPrompt {
@@ -204,7 +204,7 @@ fn to_config(opts: RunOptions) -> RunConfig {
 fn silent() -> RunOptions {
     RunOptions {
         execution: EXECUTION,
-        observer: Arc::new(NullObserver),
+        observer: Arc::new(NullObserver::default()),
         client: None,
         debug: None,
     }
@@ -223,7 +223,7 @@ fn gateway_client(addr: SocketAddr) -> GatewayClient {
 fn gatewayed(addr: SocketAddr) -> RunOptions {
     RunOptions {
         execution: EXECUTION,
-        observer: Arc::new(NullObserver),
+        observer: Arc::new(NullObserver::default()),
         client: Some(gateway_client(addr)),
         debug: None,
     }
@@ -895,7 +895,7 @@ fn tool_description_override_appears_in_model_schema() {
         &bindings,
         &ModelSet::default(),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Override",
     )
     .expect("captured bindings must install");
@@ -910,11 +910,11 @@ fn tool_description_override_appears_in_model_schema() {
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Override",
     )
     .expect("prologue must compile");
-    vm.run_chunk(&add_default, &NullObserver, "Override")
+    vm.run_chunk(&add_default, &NullObserver::default(), "Override")
         .expect("tools.add(echo) without override must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let scope =
@@ -933,18 +933,18 @@ fn tool_description_override_appears_in_model_schema() {
         "prologue-2",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Override",
     )
     .expect("second prologue must compile");
-    vm.run_chunk(&add_override, &NullObserver, "Override")
+    vm.run_chunk(&add_override, &NullObserver::default(), "Override")
         .expect("description override at tools.add must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas[0].description, "Author override for the model");
 
-    vm.teardown(&NullObserver, "Override");
+    vm.teardown(&NullObserver::default(), "Override");
 }
 
 /// Precedence at the advertised schema: a `tools.add` override beats the
@@ -968,7 +968,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         &bindings,
         &ModelSet::default(),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Precedence",
     )
     .expect("captured bindings must install");
@@ -982,11 +982,11 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Precedence",
     )
     .expect("prologue must compile");
-    vm.run_chunk(&add_plain, &NullObserver, "Precedence")
+    vm.run_chunk(&add_plain, &NullObserver::default(), "Precedence")
         .expect("tools.add without override must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let scope =
@@ -1002,11 +1002,11 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         "prologue-2",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Precedence",
     )
     .expect("second prologue must compile");
-    vm.run_chunk(&add_override, &NullObserver, "Precedence")
+    vm.run_chunk(&add_override, &NullObserver::default(), "Precedence")
         .expect("tools.add with override must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
@@ -1016,7 +1016,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         "the add override must beat the bind/always override"
     );
 
-    vm.teardown(&NullObserver, "Precedence");
+    vm.teardown(&NullObserver::default(), "Precedence");
 }
 
 #[tokio::test]
@@ -1041,7 +1041,7 @@ async fn tool_loop_dispatches_then_returns_text() {
         &dispatch,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver,
+        &NullObserver::default(),
         "Only",
         &turns,
         &options,
@@ -1128,7 +1128,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
             &dispatch,
             "ask the model".to_string(),
             DEFAULT_MAX_TOOL_ITERATIONS,
-            &NullObserver,
+            &NullObserver::default(),
             "Only",
             &turns,
             &options,
@@ -1377,7 +1377,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &dispatch,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver,
+        &NullObserver::default(),
         "Only",
         &turns,
         &options,
@@ -1452,7 +1452,7 @@ async fn untrusted_nonce_is_stable_across_rounds() {
         &dispatch,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver,
+        &NullObserver::default(),
         "Only",
         &turns,
         &options,
@@ -1534,7 +1534,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &dispatch,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver,
+        &NullObserver::default(),
         "Only",
         &turns,
         &options,

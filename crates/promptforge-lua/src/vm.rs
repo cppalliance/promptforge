@@ -12,8 +12,9 @@ use super::{
     log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
     wrap_shimmed_handle,
 };
-use crate::client::ToolSchema;
-use crate::execute::protocol::{Answer, Request, YieldParse};
+use promptforge_gateway_client::client::ToolSchema;
+
+use crate::protocol::{Answer, Request, YieldParse};
 
 /// Packs owned values into a 1-based Lua sequence table.
 pub(crate) fn pack_sequence<T: mlua::IntoLua>(
@@ -50,23 +51,25 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 ///
 /// # Examples
 /// ```text
-/// use promptforge_core::lua::SectionVm;
-/// use promptforge_core::observe::NullObserver;
-/// use promptforge_core::untrusted::GuardNonce;
+/// use promptforge_lua::SectionVm;
+/// use promptforge_core_support::observe::NullObserver;
+/// use promptforge_core_support::untrusted::GuardNonce;
 ///
 /// let nonce = GuardNonce::fresh();
 /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
 /// vm.teardown(&NullObserver::default(), "Example");
-/// # Ok::<(), promptforge_core::Error>(())
+/// # Ok::<(), promptforge_lua::Error>(())
 /// ```
 #[derive(Debug)]
-pub(crate) struct SectionVm {
+pub struct SectionVm {
     execution: String,
     lua: Lua,
     bound_tools: ToolSet,
     bound_models: ModelSet,
-    pub(crate) tool_runtime: Arc<Mutex<ToolRuntime>>,
-    pub(crate) model_runtime: Arc<Mutex<ModelRuntime>>,
+    /// The section's tool-addition runtime, read by the executor's prose path.
+    pub tool_runtime: Arc<Mutex<ToolRuntime>>,
+    /// The section's model-selection runtime, read by the executor's prose path.
+    pub model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Set by Lua `jump` before it aborts the current chunk.
     jump_slot: Arc<Mutex<Option<String>>>,
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
@@ -222,16 +225,16 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::SectionVm;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::untrusted::GuardNonce;
+    /// use promptforge_lua::SectionVm;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
     /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
+    /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub(crate) fn new(
+    pub fn new(
         nonce: &GuardNonce,
         execution: &str,
         observer: &dyn Observer,
@@ -291,7 +294,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
-    pub(crate) fn new_for_section(
+    pub fn new_for_section(
         nonce: &GuardNonce,
         tools: &ToolSet,
         models: &ModelSet,
@@ -322,7 +325,7 @@ impl SectionVm {
     /// non-scalar value, or if it calls `jump`: load-time control transfer
     /// has no coherent meaning, so a recorded jump becomes the hard error
     /// "jump is not available during shared library load".
-    pub(crate) fn replay_shared(
+    pub fn replay_shared(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -356,7 +359,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if a handle cannot be created or installed.
-    pub(crate) fn install_captured_bindings(&self) -> Result<()> {
+    pub fn install_captured_bindings(&self) -> Result<()> {
         let globals = self.lua.globals();
         for binding in self.bound_tools.bindings() {
             let handle =
@@ -397,18 +400,18 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::SectionVm;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    /// use promptforge_core::untrusted::GuardNonce;
+    /// use promptforge_lua::SectionVm;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_store::StoreRef;
+    /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory(), None)?;
     /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
+    /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub(crate) fn inject_host(
+    pub fn inject_host(
         &mut self,
         args: &str,
         sys: &Json,
@@ -429,7 +432,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or were already
     /// injected.
-    pub(crate) fn inject_host_with_var(
+    pub fn inject_host_with_var(
         &mut self,
         args: &str,
         sys: &Json,
@@ -487,11 +490,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or the
     /// globals cannot be installed.
-    pub(crate) fn install_host_apis(
-        &self,
-        observer: &Arc<dyn Observer>,
-        section: &str,
-    ) -> Result<()> {
+    pub fn install_host_apis(&self, observer: &Arc<dyn Observer>, section: &str) -> Result<()> {
         let store = self.store.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
         })?;
@@ -556,7 +555,7 @@ impl SectionVm {
         let fanout_fn = self
             .lua
             .create_function(move |lua, (worker, collection): (String, Value)| {
-                let items = crate::fanout::collection_to_items(lua, &collection)
+                let items = crate::collection::collection_to_items(lua, &collection)
                     .map_err(mlua::Error::external)?;
                 let var = var_to_json(lua).map_err(mlua::Error::external)?;
                 let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
@@ -576,9 +575,10 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
-    pub(crate) fn install_scheduler_control_globals<L>(&self, list_callback: L) -> Result<()>
+    pub fn install_scheduler_control_globals<L, E>(&self, list_callback: L) -> Result<()>
     where
-        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+        L: Fn(String) -> std::result::Result<Vec<String>, E> + Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
     {
         let globals = self.lua.globals();
         self.install_jump_global(&globals)?;
@@ -591,7 +591,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
-    pub(crate) fn install_coro_shims(&mut self) -> Result<()> {
+    pub fn install_coro_shims(&mut self) -> Result<()> {
         install_shim_prelude(&self.lua)?;
         self.coro_shims = true;
         Ok(())
@@ -613,9 +613,10 @@ impl SectionVm {
         globals.raw_set("jump", jump_fn).map_err(Error::lua)
     }
 
-    fn install_list_global<L>(&self, globals: &mlua::Table, list_callback: L) -> Result<()>
+    fn install_list_global<L, E>(&self, globals: &mlua::Table, list_callback: L) -> Result<()>
     where
-        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
+        L: Fn(String) -> std::result::Result<Vec<String>, E> + Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
     {
         let list_fn = self
             .lua
@@ -639,7 +640,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
-    pub(crate) fn install_h1_control_stubs(&self) -> Result<()> {
+    pub fn install_h1_control_stubs(&self) -> Result<()> {
         let globals = self.lua.globals();
         for name in ["execute", "jump", "fanout", "list_from_section"] {
             let stub = self
@@ -659,7 +660,11 @@ impl SectionVm {
     ///
     /// Host injection must have run first. Used to expose `sys.model` once the
     /// section's model binding is fixed.
-    pub(crate) fn re_seal_sys(&self, sys: &Json) -> Result<()> {
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// sealed table cannot be installed.
+    pub fn re_seal_sys(&self, sys: &Json) -> Result<()> {
         if !self.host_injected {
             return Err(Error::Lua(
                 "section VM host values were not injected".to_owned(),
@@ -693,7 +698,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when the live `sys` mutex is poisoned.
-    pub(crate) fn current_sys(&self, fallback: &Json) -> Result<Json> {
+    pub fn current_sys(&self, fallback: &Json) -> Result<Json> {
         let guard = self
             .sys_live
             .lock()
@@ -717,8 +722,11 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if host values have not been injected, execution
     /// fails, the shared instruction budget is exhausted, or the program
     /// returns a non-scalar value.
-    #[cfg(test)]
-    pub(crate) fn run_chunk(
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s executor
+    /// tests, not host API.
+    #[doc(hidden)]
+    pub fn run_chunk(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -751,24 +759,19 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::SectionVm;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    /// use promptforge_core::untrusted::GuardNonce;
+    /// use promptforge_lua::SectionVm;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_store::StoreRef;
+    /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
+    /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub(crate) fn bind_reply(
-        &self,
-        reply: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<()> {
+    pub fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
         observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
@@ -802,7 +805,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when `reply` is neither nil nor a string.
-    pub(crate) fn reply(&self) -> Result<Option<String>> {
+    pub fn reply(&self) -> Result<Option<String>> {
         let value: Value = self.lua.globals().get("reply").map_err(Error::lua)?;
         match value {
             Value::Nil => Ok(None),
@@ -823,19 +826,19 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::SectionVm;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    /// use promptforge_core::untrusted::GuardNonce;
+    /// use promptforge_lua::SectionVm;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_store::StoreRef;
+    /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
     /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
+    /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub(crate) fn var(&self) -> Result<Json> {
+    pub fn var(&self) -> Result<Json> {
         if !self.host_injected {
             return Err(Error::Lua(
                 "section VM host values have not been injected".to_owned(),
@@ -851,7 +854,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] when the global is a function, userdata, or
     /// thread (bare globals in prose must be data), or when its value cannot
     /// be represented as JSON.
-    pub(crate) fn global_json(&self, name: &str) -> Result<Option<Json>> {
+    pub fn global_json(&self, name: &str) -> Result<Option<Json>> {
         let value: Value = self.lua.globals().get(name).map_err(Error::lua)?;
         match value {
             Value::Nil => Ok(None),
@@ -869,7 +872,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the global cannot be set.
-    pub(crate) fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
+    pub fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
 
@@ -882,7 +885,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if the value cannot convert or the global
     /// cannot be set.
-    pub(crate) fn set_global_json(&self, name: &str, value: &Json) -> Result<()> {
+    pub fn set_global_json(&self, name: &str, value: &Json) -> Result<()> {
         let value = self.lua.to_value(value).map_err(Error::lua)?;
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
@@ -898,10 +901,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
-    pub(crate) fn install_tool_call_counts(
-        &self,
-        bindings: &[ToolBinding],
-    ) -> Result<ToolCallCounts> {
+    pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
         let counts = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
         let declared: Vec<String> = self
             .bound_tools
@@ -914,9 +914,12 @@ impl SectionVm {
     }
 
     /// Returns frozen tool bindings and the live H2 addition runtime.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s executor
+    /// tests, not host API.
+    #[doc(hidden)]
     #[must_use]
-    #[allow(dead_code)] // exercised by the lua and executor scope tests
-    pub(crate) fn tool_bag_handles(&self) -> (ToolSet, Arc<Mutex<ToolRuntime>>) {
+    pub fn tool_bag_handles(&self) -> (ToolSet, Arc<Mutex<ToolRuntime>>) {
         (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
     }
 
@@ -924,16 +927,19 @@ impl SectionVm {
     ///
     /// Test-only: production reads the run's shared set through the model
     /// view; tests snapshot straight from the VM.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s tests,
+    /// not host API.
+    #[doc(hidden)]
     #[must_use]
-    #[cfg(test)]
-    pub(crate) fn model_bag_handles(&self) -> (ModelSet, Arc<Mutex<ModelRuntime>>) {
+    pub fn model_bag_handles(&self) -> (ModelSet, Arc<Mutex<ModelRuntime>>) {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
     }
 
     /// Borrows the inner Lua state, so the shim installs and the
     /// scheduler's scoped H1 steps can drive coroutines on the VM.
     #[must_use]
-    pub(crate) fn lua(&self) -> &Lua {
+    pub fn lua(&self) -> &Lua {
         &self.lua
     }
 
@@ -949,14 +955,14 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
     /// the args cannot be bridged, the handler fails, or it returns a
     /// non-scalar value.
-    pub(crate) fn call_local_tool(&self, alias: &str, args: &Json) -> Result<String> {
+    pub fn call_local_tool(&self, alias: &str, args: &Json) -> Result<String> {
         self.local_tools.call(&self.lua, alias, args)
     }
 
     /// Returns the schemas of every registered local tool.
     /// # Errors
     /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
-    pub(crate) fn local_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
+    pub fn local_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
         self.local_tools.schemas()
     }
 
@@ -974,12 +980,12 @@ impl SectionVm {
     /// Sets the heap ceiling (`lua_memory_bytes`) and resets the `log()` event
     /// budget (`lua_log_events`). Called by the executor right after
     /// construction, ahead of the shared replay, so the replay already spends
-    /// the caller's [`crate::execute::RunLimits`] rather than only the safe non-env defaults
+    /// the caller's run limits rather than only the safe non-env defaults
     /// installed in [`SectionVm::new`].
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.
-    pub(crate) fn apply_lua_limits(&self, memory_bytes: usize, log_events: u32) -> Result<()> {
+    pub fn apply_lua_limits(&self, memory_bytes: usize, log_events: u32) -> Result<()> {
         self.lua
             .set_memory_limit(memory_bytes)
             .map_err(Error::lua)?;
@@ -1002,16 +1008,16 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::SectionVm;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::untrusted::GuardNonce;
+    /// use promptforge_lua::SectionVm;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_core_support::untrusted::GuardNonce;
     ///
     /// let nonce = GuardNonce::fresh();
     /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
+    /// # Ok::<(), promptforge_lua::Error>(())
     /// ```
-    pub(crate) fn teardown(self, observer: &dyn Observer, section: &str) {
+    pub fn teardown(self, observer: &dyn Observer, section: &str) {
         let execution = self.execution.clone();
         observer.observe(&self.execution, section, detail::LUA_TEARDOWN_STARTED);
         self.clear_infer_hook();
@@ -1087,7 +1093,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the jump slot is poisoned, the program
     /// cannot load, or the thread cannot be created or hooked; a block
     /// failure returns the mapped runtime error.
-    pub(crate) fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
+    pub fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
         {
             let mut slot = self
                 .jump_slot
@@ -1106,7 +1112,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Same contract as [`start_block_coro`](Self::start_block_coro).
-    pub(crate) fn resume_block_coro(
+    pub fn resume_block_coro(
         &self,
         program: &LuaProgram,
         thread: &Thread,
@@ -1126,7 +1132,8 @@ impl SectionVm {
     /// strict validation is defense in depth. A well-formed call whose
     /// argument fails validation is [`YieldParse::Call`]: the error rides
     /// back as the answer so the shim raises it at the call site.
-    pub(crate) fn request_from_yield(&self, values: &MultiValue) -> YieldParse {
+    #[must_use]
+    pub fn request_from_yield(&self, values: &MultiValue) -> YieldParse {
         Request::from_yield(&self.lua, values.iter().next().unwrap_or(&Value::Nil))
     }
 
@@ -1134,26 +1141,32 @@ impl SectionVm {
     ///
     /// The answer renders to its `(ok, result)` envelope on this VM. On a
     /// failure answer the envelope carries only the display string for the
-    /// shim to raise, and the typed [`Error`] the answer owned is
+    /// shim to raise, and the typed error the answer owned is
     /// substituted back when the shim-raised error surfaces as the
     /// coroutine's failure (the LUA-012 contract), so the Rust caller
     /// receives the structured error rather than a string.
     ///
+    /// The error type is the driver's own (`E`); this crate's internal
+    /// failures convert into it through [`From`].
+    ///
     /// # Errors
     /// Same contract as [`start_block_coro`](Self::start_block_coro), plus
-    /// [`Error::Lua`] if the envelope cannot be rendered on this VM.
-    pub(crate) fn resume_block_coro_answer(
+    /// the driver's `E` if the envelope cannot be rendered on this VM.
+    pub fn resume_block_coro_answer<E>(
         &self,
         program: &LuaProgram,
         thread: &Thread,
-        answer: Answer,
-    ) -> Result<CoroStep> {
+        answer: Answer<E>,
+    ) -> std::result::Result<CoroStep, E>
+    where
+        E: std::fmt::Display + From<Error>,
+    {
         let (envelope, retained) = answer.into_envelope(&self.lua).map_err(Error::lua)?;
         match self.resume_block_coro(program, thread, envelope) {
             Ok(step) => Ok(step),
             Err(error) => Err(match retained {
                 Some(retained) if coroutine_failure_is(&error, &retained) => retained,
-                _ => error,
+                _ => E::from(error),
             }),
         }
     }
@@ -1192,7 +1205,7 @@ impl SectionVm {
 /// mapped message, whose `Display` carries mlua's `runtime error: ` prefix.
 /// A block that caught the shim's error and failed on its own keeps its own
 /// error.
-fn coroutine_failure_is(failure: &Error, retained: &Error) -> bool {
+fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> bool {
     let display = retained.to_string();
     match failure {
         Error::LuaRuntime { source, .. } => match source.downcast_ref::<mlua::Error>() {
@@ -1213,7 +1226,7 @@ fn coroutine_failure_is(failure: &Error, retained: &Error) -> bool {
 /// which validates a [`Yielded`](CoroStep::Yielded) request, dispatches it,
 /// and resumes the thread with the answer.
 #[derive(Debug)]
-pub(crate) enum CoroStep {
+pub enum CoroStep {
     /// The coroutine suspended on a shim yield; the yielded values carry
     /// the request table.
     Yielded(Thread, MultiValue),
@@ -1280,7 +1293,11 @@ pub(crate) fn run_chunk(
 ///
 /// Rebuilt on every prose block so `tools.add` and `tools.add_local` calls
 /// between blocks reach the next model turn.
-pub(crate) fn current_tool_bindings(
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the tool runtime's mutex is poisoned or an added
+/// alias has no frozen binding.
+pub fn current_tool_bindings(
     bindings: &ToolSet,
     runtime: &Mutex<ToolRuntime>,
 ) -> Result<Vec<ToolBinding>> {
@@ -1298,7 +1315,11 @@ pub(crate) fn current_tool_bindings(
 /// Reads the section's effective model binding through the run's model view
 /// without mutating the model runtime: the H2 `models.use` selection, else
 /// the prompt-wide `models.default` baseline.
-pub(crate) fn resolve_model_binding(
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the model runtime's mutex is poisoned or the
+/// selected alias has no frozen binding.
+pub fn resolve_model_binding(
     bindings: &dyn ModelView,
     runtime: &Mutex<ModelRuntime>,
 ) -> Result<Option<ModelBinding>> {

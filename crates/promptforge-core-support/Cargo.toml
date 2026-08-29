@@ -1,0 +1,23 @@
+[package]
+name = "promptforge-core-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge shared host-support primitives: untrusted guards, cooperative cancellation, run observation"
+readme = "README.md"
+keywords = ["prompt", "llm", "cancellation", "observability"]
+categories = ["rust-patterns"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+rand.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

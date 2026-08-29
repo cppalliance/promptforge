@@ -192,7 +192,8 @@ fn near_duplicate_always_scope_fails_at_the_scope_rebuild() {
 
     let effective = current_tool_bindings(&tool_set, &runtime).expect("the always scope snapshots");
     let error =
-        prepare_effective_scope(&effective, &[], EXECUTION, &NullObserver, "Only").unwrap_err();
+        prepare_effective_scope(&effective, &[], EXECUTION, &NullObserver::default(), "Only")
+            .unwrap_err();
 
     assert!(
         matches!(error, Error::NearDuplicateTools { .. }),

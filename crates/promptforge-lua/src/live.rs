@@ -23,7 +23,7 @@ fn record_callback_error(errors: &Mutex<Option<Error>>, error: Error) -> mlua::R
 /// its views - so the walk needs no bindings handoff. The typed callback
 /// errors live outside the shared sets, in the producer's own slots.
 #[derive(Debug, Clone)]
-pub(crate) struct LiveBindingProducer {
+pub struct LiveBindingProducer {
     tools: Arc<Mutex<ToolSet>>,
     tool_error: Arc<Mutex<Option<Error>>>,
     models: Arc<Mutex<ModelSet>>,
@@ -32,7 +32,8 @@ pub(crate) struct LiveBindingProducer {
 
 impl LiveBindingProducer {
     /// Builds a producer whose bindings land in the run's shared sets.
-    pub(crate) fn new(tools: Arc<Mutex<ToolSet>>, models: Arc<Mutex<ModelSet>>) -> Self {
+    #[must_use]
+    pub fn new(tools: Arc<Mutex<ToolSet>>, models: Arc<Mutex<ModelSet>>) -> Self {
         Self {
             tools,
             tool_error: Arc::new(Mutex::new(None)),
@@ -46,7 +47,7 @@ impl LiveBindingProducer {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when either table cannot be installed.
-    pub(crate) fn install<'scope, 'env: 'scope>(
+    pub fn install<'scope, 'env: 'scope>(
         &self,
         lua: &'env Lua,
         scope: &'scope mlua::Scope<'scope, 'env>,
@@ -69,7 +70,10 @@ impl LiveBindingProducer {
     ///
     /// This lets the H1 executor preserve typed resolution errors instead of
     /// replacing them with mlua's callback wrapper.
-    pub(crate) fn take_callback_error(&self) -> Result<Option<Error>> {
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
+    pub fn take_callback_error(&self) -> Result<Option<Error>> {
         let tool_error = self
             .tool_error
             .lock()
@@ -85,13 +89,16 @@ impl LiveBindingProducer {
 
     /// Snapshots all bindings resolved by the live H1 execution so far.
     ///
-    /// Test-only: production reads the shared sets through the run context's
-    /// views; tests snapshot straight from the producer.
+    /// Production reads the shared sets through the run context's views; test
+    /// doubles snapshot straight from the producer.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s tests,
+    /// not host API.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if either set's mutex is poisoned.
-    #[cfg(test)]
-    pub(crate) fn bindings(&self) -> Result<(ToolSet, ModelSet)> {
+    #[doc(hidden)]
+    pub fn bindings(&self) -> Result<(ToolSet, ModelSet)> {
         let tools = self
             .tools
             .lock()

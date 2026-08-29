@@ -24,5 +24,13 @@ Lua runtime, the model catalog, and the run machinery.
   re-export under `promptforge_core::store` follows the `tools` precedent:
   verbatim re-exports only, no new vocabulary; `WriteScope` stays
   `pub(crate)`.
+- The Lua sandbox and host surface (the section VM, the coroutine protocol
+  vocabulary, the host tables, `LuaProgram`, and the Lua-layer error
+  substrate) live in `promptforge-lua`; the shared host-support primitives
+  (`untrusted`, `cancel`, `observe`) live in `promptforge-core-support`.
+  Compatibility re-exports under `promptforge_core::lua`,
+  `promptforge_core::observe`, and the crate-root `CancelHandle` follow the
+  `tools` precedent: verbatim re-exports only, no new vocabulary. The
+  executor imports from `promptforge-lua`, never the reverse.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

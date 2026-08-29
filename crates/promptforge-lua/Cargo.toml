@@ -1,0 +1,29 @@
+[package]
+name = "promptforge-lua"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge sandboxed Lua runtime: the section VM, coroutine protocol, and host surface"
+readme = "README.md"
+keywords = ["prompt", "llm", "lua", "sandbox", "scripting"]
+categories = ["text-processing", "api-bindings"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+mlua.workspace = true
+promptforge-core-support.workspace = true
+promptforge-gateway-client.workspace = true
+promptforge-store.workspace = true
+promptforge-tools.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

@@ -314,7 +314,7 @@ struct Chain<'a> {
     /// a block is running or suspended; a block that returns disposes of it.
     coroutine: Option<Thread>,
     /// The answer delivered for a suspended coroutine, consumed at resume.
-    incoming: Option<Answer>,
+    incoming: Option<Answer<Error>>,
     /// The walk-scoped reply slot: seeds each section's frame at entry and
     /// is replaced by the section's final reply at its end, so the reply
     /// crosses section boundaries.
@@ -391,9 +391,9 @@ pub(crate) struct Scheduler<'a> {
     /// The send half every spawned leaf task posts its answer to. The
     /// channel is unbounded: each task sends exactly once, and the in-flight
     /// count is already bounded by the chains that produced them.
-    answer_tx: mpsc::UnboundedSender<(RequestId, Answer)>,
+    answer_tx: mpsc::UnboundedSender<(RequestId, Answer<Error>)>,
     /// The receive half the driver awaits when no chain is ready.
-    answers: mpsc::UnboundedReceiver<(RequestId, Answer)>,
+    answers: mpsc::UnboundedReceiver<(RequestId, Answer<Error>)>,
     /// Abort handles of the in-flight leaf I/O tasks, keyed by request so
     /// a fatal fanout arm can abort a sibling arm's own in-flight round;
     /// every handle is aborted on cancellation, and aborting a completed
@@ -479,7 +479,7 @@ impl<'a> Scheduler<'a> {
     /// Posts an answer for an arbitrary request id, so a test can drive
     /// the driver's unknown-answer paths directly.
     #[cfg(test)]
-    pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer) {
+    pub(crate) fn post_answer_for_test(&self, request: u64, answer: Answer<Error>) {
         self.answer_tx
             .send((RequestId(request), answer))
             .expect("the scheduler holds its own receiver");
@@ -831,7 +831,7 @@ impl<'a> Scheduler<'a> {
         /// action phase can touch the scheduler's other fields.
         enum Advance {
             /// Resume the suspended coroutine with its delivered answer.
-            Resume(Thread, Answer),
+            Resume(Thread, Answer<Error>),
             /// The chain is between sections: enter the next section, or
             /// end the chain when the slice is exhausted.
             EnterSection,
@@ -890,7 +890,7 @@ impl<'a> Scheduler<'a> {
         &mut self,
         id: ChainId,
         thread: &Thread,
-        answer: Answer,
+        answer: Answer<Error>,
         root_result: &mut Option<Result<String>>,
     ) -> Result<()> {
         let chain = &self.chains[id.index()];
@@ -929,7 +929,9 @@ impl<'a> Scheduler<'a> {
         let name = chain.section_name().to_owned();
         observer.observe(&execution, &name, detail::LUA_CHUNK_STARTED);
         if chain.h1.is_some() {
-            let (result, callback_error) = self.h1_scoped_step(id, SectionVm::start_block_coro)?;
+            let (result, callback_error) = self.h1_scoped_step(id, |vm, program| {
+                vm.start_block_coro(program).map_err(Error::from)
+            })?;
             return self.finish_h1_step(id, result, callback_error, root_result);
         }
         let slice = chain.slice;
@@ -943,7 +945,7 @@ impl<'a> Scheduler<'a> {
             .frame
             .as_ref()
             .ok_or(Error::Internal("a live chain holds its frame"))?;
-        let result = frame.vm()?.start_block_coro(program);
+        let result = frame.vm()?.start_block_coro(program).map_err(Error::from);
         self.handle_coro_result(id, result, root_result)
     }
 
@@ -1181,13 +1183,13 @@ impl<'a> Scheduler<'a> {
                         // an author `pcall` catches it exactly as on the
                         // legacy callback path.
                         chain.coroutine = Some(thread);
-                        chain.incoming = Some(answer);
+                        chain.incoming = Some(answer.map_error(Error::from));
                         self.ready.push_back(id);
                         Ok(())
                     }
                     YieldParse::Malformed(error) => {
                         observer.observe(&execution, &name, detail::LUA_CHUNK_FAILED);
-                        Err(error)
+                        Err(Error::from(error))
                     }
                 }
             }
@@ -1367,7 +1369,7 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_fanout(id, &worker, &items, &var);
                 Ok(())
             }
-            Request::Mcp { .. } => Err(Request::mcp_reserved()),
+            Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
         }
     }
 

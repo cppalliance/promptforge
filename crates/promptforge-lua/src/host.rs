@@ -99,7 +99,9 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
 pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
     let nonce = nonce.clone();
     let untrusted = lua
-        .create_function(move |_, s: String| Ok(crate::untrusted::wrap(&nonce, &s)))
+        .create_function(move |_, s: String| {
+            Ok(promptforge_core_support::untrusted::wrap(&nonce, &s))
+        })
         .map_err(Error::lua)?;
     lua.globals()
         .raw_set("untrusted", untrusted)
@@ -153,7 +155,7 @@ fn read_store_bounded(
     start: Option<i64>,
     end: Option<i64>,
     numbered: bool,
-) -> std::result::Result<String, crate::store::StoreError> {
+) -> std::result::Result<String, promptforge_store::StoreError> {
     match start {
         None if end.is_none() => {
             if numbered {
@@ -162,7 +164,7 @@ fn read_store_bounded(
                 handle.read(path)
             }
         }
-        None => Err(crate::store::StoreError::invalid_range(
+        None => Err(promptforge_store::StoreError::invalid_range(
             path,
             "start is required when end is given",
         )),
@@ -184,7 +186,7 @@ fn read_store(
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
-) -> std::result::Result<String, crate::store::StoreError> {
+) -> std::result::Result<String, promptforge_store::StoreError> {
     read_store_bounded(handle, path, start, end, false)
 }
 
@@ -194,7 +196,7 @@ fn read_store_numbered(
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
-) -> std::result::Result<String, crate::store::StoreError> {
+) -> std::result::Result<String, promptforge_store::StoreError> {
     read_store_bounded(handle, path, start, end, true)
 }
 
@@ -223,7 +225,7 @@ fn read_store_numbered(
 /// other caller (walk sections, H1) installs with `None` and writes
 /// untracked.
 ///
-/// [`StoreError`]: crate::store::StoreError
+/// [`StoreError`]: promptforge_store::StoreError
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the `store` table or any of its functions cannot

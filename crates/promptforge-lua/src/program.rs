@@ -48,21 +48,22 @@ fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, C
 /// retained source; compilation observations carry only fixed strings.
 ///
 /// # Examples
-/// A program is obtained from the parser and exposes its source and position:
+/// A program is obtained from the parser (which compiles it at parse time)
+/// and exposes its source and position; here one is compiled directly:
 /// ```
-/// use promptforge_core::observe::NullObserver;
-/// use promptforge_core::parser::Prompt;
+/// use std::num::NonZeroU32;
 ///
-/// let source = concat!(
-///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
-///     "# Title\n\nintro\n\n",
-///     "## Only\n\n",
-///     "```lua\nreturn 1\n```\n",
-/// );
-/// let prompt = Prompt::parse(source, "doc", &NullObserver::default())?;
-/// let program = prompt.sections()[0]
-///     .prologue()
-///     .ok_or("the section has a Lua prologue")?;
+/// use promptforge_core_support::observe::NullObserver;
+/// use promptforge_lua::LuaProgram;
+///
+/// let program = LuaProgram::compile(
+///     "return 1",
+///     "section `Only` prologue",
+///     NonZeroU32::MIN,
+///     "doc",
+///     &NullObserver::default(),
+///     "Only",
+/// )?;
 /// assert_eq!(program.source(), "return 1");
 /// assert!(program.source_line().get() >= 1);
 /// assert!(program.location().contains("Only"));
@@ -97,15 +98,17 @@ impl LuaProgram {
     /// [`Error::Lua`] if the temporary compiler VM cannot be created.
     ///
     /// # Examples
-    /// ```text
+    /// ```
+    /// use std::num::NonZeroU32;
+    ///
     /// use mlua::Lua;
-    /// use promptforge_core::lua::LuaProgram;
-    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core_support::observe::NullObserver;
+    /// use promptforge_lua::LuaProgram;
     ///
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
     ///     "example prologue",
-    ///     1,
+    ///     NonZeroU32::MIN,
     ///     "example-run",
     ///     &NullObserver::default(),
     ///     "Example",
@@ -116,7 +119,7 @@ impl LuaProgram {
     /// assert_eq!(answer, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub(crate) fn compile(
+    pub fn compile(
         source: &str,
         location: &str,
         source_line: NonZeroU32,
@@ -162,7 +165,7 @@ impl LuaProgram {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created.
-    pub(crate) fn empty() -> Result<Self> {
+    pub fn empty() -> Result<Self> {
         let bytecode = compile_chunk("", "shared library").map_err(|error| match error {
             CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
         })?;
@@ -187,7 +190,7 @@ impl LuaProgram {
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created
     /// or the source fails to compile.
-    pub(crate) fn compile_internal(source: &str, location: &str) -> Result<Self> {
+    pub fn compile_internal(source: &str, location: &str) -> Result<Self> {
         let bytecode = compile_chunk(source, location).map_err(|error| match error {
             CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
         })?;
@@ -219,7 +222,7 @@ impl LuaProgram {
     /// # Errors
     /// Returns [`Error::Lua`] if the VM rejects the internally compiled
     /// bytecode.
-    pub(crate) fn load(&self, lua: &Lua) -> Result<Function> {
+    pub fn load(&self, lua: &Lua) -> Result<Function> {
         lua.load(self.bytecode.as_slice())
             .into_function()
             .map_err(Error::lua)
@@ -232,10 +235,11 @@ impl LuaProgram {
     /// remaining failures return [`Error::LuaRuntime`] with this program's
     /// chunk-relative line rewritten to an absolute prompt-source line. Nested
     /// errors from other chunks (for example a fanout arm) are left unchanged.
-    pub(crate) fn map_runtime_error(&self, error: &mlua::Error) -> Error {
+    #[must_use]
+    pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
         // A block aborted by the cancellation hook surfaces as an interruption,
         // not a Lua authoring error.
-        if crate::cancel::is_cancelled() {
+        if promptforge_core_support::cancel::is_cancelled() {
             return Error::Interrupted;
         }
         let raw = error.to_string();

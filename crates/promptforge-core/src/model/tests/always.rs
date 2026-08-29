@@ -9,17 +9,19 @@ fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Prompt",
     )?;
     let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        |_: &str| -> std::result::Result<crate::tools::ToolId, promptforge_lua::Error> {
+            unreachable!("no tools")
+        };
     resolve_live_declarations_for_test(
         &shared,
         &tool_resolver,
         &fixture_resolver,
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Prompt",
     )
 }
@@ -60,9 +62,15 @@ fn models_always_returns_inspectable_object() {
     assert_eq!(models.default.as_deref(), Some("writer"));
     assert_eq!(models.bindings()[0].context().get(), 8_192);
 
-    let vm = section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-        .expect("section install must expose the same inspectable Model object");
-    vm.teardown(&NullObserver, "Section");
+    let vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .expect("section install must expose the same inspectable Model object");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -91,14 +99,19 @@ fn models_always_installs_exactly() {
                models.default("writer")"#,
     )
     .unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -108,9 +121,14 @@ fn models_always_provides_completion_options_without_use() {
                models.default("writer")"#,
     )
     .unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
@@ -120,15 +138,20 @@ fn models_always_provides_completion_options_without_use() {
         .expect("0.0 is valid")
         .with_thinking(false);
     assert_eq!(opts, Some(expected));
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
 fn models_always_from_h2_prologue_fails() {
     let (tools, models) = resolve_shared(r#"models.bind("writer", "A tiny model")"#).unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
@@ -136,18 +159,18 @@ fn models_always_from_h2_prologue_fails() {
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Section",
     )
     .unwrap();
-    let result = vm.run_chunk(&prologue, &NullObserver, "Section");
+    let result = vm.run_chunk(&prologue, &NullObserver::default(), "Section");
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
         msg.contains("only available during live H1 execution"),
         "unexpected error: {msg}"
     );
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -173,9 +196,14 @@ fn models_always_multi_arg_provides_completion_options() {
         r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
     )
     .unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
@@ -185,7 +213,7 @@ fn models_always_multi_arg_provides_completion_options() {
         .expect("0.0 is valid")
         .with_thinking(false);
     assert_eq!(opts, Some(expected));
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -193,14 +221,19 @@ fn models_always_multi_arg_installs_exactly() {
     let (tools, models) =
         resolve_shared(r#"models.default("writer", "A tiny model", { thinking = false })"#)
             .unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
