@@ -29,7 +29,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A65. Clients and core speak one canonical protocol; per-model backend dialect translation exists only inside the gateway and grows by demonstrated need.
 
-- A75. Gateway clients bound connection and buffered-request waits; streaming uses lifecycle cancellation instead of a whole-request deadline.
 
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
 
@@ -54,6 +53,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
 
 - A91. Human boot config, machine state, view layout, and append-only tape remain separate stores.
+
+- A92. Workshop sessions own transport and multiplexing; chat execution stays behind a replaceable adapter.
 
 ## Principles
 
