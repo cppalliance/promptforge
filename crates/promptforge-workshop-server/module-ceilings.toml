@@ -30,7 +30,6 @@
 "atomic.rs" = 230
 "backoff.rs" = 232
 "catalog.rs" = 118
-"chat_ws.rs" = 2963
 # Grew by the `From<&VoiceConfig> for promptforge_transcribe::EngineConfig`
 # mapping and its test (the constructor seam into the extracted engine).
 "config.rs" = 634
@@ -39,7 +38,11 @@
 "error.rs" = 484
 "gateway.rs" = 1300
 "heartbeat.rs" = 872
-"lib.rs" = 53
+# Grew by the session split's test seams: the fixtures module now re-exports
+# the bus, health, backoff, and heartbeat types the socket behavior tests
+# drive directly (visibility cannot be feature-gated, so the re-exports are
+# present in every build, doc-hidden).
+"lib.rs" = 80
 "main.rs" = 47
 "menu.rs" = 926
 "protocol.rs" = 738
@@ -53,6 +56,12 @@
 "routes/voice.rs" = 75
 "routes/workspace.rs" = 19
 "serve.rs" = 566
+"session.rs" = 341
+"session/gateway_chat.rs" = 417
+"session/gateway_chat/delta.rs" = 92
+"session/gateway_chat/tape.rs" = 135
+"session/log.rs" = 15
+"session/menu.rs" = 165
 "status.rs" = 200
 "tape.rs" = 275
 "voice.rs" = 1315

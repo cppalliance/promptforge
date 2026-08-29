@@ -11,7 +11,6 @@ mod assets;
 mod atomic;
 mod backoff;
 mod catalog;
-mod chat_ws;
 mod config;
 mod cross_site;
 mod deadline;
@@ -25,6 +24,7 @@ mod push;
 mod relay;
 mod routes;
 mod serve;
+mod session;
 mod status;
 mod tape;
 mod voice;
@@ -37,17 +37,30 @@ mod workspace;
 #[path = "../build/manifest.rs"]
 mod build_manifest;
 
-/// Crate-internal test fixtures, re-exported to the integration-test
-/// binary; the `test-fixtures` feature that compiles them is enabled by
-/// the crate's own dev-dependency, so every `cargo test` sees them while
-/// production builds do not.
-#[cfg(feature = "test-fixtures")]
+/// Crate-internal test seams, re-exported to the integration-test binary.
+/// The socket behavior tests drive the status, catalog, and menu buses,
+/// the health flag, the backoff, and the heartbeat directly, so those
+/// types surface here; Rust visibility cannot be feature-gated, so these
+/// re-exports are present in every build and hidden from the docs. The
+/// fixture helpers with test-only dependencies stay behind the
+/// `test-fixtures` feature, which the crate's own dev-dependency enables
+/// for every test build while production builds do not.
 #[doc(hidden)]
 pub mod fixtures {
+    pub use crate::backoff::ReconnectBackoff;
+    pub use crate::catalog::CatalogBus;
+    pub use crate::heartbeat::{GatewayHealth, Heartbeat, spawn as spawn_heartbeat};
+    pub use crate::menu::{MenuBus, MenuRefusal};
+    pub use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
+    pub use crate::push::Push;
+    pub use crate::status::StatusBus;
+
+    #[cfg(feature = "test-fixtures")]
     pub use promptforge_transcribe::fixtures::{
         fixture_dir, jfk_samples, model_path, require_model,
     };
 
+    #[cfg(feature = "test-fixtures")]
     pub use crate::app::fixtures::spawn_gateway;
 }
 

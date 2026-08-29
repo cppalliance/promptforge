@@ -49,7 +49,7 @@ pub(crate) const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// which keeps a server running without a heartbeat (every router-only
 /// test) behaving exactly as it did before the heartbeat existed.
 #[derive(Debug, Clone)]
-pub(crate) struct GatewayHealth {
+pub struct GatewayHealth {
     reachable: watch::Sender<bool>,
 }
 
@@ -76,7 +76,7 @@ impl GatewayHealth {
 
     /// Publishes one probe outcome. The heartbeat is the only production
     /// writer; tests publish directly to pin the degraded paths.
-    pub(crate) fn publish(&self, reachable: bool) {
+    pub fn publish(&self, reachable: bool) {
         self.reachable.send_if_modified(|current| {
             let changed = *current != reachable;
             *current = reachable;
@@ -91,14 +91,14 @@ impl GatewayHealth {
 /// Dropping the handle without shutting down still stops the task at its
 /// next select point, because the closed channel resolves the stop branch.
 #[derive(Debug)]
-pub(crate) struct Heartbeat {
+pub struct Heartbeat {
     stop: Option<oneshot::Sender<()>>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Heartbeat {
     /// Signals the heartbeat to stop and waits for its task to finish.
-    pub(crate) async fn shutdown(mut self) {
+    pub async fn shutdown(mut self) {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
@@ -117,7 +117,8 @@ impl Heartbeat {
 /// runs immediately; later probes follow `interval` while the gateway
 /// answers and draw from `backoff` while it does not, ending the loop
 /// when the backoff's budget exhausts.
-pub(crate) fn spawn(
+#[must_use]
+pub fn spawn(
     client: GatewayClient,
     push: Push,
     health: GatewayHealth,
@@ -225,7 +226,7 @@ async fn run(
 /// than pushed: pushing a bad snapshot would clear pickers that still hold
 /// a usable list. Runs on every transition into reachable (boot and
 /// reconnect) and is shared with the profile-switch task in
-/// [`crate::chat_ws`], which refetches after a switch settles.
+/// [`crate::session::menu`], which refetches after a switch settles.
 pub(crate) async fn refresh_catalog(client: &GatewayClient, push: &Push) {
     let response = match client.list_models().await {
         Ok(response) => response,
@@ -274,7 +275,7 @@ struct ProfileStatus {
 /// A gateway without profile support is a state, not an error: a failed,
 /// declined, or malformed answer degrades that half to empty (logged by
 /// its fetcher), so the menu shows no profiles rather than stale names.
-/// Shared with the profile-switch task in [`crate::chat_ws`], which
+/// Shared with the profile-switch task in [`crate::session::menu`], which
 /// refetches after a switch settles.
 pub(crate) async fn refresh_profiles(client: &GatewayClient, push: &Push) {
     let (profiles, active) = tokio::join!(fetch_profile_list(client), fetch_active_profile(client));

@@ -33,7 +33,7 @@ const STATUS_CHANNEL_CAPACITY: usize = 64;
 /// Clones are cheap (two `Arc` bumps) and all of them send into the same
 /// channel, so subsystems take their own copy rather than a reference.
 #[derive(Debug, Clone)]
-pub(crate) struct StatusBus {
+pub struct StatusBus {
     sender: broadcast::Sender<StatusBarUpdate>,
     latest: Arc<Mutex<Option<StatusBarUpdate>>>,
 }
@@ -65,7 +65,7 @@ impl StatusBus {
 
     /// Broadcasts one update. With no subscribers this is a no-op; a slow
     /// subscriber skips ahead rather than applying backpressure.
-    pub(crate) fn emit(&self, update: StatusBarUpdate) {
+    pub fn emit(&self, update: StatusBarUpdate) {
         // The retained copy (a second owner, hence the clone) is written
         // before the send, so a session that subscribes after the send
         // still finds this update as its snapshot.
