@@ -971,6 +971,8 @@ mod tests {
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+            stream: false,
+            rest: serde_json::Map::new(),
         };
         let error = impatient_client(&base_url)
             .chat_completion(&request)
@@ -988,6 +990,8 @@ mod tests {
         let request = ChatRequest {
             model: "test-model".to_string(),
             messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
+            stream: false,
+            rest: serde_json::Map::new(),
         };
         let error = impatient_client(&base_url)
             .chat_completion_stream(&request)

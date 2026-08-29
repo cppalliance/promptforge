@@ -112,21 +112,28 @@
 //! - [`FinalFrame`] - durable. The take's single stop reply carrying the
 //!   assembled transcript; it has no successor and is never resent.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+
+pub use promptforge_gateway_protocol::wire::ChatRequest;
 
 // --- Inbound: client to server -------------------------------------------
 
-/// A non-streaming chat completion request forwarded to the gateway.
+/// Parses an inbound chat body into the shared wire request.
 ///
-/// This is the body accepted by the workshop's `POST /chat` and sent
-/// upstream to `POST /v1/chat/completions`; on `/ws` the same fields
-/// arrive inside a `{"type":"chat",...}` frame.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChatRequest {
-    /// The model name from the gateway catalog.
-    pub model: String,
-    /// OpenAI chat messages, relayed without inspecting their shape.
-    pub messages: Vec<serde_json::Value>,
+/// The workshop, not the client, chooses streaming (`/chat` is buffered,
+/// `/ws` streams), and the request forwarded upstream carries exactly
+/// `model` and `messages`: the frame envelope (`type`, `id`), any
+/// caller-sent `stream` flag, and every other field the gateway does not
+/// name are dropped here, before the request is relayed.
+pub(crate) fn parse_chat_request(
+    mut value: serde_json::Value,
+) -> Result<ChatRequest, serde_json::Error> {
+    if let Some(object) = value.as_object_mut() {
+        object.remove("stream");
+    }
+    let mut request: ChatRequest = serde_json::from_value(value)?;
+    request.rest.clear();
+    Ok(request)
 }
 
 /// The `/voice` control message that begins a take.
@@ -600,16 +607,39 @@ mod tests {
     #[test]
     fn a_chat_request_round_trips_the_wire_shapes() {
         // The `/ws` chat frame: `type` and `id` ride beside the request's
-        // own fields and are ignored by the deserializer.
-        let request: ChatRequest = serde_json::from_value(serde_json::json!({
+        // own fields and are stripped by `parse_chat_request`.
+        let request = parse_chat_request(serde_json::json!({
             "type": "chat",
             "id": 7,
             "model": "test-model",
             "messages": [{"role": "user", "content": "ping"}],
         }))
-        .expect("the chat frame deserializes");
+        .expect("the chat frame parses");
         assert_eq!(request.model, "test-model");
         // The upstream body: exactly the two fields, nothing added.
+        assert_eq!(
+            serde_json::to_value(&request).expect("the request serializes"),
+            serde_json::json!({
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "ping"}],
+            })
+        );
+    }
+
+    #[test]
+    fn a_chat_request_drops_the_stream_flag_and_unnamed_fields() {
+        // A caller-sent `stream` flag is ignored even when it is not a
+        // boolean, and fields the gateway does not name never ride the
+        // shared wire type's passthrough into the relayed body.
+        let request = parse_chat_request(serde_json::json!({
+            "type": "chat",
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": "yes",
+            "temperature": 0.5,
+        }))
+        .expect("a bogus stream flag is dropped, not an error");
+        assert!(!request.stream);
         assert_eq!(
             serde_json::to_value(&request).expect("the request serializes"),
             serde_json::json!({

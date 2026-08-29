@@ -4191,6 +4191,7 @@ dependencies = [
  "futures-util",
  "open",
  "percent-encoding",
+ "promptforge-gateway-protocol",
  "promptforge-transcribe",
  "promptforge-ws-server",
  "reqwest 0.12.28",

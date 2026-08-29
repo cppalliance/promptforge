@@ -101,7 +101,9 @@ use crate::gateway::{
 };
 use crate::heartbeat::{refresh_catalog, refresh_profiles};
 use crate::menu::SwitchOutcome;
-use crate::protocol::{Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame};
+use crate::protocol::{
+    Activity, ChatRequest, DeltaFrame, DoneFrame, ErrorFrame, ReasoningFrame, parse_chat_request,
+};
 use crate::push::Push;
 use crate::relay::{tape_round_trip, value_from_bytes};
 use crate::tape::Tape;
@@ -541,7 +543,7 @@ async fn handle_frame(
         send_error(socket, id.as_ref(), key.refusal()).await;
         return;
     }
-    let request: ChatRequest = match serde_json::from_value(frame.clone()) {
+    let request: ChatRequest = match parse_chat_request(frame.clone()) {
         Ok(request) => request,
         Err(error) => {
             send_error(

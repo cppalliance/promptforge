@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use crate::app::AppState;
 use crate::error::AppError;
 use crate::gateway::{GatewayError, GatewayResponse};
-use crate::protocol::{Activity, ChatRequest};
+use crate::protocol::{Activity, ChatRequest, parse_chat_request};
 use crate::push::Push;
 use crate::tape::{Tape, TapeEvent};
 
@@ -70,7 +70,7 @@ pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Respons
     {
         return AppError::StreamUnsupported.into_response();
     }
-    let request: ChatRequest = match serde_json::from_value(request_value.clone()) {
+    let request: ChatRequest = match parse_chat_request(request_value.clone()) {
         Ok(request) => request,
         Err(error) => return AppError::BadRequest(error).into_response(),
     };
