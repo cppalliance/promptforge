@@ -1,25 +1,25 @@
 //! Builds the workshop UI bundle before the Rust compile.
 //!
-//! Runs esbuild on `ui/src/main.ts` into `ui/dist/app.js` and copies the
-//! static assets (`ui/index.html`, `ui/style.css`, ...) into `ui/dist/`,
-//! which `rust-embed` then serves from disk (debug) or embeds (release).
+//! Debug builds run the UI build in place: esbuild on `ui/src/main.ts`
+//! into `ui/dist/app.js`, plus copies of the static assets
+//! (`ui/index.html`, `ui/style.css`, ...), which `rust-embed` serves from
+//! disk. Release builds instead verify the versioned artifact that
+//! `npm run package` in `ui/` placed in `ui/dist/` (bundle plus
+//! `manifest.json`) and embed it; see `build/manifest.rs` for the
+//! contract.
 //!
-//! Requires Node.js on `PATH` and one `npm install` in `ui/` per checkout
-//! (see the crate README). The local `ui/node_modules/.bin/esbuild` is
-//! preferred; without it the build falls back to `npx esbuild`, which may
-//! download esbuild on first use.
+//! The debug path requires Node.js on `PATH` and one `npm install` in
+//! `ui/` per checkout (see the crate README). The local
+//! `ui/node_modules/.bin/esbuild` is preferred; without it the build falls
+//! back to `npx esbuild`, which may download esbuild on first use.
+
+#[path = "build/manifest.rs"]
+mod manifest;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-/// Static UI files copied verbatim into `ui/dist/`. Mirrored in
-/// `ui/build.mjs`.
-const STATIC_FILES: &[&str] = &[
-    "index.html",
-    "style.css",
-    "pcm-worklet.js",
-    "icons/promptforge-icon-1.png",
-];
+use manifest::STATIC_FILES;
 
 fn main() -> ExitCode {
     match run() {
@@ -49,6 +49,10 @@ fn run() -> Result<(), String> {
     );
     println!(
         "cargo::rerun-if-changed={}",
+        ui_dir.join("manifest.mjs").display()
+    );
+    println!(
+        "cargo::rerun-if-changed={}",
         ui_dir.join("check-layers.mjs").display()
     );
     println!(
@@ -61,9 +65,19 @@ fn run() -> Result<(), String> {
     for file in ["tsconfig.json", "package-lock.json"] {
         println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
     }
+    // A fresh `npm run package` rewrites the manifest; watching it is what
+    // re-triggers this script so a release build embeds the new artifact.
+    println!(
+        "cargo::rerun-if-changed={}",
+        dist_dir.join("manifest.json").display()
+    );
 
-    // dist/ is rebuilt from scratch so removed assets never linger into the
-    // release embed.
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        return manifest::verify(&ui_dir);
+    }
+
+    // dist/ is rebuilt from scratch so removed assets never linger in what
+    // debug builds serve from disk.
     if dist_dir.exists() {
         std::fs::remove_dir_all(&dist_dir).map_err(|error| format!("clear ui/dist: {error}"))?;
     }
@@ -109,10 +123,6 @@ fn bundle(ui_dir: &Path) -> Result<(), String> {
         "--target=es2022",
         "--outfile=dist/app.js",
     ]);
-    // Release builds embed the bundle in the binary; minify what we embed.
-    if std::env::var("PROFILE").as_deref() == Ok("release") {
-        command.arg("--minify");
-    }
     let output = command.output().map_err(|error| {
         format!("esbuild could not be started: {error}; install Node.js so it is on PATH")
     })?;

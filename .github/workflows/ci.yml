@@ -102,6 +102,45 @@ jobs:
       - name: Test (workshop)
         run: cargo test --locked -p promptforge-ws -p promptforge-ws-server -p promptforge-desktop-shell --no-default-features
 
+  # The UI build is its own job: it typechecks, tests, and packages the
+  # versioned ui/dist artifact that release builds of promptforge-ws-server
+  # verify and embed (the debug-profile cargo jobs above still drive the UI
+  # build in place through the crate's build script, hence their npm ci).
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm run build
+
+      - name: Test
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm test
+
+      - name: Package the UI artifact
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm run package
+
+      - name: Upload the UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptforge-ws-ui-dist
+          path: crates/promptforge-ws-server/ui/dist/
+
   msrv:
     runs-on: ubuntu-latest
     steps:
