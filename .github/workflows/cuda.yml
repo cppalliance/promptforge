@@ -2,10 +2,8 @@ name: CUDA
 
 on:
   workflow_dispatch:
-  # Nightly CUDA build and live test. Uncomment once a self-hosted runner
-  # with the `windows` and `cuda` labels is registered.
-  # schedule:
-  #   - cron: '0 6 * * *'
+  schedule:
+    - cron: '0 9 * * *'
 
 jobs:
   cuda:
