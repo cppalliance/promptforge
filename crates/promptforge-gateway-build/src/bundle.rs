@@ -292,7 +292,15 @@ pub(crate) fn build_with(
     run_checked(probe, &configure, "cmake configure")?;
     let cache = std::fs::read_to_string(build_dir.join("CMakeCache.txt"))
         .context("read CMakeCache.txt after configure")?;
-    let identity = cmake::parse_cache(&cache)?;
+    let compiler_cmake = cmake::compiler_cmake_path(&build_dir)?;
+    let compiler_content = std::fs::read_to_string(&compiler_cmake)
+        .with_context(|| format!("read {}", compiler_cmake.display()))?;
+    let (cxx_compiler, cxx_version) = cmake::parse_compiler_cmake(&compiler_content)?;
+    let identity = cmake::CacheIdentity {
+        generator: cmake::parse_generator(&cache)?,
+        cxx_compiler,
+        cxx_version,
+    };
     run_checked(probe, &build_cmd, "cmake build")?;
 
     let stage = build_dir.join("bin").join("Release");
@@ -355,9 +363,11 @@ mod tests {
 
     const NVCC_OUTPUT: &str = "nvcc: NVIDIA (R) Cuda compiler driver\n\
                                Cuda compilation tools, release 13.3, V13.3.73\n";
-    const CACHE: &str = "CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n\
-                         CMAKE_CXX_COMPILER:FILEPATH=C:/VS/VC/Tools/MSVC/14.44/bin/Hostx64/x64/cl.exe\n\
-                         CMAKE_CXX_COMPILER_VERSION:STRING=19.44.35219.0\n";
+    // Visual Studio generators fix the compiler through the toolset, so a
+    // real cache carries the generator but no CMAKE_CXX_COMPILER entries.
+    const CACHE: &str = "CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026\n";
+    const COMPILER_CMAKE: &str = "set(CMAKE_CXX_COMPILER \"C:/VS/VC/Tools/MSVC/14.51/bin/Hostx64/x64/cl.exe\")\n\
+         set(CMAKE_CXX_COMPILER_VERSION \"19.51.36256.0\")\n";
     const DUMPBIN_OUTPUT: &str = "Dump of file llama-server.exe\n\
                                   \n\
                                   \x20 Image has the following dependencies:\n\
@@ -403,6 +413,9 @@ mod tests {
             std::fs::write(stage.join("llama-server.exe"), b"synthetic-exe").unwrap();
             std::fs::write(stage.join("ggml-cuda.dll"), b"synthetic-dll").unwrap();
             std::fs::write(out_dir.join("llama-build/CMakeCache.txt"), CACHE).unwrap();
+            let compiler_dir = out_dir.join("llama-build/CMakeFiles/4.4.2");
+            std::fs::create_dir_all(&compiler_dir).unwrap();
+            std::fs::write(compiler_dir.join("CMakeCXXCompiler.cmake"), COMPILER_CMAKE).unwrap();
 
             let tools = root.join("tools");
             std::fs::create_dir_all(&tools).unwrap();
@@ -530,6 +543,19 @@ mod tests {
     }
 
     #[test]
+    fn missing_compiler_identity_fails_the_build() {
+        let host = SyntheticHost::new();
+        std::fs::remove_file(
+            host.out_dir
+                .join("llama-build/CMakeFiles/4.4.2/CMakeCXXCompiler.cmake"),
+        )
+        .unwrap();
+        let err =
+            build_with(&host.probe(), &host.env(), &host.workspace, &host.out_dir).unwrap_err();
+        assert!(format!("{err:#}").contains("CMakeCXXCompiler.cmake"));
+    }
+
+    #[test]
     fn smoke_check_requires_a_cuda_device() {
         let host = SyntheticHost::new();
         let probe = FakeProbe::default()
@@ -569,7 +595,11 @@ mod tests {
             manifest["external_dlls"],
             serde_json::json!(["KERNEL32.dll", "cublas64_13.dll"])
         );
-        assert_eq!(manifest["msvc"]["version"], "19.44.35219.0");
+        assert_eq!(manifest["msvc"]["version"], "19.51.36256.0");
+        assert_eq!(
+            manifest["msvc"]["path"],
+            "C:/VS/VC/Tools/MSVC/14.51/bin/Hostx64/x64/cl.exe"
+        );
         let files = manifest["files"].as_array().unwrap();
         assert_eq!(files.len(), 2);
         assert_eq!(files[0]["name"], "ggml-cuda.dll");

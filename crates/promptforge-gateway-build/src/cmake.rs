@@ -6,10 +6,10 @@ use anyhow::Context as _;
 
 use crate::probe::CommandRequest;
 
-/// Identity facts recovered from a generated `CMakeCache.txt`.
+/// Identity facts recovered from a generated CMake build tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheIdentity {
-    /// Generator CMake selected (for example `Visual Studio 17 2022`).
+    /// Generator CMake selected (for example `Visual Studio 18 2026`).
     pub generator: String,
     /// C++ compiler executable CMake resolved (the MSVC `cl.exe`).
     pub cxx_compiler: PathBuf,
@@ -17,31 +17,71 @@ pub struct CacheIdentity {
     pub cxx_version: String,
 }
 
-/// Parses the generator and C++ compiler identity out of `CMakeCache.txt`.
+/// Parses the generator out of `CMakeCache.txt`.
 ///
 /// # Errors
-/// Returns an error when any of the three entries is missing.
-pub fn parse_cache(cache: &str) -> anyhow::Result<CacheIdentity> {
+/// Returns an error when `CMAKE_GENERATOR` is missing.
+pub fn parse_generator(cache: &str) -> anyhow::Result<String> {
+    cache
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("CMAKE_GENERATOR:INTERNAL"))
+        .and_then(|rest| {
+            rest.split_once('=')
+                .map(|(_, value)| value.trim().to_string())
+        })
+        .context("CMakeCache.txt lacks CMAKE_GENERATOR")
+}
+
+/// Parses the C++ compiler identity out of `CMakeCXXCompiler.cmake`.
+///
+/// The compiler identity comes from this file rather than `CMakeCache.txt`
+/// because the Visual Studio generators never write `CMAKE_CXX_COMPILER` or
+/// `CMAKE_CXX_COMPILER_VERSION` cache entries: with those generators the
+/// toolset fixes the compiler, so only the per-language compiler file under
+/// `CMakeFiles/<version>/` records what was resolved.
+///
+/// # Errors
+/// Returns an error when either `set(...)` entry is missing.
+pub fn parse_compiler_cmake(content: &str) -> anyhow::Result<(PathBuf, String)> {
     let entry = |key: &str| {
-        cache
-            .lines()
-            .find_map(|line| line.trim().strip_prefix(key))
-            .and_then(|rest| {
-                rest.split_once('=')
-                    .map(|(_, value)| value.trim().to_string())
-            })
+        content.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(&format!("set({key} \""))
+                .and_then(|rest| rest.strip_suffix("\")"))
+                .map(str::to_string)
+        })
     };
-    let generator =
-        entry("CMAKE_GENERATOR:INTERNAL").context("CMakeCache.txt lacks CMAKE_GENERATOR")?;
-    let cxx_compiler =
-        entry("CMAKE_CXX_COMPILER:FILEPATH").context("CMakeCache.txt lacks CMAKE_CXX_COMPILER")?;
-    let cxx_version = entry("CMAKE_CXX_COMPILER_VERSION:STRING")
-        .context("CMakeCache.txt lacks CMAKE_CXX_COMPILER_VERSION")?;
-    Ok(CacheIdentity {
-        generator,
-        cxx_compiler: PathBuf::from(cxx_compiler),
-        cxx_version,
-    })
+    let compiler =
+        entry("CMAKE_CXX_COMPILER").context("CMakeCXXCompiler.cmake lacks CMAKE_CXX_COMPILER")?;
+    let version = entry("CMAKE_CXX_COMPILER_VERSION")
+        .context("CMakeCXXCompiler.cmake lacks CMAKE_CXX_COMPILER_VERSION")?;
+    Ok((PathBuf::from(compiler), version))
+}
+
+/// Locates `CMakeFiles/<version>/CMakeCXXCompiler.cmake` under `build_dir`.
+///
+/// # Errors
+/// Returns an error when `CMakeFiles` is unreadable or no configured
+/// compiler file exists.
+pub fn compiler_cmake_path(build_dir: &Path) -> anyhow::Result<PathBuf> {
+    let cmake_files = build_dir.join("CMakeFiles");
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(&cmake_files)
+        .with_context(|| format!("read {}", cmake_files.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    for dir in dirs {
+        let candidate = dir.join("CMakeCXXCompiler.cmake");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!(
+        "no CMakeFiles/<version>/CMakeCXXCompiler.cmake under {}",
+        build_dir.display()
+    )
 }
 
 /// The full material CMake option set for the bundle configure step, in
@@ -123,23 +163,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_cache_identity() {
+    fn parses_generator_from_cache() {
         let cache = "# comment\n\
-                     CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n\
-                     CMAKE_CXX_COMPILER:FILEPATH=C:/VS/VC/Tools/MSVC/14.44/bin/Hostx64/x64/cl.exe\n\
-                     CMAKE_CXX_COMPILER_VERSION:STRING=19.44.35219.0\n";
-        let identity = parse_cache(cache).unwrap();
-        assert_eq!(identity.generator, "Visual Studio 17 2022");
-        assert_eq!(
-            identity.cxx_compiler,
-            PathBuf::from("C:/VS/VC/Tools/MSVC/14.44/bin/Hostx64/x64/cl.exe")
-        );
-        assert_eq!(identity.cxx_version, "19.44.35219.0");
+                     CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026\n\
+                     CMAKE_GENERATOR_INSTANCE:INTERNAL=C:/VS18\n";
+        assert_eq!(parse_generator(cache).unwrap(), "Visual Studio 18 2026");
     }
 
     #[test]
-    fn missing_cache_entries_are_errors() {
-        assert!(parse_cache("").is_err());
+    fn visual_studio_cache_carries_no_compiler_entries() {
+        // The Visual Studio generators fix the compiler through the toolset,
+        // so their caches omit CMAKE_CXX_COMPILER; the generator parse must
+        // not depend on those entries.
+        let cache = "CMAKE_GENERATOR:INTERNAL=Visual Studio 18 2026\n";
+        assert_eq!(parse_generator(cache).unwrap(), "Visual Studio 18 2026");
+    }
+
+    #[test]
+    fn missing_generator_is_an_error() {
+        assert!(parse_generator("").is_err());
+    }
+
+    #[test]
+    fn parses_compiler_cmake_identity() {
+        let content = "set(CMAKE_CXX_COMPILER \"C:/VS/VC/Tools/MSVC/14.51/bin/Hostx64/x64/cl.exe\")\n\
+                       set(CMAKE_CXX_COMPILER_ID \"MSVC\")\n\
+                       set(CMAKE_CXX_COMPILER_VERSION \"19.51.36256.0\")\n";
+        let (compiler, version) = parse_compiler_cmake(content).unwrap();
+        assert_eq!(
+            compiler,
+            PathBuf::from("C:/VS/VC/Tools/MSVC/14.51/bin/Hostx64/x64/cl.exe")
+        );
+        assert_eq!(version, "19.51.36256.0");
+    }
+
+    #[test]
+    fn missing_compiler_cmake_entries_are_errors() {
+        assert!(parse_compiler_cmake("").is_err());
+        assert!(
+            parse_compiler_cmake("set(CMAKE_CXX_COMPILER \"cl.exe\")\n").is_err(),
+            "version alone missing must fail"
+        );
+    }
+
+    #[test]
+    fn locates_compiler_cmake_under_versioned_dir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let build_dir = temp.path();
+        assert!(compiler_cmake_path(build_dir).is_err());
+        let versioned = build_dir.join("CMakeFiles/4.4.2");
+        std::fs::create_dir_all(&versioned).unwrap();
+        std::fs::write(versioned.join("CMakeCXXCompiler.cmake"), b"").unwrap();
+        assert_eq!(
+            compiler_cmake_path(build_dir).unwrap(),
+            versioned.join("CMakeCXXCompiler.cmake")
+        );
     }
 
     #[test]
