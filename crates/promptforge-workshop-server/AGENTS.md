@@ -6,18 +6,18 @@ These rules bind `crates/promptforge-workshop-server`. The repo-root AGENTS.md a
 
 The process has two zones with opposite failure postures. The boundary: config load plus server construction is zone one; request and session handling is zone two.
 
-- Zone one (construction/startup): fail loudly and immediately. Panics, `expect`, and hard errors returned to the host are all correct - a misconfigured process must not limp into serving.
+- Zone one (construction/startup): return rich errors to the host. This crate is embeddable, so it never panics for configuration, binding, asset, or initialization failures; a misconfigured process must not limp into serving, but the host decides how the failure surfaces. Binary entry points may convert a returned error to a failing exit status.
 - Zone two (steady state): never panic, and never `unwrap` anything a client sent. Errors are values: error frames, 4xx/5xx responses, status-bus reports, or logged degradation. A lock poisoned by a panicking peer recovers the value rather than wedging the process.
 
 Degrade-not-crash features (voice provisioning, gateway outages) are zone two by definition: absence of a capability is a state, not an error.
 
 ## WebSocket session model
 
-One task owns each socket: a single `select!` loop reads and writes the same socket handle. No outbox channel, no writer task, no session registry. Durable messages deliver via `Notify` plus a per-client cursor and coalesce; ephemeral messages go through a bounded broadcast and drop on lag. Malformed inbound frames are logged and skipped, or close the connection with a policy code - never a panic. Shared scaffolding between WebSocket endpoints is deleted, not relocated to a common module.
+One task owns each socket: a single `select!` loop reads and writes the same socket handle. No outbox channel, no writer task, no session registry. Durable messages deliver via `Notify` plus a per-client cursor and coalesce; ephemeral messages go through a bounded broadcast and drop on lag. Malformed inbound frames are logged and skipped, or close the connection with a policy code - never a panic. Each endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists - never share hypothetical reuse. The session owns transport and multiplexing, not chat execution: direct gateway execution is the current adapter, not the session architecture.
 
 ## Delivery contract
 
-Every pushed message type is classified in the protocol module as durable (delivered exactly via cursor, coalesces) or ephemeral (may drop under lag, fully resent on reconnect). No message type ships unclassified.
+Every pushed message type is classified in the protocol module as durable or ephemeral; no message type ships unclassified. Durable state is recoverable from retained state or a cursor, and consumers tolerate duplicate delivery. Ephemeral snapshots may coalesce or drop under lag; the latest complete snapshot is resent on reconnect.
 
 ## Drop-guard cancellation
 
@@ -33,7 +33,7 @@ Gate the leaf, not the call site: a feature cfg's one function body; router comp
 
 ## Router and module structure
 
-Each feature module exports `fn routes(state) -> Router`. `app.rs` is composition plus `AppState` only. Narrow state per route group with plain `with_state`. Module size ratchet: a server module may not grow past its recorded ceiling (record ceilings when the `routes/` split lands).
+Each feature module exports `fn routes(state) -> Router`. `app.rs` is composition plus `AppState` only. Narrow state per route group with plain `with_state`. A module name states its responsibility; when the name no longer covers what the module owns, rename or split it before adding another responsibility. Use `session.rs` beside `session/`; never introduce `session/mod.rs`. The ceiling ratchet prevents regrowth, not responsibility drift: a server module may not grow past its recorded ceiling, a ceiling is never raised to add a new responsibility, and a split records every new module at its actual size while removing or lowering the old ceiling in the same commit.
 
 ## Errors split by boundary
 
