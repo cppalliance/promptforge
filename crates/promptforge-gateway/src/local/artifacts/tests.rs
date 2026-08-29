@@ -867,3 +867,73 @@ fn path_source_uses_marker_on_second_call() {
         "a marker hit must not refresh the marker"
     );
 }
+
+/// Makes `path` a read-only file holding `contents` so a `File::create` on it
+/// fails deterministically, runs `run`, then restores writability so
+/// `TempDir` cleanup is not blocked.
+#[expect(
+    clippy::permissions_set_readonly_false,
+    reason = "restores the default writable state of a temp fixture"
+)]
+fn with_readonly_file(path: &Path, contents: &[u8], run: impl FnOnce()) {
+    std::fs::write(path, contents).expect("write blocking file");
+    let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(path, permissions).expect("set read-only");
+    run();
+    let mut permissions = std::fs::metadata(path).expect("metadata").permissions();
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions).expect("restore writable");
+}
+
+#[test]
+fn marker_persistence_failure_still_verifies() {
+    // The marker only skips a re-hash, so a failed refresh (a read-only file
+    // blocking the marker path) degrades to a warning and the successful hash
+    // still reports `Hashed`.
+    let (dir, blob, digest, marker) = pinned_blob_fixture(b"blob-bytes");
+    let root = dir.path().join("cache");
+
+    let mut outcome = None;
+    with_readonly_file(&marker, b"stale", || {
+        outcome = Some(verify_blob(&root, &blob, &digest, &marker).expect("verify"));
+    });
+
+    assert_eq!(outcome, Some(VerifyOutcome::Hashed));
+    assert_eq!(
+        std::fs::read_to_string(&marker).expect("marker"),
+        "stale",
+        "the blocked marker must be left untouched"
+    );
+}
+
+#[test]
+fn post_download_marker_persistence_failure_still_publishes() {
+    // A read-only file blocking the marker path makes the post-download
+    // marker write fail; the downloaded bytes already matched the pin, so
+    // publication still succeeds.
+    let body = b"marker-write-fails-after-download";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+    let key = source_cache_key(&url);
+    let dest = temp.path().join("models").join(&key).join("m.gguf");
+    std::fs::create_dir_all(dest.parent().expect("parent")).expect("mkdir");
+    let marker = blob_marker_path(&dest);
+
+    let mut published = None;
+    with_readonly_file(&marker, b"blocking", || {
+        published = Some(store.ensure_model(&url, Some(&digest)).expect("publish"));
+    });
+
+    assert_eq!(published.as_deref(), Some(dest.as_path()));
+    assert_eq!(file_digest(&dest).expect("digest"), digest);
+    assert_eq!(server.requests(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&marker).expect("marker"),
+        "blocking",
+        "the blocked marker must be left untouched"
+    );
+}

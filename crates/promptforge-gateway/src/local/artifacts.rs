@@ -32,7 +32,7 @@ use archive::{extract_archive, find_executable, require_executable};
 use assets::{ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
 use digest::tree_digest;
-use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker};
+use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker_best_effort};
 
 // Re-exports consumed elsewhere in the crate (`local/mod.rs`, `local/cache.rs`,
 // `testsupport.rs`). Test-only helpers are imported directly from their
@@ -271,8 +271,9 @@ impl ArtifactStore {
         rename_confined(&self.cache, &staging, destination)?;
         if let Some(expected) = expected_digest.as_deref() {
             let marker = blob_marker_path(destination);
+            // Confinement stays a hard error; only the marker write degrades.
             validate_cache_path(&self.cache, &marker)?;
-            write_marker(&marker, destination, expected)?;
+            write_marker_best_effort(&marker, destination, expected);
         }
         Ok(())
     }

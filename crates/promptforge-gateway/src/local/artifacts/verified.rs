@@ -42,15 +42,18 @@ pub(super) enum VerifyOutcome {
 /// blob's size and mtime to match the record exactly; anything else (missing,
 /// stale, truncated, or unparseable marker) is a cache miss, never an error,
 /// and falls through to [`file_digest`]. On a hash match the marker is
-/// written or refreshed via [`write_synced`]; on mismatch the stale marker is
+/// written or refreshed best-effort via [`write_marker_best_effort`]: the
+/// marker only skips a future re-hash, so a persistence failure is logged and
+/// never fails the verification. On mismatch the stale marker is
 /// deleted and the mismatch returned. See the module docs for the accepted
 /// trust tradeoff.
 ///
 /// # Errors
 /// Returns [`LocalError::UnsafeCachePath`] when `marker` (or `path`, when it
 /// lies under `cache_root`) escapes the cache root, [`LocalError::Io`] when
-/// reading, inspecting, or writing fails, and [`LocalError::DigestMismatch`]
-/// when the blob's actual digest does not match `expected`.
+/// reading the marker or hashing or inspecting the blob fails, and
+/// [`LocalError::DigestMismatch`] when the blob's actual digest does not
+/// match `expected`.
 pub(super) fn verify_blob(
     cache_root: &Path,
     path: &Path,
@@ -75,7 +78,7 @@ pub(super) fn verify_blob(
             actual,
         });
     }
-    write_marker(marker, path, expected)?;
+    write_marker_best_effort(marker, path, expected);
     Ok(VerifyOutcome::Hashed)
 }
 
@@ -127,6 +130,19 @@ pub(super) fn write_marker(marker: &Path, path: &Path, digest: &str) -> Result<(
         marker,
         format!("{digest}\n{}\n{secs}.{nanos}\n", metadata.len()).as_bytes(),
     )
+}
+
+/// Writes or refreshes the marker, degrading a persistence failure to a
+/// warn-level log: the marker only skips a future re-hash, so losing it must
+/// never fail an operation whose digest already matched.
+pub(super) fn write_marker_best_effort(marker: &Path, path: &Path, digest: &str) {
+    if let Err(error) = write_marker(marker, path, digest) {
+        tracing::warn!(
+            marker = %marker.display(),
+            error = %error,
+            "verified-digest marker not persisted; the blob will be re-hashed next time"
+        );
+    }
 }
 
 /// Whether the marker records `expected` plus the blob's current size and
