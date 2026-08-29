@@ -416,6 +416,24 @@ sha256 = "{DIGEST}"
     }
 
     #[test]
+    fn projector_implies_images_capability() {
+        let config = parse(
+            r#"
+[local_model.multimodal_projector]
+source = "/models/q-mmproj.gguf"
+"#,
+        )
+        .unwrap();
+        assert!(config.local_models()[0].capabilities().images());
+    }
+
+    #[test]
+    fn no_projector_keeps_images_default() {
+        let config = parse("").unwrap();
+        assert!(!config.local_models()[0].capabilities().images());
+    }
+
+    #[test]
     fn rejects_unknown_speculation_type() {
         let result = parse(&format!(
             r#"

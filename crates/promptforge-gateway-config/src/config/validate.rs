@@ -51,6 +51,24 @@ impl Config {
         Ok(())
     }
 
+    /// Advertise `images = true` for every local model with a multimodal
+    /// projector.
+    ///
+    /// A configured `[local_model.multimodal_projector]` makes the child
+    /// image-capable (`--mmproj`), so the catalog must not report the
+    /// `images` default of false. Runs after [`Self::apply_model_allowlist`]
+    /// and before [`Self::validate`], so downstream code reads the resolved
+    /// capability verbatim. The flag is a plain `bool`, so an explicit
+    /// `images = false` cannot be told apart from an absent one; the
+    /// projector wins either way because the model does accept images.
+    pub(crate) fn imply_projector_images(&mut self) {
+        for local_model in &mut self.local_models {
+            if local_model.multimodal_projector.is_some() {
+                local_model.capabilities.images = true;
+            }
+        }
+    }
+
     /// Check names are unique, references resolve, URLs parse, and closed
     /// vocabularies hold.
     ///

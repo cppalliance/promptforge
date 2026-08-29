@@ -462,7 +462,8 @@ pub struct Capabilities {
     /// Sampling temperature applied when the caller omits one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_temperature: Option<f32>,
-    /// Whether the model accepts image inputs. Defaults to false.
+    /// Whether the model accepts image inputs. Defaults to false; a
+    /// `[local_model.multimodal_projector]` companion implies true.
     #[serde(default)]
     images: bool,
     /// Whether the model can emit parallel tool calls. Defaults to false.

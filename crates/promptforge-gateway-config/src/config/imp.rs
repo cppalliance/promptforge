@@ -170,6 +170,7 @@ impl Config {
         })?;
         let mut config = Config::from(raw);
         config.apply_model_allowlist()?;
+        config.imply_projector_images();
         config.validate()?;
         Ok(config)
     }

@@ -522,7 +522,7 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | `vram_gb` | no | - | VRAM footprint estimate in GiB |
 | `max_output` | no | - | Max output tokens per completion; must not exceed `context` |
 | `default_temperature` | no | - | Sampling temperature applied when the caller omits one |
-| `images` | no | `false` | Whether the model accepts image inputs |
+| `images` | no | `false` | Whether the model accepts image inputs; a `[local_model.multimodal_projector]` companion implies `true` |
 | `parallel_tool_calls` | no | `false` | Whether the model can emit parallel tool calls |
 | `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
 | `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
