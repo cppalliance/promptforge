@@ -117,7 +117,7 @@ source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj
 sha256 = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa"
 ```
 
-`[local_model.speculative]` attaches a multi-token-prediction drafter: the child launches with `--spec-draft-model`, `--spec-type draft-mtp`, and `--spec-draft-n-max` (`draft_max`, bounded to `1..=16`). `[local_model.multimodal_projector]` attaches a vision projector (`--mmproj`) so the model accepts image inputs. Companion sources follow the main source's rules: an `https` URL requires a `sha256` pin, a local path may go unpinned, and plaintext `http` is rejected. Both companions are chat-only and validated at load. The resolved paths live in the child's launch state, so a respawn re-emits the exact verified artifacts, and a model without companions gets the same command line as before companions existed.
+`[local_model.speculative]` attaches a multi-token-prediction drafter: the child launches with `--spec-draft-model`, `--spec-type draft-mtp`, and `--spec-draft-n-max` (`draft_max`, bounded to `1..=16`). `[local_model.multimodal_projector]` attaches a vision projector (`--mmproj`) so the model accepts image inputs, and the catalog advertises `images = true` for it. Companion sources follow the main source's rules: an `https` URL requires a `sha256` pin, a local path may go unpinned, and plaintext `http` is rejected. Both companions are chat-only and validated at load. The resolved paths live in the child's launch state, so a respawn re-emits the exact verified artifacts, and a model without companions gets the same command line as before companions existed.
 
 ### Derived client credentials
 
