@@ -16,6 +16,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true }
+promptforge-progress.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

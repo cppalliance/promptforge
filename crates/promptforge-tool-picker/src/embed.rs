@@ -12,6 +12,7 @@
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config as BertConfig};
+use promptforge_progress::ProgressHandle;
 use tokenizers::{Tokenizer, TruncationParams};
 
 use crate::assets;
@@ -22,6 +23,9 @@ pub(crate) const EMBEDDING_DIMENSIONS: usize = 384;
 
 /// The dtype the model runs in: f32, not the f16 the weights are stored as.
 const COMPUTE_DTYPE: DType = DType::F32;
+
+/// The weights copy reports progress once per chunk of this many bytes.
+const COPY_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
 /// The compiled-in sentence encoder, loaded and ready to embed.
 ///
@@ -37,11 +41,20 @@ pub(crate) struct Encoder {
 impl Encoder {
     /// Loads the compiled-in model.
     ///
+    /// Loads the compiled-in model, reporting the weights copy to `progress`.
+    ///
+    /// The copy of the compiled-in safetensors blob into an aligned, owned
+    /// buffer is the one byte-measurable stage of a load; it reports
+    /// `set_units` per [`COPY_CHUNK_BYTES`] chunk and completes the leaf when
+    /// the copy finishes. Parsing and upcasting afterwards are not measured.
+    ///
     /// # Errors
     /// Returns [`ModelLoadError`] when the embedded configuration, tokenizer,
     /// or weights cannot be read, or the checkpoint's hidden size is not
     /// [`EMBEDDING_DIMENSIONS`].
-    pub(crate) fn load() -> Result<Self, ModelLoadError> {
+    pub(crate) fn load_with_progress(
+        progress: Option<&ProgressHandle>,
+    ) -> Result<Self, ModelLoadError> {
         verify_provenance()?;
 
         let config: BertConfig =
@@ -67,7 +80,7 @@ impl Encoder {
         // `include_bytes!` data is 1-byte aligned, so the buffered loader, which
         // copies into an owned buffer, is the correct one.
         let weights = VarBuilder::from_buffered_safetensors(
-            assets::WEIGHTS_SAFETENSORS.to_vec(),
+            copy_weights(progress),
             COMPUTE_DTYPE,
             &Device::Cpu,
         )
@@ -129,6 +142,25 @@ impl std::fmt::Debug for Encoder {
             .field("dimensions", &EMBEDDING_DIMENSIONS)
             .finish_non_exhaustive()
     }
+}
+
+/// Copies the compiled-in weights into an owned buffer, reporting the bytes
+/// copied through `progress` once per chunk and completing the leaf at the
+/// end of the copy.
+fn copy_weights(progress: Option<&ProgressHandle>) -> Vec<u8> {
+    let source = assets::WEIGHTS_SAFETENSORS;
+    let total = source.len() as u64;
+    let mut buffer = Vec::with_capacity(source.len());
+    for chunk in source.chunks(COPY_CHUNK_BYTES) {
+        buffer.extend_from_slice(chunk);
+        if let Some(handle) = progress {
+            handle.set_units(buffer.len() as u64, total);
+        }
+    }
+    if let Some(handle) = progress {
+        handle.complete();
+    }
+    buffer
 }
 
 /// Checks that the embedded weights carry the pinned repository and revision.
@@ -193,7 +225,8 @@ mod tests {
 
     fn encoder() -> &'static Encoder {
         static ENCODER: std::sync::OnceLock<Encoder> = std::sync::OnceLock::new();
-        ENCODER.get_or_init(|| Encoder::load().expect("the compiled-in model loads"))
+        ENCODER
+            .get_or_init(|| Encoder::load_with_progress(None).expect("the compiled-in model loads"))
     }
 
     fn cosine(a: &[f32], b: &[f32]) -> f32 {
