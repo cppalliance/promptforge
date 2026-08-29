@@ -179,7 +179,7 @@ impl AppState {
 }
 
 /// A shared-state construction failure: rich, init-only, and never sent
-/// over the wire (the HTTP failure type is [`crate::error::AppError`]).
+/// over the wire (the HTTP failure type is `crate::error::AppError`).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StateError {
@@ -270,12 +270,12 @@ fn degrade(config: &VoiceConfig, push: &Push, error: &TranscribeError) -> Option
 }
 
 /// Returns the workshop server router with every route mounted: each
-/// feature router from [`crate::routes`] built and merged, the workspace
+/// feature router from `crate::routes` built and merged, the workspace
 /// group narrowed to the one service its handlers use. The API routes sit
-/// behind the [`crate::cross_site`] guard; `/health` and the UI assets
+/// behind the `crate::cross_site` guard; `/health` and the UI assets
 /// stay outside it so the shell probe, heartbeat, and initial navigation
-/// keep working. Every HTTP route carries a [`crate::deadline`] tier -
-/// the default here, the relay tier inside [`routes::chat`] - and the
+/// keep working. Every HTTP route carries a `crate::deadline` tier -
+/// the default here, the relay tier inside `routes::chat` - and the
 /// WebSocket upgrades carry none.
 pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
