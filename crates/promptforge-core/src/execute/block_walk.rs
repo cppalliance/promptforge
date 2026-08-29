@@ -69,7 +69,7 @@ pub(crate) async fn run_live_h1_prose(
         None,
         &var,
         sys,
-        &|name| vm.global_json(name),
+        &|name| vm.global_json(name).map_err(Error::from),
     )?;
     if prose.trim().is_empty() {
         return Ok(());
@@ -218,7 +218,7 @@ pub(crate) async fn run_section_prose(
         item,
         &var,
         sys,
-        &|name| vm.global_json(name),
+        &|name| vm.global_json(name).map_err(Error::from),
     )?;
     if prose.trim().is_empty() {
         return Ok(());
@@ -249,7 +249,9 @@ pub(crate) async fn run_section_prose(
     let global_aliases = Some(&global_aliases);
     // Local tools are Lua functions on this section VM; route their calls
     // back into it rather than to a bound tool.
-    let local_dispatch = |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
+    let local_dispatch = |alias: &str, args: serde_json::Value| {
+        vm.call_local_tool(alias, &args).map_err(Error::from)
+    };
     let outcome = run_prose_inference(
         active_client,
         &schemas,

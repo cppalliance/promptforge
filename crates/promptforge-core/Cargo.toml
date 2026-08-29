@@ -14,7 +14,9 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 async-trait.workspace = true
+promptforge-core-support.workspace = true
 promptforge-gateway-client.workspace = true
+promptforge-lua.workspace = true
 promptforge-store.workspace = true
 promptforge-tool-picker.workspace = true
 promptforge-tools.workspace = true

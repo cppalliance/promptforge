@@ -18,7 +18,7 @@
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
-pub use crate::lua::LuaProgram;
+pub use promptforge_lua::LuaProgram;
 
 mod build;
 mod fence;

@@ -4,9 +4,9 @@ use super::decode::{
 };
 use super::userdata::reject_infer_options;
 use super::{ModelRuntime, record_default_binding};
-use crate::model::{ModelBindOpts, ModelId, ModelInvocation, ModelSet};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
+use promptforge_gateway_client::model::{ModelBindOpts, ModelId, ModelInvocation, ModelSet};
 
 #[test]
 fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
@@ -49,7 +49,7 @@ fn default_multi_arg_rolls_back_when_already_selected() {
     // PF-LM-003: a second multi-arg `models.default` must be rejected WITHOUT
     // leaving a half-recorded binding behind.
     let resolver = |_: &str, _: &ModelBindOpts| {
-        Ok(crate::model::ResolvedModel {
+        Ok(promptforge_gateway_client::model::ResolvedModel {
             id: ModelId::from_validated("gateway", "m1"),
             invocation: ModelInvocation::from(&ModelBindOpts::default()),
             context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
@@ -198,7 +198,8 @@ fn parse_opts_table_covers_each_key_and_rejects_unknown() {
     assert_eq!(opts.thinking, Some(true));
     assert_eq!(opts.context.map(std::num::NonZeroU32::get), Some(8192));
     assert_eq!(
-        opts.temperature.map(crate::model::Temperature::get),
+        opts.temperature
+            .map(promptforge_gateway_client::model::Temperature::get),
         Some(0.5)
     );
     assert_eq!(opts.max_tokens.map(std::num::NonZeroU32::get), Some(256));
@@ -303,7 +304,7 @@ fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
         let set = std::sync::Arc::new(std::sync::Mutex::new(ModelSet::default()));
         let errors = std::sync::Arc::new(std::sync::Mutex::new(None));
         let resolver = |_: &str, _: &ModelBindOpts| {
-            Ok(crate::model::ResolvedModel {
+            Ok(promptforge_gateway_client::model::ResolvedModel {
                 id: ModelId::from_validated("gateway", "m1"),
                 invocation: ModelInvocation::from(&ModelBindOpts::default()),
                 context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),

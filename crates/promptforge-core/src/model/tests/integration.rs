@@ -9,17 +9,19 @@ fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Prompt",
     )?;
     let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        |_: &str| -> std::result::Result<crate::tools::ToolId, promptforge_lua::Error> {
+            unreachable!("no tools")
+        };
     resolve_live_declarations_for_test(
         &shared,
         &tool_resolver,
         &fixture_resolver,
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Prompt",
     )
 }
@@ -33,9 +35,14 @@ fn models_bind_resolves_and_use_selects_section_binding() {
     assert_eq!(models.bindings()[0].id().name(), "analyst");
     assert_eq!(models.bindings()[0].invocation().thinking, Some(false));
 
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
@@ -43,27 +50,33 @@ fn models_bind_resolves_and_use_selects_section_binding() {
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Section",
     )
     .unwrap();
-    vm.run_chunk(&prologue, &NullObserver, "Section").unwrap();
+    vm.run_chunk(&prologue, &NullObserver::default(), "Section")
+        .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.unwrap().alias(), "analyst");
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
 fn no_models_use_or_always_leaves_section_unbound() {
     let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     assert!(model.is_none());
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }
 
 #[test]
@@ -77,9 +90,14 @@ fn constraint_filter_makes_bind_absent() {
 #[test]
 fn undeclared_models_use_fails_loudly() {
     let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
-    let mut vm =
-        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
-            .unwrap();
+    let mut vm = section_vm_with_model_bindings(
+        &tools,
+        &models,
+        EXECUTION,
+        &NullObserver::default(),
+        "Section",
+    )
+    .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
@@ -87,17 +105,17 @@ fn undeclared_models_use_fails_loudly() {
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
-        &NullObserver,
+        &NullObserver::default(),
         "Section",
     )
     .unwrap();
     let error = vm
-        .run_chunk(&prologue, &NullObserver, "Section")
+        .run_chunk(&prologue, &NullObserver::default(), "Section")
         .expect_err("an undeclared model alias must fail");
     let rendered = error.to_string();
     assert!(
         rendered.contains("models.use alias \"missing\" was not declared by models.bind"),
         "the error must name the undeclared alias and declaration requirement: {rendered}"
     );
-    vm.teardown(&NullObserver, "Section");
+    vm.teardown(&NullObserver::default(), "Section");
 }

@@ -7,7 +7,8 @@ use std::num::NonZeroU32;
 
 use mlua::{MultiValue, Table, Value};
 
-use crate::model::{ModelBindOpts, Temperature};
+use promptforge_gateway_client::model::{ModelBindOpts, Temperature};
+
 use crate::{Error, Result};
 
 /// Extracts a single string alias from a `MultiValue` (for the 1-arg form).

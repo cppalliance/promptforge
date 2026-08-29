@@ -8,6 +8,7 @@
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
 use promptforge_gateway_client::Error as GatewayClientError;
+use promptforge_lua::Error as LuaError;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -19,27 +20,12 @@ pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
 /// into a fresh [`Error`] each time. Wrapping it in a reference-counted
 /// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
 /// cheaply per lookup instead of being flattened to a string (resolve F4).
-#[derive(Debug, Clone)]
-pub(crate) struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
-
-impl SharedSource {
-    /// Wraps a concrete error as a shareable cause.
-    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> SharedSource {
-        SharedSource(std::sync::Arc::new(source))
-    }
-}
-
-impl std::fmt::Display for SharedSource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, formatter)
-    }
-}
-
-impl std::error::Error for SharedSource {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
-    }
-}
+///
+/// The type lives in `promptforge-lua`'s substrate (the `ToolResolver`
+/// contract's error channel needs it) and is aliased here unchanged, so the
+/// `BindQuery`/`ModelBindQuery` sources cross the crate boundary without
+/// re-wrapping.
+pub(crate) use promptforge_lua::SharedSource;
 
 /// The crate's internal error substrate, spanning parsing, HTTP, and execution
 /// failures.
@@ -506,19 +492,6 @@ pub(crate) enum Error {
     TimestampFormat(#[source] time::error::Format),
 }
 
-/// Stable messages emitted by Lua host-quota refusals.
-///
-/// Kept as constants so [`crate::lua`] emits them and the runtime-error boundary
-/// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].
-pub(crate) mod lua_quota {
-    /// Log event-count budget exhausted.
-    pub(crate) const LOG_EVENT: &str = "lua log event budget exceeded";
-    /// Cumulative log byte budget exhausted.
-    pub(crate) const LOG_BYTE: &str = "lua log cumulative byte budget exceeded";
-    /// Per-VM instruction budget exhausted.
-    pub(crate) const INSTRUCTION: &str = "lua instruction budget exceeded";
-}
-
 impl Error {
     /// Builds a parse failure with a stable classification and no source span.
     pub(crate) fn parse(kind: crate::parser::ParseErrorKind, message: impl Into<String>) -> Error {
@@ -613,6 +586,87 @@ impl From<GatewayClientError> for Error {
 impl From<crate::model::CompletionError> for Error {
     fn from(error: crate::model::CompletionError) -> Error {
         Error::from(GatewayClientError::from(error))
+    }
+}
+
+/// Maps the Lua crate's substrate back onto this substrate variant for
+/// variant, so `Display`, `source()` chains, and `RunError`/`CompletionError`
+/// classification are unchanged by the extraction. The Lua crate's substrate
+/// is not `#[non_exhaustive]` (the two crates version together), so this match
+/// is total.
+impl From<LuaError> for Error {
+    fn from(error: LuaError) -> Error {
+        match error {
+            LuaError::Lua(message) => Error::Lua(message),
+            LuaError::LuaRuntime { message, source } => Error::LuaRuntime { message, source },
+            LuaError::LuaCompile {
+                location,
+                source_line,
+                lua_source,
+                message,
+                source,
+            } => Error::LuaCompile {
+                location,
+                source_line,
+                lua_source,
+                message,
+                source,
+            },
+            LuaError::LuaQuota { resource } => Error::LuaQuota { resource },
+            LuaError::Interrupted => Error::Interrupted,
+            LuaError::Internal(message) => Error::Internal(message),
+            LuaError::DuplicateAlias { alias } => Error::DuplicateAlias { alias },
+            LuaError::PickedToolNotLive { alias, id } => Error::PickedToolNotLive { alias, id },
+            LuaError::ToolIdSelectedTwice {
+                id,
+                first_alias,
+                second_alias,
+            } => Error::ToolIdSelectedTwice {
+                id,
+                first_alias,
+                second_alias,
+            },
+            LuaError::Bind { capability, detail } => Error::Bind { capability, detail },
+            LuaError::BindQuery { capability, source } => Error::BindQuery { capability, source },
+            LuaError::Absent { capability } => Error::Absent { capability },
+            LuaError::Duplicate {
+                capability,
+                candidates,
+            } => Error::Duplicate {
+                capability,
+                candidates,
+            },
+            LuaError::Ambiguous {
+                capability,
+                candidates,
+            } => Error::Ambiguous {
+                capability,
+                candidates,
+            },
+            LuaError::ToolScopeAnalysisSource { source } => {
+                Error::ToolScopeAnalysisSource { source }
+            }
+            LuaError::DuplicateModelAlias { alias } => Error::DuplicateModelAlias { alias },
+            LuaError::ModelBind { capability, detail } => Error::ModelBind { capability, detail },
+            LuaError::ModelBindQuery { capability, source } => {
+                Error::ModelBindQuery { capability, source }
+            }
+            LuaError::ModelAbsent { capability } => Error::ModelAbsent { capability },
+            LuaError::ModelDuplicate {
+                capability,
+                candidates,
+            } => Error::ModelDuplicate {
+                capability,
+                candidates,
+            },
+            LuaError::ModelAmbiguous {
+                capability,
+                candidates,
+            } => Error::ModelAmbiguous {
+                capability,
+                candidates,
+            },
+        }
     }
 }
 

@@ -8,7 +8,7 @@ use super::{
 /// This is the deterministic seam used by live H1 resolution. It keeps core
 /// independent of any concrete picker implementation while allowing a caller
 /// to supply a fixed resolver in tests.
-pub(crate) trait ToolResolver: Send + Sync {
+pub trait ToolResolver: Send + Sync {
     /// Resolves `description` to a stable tool identity.
     ///
     /// # Errors
@@ -44,11 +44,11 @@ where
 /// The picker is an H1-phase capability, so the score is copied onto the
 /// binding when the clash is recorded; it cannot be recomputed later.
 #[derive(Debug, Clone)]
-pub(crate) struct Conflict {
+pub struct Conflict {
     /// The alias of the other binding in the clashing pair.
-    pub(crate) alias: String,
+    pub alias: String,
     /// The picker's cosine similarity between the two bound tools.
-    pub(crate) similarity: f64,
+    pub similarity: f64,
 }
 
 /// Bit comparison on the score keeps equality reflexive (`f64 ==` is not,
@@ -69,22 +69,25 @@ impl Eq for Conflict {}
 /// capability whose tool is unavailable fails at the `tools.bind` call, before
 /// any binding exists.
 #[derive(Clone)]
-pub(crate) struct ToolBinding {
-    pub(crate) alias: String,
-    pub(crate) description: String,
-    pub(crate) id: ToolId,
+pub struct ToolBinding {
+    /// The exact prompt-local alias.
+    pub alias: String,
+    /// The declared capability description.
+    pub description: String,
+    /// The selected stable live identity.
+    pub id: ToolId,
     /// Author override for the model-facing schema description.
     ///
     /// Capability text in [`Self::description`] stays the live H1 bind
-    /// string. When set, [`crate::execute`] advertises this instead of the
+    /// string. When set, the executor advertises this instead of the
     /// bound tool's default description.
-    pub(crate) model_description: Option<String>,
+    pub model_description: Option<String>,
     /// The resolved implementation, attached at bind time.
-    pub(crate) tool: Arc<dyn Tool>,
+    pub tool: Arc<dyn Tool>,
     /// Near-duplicate clashes with sibling bindings, recorded at bind time.
     /// Binding records, never fails: a clash errors only when both halves
     /// enter one model-visible scope.
-    pub(crate) conflicts: Vec<Conflict>,
+    pub conflicts: Vec<Conflict>,
 }
 
 /// Equality is keyed on the binding's data (alias, capability text, stable
@@ -117,8 +120,14 @@ impl std::fmt::Debug for ToolBinding {
 }
 
 impl ToolBinding {
-    #[cfg(test)]
-    pub(crate) fn for_test(alias: &str, description: &str, tool: Arc<dyn Tool>) -> Self {
+    /// Builds a binding for a test double: the identity comes from the tool,
+    /// with no override and no recorded clashes.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s executor
+    /// tests, not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn for_test(alias: &str, description: &str, tool: Arc<dyn Tool>) -> Self {
         Self {
             alias: alias.to_owned(),
             description: description.to_owned(),
@@ -131,37 +140,37 @@ impl ToolBinding {
 
     /// Returns the exact prompt-local alias.
     #[must_use]
-    pub(crate) fn alias(&self) -> &str {
+    pub fn alias(&self) -> &str {
         &self.alias
     }
 
     /// Returns the declared capability description.
     #[must_use]
-    pub(crate) fn description(&self) -> &str {
+    pub fn description(&self) -> &str {
         &self.description
     }
 
     /// Returns the selected stable live identity.
     #[must_use]
-    pub(crate) fn id(&self) -> &ToolId {
+    pub fn id(&self) -> &ToolId {
         &self.id
     }
 
     /// Returns the author override for the model-facing description, if any.
     #[must_use]
-    pub(crate) fn model_description(&self) -> Option<&str> {
+    pub fn model_description(&self) -> Option<&str> {
         self.model_description.as_deref()
     }
 
     /// Returns the resolved implementation attached at bind time.
     #[must_use]
-    pub(crate) fn tool(&self) -> &dyn Tool {
+    pub fn tool(&self) -> &dyn Tool {
         self.tool.as_ref()
     }
 
     /// Returns the near-duplicate clashes recorded at bind time.
     #[must_use]
-    pub(crate) fn conflicts(&self) -> &[Conflict] {
+    pub fn conflicts(&self) -> &[Conflict] {
         &self.conflicts
     }
 }
@@ -254,7 +263,7 @@ impl UserData for LuaToolHandle {
 /// `.item` carries the arm's member value back as a Lua value via the same
 /// serde bridge that seeds `var`.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct LuaFanoutResult {
+pub struct LuaFanoutResult {
     text: String,
     ok: bool,
     item: Json,
@@ -264,7 +273,7 @@ pub(crate) struct LuaFanoutResult {
 impl LuaFanoutResult {
     /// Builds a successful arm result.
     #[must_use]
-    pub(crate) fn success(item: impl Into<Json>, text: impl Into<String>) -> Self {
+    pub fn success(item: impl Into<Json>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: true,
@@ -275,7 +284,7 @@ impl LuaFanoutResult {
 
     /// Builds a soft-degraded arm result after tool-loop exhaustion.
     #[must_use]
-    pub(crate) fn exhausted_stub(item: impl Into<Json>, text: impl Into<String>) -> Self {
+    pub fn exhausted_stub(item: impl Into<Json>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: false,
@@ -300,7 +309,7 @@ impl UserData for LuaFanoutResult {
 
 /// Outcome of a Lua block that may invoke `jump`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LuaBlockResult {
+pub enum LuaBlockResult {
     /// Normal completion with an optional scalar return.
     Returned(Option<String>),
     /// `jump` transferred control to this heading (`## Name`).
@@ -324,38 +333,46 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
 /// The run's tool set: the prompt-level bindings produced by live H1
 /// execution plus the prompt-wide `always` aliases.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ToolSet {
-    pub(crate) bindings: Vec<ToolBinding>,
-    pub(crate) always: Vec<String>,
+pub struct ToolSet {
+    /// The prompt-level bindings in declaration order.
+    pub bindings: Vec<ToolBinding>,
+    /// The prompt-wide `always` aliases in declaration order.
+    pub always: Vec<String>,
 }
 
 impl ToolSet {
-    #[cfg(test)]
-    pub(crate) fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
+    /// Builds a set from owned parts, for executor test doubles.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s executor
+    /// tests, not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
         Self { bindings, always }
     }
 
     /// Reassembles a set from owned snapshots of its two lists (the
     /// [`ToolView`] read pair).
     #[must_use]
-    pub(crate) fn from_parts(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
+    pub fn from_parts(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
         Self { bindings, always }
     }
 
     /// Returns bindings in declaration order.
     #[must_use]
-    pub(crate) fn bindings(&self) -> &[ToolBinding] {
+    pub fn bindings(&self) -> &[ToolBinding] {
         &self.bindings
     }
 
     /// Returns prompt-wide aliases in declaration order.
     #[must_use]
-    pub(crate) fn always(&self) -> &[String] {
+    pub fn always(&self) -> &[String] {
         &self.always
     }
 
     /// Returns the binding for `alias`, if it was declared.
-    pub(crate) fn binding(&self, alias: &str) -> Option<&ToolBinding> {
+    #[must_use]
+    pub fn binding(&self, alias: &str) -> Option<&ToolBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
 }
@@ -368,7 +385,7 @@ impl ToolSet {
 /// mutation, so post-H1 frozenness is structural. Every method locks
 /// briefly and returns an owned snapshot: a mutex guard cannot outlive the
 /// call.
-pub(crate) trait ToolView: Send + Sync {
+pub trait ToolView: Send + Sync {
     /// Returns an owned snapshot of the bindings in declaration order.
     ///
     /// # Errors

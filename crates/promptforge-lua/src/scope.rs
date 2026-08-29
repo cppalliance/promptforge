@@ -5,14 +5,14 @@ use super::{Arc, BTreeMap, Error, Mutex, Result};
 /// The executor increments a count when dispatch is attempted (even if the tool
 /// later errors). Lua reads the snapshot through the `tools.calls` table.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ToolCallCounts {
+pub struct ToolCallCounts {
     inner: Arc<Mutex<BTreeMap<String, u64>>>,
 }
 
 impl ToolCallCounts {
     /// Creates a counts map pre-seeded with 0 for every alias.
     #[must_use]
-    pub(crate) fn new(aliases: impl IntoIterator<Item = String>) -> Self {
+    pub fn new(aliases: impl IntoIterator<Item = String>) -> Self {
         let map: BTreeMap<String, u64> = aliases.into_iter().map(|a| (a, 0)).collect();
         Self {
             inner: Arc::new(Mutex::new(map)),
@@ -29,7 +29,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub(crate) fn ensure(&self, alias: &str) -> Result<()> {
+    pub fn ensure(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         map.entry(alias.to_owned()).or_insert(0);
         Ok(())
@@ -39,7 +39,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned or alias is not in scope.
-    pub(crate) fn increment(&self, alias: &str) -> Result<()> {
+    pub fn increment(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         let count = map.get_mut(alias).ok_or_else(|| {
             Error::Lua(format!(
@@ -54,7 +54,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub(crate) fn get(&self, alias: &str) -> Result<Option<u64>> {
+    pub fn get(&self, alias: &str) -> Result<Option<u64>> {
         Ok(self.lock()?.get(alias).copied())
     }
 
@@ -62,16 +62,16 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub(crate) fn aliases(&self) -> Result<Vec<String>> {
+    pub fn aliases(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
     }
 }
 
 /// Tracks tools added to one section VM and their description overrides.
 #[derive(Debug)]
-pub(crate) struct ToolRuntime {
+pub struct ToolRuntime {
     /// Prompt-local aliases currently in the section's tool scope.
-    pub(crate) added: Vec<String>,
+    pub added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
-    pub(crate) description_overrides: BTreeMap<String, String>,
+    pub description_overrides: BTreeMap<String, String>,
 }

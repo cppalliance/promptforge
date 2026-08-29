@@ -23,7 +23,8 @@ models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64
 ## Only\n\n\
 ```lua\nmodels.use('analyst')\n```\n\n\
 Ask the model.\n";
-    let prompt = Prompt::parse(md, EXECUTION, &NullObserver).expect("fixture must parse");
+    let prompt =
+        Prompt::parse(md, EXECUTION, &NullObserver::default()).expect("fixture must parse");
     let prompt = TestPrompt {
         prompt,
         models: catalog,

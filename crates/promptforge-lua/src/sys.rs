@@ -125,12 +125,14 @@ fn enrich_sys_field(sys: &Json, key: &str, value: Json) -> Json {
 }
 
 /// Returns a copy of `sys` with the bound catalog model id under `"model"`.
-pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
+#[must_use]
+pub fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
     enrich_sys_field(sys, "model", Json::String(binding.id().name().to_owned()))
 }
 
 /// Returns a copy of `sys` with `reply_finish_reason` set from the last inference.
-pub(crate) fn enrich_sys_reply_finish_reason(sys: &Json, reason: Option<&str>) -> Json {
+#[must_use]
+pub fn enrich_sys_reply_finish_reason(sys: &Json, reason: Option<&str>) -> Json {
     let value = match reason {
         Some(value) => Json::String(value.to_owned()),
         None => Json::Null,

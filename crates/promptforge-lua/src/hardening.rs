@@ -99,7 +99,7 @@ fn budget_hook(
         // Cooperative cancellation: abort a long-running Lua block promptly
         // when the run's CancelHandle is signaled (mapped to
         // Error::Interrupted at the runtime-error boundary).
-        if crate::cancel::is_cancelled() {
+        if promptforge_core_support::cancel::is_cancelled() {
             return Err(mlua::Error::RuntimeError(
                 "lua execution cancelled".to_string(),
             ));

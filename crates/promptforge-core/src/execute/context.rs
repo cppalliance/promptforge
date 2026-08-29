@@ -354,7 +354,8 @@ mod tests {
             "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
             "# Title\n\n## Only\n\ndone\n",
         );
-        Prompt::parse(source, "run-context-test", &NullObserver).expect("the test prompt parses")
+        Prompt::parse(source, "run-context-test", &NullObserver::default())
+            .expect("the test prompt parses")
     }
 
     fn test_context(prompt: &Prompt) -> RunContext {
@@ -405,7 +406,8 @@ mod tests {
         assert_eq!(ctx.args(), "");
 
         let turns = Arc::new(AtomicU32::new(7));
-        let arm = ctx.with_effective_handles(Arc::new(NullObserver), None, Arc::clone(&turns));
+        let arm =
+            ctx.with_effective_handles(Arc::new(NullObserver::default()), None, Arc::clone(&turns));
         assert!(Arc::ptr_eq(arm.turns(), &turns));
         assert!(Arc::ptr_eq(&ctx.prompt, &arm.prompt));
     }

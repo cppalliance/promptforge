@@ -76,7 +76,6 @@ mod error;
 pub mod execute;
 pub(crate) mod fanout;
 pub(crate) mod lua;
-mod lua_models;
 pub mod model;
 pub mod observe;
 pub mod parser;
@@ -91,7 +90,8 @@ pub(crate) mod untrusted;
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
-pub use crate::cancel::CancelHandle;
+pub use promptforge_core_support::cancel::CancelHandle;
+
 pub use crate::execute::{ResolutionContext, RunConfig, RunError, RunErrorKind, RunLimits, run};
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

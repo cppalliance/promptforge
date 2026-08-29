@@ -3914,7 +3914,9 @@ dependencies = [
  "async-trait",
  "axum",
  "mlua",
+ "promptforge-core-support",
  "promptforge-gateway-client",
+ "promptforge-lua",
  "promptforge-store",
  "promptforge-tool-picker",
  "promptforge-tools",
@@ -3926,6 +3928,14 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.19",
  "time",
+ "tokio",
+]
+
+[[package]]
+name = "promptforge-core-support"
+version = "0.1.0"
+dependencies = [
+ "rand 0.9.5",
  "tokio",
 ]
 
@@ -4089,6 +4099,21 @@ version = "0.1.0"
 dependencies = [
  "promptforge-gateway-config",
  "promptforge-gateway-protocol",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
+name = "promptforge-lua"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "mlua",
+ "promptforge-core-support",
+ "promptforge-gateway-client",
+ "promptforge-store",
+ "promptforge-tools",
+ "serde_json",
  "thiserror 2.0.19",
  "tokio",
 ]

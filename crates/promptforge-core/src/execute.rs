@@ -234,7 +234,9 @@ pub async fn run(
     // sequence carries no `Option` branch.
     let shared = match prompt.replay.as_ref() {
         Some(program) => program.clone(),
-        None => crate::lua::LuaProgram::empty().map_err(RunError::from)?,
+        None => {
+            crate::lua::LuaProgram::empty().map_err(|error| RunError::from(Error::from(error)))?
+        }
     };
     let ctx = RunContext::new(prompt, args, store, shared, &config);
 

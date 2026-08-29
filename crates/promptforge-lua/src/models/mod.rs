@@ -1,14 +1,15 @@
 //! Lua `models.bind` / `models.use` host tables for live H1 and H2.
 //!
-//! Kept beside [`crate::lua`] so the tool tables stay readable while model
-//! declaration recording mirrors their phase rules.
+//! Kept beside the sandbox VM modules so the tool tables stay readable while
+//! model declaration recording mirrors their phase rules.
 
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table};
 
-use crate::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
+use promptforge_gateway_client::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
+
 use crate::{Error, Result};
 
 mod decode;
@@ -37,7 +38,7 @@ fn call_models_infer_hook(lua: &Lua, prompt: &str) -> mlua::Result<String> {
 
 /// H2 model-recording state: wraps the at-most-once `models.use` selection.
 #[derive(Debug)]
-pub(crate) struct ModelRuntime {
+pub struct ModelRuntime {
     used: Option<String>,
 }
 

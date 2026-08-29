@@ -21,7 +21,7 @@ pub use promptforge_gateway_client::model::{
 };
 pub(crate) use promptforge_gateway_client::model::{
     ModelBindOpts, ModelBinding, ModelResolver, ModelSet, ModelView, PickerModelResolver,
-    ResolvedModel, Temperature,
+    ResolvedModel,
 };
 
 #[cfg(test)]

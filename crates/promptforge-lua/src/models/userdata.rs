@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use mlua::{Lua, UserData, UserDataFields, UserDataMethods, Value};
 
-use crate::model::ModelBinding;
+use promptforge_gateway_client::model::ModelBinding;
 
 /// Host hook that runs `handle:infer` from Lua via the executor's shared
 /// context.
@@ -26,7 +26,7 @@ pub(crate) type ModelInferHook =
 ///
 /// Takes only the prompt: the hook resolves the section's current model
 /// binding itself, because the executor side knows the section name needed
-/// for a typed [`crate::Error::ModelRequired`] and, on the live H1 path, the
+/// for a typed model-required failure and, on the live H1 path, the
 /// bindings are still being recorded into the run's producer. The resolved
 /// binding runs the same single tool-free round as [`ModelInferHook`].
 /// Installed as Lua app data alongside [`ModelInferHook`]; absent app data
@@ -89,14 +89,15 @@ impl LuaModelHandle {
 
     /// Returns the frozen sampling temperature, when the bind declared one.
     ///
-    /// The binding stores a validated [`crate::model::Temperature`]; the raw
-    /// `f64` is exposed only here, at the Lua presentation boundary.
+    /// The binding stores a validated
+    /// [`Temperature`](promptforge_gateway_client::model::Temperature); the
+    /// raw `f64` is exposed only here, at the Lua presentation boundary.
     #[must_use]
     pub(crate) fn temperature(&self) -> Option<f64> {
         self.binding
             .invocation()
             .temperature
-            .map(crate::model::Temperature::get)
+            .map(promptforge_gateway_client::model::Temperature::get)
     }
 
     /// Returns the frozen max generation tokens, when the bind declared one.

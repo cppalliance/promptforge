@@ -221,7 +221,7 @@ impl SectionContext {
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_live_h1(&mut vm, ctx, &sys, title)
-            .and_then(|()| install_live_h1_shim_base(vm.lua()))
+            .and_then(|()| install_live_h1_shim_base(vm.lua()).map_err(Error::from))
         {
             vm.teardown(ctx.observer().as_ref(), title);
             return Err(error);
@@ -300,6 +300,7 @@ impl SectionContext {
                 ctx.limits().lua_memory().get(),
                 ctx.limits().lua_logs().get(),
             )
+            .map_err(Error::from)
             .and_then(|()| {
                 let mut sys = ctx.sys_json(next_id(ctx.ids()), &worker.name)?;
                 // The arm's own sys extra: its 1-based position within this
@@ -551,7 +552,7 @@ fn setup_live_h1(
 ) -> Result<()> {
     vm.inject_host(ctx.args(), sys, ctx.store(), None)?;
     vm.install_host_apis(ctx.observer(), title)?;
-    vm.install_h1_control_stubs()
+    vm.install_h1_control_stubs().map_err(Error::from)
 }
 
 impl Drop for SectionContext {

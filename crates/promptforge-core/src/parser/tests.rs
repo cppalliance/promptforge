@@ -28,7 +28,7 @@ fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // `Frontmatter` and retain the underlying serde_yaml_ng failure as the
     // public error's `source()`, instead of flattening it into a string.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
-    let error = Prompt::parse(src, "test", &NullObserver)
+    let error = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("malformed YAML frontmatter must fail to parse");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert!(
@@ -42,7 +42,7 @@ fn mixed_prose_with_one_bullet_is_not_a_list() {
     // PF-PARSER-005: an incidental bullet line in ordinary prose must not
     // force strict list parsing; the section stays prose.
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\nHere is context.\n- one incidental bullet\nMore prose follows.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(!section.is_list_only(), "mixed prose is not a list");
     assert!(section.items().is_empty());
@@ -52,7 +52,7 @@ fn mixed_prose_with_one_bullet_is_not_a_list() {
 #[test]
 fn pure_list_section_parses_items() {
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n- beta\n3. gamma\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_list_only());
     assert_eq!(section.items(), ["alpha", "beta", "gamma"]);
@@ -63,7 +63,8 @@ fn all_marker_list_with_empty_item_is_rejected() {
     // Every nonblank line is a marker, so it is a list; the empty marker is
     // then a hard error rather than a detector miss.
     let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n1.\n- beta\n";
-    let error = Prompt::parse(src, "test", &NullObserver).expect_err("empty item must fail");
+    let error =
+        Prompt::parse(src, "test", &NullObserver::default()).expect_err("empty item must fail");
     assert_eq!(error.kind(), ParseErrorKind::List);
 }
 
@@ -72,8 +73,8 @@ fn list_error_kind_does_not_depend_on_the_section_name() {
     for section in ["frontmatter", "fence"] {
         let src =
             format!("---\nname: p\ndescription: d\n---\n\n# T\n\n## {section}\n\n- alpha\n1.\n");
-        let error =
-            Prompt::parse(&src, "test", &NullObserver).expect_err("an empty list item must fail");
+        let error = Prompt::parse(&src, "test", &NullObserver::default())
+            .expect_err("an empty list item must fail");
         assert_eq!(error.kind(), ParseErrorKind::List);
     }
 }
@@ -84,14 +85,14 @@ fn parsed_prompt_value_types_are_equatable() {
     // a differing source yields unequal values, across the finalized parser
     // value types (`Prompt`, `Frontmatter`, `Section`, `Block`).
     let src = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## One\n\ndo a thing\n";
-    let a = Prompt::parse(src, "test", &NullObserver).unwrap();
-    let b = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let a = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
+    let b = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(a, b, "identical sources must parse equal");
     assert_eq!(a.frontmatter, b.frontmatter);
     assert_eq!(a.sections, b.sections);
 
     let other = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## Two\n\ndo a thing\n";
-    let c = Prompt::parse(other, "test", &NullObserver).unwrap();
+    let c = Prompt::parse(other, "test", &NullObserver::default()).unwrap();
     assert_ne!(a, c, "differing section headings must parse unequal");
 }
 
@@ -156,7 +157,7 @@ Child prose.\n\
 \n\
 Prose for the second section.\n";
 
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(p.frontmatter.name, "demo");
     assert_eq!(p.frontmatter.description, "A demo");
     assert_eq!(p.title, "Demo Title");
@@ -193,7 +194,7 @@ Prose for the second section.\n";
 #[test]
 fn parses_single_minimal_section() {
     let src = "---\nname: hi\ndescription: d\n---\n\n# T\n\n## Greet\n\nSay hi\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(p.sections.len(), 1);
     assert_eq!(p.sections[0].name, "Greet");
     assert_eq!(p.sections[0].prose(), "Say hi");
@@ -202,35 +203,38 @@ fn parses_single_minimal_section() {
 #[test]
 fn name_and_description_are_sufficient_frontmatter_for_parsing() {
     let src = prompt_src("## S\n\np\n");
-    let prompt =
-        Prompt::parse(&src, "test", &NullObserver).expect("minimum frontmatter must parse");
+    let prompt = Prompt::parse(&src, "test", &NullObserver::default())
+        .expect("minimum frontmatter must parse");
     assert_eq!(prompt.frontmatter.name, "x");
 }
 
 #[test]
 fn missing_frontmatter_delimiter_errors() {
     let src = "# T\n\n## S\n\np\n";
-    assert!(Prompt::parse(src, "test", &NullObserver).is_err());
+    assert!(Prompt::parse(src, "test", &NullObserver::default()).is_err());
 }
 
 #[test]
 fn h1_only_prompt_parses_with_empty_sections() {
     let src = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n# Only a title\n\nText.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("H1-only prompt must parse");
+    let prompt =
+        Prompt::parse(src, "test", &NullObserver::default()).expect("H1-only prompt must parse");
     assert!(prompt.sections.is_empty());
 }
 
 #[test]
 fn empty_h1_title_errors() {
     let src = "---\nname: x\ndescription: d\n---\n\n#\n\n## S\n\np\n";
-    let error = Prompt::parse(src, "test", &NullObserver).expect_err("H1 title must not be empty");
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("H1 title must not be empty");
     assert!(error.to_string().contains("title must not be empty"));
 }
 
 #[test]
 fn preface_before_h1_is_ignored() {
     let src = "---\nname: x\ndescription: d\n---\n\nIgnored preface.\n\n```text\nalso ignored\n```\n\n# T\n\nDescription.\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("preface is not semantic");
+    let prompt =
+        Prompt::parse(src, "test", &NullObserver::default()).expect("preface is not semantic");
     assert_eq!(prompt.title, "T");
     assert_eq!(prompt.description_text, "Description.");
     assert_eq!(prompt.entry().expect("has sections").name, "S");
@@ -239,7 +243,8 @@ fn preface_before_h1_is_ignored() {
 #[test]
 fn shared_library_allows_blank_lines_and_is_compiled() {
     let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua shared\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("shared Lua must parse");
+    let prompt =
+        Prompt::parse(src, "test", &NullObserver::default()).expect("shared Lua must parse");
     let replay = prompt.replay.expect("replay program must be present");
     assert_eq!(replay.source(), "function answer() return 42 end");
     assert_eq!(prompt.description_text, "Description.");
@@ -248,7 +253,8 @@ fn shared_library_allows_blank_lines_and_is_compiled() {
 #[test]
 fn h1_plain_lua_and_prose_are_live_blocks() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal first = 1\n```\n\nPlan {{ args }}.\n\n```lua shared\nfunction helper() return 1 end\n```\n\n```lua\nstore.write('done', reply)\n```\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("H1 blocks must parse");
+    let prompt =
+        Prompt::parse(src, "test", &NullObserver::default()).expect("H1 blocks must parse");
     assert_eq!(
         prompt.replay.as_ref().map(LuaProgram::source),
         Some("function helper() return 1 end")
@@ -276,7 +282,8 @@ fn h1_plain_lua_and_prose_are_live_blocks() {
 fn lone_plain_h1_lua_is_not_a_shared_library() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal live = true\n```\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("plain H1 Lua must parse");
+    let prompt =
+        Prompt::parse(src, "test", &NullObserver::default()).expect("plain H1 Lua must parse");
     assert!(prompt.replay.is_none());
     assert!(matches!(
         prompt.h1_blocks.as_slice(),
@@ -287,8 +294,8 @@ fn lone_plain_h1_lua_is_not_a_shared_library() {
 #[test]
 fn second_shared_fence_is_a_parse_error() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nlocal a = 1\n```\n\n```lua shared\nlocal b = 2\n```\n\n## S\n\np\n";
-    let error =
-        Prompt::parse(src, "test", &NullObserver).expect_err("a second shared fence must fail");
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("a second shared fence must fail");
     assert!(error.to_string().contains("at most one `lua shared`"));
 }
 
@@ -296,15 +303,15 @@ fn second_shared_fence_is_a_parse_error() {
 fn shared_fence_in_h2_is_a_parse_error() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua shared\nlocal a = 1\n```\n";
-    let error =
-        Prompt::parse(src, "test", &NullObserver).expect_err("a shared fence in H2 must fail");
+    let error = Prompt::parse(src, "test", &NullObserver::default())
+        .expect_err("a shared fence in H2 must fail");
     assert!(error.to_string().contains("allowed only in H1"));
 }
 
 #[test]
 fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n## S\n\np\n";
-    let error = Prompt::parse(src, "test", &NullObserver)
+    let error = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("the removed leading form must be rejected by name");
     assert!(
         error
@@ -316,14 +323,14 @@ fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
 #[test]
 fn lua_prompt_form_after_prose_is_ordinary_prose() {
     let in_h1 = "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n```lua prompt\nnot compiled =\n```\n\n## S\n\np\n";
-    let prompt = Prompt::parse(in_h1, "test", &NullObserver)
+    let prompt = Prompt::parse(in_h1, "test", &NullObserver::default())
         .expect("the removed form after prose is ordinary Markdown");
     assert!(prompt.replay.is_none());
     assert!(prompt.description_text.contains("```lua prompt"));
 
     let in_section =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
-    let prompt = Prompt::parse(in_section, "test", &NullObserver)
+    let prompt = Prompt::parse(in_section, "test", &NullObserver::default())
         .expect("the removed form in a section is ordinary Markdown");
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_none());
@@ -345,7 +352,7 @@ fn shared_fence_markers_must_be_exact() {
         "```lua shared extra\nreturn 1\n```",
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{near_miss}\n\n## S\n\np\n");
-        let prompt = Prompt::parse(&src, "test", &NullObserver)
+        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
             .expect("leading near-miss shared markers must remain prose");
         assert!(prompt.replay.is_none());
         assert!(prompt.description_text.contains(near_miss.trim()));
@@ -362,7 +369,7 @@ fn shared_fence_markers_must_be_exact() {
         let src = format!(
             "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n{near_miss}\n\n## S\n\np\n"
         );
-        let prompt = Prompt::parse(&src, "test", &NullObserver)
+        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
             .expect("near-miss shared markers must remain prose");
         assert!(prompt.replay.is_none());
         assert!(prompt.description_text.contains(near_miss));
@@ -370,7 +377,7 @@ fn shared_fence_markers_must_be_exact() {
 
     let unclosed =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nreturn 1\n````\n\n## S\n\np\n";
-    let error = Prompt::parse(unclosed, "test", &NullObserver)
+    let error = Prompt::parse(unclosed, "test", &NullObserver::default())
         .expect_err("near-miss closing marker must not close the fence");
     assert!(error.to_string().contains("not closed"));
 }
@@ -378,8 +385,8 @@ fn shared_fence_markers_must_be_exact() {
 #[test]
 fn shared_markers_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua shared\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua shared\nreturn 2\n```\n````\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver).expect("nested shared markers must remain prose");
+    let prompt = Prompt::parse(src, "test", &NullObserver::default())
+        .expect("nested shared markers must remain prose");
 
     assert!(prompt.replay.is_none());
     assert!(prompt.description_text.contains("```lua shared"));
@@ -456,7 +463,7 @@ fn successful_parse_reports_only_fixed_boundaries() {
 #[test]
 fn lua_fence_separated_from_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nreturn 42\n```\n\nActual prose here.\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(
         p.sections[0].prologue().map(LuaProgram::source),
         Some("return 42")
@@ -468,8 +475,8 @@ fn lua_fence_separated_from_prose() {
 #[test]
 fn section_compiles_prologue_and_epilog_around_prose() {
     let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n## Transform\r\n\r\n \t\r\n```lua\r\nvar.before = args\r\n```\r\n\r\nAsk about {{ var.before }}.\r\n\r\n```lua\r\nreturn reply\r\n```\r\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver).expect("both exact section phases must compile");
+    let prompt = Prompt::parse(src, "test", &NullObserver::default())
+        .expect("both exact section phases must compile");
     let section = prompt.entry().expect("has sections");
 
     assert_eq!(
@@ -486,8 +493,8 @@ fn section_compiles_prologue_and_epilog_around_prose() {
 #[test]
 fn section_compiles_epilog_after_prose_without_prologue() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Transform\n\nAsk the model.\n\n```lua\nreturn reply\n```\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver).expect("the trailing epilog must compile");
+    let prompt = Prompt::parse(src, "test", &NullObserver::default())
+        .expect("the trailing epilog must compile");
     let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
@@ -501,8 +508,8 @@ fn section_compiles_epilog_after_prose_without_prologue() {
 #[test]
 fn exact_middle_lua_fences_become_compiled_blocks() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nvar.mid = 1\n```\n\nAfter.\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver).expect("middle Lua fences compile as blocks");
+    let prompt = Prompt::parse(src, "test", &NullObserver::default())
+        .expect("middle Lua fences compile as blocks");
     let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
@@ -532,7 +539,7 @@ fn exact_middle_lua_fences_become_compiled_blocks() {
 #[test]
 fn invalid_middle_lua_fence_fails_parse() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nnot valid lua =\n```\n\nAfter.\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("invalid middle Lua must fail compilation");
     assert_eq!(err.kind(), ParseErrorKind::Lua);
 }
@@ -540,14 +547,15 @@ fn invalid_middle_lua_fence_fails_parse() {
 #[test]
 fn one_exact_fence_is_the_prologue_and_two_can_surround_empty_prose() {
     let one = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n";
-    let prompt = Prompt::parse(one, "test", &NullObserver).expect("one fence is the prologue");
+    let prompt =
+        Prompt::parse(one, "test", &NullObserver::default()).expect("one fence is the prologue");
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_some());
     assert!(entry.epilog().is_none());
 
     let two = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n\n```lua\nreturn reply\n```\n";
-    let prompt =
-        Prompt::parse(two, "test", &NullObserver).expect("two fences can enclose empty prose");
+    let prompt = Prompt::parse(two, "test", &NullObserver::default())
+        .expect("two fences can enclose empty prose");
     let entry = prompt.entry().expect("has sections");
     assert_eq!(entry.prose(), "");
     assert!(entry.prologue().is_some());
@@ -563,8 +571,8 @@ fn section_fence_markers_must_be_exact() {
         "```lua extra\nreturn 1\n```",
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{near_miss}\n");
-        let prompt =
-            Prompt::parse(&src, "test", &NullObserver).expect("near-miss fence must remain prose");
+        let prompt = Prompt::parse(&src, "test", &NullObserver::default())
+            .expect("near-miss fence must remain prose");
         let entry = prompt.entry().expect("has sections");
         assert!(entry.prologue().is_none());
         assert!(entry.epilog().is_none());
@@ -578,7 +586,7 @@ fn non_exact_section_closing_before_another_lua_fence_is_a_parse_error() {
         let src = format!(
             "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.a = 1\n{near_miss_close}\n\n```lua\nvar.b = 2\n```\n"
         );
-        let error = Prompt::parse(&src, "test", &NullObserver)
+        let error = Prompt::parse(&src, "test", &NullObserver::default())
             .expect_err("a near-miss closing fence must not panic or close the block");
         assert!(error.to_string().contains("not closed exactly"));
     }
@@ -587,8 +595,8 @@ fn non_exact_section_closing_before_another_lua_fence_is_a_parse_error() {
 #[test]
 fn section_markers_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n````markdown\n```lua\nreturn 1\n```\n````\n";
-    let prompt =
-        Prompt::parse(src, "test", &NullObserver).expect("nested markers must remain prose");
+    let prompt = Prompt::parse(src, "test", &NullObserver::default())
+        .expect("nested markers must remain prose");
 
     let entry = prompt.entry().expect("has sections");
     assert!(entry.prologue().is_none());
@@ -667,7 +675,7 @@ fn unclosed_reserved_section_fences_are_location_errors() {
         ("Prose.\n\n```lua\nreturn reply", "epilog"),
     ] {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{content}\n");
-        let error = Prompt::parse(&src, "test", &NullObserver)
+        let error = Prompt::parse(&src, "test", &NullObserver::default())
             .expect_err("reserved fence must close exactly");
         assert!(error.to_string().contains(phase));
         assert!(error.to_string().contains("not closed"));
@@ -696,7 +704,7 @@ fn successful_section_compilation_reports_fixed_ordered_boundaries() {
 #[test]
 fn non_lua_fence_stays_in_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nHere is code:\n\n```python\nprint(1)\n```\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert!(p.sections[0].prologue().is_none());
     assert!(p.sections[0].epilog().is_none());
     assert!(p.sections[0].prose().contains("```python"));
@@ -706,7 +714,7 @@ fn non_lua_fence_stays_in_prose() {
 fn recursive_nesting_h2_h3_h4() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n### B\n\nb\n\n#### C\n\nc\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let a = &p.sections[0];
     assert_eq!(a.name, "A");
     let b = &a.children[0];
@@ -722,7 +730,7 @@ fn skipped_heading_level_is_rejected_as_orphan() {
     // H4 directly under H2 (no intervening H3) is an orphan deep heading:
     // it has no parent H3, so it must be rejected, not reparented to the H2.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n#### D\n\nd\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("an H4 with no parent H3 must be rejected");
     assert!(
         err.to_string().contains("orphan"),
@@ -734,7 +742,7 @@ fn skipped_heading_level_is_rejected_as_orphan() {
 fn orphan_top_level_deep_heading_is_rejected() {
     // The first section heading is an H3 with no parent H2: an orphan.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n### A\n\na\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("an H3 top-level section with no parent H2 must be rejected");
     assert!(
         err.to_string().contains("orphan"),
@@ -744,7 +752,7 @@ fn orphan_top_level_deep_heading_is_rejected() {
     // An H4 top-level section (double skip) is likewise rejected.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n#### A\n\na\n";
     assert!(
-        Prompt::parse(src, "test", &NullObserver).is_err(),
+        Prompt::parse(src, "test", &NullObserver::default()).is_err(),
         "an H4 top-level section must be rejected"
     );
 }
@@ -752,7 +760,7 @@ fn orphan_top_level_deep_heading_is_rejected() {
 #[test]
 fn unknown_frontmatter_field_is_rejected() {
     let src = "---\nname: x\ndescription: d\nnot_a_real_field: 1\n---\n\n# T\n\n## S\n\np\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("an unknown frontmatter field must be rejected");
     assert!(
         err.to_string().contains("not_a_real_field") || err.to_string().contains("unknown field"),
@@ -760,13 +768,13 @@ fn unknown_frontmatter_field_is_rejected() {
     );
     // A known-field-only frontmatter still parses.
     let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    assert!(Prompt::parse(ok, "test", &NullObserver).is_ok());
+    assert!(Prompt::parse(ok, "test", &NullObserver::default()).is_ok());
 }
 
 #[test]
 fn empty_section_heading_is_rejected() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## \n\na\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("an empty section heading must be rejected");
     assert!(
         err.to_string().contains("must not be empty"),
@@ -778,7 +786,7 @@ fn empty_section_heading_is_rejected() {
 fn duplicate_sibling_section_names_are_rejected() {
     // Two H2 siblings named `S` are ambiguous section targets.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\na\n\n## S\n\nb\n";
-    let err = Prompt::parse(src, "test", &NullObserver)
+    let err = Prompt::parse(src, "test", &NullObserver::default())
         .expect_err("duplicate sibling section names must be rejected");
     let message = err.to_string();
     assert!(
@@ -803,7 +811,7 @@ fn duplicate_sibling_section_names_are_rejected() {
     // The same name under DIFFERENT parents (not siblings) is allowed.
     let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n### S\n\nx\n\n## B\n\nb\n\n### S\n\ny\n";
     assert!(
-        Prompt::parse(ok, "test", &NullObserver).is_ok(),
+        Prompt::parse(ok, "test", &NullObserver::default()).is_ok(),
         "the same name under different parents is not a sibling collision"
     );
 }
@@ -812,14 +820,14 @@ fn duplicate_sibling_section_names_are_rejected() {
 fn max_tool_iterations_parses_positive_and_defaults_when_absent() {
     let declared =
         "---\nname: x\ndescription: d\nmax_tool_iterations: 20\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(declared, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(declared, "test", &NullObserver::default()).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Limit(std::num::NonZeroU32::new(20).unwrap())
     );
 
     let absent = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(absent, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(absent, "test", &NullObserver::default()).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Default
@@ -834,7 +842,7 @@ fn max_tool_iterations_rejects_zero_negative_and_overflow() {
         )
     };
     for bad in ["0", "-1", "1001", "100000000000"] {
-        let error = Prompt::parse(&body(bad), "test", &NullObserver)
+        let error = Prompt::parse(&body(bad), "test", &NullObserver::default())
             .expect_err(&format!("max_tool_iterations {bad} must be rejected"));
         assert_eq!(
             error.kind(),
@@ -849,7 +857,7 @@ fn max_tool_iterations_accepts_the_upper_boundary() {
     let body = format!(
         "---\nname: x\ndescription: d\nmax_tool_iterations: {MAX_TOOL_ITERATIONS}\n---\n\n# T\n\n## S\n\np\n"
     );
-    let p = Prompt::parse(&body, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(&body, "test", &NullObserver::default()).unwrap();
     assert_eq!(
         p.frontmatter.max_tool_iterations,
         MaxToolIterations::Limit(std::num::NonZeroU32::new(MAX_TOOL_ITERATIONS).unwrap())
@@ -869,7 +877,7 @@ fn max_tool_iterations_resolve_uses_default_only_when_absent() {
 fn first_h2_is_entry_regardless_of_name() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## Zebra\n\nfirst\n\n## Main\n\nsecond\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(p.entry().expect("has sections").name, "Zebra");
 }
 
@@ -912,11 +920,11 @@ fn detection_malformed_frontmatter_is_none() {
 #[test]
 fn frontmatter_exposes_promptforge_field() {
     let with = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(with, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(with, "test", &NullObserver::default()).unwrap();
     assert_eq!(p.frontmatter.promptforge, Some(1));
 
     let without = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(without, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(without, "test", &NullObserver::default()).unwrap();
     assert_eq!(p.frontmatter.promptforge, None);
 }
 
@@ -967,7 +975,7 @@ fn bullet_parser_rejects_empty_item() {
 #[test]
 fn list_h3_parses_items_at_load_time() {
     let src = prompt_src("## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n");
-    let p = Prompt::parse(&src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(&src, "test", &NullObserver::default()).unwrap();
     let items_section = &p.sections[0].children[0];
     assert_eq!(items_section.name, "Items");
     assert_eq!(items_section.items, vec!["alpha", "beta"]);
@@ -978,7 +986,7 @@ fn non_list_h3_has_empty_items() {
     let src = prompt_src(
         "## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n",
     );
-    let p = Prompt::parse(&src, "test", &NullObserver).unwrap();
+    let p = Prompt::parse(&src, "test", &NullObserver::default()).unwrap();
     let worker = &p.sections[0].children[0];
     assert_eq!(worker.name, "Worker");
     assert!(worker.items.is_empty());
@@ -1003,7 +1011,7 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 14: assert(false) <- epilog line 2 (absolute = 14)
     // 15: ```
     let src = prompt_src("## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
+    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -1040,7 +1048,7 @@ fn prologue_source_line_maps_correctly() {
     // 13: (empty)
     // 14: Do the work.
     let src = prompt_src("## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
+    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
     let prologue = prompt
         .entry()
         .expect("has sections")
@@ -1074,7 +1082,7 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 16: ```
     let src =
         prompt_src("## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
+    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -1105,7 +1113,7 @@ fn shared_library_source_line_is_correct() {
     // 14: (empty)
     // 15: p
     let src = prompt_src("```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n");
-    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
+    let prompt = Prompt::parse(&src, "test", &NullObserver::default()).expect("prompt must parse");
     let replay = prompt.replay.as_ref().expect("replay must exist");
     assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
 }
@@ -1126,7 +1134,7 @@ fn frontmatter_parses_input_and_output() {
         "---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );
-    let prompt = Prompt::parse(source, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(source, "test", &NullObserver::default()).unwrap();
     let fm = prompt.frontmatter();
     let input = fm.input().expect("input declared");
     assert_eq!(input.path(), "paper.md");
@@ -1146,7 +1154,7 @@ fn frontmatter_without_input_output_still_parses() {
         "---\n\n",
         "# Title\n\n## Only\n\ndone\n",
     );
-    let prompt = Prompt::parse(source, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(source, "test", &NullObserver::default()).unwrap();
     assert!(prompt.frontmatter().input().is_none());
     assert!(prompt.frontmatter().output().is_none());
 }
@@ -1157,7 +1165,7 @@ fn off_walk_marker_marks_section_and_content_below_parses() {
     // takes the section off the walk; the content below the marker parses
     // normally.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nBelow the marker.\n\n## Plain\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_off_walk());
     assert_eq!(
@@ -1175,7 +1183,7 @@ fn comment_rule_excludes_everything_below_it() {
     // did) and no prose below it reaches the model. A heading below the rule
     // still splits sections.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nLive prose.\n\n```lua\nvar.x = 1\n```\n\n---\n\nDead prose.\n\n```lua\nnot compiled =\n```\n\n## After\n\nafter prose\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(prompt.sections.len(), 2);
     let section = &prompt.sections[0];
     assert!(!section.is_off_walk());
@@ -1192,7 +1200,7 @@ fn off_walk_marker_composes_with_a_later_comment_rule() {
     // and prose, then a blank line and a second rule starting a comment
     // region.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nLive prose.\n\n---\n\nDead prose.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_off_walk());
     assert_eq!(section.blocks().len(), 2);
@@ -1206,7 +1214,7 @@ fn off_walk_marker_composes_with_a_later_comment_rule() {
 #[test]
 fn off_walk_list_section_parses_items_below_the_marker() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n---\n\n- alpha\n- beta\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_off_walk());
     assert!(section.is_list_only());
@@ -1217,7 +1225,7 @@ fn off_walk_list_section_parses_items_below_the_marker() {
 fn comment_rule_ends_list_items() {
     // List items parse only from the executable content above the boundary.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n- alpha\n\n---\n\n- beta\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(!section.is_off_walk());
     assert_eq!(section.items(), ["alpha"]);
@@ -1229,7 +1237,7 @@ fn h1_rule_is_a_comment_boundary() {
     // rule there is simply a comment boundary: a `lua shared` fence below it
     // is inert and the description text comes from above the rule.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua shared\nlocal hidden = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert!(prompt.replay.is_none());
     assert_eq!(prompt.description_text, "Description above.");
     assert_eq!(
@@ -1246,7 +1254,7 @@ fn rule_inside_a_fenced_code_block_is_not_a_marker() {
     // Pulldown reports only a genuine thematic break: a `---` inside a
     // fenced code block is code, not a rule.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nLive prose.\n\n```text\n---\n```\n\nAlso live.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(!section.is_off_walk());
     assert!(section.prose().contains("Also live."));
@@ -1256,7 +1264,7 @@ fn rule_inside_a_fenced_code_block_is_not_a_marker() {
     // boundary.
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```text\n---\n```\n\nLive.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     let section = &prompt.sections[0];
     assert!(section.is_off_walk());
     assert!(section.prose().contains("Live."));
@@ -1270,7 +1278,7 @@ fn setext_underline_is_not_a_rule() {
     // the heading scanner reads it as a new section. The blank line before
     // the marker is required.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nSome prose\n---\n\nMore prose\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let prompt = Prompt::parse(src, "test", &NullObserver::default()).unwrap();
     assert_eq!(prompt.sections.len(), 2);
     assert_eq!(prompt.sections[0].name, "S");
     assert!(!prompt.sections[0].is_off_walk());

@@ -119,5 +119,5 @@ where
         setup.observer_arc.as_ref(),
         setup.section_name,
     )?;
-    vm.install_captured_bindings()
+    vm.install_captured_bindings().map_err(Error::from)
 }
