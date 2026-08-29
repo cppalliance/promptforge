@@ -96,3 +96,4 @@
 - [2026-08-29-1-crate-extraction-execution] versioned UI artifact: Rust builds consume a hash-verified UI bundle while release builds preserve a one-command path.
 - [2026-08-29-2-rename-ws-crates-to-workshop] atomic product rename: Package, binary, directory, UI, and CI names move together while historical decision records keep their dated identity.
 - [2026-08-29-3-chat-ws-decomposition] responsibility ratchet: Module ceilings prevent size regrowth but ownership drift still requires a rename or split.
+- [2026-08-29-4-progress-architecture-rollout] terminal progress authority: Intermediate samples may coalesce, but sticky terminal outcomes and reconnect snapshots define completion.
