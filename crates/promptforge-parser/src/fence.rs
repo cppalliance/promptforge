@@ -11,10 +11,10 @@ use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
+use promptforge_core_support::observe::Observer;
+
 use super::build::{line_add, newlines_before, nz_source_line};
-use super::{Block, ParseErrorKind};
-use crate::lua::LuaProgram;
-use crate::observe::Observer;
+use super::{Block, LuaProgram, ParseErrorKind};
 use crate::{Error, Result};
 
 /// Uncompiled block produced while scanning section content.

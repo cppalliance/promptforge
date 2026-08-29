@@ -32,5 +32,11 @@ Lua runtime, the model catalog, and the run machinery.
   `promptforge_core::observe`, and the crate-root `CancelHandle` follow the
   `tools` precedent: verbatim re-exports only, no new vocabulary. The
   executor imports from `promptforge-lua`, never the reverse.
+- The prompt document parser (the `Prompt`/`Section`/`Block` tree, the
+  frontmatter model, and the `ParseError`/`ParseErrorKind` vocabulary) lives
+  in `promptforge-parser`. The compatibility re-export under
+  `promptforge_core::parser` follows the `tools` precedent: verbatim
+  re-exports only, no new vocabulary. The executor imports from
+  `promptforge-parser`, never the reverse.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

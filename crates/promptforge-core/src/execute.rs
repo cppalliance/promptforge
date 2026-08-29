@@ -218,7 +218,7 @@ pub async fn run(
     store: &StoreRef,
     config: RunConfig,
 ) -> std::result::Result<String, RunError> {
-    match prompt.frontmatter.promptforge {
+    match prompt.frontmatter().promptforge() {
         Some(SUPPORTED_MAJOR) => {}
         Some(other) => return Err(RunError::from(Error::UnsupportedVersion(other))),
         None => {
@@ -232,7 +232,7 @@ pub async fn run(
     // Section startup replays the shared library unconditionally; a prompt
     // without one replays an empty compiled chunk instead, so the startup
     // sequence carries no `Option` branch.
-    let shared = match prompt.replay.as_ref() {
+    let shared = match prompt.replay() {
         Some(program) => program.clone(),
         None => {
             crate::lua::LuaProgram::empty().map_err(|error| RunError::from(Error::from(error)))?
@@ -250,7 +250,7 @@ pub async fn run(
     } = config;
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    observer.observe(&execution, &prompt.title, detail::RUN_STARTED);
+    observer.observe(&execution, prompt.title(), detail::RUN_STARTED);
 
     let run_body = async {
         Scheduler::new(&ctx, client)
@@ -266,7 +266,7 @@ pub async fn run(
 
     observer.observe(
         &execution,
-        &prompt.title,
+        prompt.title(),
         if result.is_ok() {
             detail::RUN_SUCCEEDED
         } else {

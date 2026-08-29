@@ -21,6 +21,7 @@ promptforge-gateway-local = { path = "crates/promptforge-gateway-local", version
 promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.1.0" }
 promptforge-gateway-routing = { path = "crates/promptforge-gateway-routing", version = "0.1.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.1.0" }
+promptforge-parser = { path = "crates/promptforge-parser", version = "0.1.0" }
 promptforge-store = { path = "crates/promptforge-store", version = "0.1.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }

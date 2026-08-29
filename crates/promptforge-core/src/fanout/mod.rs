@@ -78,11 +78,11 @@ pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Resu
 
     let mut matches = visible
         .iter()
-        .filter(|section| usize::from(section.level) == level && section.name == name);
+        .filter(|section| usize::from(section.level()) == level && section.name() == name);
     let Some(found) = matches.next() else {
         let available: Vec<String> = visible
             .iter()
-            .map(|s| format!("{} {}", "#".repeat(s.level.into()), s.name))
+            .map(|s| format!("{} {}", "#".repeat(s.level().into()), s.name()))
             .collect();
         return Err(Error::Lua(format!(
             "section heading `{}` not found; available sections: {}",
