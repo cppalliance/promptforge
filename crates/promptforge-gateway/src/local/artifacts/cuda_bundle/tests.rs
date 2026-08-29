@@ -4,6 +4,7 @@ use std::thread;
 use tempfile::TempDir;
 
 use super::*;
+use crate::local::error::LocalError;
 use crate::testsupport::hex_sha256;
 
 const TOOLKIT_VERSION: &str = "13.3";

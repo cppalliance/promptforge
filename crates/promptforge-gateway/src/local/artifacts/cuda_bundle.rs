@@ -42,7 +42,6 @@ use super::confine::{
 };
 use super::digest::tree_digest;
 use super::{ArtifactStore, INSTALL_MARKER, Result, hex_digest, lock_artifact};
-use crate::local::error::LocalError;
 
 /// Bundle format version this runtime decodes. Mirrors the build-side
 /// contract constant; the runtime deliberately does not import it.
@@ -57,8 +56,8 @@ const SERVER_EXECUTABLE: &str = "llama-server.exe";
 
 /// A failure validating or extracting the embedded CUDA bundle.
 ///
-/// Wrapped by [`LocalError::CudaBundle`]; build-script failures never reach
-/// this type - they fail the Cargo build itself.
+/// Wrapped by [`crate::local::error::LocalError::CudaBundle`]; build-script
+/// failures never reach this type - they fail the Cargo build itself.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub(crate) enum BundleError {
@@ -384,9 +383,10 @@ fn install_dir_name() -> String {
 /// from an interrupted run is removed before restaging.
 ///
 /// # Errors
-/// Returns [`LocalError::CudaBundle`] for manifest, payload, target, or
-/// toolkit validation failures, and the shared [`LocalError`] I/O and
-/// confinement variants for cache failures.
+/// Returns [`crate::local::error::LocalError::CudaBundle`] for manifest,
+/// payload, target, or toolkit validation failures, and the shared
+/// [`crate::local::error::LocalError`] I/O and confinement variants for cache
+/// failures.
 pub(super) fn stage_bundle(
     cache: &Path,
     payload: &BundlePayload<'_>,
@@ -430,8 +430,8 @@ pub(super) fn stage_bundle(
 /// Writes the payload files, tree digest, and install marker into `staging`.
 ///
 /// # Errors
-/// Returns the shared [`LocalError`] I/O and confinement variants; the caller
-/// removes the partial staging directory.
+/// Returns the shared [`crate::local::error::LocalError`] I/O and confinement
+/// variants; the caller removes the partial staging directory.
 fn stage_files(
     cache: &Path,
     staging: &Path,

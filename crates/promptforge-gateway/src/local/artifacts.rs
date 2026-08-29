@@ -119,10 +119,10 @@ impl ArtifactStore {
         #[cfg(llama_cuda_embedded)]
         {
             let staged = cuda_bundle::stage_embedded(&self.cache)?;
-            return Ok(ProvisionedServer {
+            Ok(ProvisionedServer {
                 executable: staged.executable,
                 path_prefix: staged.path_prefix,
-            });
+            })
         }
         #[cfg(not(llama_cuda_embedded))]
         {
