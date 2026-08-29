@@ -226,14 +226,14 @@ impl RunContext {
     /// `max_tool_iterations` over the limits default.
     pub(crate) fn max_tool_iterations(&self) -> usize {
         self.prompt
-            .frontmatter
-            .max_tool_iterations
+            .frontmatter()
+            .max_tool_iterations()
             .resolve(self.limits.tool_iterations().get() as usize)
     }
 
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) fn section_count(&self) -> usize {
-        self.prompt.sections.len()
+        self.prompt.sections().len()
     }
 
     /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
@@ -372,7 +372,7 @@ mod tests {
     fn new_builds_a_context_over_the_prompt() {
         let prompt = test_prompt();
         let ctx = test_context(&prompt);
-        assert_eq!(ctx.prompt().title, prompt.title);
+        assert_eq!(ctx.prompt().title(), prompt.title());
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
     fn derived_values_come_from_the_prompt_and_limits() {
         let prompt = test_prompt();
         let ctx = test_context(&prompt);
-        assert_eq!(ctx.section_count(), prompt.sections.len());
+        assert_eq!(ctx.section_count(), prompt.sections().len());
         assert_eq!(ctx.max_tool_iterations(), 24);
     }
 

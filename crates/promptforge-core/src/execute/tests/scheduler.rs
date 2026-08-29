@@ -2529,8 +2529,8 @@ async fn the_shared_replay_sees_the_arm_item() {
         ```\n";
     let prompt = parse(md);
     let shared = prompt
-        .replay
-        .clone()
+        .replay()
+        .cloned()
         .expect("the prompt's shared chunk compiles at parse");
     let ctx = RunContext::new(
         &prompt,

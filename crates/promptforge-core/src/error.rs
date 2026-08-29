@@ -9,6 +9,7 @@
 
 use promptforge_gateway_client::Error as GatewayClientError;
 use promptforge_lua::Error as LuaError;
+use promptforge_parser::Error as ParserError;
 
 /// A type-erased owned error cause used by the internal substrate.
 pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
@@ -40,7 +41,7 @@ pub(crate) enum Error {
     /// The prompt frontmatter was not valid YAML, preserving the parser cause.
     ///
     /// This retains the originating YAML decode failure (a
-    /// [`serde_yaml_ng::Error`]) as the `#[source]` cause (F3) so
+    /// `serde_yaml_ng::Error`) as the `#[source]` cause (F3) so
     /// [`crate::ParseError`] can expose the frontmatter syntax location through
     /// [`std::error::Error::source`] instead of flattening it into the message.
     #[error("invalid frontmatter: {message}")]
@@ -586,6 +587,32 @@ impl From<GatewayClientError> for Error {
 impl From<crate::model::CompletionError> for Error {
     fn from(error: crate::model::CompletionError) -> Error {
         Error::from(GatewayClientError::from(error))
+    }
+}
+
+/// Maps a parse failure back onto this substrate variant for variant, so
+/// `Display`, `source()` chains, and `RunError` classification are unchanged
+/// by the parser extraction. The parser crate's substrate is not
+/// `#[non_exhaustive]` (the two crates version together), so this match is
+/// total.
+impl From<crate::parser::ParseError> for Error {
+    fn from(error: crate::parser::ParseError) -> Self {
+        match error.into_inner() {
+            ParserError::ParseFrontmatter { message, source } => {
+                Error::ParseFrontmatter { message, source }
+            }
+            ParserError::ParseStructured {
+                kind,
+                span,
+                message,
+            } => Error::ParseStructured {
+                kind,
+                span,
+                message,
+            },
+            ParserError::Lua(lua) => Error::from(lua),
+            ParserError::Internal(message) => Error::Internal(message),
+        }
     }
 }
 

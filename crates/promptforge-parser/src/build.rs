@@ -9,11 +9,11 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+use promptforge_core_support::observe::Observer;
+
 use super::fence::{RawBlock, lua_block_location, split_rule_roles, split_section_blocks};
 use super::list::{is_all_list_markers, parse_bullet_items};
-use super::{Block, ParseErrorKind, Section};
-use crate::lua::LuaProgram;
-use crate::observe::Observer;
+use super::{Block, LuaProgram, ParseErrorKind, Section};
 use crate::{Error, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
@@ -267,7 +267,7 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::promptforge_version;
+/// use promptforge_parser::promptforge_version;
 ///
 /// assert_eq!(promptforge_version("---\npromptforge: 1\n---\n\n## S\n\np\n"), Some(1));
 /// assert_eq!(promptforge_version("just prose, no frontmatter"), None);

@@ -19,7 +19,7 @@ use crate::{Error, Result};
 pub(super) fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
     slice
         .iter()
-        .position(|s| s.level == target.level && s.name == target.name)
+        .position(|s| s.level() == target.level() && s.name() == target.name())
 }
 
 /// The caller's home slice minus the caller itself, the caller found by its
@@ -43,7 +43,7 @@ pub(super) fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
 pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Section> {
     home_without(home, caller)
         .into_iter()
-        .chain(caller.children.iter().cloned())
+        .chain(caller.children().iter().cloned())
         .collect()
 }
 
@@ -57,13 +57,13 @@ pub(super) fn visible_sections(home: &[Section], caller: &Section) -> Vec<Sectio
 /// naming a prose section by mistake.
 pub(super) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
     let section = fanout::resolve_sibling(heading, visible)?;
-    if section.items.is_empty() {
+    if section.items().is_empty() {
         return Err(Error::Lua(format!(
             "section `{}` has no pre-parsed items",
-            section.name
+            section.name()
         )));
     }
-    Ok(section.items.clone())
+    Ok(section.items().to_vec())
 }
 
 /// Where a jump transfers control, resolved against the jumper's visible set.
@@ -94,7 +94,7 @@ pub(super) fn resolve_jump_target(
 ) -> Result<JumpTarget> {
     let visible = visible_sections(siblings, jumper);
     let target = fanout::resolve_sibling(heading, &visible)?;
-    if let Some(index) = section_position(&jumper.children, target) {
+    if let Some(index) = section_position(jumper.children(), target) {
         return Ok(JumpTarget::Child(index));
     }
     // `target` was resolved out of the visible set built from exactly these

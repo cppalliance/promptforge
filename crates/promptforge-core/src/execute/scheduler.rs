@@ -250,16 +250,16 @@ fn resolve_arm_target<'a>(
     let caller = &caller_slice[caller_index];
     let worker = &worker_slice[worker_index];
     let mut visible = home_without(&visible_sections(caller_slice, caller), worker);
-    visible.extend(worker.children.iter().cloned());
+    visible.extend(worker.children().iter().cloned());
     let target = fanout::resolve_sibling(heading, &visible)?;
-    if let Some(index) = section_position(&worker.children, target) {
+    if let Some(index) = section_position(worker.children(), target) {
         return Ok(ChainTarget {
-            slice: &worker.children,
+            slice: worker.children(),
             index,
             child: true,
         });
     }
-    for slice in [worker_slice, caller.children.as_slice(), caller_slice] {
+    for slice in [worker_slice, caller.children(), caller_slice] {
         if let Some(index) = section_position(slice, target) {
             return Ok(ChainTarget {
                 slice,
@@ -355,7 +355,7 @@ impl Chain<'_> {
     fn blocks(&self) -> &[Block] {
         match &self.h1 {
             Some(blocks) => blocks,
-            None => &self.slice[self.index].blocks,
+            None => self.slice[self.index].blocks(),
         }
     }
 
@@ -363,8 +363,8 @@ impl Chain<'_> {
     /// prompt's title for the live H1 pass, the section's name on the walk.
     fn section_name(&self) -> &str {
         match self.h1 {
-            Some(_) => &self.ctx.prompt().title,
-            None => &self.slice[self.index].name,
+            Some(_) => self.ctx.prompt().title(),
+            None => self.slice[self.index].name(),
         }
     }
 }
@@ -511,7 +511,7 @@ impl<'a> Scheduler<'a> {
             let h1 = self.start_live_h1()?;
             self.ready.push_back(h1);
         } else {
-            let sections = self.ctx.prompt().sections.as_slice();
+            let sections = self.ctx.prompt().sections();
             if sections.is_empty() {
                 return Ok(GENERIC_COMPLETION.to_owned());
             }
@@ -689,7 +689,7 @@ impl<'a> Scheduler<'a> {
             client,
             parent: None,
             arm: None,
-            h1: Some(self.ctx.prompt().h1_blocks.as_slice()),
+            h1: Some(self.ctx.prompt().h1_blocks()),
         });
         Ok(id)
     }
@@ -713,7 +713,7 @@ impl<'a> Scheduler<'a> {
         let var = frame.read_var()?;
         let reply = frame.reply();
         drop(frame);
-        let sections = self.ctx.prompt().sections.as_slice();
+        let sections = self.ctx.prompt().sections();
         if sections.is_empty() {
             *root_result = Some(Ok(reply.unwrap_or_else(|| GENERIC_COMPLETION.to_owned())));
             return Ok(());
@@ -863,6 +863,11 @@ impl<'a> Scheduler<'a> {
                 match &chain.blocks()[chain.block] {
                     Block::Lua(_) => Advance::StartLua,
                     Block::Prose { .. } => Advance::RunProse,
+                    // `Block` is `#[non_exhaustive]` across the crate seam; a
+                    // future variant has no advance rule yet.
+                    _ => {
+                        return Err(Error::Internal("an unrecognized block kind cannot advance"));
+                    }
                 }
             }
         };
@@ -901,11 +906,8 @@ impl<'a> Scheduler<'a> {
             return self.finish_h1_step(id, result, callback_error, root_result);
         }
         let slice = chain.slice;
-        let program = match &slice[chain.index].blocks[chain.block] {
-            Block::Lua(program) => program,
-            Block::Prose { .. } => {
-                return Err(Error::Internal("a suspended coroutine's block is Lua"));
-            }
+        let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
+            return Err(Error::Internal("a suspended coroutine's block is Lua"));
         };
         let frame = chain
             .frame
@@ -935,11 +937,8 @@ impl<'a> Scheduler<'a> {
             return self.finish_h1_step(id, result, callback_error, root_result);
         }
         let slice = chain.slice;
-        let program = match &slice[chain.index].blocks[chain.block] {
-            Block::Lua(program) => program,
-            Block::Prose { .. } => {
-                return Err(Error::Internal("the advance matched the block kind"));
-            }
+        let Block::Lua(program) = &slice[chain.index].blocks()[chain.block] else {
+            return Err(Error::Internal("the advance matched the block kind"));
         };
         let frame = chain
             .frame
@@ -954,8 +953,10 @@ impl<'a> Scheduler<'a> {
     async fn run_prose(&mut self, id: ChainId) -> Result<()> {
         let chain = &mut self.chains[id.index()];
         let (text, loop_capable) = match &chain.blocks()[chain.block] {
-            Block::Prose { text, loop_capable } => (text.clone(), *loop_capable),
-            Block::Lua(_) => {
+            Block::Prose {
+                text, loop_capable, ..
+            } => (text.clone(), *loop_capable),
+            _ => {
                 return Err(Error::Internal("the advance matched the block kind"));
             }
         };
@@ -1129,7 +1130,7 @@ impl<'a> Scheduler<'a> {
         let jumper = &slice[index];
         match resolve_jump_target(heading, slice, jumper)? {
             JumpTarget::Child(child) => Ok(ChainTarget {
-                slice: &jumper.children,
+                slice: jumper.children(),
                 index: child,
                 child: true,
             }),
@@ -1295,11 +1296,8 @@ impl<'a> Scheduler<'a> {
                 "the scoped step belongs to the live H1 pass",
             ));
         };
-        let program = match &blocks[chain.block] {
-            Block::Lua(program) => program,
-            Block::Prose { .. } => {
-                return Err(Error::Internal("a suspended coroutine's block is Lua"));
-            }
+        let Block::Lua(program) = &blocks[chain.block] else {
+            return Err(Error::Internal("a suspended coroutine's block is Lua"));
         };
         let resolution = self
             .h1_resolution
@@ -1594,10 +1592,10 @@ impl<'a> Scheduler<'a> {
         // prompt tree, so the worker's slice outlives it.
         let target = self.resolve_chain_target(id, worker_name)?;
         let worker = &target.slice[target.index];
-        if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
+        if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items().is_empty() {
             return Err(Error::Lua(format!(
                 "section `{}` is a list section, not a worker template",
-                worker.name
+                worker.name()
             )));
         }
         let fanout_id = FanoutId(self.next_fanout);
@@ -1684,7 +1682,7 @@ impl<'a> Scheduler<'a> {
             // event from here on.
             template.ctx.observer().observe(
                 template.ctx.execution(),
-                &worker.name,
+                worker.name(),
                 detail::FANOUT_ARM_STARTED,
             );
             let arm = ArmState {
@@ -1701,7 +1699,7 @@ impl<'a> Scheduler<'a> {
                 finalizer: ArmFinalizer::new(
                     Arc::clone(template.ctx.observer()),
                     template.ctx.execution().to_owned(),
-                    worker.name.clone(),
+                    worker.name().to_owned(),
                 ),
             };
             let chain = self.start_chain(

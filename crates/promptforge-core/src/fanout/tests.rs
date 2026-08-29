@@ -5,13 +5,12 @@ use tokio::sync::mpsc;
 use super::arm::ArmFinalizer;
 use super::*;
 use crate::observe::{Observation, Observer, detail};
-use crate::parser::Block;
 
 #[test]
 fn resolve_sibling_finds_exact_match() {
     let sections = vec![sibling("Worker", 3), sibling("Topics", 3)];
     let found = resolve_sibling("### Worker", &sections).expect("must resolve");
-    assert_eq!(found.name, "Worker");
+    assert_eq!(found.name(), "Worker");
 }
 
 #[test]
@@ -32,10 +31,10 @@ fn sibling(name: &str, level: u8) -> Section {
     crate::test_support::synthetic_section(
         name,
         level,
-        vec![Block::Prose {
-            text: String::new(),
-            loop_capable: true,
-        }],
+        vec![promptforge_parser::test_support::prose_block(
+            String::new(),
+            true,
+        )],
         Vec::new(),
     )
 }
@@ -64,7 +63,7 @@ fn resolve_sibling_requires_exact_level() {
     assert!(err.to_string().contains("not found"), "error was: {err}");
     // The exact address resolves.
     let ok = resolve_sibling("### Worker", &sections).expect("exact address resolves");
-    assert_eq!(ok.name, "Worker");
+    assert_eq!(ok.name(), "Worker");
 }
 
 #[test]

@@ -119,9 +119,9 @@ impl SectionContext {
         incoming_reply: Option<&str>,
         var: &serde_json::Value,
     ) -> Result<Self> {
-        let sys = ctx.sys_json(section_id, &section.name)?;
+        let sys = ctx.sys_json(section_id, section.name())?;
         ctx.observer()
-            .observe(ctx.execution(), &section.name, detail::SECTION_STARTED);
+            .observe(ctx.execution(), section.name(), detail::SECTION_STARTED);
         let tool_set = ctx.tool_set_snapshot()?;
         let model_set = ctx.model_set_snapshot()?;
         let mut vm = SectionVm::new_for_section(
@@ -130,7 +130,7 @@ impl SectionContext {
             &model_set,
             ctx.execution(),
             ctx.observer().as_ref(),
-            &section.name,
+            section.name(),
         )?;
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
@@ -158,17 +158,17 @@ impl SectionContext {
             // Walk-section store writes are untracked; only fanout arms
             // carry a write scope.
             None,
-            &section.name,
+            section.name(),
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer().as_ref(), &section.name);
+            vm.teardown(ctx.observer().as_ref(), section.name());
             return Err(error);
         }
         Ok(Self {
             vm: Some(vm),
-            name: section.name.clone(),
+            name: section.name().to_owned(),
             execution: ctx.execution().to_owned(),
             completed: false,
             sys,
@@ -201,7 +201,7 @@ impl SectionContext {
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
     pub(crate) fn new_live_h1(ctx: &RunContext) -> Result<Self> {
-        let title = &ctx.prompt().title;
+        let title = ctx.prompt().title();
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
             &now,
@@ -209,7 +209,7 @@ impl SectionContext {
             0,
             title,
             ctx.execution(),
-            ctx.prompt().sections.len(),
+            ctx.prompt().sections().len(),
         );
         let mut vm = SectionVm::new(ctx.nonce(), ctx.execution(), ctx.observer().as_ref(), title)?;
         // A limits failure propagates bare: no teardown runs here, so no
@@ -228,7 +228,7 @@ impl SectionContext {
         }
         Ok(Self {
             vm: Some(vm),
-            name: title.clone(),
+            name: title.to_owned(),
             execution: ctx.execution().to_owned(),
             completed: false,
             sys,
@@ -289,7 +289,7 @@ impl SectionContext {
             &model_set,
             ctx.execution(),
             ctx.observer().as_ref(),
-            &worker.name,
+            worker.name(),
         )?;
         // The limits install and the `sys` build are the construction
         // phase's fallible steps once the VM exists; a failure tears the
@@ -302,7 +302,7 @@ impl SectionContext {
             )
             .map_err(Error::from)
             .and_then(|()| {
-                let mut sys = ctx.sys_json(next_id(ctx.ids()), &worker.name)?;
+                let mut sys = ctx.sys_json(next_id(ctx.ids()), worker.name())?;
                 // The arm's own sys extra: its 1-based position within this
                 // fanout. Absent outside a fanout, so a walked section
                 // reading `sys.index` raises the sealed-sys unknown-field
@@ -312,7 +312,7 @@ impl SectionContext {
             }) {
             Ok(sys) => sys,
             Err(error) => {
-                vm.teardown(ctx.observer().as_ref(), &worker.name);
+                vm.teardown(ctx.observer().as_ref(), worker.name());
                 return Err(error);
             }
         };
@@ -336,17 +336,17 @@ impl SectionContext {
                 item: item.as_ref(),
             },
             write_scope,
-            &worker.name,
+            worker.name(),
         );
         // Setup runs on the bare VM so a failure tears it down here: the
         // frame does not exist yet, so its `Drop` cannot own this path.
         if let Err(error) = setup_section_vm(&mut vm, &setup, list_callback) {
-            vm.teardown(ctx.observer().as_ref(), &worker.name);
+            vm.teardown(ctx.observer().as_ref(), worker.name());
             return Err(error);
         }
         Ok(Self {
             vm: Some(vm),
-            name: worker.name.clone(),
+            name: worker.name().to_owned(),
             execution: ctx.execution().to_owned(),
             completed: false,
             sys,

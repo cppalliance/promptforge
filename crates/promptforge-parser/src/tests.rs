@@ -1,8 +1,9 @@
 use std::sync::Mutex;
 
+use promptforge_core_support::observe::{NullObserver, Observation, detail};
+
 use super::list::parse_bullet_items;
 use super::*;
-use crate::observe::{NullObserver, Observation, detail};
 
 fn prompt_src(body: &str) -> String {
     format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{body}")
@@ -403,12 +404,12 @@ fn malformed_shared_lua_retains_diagnostics_and_reports_safe_boundaries() {
     );
     let error = Prompt::parse(&src, "parse-failure", &recorder)
         .expect_err("malformed shared Lua must fail");
-    match Error::from(error) {
-        Error::LuaCompile {
+    match error.into_inner() {
+        Error::Lua(promptforge_lua::Error::LuaCompile {
             location,
             lua_source,
             ..
-        } => {
+        }) => {
             assert_eq!(location, "prompt shared library");
             assert_eq!(lua_source, source);
         }
@@ -637,12 +638,12 @@ fn malformed_section_phases_report_locations_and_safe_boundaries() {
         let Err(error) = Prompt::parse(&src, "test", &recorder) else {
             panic!("malformed {phase} unexpectedly parsed");
         };
-        match Error::from(error) {
-            Error::LuaCompile {
+        match error.into_inner() {
+            Error::Lua(promptforge_lua::Error::LuaCompile {
                 location,
                 lua_source,
                 ..
-            } => {
+            }) => {
                 assert_eq!(location, expected_location);
                 assert_eq!(lua_source, "private_payload =");
             }

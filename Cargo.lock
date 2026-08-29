@@ -3917,15 +3917,14 @@ dependencies = [
  "promptforge-core-support",
  "promptforge-gateway-client",
  "promptforge-lua",
+ "promptforge-parser",
  "promptforge-store",
  "promptforge-tool-picker",
  "promptforge-tools",
  "promptforge-web-search",
- "pulldown-cmark",
  "rand 0.9.5",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "thiserror 2.0.19",
  "time",
  "tokio",
@@ -4147,6 +4146,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+]
+
+[[package]]
+name = "promptforge-parser"
+version = "0.1.0"
+dependencies = [
+ "mlua",
+ "promptforge-core-support",
+ "promptforge-lua",
+ "pulldown-cmark",
+ "serde",
+ "serde_yaml_ng",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
