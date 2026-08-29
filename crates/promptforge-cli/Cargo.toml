@@ -22,6 +22,7 @@ clap = { version = "4", features = ["derive"] }
 fastrand.workspace = true
 promptforge-core.workspace = true
 promptforge-tools.workspace = true
+promptforge-web-search.workspace = true
 promptforge-webfetch.workspace = true
 promptforge-tool-picker.workspace = true
 tokio = { workspace = true, features = ["fs", "signal"] }

@@ -1,0 +1,34 @@
+[package]
+name = "promptforge-web-search"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge web_search tool: proxy a search query through the gateway so the vendor credential never leaves the server"
+readme = "README.md"
+keywords = ["promptforge", "llm", "tools", "search", "ai"]
+categories = ["web-programming::http-client", "api-bindings"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+promptforge-tools.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+# `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock frames its
+# truncated response with.
+tokio = { workspace = true, features = ["io-util"] }
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

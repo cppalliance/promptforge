@@ -11,6 +11,8 @@ Lua runtime, the model catalog, and the run machinery.
   in their own crates.
 - Compatibility re-exports under `promptforge_core::tools` are allowed so
   existing `promptforge_core::tools::*` paths keep working; they re-export
-  the contract crate verbatim and must not grow new vocabulary.
+  the contract crate verbatim and must not grow new vocabulary. The concrete
+  `WebSearch` provider is re-exported from `promptforge-web-search` under its
+  historical path; this crate must not reacquire provider code.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

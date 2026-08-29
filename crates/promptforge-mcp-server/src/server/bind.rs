@@ -11,11 +11,11 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{
     CompletionError, CompletionErrorKind, ModelCatalog, fetch_model_catalog,
 };
-use promptforge_core::tools::WebSearch;
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
 use promptforge_tools::{Tool, ToolCatalog};
+use promptforge_web_search::WebSearch;
 use promptforge_webfetch::WebFetch;
 
 use crate::config::{Config, GatewayConfig, ToolsConfig};
