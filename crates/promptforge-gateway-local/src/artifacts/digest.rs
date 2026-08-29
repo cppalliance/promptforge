@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::{INSTALL_MARKER, Result};
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// Validates and canonicalizes a configured SHA-256 pin at the trust boundary.
 ///
 /// A pin must be exactly 64 hexadecimal characters. The returned value is
-/// lowercased so comparison against the lowercase hex produced by [`hex_digest`]
+/// lowercased so comparison against the lowercase hex produced by `hex_digest`
 /// never fails on case alone (a real footgun with an uppercase config value).
 ///
 /// # Errors
 /// Returns [`LocalError::InvalidDigest`] when the pin is not 64 hex characters.
-pub(crate) fn parse_expected_digest(raw: &str) -> Result<String> {
+pub fn parse_expected_digest(raw: &str) -> Result<String> {
     let trimmed = raw.trim();
     if trimmed.len() != 64 {
         return Err(LocalError::InvalidDigest {

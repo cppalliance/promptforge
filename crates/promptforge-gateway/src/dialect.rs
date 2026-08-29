@@ -22,7 +22,7 @@ use crate::error::GatewayError;
 use crate::wire::{ChatRequest, ChatResponse};
 
 /// The `tool_dialect` config value selecting this dialect.
-pub(crate) const GEMMA3_TOOL_CODE: &str = "gemma3_tool_code";
+pub(crate) use promptforge_gateway_routing::GEMMA3_TOOL_CODE;
 
 /// Translate an outgoing request for the emulated dialect: strip the tool
 /// surface the backend cannot honor and prepend the tool-code system guide.

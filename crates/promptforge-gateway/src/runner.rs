@@ -20,6 +20,7 @@ use tokio::net::TcpListener;
 use promptforge_gateway_config::{Config, ConfigError, ProfileName, ServerConfig, WorkshopConfig};
 
 use crate::api_error::{ServeError, StartupError};
+#[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::workshop::{self, WorkshopHandle};
@@ -118,14 +119,25 @@ impl Gateway {
         config: &Config,
         profiles: ProfilesContext,
     ) -> Result<Gateway, StartupError> {
+        #[cfg(feature = "local")]
         let local = LocalRuntime::start(config).map_err(StartupError::provisioning)?;
-        let routing = Routing::from_config(config)
-            .map_err(StartupError::config)?
+        // A headless build cannot honor a config declaring local models;
+        // refuse at assembly rather than silently dropping them.
+        #[cfg(not(feature = "local"))]
+        if !config.local_models().is_empty() {
+            return Err(StartupError::provisioning(std::io::Error::other(
+                crate::LOCAL_MODELS_UNSUPPORTED,
+            )));
+        }
+        let routing = Routing::from_config(config).map_err(StartupError::config)?;
+        #[cfg(feature = "local")]
+        let routing = routing
             .merge(local.models().iter().cloned())
             .map_err(StartupError::config)?;
         let state = AppState::from_parts(
             Arc::new(routing),
             config.server_key(),
+            #[cfg(feature = "local")]
             local,
             config.web_search_config(),
             profiles.dir,
@@ -159,6 +171,9 @@ impl Gateway {
     /// CUDA device, that model layers offloaded to the GPU - without
     /// reaching the child's private loopback port. Empty when the config
     /// declares no `[[local_model]]`.
+    ///
+    /// Available only in builds with the `local` feature.
+    #[cfg(feature = "local")]
     pub async fn local_diagnostics(&self) -> Vec<(String, String)> {
         self.state.live.read().await.local.diagnostics()
     }
@@ -774,12 +789,42 @@ mod tests {
     use crate::api_error::{StartupError, StartupErrorKind};
     use promptforge_gateway_config::{Config, ProfileName};
 
+    #[cfg(feature = "local")]
     #[tokio::test]
     async fn gateway_without_local_models_reports_no_diagnostics() {
         let config = Config::from_toml_str(CATALOG).unwrap();
         let gateway =
             super::Gateway::from_config(&config, super::ProfilesContext::default()).unwrap();
         assert!(gateway.local_diagnostics().await.is_empty());
+    }
+
+    /// A catalog declaring one `[[local_model]]`; a headless build must
+    /// refuse it rather than silently dropping the model.
+    #[cfg(not(feature = "local"))]
+    const LOCAL_CATALOG: &str = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "boot-key"
+
+[[local_model]]
+name = "q"
+description = "a local model"
+source = "/models/q.gguf"
+context = 4096
+"#;
+
+    #[cfg(not(feature = "local"))]
+    #[test]
+    fn headless_boot_refuses_a_config_declaring_local_models() {
+        let config = Config::from_toml_str(LOCAL_CATALOG).unwrap();
+        let error = super::Gateway::from_config(&config, super::ProfilesContext::default())
+            .expect_err("a headless build must refuse a config declaring local models");
+        assert_eq!(error.kind(), StartupErrorKind::Provisioning);
+        let source = error.source().expect("the refusal carries its cause");
+        assert!(
+            source.to_string().contains("lacks the `local` feature"),
+            "refusal cause: {source}"
+        );
     }
 
     #[test]

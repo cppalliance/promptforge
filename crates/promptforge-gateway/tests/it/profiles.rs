@@ -123,6 +123,7 @@ async fn switch_profile_updates_models_catalog() {
 /// loading-profile, then stopping-models, then starting-models - and ends
 /// with the terminal ready event naming the new profile. No drain stage
 /// exists because the gateway does not drain.
+#[cfg(feature = "local")]
 #[tokio::test]
 async fn switch_profile_streams_stages_in_order_then_ready() {
     let (_profiles, server) = alpha_beta_server().await;
@@ -138,6 +139,100 @@ async fn switch_profile_streams_stages_in_order_then_ready() {
             serde_json::json!({ "status": "ready", "profile": "beta" }),
         ]
     );
+    server.shutdown().await;
+}
+
+/// A headless build has no local children to stop or start, so the switch
+/// stream carries only the loading-profile stage before the terminal ready.
+#[cfg(not(feature = "local"))]
+#[tokio::test]
+async fn headless_switch_streams_loading_stage_then_ready() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    assert_eq!(
+        events,
+        vec![
+            serde_json::json!({ "stage": "loading-profile" }),
+            serde_json::json!({ "status": "ready", "profile": "beta" }),
+        ]
+    );
+    server.shutdown().await;
+}
+
+/// A headless build reports zero local children on `/admin/status` and
+/// mounts no `/v1/cache` routes.
+#[cfg(not(feature = "local"))]
+#[tokio::test]
+async fn headless_status_reports_zero_local_children_and_no_cache_routes() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    let status = json_within(
+        send_within(
+            http.get(format!("http://{}/admin/status", server.addr))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status["local_children"], serde_json::json!(0));
+
+    let response = send_within(
+        http.get(format!("http://{}/v1/cache", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 404);
+    server.shutdown().await;
+}
+
+/// A headless build refuses a switch to a profile declaring
+/// `[[local_model]]`: the stream ends with a terminal error event naming the
+/// `start-local` stage, and the live profile stays intact.
+#[cfg(not(feature = "local"))]
+#[tokio::test]
+async fn headless_switch_refuses_profile_declaring_local_models() {
+    let (profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    // A profile matching the boot [server] but declaring a local model.
+    fs::write(
+        profiles.path().join("local-beta.toml"),
+        r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[local_model]]
+name = "local-q"
+description = "a local model"
+source = "/models/q.gguf"
+context = 4096
+"#,
+    )
+    .unwrap();
+
+    let events = switch_stream_events(&http, server.addr, "local-beta").await;
+    assert_eq!(
+        events.first(),
+        Some(&serde_json::json!({ "stage": "loading-profile" }))
+    );
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    let message = terminal["message"].as_str().expect("message");
+    assert!(
+        message.contains("switch profile failed at start-local"),
+        "terminal event: {terminal}"
+    );
+    assert!(
+        message.contains("lacks the `local` feature"),
+        "terminal event: {terminal}"
+    );
+
+    // The live profile is untouched.
+    assert_eq!(catalog_ids(&http, server.addr).await, vec!["alpha-model"]);
     server.shutdown().await;
 }
 

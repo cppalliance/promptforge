@@ -6,7 +6,7 @@
 #[cfg(not(llama_cuda_embedded))]
 use super::Result;
 #[cfg(not(llama_cuda_embedded))]
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// The `llama.cpp` release tag every managed `llama-server` build is pinned to.
 pub(super) const LLAMA_RELEASE: &str = "b10082";

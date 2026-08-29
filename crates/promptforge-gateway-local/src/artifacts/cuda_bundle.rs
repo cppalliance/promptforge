@@ -59,11 +59,11 @@ const SERVER_EXECUTABLE: &str = "llama-server.exe";
 
 /// A failure validating or extracting the embedded CUDA bundle.
 ///
-/// Wrapped by [`crate::local::error::LocalError::CudaBundle`]; build-script
+/// Wrapped by [`crate::error::LocalError::CudaBundle`]; build-script
 /// failures never reach this type - they fail the Cargo build itself.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub(crate) enum BundleError {
+pub enum BundleError {
     /// The embedded manifest JSON did not decode into the runtime schema.
     #[error("decode embedded manifest")]
     ManifestDecode(#[source] serde_json::Error),
@@ -401,9 +401,9 @@ fn install_dir_name() -> String {
 /// from an interrupted run is removed before restaging.
 ///
 /// # Errors
-/// Returns [`crate::local::error::LocalError::CudaBundle`] for manifest,
+/// Returns [`crate::error::LocalError::CudaBundle`] for manifest,
 /// payload, target, or toolkit validation failures, and the shared
-/// [`crate::local::error::LocalError`] I/O and confinement variants for cache
+/// [`crate::error::LocalError`] I/O and confinement variants for cache
 /// failures.
 pub(super) fn stage_bundle(
     cache: &Path,
@@ -448,7 +448,7 @@ pub(super) fn stage_bundle(
 /// Writes the payload files, tree digest, and install marker into `staging`.
 ///
 /// # Errors
-/// Returns the shared [`crate::local::error::LocalError`] I/O and confinement
+/// Returns the shared [`crate::error::LocalError`] I/O and confinement
 /// variants; the caller removes the partial staging directory.
 fn stage_files(
     cache: &Path,

@@ -1,0 +1,30 @@
+[package]
+name = "promptforge-gateway-routing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway routing vocabulary: model/endpoint table entries and dominion admission queues"
+readme = "README.md"
+keywords = ["llm", "gateway", "openai", "proxy"]
+categories = ["web-programming::http-server"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+promptforge-gateway-config.workspace = true
+promptforge-gateway-protocol.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+# Exposes the DominionQueue observation seams (waiter_count, distinct_clients)
+# to downstream crates' test suites.
+test-helpers = []
+
+[lints]
+workspace = true

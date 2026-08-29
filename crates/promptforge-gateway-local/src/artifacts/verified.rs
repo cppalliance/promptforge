@@ -21,7 +21,7 @@ use std::time::UNIX_EPOCH;
 use super::confine::{ensure_cache_directory, validate_cache_path, write_synced};
 use super::digest::file_digest;
 use super::{Result, source_cache_key};
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// How a blob's pin was confirmed: marker cache hit, or a fresh hash pass.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

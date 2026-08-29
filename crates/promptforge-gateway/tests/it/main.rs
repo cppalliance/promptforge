@@ -19,11 +19,13 @@
 
 mod support;
 
+#[cfg(feature = "local")]
 mod cache;
 mod chat;
 #[cfg(feature = "llama-cuda")]
 mod cuda;
 mod embeddings;
+#[cfg(feature = "local")]
 mod local;
 mod profiles;
 mod queue;

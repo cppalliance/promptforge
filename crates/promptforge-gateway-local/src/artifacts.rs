@@ -4,14 +4,14 @@
 //! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
 //! A `llama-cuda` Windows x86-64 build instead stages the embedded CUDA bundle
-//! produced by the build script (see [`cuda_bundle`]) and never falls back to
+//! produced by the build script (see `cuda_bundle`) and never falls back to
 //! the Vulkan archive.
 //!
-//! The module is split into cohesive units: [`assets`] (release table),
-//! [`digest`] (hashing + pin validation), [`archive`] (extraction),
-//! [`confine`] (cache-root path safety), [`progress`] (download reporting),
-//! [`download`] (HTTP transfer + scoped HF auth), and [`verified`]
-//! (verified-digest markers). This file owns [`ArtifactStore`], the
+//! The module is split into cohesive units: `assets` (release table),
+//! `digest` (hashing + pin validation), `archive` (extraction),
+//! `confine` (cache-root path safety), `progress` (download reporting),
+//! `download` (HTTP transfer + scoped HF auth), and `verified`
+//! (verified-digest markers). This file owns `ArtifactStore`, the
 //! orchestration that ties them together.
 
 #[cfg(any(not(llama_cuda_embedded), test))]
@@ -19,7 +19,7 @@ mod archive;
 mod assets;
 mod confine;
 #[cfg(any(llama_cuda_embedded, test))]
-pub(crate) mod cuda_bundle;
+pub mod cuda_bundle;
 mod digest;
 mod download;
 mod progress;
@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 #[cfg(not(llama_cuda_embedded))]
 use archive::require_executable;
@@ -47,16 +47,17 @@ use confine::validate_tree_path;
 use digest::tree_digest;
 use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker_best_effort};
 
-// Re-exports consumed elsewhere in the crate (`local/mod.rs`, `local/cache.rs`,
+// Re-exports consumed elsewhere in the crate (`runtime.rs`, `cache.rs`,
 // `testsupport.rs`). Test-only helpers are imported directly from their
 // submodules by `tests.rs`.
 pub(crate) use confine::{
     enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
     rename_confined, safe_relative_path, validate_cache_path, write_synced,
 };
-pub(crate) use digest::{hex_digest, parse_expected_digest};
+pub(crate) use digest::hex_digest;
+pub use digest::parse_expected_digest;
 pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};
-pub(crate) use progress::DownloadProgress;
+pub use progress::DownloadProgress;
 
 const INSTALL_MARKER: &str = ".promptforge-install";
 /// Connect timeout for artifact downloads (bounds a stalled connect).
@@ -427,7 +428,7 @@ pub(crate) fn source_cache_key(source: &str) -> String {
 /// # Errors
 /// Returns [`LocalError::InvalidSource`] when the URL has no filename segment
 /// or the segment is not a safe relative path.
-pub(crate) fn filename_from_url(url: &str) -> Result<String> {
+pub fn filename_from_url(url: &str) -> Result<String> {
     let without_query = url.split('?').next().unwrap_or(url);
     let name = without_query
         .rsplit('/')

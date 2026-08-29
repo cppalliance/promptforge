@@ -45,19 +45,20 @@ Built with the `workshop` feature, the gateway can host the PromptForge Workshop
 cargo build -p promptforge-gateway --features workshop
 ```
 
-Three feature flags exist:
+Four feature flags exist:
 
+- `local` (default) - compiles in gateway-owned local inference via the `promptforge-gateway-local` crate: GGUF provisioning, managed `llama-server` children, and the blob cache behind the `/v1/cache` routes. A `--no-default-features` build is headless of local inference: it links neither the archive/extraction stack nor a blocking HTTP client, and it refuses a configuration declaring `[[local_model]]` at startup and on profile switch.
 - `workshop` - compiles the hosted workshop in: the `promptforge-ws-server` crate and system-browser opening.
-- `llama-cuda` - on a native Windows x86-64 build with CUDA Toolkit >= 12.8, compiles the pinned `third_party/llama.cpp` submodule during the Cargo build into a Release `llama-server` for the build machine's visible GPUs, and embeds the resulting bundle (manifest plus runtime files) into the gateway binary. A no-op on every other target, where the platform backend archive path is unchanged.
+- `llama-cuda` - implies `local`; on a native Windows x86-64 build with CUDA Toolkit >= 12.8, compiles the pinned `third_party/llama.cpp` submodule during the Cargo build into a Release `llama-server` for the build machine's visible GPUs, and embeds the resulting bundle (manifest plus runtime files) into the gateway binary. A no-op on every other target, where the platform backend archive path is unchanged.
 - `workshop-cuda` - implies `workshop` and `llama-cuda`, and builds the whisper voice engine with CUDA acceleration.
 
-The default feature set is empty, so a headless gateway build never pulls the workshop's toolchain into the graph: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
+The workshop's toolchain stays opt-in: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
 
 ### CUDA llama-server builds
 
 A `llama-cuda` build needs three things on the build machine: the pinned llama.cpp sources checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and the NVIDIA GPUs the server should run on. The build detects every visible GPU's compute capability and compiles only those architectures; cross-compilation is rejected.
 
-All native compilation happens during the Cargo build: the gateway's build script (backed by the `promptforge-gateway-build` crate) compiles the submodule into a Release `llama-server`, records a versioned manifest (source commit, tool identities, architectures, per-file SHA-256), and embeds the manifest and runtime files into the gateway binary. At runtime the gateway never invokes a compiler or build tool: it validates the embedded payload against the manifest, checks that the host provides the declared CUDA Toolkit runtime DLLs, and atomically stages the files into the operator cache. A valid matching installation is reused without restaging, and a CUDA build never silently falls back to the Vulkan archive.
+All native compilation happens during the Cargo build: the `promptforge-gateway-local` crate's build script (backed by the `promptforge-gateway-build` crate) compiles the submodule into a Release `llama-server`, records a versioned manifest (source commit, tool identities, architectures, per-file SHA-256), and embeds the manifest and runtime files into the gateway binary. At runtime the gateway never invokes a compiler or build tool: it validates the embedded payload against the manifest, checks that the host provides the declared CUDA Toolkit runtime DLLs, and atomically stages the files into the operator cache. A valid matching installation is reused without restaging, and a CUDA build never silently falls back to the Vulkan archive.
 
 Build failures surface as Cargo build errors from the build script. Staging failures surface at gateway startup as a provisioning error naming the validation that failed (tampered payload, target mismatch, missing toolkit DLL). Embedding hosts can also read a bounded, credential-redacted tail of each child's captured stdout/stderr through `Gateway::local_diagnostics` - for example to confirm the child reported a CUDA device and offloaded its layers to the GPU.
 

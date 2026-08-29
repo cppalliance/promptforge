@@ -8,8 +8,6 @@
 
 use promptforge_gateway_config::ConfigError;
 
-use crate::local::LocalError;
-
 /// A startup failure while assembling or serving the gateway.
 ///
 /// Opaque wrapper preserving the underlying cause via `source()`. Classify with
@@ -58,7 +56,7 @@ enum StartupRepr {
     #[error("configuration error")]
     Config(#[source] ConfigError),
     #[error("local provisioning error")]
-    Provisioning(#[source] LocalError),
+    Provisioning(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("failed to bind the listener")]
     Bind(#[source] std::io::Error),
     #[error("gateway thread error")]
@@ -89,8 +87,8 @@ impl StartupError {
         StartupError(StartupRepr::Config(err))
     }
 
-    pub(crate) fn provisioning(err: LocalError) -> Self {
-        StartupError(StartupRepr::Provisioning(err))
+    pub(crate) fn provisioning(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        StartupError(StartupRepr::Provisioning(Box::new(err)))
     }
 
     pub(crate) fn bind(err: std::io::Error) -> Self {

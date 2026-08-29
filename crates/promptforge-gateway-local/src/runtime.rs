@@ -3,16 +3,8 @@
 //! In-process `llama-cpp-2` linking is deferred. Layer 2 provisions a pinned
 //! `llama-server` binary, downloads each configured GGUF into the operator
 //! cache, spawns one child per `[[local_model]]`, and registers each as a
-//! normal OpenAI-routed [`Model`](crate::routing::Model). Dropping
-//! [`LocalRuntime`] kills the children.
-
-pub(crate) mod artifacts;
-pub(crate) mod cache;
-mod dialect;
-mod error;
-mod server;
-pub(crate) mod sidecar;
-mod upstream;
+//! normal OpenAI-routed [`Model`](promptforge_gateway_routing::Model).
+//! Dropping [`LocalRuntime`] kills the children.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,24 +13,24 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use crate::queue::DominionQueue;
-use crate::routing::{Endpoint, Model, dominion_queues};
 use promptforge_gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingMode};
 use promptforge_gateway_protocol::ShutdownError;
+use promptforge_gateway_routing::queue::DominionQueue;
+use promptforge_gateway_routing::{Endpoint, Model, dominion_queues};
 
-pub(crate) use error::LocalError;
-
-use artifacts::ArtifactStore;
-use dialect::resolve_local_dialect;
-use server::{LaunchOptions, ServeMode, ServerGuard, SpeculativeLaunch};
-use upstream::LocalUpstream;
+use crate::artifacts::{self, ArtifactStore};
+use crate::dialect::resolve_local_dialect;
+use crate::error::LocalError;
+use crate::server::{LaunchOptions, ServeMode, ServerGuard, SpeculativeLaunch};
+use crate::sidecar;
+use crate::upstream::LocalUpstream;
 
 /// Running local `llama-server` children and the models they back.
 ///
 /// Keep this value alive for the lifetime of the gateway process. Dropping it
-/// terminates every child (via [`LocalUpstream`] Drop → [`ServerGuard`] Drop).
+/// terminates every child (via `LocalUpstream` Drop → `ServerGuard` Drop).
 #[derive(Debug)]
-pub(crate) struct LocalRuntime {
+pub struct LocalRuntime {
     models: Vec<Arc<Model>>,
     /// The upstreams behind `models`, kept un-erased so diagnostics can reach
     /// each child's captured output.
@@ -52,7 +44,7 @@ impl LocalRuntime {
     /// An empty runtime with no children. Used when no `[[local_model]]` is set
     /// and as the placeholder before the first profile switch.
     #[must_use]
-    pub(crate) fn empty() -> LocalRuntime {
+    pub fn empty() -> LocalRuntime {
         LocalRuntime {
             models: Vec::new(),
             upstreams: Vec::new(),
@@ -67,7 +59,7 @@ impl LocalRuntime {
     ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
-    pub(crate) fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
+    pub fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
         let cache_dir = config.local().cache_dir().map(str::to_owned);
         if config.local_models().is_empty() {
             return Ok(LocalRuntime {
@@ -160,7 +152,7 @@ impl LocalRuntime {
     /// Bounded captured-output tails of the running local children, keyed by
     /// configured model name.
     #[must_use]
-    pub(crate) fn diagnostics(&self) -> Vec<(String, String)> {
+    pub fn diagnostics(&self) -> Vec<(String, String)> {
         self.upstreams
             .iter()
             .map(|upstream| (upstream.model_name().to_owned(), upstream.diagnostics()))
@@ -169,19 +161,19 @@ impl LocalRuntime {
 
     /// Models registered for local inference, in `[[local_model]]` order.
     #[must_use]
-    pub(crate) fn models(&self) -> &[Arc<Model>] {
+    pub fn models(&self) -> &[Arc<Model>] {
         &self.models
     }
 
     /// The profile's configured `[local].cache_dir`, when set.
     #[must_use]
-    pub(crate) fn cache_dir(&self) -> Option<&str> {
+    pub fn cache_dir(&self) -> Option<&str> {
         self.cache_dir.as_deref()
     }
 
     /// Number of local model endpoints (each owns one `llama-server` child).
     #[must_use]
-    pub(crate) fn child_count(&self) -> usize {
+    pub fn child_count(&self) -> usize {
         self.models.len()
     }
 
@@ -191,14 +183,14 @@ impl LocalRuntime {
     /// Dropping the runtime does not guarantee child termination, because the
     /// routing table holds `Arc<dyn Upstream>` clones of these same models, so
     /// the runtime is not the sole owner (PFGL-MOD-001). This drives an explicit
-    /// teardown through the [`Upstream`](crate::upstream::Upstream) seam so a
+    /// teardown through the [`Upstream`](promptforge_gateway_protocol::upstream::Upstream) seam so a
     /// profile switch frees the old children's VRAM deterministically before the
     /// replacement profile's children start. Every child is torn down even if an
     /// earlier one fails, so one stuck child never strands the rest.
     ///
     /// # Errors
     /// Returns the first [`ShutdownError`] a child teardown produced.
-    pub(crate) fn shutdown(&self) -> Result<(), ShutdownError> {
+    pub fn shutdown(&self) -> Result<(), ShutdownError> {
         let mut first_error: Option<ShutdownError> = None;
         for model in &self.models {
             if let Err(error) = model.endpoint.upstream.shutdown() {
@@ -218,7 +210,7 @@ impl LocalRuntime {
 /// # Errors
 /// Returns [`LocalError::MissingHome`] when no cache dir is configured and the
 /// home variable is unset or empty.
-pub(crate) fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
+pub fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
     match configured {
         Some(path) if !path.is_empty() => expand_configured_path(path),
         // An unset cache_dir defaults to `~/.promptforge`; a missing home is a
@@ -476,34 +468,6 @@ endpoints = ["e"]
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
         assert!(runtime.diagnostics().is_empty());
-    }
-
-    #[test]
-    fn remote_model_defaults_to_openai_dialect() {
-        let config = Config::from_toml_str(
-            r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "e"
-protocol = "openai"
-base_url = "http://127.0.0.1:9"
-api_key = ""
-
-[[model]]
-name = "remote"
-description = "a remote model"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-"#,
-        )
-        .expect("config");
-        let routing = crate::routing::Routing::from_config(&config).unwrap();
-        let model = routing.model("remote").unwrap();
-        assert_eq!(model.tool_dialect, "openai");
     }
 
     #[tokio::test]

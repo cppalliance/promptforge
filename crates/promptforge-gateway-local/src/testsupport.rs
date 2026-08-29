@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use crate::local::artifacts::hex_digest;
+use crate::artifacts::hex_digest;
 
 /// A blocking one-response HTTP server on an ephemeral loopback port.
 ///

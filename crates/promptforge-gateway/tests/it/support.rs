@@ -18,20 +18,26 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 /// Pinned tiny Qwen3-0.6B GGUF, used only by the ignored live-local test.
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true";
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_MODEL_SHA256: &str =
     "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
 
 /// Pinned tiny bge-small-en-v1.5 GGUF, used only by the ignored live-local
 /// embeddings test.
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_EMBED_MODEL_URL: &str = "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf";
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_EMBED_MODEL_SHA256: &str =
     "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514";
 
 /// Pinned tiny jina-reranker-v1-tiny-en GGUF, used only by the ignored
 /// live-local rerank test.
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_RERANK_MODEL_URL: &str = "https://huggingface.co/gpustack/jina-reranker-v1-tiny-en-GGUF/resolve/main/jina-reranker-v1-tiny-en-Q8_0.gguf";
+#[cfg(feature = "local")]
 pub(crate) const SCENARIO_RERANK_MODEL_SHA256: &str =
     "0defc1f8a1f4dd22183124a2a25a97765603e5a9e42258046c9b2c8a26d1f553";
 

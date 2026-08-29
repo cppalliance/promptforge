@@ -21,7 +21,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use promptforge_gateway_config::QueuePolicy;
+use promptforge_gateway_config::{Config, QueuePolicy};
 use tokio::sync::oneshot;
 
 /// A bounded scheduling identity parsed from the client header.
@@ -32,21 +32,22 @@ use tokio::sync::oneshot;
 /// maps to the single documented `default` bucket so an authenticated caller
 /// cannot mint unbounded, attacker-chosen scheduler identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ClientId(String);
+pub struct ClientId(String);
 
 impl ClientId {
     /// Maximum accepted client-id length, in bytes.
-    pub(crate) const MAX_LEN: usize = 64;
+    pub const MAX_LEN: usize = 64;
     /// The fallback bucket for absent or invalid ids.
-    pub(crate) const DEFAULT: &'static str = "default";
+    pub const DEFAULT: &'static str = "default";
 
     /// Parse an optional header string into a bounded [`ClientId`].
-    pub(crate) fn from_header(value: Option<&str>) -> ClientId {
+    pub fn from_header(value: Option<&str>) -> ClientId {
         value.map_or_else(|| ClientId(Self::DEFAULT.to_owned()), Self::parse)
     }
 
     /// Parse a raw string into a bounded [`ClientId`], falling back to `default`.
-    pub(crate) fn parse(raw: &str) -> ClientId {
+    #[must_use]
+    pub fn parse(raw: &str) -> ClientId {
         let trimmed = raw.trim();
         let valid = !trimmed.is_empty()
             && trimmed.len() <= Self::MAX_LEN
@@ -61,7 +62,8 @@ impl ClientId {
     }
 
     /// The validated id as a string slice.
-    pub(crate) fn as_str(&self) -> &str {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -69,7 +71,7 @@ impl ClientId {
 /// Failure to admit a request onto a dominion queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub(crate) enum AdmitError {
+pub enum AdmitError {
     /// The dominion's waiting queue is already at `max_depth`.
     #[error("queue full")]
     QueueFull,
@@ -92,7 +94,7 @@ pub(crate) enum AdmitError {
 /// waiter). An unlimited queue returns a no-op permit.
 #[derive(Debug)]
 #[must_use = "dropping the permit releases the concurrency slot"]
-pub(crate) struct Permit {
+pub struct Permit {
     limited: Option<Arc<LimitedQueue>>,
 }
 
@@ -110,7 +112,7 @@ impl Drop for Permit {
 /// what lets several endpoints bound to the same dominion compete for a
 /// single pool of slots.
 #[derive(Debug, Clone)]
-pub(crate) struct DominionQueue {
+pub struct DominionQueue {
     inner: QueueInner,
 }
 
@@ -158,7 +160,7 @@ struct Waiter {
 impl DominionQueue {
     /// An unlimited queue: every [`admit`](Self::admit) succeeds immediately.
     #[must_use]
-    pub(crate) fn unlimited() -> DominionQueue {
+    pub fn unlimited() -> DominionQueue {
         DominionQueue {
             inner: QueueInner::Unlimited,
         }
@@ -172,7 +174,7 @@ impl DominionQueue {
     /// validation already rejects both zeros, so this is purely defensive -
     /// construction can never panic on out-of-range runtime settings.
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         concurrency: usize,
         max_depth: usize,
         fair_scheduling: bool,
@@ -202,9 +204,10 @@ impl DominionQueue {
     /// Number of requests currently waiting for a slot on this queue.
     ///
     /// Test-only observation seam so tests can rendezvous on a waiter being
-    /// enqueued instead of sleeping.
-    #[cfg(test)]
-    pub(crate) fn waiter_count(&self) -> usize {
+    /// enqueued instead of sleeping. Available to downstream crates under the
+    /// `test-helpers` feature.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn waiter_count(&self) -> usize {
         match &self.inner {
             QueueInner::Unlimited => 0,
             QueueInner::Limited(queue) => {
@@ -220,8 +223,9 @@ impl DominionQueue {
     /// Number of distinct client buckets currently in the fair round-robin.
     ///
     /// Test-only observation seam for the distinct-client cap (Q-001).
-    #[cfg(test)]
-    pub(crate) fn distinct_clients(&self) -> usize {
+    /// Available to downstream crates under the `test-helpers` feature.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn distinct_clients(&self) -> usize {
         match &self.inner {
             QueueInner::Unlimited => 0,
             QueueInner::Limited(queue) => queue
@@ -246,7 +250,7 @@ impl DominionQueue {
     /// when the `Reject` policy finds no free slot, and
     /// [`AdmitError::Unavailable`] when the queue is torn down while this
     /// caller waits.
-    pub(crate) async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
+    pub async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
         let QueueInner::Limited(queue) = &self.inner else {
             return Ok(Permit { limited: None });
         };
@@ -316,6 +320,34 @@ impl DominionQueue {
             }
         }
     }
+}
+
+/// Build one shared [`DominionQueue`] per configured dominion.
+///
+/// Cloning a returned queue clones the Arc-backed limit, so everything bound
+/// to the same dominion competes for one pool of slots. Remote endpoints
+/// (the gateway's routing table) and local models (the local inference crate)
+/// both build their bindings from this map; validation keeps the two on
+/// disjoint dominion kinds, so each side only ever looks up its own kind's
+/// queues.
+#[must_use]
+pub fn dominion_queues(config: &Config) -> HashMap<&str, DominionQueue> {
+    let mut queues = HashMap::with_capacity(config.dominions().len());
+    for dominion in config.dominions() {
+        let queue = match dominion.max_concurrency() {
+            Some(n) => DominionQueue::new(
+                n,
+                dominion.max_queue(),
+                dominion.fair_scheduling(),
+                dominion.policy(),
+            ),
+            // Unlimited concurrency never parks a caller, so `max_queue`
+            // and `policy` have no wait to bound.
+            None => DominionQueue::unlimited(),
+        };
+        queues.insert(dominion.id(), queue);
+    }
+    queues
 }
 
 enum AdmitOutcome {

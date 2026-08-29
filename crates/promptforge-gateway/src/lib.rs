@@ -24,17 +24,12 @@
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
+#[cfg(feature = "local")]
 mod cache;
 mod dialect;
 mod error;
-#[cfg(llama_cuda_embedded)]
-mod llama_cuda_bundle;
-mod local;
-mod queue;
 mod routing;
 mod runner;
-#[cfg(test)]
-mod testsupport;
 mod tools;
 mod web_search_process;
 mod workshop;
@@ -43,6 +38,13 @@ mod workshop;
 // the protocol crate; these re-exports keep every `crate::wire::*`,
 // `crate::upstream::*`, and `crate::http_util::*` path resolving unchanged.
 pub(crate) use promptforge_gateway_protocol::{http_util, upstream, wire};
+// The dominion admission queues live in the routing crate; this re-export
+// keeps every `crate::queue::*` path resolving unchanged.
+pub(crate) use promptforge_gateway_routing::queue;
+// Local inference lives in its own crate behind the `local` feature; this
+// re-export keeps every `crate::local::*` path resolving unchanged.
+#[cfg(feature = "local")]
+pub(crate) use promptforge_gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};
@@ -59,12 +61,15 @@ use axum::extract::State;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
-use axum::routing::{delete, get, post};
+#[cfg(feature = "local")]
+use axum::routing::delete;
+use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
 use crate::error::GatewayError;
+#[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
@@ -81,6 +86,7 @@ struct LiveState {
     routing: Arc<Routing>,
     key: Secret,
     web_search: Option<Arc<WebSearchState>>,
+    #[cfg(feature = "local")]
     local: LocalRuntime,
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
@@ -135,7 +141,7 @@ impl AppState {
     pub(crate) fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
-        local: LocalRuntime,
+        #[cfg(feature = "local")] local: LocalRuntime,
         web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
         selection: ProfileSelection,
@@ -146,6 +152,7 @@ impl AppState {
                 routing,
                 key,
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
+                #[cfg(feature = "local")]
                 local,
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
@@ -162,6 +169,7 @@ impl AppState {
     }
 
     /// The active profile's `[local].cache_dir` setting, for the cache routes.
+    #[cfg(feature = "local")]
     pub(crate) async fn cache_dir(&self) -> Option<String> {
         self.live.read().await.local.cache_dir().map(str::to_owned)
     }
@@ -169,19 +177,23 @@ impl AppState {
 
 /// Build the gateway's axum router.
 pub(crate) fn build_router(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/embeddings", post(embeddings))
         .route("/v1/rerank", post(rerank))
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
-        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
-        .route("/v1/cache/{sha256}", delete(cache::delete_cache))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
-        .route("/admin/switch-profile", post(admin_switch_profile))
-        .with_state(state)
+        .route("/admin/switch-profile", post(admin_switch_profile));
+    // The blob-cache routes serve the local artifact store, so they exist
+    // only in builds with local inference.
+    #[cfg(feature = "local")]
+    let router = router
+        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
+        .route("/v1/cache/{sha256}", delete(cache::delete_cache));
+    router.with_state(state)
 }
 
 /// Liveness probe; unauthenticated and always 200 while serving.
@@ -191,6 +203,12 @@ async fn health() -> impl IntoResponse {
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
 const CLIENT_HEADER: &str = "X-PromptForge-Client";
+
+/// Error message when a configuration declaring `[[local_model]]` reaches a
+/// build compiled without the `local` feature.
+#[cfg(not(feature = "local"))]
+const LOCAL_MODELS_UNSUPPORTED: &str =
+    "configuration declares [[local_model]] but this build lacks the `local` feature";
 
 /// The chat route to a backend.
 async fn chat_completions(
@@ -431,11 +449,17 @@ async fn admin_status(
         .iter()
         .map(|m| m.name.as_str())
         .collect();
+    // A headless build has no local runtime; it reports zero children rather
+    // than dropping the field from the status response.
+    #[cfg(feature = "local")]
+    let local_children = live.local.child_count();
+    #[cfg(not(feature = "local"))]
+    let local_children = 0;
     Ok(Json(serde_json::json!({
         "profile": live.profile_name,
         "models": models,
         "model_allowlist": live.model_allowlist,
-        "local_children": live.local.child_count(),
+        "local_children": local_children,
         "queue": "per-dominion shared waiting queue; switch-profile is immediate (no drain)",
     })))
 }
@@ -450,7 +474,10 @@ async fn admin_status(
 /// `{"status": "ready", "profile": ...}` or `{"status": "error",
 /// "message": ...}`. There is no drain stage because the gateway does not
 /// drain. A refusal before the switch starts (bad auth, no profiles
-/// directory, a malformed name) stays a buffered JSON error envelope.
+/// directory, a malformed name) stays a buffered JSON error envelope. Builds
+/// without the `local` feature emit no `stopping-models`/`starting-models`
+/// stages, and refuse a profile declaring `[[local_model]]` with a terminal
+/// error event instead of starting children.
 ///
 /// The switch itself runs on its own task ([`run_switch`]) and always runs
 /// to completion: a client disconnect drops only the response body and the
@@ -535,45 +562,60 @@ async fn run_switch(
     // Stop the previous local children before starting new ones so the two
     // never hold VRAM simultaneously. The bearer key, routing, and web-search
     // settings are left untouched here, so auth stays stable if start fails.
-    let _ = stages.try_send("stopping-models");
-    let old_local = {
-        let mut live = state.live.write().await;
-        std::mem::replace(&mut live.local, LocalRuntime::empty())
+    #[cfg(feature = "local")]
+    let new_local = {
+        let _ = stages.try_send("stopping-models");
+        let old_local = {
+            let mut live = state.live.write().await;
+            std::mem::replace(&mut live.local, LocalRuntime::empty())
+        };
+        // Explicitly terminate the old children before starting new ones, and abort
+        // the switch if teardown fails. Dropping the runtime does not free their
+        // VRAM here (the still-live old routing holds Arc<dyn Upstream> clones, so
+        // the runtime is not the sole owner - PFGL-MOD-001); the teardown also
+        // cancels any in-flight recovery/respawn and disables further respawn, so no
+        // old child can outlive the switch (PF-GW-SERVER-004). Every child failure
+        // is surfaced, never discarded, so we never start replacements on top of a
+        // survivor.
+        match tokio::task::spawn_blocking(move || {
+            let result = old_local.shutdown();
+            drop(old_local);
+            result
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(GatewayError::switch_failed("shutdown-local", e)),
+            Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
+        }
+
+        let _ = stages.try_send("starting-models");
+        match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
+            Ok(Ok(runtime)) => runtime,
+            Ok(Err(e)) => {
+                return Err(GatewayError::switch_failed("start-local", e));
+            }
+            Err(e) => {
+                return Err(GatewayError::switch_failed("start-local-task", e));
+            }
+        }
     };
-    // Explicitly terminate the old children before starting new ones, and abort
-    // the switch if teardown fails. Dropping the runtime does not free their
-    // VRAM here (the still-live old routing holds Arc<dyn Upstream> clones, so
-    // the runtime is not the sole owner - PFGL-MOD-001); the teardown also
-    // cancels any in-flight recovery/respawn and disables further respawn, so no
-    // old child can outlive the switch (PF-GW-SERVER-004). Every child failure
-    // is surfaced, never discarded, so we never start replacements on top of a
-    // survivor.
-    match tokio::task::spawn_blocking(move || {
-        let result = old_local.shutdown();
-        drop(old_local);
-        result
-    })
-    .await
-    {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => return Err(GatewayError::switch_failed("shutdown-local", e)),
-        Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
+    // A headless build cannot honor a profile declaring local models; refuse
+    // the switch rather than silently dropping them.
+    #[cfg(not(feature = "local"))]
+    if !config.local_models().is_empty() {
+        return Err(GatewayError::switch_failed(
+            "start-local",
+            std::io::Error::other(LOCAL_MODELS_UNSUPPORTED),
+        ));
     }
 
-    let _ = stages.try_send("starting-models");
-    let new_local = match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
-        Ok(Ok(runtime)) => runtime,
-        Ok(Err(e)) => {
-            return Err(GatewayError::switch_failed("start-local", e));
-        }
-        Err(e) => {
-            return Err(GatewayError::switch_failed("start-local-task", e));
-        }
-    };
-
+    #[cfg(feature = "local")]
     let routing = remote_routing
         .merge(new_local.models().iter().cloned())
         .map_err(|e| GatewayError::switch_failed("merge-routing", e))?;
+    #[cfg(not(feature = "local"))]
+    let routing = remote_routing;
 
     // Atomic swap: commit the whole new profile at once.
     {
@@ -581,7 +623,10 @@ async fn run_switch(
         live.routing = Arc::new(routing);
         live.key = new_key;
         live.web_search = new_web_search;
-        live.local = new_local;
+        #[cfg(feature = "local")]
+        {
+            live.local = new_local;
+        }
         live.profile_name = Some(name.to_string());
         live.model_allowlist = new_allowlist;
     }

@@ -165,7 +165,7 @@ fn spawn_fake_child(request: &SpawnRequest<'_>) -> Result<Child> {
     Command::new(&executable)
         .args([
             "--exact",
-            "local::server::tests::fake_llama_server_worker",
+            "server::tests::fake_llama_server_worker",
             "--ignored",
             "--nocapture",
         ])
@@ -729,9 +729,9 @@ fn respawn_reuses_port_and_identity_after_child_death() {
 
 #[test]
 fn local_upstream_send_respawns_dead_child_once() {
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::ChatRequest;
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -823,9 +823,9 @@ fn local_upstream_send_respawns_dead_child_once() {
 fn local_upstream_send_embeddings_routes_through_child() {
     // An embeddings request forwards to the child's `/v1/embeddings` and the
     // response restores the caller's model name, same contract as chat.
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::{EmbeddingInput, EmbeddingRequest};
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::{EmbeddingInput, EmbeddingRequest};
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -890,9 +890,9 @@ fn local_upstream_send_embeddings_routes_through_child() {
 fn local_upstream_send_rerank_routes_through_child() {
     // A rerank request forwards to the child's `/v1/rerank` and the response
     // restores the caller's model name, same contract as chat.
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::RerankRequest;
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::RerankRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -958,10 +958,10 @@ fn local_upstream_send_rerank_routes_through_child() {
 fn local_upstream_send_honors_cooldown_after_failed_respawn() {
     // UPSTREAM-005: a failed respawn records the attempt time; an immediate
     // second failure is short-circuited by the cooldown (no respawn storm).
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::ChatRequest;
+    use crate::upstream::LocalUpstream;
     use promptforge_gateway_protocol::ProtocolError;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -1058,9 +1058,9 @@ fn local_upstream_send_honors_cooldown_after_failed_respawn() {
 fn local_upstream_concurrent_sends_respawn_child_at_most_once() {
     // UPSTREAM-005: two concurrent transport failures on a dead child serialize
     // through the guard mutex, so recovery respawns the child exactly once.
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::ChatRequest;
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -1140,7 +1140,7 @@ fn recover_if_dead_is_a_noop_for_a_live_but_unreachable_child() {
     // UPSTREAM-005: when a transport failure occurs but the child is still
     // running (live-but-unreachable), recovery is a no-op returning Ok(false) -
     // it never respawns a child that has not actually died.
-    use crate::local::upstream::LocalUpstream;
+    use crate::upstream::LocalUpstream;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -1199,9 +1199,9 @@ fn recover_if_dead_is_a_noop_for_a_live_but_unreachable_child() {
 fn local_upstream_shutdown_kills_child_and_disables_respawn() {
     // PFGL-MOD-001/PF-GW-SERVER-004: an explicit shutdown terminates the child
     // and prevents any later transport failure from respawning it.
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::ChatRequest;
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -1310,7 +1310,7 @@ fn spawn_blocked_child(_request: &SpawnRequest<'_>) -> Result<Child> {
     Command::new(&executable)
         .args([
             "--exact",
-            "local::server::tests::blocked_child_worker",
+            "server::tests::blocked_child_worker",
             "--ignored",
             "--nocapture",
         ])
@@ -1327,9 +1327,9 @@ fn switch_shutdown_terminates_an_in_flight_respawned_child() {
     // PFGL-MOD-001/PF-GW-SERVER-004: a shutdown concurrent with an in-flight
     // recovery/respawn must cancel the respawn and terminate the freshly spawned
     // child, so no old child can outlive a profile switch.
-    use crate::local::upstream::LocalUpstream;
-    use crate::upstream::Upstream;
-    use crate::wire::ChatRequest;
+    use crate::upstream::LocalUpstream;
+    use promptforge_gateway_protocol::upstream::Upstream;
+    use promptforge_gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");

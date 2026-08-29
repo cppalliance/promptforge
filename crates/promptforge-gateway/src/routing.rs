@@ -3,58 +3,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use promptforge_gateway_config::{
-    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode,
-};
+use promptforge_gateway_config::{Config, ConfigError, ModelKind, Protocol};
 
 use crate::error::GatewayError;
 use crate::queue::DominionQueue;
 use crate::upstream::{OpenAiUpstream, Upstream};
 
-/// One backend endpoint plus the upstream that talks to it.
-pub(crate) struct Endpoint {
-    /// The endpoint's configured id.
-    pub id: String,
-    /// The upstream implementation forwarding to this backend.
-    pub upstream: Arc<dyn Upstream>,
-    /// Admission control: concurrency limit plus bounded waiting queue.
-    /// Endpoints bound to the same dominion hold clones of one shared queue
-    /// and compete for a single pool of slots; an endpoint with no dominion
-    /// is unlimited.
-    pub queue: DominionQueue,
-}
-
-impl std::fmt::Debug for Endpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Endpoint")
-            .field("id", &self.id)
-            .field("queue", &self.queue)
-            .finish_non_exhaustive()
-    }
-}
-
-/// One model, resolved to a backend endpoint and the backend's model string.
-#[derive(Debug)]
-pub(crate) struct Model {
-    /// The caller-facing model name.
-    pub name: String,
-    /// The workload this model serves: chat, embedding, or classifier.
-    pub kind: ModelKind,
-    /// Prose describing the model for catalog consumers.
-    pub description: String,
-    /// Context window size in tokens.
-    pub context: u32,
-    /// Whether thinking tokens are never, always, or switchably available.
-    pub thinking: ThinkingMode,
-    /// Capability metadata advertised on the catalog.
-    pub capabilities: Capabilities,
-    /// The tool-calling dialect used by this model (e.g. `"openai"`, `"gemma3_tool_code"`).
-    pub tool_dialect: String,
-    /// The string the backend knows this model by.
-    pub upstream_name: String,
-    /// The endpoint serving this model (v0 uses the first configured one).
-    pub endpoint: Arc<Endpoint>,
-}
+// The table-entry vocabulary (`Model`, `Endpoint`) and the dominion-queue
+// builder live in the routing crate, shared with the local inference crate;
+// these re-exports keep every `crate::routing::*` path resolving unchanged.
+pub(crate) use promptforge_gateway_routing::{Endpoint, Model, dominion_queues};
 
 /// A resolved routing table.
 #[derive(Debug)]
@@ -62,32 +20,6 @@ pub(crate) struct Routing {
     by_name: HashMap<String, Arc<Model>>,
     /// Configured models in `gateway.toml` order, for the catalog listing.
     models: Vec<Arc<Model>>,
-}
-
-/// Build one shared [`DominionQueue`] per configured dominion.
-///
-/// Cloning a returned queue clones the Arc-backed limit, so everything bound
-/// to the same dominion competes for one pool of slots. Remote endpoints
-/// (routing) and local models ([`crate::local`]) both build their bindings
-/// from this map; validation keeps the two on disjoint dominion kinds, so
-/// each side only ever looks up its own kind's queues.
-pub(crate) fn dominion_queues(config: &Config) -> HashMap<&str, DominionQueue> {
-    let mut queues = HashMap::with_capacity(config.dominions().len());
-    for dominion in config.dominions() {
-        let queue = match dominion.max_concurrency() {
-            Some(n) => DominionQueue::new(
-                n,
-                dominion.max_queue(),
-                dominion.fair_scheduling(),
-                dominion.policy(),
-            ),
-            // Unlimited concurrency never parks a caller, so `max_queue`
-            // and `policy` have no wait to bound.
-            None => DominionQueue::unlimited(),
-        };
-        queues.insert(dominion.id(), queue);
-    }
-    queues
 }
 
 impl Routing {
@@ -195,10 +127,12 @@ impl Routing {
         Routing::new(models)
     }
 
-    /// Appends models (for example from [`crate::local::LocalRuntime`]) to this table.
+    /// Appends models (for example from the local crate's `LocalRuntime`) to
+    /// this table.
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] when a model name already exists.
+    #[cfg(any(test, feature = "local"))]
     pub(crate) fn merge(
         mut self,
         extras: impl IntoIterator<Item = Arc<Model>>,
@@ -249,7 +183,7 @@ pub(crate) fn require_kind(model: &Model, expected: ModelKind) -> Result<(), Gat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use promptforge_gateway_config::{ConfigErrorKind, Secret};
+    use promptforge_gateway_config::{Capabilities, ConfigErrorKind, Secret, ThinkingMode};
 
     fn model_named(name: &str) -> Arc<Model> {
         let endpoint = Arc::new(Endpoint {
@@ -383,6 +317,31 @@ endpoints = ["e"]
         assert_eq!(plain.tool_dialect, "openai");
         let gemma = routing.model("gemma").unwrap();
         assert_eq!(gemma.tool_dialect, "gemma3_tool_code");
+    }
+
+    #[test]
+    fn remote_model_defaults_to_openai_dialect() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "remote"
+description = "a remote model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#;
+        let routing = routing_from(toml);
+        let model = routing.model("remote").unwrap();
+        assert_eq!(model.tool_dialect, "openai");
     }
 
     #[test]

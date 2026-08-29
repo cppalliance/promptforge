@@ -18,37 +18,33 @@ path = "src/main.rs"
 
 [dependencies]
 axum.workspace = true
-async-trait.workspace = true
 dotenvy.workspace = true
-flate2.workspace = true
 futures-util.workspace = true
-indicatif.workspace = true
 # Optional: opens the system browser at the hosted workshop URL.
 open = { workspace = true, optional = true }
 promptforge-core.workspace = true
 promptforge-gateway-config.workspace = true
+# Optional: gateway-owned local inference (GGUF provisioning, managed
+# `llama-server` children, blob cache store). Headless builds disable it.
+promptforge-gateway-local = { workspace = true, optional = true }
 promptforge-gateway-protocol.workspace = true
+promptforge-gateway-routing.workspace = true
 promptforge-ws-server = { workspace = true, optional = true }
-rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
-tar.workspace = true
 url.workspace = true
-reqwest = { workspace = true, features = ["blocking", "stream"] }
+reqwest = { workspace = true, features = ["stream"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-zip.workspace = true
-
-[build-dependencies]
-# Compiles and embeds the CUDA llama-server bundle; only in the graph when
-# the `llama-cuda` feature is enabled.
-promptforge-gateway-build = { workspace = true, optional = true }
 
 [features]
+default = ["local"]
+# Gateway-owned local inference via the `promptforge-gateway-local` crate.
+local = ["dep:promptforge-gateway-local"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull whisper, CUDA, or the
 # Node UI build into the graph.
@@ -56,12 +52,13 @@ workshop = ["dep:promptforge-ws-server", "dep:open"]
 # Compile the pinned llama.cpp submodule into an embedded, host-native CUDA
 # llama-server bundle during the Cargo build. Windows x86-64 with a CUDA
 # Toolkit >= 12.8 only; a no-op on every other target.
-llama-cuda = ["dep:promptforge-gateway-build"]
+llama-cuda = ["local", "promptforge-gateway-local/llama-cuda"]
 workshop-cuda = ["workshop", "llama-cuda", "promptforge-ws-server/voice-cuda"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.
 png.workspace = true
+promptforge-gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
 
 [lints]

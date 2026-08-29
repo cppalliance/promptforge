@@ -8,10 +8,14 @@ use indicatif::{ProgressBar, ProgressStyle};
 const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Progress updates for a single HTTP blob download.
-pub(crate) trait DownloadProgress: Send {
+pub trait DownloadProgress: Send {
+    /// Records the total length in bytes, when the server sent one.
     fn set_len(&self, total: Option<u64>);
+    /// Adds `n` downloaded bytes to the running total.
     fn inc(&self, n: u64);
+    /// Marks the download complete.
     fn finish(&self);
+    /// Marks the download abandoned before completion.
     fn abandon(&self);
 }
 

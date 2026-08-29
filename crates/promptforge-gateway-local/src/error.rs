@@ -6,7 +6,7 @@ use std::path::PathBuf;
 /// A failure while downloading, verifying, or launching a local model.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub(crate) enum LocalError {
+pub enum LocalError {
     /// The host OS/arch has no pinned `llama-server` archive.
     #[cfg(not(llama_cuda_embedded))]
     #[error("unsupported llama-server platform `{os}/{arch}`")]
@@ -343,7 +343,7 @@ pub(crate) enum LocalError {
     /// never reach this variant because they fail the Cargo build itself.
     #[cfg(any(llama_cuda_embedded, test))]
     #[error("stage embedded CUDA llama-server bundle")]
-    CudaBundle(#[from] crate::local::artifacts::cuda_bundle::BundleError),
+    CudaBundle(#[from] crate::artifacts::cuda_bundle::BundleError),
 
     /// Reading a dialect-probe body failed or exceeded the byte ceiling
     /// (HYGIENE-BOUNDS-001).
@@ -373,7 +373,7 @@ pub(crate) enum LocalError {
         model: String,
         /// The underlying resolution error.
         #[source]
-        source: super::dialect::DialectResolveError,
+        source: crate::dialect::DialectResolveError,
     },
 }
 
@@ -382,7 +382,7 @@ impl LocalError {
     /// liveness issue, or port contention - rather than a permanent integrity,
     /// configuration, or validation fault. Used to annotate respawn diagnostics.
     #[must_use]
-    pub(crate) fn is_retryable(&self) -> bool {
+    pub fn is_retryable(&self) -> bool {
         matches!(
             self,
             LocalError::HttpClient(_)

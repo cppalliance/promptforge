@@ -17,8 +17,8 @@ use super::{
     API_KEY_REDACTION, AttemptIdentity, CAPTURE_LIMIT, LOOPBACK, LaunchOptions, Result, ServeMode,
     SpawnRequest,
 };
-use crate::http_util::MAX_JSON_BODY;
-use crate::local::error::LocalError;
+use crate::error::LocalError;
+use promptforge_gateway_protocol::http_util::MAX_JSON_BODY;
 
 /// A spawn callback: builds a child from a [`SpawnRequest`].
 pub(super) type SpawnFn = Box<dyn FnMut(&SpawnRequest<'_>) -> Result<Child> + Send>;
@@ -412,7 +412,7 @@ mod tests {
         capture_reader, child_path_with_prefix, new_capture, production_command,
         readiness_lists_model,
     };
-    use crate::local::server::SpawnRequest;
+    use crate::server::SpawnRequest;
     use std::ffi::{OsStr, OsString};
     use std::io::{self, Read};
     use std::path::{Path, PathBuf};
