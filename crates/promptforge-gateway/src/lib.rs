@@ -27,7 +27,6 @@ mod api_error;
 mod cache;
 mod dialect;
 mod error;
-mod http_util;
 #[cfg(llama_cuda_embedded)]
 mod llama_cuda_bundle;
 mod local;
@@ -37,10 +36,13 @@ mod runner;
 #[cfg(test)]
 mod testsupport;
 mod tools;
-mod upstream;
 mod web_search_process;
-mod wire;
 mod workshop;
+
+// The wire protocol, upstream abstraction, and bounded HTTP helpers live in
+// the protocol crate; these re-exports keep every `crate::wire::*`,
+// `crate::upstream::*`, and `crate::http_util::*` path resolving unchanged.
+pub(crate) use promptforge_gateway_protocol::{http_util, upstream, wire};
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};

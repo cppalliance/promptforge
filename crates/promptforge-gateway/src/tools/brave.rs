@@ -5,6 +5,7 @@
 //! [`BraveSearchParams`] and calls [`brave_search`]; everything Brave-specific
 //! (query pairs, over-fetch policy, JSON shape, error prefixing) lives here.
 
+use promptforge_gateway_protocol::ProtocolError;
 use serde::Deserialize;
 
 use super::SearchResult;
@@ -97,19 +98,27 @@ pub(crate) fn brave_overfetch_count(requested_count: u8, max_count: u8) -> u8 {
 /// Prefix Brave upstream errors with `web_search: `.
 pub(crate) fn prefix_web_search_upstream(err: GatewayError) -> GatewayError {
     match err {
-        GatewayError::UpstreamStatus { status, body } => GatewayError::UpstreamStatus {
+        GatewayError::Protocol(protocol) => GatewayError::Protocol(prefix_protocol(protocol)),
+        other => other,
+    }
+}
+
+/// Prefix the protocol-level Brave upstream errors with `web_search: `.
+fn prefix_protocol(err: ProtocolError) -> ProtocolError {
+    match err {
+        ProtocolError::UpstreamStatus { status, body, .. } => ProtocolError::upstream_status(
             status,
-            body: if body.starts_with("web_search: ") {
+            if body.starts_with("web_search: ") {
                 body
             } else {
                 format!("web_search: {body}")
             },
-        },
-        GatewayError::UpstreamTransport(source) => {
-            GatewayError::UpstreamTransport(Box::new(WebSearchUpstream { source }))
+        ),
+        ProtocolError::UpstreamTransport(source, ..) => {
+            ProtocolError::transport(WebSearchUpstream { source })
         }
-        GatewayError::UpstreamConnect(source) => {
-            GatewayError::UpstreamConnect(Box::new(WebSearchUpstream { source }))
+        ProtocolError::UpstreamConnect(source, ..) => {
+            ProtocolError::connect(WebSearchUpstream { source })
         }
         other => other,
     }
@@ -164,9 +173,9 @@ pub(crate) fn brave_search_query(params: &BraveSearchParams<'_>) -> Vec<(&'stati
 /// Always sends `extra_snippets=true`. Optional knobs are omitted when `None`.
 ///
 /// # Errors
-/// Returns [`GatewayError::UpstreamConnect`] when the connection itself fails,
-/// [`GatewayError::UpstreamTransport`] on a mid-flight transport failure, and
-/// [`GatewayError::UpstreamStatus`] on a non-success provider status. All are
+/// Returns [`ProtocolError::UpstreamConnect`] when the connection itself fails,
+/// [`ProtocolError::UpstreamTransport`] on a mid-flight transport failure, and
+/// [`ProtocolError::UpstreamStatus`] on a non-success provider status. All are
 /// prefixed with `web_search: ` on the body or source message.
 pub(crate) async fn brave_search(
     http: &reqwest::Client,
@@ -196,10 +205,9 @@ pub(crate) async fn brave_search(
                 Ok(bytes) => String::from_utf8_lossy(&bytes).chars().take(2000).collect(),
                 Err(error) => format!("<error body unreadable: {error}>"),
             };
-        return Err(prefix_web_search_upstream(GatewayError::UpstreamStatus {
-            status: status.as_u16(),
-            body,
-        }));
+        return Err(prefix_web_search_upstream(GatewayError::from(
+            ProtocolError::upstream_status(status.as_u16(), body),
+        )));
     }
 
     // Bounded success body read that *detects* oversize (TOOLS-010): read one
@@ -209,10 +217,12 @@ pub(crate) async fn brave_search(
         .await
         .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
     if bytes.len() > SUCCESS_BODY_CAP {
-        return Err(prefix_web_search_upstream(GatewayError::UpstreamStatus {
-            status: 502,
-            body: format!("response body exceeded {SUCCESS_BODY_CAP} bytes"),
-        }));
+        return Err(prefix_web_search_upstream(GatewayError::from(
+            ProtocolError::upstream_status(
+                502,
+                format!("response body exceeded {SUCCESS_BODY_CAP} bytes"),
+            ),
+        )));
     }
     let parsed: BraveResponse = serde_json::from_slice(&bytes)
         .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_protocol(e)))?;
@@ -319,7 +329,7 @@ mod provider_tests {
             .await
             .expect_err("should fail");
         match err {
-            GatewayError::UpstreamStatus { status, body } => {
+            GatewayError::Protocol(ProtocolError::UpstreamStatus { status, body, .. }) => {
                 assert_eq!(status, 429);
                 assert!(body.starts_with("web_search: "), "body was {body:?}");
             }
@@ -337,7 +347,10 @@ mod provider_tests {
             .await
             .expect_err("should fail");
         assert!(
-            matches!(err, GatewayError::UpstreamProtocol(_)),
+            matches!(
+                err,
+                GatewayError::Protocol(ProtocolError::UpstreamProtocol(..))
+            ),
             "expected UpstreamProtocol, got {err:?}"
         );
         handle.join().expect("thread").expect("serve ok");

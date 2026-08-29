@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use promptforge_gateway_config::Secret;
 
-use crate::error::GatewayError;
+use crate::error::{ProtocolError, ShutdownError};
 use crate::wire::{
     ChatChunk, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest,
     RerankResponse,
@@ -18,16 +18,16 @@ use crate::wire::{
 
 /// An opened streaming chat completion: the upstream response headers worth
 /// forwarding to the client, plus the validated chunk stream.
-pub(crate) struct StreamedChunks {
+pub struct StreamedChunks {
     /// The upstream `Content-Type`, forwarded when present; the relay
     /// defaults to `text/event-stream` otherwise.
-    pub(crate) content_type: Option<String>,
+    pub content_type: Option<String>,
     /// The upstream `Cache-Control`, forwarded when present.
-    pub(crate) cache_control: Option<String>,
+    pub cache_control: Option<String>,
     /// The validated chunk stream. The upstream's terminal `[DONE]` sentinel
     /// is consumed here, never yielded; the relay emits its own. Dropping the
     /// stream drops the upstream response and aborts the connection.
-    pub(crate) chunks: BoxStream<'static, Result<ChatChunk, GatewayError>>,
+    pub chunks: BoxStream<'static, Result<ChatChunk, ProtocolError>>,
 }
 
 impl std::fmt::Debug for StreamedChunks {
@@ -41,61 +41,61 @@ impl std::fmt::Debug for StreamedChunks {
 
 /// A backend the gateway can forward a chat completion to.
 #[async_trait]
-pub(crate) trait Upstream: Send + Sync {
+pub trait Upstream: Send + Sync {
     /// Forward `req` to the backend, substituting `upstream_model` for the
     /// caller's model name, and return the response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, and [`GatewayError::UpstreamStatus`] on a non-success backend
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`ProtocolError::UpstreamStatus`] on a non-success backend
     /// status.
     async fn send(
         &self,
         req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError>;
+    ) -> Result<ChatResponse, ProtocolError>;
 
     /// Forward an embeddings `req` to the backend, substituting
     /// `upstream_model` for the caller's model name, and return the response.
     ///
-    /// The default is [`GatewayError::ModelUnavailable`]: upstreams without an
+    /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without an
     /// embeddings implementation (a local chat server, for example) decline
     /// the workload rather than fabricate a response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, [`GatewayError::UpstreamStatus`] on a non-success backend
-    /// status, and [`GatewayError::ModelUnavailable`] when the upstream
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, [`ProtocolError::UpstreamStatus`] on a non-success backend
+    /// status, and [`ProtocolError::ModelUnavailable`] when the upstream
     /// cannot serve embeddings at all.
     async fn send_embeddings(
         &self,
         req: EmbeddingRequest,
         _upstream_model: &str,
-    ) -> Result<EmbeddingResponse, GatewayError> {
-        Err(GatewayError::ModelUnavailable(req.model))
+    ) -> Result<EmbeddingResponse, ProtocolError> {
+        Err(ProtocolError::ModelUnavailable(req.model))
     }
 
     /// Forward a rerank `req` to the backend, substituting `upstream_model`
     /// for the caller's model name, and return the response.
     ///
-    /// The default is [`GatewayError::ModelUnavailable`]: upstreams without a
+    /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without a
     /// rerank implementation (a local chat server, for example) decline the
     /// workload rather than fabricate a response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, [`GatewayError::UpstreamStatus`] on a non-success backend
-    /// status, and [`GatewayError::ModelUnavailable`] when the upstream
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, [`ProtocolError::UpstreamStatus`] on a non-success backend
+    /// status, and [`ProtocolError::ModelUnavailable`] when the upstream
     /// cannot serve rerank at all.
     async fn send_rerank(
         &self,
         req: RerankRequest,
         _upstream_model: &str,
-    ) -> Result<RerankResponse, GatewayError> {
-        Err(GatewayError::ModelUnavailable(req.model))
+    ) -> Result<RerankResponse, ProtocolError> {
+        Err(ProtocolError::ModelUnavailable(req.model))
     }
 
     /// Open a streaming chat completion for `req`, substituting
@@ -110,22 +110,22 @@ pub(crate) trait Upstream: Send + Sync {
     /// upstream connection, which is how a client disconnect cancels the
     /// upstream work.
     ///
-    /// The default is [`GatewayError::ModelUnavailable`]: upstreams without a
+    /// The default is [`ProtocolError::ModelUnavailable`]: upstreams without a
     /// streaming implementation decline the workload rather than fabricate a
     /// response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure before the stream starts, [`GatewayError::UpstreamStatus`] on
-    /// a non-success backend status, and [`GatewayError::ModelUnavailable`]
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure before the stream starts, [`ProtocolError::UpstreamStatus`] on
+    /// a non-success backend status, and [`ProtocolError::ModelUnavailable`]
     /// when the upstream cannot stream at all.
     async fn stream(
         &self,
         req: ChatRequest,
         _upstream_model: &str,
-    ) -> Result<StreamedChunks, GatewayError> {
-        Err(GatewayError::ModelUnavailable(req.model))
+    ) -> Result<StreamedChunks, ProtocolError> {
+        Err(ProtocolError::ModelUnavailable(req.model))
     }
 
     /// Explicitly release any owned resources (for example a child process) and
@@ -139,17 +139,17 @@ pub(crate) trait Upstream: Send + Sync {
     /// the sole owner (PFGL-MOD-001, PF-GW-SERVER-004).
     ///
     /// # Errors
-    /// Returns a [`LocalError`](crate::local::LocalError) when a child kill/reap
-    /// or capture-reader teardown fails, so a caller can refuse to proceed
-    /// rather than start replacements while an old child may survive.
-    fn shutdown(&self) -> Result<(), crate::local::LocalError> {
+    /// Returns a [`ShutdownError`] when a child kill/reap or capture-reader
+    /// teardown fails, so a caller can refuse to proceed rather than start
+    /// replacements while an old child may survive.
+    fn shutdown(&self) -> Result<(), ShutdownError> {
         Ok(())
     }
 }
 
 /// An OpenAI-compatible backend reached over HTTP.
 #[derive(Debug)]
-pub(crate) struct OpenAiUpstream {
+pub struct OpenAiUpstream {
     base_url: String,
     api_key: Secret,
     http: reqwest::Client,
@@ -162,7 +162,7 @@ pub(crate) struct OpenAiUpstream {
 impl OpenAiUpstream {
     /// Build an upstream for `base_url` (a trailing slash is trimmed).
     #[must_use]
-    pub(crate) fn new(base_url: &str, api_key: Secret) -> OpenAiUpstream {
+    pub fn new(base_url: &str, api_key: Secret) -> OpenAiUpstream {
         OpenAiUpstream {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
@@ -195,16 +195,16 @@ impl OpenAiUpstream {
     /// as the start of a chunk stream.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`ProtocolError::UpstreamStatus`] with a truncated body on
     /// a non-success backend status.
     async fn post(
         &self,
         client: &reqwest::Client,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<reqwest::Response, GatewayError> {
+    ) -> Result<reqwest::Response, ProtocolError> {
         let mut builder = client.post(format!("{}/{path}", self.base_url)).json(body);
         if !self.api_key.is_empty() {
             builder = builder.bearer_auth(self.api_key.expose());
@@ -213,7 +213,7 @@ impl OpenAiUpstream {
         let response = builder
             .send()
             .await
-            .map_err(GatewayError::upstream_transport)?;
+            .map_err(ProtocolError::upstream_transport)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -221,7 +221,7 @@ impl OpenAiUpstream {
                 crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY)
                     .await;
             let body: String = body.chars().take(2000).collect();
-            return Err(GatewayError::UpstreamStatus {
+            return Err(ProtocolError::UpstreamStatus {
                 status: status.as_u16(),
                 body,
             });
@@ -237,19 +237,19 @@ impl OpenAiUpstream {
     /// and cannot trigger a spurious recovery upstream (UP-003, UP-004).
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`ProtocolError::UpstreamStatus`] with a truncated body on
     /// a non-success backend status.
     async fn post_json(
         &self,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<Vec<u8>, GatewayError> {
+    ) -> Result<Vec<u8>, ProtocolError> {
         let response = self.post(&self.http, path, body).await?;
         crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
-            .map_err(GatewayError::upstream_transport)
+            .map_err(ProtocolError::upstream_transport)
     }
 }
 
@@ -267,7 +267,7 @@ impl OpenAiUpstream {
 /// Dropping the returned stream drops the upstream response, which aborts
 /// the upstream connection: that Drop chain is the entire client-disconnect
 /// cancellation mechanism.
-pub(crate) fn sse_chunks(response: reqwest::Response, requested: String) -> StreamedChunks {
+pub fn sse_chunks(response: reqwest::Response, requested: String) -> StreamedChunks {
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -322,7 +322,7 @@ pub(crate) fn sse_chunks(response: reqwest::Response, requested: String) -> Stre
                     Some(Ok(chunk)) => buffer.extend_from_slice(&chunk),
                     Some(Err(error)) => {
                         return Some((
-                            Err(GatewayError::upstream_transport(error)),
+                            Err(ProtocolError::upstream_transport(error)),
                             (bytes, buffer, requested, true),
                         ));
                     }
@@ -345,11 +345,11 @@ impl Upstream for OpenAiUpstream {
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError> {
+    ) -> Result<ChatResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("chat/completions", &req).await?;
         let mut parsed: ChatResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
         Ok(parsed)
@@ -359,11 +359,11 @@ impl Upstream for OpenAiUpstream {
         &self,
         mut req: EmbeddingRequest,
         upstream_model: &str,
-    ) -> Result<EmbeddingResponse, GatewayError> {
+    ) -> Result<EmbeddingResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("embeddings", &req).await?;
         let mut parsed: EmbeddingResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
         Ok(parsed)
@@ -373,11 +373,11 @@ impl Upstream for OpenAiUpstream {
         &self,
         mut req: RerankRequest,
         upstream_model: &str,
-    ) -> Result<RerankResponse, GatewayError> {
+    ) -> Result<RerankResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("rerank", &req).await?;
         let mut parsed: RerankResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
         Ok(parsed)
@@ -387,7 +387,7 @@ impl Upstream for OpenAiUpstream {
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<StreamedChunks, GatewayError> {
+    ) -> Result<StreamedChunks, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         req.stream = true;
         let response = self
@@ -490,7 +490,7 @@ mod tests {
             .await
             .expect_err("should fail");
         assert!(
-            matches!(err, GatewayError::UpstreamStatus { status: 500, .. }),
+            matches!(err, ProtocolError::UpstreamStatus { status: 500, .. }),
             "expected UpstreamStatus 500, got {err:?}"
         );
         let _ = handle.join();
@@ -508,7 +508,7 @@ mod tests {
                 &self,
                 _req: ChatRequest,
                 _upstream_model: &str,
-            ) -> Result<ChatResponse, GatewayError> {
+            ) -> Result<ChatResponse, ProtocolError> {
                 unreachable!("not under test")
             }
         }
@@ -518,7 +518,7 @@ mod tests {
             .await
             .expect_err("default must decline");
         match err {
-            GatewayError::ModelUnavailable(model) => assert_eq!(model, "local-chat"),
+            ProtocolError::ModelUnavailable(model) => assert_eq!(model, "local-chat"),
             other => panic!("expected ModelUnavailable, got {other:?}"),
         }
     }
@@ -567,7 +567,7 @@ mod tests {
             .await
             .expect_err("should fail");
         assert!(
-            matches!(err, GatewayError::UpstreamStatus { status: 500, .. }),
+            matches!(err, ProtocolError::UpstreamStatus { status: 500, .. }),
             "expected UpstreamStatus 500, got {err:?}"
         );
         let _ = handle.join();
@@ -586,7 +586,7 @@ mod tests {
                 &self,
                 _req: ChatRequest,
                 _upstream_model: &str,
-            ) -> Result<ChatResponse, GatewayError> {
+            ) -> Result<ChatResponse, ProtocolError> {
                 unreachable!("not under test")
             }
         }
@@ -596,7 +596,7 @@ mod tests {
             .await
             .expect_err("default must decline");
         match err {
-            GatewayError::ModelUnavailable(model) => assert_eq!(model, "local-classifier"),
+            ProtocolError::ModelUnavailable(model) => assert_eq!(model, "local-classifier"),
             other => panic!("expected ModelUnavailable, got {other:?}"),
         }
     }
@@ -615,7 +615,7 @@ mod tests {
                 &self,
                 _req: ChatRequest,
                 _upstream_model: &str,
-            ) -> Result<ChatResponse, GatewayError> {
+            ) -> Result<ChatResponse, ProtocolError> {
                 unreachable!("not under test")
             }
         }
@@ -625,7 +625,7 @@ mod tests {
             .stream(request("local-chat"), "ignored-alias")
             .await
         {
-            Err(GatewayError::ModelUnavailable(model)) => assert_eq!(model, "local-chat"),
+            Err(ProtocolError::ModelUnavailable(model)) => assert_eq!(model, "local-chat"),
             Err(other) => panic!("expected ModelUnavailable, got {other:?}"),
             Ok(_) => panic!("default must decline"),
         }
@@ -689,7 +689,7 @@ mod tests {
             .await
             .expect_err("should fail");
         assert!(
-            matches!(err, GatewayError::UpstreamStatus { status: 500, .. }),
+            matches!(err, ProtocolError::UpstreamStatus { status: 500, .. }),
             "expected UpstreamStatus 500, got {err:?}"
         );
         let _ = handle.join();
@@ -916,7 +916,7 @@ mod tests {
             .await
             .expect_err("should fail");
         match err {
-            GatewayError::UpstreamStatus { status, body } => {
+            ProtocolError::UpstreamStatus { status, body } => {
                 assert_eq!(status, 500);
                 assert_eq!(body, "backend exploded");
             }
@@ -960,7 +960,7 @@ mod tests {
             .await
             .expect_err("connect refused must fail");
         assert!(
-            matches!(err, GatewayError::UpstreamConnect(_)),
+            matches!(err, ProtocolError::UpstreamConnect(_)),
             "expected UpstreamConnect, got {err:?}"
         );
         assert_eq!(err.envelope()["error"]["code"], "upstream_connect");
@@ -983,7 +983,7 @@ mod tests {
             .await
             .expect_err("stalled server must time out");
         assert!(
-            matches!(err, GatewayError::UpstreamTransport(_)),
+            matches!(err, ProtocolError::UpstreamTransport(_)),
             "expected UpstreamTransport, got {err:?}"
         );
         assert_eq!(err.envelope()["error"]["code"], "upstream_transport");
@@ -999,7 +999,7 @@ mod tests {
         let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
         let err = upstream.send(request("m"), "u").await.expect_err("error");
         match err {
-            GatewayError::UpstreamStatus { status, body } => {
+            ProtocolError::UpstreamStatus { status, body } => {
                 assert_eq!(status, 503);
                 assert_eq!(body, exact);
             }
@@ -1013,7 +1013,7 @@ mod tests {
         let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
         let err = upstream.send(request("m"), "u").await.expect_err("error");
         match err {
-            GatewayError::UpstreamStatus { body, .. } => {
+            ProtocolError::UpstreamStatus { body, .. } => {
                 assert_eq!(body.chars().count(), 2000, "error body char-capped");
             }
             other => panic!("expected UpstreamStatus, got {other:?}"),
@@ -1032,7 +1032,7 @@ mod tests {
             .await
             .expect_err("should fail");
         assert!(
-            matches!(err, GatewayError::UpstreamProtocol(_)),
+            matches!(err, ProtocolError::UpstreamProtocol(_)),
             "expected UpstreamProtocol, got {err:?}"
         );
         let _ = handle.join();
