@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[non_exhaustive]
 pub(crate) enum LocalError {
     /// The host OS/arch has no pinned `llama-server` archive.
+    #[cfg(not(llama_cuda_embedded))]
     #[error("unsupported llama-server platform `{os}/{arch}`")]
     UnsupportedPlatform {
         /// Operating system triple fragment (`windows`, `linux`, `macos`).
@@ -83,6 +84,7 @@ pub(crate) enum LocalError {
     },
 
     /// Reading or unpacking an archive failed.
+    #[cfg(any(not(llama_cuda_embedded), test))]
     #[error("read archive `{archive}`")]
     Archive {
         /// Archive path (display form).
@@ -93,6 +95,7 @@ pub(crate) enum LocalError {
     },
 
     /// The archive did not contain the expected executable.
+    #[cfg(any(not(llama_cuda_embedded), test))]
     #[error("archive `{archive}` does not contain `{executable}`")]
     MissingExecutable {
         /// Archive path (display form).
@@ -102,6 +105,7 @@ pub(crate) enum LocalError {
     },
 
     /// The archive contained more than one matching executable.
+    #[cfg(any(not(llama_cuda_embedded), test))]
     #[error("archive `{archive}` contains more than one `{executable}`")]
     DuplicateExecutable {
         /// Archive path (display form).

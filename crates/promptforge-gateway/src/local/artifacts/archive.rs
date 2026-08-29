@@ -200,7 +200,7 @@ fn apply_archive_mode(_path: &Path, _mode: Option<u32>) -> Result<()> {
 ///
 /// # Errors
 /// Returns [`LocalError`] when the file lacks an executable bit or cannot be read.
-#[cfg(unix)]
+#[cfg(all(unix, not(llama_cuda_embedded)))]
 pub(super) fn require_executable(path: &Path, archive: &str) -> Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -221,7 +221,7 @@ pub(super) fn require_executable(path: &Path, archive: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(llama_cuda_embedded)))]
 #[expect(
     clippy::unnecessary_wraps,
     reason = "matches the fallible Unix implementation at the call site"
