@@ -134,6 +134,18 @@ pub(crate) enum ServeMode {
     Reranking,
 }
 
+/// Launch state for a speculative decoding drafter companion.
+///
+/// The resolved drafter path is owned here so a respawn re-emits the exact
+/// verified artifact without re-resolving external state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SpeculativeLaunch {
+    /// Resolved drafter GGUF path, passed as `--spec-draft-model`.
+    pub(crate) draft_model: PathBuf,
+    /// Maximum tokens drafted per step, passed as `--spec-draft-n-max`.
+    pub(crate) draft_max: u32,
+}
+
 /// Launch knobs for one gateway-owned `llama-server` child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LaunchOptions {
@@ -157,6 +169,11 @@ pub(crate) struct LaunchOptions {
     pub(crate) chat_template_file: Option<PathBuf>,
     /// The child's serving mode (`--embeddings` / `--reranking`; chat is default).
     pub(crate) serve_mode: ServeMode,
+    /// The resolved MTP drafter companion, when the model declares one.
+    pub(crate) speculative: Option<SpeculativeLaunch>,
+    /// The resolved multimodal projector GGUF path (`--mmproj`), when the
+    /// model declares one.
+    pub(crate) multimodal_projector: Option<PathBuf>,
     /// Directories prepended to the child's `PATH` (the staged CUDA bundle
     /// directory and the CUDA Toolkit runtime directory); empty for
     /// archive-installed servers.
