@@ -1,0 +1,28 @@
+[package]
+name = "promptforge-web-search-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway web-search service: the Brave Search provider client, request validation, and result post-processing"
+readme = "README.md"
+keywords = ["llm", "gateway", "openai", "proxy", "search"]
+categories = ["web-programming::http-client"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+promptforge-gateway-config.workspace = true
+promptforge-gateway-protocol.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

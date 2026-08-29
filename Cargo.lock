@@ -4001,6 +4001,7 @@ dependencies = [
  "promptforge-gateway-local",
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
+ "promptforge-web-search-service",
  "promptforge-ws-server",
  "reqwest 0.12.28",
  "serde",
@@ -4215,6 +4216,20 @@ dependencies = [
  "async-trait",
  "axum",
  "promptforge-tools",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "promptforge-web-search-service"
+version = "0.1.0"
+dependencies = [
+ "promptforge-gateway-config",
+ "promptforge-gateway-protocol",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
