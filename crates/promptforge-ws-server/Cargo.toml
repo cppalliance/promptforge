@@ -20,6 +20,7 @@ dunce.workspace = true
 futures-util.workspace = true
 open.workspace = true
 percent-encoding.workspace = true
+promptforge-gateway-protocol.workspace = true
 promptforge-transcribe.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
