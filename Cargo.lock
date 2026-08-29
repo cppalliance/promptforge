@@ -3990,6 +3990,7 @@ dependencies = [
  "futures-util",
  "indicatif",
  "open",
+ "png",
  "promptforge-core",
  "promptforge-gateway-build",
  "promptforge-gateway-config",
