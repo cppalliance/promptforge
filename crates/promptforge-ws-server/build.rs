@@ -3,15 +3,17 @@
 //! Debug builds run the UI build in place: esbuild on `ui/src/main.ts`
 //! into `ui/dist/app.js`, plus copies of the static assets
 //! (`ui/index.html`, `ui/style.css`, ...), which `rust-embed` serves from
-//! disk. Release builds instead verify the versioned artifact that
-//! `npm run package` in `ui/` placed in `ui/dist/` (bundle plus
-//! `manifest.json`) and embed it; see `build/manifest.rs` for the
-//! contract.
+//! disk. Release builds embed the versioned, minified artifact in
+//! `ui/dist/` (bundle plus `manifest.json`); when the artifact is absent
+//! or stale against the current sources, the build produces it first with
+//! `node build.mjs --package` and verifies the result, so a single
+//! `cargo build --release` is sufficient. See `build/manifest.rs` for the
+//! artifact contract.
 //!
-//! The debug path requires Node.js on `PATH` and one `npm install` in
-//! `ui/` per checkout (see the crate README). The local
-//! `ui/node_modules/.bin/esbuild` is preferred; without it the build falls
-//! back to `npx esbuild`, which may download esbuild on first use.
+//! Both paths require Node.js on `PATH` and one `npm ci` in `ui/` per
+//! checkout (see the crate README). The debug bundle prefers the local
+//! `ui/node_modules/.bin/esbuild`; without it the build falls back to
+//! `npx esbuild`, which may download esbuild on first use.
 
 #[path = "build/manifest.rs"]
 mod manifest;
@@ -73,7 +75,7 @@ fn run() -> Result<(), String> {
     );
 
     if std::env::var("PROFILE").as_deref() == Ok("release") {
-        return manifest::verify(&ui_dir);
+        return release_artifact(&ui_dir);
     }
 
     // dist/ is rebuilt from scratch so removed assets never linger in what
@@ -85,6 +87,46 @@ fn run() -> Result<(), String> {
     bundle(&ui_dir)?;
     copy_static(&ui_dir, &dist_dir)?;
     Ok(())
+}
+
+/// Release builds embed the verified artifact from `ui/dist/`. When the
+/// artifact is absent or stale against the current sources, the build
+/// produces it first and verifies the result, so one
+/// `cargo build --release` is enough. The build fails only when the
+/// artifact cannot be produced or still does not verify.
+fn release_artifact(ui_dir: &Path) -> Result<(), String> {
+    if manifest::verify(ui_dir).is_ok() {
+        return Ok(());
+    }
+    package(ui_dir)?;
+    manifest::verify(ui_dir)
+}
+
+/// Runs the packaging step (`node build.mjs --package`) in `ui/`, which
+/// rebuilds `dist/` from scratch: the layer-rule check runs through the
+/// esbuild plugin, the bundle is minified, the static files are copied,
+/// and the manifest is written. Like `check_layers`, this spawns the real
+/// `node` executable, so no `cmd /c` indirection is needed.
+fn package(ui_dir: &Path) -> Result<(), String> {
+    let output = Command::new("node")
+        .arg("build.mjs")
+        .arg("--package")
+        .current_dir(ui_dir)
+        .output()
+        .map_err(|error| {
+            format!("node could not be started: {error}; install Node.js so it is on PATH")
+        })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "the UI packaging step failed (status {}):\n{}\n{}\n\
+         If ui/node_modules is missing, run `npm ci` in {} first.",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        ui_dir.display(),
+    ))
 }
 
 /// Runs the UI layer-rule walk (`ui/check-layers.mjs`) before bundling, so
