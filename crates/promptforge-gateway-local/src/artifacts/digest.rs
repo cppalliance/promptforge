@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use promptforge_progress::ProgressHandle;
+
 use super::{INSTALL_MARKER, Result};
 use crate::error::LocalError;
 
@@ -51,14 +53,37 @@ pub(crate) fn hex_digest(hasher: Sha256) -> String {
 /// # Errors
 /// Returns [`LocalError::Io`] when the file cannot be opened or read.
 pub(super) fn file_digest(path: &Path) -> Result<String> {
+    file_digest_with_progress(path, None)
+}
+
+/// [`file_digest`] variant that reports bytes read into `progress`, when given.
+///
+/// # Errors
+/// Returns [`LocalError::Io`] when the file cannot be opened, inspected, or read.
+pub(super) fn file_digest_with_progress(
+    path: &Path,
+    progress: Option<&ProgressHandle>,
+) -> Result<String> {
     let file = File::open(path).map_err(|source| LocalError::Io {
         operation: "open cached artifact",
         path: path.to_owned(),
         source,
     })?;
+    let total = progress
+        .map(|_| {
+            file.metadata()
+                .map(|metadata| metadata.len())
+                .map_err(|source| LocalError::Io {
+                    operation: "inspect cached artifact",
+                    path: path.to_owned(),
+                    source,
+                })
+        })
+        .transpose()?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+    let mut read: u64 = 0;
     loop {
         let count = reader.read(&mut buffer).map_err(|source| LocalError::Io {
             operation: "hash cached artifact",
@@ -69,6 +94,10 @@ pub(super) fn file_digest(path: &Path) -> Result<String> {
             break;
         }
         hasher.update(&buffer[..count]);
+        read = read.saturating_add(count as u64);
+        if let (Some(handle), Some(total)) = (progress, total) {
+            handle.set_units(read, total);
+        }
     }
     Ok(hex_digest(hasher))
 }

@@ -4063,6 +4063,7 @@ dependencies = [
  "promptforge-gateway-config",
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
+ "promptforge-progress",
  "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",

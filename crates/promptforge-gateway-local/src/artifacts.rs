@@ -57,7 +57,7 @@ pub(crate) use confine::{
 pub(crate) use digest::hex_digest;
 pub use digest::parse_expected_digest;
 pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};
-pub use progress::DownloadProgress;
+pub use progress::{DownloadProgress, TreeProgress};
 
 const INSTALL_MARKER: &str = ".promptforge-install";
 /// Connect timeout for artifact downloads (bounds a stalled connect).

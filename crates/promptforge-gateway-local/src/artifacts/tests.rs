@@ -7,11 +7,13 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use super::archive::safe_archive_path;
+use promptforge_progress::{EventState, ProgressHub};
+
+use super::archive::{extract_archive_with_progress, safe_archive_path};
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
-use super::progress::{DownloadProgress, download_label, progress_for_download};
-use super::verified::{VerifyOutcome, blob_marker_path, verify_blob};
+use super::progress::{DownloadProgress, TreeProgress, download_label, progress_for_download};
+use super::verified::{VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress};
 use super::*;
 use crate::testsupport::{FakeServer, hex_sha256};
 
@@ -767,6 +769,226 @@ fn second_verification_hits_marker_without_rehash() {
     assert_eq!(first, VerifyOutcome::Hashed);
     let second = verify_blob(&root, &blob, &digest, &marker).expect("second");
     assert_eq!(second, VerifyOutcome::MarkerHit);
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn tree_progress_drives_handle_fraction_per_byte() {
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let leaf = tree.register("download", 1.0);
+    let progress = TreeProgress::new(leaf.clone());
+
+    progress.set_len(Some(200));
+    progress.inc(50);
+    assert_eq!(leaf.fraction(), 0.25);
+    progress.inc(150);
+    assert_eq!(leaf.fraction(), 1.0);
+    progress.finish();
+    assert_eq!(leaf.fraction(), 1.0);
+
+    // Without a Content-Length the leaf stays indeterminate until finish.
+    let unknown = tree.register("unknown-length", 1.0);
+    let progress = TreeProgress::new(unknown.clone());
+    progress.set_len(None);
+    progress.inc(10);
+    assert_eq!(unknown.fraction(), 0.0);
+    progress.finish();
+    assert_eq!(unknown.fraction(), 1.0);
+
+    // Abandon completes the leaf: the handle vocabulary has no failure
+    // terminal, so the owner carries failure through its own exit path.
+    let abandoned = tree.register("abandoned", 1.0);
+    let progress = TreeProgress::new(abandoned.clone());
+    progress.set_len(Some(100));
+    progress.inc(40);
+    progress.abandon();
+    assert_eq!(abandoned.fraction(), 1.0);
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn verify_blob_reports_bytes_read_during_hash() {
+    // Two full 64 KiB read chunks: 0.5 after the first, 1.0 after the second.
+    let body = vec![0xAB_u8; 128 * 1024];
+    let (dir, blob, digest, marker) = pinned_blob_fixture(&body);
+    let root = dir.path().join("cache");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("verify", 1.0);
+
+    let outcome =
+        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&leaf)).expect("verify");
+    assert_eq!(outcome, VerifyOutcome::Hashed);
+    assert_eq!(leaf.fraction(), 1.0);
+
+    let mut updates = Vec::new();
+    let mut finished = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.state {
+            EventState::Updated { fraction } => updates.push(fraction),
+            EventState::Finished { ok } => finished = ok,
+            _ => {}
+        }
+    }
+    assert_eq!(updates, vec![0.5, 1.0]);
+    assert!(finished, "the hash pass ends with a terminal event");
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn verify_blob_marker_hit_completes_the_leaf_without_updates() {
+    let body = b"blob-bytes";
+    let (dir, blob, digest, marker) = pinned_blob_fixture(body);
+    let root = dir.path().join("cache");
+    let first = verify_blob(&root, &blob, &digest, &marker).expect("first verify");
+    assert_eq!(first, VerifyOutcome::Hashed);
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("verify", 1.0);
+
+    let outcome =
+        verify_blob_with_progress(&root, &blob, &digest, &marker, Some(&leaf)).expect("verify");
+    assert_eq!(outcome, VerifyOutcome::MarkerHit);
+    assert_eq!(leaf.fraction(), 1.0);
+
+    let mut updates = 0;
+    let mut finished = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.state {
+            EventState::Updated { .. } => updates += 1,
+            EventState::Finished { ok } => finished = ok,
+            _ => {}
+        }
+    }
+    assert_eq!(updates, 0, "a marker hit reads nothing and reports nothing");
+    assert!(finished, "a marker hit still ends with a terminal event");
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn verify_blob_completes_the_leaf_before_a_digest_mismatch() {
+    let body = b"blob-bytes";
+    let (dir, blob, _digest, marker) = pinned_blob_fixture(body);
+    let root = dir.path().join("cache");
+    let wrong = hex_sha256(b"other-bytes");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("verify", 1.0);
+
+    let result = verify_blob_with_progress(&root, &blob, &wrong, &marker, Some(&leaf));
+    assert!(matches!(result, Err(LocalError::DigestMismatch { .. })));
+    assert_eq!(leaf.fraction(), 1.0);
+
+    let mut finished = false;
+    while let Ok(event) = rx.try_recv() {
+        if let EventState::Finished { ok } = event.state {
+            finished = ok;
+        }
+    }
+    assert!(
+        finished,
+        "the hash pass ends with a terminal event even on mismatch"
+    );
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn extract_zip_reports_entry_counts() {
+    use zip::write::SimpleFileOptions;
+
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("bundle.zip");
+    {
+        let file = std::fs::File::create(&archive).expect("create archive");
+        let mut writer = zip::ZipWriter::new(file);
+        for index in 0..4 {
+            writer
+                .start_file(format!("file-{index}.txt"), SimpleFileOptions::default())
+                .expect("start entry");
+            writer.write_all(b"data").expect("write entry");
+        }
+        writer.finish().expect("finish zip");
+    }
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("extract", 1.0);
+
+    extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&leaf)).expect("extract");
+    assert_eq!(leaf.fraction(), 1.0);
+
+    let mut updates = Vec::new();
+    let mut finished = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.state {
+            EventState::Updated { fraction } => updates.push(fraction),
+            EventState::Finished { ok } => finished = ok,
+            _ => {}
+        }
+    }
+    assert_eq!(updates, vec![0.25, 0.5, 0.75, 1.0]);
+    assert!(finished, "extraction ends with a terminal event");
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn extract_tar_gz_reports_entry_counts() {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("bundle.tar.gz");
+    {
+        let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        for name in ["a.txt", "b.txt"] {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_size(4);
+            header.set_mode(0o644);
+            header.set_path(name).expect("set path");
+            header.set_cksum();
+            builder.append(&header, &b"data"[..]).expect("append entry");
+        }
+        let bytes = builder
+            .into_inner()
+            .expect("finish tar")
+            .finish()
+            .expect("finish gz");
+        std::fs::write(&archive, bytes).expect("write archive");
+    }
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("extract", 1.0);
+
+    extract_archive_with_progress(&archive, &dest, ArchiveKind::TarGz, Some(&leaf))
+        .expect("extract");
+    assert_eq!(leaf.fraction(), 1.0);
+
+    let mut updates = Vec::new();
+    let mut finished = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.state {
+            EventState::Updated { fraction } => updates.push(fraction),
+            EventState::Finished { ok } => finished = ok,
+            _ => {}
+        }
+    }
+    assert_eq!(updates, vec![0.5, 1.0]);
+    assert!(finished, "extraction ends with a terminal event");
 }
 
 #[test]

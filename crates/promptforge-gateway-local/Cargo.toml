@@ -19,6 +19,7 @@ indicatif.workspace = true
 promptforge-gateway-config.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true
+promptforge-progress.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
