@@ -8,10 +8,10 @@
 use std::time::Duration;
 
 /// Maximum bytes read from a non-success (error) body, kept for diagnostics.
-pub(crate) const MAX_ERROR_BODY: usize = 64 * 1024;
+pub const MAX_ERROR_BODY: usize = 64 * 1024;
 
 /// Maximum bytes read from a success JSON body before decoding.
-pub(crate) const MAX_JSON_BODY: usize = 4 * 1024 * 1024;
+pub const MAX_JSON_BODY: usize = 4 * 1024 * 1024;
 
 /// Connect timeout for outbound calls.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -20,7 +20,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Build a reqwest client with bounded connect and whole-request timeouts.
-pub(crate) fn bounded_client() -> reqwest::Client {
+#[must_use]
+pub fn bounded_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
@@ -34,7 +35,8 @@ pub(crate) fn bounded_client() -> reqwest::Client {
 /// would kill any SSE stream that outlives it. The streaming path therefore
 /// bounds only the connect; once the stream is open, chunk flow is the
 /// liveness signal.
-pub(crate) fn streaming_client() -> reqwest::Client {
+#[must_use]
+pub fn streaming_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .build()
@@ -45,7 +47,7 @@ pub(crate) fn streaming_client() -> reqwest::Client {
 ///
 /// The body is streamed chunk by chunk so an oversized or stalled response never
 /// allocates beyond `cap`. Returns a lossy UTF-8 string of the bytes read.
-pub(crate) async fn read_body_capped(response: reqwest::Response, cap: usize) -> String {
+pub async fn read_body_capped(response: reqwest::Response, cap: usize) -> String {
     let mut response = response;
     let mut buffer: Vec<u8> = Vec::new();
     loop {
@@ -76,7 +78,7 @@ pub(crate) async fn read_body_capped(response: reqwest::Response, cap: usize) ->
 ///
 /// # Errors
 /// Returns the underlying [`reqwest::Error`] when streaming a chunk fails.
-pub(crate) async fn read_bytes_capped(
+pub async fn read_bytes_capped(
     response: reqwest::Response,
     cap: usize,
 ) -> Result<Vec<u8>, reqwest::Error> {

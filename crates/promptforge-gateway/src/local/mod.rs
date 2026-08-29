@@ -24,6 +24,7 @@ use std::time::Duration;
 use crate::queue::DominionQueue;
 use crate::routing::{Endpoint, Model, dominion_queues};
 use promptforge_gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingMode};
+use promptforge_gateway_protocol::ShutdownError;
 
 pub(crate) use error::LocalError;
 
@@ -196,9 +197,9 @@ impl LocalRuntime {
     /// earlier one fails, so one stuck child never strands the rest.
     ///
     /// # Errors
-    /// Returns the first [`LocalError`] a child teardown produced.
-    pub(crate) fn shutdown(&self) -> Result<(), LocalError> {
-        let mut first_error: Option<LocalError> = None;
+    /// Returns the first [`ShutdownError`] a child teardown produced.
+    pub(crate) fn shutdown(&self) -> Result<(), ShutdownError> {
+        let mut first_error: Option<ShutdownError> = None;
         for model in &self.models {
             if let Err(error) = model.endpoint.upstream.shutdown() {
                 first_error.get_or_insert(error);

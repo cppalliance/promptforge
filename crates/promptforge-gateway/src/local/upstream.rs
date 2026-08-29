@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use promptforge_gateway_protocol::{ProtocolError, ShutdownError};
 
-use crate::error::GatewayError;
 use crate::local::error::LocalError;
 use crate::local::server::{LaunchOptions, ServerGuard};
 use crate::upstream::Upstream;
@@ -210,16 +210,16 @@ impl LocalUpstream {
     /// start of a chunk stream.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`ProtocolError::UpstreamStatus`] with a truncated body on
     /// a non-success child status.
     async fn post(
         &self,
         client: &reqwest::Client,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<reqwest::Response, GatewayError> {
+    ) -> Result<reqwest::Response, ProtocolError> {
         let (base_url, api_key) = {
             let guard = self
                 .inner
@@ -239,7 +239,7 @@ impl LocalUpstream {
         let response = builder
             .send()
             .await
-            .map_err(GatewayError::upstream_transport)?;
+            .map_err(ProtocolError::upstream_transport)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -247,10 +247,7 @@ impl LocalUpstream {
                 crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY)
                     .await;
             let body: String = body.chars().take(2000).collect();
-            return Err(GatewayError::UpstreamStatus {
-                status: status.as_u16(),
-                body,
-            });
+            return Err(ProtocolError::upstream_status(status.as_u16(), body));
         }
         Ok(response)
     }
@@ -263,30 +260,30 @@ impl LocalUpstream {
     /// that would trigger a spurious child respawn (UPSTREAM-003).
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
-    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
-    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// Returns [`ProtocolError::UpstreamConnect`] when the connection itself
+    /// fails, [`ProtocolError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`ProtocolError::UpstreamStatus`] with a truncated body on
     /// a non-success child status.
     async fn post_json(
         &self,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<Vec<u8>, GatewayError> {
+    ) -> Result<Vec<u8>, ProtocolError> {
         let response = self.post(&self.http, path, body).await?;
         crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
-            .map_err(GatewayError::upstream_transport)
+            .map_err(ProtocolError::upstream_transport)
     }
 
     async fn forward(
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError> {
+    ) -> Result<ChatResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("chat/completions", &req).await?;
         let mut parsed: ChatResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
     }
@@ -295,11 +292,11 @@ impl LocalUpstream {
         &self,
         mut req: EmbeddingRequest,
         upstream_model: &str,
-    ) -> Result<EmbeddingResponse, GatewayError> {
+    ) -> Result<EmbeddingResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("embeddings", &req).await?;
         let mut parsed: EmbeddingResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
     }
@@ -308,11 +305,11 @@ impl LocalUpstream {
         &self,
         mut req: RerankRequest,
         upstream_model: &str,
-    ) -> Result<RerankResponse, GatewayError> {
+    ) -> Result<RerankResponse, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         let bytes = self.post_json("rerank", &req).await?;
         let mut parsed: RerankResponse =
-            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+            serde_json::from_slice(&bytes).map_err(ProtocolError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
     }
@@ -321,7 +318,7 @@ impl LocalUpstream {
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<crate::upstream::StreamedChunks, GatewayError> {
+    ) -> Result<crate::upstream::StreamedChunks, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         req.stream = true;
         let response = self
@@ -335,7 +332,7 @@ impl LocalUpstream {
     /// Recovery runs on a plain OS thread so reqwest::blocking readiness (used
     /// by [`ServerGuard::respawn`]) never nests a Tokio runtime inside the
     /// gateway's async runtime.
-    async fn recover_on_transport(&self, error: GatewayError) -> RecoveryOutcome {
+    async fn recover_on_transport(&self, error: ProtocolError) -> RecoveryOutcome {
         let inner = Arc::clone(&self.inner);
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
@@ -348,10 +345,10 @@ impl LocalUpstream {
 /// True when a forward failure is a transport-layer death - connect or
 /// mid-flight - that a child respawn might cure. A protocol or status
 /// failure means the child answered, so respawning would not help.
-fn is_transport_failure(error: &GatewayError) -> bool {
+fn is_transport_failure(error: &ProtocolError) -> bool {
     matches!(
         error,
-        GatewayError::UpstreamTransport(_) | GatewayError::UpstreamConnect(_)
+        ProtocolError::UpstreamTransport(..) | ProtocolError::UpstreamConnect(..)
     )
 }
 
@@ -361,7 +358,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError> {
+    ) -> Result<ChatResponse, ProtocolError> {
         match self.forward(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
             Err(error) if is_transport_failure(&error) => {
@@ -378,7 +375,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: EmbeddingRequest,
         upstream_model: &str,
-    ) -> Result<EmbeddingResponse, GatewayError> {
+    ) -> Result<EmbeddingResponse, ProtocolError> {
         match self.forward_embeddings(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
             Err(error) if is_transport_failure(&error) => {
@@ -395,7 +392,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: RerankRequest,
         upstream_model: &str,
-    ) -> Result<RerankResponse, GatewayError> {
+    ) -> Result<RerankResponse, ProtocolError> {
         match self.forward_rerank(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
             Err(error) if is_transport_failure(&error) => {
@@ -412,7 +409,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<crate::upstream::StreamedChunks, GatewayError> {
+    ) -> Result<crate::upstream::StreamedChunks, ProtocolError> {
         // Recovery applies only to a pre-stream transport failure: once the
         // chunk stream is open, a mid-stream death surfaces as an `Err` item
         // rather than triggering a respawn under a live response.
@@ -428,8 +425,8 @@ impl Upstream for LocalUpstream {
         }
     }
 
-    fn shutdown(&self) -> Result<(), LocalError> {
-        self.teardown()
+    fn shutdown(&self) -> Result<(), ShutdownError> {
+        self.teardown().map_err(ShutdownError::teardown)
     }
 }
 
@@ -438,7 +435,7 @@ enum RecoveryOutcome {
     /// The child was respawned; retry the forward.
     Retry,
     /// Recovery did not (or could not) restore the child; surface this error.
-    Failed(GatewayError),
+    Failed(ProtocolError),
 }
 
 /// Maps a recovery worker's reply (or a dropped reply) to a [`RecoveryOutcome`].
@@ -448,14 +445,14 @@ enum RecoveryOutcome {
 /// without a live child (UPSTREAM-005).
 fn map_recovery_reply(
     reply: Result<Result<bool, LocalError>, tokio::sync::oneshot::error::RecvError>,
-    original: GatewayError,
+    original: ProtocolError,
 ) -> RecoveryOutcome {
     match reply {
         Ok(Ok(true)) => RecoveryOutcome::Retry,
         Ok(Ok(false)) => RecoveryOutcome::Failed(original),
-        Ok(Err(local)) => RecoveryOutcome::Failed(GatewayError::UpstreamTransport(Box::new(local))),
-        Err(_) => RecoveryOutcome::Failed(GatewayError::UpstreamTransport(Box::new(
-            std::io::Error::other("llama-server respawn thread dropped before reporting"),
+        Ok(Err(local)) => RecoveryOutcome::Failed(ProtocolError::transport(local)),
+        Err(_) => RecoveryOutcome::Failed(ProtocolError::transport(std::io::Error::other(
+            "llama-server respawn thread dropped before reporting",
         ))),
     }
 }
@@ -464,10 +461,8 @@ fn map_recovery_reply(
 mod tests {
     use super::*;
 
-    fn transport_err() -> GatewayError {
-        GatewayError::UpstreamTransport(Box::new(std::io::Error::other(
-            "original transport failure",
-        )))
+    fn transport_err() -> ProtocolError {
+        ProtocolError::transport(std::io::Error::other("original transport failure"))
     }
 
     #[test]
@@ -475,10 +470,10 @@ mod tests {
         // A dead child looks the same whether the connection was refused or
         // died mid-flight: both transport variants trigger recovery, while a
         // protocol failure means the child answered and must not respawn.
-        let connect = GatewayError::UpstreamConnect(Box::new(std::io::Error::other("refused")));
+        let connect = ProtocolError::connect(std::io::Error::other("refused"));
         assert!(is_transport_failure(&connect));
         assert!(is_transport_failure(&transport_err()));
-        let protocol = GatewayError::upstream_protocol(std::io::Error::other("bad json"));
+        let protocol = ProtocolError::upstream_protocol(std::io::Error::other("bad json"));
         assert!(!is_transport_failure(&protocol));
     }
 
@@ -492,19 +487,19 @@ mod tests {
         // Still-alive child (no respawn) -> return the original transport error.
         assert!(matches!(
             map_recovery_reply(Ok(Ok(false)), transport_err()),
-            RecoveryOutcome::Failed(GatewayError::UpstreamTransport(_))
+            RecoveryOutcome::Failed(ProtocolError::UpstreamTransport(..))
         ));
         // Recovery error -> wrapped as a transport error.
         assert!(matches!(
             map_recovery_reply(Ok(Err(LocalError::TeardownTimeout)), transport_err()),
-            RecoveryOutcome::Failed(GatewayError::UpstreamTransport(_))
+            RecoveryOutcome::Failed(ProtocolError::UpstreamTransport(..))
         ));
         // Dropped recovery reply -> synthesized transport error, never a hang.
         let (tx, rx) = tokio::sync::oneshot::channel::<std::result::Result<bool, LocalError>>();
         drop(tx);
         let dropped = rx.await;
         match map_recovery_reply(dropped, transport_err()) {
-            RecoveryOutcome::Failed(GatewayError::UpstreamTransport(source)) => {
+            RecoveryOutcome::Failed(ProtocolError::UpstreamTransport(source, ..)) => {
                 assert!(
                     source.to_string().contains("dropped before reporting"),
                     "unexpected message: {source}"

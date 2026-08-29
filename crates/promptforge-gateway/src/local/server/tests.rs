@@ -958,10 +958,10 @@ fn local_upstream_send_rerank_routes_through_child() {
 fn local_upstream_send_honors_cooldown_after_failed_respawn() {
     // UPSTREAM-005: a failed respawn records the attempt time; an immediate
     // second failure is short-circuited by the cooldown (no respawn storm).
-    use crate::error::GatewayError;
     use crate::local::upstream::LocalUpstream;
     use crate::upstream::Upstream;
     use crate::wire::ChatRequest;
+    use promptforge_gateway_protocol::ProtocolError;
     use serde_json::Map;
 
     let port = free_port().expect("select free port");
@@ -1040,7 +1040,7 @@ fn local_upstream_send_honors_cooldown_after_failed_respawn() {
             .unwrap_or_else(std::sync::PoisonError::into_inner),
         2
     );
-    assert!(matches!(err1, GatewayError::UpstreamTransport(_)));
+    assert!(matches!(err1, ProtocolError::UpstreamTransport(..)));
     // The cooldown error is preserved through the transport wrapper.
     let mut current: Option<&(dyn std::error::Error + 'static)> = Some(&err2);
     let mut saw_cooldown = false;

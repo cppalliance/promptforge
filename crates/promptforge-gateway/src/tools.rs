@@ -515,12 +515,16 @@ mod tests {
 
     #[test]
     fn prefix_web_search_upstream_prefixes_status_body() {
-        let err = prefix_web_search_upstream(GatewayError::UpstreamStatus {
-            status: 429,
-            body: "rate limited".to_string(),
-        });
+        let err = prefix_web_search_upstream(GatewayError::from(
+            promptforge_gateway_protocol::ProtocolError::upstream_status(
+                429,
+                "rate limited".to_string(),
+            ),
+        ));
         match err {
-            GatewayError::UpstreamStatus { body, .. } => {
+            GatewayError::Protocol(
+                promptforge_gateway_protocol::ProtocolError::UpstreamStatus { body, .. },
+            ) => {
                 assert_eq!(body, "web_search: rate limited");
             }
             other => panic!("expected UpstreamStatus, got {other:?}"),

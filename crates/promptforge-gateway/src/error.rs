@@ -4,6 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use promptforge_gateway_config::ModelKind;
+use promptforge_gateway_protocol::ProtocolError;
 
 /// A request-time failure, rendered to the client as an OpenAI error envelope.
 #[derive(Debug, thiserror::Error)]
@@ -31,14 +32,6 @@ pub(crate) enum GatewayError {
         actual: ModelKind,
     },
 
-    /// The resolved model's upstream cannot serve the route's workload (for
-    /// example a local chat server asked for embeddings). Distinct from
-    /// [`GatewayError::KindMismatch`]: the kind matches, but the backing
-    /// upstream has no implementation for it.
-    #[non_exhaustive]
-    #[error("model {0} is not available for this workload")]
-    ModelUnavailable(String),
-
     /// A tool endpoint was reached but the tool is not configured.
     #[non_exhaustive]
     #[error("tool not configured: {0}")]
@@ -49,45 +42,11 @@ pub(crate) enum GatewayError {
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
-    /// The upstream backend could not be reached after the request may
-    /// have left the gateway (a mid-flight read or timeout failure). The
-    /// provider may have received and billed it, so it is not safe to
-    /// retry blindly.
-    #[non_exhaustive]
-    #[error("upstream transport error")]
-    UpstreamTransport(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// The connection to the upstream backend itself failed (refused,
-    /// DNS, TLS handshake): the request never left the gateway, nothing
-    /// was billed, and a retry is safe.
-    ///
-    /// Distinct from [`GatewayError::UpstreamTransport`], where the
-    /// request may have reached the provider. A timeout is never connect:
-    /// it may have reached the provider.
-    #[non_exhaustive]
-    #[error("upstream connect error")]
-    UpstreamConnect(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// The upstream returned a success status but a body that could not be
-    /// decoded into the expected shape.
-    ///
-    /// Distinct from [`GatewayError::UpstreamTransport`] so a decode failure
-    /// (a protocol problem) never masquerades as a transport death and triggers
-    /// a spurious local `llama-server` respawn (UP-004, UPSTREAM-003). The cause
-    /// is preserved via `source()`.
-    #[non_exhaustive]
-    #[error("upstream protocol error")]
-    UpstreamProtocol(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// The upstream backend returned a non-success status.
-    #[non_exhaustive]
-    #[error("upstream returned {status}")]
-    UpstreamStatus {
-        /// The status code the backend returned.
-        status: u16,
-        /// The (truncated) upstream body, for diagnostics.
-        body: String,
-    },
+    /// A transport- or protocol-level failure from the upstream seam. The
+    /// variants live in [`ProtocolError`]; the gateway wraps them so a route
+    /// handler deals with one error type.
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
 
     /// The endpoint's waiting queue is full.
     #[error("queue full")]
@@ -149,28 +108,24 @@ impl From<crate::queue::AdmitError> for GatewayError {
 }
 
 impl GatewayError {
-    /// Wrap a transport error, hiding its concrete type from the public API.
+    /// Wrap a transport error from the upstream seam.
     ///
     /// A connect failure (`err.is_connect()`) means the request never left
-    /// the gateway and is classified [`GatewayError::UpstreamConnect`];
-    /// anything else - including every timeout, which may have reached the
-    /// provider - stays [`GatewayError::UpstreamTransport`].
+    /// the gateway and is classified `upstream_connect`; anything else -
+    /// including every timeout, which may have reached the provider - stays
+    /// `upstream_transport`. See [`ProtocolError::upstream_transport`].
     #[must_use]
     pub(crate) fn upstream_transport(source: reqwest::Error) -> GatewayError {
-        if source.is_connect() {
-            GatewayError::UpstreamConnect(Box::new(source))
-        } else {
-            GatewayError::UpstreamTransport(Box::new(source))
-        }
+        GatewayError::Protocol(ProtocolError::upstream_transport(source))
     }
 
     /// Wrap a body-decode failure as a protocol error (not a transport error),
-    /// preserving the cause via `source()`.
+    /// preserving the cause via `source()`. See [`ProtocolError::upstream_protocol`].
     #[must_use]
     pub(crate) fn upstream_protocol(
         source: impl std::error::Error + Send + Sync + 'static,
     ) -> GatewayError {
-        GatewayError::UpstreamProtocol(Box::new(source))
+        GatewayError::Protocol(ProtocolError::upstream_protocol(source))
     }
 
     /// Wrap a profile-switch failure at `stage`, preserving the cause.
@@ -209,11 +164,6 @@ impl GatewayError {
                 "invalid_request_error",
                 "kind_mismatch",
             ),
-            GatewayError::ModelUnavailable(_) => (
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                "model_unavailable",
-            ),
             GatewayError::ToolNotConfigured(_) => {
                 (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
             }
@@ -222,25 +172,7 @@ impl GatewayError {
                 "invalid_request_error",
                 "malformed_request",
             ),
-            GatewayError::UpstreamTransport(_) => (
-                StatusCode::BAD_GATEWAY,
-                "server_error",
-                "upstream_transport",
-            ),
-            GatewayError::UpstreamConnect(_) => {
-                (StatusCode::BAD_GATEWAY, "server_error", "upstream_connect")
-            }
-            GatewayError::UpstreamProtocol(_) => {
-                (StatusCode::BAD_GATEWAY, "server_error", "upstream_protocol")
-            }
-            GatewayError::UpstreamStatus { status, .. } => {
-                let code = StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY);
-                if code.is_client_error() {
-                    (code, "invalid_request_error", "upstream_client_error")
-                } else {
-                    (StatusCode::BAD_GATEWAY, "server_error", "upstream_error")
-                }
-            }
+            GatewayError::Protocol(error) => error.classify(),
             GatewayError::QueueFull => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
@@ -335,31 +267,11 @@ mod tests {
                 ),
             ),
             (
-                GatewayError::ModelUnavailable("m".to_owned()),
-                (
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request_error",
-                    "model_unavailable",
-                ),
-            ),
-            (
                 GatewayError::QueueFull,
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server_error",
                     "queue_full",
-                ),
-            ),
-            (
-                GatewayError::UpstreamConnect(Box::new(std::io::Error::other("refused"))),
-                (StatusCode::BAD_GATEWAY, "server_error", "upstream_connect"),
-            ),
-            (
-                GatewayError::UpstreamTransport(Box::new(std::io::Error::other("reset"))),
-                (
-                    StatusCode::BAD_GATEWAY,
-                    "server_error",
-                    "upstream_transport",
                 ),
             ),
             (
@@ -385,16 +297,21 @@ mod tests {
     }
 
     #[test]
-    fn upstream_protocol_is_502_and_not_a_transport_error() {
+    fn protocol_error_delegates_classify_and_display() {
+        // The protocol crate owns the transport/protocol variants and their
+        // envelope mapping; the gateway wrapper delegates both and stays
+        // transparent in the source chain.
         let error = GatewayError::upstream_protocol(std::io::Error::other("bad json"));
+        assert!(matches!(error, GatewayError::Protocol(_)));
         assert_eq!(
             error.classify(),
             (StatusCode::BAD_GATEWAY, "server_error", "upstream_protocol")
         );
-        // Must not be a transport error, so a decode failure never triggers a
-        // local child respawn (UP-004, UPSTREAM-003).
-        assert!(!matches!(error, GatewayError::UpstreamTransport(_)));
-        assert!(error.source().is_some());
+        assert_eq!(error.to_string(), "upstream protocol error");
+        assert_eq!(
+            error.source().map(ToString::to_string).as_deref(),
+            Some("bad json")
+        );
     }
 
     #[test]

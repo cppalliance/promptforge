@@ -27,6 +27,7 @@ indicatif.workspace = true
 open = { workspace = true, optional = true }
 promptforge-core.workspace = true
 promptforge-gateway-config.workspace = true
+promptforge-gateway-protocol.workspace = true
 promptforge-ws-server = { workspace = true, optional = true }
 rand.workspace = true
 serde.workspace = true

@@ -21,8 +21,7 @@ use promptforge_gateway_config::{Capabilities, ModelKind, ThinkingMode};
 
 /// An incoming chat completions request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ChatRequest {
+pub struct ChatRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
     /// The conversation messages, passed through to the backend verbatim.
@@ -71,7 +70,7 @@ impl ChatRequest {
     /// Returns a static reason string when the model is empty, `messages` is
     /// empty, a message fails the minimal shape check, or `rest` collides with a
     /// named field.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         if self.model.trim().is_empty() {
             return Err("model must not be empty");
         }
@@ -117,8 +116,7 @@ fn validate_message(message: &Value) -> Result<(), &'static str> {
 
 /// An outgoing chat completions response.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ChatResponse {
+pub struct ChatResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
     /// The completion choices, passed through from the backend verbatim.
@@ -143,7 +141,7 @@ impl ChatResponse {
     /// # Errors
     /// Returns a static reason string when a choice is not a minimally-shaped
     /// object or a reserved key collides with the flattened `rest` map.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         for choice in &self.choices {
             validate_choice(choice)?;
         }
@@ -186,8 +184,7 @@ fn validate_choice(choice: &Value) -> Result<(), &'static str> {
 /// terminal `[DONE]` sentinel is not JSON and never deserializes into this
 /// type; the relay special-cases it before parsing.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ChatChunk {
+pub struct ChatChunk {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
     /// The partial choices for this chunk.
@@ -210,7 +207,7 @@ impl ChatChunk {
     ///
     /// # Errors
     /// Returns a static reason string when the chunk carries no choices.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         if self.choices.is_empty() {
             return Err("upstream chunk has no choices");
         }
@@ -222,8 +219,7 @@ impl ChatChunk {
 /// the incremental payload (`role` on the first chunk, content or tool-call
 /// fragments thereafter).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ChatChunkChoice {
+pub struct ChatChunkChoice {
     /// The completion choice this delta belongs to.
     pub index: u32,
     /// The incremental payload, kept as opaque JSON so every field the
@@ -238,7 +234,7 @@ pub(crate) struct ChatChunkChoice {
 /// The text to embed: one string or a batch of strings (OpenAI shape).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
-pub(crate) enum EmbeddingInput {
+pub enum EmbeddingInput {
     /// A single input string.
     One(String),
     /// A batch of input strings.
@@ -247,8 +243,7 @@ pub(crate) enum EmbeddingInput {
 
 /// An incoming embeddings request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct EmbeddingRequest {
+pub struct EmbeddingRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
     /// The text to embed.
@@ -275,7 +270,7 @@ impl EmbeddingRequest {
     /// # Errors
     /// Returns a static reason string when the model is empty, the input batch
     /// is empty, or `rest` collides with a named field.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         if self.model.trim().is_empty() {
             return Err("model must not be empty");
         }
@@ -294,8 +289,7 @@ impl EmbeddingRequest {
 
 /// An outgoing embeddings response.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct EmbeddingResponse {
+pub struct EmbeddingResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
     /// The embedding entries, passed through from the backend verbatim.
@@ -319,7 +313,7 @@ impl EmbeddingResponse {
     /// # Errors
     /// Returns a static reason string when an entry is not a minimally-shaped
     /// object or a reserved key collides with the flattened `rest` map.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         for entry in &self.data {
             let object = entry
                 .as_object()
@@ -344,8 +338,7 @@ impl EmbeddingResponse {
 /// An incoming rerank request (the llama-server/vLLM/Jina shape: a query and
 /// a document set in, ranked relevance scores out).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct RerankRequest {
+pub struct RerankRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
     /// The query each document is scored against.
@@ -374,7 +367,7 @@ impl RerankRequest {
     /// # Errors
     /// Returns a static reason string when the model or query is empty, the
     /// document set is empty, or `rest` collides with a named field.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         if self.model.trim().is_empty() {
             return Err("model must not be empty");
         }
@@ -396,8 +389,7 @@ impl RerankRequest {
 
 /// An outgoing rerank response.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub(crate) struct RerankResponse {
+pub struct RerankResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
     /// The ranked results, passed through from the backend verbatim.
@@ -422,7 +414,7 @@ impl RerankResponse {
     /// # Errors
     /// Returns a static reason string when a result is not a minimally-shaped
     /// object or a reserved key collides with the flattened `rest` map.
-    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         for result in &self.results {
             let object = result
                 .as_object()
@@ -446,8 +438,7 @@ impl RerankResponse {
 
 /// The OpenAI-shaped model list returned by `GET /v1/models`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ModelsResponse {
+pub struct ModelsResponse {
     /// Always `"list"`.
     pub object: &'static str,
     /// One entry per configured `[[model]]`, in config order.
@@ -456,8 +447,7 @@ pub(crate) struct ModelsResponse {
 
 /// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[non_exhaustive]
-pub(crate) struct ModelInfo {
+pub struct ModelInfo {
     /// The caller-facing model name (`[[model]].name`).
     pub id: String,
     /// Always `"model"`.
