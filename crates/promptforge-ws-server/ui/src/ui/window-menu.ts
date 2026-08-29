@@ -583,6 +583,12 @@ export function setupWindowMenus(options: {
   document.addEventListener("pointerdown", onPointerDown);
   store.add(toDisposable(() => document.removeEventListener("pointerdown", onPointerDown)));
 
+  // Close the menu when the window loses focus (Alt+Tab, taskbar click,
+  // notification popup) so a stale popover never covers a returned window.
+  const onWindowBlur = (): void => closeMenu();
+  window.addEventListener("blur", onWindowBlur);
+  store.add(toDisposable(() => window.removeEventListener("blur", onWindowBlur)));
+
   const onKeydown = (event: KeyboardEvent): void => {
     if (openId === null) {
       return;

@@ -648,6 +648,22 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   check("the shared set dispatches the workshop toggle", stats().workshopToggles === 1);
 }
 
+// --- Window blur closes the open menu ----------------------------------------
+
+{
+  const { window, menus, isOpen } = scenario();
+  menus.file.click();
+  check("menu is open before blur", isOpen("file"));
+  window.dispatchEvent(new window.Event("blur"));
+  check("window blur closes the open menu", !isOpen("file"));
+}
+
+{
+  const { window, menus, isOpen } = scenario();
+  window.dispatchEvent(new window.Event("blur"));
+  check("blur with no menu open is a harmless no-op", !isOpen("file") && !isOpen("edit"));
+}
+
 // --- Browser mode: popovers wired, native window commands inert --------------
 
 {
