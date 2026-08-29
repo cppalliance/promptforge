@@ -4211,7 +4211,9 @@ name = "promptforge-transcribe"
 version = "0.1.0"
 dependencies = [
  "hound",
+ "promptforge-progress",
  "promptforge-transcribe",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
