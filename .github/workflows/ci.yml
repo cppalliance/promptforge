@@ -33,22 +33,37 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
-      # promptforge-gateway is excluded from the blanket commands: --all-features
-      # would enable workshop-cuda, which needs a CUDA Toolkit these runners do
-      # not have. Its non-CUDA surface is exercised by the gateway steps below.
+      # promptforge-gateway and promptforge-transcribe are excluded from the
+      # blanket commands: --all-features would enable workshop-cuda and the
+      # transcription engine's cuda feature, which need a CUDA Toolkit these
+      # runners do not have. Their non-CUDA surfaces are exercised by the
+      # dedicated steps below.
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
+        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --doc
+        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe
+
+      # The transcription engine without its cuda feature: whisper then builds
+      # its CPU backend, which needs no toolkit.
+      - name: Clippy (transcribe)
+        run: cargo clippy -p promptforge-transcribe --all-targets -- -D warnings
+
+      - name: Test (transcribe)
+        run: cargo test --locked -p promptforge-transcribe
+
+      - name: Docs (transcribe)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps -p promptforge-transcribe
 
       # The workshop feature hosts the ws-server UI; its build script bundles
       # the UI with esbuild, which needs the node_modules installed above.
@@ -93,6 +108,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -107,13 +124,18 @@ jobs:
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
-          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
+          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
+          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
 
       - name: Build and test gateway on MSRV
         run: |
           cargo build --locked -p promptforge-gateway --features workshop
           cargo test --locked -p promptforge-gateway --features workshop
+
+      - name: Build and test transcribe on MSRV
+        run: |
+          cargo build --locked -p promptforge-transcribe
+          cargo test --locked -p promptforge-transcribe
 
   supply-chain:
     runs-on: ubuntu-latest
