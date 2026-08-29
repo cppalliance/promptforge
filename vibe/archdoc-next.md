@@ -92,3 +92,5 @@
 - [2026-08-28-1-fix-open-vibe-findings] single boot parse: Gateway startup resolves the include chain once for both server and Workshop boot sections.
 - [2026-08-28-2-coroutine-protocol-executor] cooperative scheduler boundary: One prompt run interleaves chains only at host I/O yields while keeping scheduler state exclusively owned.
 - [2026-08-28-3-digest-marker-child-priority] child process priority: Below-normal llama-server priority improves CPU and I/O responsiveness but cannot cure display-driver contention.
+- [2026-08-28-4-cuda-llama-provisioning] embedded native bundle: A canonical manifest binds source, toolchain, target, options, dependencies, and file digests before atomic staging.
+- [2026-08-28-4-cuda-llama-provisioning] explicit companion artifacts: Draft and projector models carry independent sources and pins through the same provision and respawn lifecycle.

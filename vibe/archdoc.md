@@ -36,7 +36,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A79. Model stream channels retain their semantics end to end; reasoning is neither dropped nor folded into answer content.
 
-- A80. Workshop UI dependencies flow from ui to services to base; main.ts alone composes layers and builds reject reverse edges.
 
 - A82. Chat replies are ordered durable per-request traffic; status, catalog, and interim transcription are complete ephemeral snapshots.
 
@@ -51,6 +50,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
 
 - A88. Cached artifacts skip hashing only when digest, size, and mtime match in an operator-trusted cache.
+
+- A89. Native code compiles only during build or packaging; runtime only verifies, stages, and launches its artifacts.
 
 ## Principles
 
