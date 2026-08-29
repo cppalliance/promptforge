@@ -187,6 +187,21 @@ impl LocalUpstream {
         Self::recover_if_dead(&self.inner)
     }
 
+    /// The configured name of the model this upstream serves.
+    pub(crate) fn model_name(&self) -> &str {
+        &self.inner.model_name
+    }
+
+    /// A bounded tail of the child's captured stdout and stderr, with the
+    /// per-attempt loopback credential redacted.
+    pub(crate) fn diagnostics(&self) -> String {
+        self.inner
+            .guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .diagnostics()
+    }
+
     /// POST `body` to the child's `{base_url}/{path}` with the per-attempt
     /// loopback credential and return the success response.
     ///

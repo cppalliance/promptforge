@@ -53,6 +53,22 @@ Three feature flags exist:
 
 The default feature set is empty, so a headless gateway build never pulls the workshop's toolchain into the graph: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
 
+### CUDA llama-server builds
+
+A `llama-cuda` build needs three things on the build machine: the pinned llama.cpp sources checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and the NVIDIA GPUs the server should run on. The build detects every visible GPU's compute capability and compiles only those architectures; cross-compilation is rejected.
+
+All native compilation happens during the Cargo build: the gateway's build script (backed by the `promptforge-gateway-build` crate) compiles the submodule into a Release `llama-server`, records a versioned manifest (source commit, tool identities, architectures, per-file SHA-256), and embeds the manifest and runtime files into the gateway binary. At runtime the gateway never invokes a compiler or build tool: it validates the embedded payload against the manifest, checks that the host provides the declared CUDA Toolkit runtime DLLs, and atomically stages the files into the operator cache. A valid matching installation is reused without restaging, and a CUDA build never silently falls back to the Vulkan archive.
+
+Build failures surface as Cargo build errors from the build script. Staging failures surface at gateway startup as a provisioning error naming the validation that failed (tampered payload, target mismatch, missing toolkit DLL). Embedding hosts can also read a bounded, credential-redacted tail of each child's captured stdout/stderr through `Gateway::local_diagnostics` - for example to confirm the child reported a CUDA device and offloaded its layers to the GPU.
+
+On a suitable host, the ignored live integration test proves the whole path (embedded-bundle staging, CUDA device report, GPU-layer offload, digest pins, MTP acceptance, cache reuse, a tool call, and a projector completion):
+
+```bash
+cargo test -p promptforge-gateway --features llama-cuda -- --ignored live_cuda   # needs PROMPTFORGE_LIVE_CUDA=1
+```
+
+Without `llama-cuda`, the Windows/Linux Vulkan and macOS Metal archive provisioning path is unchanged.
+
 ### The `[workshop]` section
 
 | Field | Default | Meaning |
@@ -77,6 +93,31 @@ The default feature set is empty, so a headless gateway build never pulls the wo
 | Field | Default | Meaning |
 |---|---|---|
 | `path` | `tape.jsonl` | Path of the JSONL tape file. A relative path resolves against the directory holding the boot config, never the process current directory; an absolute path is used unchanged. An absent `[workshop.tape]` anchors the default `tape.jsonl` the same way. |
+
+## Local model companions
+
+A chat `[[local_model]]` can declare two companions, each provisioned through the same pinned, digest-verified cache machinery as the main model:
+
+```toml
+[[local_model]]
+name = "gemma-4"
+description = "Gemma 4 E2B instruct with MTP drafting and vision"
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-UD-Q4_K_XL.gguf"
+sha256 = "b52f438017efaec5debf1c0d8be690571e212a07c312f1102bbce927258cfc32"
+context = 131072
+
+[local_model.speculative]
+type = "draft-mtp"
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mtp-gemma-4-E2B-it.gguf"
+sha256 = "9eba819938efccfd6044f8af84e3bbfddc639a2bcf32ebc36420e6a649191919"
+draft_max = 2
+
+[local_model.multimodal_projector]
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf"
+sha256 = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa"
+```
+
+`[local_model.speculative]` attaches a multi-token-prediction drafter: the child launches with `--spec-draft-model`, `--spec-type draft-mtp`, and `--spec-draft-n-max` (`draft_max`, bounded to `1..=16`). `[local_model.multimodal_projector]` attaches a vision projector (`--mmproj`) so the model accepts image inputs. Companion sources follow the main source's rules: an `https` URL requires a `sha256` pin, a local path may go unpinned, and plaintext `http` is rejected. Both companions are chat-only and validated at load. The resolved paths live in the child's launch state, so a respawn re-emits the exact verified artifacts, and a model without companions gets the same command line as before companions existed.
 
 ### Derived client credentials
 

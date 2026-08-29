@@ -485,7 +485,7 @@ Profile names must be a single path component - no separators, no `.` or `..`, n
 
 ## Local Inference
 
-Run local generative models by declaring `[[local_model]]` entries. The gateway provisions a pinned `llama-server` binary (GPU builds: Vulkan on Windows/Linux, Metal on macOS), downloads each GGUF, and spawns one child process per model.
+Run local generative models by declaring `[[local_model]]` entries. The gateway provisions a pinned `llama-server` binary, downloads each GGUF, and spawns one child process per model. On a Windows x86-64 build with the `llama-cuda` feature the binary is a host-native CUDA build staged from a bundle embedded in the gateway binary; every other build downloads the pinned GPU archive (Vulkan on Windows/Linux, Metal on macOS).
 
 ```toml
 [local]
@@ -532,6 +532,43 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
 
 A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking`, `chat_template_file`, `effort_levels`, `default_effort`, and `adaptive_thinking` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind. The effort knobs are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
+
+### Companion Artifacts
+
+A chat local model can declare two companions - a speculative-decoding drafter and a multimodal projector - each downloaded and digest-verified through the same cache machinery as the main model:
+
+```toml
+[[local_model]]
+name = "gemma-4"
+description = "Gemma 4 E2B instruct with MTP drafting and vision"
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-UD-Q4_K_XL.gguf"
+sha256 = "b52f438017efaec5debf1c0d8be690571e212a07c312f1102bbce927258cfc32"
+context = 131072
+
+[local_model.speculative]
+type = "draft-mtp"          # multi-token-prediction drafter
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mtp-gemma-4-E2B-it.gguf"
+sha256 = "9eba819938efccfd6044f8af84e3bbfddc639a2bcf32ebc36420e6a649191919"
+draft_max = 2               # tokens drafted per step; 1..=16
+
+[local_model.multimodal_projector]
+source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf"
+sha256 = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa"
+```
+
+`[local_model.speculative]` makes the child launch with `--spec-draft-model`, `--spec-type draft-mtp`, and `--spec-draft-n-max`, so generation runs with multi-token-prediction speculative decoding. `[local_model.multimodal_projector]` passes `--mmproj`, so the model accepts image content in chat completions. Companion sources follow the main source's rules: an `https` URL requires a `sha256` pin, a local path may go unpinned, and plaintext `http` is rejected. Both companions are chat-only. Each companion lands in its own cache slot keyed by its own source, the resolved paths live in the child's launch state so a respawn re-emits the exact verified artifacts, and a companion resolution failure stops startup before any child process is spawned.
+
+### CUDA Builds
+
+A gateway built with `--features llama-cuda` on Windows x86-64 compiles the pinned `third_party/llama.cpp` submodule into a Release CUDA `llama-server` during the Cargo build. The build machine needs the submodule checked out (`git submodule update --init`), CUDA Toolkit >= 12.8, and the NVIDIA GPUs the server should run on - the build detects every visible GPU's compute capability and compiles only those architectures, and cross-compilation is rejected. The `workshop-cuda` feature implies `llama-cuda` and adds CUDA acceleration for the whisper voice engine; the desktop app's default `cuda` feature forwards to `workshop-cuda`.
+
+The split is strict: Cargo build compiles, runtime only verifies and stages. The build embeds a versioned manifest (source commit, tool identities, architectures, per-file SHA-256) plus the runtime files into the gateway binary. At startup the gateway validates the embedded payload against the manifest, checks the host provides the declared CUDA Toolkit runtime DLLs, and atomically stages the files into the operator cache; a valid matching installation is reused as-is, and a CUDA build never silently falls back to the Vulkan archive. Runtime and serve paths never invoke a compiler or build tool.
+
+Diagnostics: a build failure is a Cargo build error from the gateway's build script; a staging failure is a startup provisioning error naming the validation that failed (tampered payload, target mismatch, missing toolkit DLL). Embedding hosts can read a bounded, credential-redacted tail of each child's captured output through `Gateway::local_diagnostics` to confirm the child reported a CUDA device and offloaded its layers. On a suitable host the ignored live integration test proves the full path end to end:
+
+```bash
+cargo test -p promptforge-gateway --features llama-cuda -- --ignored live_cuda   # needs PROMPTFORGE_LIVE_CUDA=1
+```
 
 ### Local Embeddings
 

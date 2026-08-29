@@ -39,6 +39,9 @@ use upstream::LocalUpstream;
 #[derive(Debug)]
 pub(crate) struct LocalRuntime {
     models: Vec<Arc<Model>>,
+    /// The upstreams behind `models`, kept un-erased so diagnostics can reach
+    /// each child's captured output.
+    upstreams: Vec<LocalUpstream>,
     /// The profile's `[local].cache_dir`, retained so the `/v1/cache` routes
     /// resolve the same root provisioning does, even with no local models.
     cache_dir: Option<String>,
@@ -51,6 +54,7 @@ impl LocalRuntime {
     pub(crate) fn empty() -> LocalRuntime {
         LocalRuntime {
             models: Vec::new(),
+            upstreams: Vec::new(),
             cache_dir: None,
         }
     }
@@ -67,6 +71,7 @@ impl LocalRuntime {
         if config.local_models().is_empty() {
             return Ok(LocalRuntime {
                 models: Vec::new(),
+                upstreams: Vec::new(),
                 cache_dir,
             });
         }
@@ -80,6 +85,7 @@ impl LocalRuntime {
         let interrupted = startup_interrupt_flag();
         let dominion_queues = dominion_queues(config);
         let mut models = Vec::with_capacity(config.local_models().len());
+        let mut upstreams = Vec::with_capacity(config.local_models().len());
 
         for local_model in config.local_models() {
             let model_path = store.ensure_model(local_model.source(), local_model.sha256())?;
@@ -111,13 +117,15 @@ impl LocalRuntime {
             };
             let upstream_name = guard.model_alias().to_owned();
             let base_url = guard.base_url();
-            let upstream = Arc::new(LocalUpstream::new(
+            let upstream = LocalUpstream::new(
                 guard,
                 server.executable.clone(),
                 model_path.clone(),
                 options,
                 local_model.name().to_owned(),
-            ));
+            );
+            upstreams.push(upstream.clone());
+            let upstream = Arc::new(upstream);
             let endpoint = Arc::new(Endpoint {
                 id: endpoint_id,
                 upstream,
@@ -141,7 +149,21 @@ impl LocalRuntime {
             );
         }
 
-        Ok(LocalRuntime { models, cache_dir })
+        Ok(LocalRuntime {
+            models,
+            upstreams,
+            cache_dir,
+        })
+    }
+
+    /// Bounded captured-output tails of the running local children, keyed by
+    /// configured model name.
+    #[must_use]
+    pub(crate) fn diagnostics(&self) -> Vec<(String, String)> {
+        self.upstreams
+            .iter()
+            .map(|upstream| (upstream.model_name().to_owned(), upstream.diagnostics()))
+            .collect()
     }
 
     /// Models registered for local inference, in `[[local_model]]` order.
@@ -452,6 +474,7 @@ endpoints = ["e"]
         let runtime = LocalRuntime::start(&config).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
+        assert!(runtime.diagnostics().is_empty());
     }
 
     #[test]

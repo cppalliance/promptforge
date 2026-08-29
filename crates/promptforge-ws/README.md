@@ -26,6 +26,10 @@ The shell always boots the `default` profile. Development against an external ga
 
 The generated config leaves `workshop.open_browser` off. Setting it in a boot config the shell loads opens a browser tab in addition to the desktop window, because the gateway honors the flag wherever it runs; the flag is meant for running the gateway (or the standalone `promptforge-ws-server`) without the shell.
 
+## Features
+
+- `cuda` (default) - forwards to the gateway's `workshop-cuda`, which implies `llama-cuda` (the pinned `third_party/llama.cpp` submodule is compiled into an embedded CUDA `llama-server` during the Cargo build) plus `voice-cuda` (CUDA acceleration for the whisper voice engine). Building with it requires the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU. On a machine without those, build with `--no-default-features`: voice transcription stays off and local inference keeps the standard Vulkan archive path.
+
 ## Minimum Rust Version
 
 Rust 1.89 or later.

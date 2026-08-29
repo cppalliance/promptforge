@@ -150,6 +150,19 @@ impl Gateway {
         build_router(self.state.clone())
     }
 
+    /// Bounded stdout/stderr tails captured from each running local
+    /// `llama-server` child, keyed by configured model name.
+    ///
+    /// The per-attempt loopback credential is redacted from the captures.
+    /// Embedding hosts use this to verify what a child actually reported -
+    /// that a CUDA build staged its embedded bundle, that the child saw a
+    /// CUDA device, that model layers offloaded to the GPU - without
+    /// reaching the child's private loopback port. Empty when the config
+    /// declares no `[[local_model]]`.
+    pub async fn local_diagnostics(&self) -> Vec<(String, String)> {
+        self.state.live.read().await.local.diagnostics()
+    }
+
     /// Serve on a caller-owned listener until `shutdown` completes.
     ///
     /// Tests pass an ephemeral [`TcpListener`] they bound themselves (no port
@@ -760,6 +773,14 @@ mod tests {
     };
     use crate::api_error::{StartupError, StartupErrorKind};
     use promptforge_gateway_config::{Config, ProfileName};
+
+    #[tokio::test]
+    async fn gateway_without_local_models_reports_no_diagnostics() {
+        let config = Config::from_toml_str(CATALOG).unwrap();
+        let gateway =
+            super::Gateway::from_config(&config, super::ProfilesContext::default()).unwrap();
+        assert!(gateway.local_diagnostics().await.is_empty());
+    }
 
     #[test]
     fn classify_shutdown_distinguishes_interrupt_from_handler_failure() {

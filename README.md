@@ -63,6 +63,8 @@ cd promptforge
 cargo build
 ```
 
+A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server`. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-ws --no-default-features` (voice transcription then stays off and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
+
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
 Two processes: the gateway holds the vendor credential; the client points at it.

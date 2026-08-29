@@ -59,6 +59,8 @@ llama-cuda = ["dep:promptforge-gateway-build"]
 workshop-cuda = ["workshop", "llama-cuda", "promptforge-ws-server/voice-cuda"]
 
 [dev-dependencies]
+# Encodes the generated test image for the live CUDA projector proof.
+png.workspace = true
 tempfile.workspace = true
 
 [lints]

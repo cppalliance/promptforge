@@ -23,6 +23,14 @@ What it provides:
   single include-resolution pass.
 - [`Secret`](src/config.rs): a credential wrapper that redacts in `Debug` and
   `Display` and never serializes.
+- Local-model companion types ([`SpeculativeConfig`,
+  `MultimodalProjectorConfig`, `SpeculationType`, and
+  `DraftTokenMax`](src/config/companion.rs)): declarative speculative-decoding
+  drafters (`draft-mtp` only, with a bounded `draft_max`) and multimodal
+  projectors for chat `[[local_model]]` entries. Companion sources follow the
+  artifact-source rules - `https` with a mandatory `sha256` pin, or an
+  operator-controlled local path - and are validated before values leave the
+  crate.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
   classify failures with `ConfigError::kind` and `ConfigErrorKind`.
 
