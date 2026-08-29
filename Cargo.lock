@@ -3991,6 +3991,7 @@ dependencies = [
  "indicatif",
  "open",
  "promptforge-core",
+ "promptforge-gateway-build",
  "promptforge-gateway-config",
  "promptforge-ws-server",
  "rand 0.9.5",
@@ -4007,6 +4008,17 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "zip",
+]
+
+[[package]]
+name = "promptforge-gateway-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]
