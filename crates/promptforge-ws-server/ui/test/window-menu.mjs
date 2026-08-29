@@ -121,6 +121,41 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   check("clicking the open menu's button closes it", !isOpen("edit"));
 }
 
+// --- Menubar rollover: hover switches the open menu ---------------------------
+
+{
+  const { window, menus, isOpen } = scenario();
+  const enter = (id) =>
+    menus[id].dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
+  enter("edit");
+  check("hover with no menu open opens nothing", !isOpen("edit") && !isOpen("file"));
+  menus.file.click();
+  enter("edit");
+  check(
+    "hovering another button while open switches the menu",
+    isOpen("edit") && !isOpen("file"),
+  );
+  check(
+    "the rollover target's button is announced expanded",
+    menus.edit.getAttribute("aria-expanded") === "true" &&
+      menus.file.getAttribute("aria-expanded") === "false",
+  );
+}
+
+{
+  const modelMenu = new ModelService(() => true);
+  modelMenu.setModels([{ id: "alpha" }]);
+  const { window, menus, itemsOf, isOpen } = scenario({ modelMenu });
+  menus.model.click();
+  const rowsBefore = itemsOf("model");
+  menus.model.dispatchEvent(new window.Event("pointerenter", { bubbles: false }));
+  check("hovering the open menu's own button keeps it open", isOpen("model"));
+  check(
+    "hovering the open menu's own button does not rebuild its rows",
+    itemsOf("model").every((row, index) => row === rowsBefore[index]),
+  );
+}
+
 // --- Keyboard navigation and dismissal ---------------------------------------
 
 {

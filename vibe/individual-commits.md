@@ -142,3 +142,7 @@ user directive, twice escalated ("no italics even for thinking prose"); the swee
 
 the gateway's /v1/models only advertises the active profile, so the menu was accurate but the user wanted profile switching; the admin API was plumbed through relay routes into a Model-menu profile section. (user reported, assistant reasoned the interpretation)
 
+## 2026-08-29 Add menubar hover rollover to switch the open menu
+
+the mouse rollover handler was never written; pointerenter switches the open menu only while one is already open, so casual hovering never pops menus uninvited. (user reported, assistant reasoned)
+

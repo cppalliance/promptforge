@@ -554,6 +554,16 @@ export function setupWindowMenus(options: {
     };
     handle.button.addEventListener("click", onButtonClick);
     store.add(toDisposable(() => handle.button.removeEventListener("click", onButtonClick)));
+    // Menubar rollover: while any menu is open, hovering another button
+    // switches the open menu to it (openMenu closes the current one
+    // first). With no menu open, hover alone opens nothing.
+    const onButtonEnter = (): void => {
+      if (openId !== null && openId !== handle.id) {
+        openMenu(handle.id, false);
+      }
+    };
+    handle.button.addEventListener("pointerenter", onButtonEnter);
+    store.add(toDisposable(() => handle.button.removeEventListener("pointerenter", onButtonEnter)));
   }
 
   const onPointerDown = (event: PointerEvent): void => {
