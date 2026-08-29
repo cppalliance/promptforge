@@ -39,7 +39,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A82. Chat replies are ordered durable per-request traffic; status, catalog, and interim transcription are complete ephemeral snapshots.
 
-- A83. The server owns complete Workshop state snapshots; clients send commands, render snapshots, and do not derive readiness.
 
 - A84. Gateway and Workshop may share a process but retain their loopback protocol boundary; headless builds omit Workshop.
 
@@ -53,6 +52,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A89. Native code compiles only during build or packaging; runtime only verifies, stages, and launches its artifacts.
 
 - A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
+
+- A91. Human boot config, machine state, view layout, and append-only tape remain separate stores.
 
 ## Principles
 

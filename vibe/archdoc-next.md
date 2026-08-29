@@ -88,10 +88,10 @@
 - [2026-08-27-2-workshop-server-refactor] bounded shutdown: Serve handles expose readiness, shutdown, stopped, and join phases with a force watchdog outside library code.
 - [2026-08-27-3-server-driven-menu-state] multiplexed chats: Tagged chats interleave with per-chat ordering and scoped cancellation while inbound events remain readable.
 - [2026-08-27-3-server-driven-menu-state] profile-local memory: The server persists each profile last selected model outside hand-edited config.
-- [2026-08-27-4-merged-gateway-workshop] config-state split: Human boot config, machine state, view layout, and append-only tape remain separate stores.
 - [2026-08-28-1-fix-open-vibe-findings] single boot parse: Gateway startup resolves the include chain once for both server and Workshop boot sections.
 - [2026-08-28-2-coroutine-protocol-executor] cooperative scheduler boundary: One prompt run interleaves chains only at host I/O yields while keeping scheduler state exclusively owned.
 - [2026-08-28-3-digest-marker-child-priority] child process priority: Below-normal llama-server priority improves CPU and I/O responsiveness but cannot cure display-driver contention.
 - [2026-08-28-4-cuda-llama-provisioning] embedded native bundle: A canonical manifest binds source, toolchain, target, options, dependencies, and file digests before atomic staging.
 - [2026-08-28-4-cuda-llama-provisioning] explicit companion artifacts: Draft and projector models carry independent sources and pins through the same provision and respawn lifecycle.
 - [2026-08-29-1-crate-extraction-execution] versioned UI artifact: Rust builds consume a hash-verified UI bundle while release builds preserve a one-command path.
+- [2026-08-29-2-rename-ws-crates-to-workshop] atomic product rename: Package, binary, directory, UI, and CI names move together while historical decision records keep their dated identity.
