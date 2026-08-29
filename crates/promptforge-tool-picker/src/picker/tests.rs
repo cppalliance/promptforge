@@ -1,7 +1,8 @@
 //! Unit tests for the engine: building, resolving, shortlisting, rebuilding.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
+use promptforge_progress::{EventState, ProgressHub};
 use serde_json::json;
 
 use super::ToolPicker;
@@ -19,7 +20,7 @@ fn model() -> &'static Model {
 
 /// A picker over `catalog` built with the shared model.
 fn picker(catalog: Catalog, config: Config) -> ToolPicker {
-    ToolPicker::build_with_model(model(), catalog, config).expect("the shared model indexes")
+    ToolPicker::build_with_model(model(), catalog, config, None).expect("the shared model indexes")
 }
 
 fn tiny_catalog() -> Catalog {
@@ -99,6 +100,56 @@ fn build_loads_a_model_and_reports_a_readable_debug() {
         !debug.contains("0.0,"),
         "the vectors must not be printed: {debug}"
     );
+}
+
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+#[test]
+fn build_with_model_drives_the_leaf_to_one_in_tool_count_steps() {
+    let hub = Arc::new(ProgressHub::new());
+    let mut events = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("embed-tools", 1.0);
+    assert!(matches!(
+        events.try_recv().expect("register emits Begun").state,
+        EventState::Begun { .. }
+    ));
+
+    let catalog = tiny_catalog();
+    let picker =
+        ToolPicker::build_with_model(model(), catalog.clone(), Config::default(), Some(&leaf))
+            .expect("the shared model indexes");
+    assert_eq!(picker.len(), catalog.len());
+    assert_eq!(leaf.fraction(), 1.0, "indexing completes the leaf");
+
+    let mut fractions = Vec::new();
+    let mut saw_finished = false;
+    while let Ok(event) = events.try_recv() {
+        match event.state {
+            EventState::Updated { fraction } => fractions.push(fraction),
+            EventState::Finished { ok } => saw_finished |= ok,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fractions,
+        vec![0.5, 1.0],
+        "one fraction step per embedded tool"
+    );
+    assert!(saw_finished, "completion emits Finished");
+}
+
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+#[test]
+fn build_with_model_over_an_empty_catalog_completes_the_leaf() {
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let leaf = tree.register("embed-tools", 1.0);
+
+    let picker =
+        ToolPicker::build_with_model(model(), Catalog::default(), Config::default(), Some(&leaf))
+            .expect("an empty catalog builds");
+    assert!(picker.is_empty());
+    assert_eq!(leaf.fraction(), 1.0, "completion does not wait for tools");
 }
 
 #[test]

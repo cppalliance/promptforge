@@ -10,6 +10,8 @@
 //! borrowed model, and [`ToolPicker::rebuild`] replaces a picker's catalog while
 //! preserving its model and policy. Building over an empty catalog succeeds.
 
+use promptforge_progress::ProgressHandle;
+
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};
 use crate::config::Config;
 use crate::embed::EMBEDDING_DIMENSIONS;
@@ -67,13 +69,15 @@ impl ToolPicker {
     #[must_use = "a picker that is built and dropped did its costly work for nothing"]
     pub fn build(catalog: Catalog, config: Config) -> Result<Self, BuildError> {
         let model = Model::load()?;
-        Ok(Self::build_with_model(&model, catalog, config)?)
+        Ok(Self::build_with_model(&model, catalog, config, None)?)
     }
 
     /// Indexes a whole catalog with a model that is already loaded.
     ///
     /// The reusable-model path: the cost is one forward pass per tool, and the
-    /// model is borrowed rather than reloaded.
+    /// model is borrowed rather than reloaded. A `progress` leaf advances one
+    /// tool-count step per embedded tool and completes when indexing finishes;
+    /// `None` indexes without reporting.
     ///
     /// # Errors
     /// Returns [`IndexError`] when a tool's text cannot be embedded or the
@@ -84,8 +88,8 @@ impl ToolPicker {
     /// use promptforge_tool_picker::{Catalog, Config, Model, ToolPicker};
     ///
     /// let model = Model::load()?;
-    /// let first = ToolPicker::build_with_model(&model, Catalog::default(), Config::default())?;
-    /// let second = ToolPicker::build_with_model(&model, Catalog::default(), Config::default())?;
+    /// let first = ToolPicker::build_with_model(&model, Catalog::default(), Config::default(), None)?;
+    /// let second = ToolPicker::build_with_model(&model, Catalog::default(), Config::default(), None)?;
     /// assert_eq!(first.len(), second.len());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -94,13 +98,21 @@ impl ToolPicker {
         model: &Model,
         catalog: Catalog,
         config: Config,
+        progress: Option<&ProgressHandle>,
     ) -> Result<Self, IndexError> {
         let mut rows = Vec::with_capacity(catalog.len().saturating_mul(EMBEDDING_DIMENSIONS));
-        for tool in catalog.as_slice() {
+        let total = catalog.len() as u64;
+        for (embedded, tool) in catalog.as_slice().iter().enumerate() {
             let vector = model
                 .embed(&tool.enriched_text())
                 .map_err(IndexError::embed)?;
             rows.extend_from_slice(&vector);
+            if let Some(handle) = progress {
+                handle.set_units(embedded as u64 + 1, total);
+            }
+        }
+        if let Some(handle) = progress {
+            handle.complete();
         }
         let index =
             Index::new(rows, EMBEDDING_DIMENSIONS, catalog.len()).map_err(IndexError::layout)?;
@@ -128,7 +140,7 @@ impl ToolPicker {
     /// ```
     #[must_use = "rebuild returns a new picker; the original is left unchanged"]
     pub fn rebuild(&self, catalog: Catalog) -> Result<Self, IndexError> {
-        Self::build_with_model(&self.model, catalog, self.config.clone())
+        Self::build_with_model(&self.model, catalog, self.config.clone(), None)
     }
 
     /// Returns the number of tools indexed.

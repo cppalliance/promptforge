@@ -51,7 +51,7 @@ fn public_types_are_send_sync_static() {
 
 #[test]
 fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
-    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
     assert_eq!(picker.len(), 2);
     assert_eq!(picker.iter().count(), 2);
@@ -88,7 +88,7 @@ fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
 
 #[test]
 fn a_selection_error_names_the_first_missing_identity() {
-    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
     let missing = ToolId::new("missing", "tool");
     let error = picker
@@ -99,14 +99,14 @@ fn a_selection_error_names_the_first_missing_identity() {
 
 #[test]
 fn one_model_builds_a_picker_per_catalog_and_rebuild_reuses_it() {
-    let files = ToolPicker::build_with_model(model(), catalog(), Config::default())
+    let files = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
     let weather = Catalog::new(vec![ToolDescriptor::new(
         ToolId::new("weather", "get_forecast"),
         "Get the weather forecast for a city",
         json!({"properties": {"city": {"type": "string"}}}),
     )]);
-    let forecasts = ToolPicker::build_with_model(model(), weather.clone(), Config::default())
+    let forecasts = ToolPicker::build_with_model(model(), weather.clone(), Config::default(), None)
         .expect("index a second catalog");
 
     match forecasts
@@ -127,7 +127,7 @@ fn one_model_builds_a_picker_per_catalog_and_rebuild_reuses_it() {
 
 #[test]
 fn the_same_need_answers_the_same_way_every_time() {
-    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default(), None)
         .expect("index the catalog");
     let first = picker.resolve("read a file from disk").expect("resolve");
     let listed = picker
