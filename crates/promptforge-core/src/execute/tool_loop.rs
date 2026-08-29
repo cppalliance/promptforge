@@ -256,10 +256,11 @@ pub(crate) async fn run_prose_inference(
                     // what actually blocks a forged close tag, so the reuse costs
                     // nothing.
                     let result = match output.trust() {
-                        crate::tools::OutputTrust::Untrusted => {
-                            untrusted::wrap(nonce, output.text())
-                        }
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
+                        // `OutputTrust` is `#[non_exhaustive]` in the contract
+                        // crate: an unknown future variant takes the safe path
+                        // and is nonce-wrapped as untrusted.
+                        _ => untrusted::wrap(nonce, output.text()),
                     };
                     results.push((call.id.clone(), result));
                 }

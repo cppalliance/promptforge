@@ -8,7 +8,7 @@ Construct the tool and call it with a URL:
 
 ````rust
 use promptforge_webfetch::WebFetch;
-use promptforge_core::tools::Tool;
+use promptforge_tools::Tool;
 
 let tool = WebFetch::new();
 let output = tool.call(serde_json::json!({ "url": "https://example.com/article" })).await?;

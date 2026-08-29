@@ -23,12 +23,12 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::ToolId;
+    /// use promptforge_tools::ToolId;
     ///
     /// let id = ToolId::new("promptforge", "web_fetch")?;
     /// assert_eq!(id.server(), "promptforge");
     /// assert_eq!(id.name(), "web_fetch");
-    /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
+    /// # Ok::<(), promptforge_tools::ToolIdError>(())
     /// ```
     pub fn new(server: impl Into<String>, name: impl Into<String>) -> Result<ToolId, ToolIdError> {
         let server = server.into();
@@ -42,7 +42,10 @@ impl ToolId {
     ///
     /// For internal callers whose inputs are static tool names or come from an
     /// existing [`ToolId`], so the validation in [`ToolId::new`] is redundant.
-    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ToolId {
+    /// Hidden from the public API: downstream callers use [`ToolId::new`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ToolId {
         ToolId {
             server: server.into(),
             name: name.into(),
@@ -59,11 +62,11 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::ToolId;
+    /// use promptforge_tools::ToolId;
     ///
     /// let id = ToolId::new("promptforge", "web_fetch")?;
     /// assert_eq!(id.server(), "promptforge");
-    /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
+    /// # Ok::<(), promptforge_tools::ToolIdError>(())
     /// ```
     #[must_use]
     pub fn server(&self) -> &str {
@@ -75,11 +78,11 @@ impl ToolId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::ToolId;
+    /// use promptforge_tools::ToolId;
     ///
     /// let id = ToolId::new("promptforge", "web_fetch")?;
     /// assert_eq!(id.name(), "web_fetch");
-    /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
+    /// # Ok::<(), promptforge_tools::ToolIdError>(())
     /// ```
     #[must_use]
     pub fn name(&self) -> &str {
@@ -128,7 +131,7 @@ impl ToolIdError {
     }
 
     /// The crate-internal human-readable reason, reused when a wire-name
-    /// rejection is re-reported as a [`super::ToolCatalogError`].
+    /// rejection is re-reported as a [`crate::ToolCatalogError`].
     pub(crate) fn reason(&self) -> &'static str {
         self.reason
     }

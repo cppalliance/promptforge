@@ -9,12 +9,12 @@ use super::output::{ToolError, ToolOutput};
 /// The caller-provided catalog of tool implementations a run may bind.
 ///
 /// The harness builds and validates the catalog once and then shares it by
-/// reference across every run, mirroring
-/// [`ModelCatalog`](crate::model::ModelCatalog): construction rejects a
-/// repeated [`ToolId`] or a transport-illegal [`wire_name`](Tool::wire_name),
-/// so the H1-phase [`get`](Self::get) lookup (where `tools.bind` attaches the
-/// resolved implementation to its binding) trusts the invariant without
-/// rescanning. Cloning is cheap: the tools live behind one refcounted slice.
+/// reference across every run, mirroring the model catalog: construction
+/// rejects a repeated [`ToolId`] or a transport-illegal
+/// [`wire_name`](Tool::wire_name), so the bind-phase [`get`](Self::get)
+/// lookup (where `tools.bind` attaches the resolved implementation to its
+/// binding) trusts the invariant without rescanning. Cloning is cheap: the
+/// tools live behind one refcounted slice.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct ToolCatalog {
@@ -48,11 +48,11 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::ToolCatalog;
+    /// use promptforge_tools::ToolCatalog;
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge_core::tools::ToolCatalogError>(())
+    /// # Ok::<(), promptforge_tools::ToolCatalogError>(())
     /// ```
     pub fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolCatalogError> {
         let mut seen = std::collections::BTreeSet::new();
@@ -86,7 +86,7 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::{ToolCatalog, ToolId};
+    /// use promptforge_tools::{ToolCatalog, ToolId};
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// let missing = ToolId::new("promptforge", "missing")?;
@@ -106,11 +106,11 @@ impl ToolCatalog {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::tools::ToolCatalog;
+    /// use promptforge_tools::ToolCatalog;
     ///
     /// let catalog = ToolCatalog::new(&[])?;
     /// assert!(catalog.tools().is_empty());
-    /// # Ok::<(), promptforge_core::tools::ToolCatalogError>(())
+    /// # Ok::<(), promptforge_tools::ToolCatalogError>(())
     /// ```
     #[must_use]
     pub fn tools(&self) -> &[Arc<dyn Tool>] {
@@ -118,25 +118,6 @@ impl ToolCatalog {
     }
 }
 
-/// Diagnostics for two semantic near-duplicates exposed in one model turn.
-///
-/// The near-duplicate check is part of tool-scope validation, so the diagnostic
-/// vocabulary lives here (F10); the internal error substrate references this
-/// type rather than owning it.
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) struct NearDuplicateDiagnostic {
-    /// The first prompt-local alias in scope order.
-    pub(crate) first_alias: String,
-    /// The first stable identity.
-    pub(crate) first_id: ToolId,
-    /// The second prompt-local alias in scope order.
-    pub(crate) second_alias: String,
-    /// The second stable identity.
-    pub(crate) second_id: ToolId,
-    /// The cosine similarity the picker reported at bind time.
-    pub(crate) similarity: f64,
-}
 /// A stable, matchable classification of a [`ToolCatalogError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -205,7 +186,7 @@ impl ToolCatalogError {
 /// [`call`](Tool::call). A minimal doctested implementation:
 ///
 /// ```
-/// use promptforge_core::tools::{
+/// use promptforge_tools::{
 ///     OutputTrust, Tool, ToolError, ToolErrorKind, ToolId, ToolOutput,
 /// };
 ///
@@ -247,7 +228,7 @@ impl ToolCatalogError {
 /// assert_eq!(echo.wire_name(), "echo");
 /// assert_eq!(echo.id().server(), "example");
 /// # let _ = OutputTrust::Trusted;
-/// # Ok::<(), promptforge_core::tools::ToolIdError>(())
+/// # Ok::<(), promptforge_tools::ToolIdError>(())
 /// ```
 ///
 /// # Compatibility policy
@@ -298,9 +279,9 @@ pub trait Tool: Send + Sync {
     /// Execute the tool with the given JSON arguments and return its output.
     ///
     /// The returned [`ToolOutput`] carries its own
-    /// [`OutputTrust`](crate::tools::OutputTrust), so trust is mandatory and
+    /// [`OutputTrust`](crate::OutputTrust), so trust is mandatory and
     /// cannot be forgotten: an
-    /// [`OutputTrust::Untrusted`](crate::tools::OutputTrust::Untrusted) result
+    /// [`OutputTrust::Untrusted`](crate::OutputTrust::Untrusted) result
     /// is nonce-wrapped before it can reach model input. A failure returns a
     /// narrow, model-safe [`ToolError`]. Implementations must not panic and
     /// should return promptly when the run is cancelled.

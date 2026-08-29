@@ -12,8 +12,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use promptforge_core::tools::{Tool, ToolCatalog, WebSearch};
+use promptforge_core::tools::WebSearch;
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
+use promptforge_tools::{Tool, ToolCatalog};
 use promptforge_webfetch::WebFetch;
 
 /// The complete set of concrete tools available to one run.
@@ -95,8 +96,8 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 mod tests {
     use std::sync::Arc;
 
-    use promptforge_core::tools::{Tool, ToolError, ToolId, ToolOutput};
     use promptforge_tool_picker::{Config, Outcome, ToolPicker};
+    use promptforge_tools::{Tool, ToolError, ToolId, ToolOutput};
 
     use super::{assemble, available_tools};
 

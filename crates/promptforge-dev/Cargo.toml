@@ -22,6 +22,7 @@ fastrand.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
 promptforge-tool-picker.workspace = true
+promptforge-tools.workspace = true
 promptforge-webfetch.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "signal", "sync", "time"] }

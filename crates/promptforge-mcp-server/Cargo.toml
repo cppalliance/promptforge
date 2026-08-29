@@ -34,6 +34,7 @@ humantime-serde.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
 promptforge-tool-picker.workspace = true
+promptforge-tools.workspace = true
 promptforge-webfetch.workspace = true
 rmcp.workspace = true
 serde.workspace = true

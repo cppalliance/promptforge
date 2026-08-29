@@ -10,8 +10,8 @@ use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::{Tool, ToolCatalog};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+use promptforge_tools::{Tool, ToolCatalog};
 
 /// One correlated observation: which execution and section emitted it, plus the
 /// rendered event detail the fixtures assert on.
