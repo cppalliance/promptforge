@@ -146,3 +146,7 @@ the gateway's /v1/models only advertises the active profile, so the menu was acc
 
 the mouse rollover handler was never written; pointerenter switches the open menu only while one is already open, so casual hovering never pops menus uninvited. (user reported, assistant reasoned)
 
+## 2026-08-29 Close the menu when the window loses focus
+
+user rule stated directly - "if app loses focus, menu should unpop"; the menu previously closed only on click-outside, Escape, or selection, so a blur listener was the missing fourth dismissal path. (user said)
+
