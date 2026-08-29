@@ -30,14 +30,12 @@ mod dialect;
 mod error;
 mod routing;
 mod runner;
-mod tools;
-mod web_search_process;
 mod workshop;
 
-// The wire protocol, upstream abstraction, and bounded HTTP helpers live in
-// the protocol crate; these re-exports keep every `crate::wire::*`,
-// `crate::upstream::*`, and `crate::http_util::*` path resolving unchanged.
-pub(crate) use promptforge_gateway_protocol::{http_util, upstream, wire};
+// The wire protocol and upstream abstraction live in the protocol crate;
+// these re-exports keep every `crate::wire::*` and `crate::upstream::*`
+// path resolving unchanged.
+pub(crate) use promptforge_gateway_protocol::{upstream, wire};
 // The dominion admission queues live in the routing crate; this re-export
 // keeps every `crate::queue::*` path resolving unchanged.
 pub(crate) use promptforge_gateway_routing::queue;
@@ -72,12 +70,15 @@ use crate::error::GatewayError;
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
-use crate::tools::WebSearchState;
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse, RerankRequest,
     RerankResponse,
 };
-use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig, WorkshopConfig};
+#[cfg(feature = "web-search")]
+use promptforge_gateway_config::WebSearchConfig;
+use promptforge_gateway_config::{ModelKind, ServerConfig, WorkshopConfig};
+#[cfg(feature = "web-search")]
+use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSearchState};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -85,6 +86,7 @@ use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig, Works
 struct LiveState {
     routing: Arc<Routing>,
     key: Secret,
+    #[cfg(feature = "web-search")]
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
     local: LocalRuntime,
@@ -142,7 +144,7 @@ impl AppState {
         routing: Arc<Routing>,
         key: Secret,
         #[cfg(feature = "local")] local: LocalRuntime,
-        web_search: Option<&WebSearchConfig>,
+        #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
         selection: ProfileSelection,
         boot: BootOwned,
@@ -151,6 +153,7 @@ impl AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
                 key,
+                #[cfg(feature = "web-search")]
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 #[cfg(feature = "local")]
                 local,
@@ -164,6 +167,7 @@ impl AppState {
     }
 
     /// The web-search capability, when configured.
+    #[cfg(feature = "web-search")]
     pub(crate) async fn web_search(&self) -> Option<Arc<WebSearchState>> {
         self.live.read().await.web_search.clone()
     }
@@ -182,11 +186,14 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/embeddings", post(embeddings))
         .route("/v1/rerank", post(rerank))
         .route("/v1/models", get(list_models))
-        .route("/v1/tools/web_search", post(tools::web_search))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
         .route("/admin/switch-profile", post(admin_switch_profile));
+    // The web-search tool route delegates to the service crate, so it exists
+    // only in builds with the `web-search` feature.
+    #[cfg(feature = "web-search")]
+    let router = router.route("/v1/tools/web_search", post(web_search));
     // The blob-cache routes serve the local artifact store, so they exist
     // only in builds with local inference.
     #[cfg(feature = "local")]
@@ -194,6 +201,28 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
         .route("/v1/cache/{sha256}", delete(cache::delete_cache));
     router.with_state(state)
+}
+
+/// The `POST /v1/tools/web_search` route: bearer-authed, delegates to the
+/// web-search service crate.
+///
+/// # Errors
+/// Returns [`GatewayError::Unauthorized`] when the bearer token is absent or
+/// wrong, [`GatewayError::ToolNotConfigured`] when no `[tools.web_search]`
+/// section is present, [`GatewayError::MalformedRequest`] when the request
+/// fails validation, and the upstream variants on a provider failure.
+#[cfg(feature = "web-search")]
+async fn web_search(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<WebSearchRequest>,
+) -> Result<Json<WebSearchResponse>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let service = state
+        .web_search()
+        .await
+        .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
+    Ok(Json(service.search(&request).await?))
 }
 
 /// Liveness probe; unauthenticated and always 200 while serving.
@@ -552,6 +581,7 @@ async fn run_switch(
     .map_err(|e| GatewayError::switch_failed("workshop-mismatch", e))?;
     let remote_routing = Routing::from_config(&config)
         .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
+    #[cfg(feature = "web-search")]
     let new_web_search = config
         .web_search_config()
         .map(WebSearchState::new)
@@ -622,7 +652,10 @@ async fn run_switch(
         let mut live = state.live.write().await;
         live.routing = Arc::new(routing);
         live.key = new_key;
-        live.web_search = new_web_search;
+        #[cfg(feature = "web-search")]
+        {
+            live.web_search = new_web_search;
+        }
         #[cfg(feature = "local")]
         {
             live.local = new_local;

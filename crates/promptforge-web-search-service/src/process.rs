@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::tools::SearchResult;
+use crate::service::SearchResult;
 
 /// Max characters kept for a result title after sanitisation.
 pub(crate) const TITLE_MAX_CHARS: usize = 512;

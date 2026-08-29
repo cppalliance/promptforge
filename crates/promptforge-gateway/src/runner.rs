@@ -139,6 +139,7 @@ impl Gateway {
             config.server_key(),
             #[cfg(feature = "local")]
             local,
+            #[cfg(feature = "web-search")]
             config.web_search_config(),
             profiles.dir,
             crate::ProfileSelection {

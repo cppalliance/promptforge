@@ -33,6 +33,7 @@ pub(crate) enum GatewayError {
     },
 
     /// A tool endpoint was reached but the tool is not configured.
+    #[cfg(feature = "web-search")]
     #[non_exhaustive]
     #[error("tool not configured: {0}")]
     ToolNotConfigured(&'static str),
@@ -113,18 +114,22 @@ impl From<crate::queue::AdmitError> for GatewayError {
     }
 }
 
-impl GatewayError {
-    /// Wrap a transport error from the upstream seam.
-    ///
-    /// A connect failure (`err.is_connect()`) means the request never left
-    /// the gateway and is classified `upstream_connect`; anything else -
-    /// including every timeout, which may have reached the provider - stays
-    /// `upstream_transport`. See [`ProtocolError::upstream_transport`].
-    #[must_use]
-    pub(crate) fn upstream_transport(source: reqwest::Error) -> GatewayError {
-        GatewayError::Protocol(ProtocolError::upstream_transport(source))
+#[cfg(feature = "web-search")]
+impl From<promptforge_web_search_service::WebSearchError> for GatewayError {
+    fn from(value: promptforge_web_search_service::WebSearchError) -> Self {
+        use promptforge_web_search_service::WebSearchError;
+        match value {
+            WebSearchError::MalformedRequest(message) => GatewayError::MalformedRequest(message),
+            WebSearchError::Protocol(error) => GatewayError::Protocol(error),
+            // `WebSearchError` is non-exhaustive across the crate boundary; a
+            // future variant renders as a malformed request rather than
+            // failing to compile here.
+            _ => GatewayError::MalformedRequest(value.to_string()),
+        }
     }
+}
 
+impl GatewayError {
     /// Wrap a body-decode failure as a protocol error (not a transport error),
     /// preserving the cause via `source()`. See [`ProtocolError::upstream_protocol`].
     #[must_use]
@@ -171,6 +176,7 @@ impl GatewayError {
                 "invalid_request_error",
                 "kind_mismatch",
             ),
+            #[cfg(feature = "web-search")]
             GatewayError::ToolNotConfigured(_) => {
                 (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
             }
@@ -343,5 +349,34 @@ mod tests {
             GatewayError::from(crate::queue::AdmitError::Rejected),
             GatewayError::QueueRejected
         ));
+    }
+
+    #[cfg(feature = "web-search")]
+    #[test]
+    fn web_search_error_maps_to_gateway_error() {
+        use promptforge_web_search_service::WebSearchError;
+        // The malformed-request arm preserves the message verbatim, so the
+        // wire envelope is unchanged by the crate boundary.
+        let err = GatewayError::from(WebSearchError::MalformedRequest(
+            "web_search: empty query".to_string(),
+        ));
+        assert!(
+            matches!(&err, GatewayError::MalformedRequest(m) if m == "web_search: empty query")
+        );
+        assert_eq!(
+            err.classify(),
+            (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "malformed_request"
+            )
+        );
+        // The protocol arm is transparent: same variant, same display.
+        let err = GatewayError::from(WebSearchError::from(ProtocolError::upstream_status(
+            502,
+            "bad gateway".to_string(),
+        )));
+        assert!(matches!(err, GatewayError::Protocol(_)));
+        assert_eq!(err.to_string(), "upstream returned 502");
     }
 }

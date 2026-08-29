@@ -22,5 +22,9 @@ default-on `local` feature; the gateway drives them through `LocalRuntime`.
 - The `local` feature is additive and defaults on; `--no-default-features`
   must keep compiling as a headless gateway without the local crate and its
   archive/blocking-HTTP dependencies.
+- The `web-search` feature is additive and defaults on; it gates the
+  `promptforge-web-search-service` dependency and the
+  `POST /v1/tools/web_search` route. The gateway keeps auth and the
+  mount/reload shim; the service crate never sees `GatewayError`.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

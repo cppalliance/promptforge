@@ -45,9 +45,10 @@ Built with the `workshop` feature, the gateway can host the PromptForge Workshop
 cargo build -p promptforge-gateway --features workshop
 ```
 
-Four feature flags exist:
+Five feature flags exist:
 
 - `local` (default) - compiles in gateway-owned local inference via the `promptforge-gateway-local` crate: GGUF provisioning, managed `llama-server` children, and the blob cache behind the `/v1/cache` routes. A `--no-default-features` build is headless of local inference: it links neither the archive/extraction stack nor a blocking HTTP client, and it refuses a configuration declaring `[[local_model]]` at startup and on profile switch.
+- `web-search` (default) - compiles in the Brave-powered `POST /v1/tools/web_search` tool service via the `promptforge-web-search-service` crate. A `--no-default-features` build omits the route entirely.
 - `workshop` - compiles the hosted workshop in: the `promptforge-ws-server` crate and system-browser opening.
 - `llama-cuda` - implies `local`; on a native Windows x86-64 build with CUDA Toolkit >= 12.8, compiles the pinned `third_party/llama.cpp` submodule during the Cargo build into a Release `llama-server` for the build machine's visible GPUs, and embeds the resulting bundle (manifest plus runtime files) into the gateway binary. A no-op on every other target, where the platform backend archive path is unchanged.
 - `workshop-cuda` - implies `workshop` and `llama-cuda`, and builds the whisper voice engine with CUDA acceleration.

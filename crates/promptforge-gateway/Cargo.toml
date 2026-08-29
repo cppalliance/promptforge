@@ -29,6 +29,7 @@ promptforge-gateway-config.workspace = true
 promptforge-gateway-local = { workspace = true, optional = true }
 promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true
+promptforge-web-search-service = { workspace = true, optional = true }
 promptforge-ws-server = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
@@ -42,9 +43,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
-default = ["local"]
+default = ["local", "web-search"]
 # Gateway-owned local inference via the `promptforge-gateway-local` crate.
 local = ["dep:promptforge-gateway-local"]
+# The Brave-powered `POST /v1/tools/web_search` tool service.
+web-search = ["dep:promptforge-web-search-service"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull whisper, CUDA, or the
 # Node UI build into the graph.
