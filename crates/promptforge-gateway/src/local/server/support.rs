@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -40,7 +40,7 @@ impl ChildSpawner {
 
     pub(super) fn production() -> Self {
         Self::new(|request: &SpawnRequest<'_>| {
-            production_command(request)
+            production_command(request)?
                 .spawn()
                 .map_err(|source| LocalError::Spawn {
                     executable: request.executable.to_owned(),
@@ -75,19 +75,52 @@ const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 /// loading and inference yield CPU and I/O scheduling to interactive desktop
 /// processes. Non-Windows is a documented no-op: a `nice` port would need
 /// libc or `pre_exec` unsafe and is deferred.
-pub(super) fn production_command(request: &SpawnRequest<'_>) -> Command {
+///
+/// When the request carries a `path_prefix` (a staged CUDA bundle), the
+/// child's `PATH` is set to the prefix entries followed by the inherited
+/// ones. Only the child environment is touched; this process's environment is
+/// never mutated.
+///
+/// # Errors
+/// Returns [`LocalError::Spawn`] when the prefixed `PATH` value cannot be
+/// joined (a prefix entry contains a platform-forbidden character).
+pub(super) fn production_command(request: &SpawnRequest<'_>) -> Result<Command> {
     let mut command = Command::new(request.executable);
     command
         .args(request.args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if !request.path_prefix.is_empty() {
+        let path = child_path_with_prefix(request.path_prefix, std::env::var_os("PATH")).map_err(
+            |source| LocalError::Spawn {
+                executable: request.executable.to_owned(),
+                source: io::Error::other(source),
+            },
+        )?;
+        command.env("PATH", path);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS);
     }
-    command
+    Ok(command)
+}
+
+/// The child's `PATH` value: `prefix` entries first, then the inherited ones.
+///
+/// Pure join, so the prepend order and the no-process-mutation contract are
+/// testable without spawning anything.
+fn child_path_with_prefix(
+    prefix: &[PathBuf],
+    inherited: Option<OsString>,
+) -> std::result::Result<OsString, std::env::JoinPathsError> {
+    let mut entries = prefix.to_vec();
+    if let Some(inherited) = inherited {
+        entries.extend(std::env::split_paths(&inherited));
+    }
+    std::env::join_paths(entries)
 }
 
 /// A narrow view of the `llama-server` `/v1/models` readiness response.
@@ -351,8 +384,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_reader, new_capture, readiness_lists_model};
+    use super::{
+        capture_reader, child_path_with_prefix, new_capture, production_command,
+        readiness_lists_model,
+    };
+    use crate::local::server::SpawnRequest;
+    use std::ffi::{OsStr, OsString};
     use std::io::{self, Read};
+    use std::path::{Path, PathBuf};
 
     struct ErroringReader;
 
@@ -397,5 +436,81 @@ mod tests {
             br#"{"data":[{"id":"promptforge"#,
             "x"
         ));
+    }
+
+    #[test]
+    fn child_path_with_prefix_orders_prefix_before_inherited() {
+        let prefix = vec![PathBuf::from("staged"), PathBuf::from("toolkit-bin")];
+        let inherited =
+            std::env::join_paths([PathBuf::from("c"), PathBuf::from("d")]).expect("join inherited");
+        let joined = child_path_with_prefix(&prefix, Some(inherited)).expect("join child path");
+        let entries: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        assert_eq!(
+            entries,
+            vec![
+                PathBuf::from("staged"),
+                PathBuf::from("toolkit-bin"),
+                PathBuf::from("c"),
+                PathBuf::from("d"),
+            ]
+        );
+    }
+
+    #[test]
+    fn child_path_with_prefix_without_inherited_is_just_the_prefix() {
+        let prefix = vec![PathBuf::from("staged")];
+        let joined = child_path_with_prefix(&prefix, None).expect("join child path");
+        let entries: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        assert_eq!(entries, vec![PathBuf::from("staged")]);
+    }
+
+    #[test]
+    fn production_command_prepends_path_to_child_env_only() {
+        let before = std::env::var_os("PATH");
+        let args = [OsString::from("--version")];
+        let prefix = [PathBuf::from("staged-dir"), PathBuf::from("toolkit-bin")];
+        let request = SpawnRequest {
+            executable: Path::new("llama-server"),
+            args: &args,
+            path_prefix: &prefix,
+            port: 0,
+            model_alias: "env-test",
+            api_key: "env-test",
+        };
+        let command = production_command(&request).expect("build child command");
+
+        // The process-global environment is never mutated.
+        assert_eq!(std::env::var_os("PATH"), before);
+
+        let child_path = command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .expect("child PATH is set")
+            .to_owned();
+        let entries: Vec<PathBuf> = std::env::split_paths(&child_path).collect();
+        assert_eq!(entries[..2], prefix[..]);
+        if let Some(inherited) = before {
+            let inherited_entries: Vec<PathBuf> = std::env::split_paths(&inherited).collect();
+            assert!(entries.ends_with(&inherited_entries));
+        }
+    }
+
+    #[test]
+    fn production_command_with_empty_prefix_leaves_child_path_inherited() {
+        let args = [OsString::from("--version")];
+        let request = SpawnRequest {
+            executable: Path::new("llama-server"),
+            args: &args,
+            path_prefix: &[],
+            port: 0,
+            model_alias: "env-test",
+            api_key: "env-test",
+        };
+        let command = production_command(&request).expect("build child command");
+        assert!(
+            command.get_envs().all(|(key, _)| key != OsStr::new("PATH")),
+            "an empty prefix must not override the child's inherited PATH"
+        );
     }
 }

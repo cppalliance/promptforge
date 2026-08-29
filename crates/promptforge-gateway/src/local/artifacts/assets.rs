@@ -1,17 +1,24 @@
 //! Pinned `llama-server` release assets and the host->asset selection table.
+//!
+//! Compiled out of a `llama-cuda` Windows x86-64 build (`llama_cuda_embedded`),
+//! which stages the embedded CUDA bundle instead of downloading an archive.
 
+#[cfg(not(llama_cuda_embedded))]
 use super::Result;
+#[cfg(not(llama_cuda_embedded))]
 use crate::local::error::LocalError;
 
 /// The `llama.cpp` release tag every managed `llama-server` build is pinned to.
 pub(super) const LLAMA_RELEASE: &str = "b10082";
 
+#[cfg(any(not(llama_cuda_embedded), test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArchiveKind {
     TarGz,
     Zip,
 }
 
+#[cfg(not(llama_cuda_embedded))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ServerAsset<'a> {
     pub(super) os: &'a str,
@@ -31,6 +38,7 @@ pub(super) struct FileAsset<'a> {
     pub(super) sha256: Option<&'a str>,
 }
 
+#[cfg(not(llama_cuda_embedded))]
 const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
     os: "windows",
     arch: "aarch64",
@@ -43,6 +51,7 @@ const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
 };
 
 // The macOS release tars are already Metal-enabled, so both kinds share them.
+#[cfg(not(llama_cuda_embedded))]
 const MACOS_X86_64: ServerAsset<'static> = ServerAsset {
     os: "macos",
     arch: "x86_64",
@@ -54,6 +63,7 @@ const MACOS_X86_64: ServerAsset<'static> = ServerAsset {
     executable_name: "llama-server",
 };
 
+#[cfg(not(llama_cuda_embedded))]
 const MACOS_AARCH64: ServerAsset<'static> = ServerAsset {
     os: "macos",
     arch: "aarch64",
@@ -65,6 +75,7 @@ const MACOS_AARCH64: ServerAsset<'static> = ServerAsset {
     executable_name: "llama-server",
 };
 
+#[cfg(not(llama_cuda_embedded))]
 const WINDOWS_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
     os: "windows",
     arch: "x86_64",
@@ -76,6 +87,7 @@ const WINDOWS_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
     executable_name: "llama-server.exe",
 };
 
+#[cfg(not(llama_cuda_embedded))]
 const LINUX_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
     os: "linux",
     arch: "x86_64",
@@ -87,6 +99,7 @@ const LINUX_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
     executable_name: "llama-server",
 };
 
+#[cfg(not(llama_cuda_embedded))]
 const LINUX_AARCH64_VULKAN: ServerAsset<'static> = ServerAsset {
     os: "linux",
     arch: "aarch64",
@@ -100,6 +113,7 @@ const LINUX_AARCH64_VULKAN: ServerAsset<'static> = ServerAsset {
 
 // No Vulkan build exists for Windows arm64 in release b10082, so the dev
 // table falls back to the CPU archive there.
+#[cfg(not(llama_cuda_embedded))]
 const DEV_SERVER_ASSETS: &[ServerAsset<'static>] = &[
     WINDOWS_X86_64_VULKAN,
     WINDOWS_AARCH64_CPU,
@@ -113,6 +127,7 @@ const DEV_SERVER_ASSETS: &[ServerAsset<'static>] = &[
 ///
 /// # Errors
 /// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+#[cfg(not(llama_cuda_embedded))]
 pub(super) fn server_asset(os: &str, arch: &str) -> Result<ServerAsset<'static>> {
     DEV_SERVER_ASSETS
         .iter()

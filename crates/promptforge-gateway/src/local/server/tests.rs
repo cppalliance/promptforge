@@ -32,6 +32,7 @@ fn options(think: bool) -> LaunchOptions {
         think,
         chat_template_file: None,
         serve_mode: ServeMode::Chat,
+        path_prefix: Vec::new(),
     }
 }
 
@@ -345,6 +346,7 @@ fn attempt_identity_and_spawn_request_debug_redact_the_token() {
     let request = SpawnRequest {
         executable: Path::new("llama-server"),
         args: &args,
+        path_prefix: &[],
         port: 4242,
         model_alias: "promptforge-local-alias",
         api_key: TOKEN,
@@ -1274,11 +1276,13 @@ fn production_command_child_runs_at_below_normal_priority() {
     let request = SpawnRequest {
         executable: Path::new("powershell.exe"),
         args: &args,
+        path_prefix: &[],
         port: 0,
         model_alias: "priority-test",
         api_key: "priority-test",
     };
     let mut child = production_command(&request)
+        .expect("build priority probe command")
         .spawn()
         .expect("spawn powershell priority probe");
     let mut stdout = child.stdout.take().expect("child stdout is piped");

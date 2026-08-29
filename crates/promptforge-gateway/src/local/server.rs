@@ -68,6 +68,9 @@ impl std::fmt::Debug for AttemptIdentity {
 struct SpawnRequest<'a> {
     executable: &'a Path,
     args: &'a [OsString],
+    /// Directories prepended to the child's `PATH`; empty leaves the child on
+    /// the inherited `PATH`.
+    path_prefix: &'a [PathBuf],
     #[cfg(test)]
     port: u16,
     #[cfg(test)]
@@ -103,6 +106,7 @@ impl std::fmt::Debug for SpawnRequest<'_> {
         let mut dbg = f.debug_struct("SpawnRequest");
         dbg.field("executable", &self.executable);
         dbg.field("args", &RedactedArgs(self.args));
+        dbg.field("path_prefix", &self.path_prefix);
         #[cfg(test)]
         {
             dbg.field("port", &self.port);
@@ -153,6 +157,10 @@ pub(crate) struct LaunchOptions {
     pub(crate) chat_template_file: Option<PathBuf>,
     /// The child's serving mode (`--embeddings` / `--reranking`; chat is default).
     pub(crate) serve_mode: ServeMode,
+    /// Directories prepended to the child's `PATH` (the staged CUDA bundle
+    /// directory and the CUDA Toolkit runtime directory); empty for
+    /// archive-installed servers.
+    pub(crate) path_prefix: Vec<PathBuf>,
 }
 
 /// A running local server that is killed and reaped whenever its owner exits.
@@ -222,6 +230,7 @@ impl ServerGuard {
             let request = SpawnRequest {
                 executable,
                 args: &args,
+                path_prefix: &options.path_prefix,
                 #[cfg(test)]
                 port,
                 #[cfg(test)]
@@ -439,6 +448,7 @@ impl ServerGuard {
         let request = SpawnRequest {
             executable,
             args: &args,
+            path_prefix: &options.path_prefix,
             #[cfg(test)]
             port: self.port,
             #[cfg(test)]

@@ -333,6 +333,14 @@ pub(crate) enum LocalError {
         status: String,
     },
 
+    /// Staging the embedded CUDA `llama-server` bundle failed.
+    ///
+    /// Present only in CUDA-embedded builds and tests; build-script failures
+    /// never reach this variant because they fail the Cargo build itself.
+    #[cfg(any(llama_cuda_embedded, test))]
+    #[error("stage embedded CUDA llama-server bundle")]
+    CudaBundle(#[from] crate::local::artifacts::cuda_bundle::BundleError),
+
     /// Reading a dialect-probe body failed or exceeded the byte ceiling
     /// (HYGIENE-BOUNDS-001).
     #[error("{operation}")]
