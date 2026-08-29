@@ -190,7 +190,7 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{StoreErrorKind, StoreRef};
+    /// use promptforge_store::{StoreErrorKind, StoreRef};
     ///
     /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
     /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
@@ -215,7 +215,7 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::StoreRef;
+    /// use promptforge_store::StoreRef;
     ///
     /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
     /// assert!(err.is_not_found());
@@ -229,7 +229,7 @@ impl StoreError {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::StoreRef;
+    /// use promptforge_store::StoreRef;
     ///
     /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
     /// assert_eq!(err.path(), Some("missing.txt"));
@@ -250,12 +250,12 @@ impl StoreError {
 
     /// Wraps a backend's own error as an opaque [`StoreError::Backend`] source.
     ///
-    /// A downstream [`Store`](crate::store::Store) implementation uses this so its concrete error
+    /// A downstream [`Store`](crate::Store) implementation uses this so its concrete error
     /// type never leaks through this crate's public API.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{StoreError, StoreErrorKind};
+    /// use promptforge_store::{StoreError, StoreErrorKind};
     ///
     /// let io = std::io::Error::other("disk gone");
     /// let err = StoreError::backend(io);
@@ -265,6 +265,34 @@ impl StoreError {
     pub fn backend(source: impl std::error::Error + Send + Sync + 'static) -> StoreError {
         StoreError::Backend {
             source: Box::new(source),
+        }
+    }
+
+    /// Builds [`StoreError::NotFound`] for `path`.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core` test
+    /// doubles, which cannot construct the `#[non_exhaustive]` variant
+    /// directly. Not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn not_found(path: &str) -> StoreError {
+        StoreError::NotFound {
+            path: path.to_owned(),
+        }
+    }
+
+    /// Builds [`StoreError::InvalidRange`] for `path` with `reason`.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s Lua
+    /// host, which refuses an `end` without a `start` with the same
+    /// `InvalidRange` a zero bound earns but cannot construct the
+    /// `#[non_exhaustive]` variant directly. Not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn invalid_range(path: &str, reason: &'static str) -> StoreError {
+        StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason,
         }
     }
 }

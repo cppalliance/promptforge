@@ -16,12 +16,12 @@ use super::path::StorePath;
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::store::{Store, MemStore};
+/// use promptforge_store::{Store, MemStore};
 ///
 /// let mut fs = MemStore::new();
 /// fs.write("greeting.txt", "hello")?;
 /// assert_eq!(fs.read("greeting.txt")?, "hello");
-/// # Ok::<(), promptforge_core::store::StoreError>(())
+/// # Ok::<(), promptforge_store::StoreError>(())
 /// ```
 ///
 /// The `Send` bound lets a backend cross a `spawn_blocking` boundary; `Sync` is
@@ -36,13 +36,13 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "one")?;
     /// fs.write("a.txt", "two")?;
     /// assert_eq!(fs.read("a.txt")?, "two");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError>;
 
@@ -54,13 +54,13 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.append("log.txt", "first\n")?;
     /// fs.append("log.txt", "second")?;
     /// assert_eq!(fs.read("log.txt")?, "first\nsecond");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn append(&mut self, path: &str, contents: &str) -> Result<(), StoreError>;
 
@@ -75,12 +75,12 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.write("poem.txt", "roses\nviolets\n")?;
     /// assert_eq!(fs.read("poem.txt")?, "roses\nviolets\n");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn read(&self, path: &str) -> Result<String, StoreError>;
 
@@ -98,13 +98,13 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "the quick brown fox")?;
     /// fs.str_replace("a.txt", "quick", "slow")?;
     /// assert_eq!(fs.read("a.txt")?, "the slow brown fox");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn str_replace(&mut self, path: &str, old: &str, new: &str) -> Result<(), StoreError>;
 
@@ -119,14 +119,14 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.write("temp.txt", "scratch")?;
     /// fs.delete("temp.txt")?;
     /// assert!(fs.read("temp.txt").is_err());
     /// fs.delete("temp.txt")?; // already gone; still Ok
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn delete(&mut self, path: &str) -> Result<(), StoreError>;
 
@@ -142,7 +142,7 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// fs.write("src/a.rs", "")?;
@@ -153,7 +153,7 @@ pub trait Store: Send {
     ///     fs.glob("src/**/*.rs")?,
     ///     vec!["src/a.rs", "src/b.rs", "src/deep/c.rs"],
     /// );
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError>;
 
@@ -168,13 +168,13 @@ pub trait Store: Send {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{Store, MemStore};
+    /// use promptforge_store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
     /// assert!(!fs.exists("a.txt")?);
     /// fs.write("a.txt", "hi")?;
     /// assert!(fs.exists("a.txt")?);
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     fn exists(&self, path: &str) -> Result<bool, StoreError>;
 }
@@ -189,12 +189,12 @@ pub trait Store: Send {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::store::{Store, MemStore};
+/// use promptforge_store::{Store, MemStore};
 ///
 /// let mut fs = MemStore::new();
 /// fs.write("notes.md", "todo")?;
 /// assert_eq!(fs.glob("*.md")?, vec!["notes.md"]);
-/// # Ok::<(), promptforge_core::store::StoreError>(())
+/// # Ok::<(), promptforge_store::StoreError>(())
 /// ```
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -207,7 +207,7 @@ impl MemStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::MemStore;
+    /// use promptforge_store::MemStore;
     ///
     /// let fs = MemStore::new();
     /// # let _ = fs;
@@ -228,13 +228,13 @@ impl MemStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{MemStore, Store};
+    /// use promptforge_store::{MemStore, Store};
     ///
     /// let fs = MemStore::with_files([
     ///     ("input.md".to_owned(), "# Hello".to_owned()),
     /// ])?;
     /// assert_eq!(fs.read("input.md")?, "# Hello");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// # Ok::<(), promptforge_store::StoreError>(())
     /// ```
     pub fn with_files(
         files: impl IntoIterator<Item = (String, String)>,

@@ -1,0 +1,22 @@
+[package]
+name = "promptforge-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge run-scoped virtual filesystem: the Store backend contract, in-memory and file backends, and the shared StoreRef handle"
+readme = "README.md"
+keywords = ["prompt", "llm", "virtual-filesystem", "storage"]
+categories = ["data-structures", "rust-patterns"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

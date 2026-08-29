@@ -19,5 +19,10 @@ Lua runtime, the model catalog, and the run machinery.
   Compatibility re-exports under `promptforge_core::client` and
   `promptforge_core::model` follow the `tools` precedent: verbatim
   re-exports only, no new vocabulary.
+- The run-scoped virtual filesystem (`Store`, `StoreRef`, the backends, and
+  the error vocabulary) lives in `promptforge-store`. The compatibility
+  re-export under `promptforge_core::store` follows the `tools` precedent:
+  verbatim re-exports only, no new vocabulary; `WriteScope` stays
+  `pub(crate)`.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.
