@@ -1,20 +1,22 @@
 // Bundles src/main.ts into dist/app.js and copies the static assets into
-// dist/. The server crate's build.rs performs the same two steps on
+// dist/. The server crate's build.rs performs the same two steps on debug
 // `cargo build` (STATIC_FILES is mirrored there); this script exists for the
-// fast iteration workflow: `npm run watch` rebuilds on save without a Rust
-// recompile.
+// fast iteration workflow (`npm run watch` rebuilds on save without a Rust
+// recompile) and for packaging: `node build.mjs --package` builds minified
+// and writes the dist/manifest.json that release builds verify and embed.
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 import { checkImport } from "./check-layers.mjs";
+import { writeManifest } from "./manifest.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
 const srcDir = path.join(uiDir, "src");
 const chatDir = path.join(srcDir, "chat");
 
-// Mirrored in ../build.rs.
+// Mirrored in ../build/manifest.rs.
 const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js", "icons/promptforge-icon-1.png"];
 
 // The layer rule (defined once, in check-layers.mjs) enforced while
@@ -43,14 +45,15 @@ const layerCheckPlugin = {
   },
 };
 
+// `--minify` produces a release-grade bundle by hand; `--package` (the
+// release artifact path release builds consume) always minifies.
+const packaging = process.argv.includes("--package");
 const options = {
   entryPoints: [path.join(srcDir, "main.ts")],
   bundle: true,
   format: "esm",
   target: "es2022",
-  // `node build.mjs --minify` matches what build.rs does for cargo release
-  // builds.
-  minify: process.argv.includes("--minify"),
+  minify: packaging || process.argv.includes("--minify"),
   outfile: path.join(distDir, "app.js"),
   logLevel: "info",
   plugins: [layerCheckPlugin],
@@ -78,4 +81,7 @@ if (process.argv.includes("--watch")) {
   await rm(distDir, { recursive: true, force: true });
   await esbuild.build(options);
   await copyStatic();
+  if (packaging) {
+    await writeManifest(uiDir, distDir, STATIC_FILES);
+  }
 }

@@ -30,6 +30,13 @@ mod tape;
 mod voice;
 mod workspace;
 
+// The release artifact verifier lives outside src/ so build.rs shares it
+// through the same `#[path]` mechanism; included here only to run its
+// tests under `cargo test`.
+#[cfg(test)]
+#[path = "../build/manifest.rs"]
+mod build_manifest;
+
 /// Crate-internal test fixtures, re-exported to the integration-test
 /// binary; the `test-fixtures` feature that compiles them is enabled by
 /// the crate's own dev-dependency, so every `cargo test` sees them while
