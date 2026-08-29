@@ -1,0 +1,34 @@
+name: CUDA
+
+on:
+  workflow_dispatch:
+  # Nightly CUDA build and live test. Uncomment once a self-hosted runner
+  # with the `windows` and `cuda` labels is registered.
+  # schedule:
+  #   - cron: '0 6 * * *'
+
+jobs:
+  cuda:
+    runs-on: [self-hosted, windows, cuda]
+    timeout-minutes: 120
+    steps:
+      # submodules: the CUDA build compiles the pinned llama.cpp submodule.
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CUDA bundle
+        run: cargo build --locked -p promptforge-ws
+
+      - name: Test (llama-cuda)
+        run: cargo test --locked -p promptforge-gateway --features llama-cuda
+
+      - name: Live CUDA test
+        env:
+          PROMPTFORGE_LIVE_CUDA: "1"
+        run: cargo test --locked -p promptforge-gateway --features llama-cuda -- --ignored live_cuda --nocapture

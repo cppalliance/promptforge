@@ -22,22 +22,41 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm ci
+
       - name: Format
         run: cargo fmt --all --check
 
+      # promptforge-gateway is excluded from the blanket commands: --all-features
+      # would enable workshop-cuda, which needs a CUDA Toolkit these runners do
+      # not have. Its non-CUDA surface is exercised by the gateway steps below.
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --all-features
+        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --doc
+        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway
+
+      # The workshop feature hosts the ws-server UI; its build script bundles
+      # the UI with esbuild, which needs the node_modules installed above.
+      - name: Clippy (gateway)
+        run: cargo clippy -p promptforge-gateway --all-targets --features workshop -- -D warnings
+
+      - name: Test (gateway)
+        run: cargo test --locked -p promptforge-gateway --features workshop
 
   check-workshop:
     runs-on: windows-latest
@@ -78,10 +97,23 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-ws-server/ui
+        run: npm ci
+
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --all-features
-          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --all-features
+          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
+          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --all-features
+
+      - name: Build and test gateway on MSRV
+        run: |
+          cargo build --locked -p promptforge-gateway --features workshop
+          cargo test --locked -p promptforge-gateway --features workshop
 
   supply-chain:
     runs-on: ubuntu-latest
