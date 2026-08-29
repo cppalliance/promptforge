@@ -1,4 +1,4 @@
-//! The `promptforge-ws` binary: the PromptForge Workshop desktop app.
+//! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
 //! search order), generating a default config and its `default` profile in
@@ -8,7 +8,7 @@
 //! answer, and opens a window pointed at it through
 //! [`promptforge_desktop_shell::run`]. Closing the window shuts the
 //! gateway down cleanly. Development against an external gateway uses the
-//! standalone `promptforge-ws-server` binary and its `workshop.toml`
+//! standalone `promptforge-workshop-server` binary and its `workshop.toml`
 //! instead of this shell.
 
 mod discover;
@@ -96,8 +96,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crate_is_named_promptforge_ws() {
-        assert_eq!(env!("CARGO_PKG_NAME"), "promptforge-ws");
+    fn crate_is_named_promptforge_workshop() {
+        assert_eq!(env!("CARGO_PKG_NAME"), "promptforge-workshop");
     }
 
     #[test]

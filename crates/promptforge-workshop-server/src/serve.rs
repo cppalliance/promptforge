@@ -153,7 +153,7 @@ fn spawn_with_grace(config: Config, grace: Duration) -> Result<ServerHandle, Spa
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let (stopped_tx, stopped_rx) = mpsc::channel();
     let thread = std::thread::Builder::new()
-        .name("promptforge-ws-server".to_string())
+        .name("promptforge-workshop-server".to_string())
         .spawn(move || serve_thread(config, ready_tx, shutdown_rx, &stopped_tx, grace))?;
     match ready_rx.recv() {
         Ok(Ok(url)) => Ok(ServerHandle {

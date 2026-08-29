@@ -29,7 +29,7 @@ promptforge-tools = { path = "crates/promptforge-tools", version = "0.1.0" }
 promptforge-transcribe = { path = "crates/promptforge-transcribe", version = "0.1.0" }
 promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.1.0" }
 promptforge-web-search-service = { path = "crates/promptforge-web-search-service", version = "0.1.0" }
-promptforge-ws-server = { path = "crates/promptforge-ws-server", version = "0.1.0" }
+promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"

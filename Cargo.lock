@@ -4002,7 +4002,7 @@ dependencies = [
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
  "promptforge-web-search-service",
- "promptforge-ws-server",
+ "promptforge-workshop-server",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4261,7 +4261,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-ws"
+name = "promptforge-workshop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4272,7 +4272,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-ws-server"
+name = "promptforge-workshop-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -4283,7 +4283,7 @@ dependencies = [
  "percent-encoding",
  "promptforge-gateway-protocol",
  "promptforge-transcribe",
- "promptforge-ws-server",
+ "promptforge-workshop-server",
  "reqwest 0.12.28",
  "rust-embed",
  "serde",

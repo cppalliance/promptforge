@@ -1,6 +1,6 @@
 # Workshop UI Rules
 
-These rules bind the embedded UI under `crates/promptforge-ws-server/ui/`. The repo-root and server-crate AGENTS.md apply on top.
+These rules bind the embedded UI under `crates/promptforge-workshop-server/ui/`. The repo-root and server-crate AGENTS.md apply on top.
 
 ## Vendored code is never edited
 

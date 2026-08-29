@@ -1,7 +1,7 @@
-//! The `promptforge-ws-server` binary: loads `workshop.toml` and serves the
+//! The `promptforge-workshop-server` binary: loads `workshop.toml` and serves the
 //! workshop HTTP API.
 //!
-//! Thin shell around [`promptforge_ws_server`]: load the config, spawn the
+//! Thin shell around [`promptforge_workshop_server`]: load the config, spawn the
 //! server in-process, optionally open the system browser at its address (the
 //! browser-tab frame, for when no desktop window is driving), and wait.
 
@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::Context as _;
-use promptforge_ws_server::{Config, DEFAULT_CONFIG_PATH};
+use promptforge_workshop_server::{Config, DEFAULT_CONFIG_PATH};
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt::init();
@@ -34,7 +34,7 @@ fn serve() -> anyhow::Result<()> {
     };
     let config = Config::load(Path::new(path)).with_context(|| format!("load {path}"))?;
     let open_browser = config.server.open_browser;
-    let server = promptforge_ws_server::spawn(config).context("start workshop server")?;
+    let server = promptforge_workshop_server::spawn(config).context("start workshop server")?;
     if open_browser {
         let url = server.url().to_string();
         // A browser that will not open is not worth killing a serving

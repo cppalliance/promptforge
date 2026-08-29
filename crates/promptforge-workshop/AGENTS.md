@@ -1,6 +1,6 @@
 # Desktop Binary Rules
 
-These rules bind `crates/promptforge-ws`. The repo-root AGENTS.md applies on top.
+These rules bind `crates/promptforge-workshop`. The repo-root AGENTS.md applies on top.
 
 ## Two-zone error policy
 

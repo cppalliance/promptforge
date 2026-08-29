@@ -7,7 +7,7 @@ segmentation, silence gating, and the whisper-rs integration.
 ## Rules
 
 - Engine-only ownership. This crate never depends on HTTP, WebSocket, or UI
-  crates, and never on `promptforge-ws-server`, the gateway, or any other
+  crates, and never on `promptforge-workshop-server`, the gateway, or any other
   PromptForge crate. Session transport, route state, and post-cache
   activation stay in the server.
 - The host configures the engine through `EngineConfig`'s plain values only.

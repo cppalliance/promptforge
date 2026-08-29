@@ -1,11 +1,11 @@
 # PromptForge Workshop example configuration.
 #
-# The promptforge-ws desktop shell generates ~/.promptforge/workshop.toml
+# The promptforge-workshop desktop shell generates ~/.promptforge/workshop.toml
 # from a built-in template on first run, so no setup is needed there. This
 # file is the commented reference: copy it to workshop.toml and edit when
 # you want a configuration the template does not produce - beside the
 # shell's executable or in the current directory to shadow the profile
-# copy, or in the current directory for the promptforge-ws-server binary,
+# copy, or in the current directory for the promptforge-workshop-server binary,
 # which reads workshop.toml from there (or workbench.toml if that is absent).
 #
 # String values support ${VAR} environment interpolation; $$ is a literal

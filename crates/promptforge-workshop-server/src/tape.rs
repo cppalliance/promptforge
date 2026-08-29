@@ -130,7 +130,7 @@ impl Tape {
     /// # Examples
     /// ```
     /// let dir = tempfile::TempDir::new()?;
-    /// let tape = promptforge_ws_server::Tape::open(&dir.path().join("tape.jsonl"))?;
+    /// let tape = promptforge_workshop_server::Tape::open(&dir.path().join("tape.jsonl"))?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn open(path: &Path) -> Result<Self, TapeError> {
