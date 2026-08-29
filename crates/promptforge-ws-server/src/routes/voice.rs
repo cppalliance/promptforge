@@ -27,7 +27,7 @@ pub(crate) fn routes(state: AppState) -> Router {
 /// Reports whether voice transcription can run on the GPU, so the UI can
 /// hide the mic rather than offer a take that stalls on a CPU pass.
 async fn voice_capability() -> impl IntoResponse {
-    let gpu = crate::transcribe::gpu_transcription_available();
+    let gpu = promptforge_transcribe::gpu_transcription_available();
     (
         [(header::CONTENT_TYPE, "application/json")],
         format!(r#"{{"gpu":{gpu}}}"#),
@@ -72,7 +72,7 @@ mod tests {
             .await
             .expect("the route answers");
         assert_eq!(response.status(), StatusCode::OK);
-        let expected = crate::transcribe::gpu_transcription_available();
+        let expected = promptforge_transcribe::gpu_transcription_available();
         assert_eq!(
             &body_bytes(response).await[..],
             format!(r#"{{"gpu":{expected}}}"#).as_bytes()

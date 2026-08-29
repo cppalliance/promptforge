@@ -4,9 +4,9 @@ use std::path::Path;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::transcribe::MAX_PROMPT_TOKENS;
-use crate::transcribe::error::TranscribeError;
-use crate::transcribe::prompt::{fit_glossary, sanitize_prompt};
+use crate::MAX_PROMPT_TOKENS;
+use crate::error::TranscribeError;
+use crate::prompt::{fit_glossary, sanitize_prompt};
 
 /// One transcription request handed to the worker thread.
 struct Job {

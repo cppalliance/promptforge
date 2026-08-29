@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use axum::Router;
 
+use promptforge_transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
+
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;
 use crate::config::{Config, VoiceConfig};
@@ -17,7 +19,6 @@ use crate::push::Push;
 use crate::routes;
 use crate::status::StatusBus;
 use crate::tape::{Tape, TapeError};
-use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use crate::workspace::Workspace;
 
 /// Address the server binds to when no override is given.
@@ -83,7 +84,7 @@ impl AppState {
         // a take stalls on a CPU pass and the UI hides the mic, so the
         // server never loads the multi-gigabyte whisper models it could
         // not use, and never announces voice over a mic that is not there.
-        if crate::transcribe::gpu_transcription_available() {
+        if promptforge_transcribe::gpu_transcription_available() {
             if let Some(engine) = startup_engine(&config.voice, &push) {
                 voice.activate(engine);
             }
@@ -209,7 +210,7 @@ pub(crate) fn startup_engine(config: &VoiceConfig, push: &Push) -> Option<VoiceE
         "the interim transcription model",
         Activity::General,
     );
-    match VoiceEngine::new(config) {
+    match VoiceEngine::new(&promptforge_transcribe::EngineConfig::from(config)) {
         Ok(engine) => Some(engine),
         Err(error) => degrade(config, push, &error),
     }
@@ -239,7 +240,9 @@ fn degrade(config: &VoiceConfig, push: &Push, error: &TranscribeError) -> Option
             // drops to interim-only rather than costing voice entirely.
             let mut interim_only = config.clone();
             interim_only.final_model = std::path::PathBuf::new();
-            return match VoiceEngine::new(&interim_only) {
+            return match VoiceEngine::new(&promptforge_transcribe::EngineConfig::from(
+                &interim_only,
+            )) {
                 Ok(engine) => {
                     tracing::warn!(%error, "voice final pass unavailable; running interim-only");
                     push.push_status_update(
@@ -384,9 +387,10 @@ mod tests {
     use axum::response::{IntoResponse, Response};
     use axum::routing::get;
 
+    use promptforge_transcribe::fixtures;
+
     use super::fixtures::{config_for, spawn_gateway};
     use crate::protocol::{Severity, StatusBarUpdate};
-    use crate::transcribe::fixtures;
 
     /// Reports whether the request carried an `Authorization` header, so
     /// the client tests can observe what was sent.

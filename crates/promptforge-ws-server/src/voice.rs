@@ -15,7 +15,7 @@
 //! `committed` is the crystallized prefix (final-pass segment transcripts,
 //! append-only within a take) and `tentative` is the interim model's decode
 //! of the audio past it. In parallel, an energy-based segmenter
-//! ([`crate::segment::Segmenter`]) cuts completed speech segments at
+//! ([`Segmenter`]) cuts completed speech segments at
 //! silence boundaries and hands them to the final-pass worker, which
 //! transcribes them with the `voice.final_model` model in the background,
 //! each conditioned on the take's accumulated transcript. On `stop` the
@@ -52,6 +52,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
+use promptforge_transcribe::{MIN_WINDOW_SAMPLES, Segmenter, VoiceEngine, is_silence, tail};
 use tokio::sync::watch;
 
 use crate::app::AppState;
@@ -59,8 +60,6 @@ use crate::cross_site;
 use crate::error::AppError;
 use crate::protocol::{Activity, FinalFrame, InterimFrame, StreamFrame, VOICE_START, VOICE_STOP};
 use crate::push::Push;
-use crate::segment::Segmenter;
-use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
 
 /// Voice session ids for log correlation, handed out in connection order.
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -173,7 +172,7 @@ impl TakeState {
         // the previous take's not-yet-cancelled interim task; clamp rather
         // than panic on it.
         let uncommitted = &guard[consumed.min(guard.len())..];
-        transcribe::tail(uncommitted, window_samples).to_vec()
+        tail(uncommitted, window_samples).to_vec()
     }
 }
 
@@ -253,8 +252,7 @@ fn spawn_interim(
                 state.consumed.load(Ordering::Relaxed),
                 engine.window_samples(),
             );
-            let tentative = if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window)
-            {
+            let tentative = if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
                 String::new()
             } else {
                 push.push_activity(
@@ -320,7 +318,7 @@ async fn final_transcript(
     push: &Push,
 ) -> String {
     let window = state.uncommitted_snapshot(segmenter.consumed(), engine.window_samples());
-    if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window) {
+    if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
         return String::new();
     }
     match engine.transcribe(window).await {
@@ -616,8 +614,9 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite;
 
+    use promptforge_transcribe::fixtures;
+
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
-    use crate::transcribe::fixtures;
 
     /// Binds the workshop router on a free loopback port with the given
     /// voice configuration and returns the `/voice` WebSocket URL plus the

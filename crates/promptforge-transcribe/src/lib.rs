@@ -2,43 +2,43 @@
 //!
 //! [`VoiceEngine`] owns two worker threads: the interim worker holds the
 //! streaming model and transcribes sliding windows, and the final-pass
-//! worker ([`FinalTranscriber`](final_pass::FinalTranscriber), present when
-//! `[voice].final_model` is configured) holds the larger model and
-//! transcribes completed speech segments in the background while the user
-//! is still talking. Callers hand owned sample buffers through channels
-//! and await transcripts on oneshots, so the blocking CPU-bound inference
-//! never touches the tokio executor. The pure helpers ([`rms`],
-//! [`is_silence`], [`tail`]) are the session's silence gate: whisper
-//! hallucinates plausible text on silent input, so quiet windows are never
-//! sent to the model.
+//! worker (`FinalTranscriber`, present when [`EngineConfig::final_model`] is
+//! set) holds the larger model and transcribes completed speech segments in
+//! the background while the user is still talking. Callers hand owned sample
+//! buffers through channels and await transcripts on oneshots, so the
+//! blocking CPU-bound inference never touches the tokio executor. The pure
+//! helpers ([`is_silence`], [`tail`]) are the session's silence gate:
+//! whisper hallucinates plausible text on silent input, so quiet windows are
+//! never sent to the model.
 
 mod engine;
 mod error;
 mod final_pass;
 mod prompt;
+mod segment;
 mod slot;
 mod worker;
 
+pub use engine::{EngineConfig, VoiceEngine};
 pub use error::TranscribeError;
-
-pub(crate) use engine::VoiceEngine;
-pub(crate) use slot::VoiceSlot;
+pub use segment::Segmenter;
+pub use slot::VoiceSlot;
 
 use std::path::Path;
 
 /// PCM sample rate the voice wire format and whisper both require.
-pub(crate) const SAMPLE_RATE: usize = 16_000;
+pub const SAMPLE_RATE: usize = 16_000;
 
 /// Windows below this RMS are treated as silence and never transcribed.
 ///
 /// 0.001 is -60 dBFS: above the noise floor of a browser-suppressed mic
 /// stream, far below conversational speech (typically 0.02 and up).
-pub(crate) const SILENCE_RMS: f64 = 0.001;
+const SILENCE_RMS: f64 = 0.001;
 
 /// Minimum audio the interim loop bothers to transcribe; shorter fragments
 /// decode to garbage often enough that gating them is cheaper than filtering
 /// their output.
-pub(crate) const MIN_WINDOW_SAMPLES: usize = SAMPLE_RATE / 2;
+pub const MIN_WINDOW_SAMPLES: usize = SAMPLE_RATE / 2;
 
 /// Maximum conditioning prompt handed to the final pass, in chars. Whisper
 /// keeps at most half its text context for the prompt (224 tokens), and
@@ -64,7 +64,7 @@ const GLOSSARY_TOKEN_BUDGET: usize = MAX_PROMPT_TOKENS / 2;
     clippy::cast_precision_loss,
     reason = "audio buffers are far below 2^53 samples"
 )]
-pub(crate) fn rms(samples: &[f32]) -> f64 {
+fn rms(samples: &[f32]) -> f64 {
     if samples.is_empty() {
         return 0.0;
     }
@@ -74,13 +74,15 @@ pub(crate) fn rms(samples: &[f32]) -> f64 {
 
 /// Returns true when the buffer is quiet enough that whisper would
 /// hallucinate rather than transcribe.
-pub(crate) fn is_silence(samples: &[f32]) -> bool {
+#[must_use]
+pub fn is_silence(samples: &[f32]) -> bool {
     rms(samples) < SILENCE_RMS
 }
 
 /// Returns the trailing `window` samples of `buffer`, or the whole buffer
 /// when it is shorter than the window.
-pub(crate) fn tail(buffer: &[f32], window: usize) -> &[f32] {
+#[must_use]
+pub fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
 
@@ -88,7 +90,8 @@ pub(crate) fn tail(buffer: &[f32], window: usize) -> &[f32] {
 /// carries the CUDA backend and an NVIDIA driver is present. Without both,
 /// whisper falls back to a CPU pass slow enough that the UI hides the mic
 /// rather than offering a take that stalls for half a minute.
-pub(crate) fn gpu_transcription_available() -> bool {
+#[must_use]
+pub fn gpu_transcription_available() -> bool {
     cfg!(feature = "cuda") && gpu_driver_present()
 }
 
@@ -113,19 +116,20 @@ fn gpu_driver_present() -> bool {
 /// and a 16 kHz mono WAV of known speech, both downloaded out of band (the
 /// URLs are recorded in the design log) and gitignored. Gated on the
 /// `test-fixtures` feature - which the crate's own dev-dependency enables
-/// for every test build - rather than `cfg(test)`, so the integration-test
-/// binary reuses these through the [`crate::fixtures`] re-export instead
-/// of duplicating them.
+/// for every test build - rather than `cfg(test)`, so consumers'
+/// integration-test binaries reuse these through their own fixture
+/// re-exports instead of duplicating them.
 // An `allow` rather than an `expect`: whether the lint fires here depends
 // on the build's cfg permutation (clippy suppresses expect_used inside
 // test-cfg'd code on its own), so an expectation would be unfulfilled in
 // some builds and fail the -D warnings gate.
 #[cfg(feature = "test-fixtures")]
+#[doc(hidden)]
 #[allow(
     clippy::expect_used,
     reason = "test fixtures fail by panicking with the invariant named"
 )]
-pub(crate) mod fixtures {
+pub mod fixtures {
     use std::path::{Path, PathBuf};
 
     /// The directory holding the downloaded fixtures.

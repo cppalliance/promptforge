@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, PoisonError, RwLock};
 
-use crate::transcribe::engine::VoiceEngine;
+use crate::engine::VoiceEngine;
 
 /// Shared holder for the voice engine: empty until the engine loads, then
 /// filled exactly once - at startup from local model files, or later by the
@@ -13,13 +13,14 @@ use crate::transcribe::engine::VoiceEngine;
 /// recovers the value, matching the tape's posture: a panicking writer
 /// cannot wedge voice for the process's life.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct VoiceSlot {
+pub struct VoiceSlot {
     engine: Arc<RwLock<Option<Arc<VoiceEngine>>>>,
 }
 
 impl VoiceSlot {
     /// The engine, when it has loaded.
-    pub(crate) fn engine(&self) -> Option<Arc<VoiceEngine>> {
+    #[must_use]
+    pub fn engine(&self) -> Option<Arc<VoiceEngine>> {
         self.engine
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -27,7 +28,8 @@ impl VoiceSlot {
     }
 
     /// Whether the engine has loaded.
-    pub(crate) fn is_active(&self) -> bool {
+    #[must_use]
+    pub fn is_active(&self) -> bool {
         self.engine
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -35,7 +37,7 @@ impl VoiceSlot {
     }
 
     /// Installs a loaded engine.
-    pub(crate) fn activate(&self, engine: VoiceEngine) {
+    pub fn activate(&self, engine: VoiceEngine) {
         *self.engine.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(engine));
     }
 }

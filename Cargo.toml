@@ -16,6 +16,7 @@ promptforge-gateway-config = { path = "crates/promptforge-gateway-config", versi
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
 promptforge-tools = { path = "crates/promptforge-tools", version = "0.1.0" }
+promptforge-transcribe = { path = "crates/promptforge-transcribe", version = "0.1.0" }
 promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.1.0" }
 promptforge-ws-server = { path = "crates/promptforge-ws-server", version = "0.1.0" }
 pulldown-cmark = "0.12"
@@ -87,10 +88,12 @@ tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 indicatif = "0.18"
 # Safe bindings to whisper.cpp; the C++ core is built from source by
-# whisper-rs-sys (cmake + MSVC required). Enable the wb-server's "cuda"
-# feature to build with GPU acceleration (needs the CUDA Toolkit).
+# whisper-rs-sys (cmake + MSVC required). Enable promptforge-transcribe's
+# "cuda" feature (via the ws-server's "voice-cuda") to build with GPU
+# acceleration (needs the CUDA Toolkit).
 whisper-rs = "0.16"
-# WAV parsing for the voice test fixtures; dev-dependency of the wb-server.
+# WAV parsing for the voice test fixtures; optional dependency of
+# promptforge-transcribe's test-fixtures feature.
 hound = "3.5"
 socket2 = { version = "0.6", features = ["all"] }
 # wry 0.56 pairs with tao 0.36 (wry's own dev-dependency constraint); tao 0.37

@@ -4,10 +4,10 @@ use std::path::Path;
 
 use whisper_rs::WhisperContext;
 
-use crate::transcribe::error::TranscribeError;
-use crate::transcribe::prompt::{final_prompt, fit_glossary};
-use crate::transcribe::worker::{load_state, transcribe_blocking};
-use crate::transcribe::{GLOSSARY_TOKEN_BUDGET, MIN_WINDOW_SAMPLES, is_silence};
+use crate::error::TranscribeError;
+use crate::prompt::{final_prompt, fit_glossary};
+use crate::worker::{load_state, transcribe_blocking};
+use crate::{GLOSSARY_TOKEN_BUDGET, MIN_WINDOW_SAMPLES, is_silence};
 
 /// One take's final-pass state: the large model's whisper context and state
 /// plus the take's accumulated transcript, which conditions each new
@@ -245,9 +245,8 @@ mod tests {
 
     use super::*;
 
-    use crate::config::VoiceConfig;
-    use crate::transcribe::engine::VoiceEngine;
-    use crate::transcribe::{SAMPLE_RATE, fixtures};
+    use crate::engine::VoiceEngine;
+    use crate::{EngineConfig, SAMPLE_RATE, fixtures};
 
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
@@ -290,10 +289,12 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_submit_reports_the_segment_on_the_take_channel() {
-        let config = VoiceConfig {
+        let config = EngineConfig {
             interim_model: fixtures::require_model(),
-            final_model: fixtures::require_model(),
-            ..VoiceConfig::default()
+            final_model: Some(fixtures::require_model()),
+            window_seconds: 12,
+            interval_ms: 500,
+            ..EngineConfig::default()
         };
         let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
         let (segment_tx, segment_rx) = std::sync::mpsc::channel();
@@ -334,10 +335,12 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_finish_with_a_silent_tail_returns_empty_after_draining() {
-        let config = VoiceConfig {
+        let config = EngineConfig {
             interim_model: fixtures::require_model(),
-            final_model: fixtures::require_model(),
-            ..VoiceConfig::default()
+            final_model: Some(fixtures::require_model()),
+            window_seconds: 12,
+            interval_ms: 500,
+            ..EngineConfig::default()
         };
         let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
         let (segment_tx, segment_rx) = std::sync::mpsc::channel();

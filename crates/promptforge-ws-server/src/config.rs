@@ -211,6 +211,22 @@ impl VoiceConfig {
     }
 }
 
+impl From<&VoiceConfig> for promptforge_transcribe::EngineConfig {
+    // The narrow seam into the transcription engine: plain values only, so
+    // the engine crate never names this server's configuration types. An
+    // empty `final_model` becomes `None`, which disables the final pass.
+    fn from(config: &VoiceConfig) -> Self {
+        Self {
+            interim_model: config.interim_model.clone(),
+            final_model: (!config.final_model.as_os_str().is_empty())
+                .then(|| config.final_model.clone()),
+            vocabulary: config.vocabulary.clone(),
+            window_seconds: config.window_seconds,
+            interval_ms: config.interval_ms,
+        }
+    }
+}
+
 /// A workshop configuration load or parse failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -480,6 +496,31 @@ vocabulary = ["MCP", "GGUF", "Lua"]
 "#;
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert_eq!(config.voice.vocabulary, ["MCP", "GGUF", "Lua"]);
+    }
+
+    #[test]
+    fn voice_config_maps_into_engine_config() {
+        let voice = VoiceConfig {
+            interim_model: PathBuf::from("models/interim.bin"),
+            final_model: PathBuf::from("models/final.bin"),
+            vocabulary: vec!["MCP".to_string(), "GGUF".to_string()],
+            window_seconds: 8,
+            interval_ms: 400,
+            ..VoiceConfig::default()
+        };
+        let engine = promptforge_transcribe::EngineConfig::from(&voice);
+        assert_eq!(engine.interim_model, PathBuf::from("models/interim.bin"));
+        assert_eq!(engine.final_model, Some(PathBuf::from("models/final.bin")));
+        assert_eq!(engine.vocabulary, ["MCP", "GGUF"]);
+        assert_eq!(engine.window_seconds, 8);
+        assert_eq!(engine.interval_ms, 400);
+
+        let no_final = promptforge_transcribe::EngineConfig::from(&VoiceConfig::default());
+        assert_eq!(
+            no_final.final_model, None,
+            "an empty final_model disables the final pass instead of \
+             becoming a path the engine would try to load"
+        );
     }
 
     #[test]
