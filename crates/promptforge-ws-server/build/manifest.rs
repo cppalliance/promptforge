@@ -47,8 +47,9 @@ const REQUIRED_SERVED: &[&str] = &[
 ];
 
 const INSTRUCTIONS: &str = "\
-Release builds embed a verified, prebuilt UI artifact and do not run the
-UI build. Produce the artifact, then re-run the cargo command:
+Release builds embed the verified UI artifact in ui/dist/. The build already
+tried to produce the artifact with `node build.mjs --package`; to produce it
+by hand and see the full packaging output:
 
     cd crates/promptforge-ws-server/ui
     npm ci              # once per checkout

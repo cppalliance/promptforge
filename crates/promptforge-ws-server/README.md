@@ -65,7 +65,7 @@ When voice model sources are configured but the model files are not on disk, a p
 
 The chat UI is TypeScript under `ui/src/`, bundled by esbuild into `ui/dist/app.js`. Node.js is required: run `npm install` in `ui/` once per checkout. After that, debug `cargo build` runs the UI build itself (the crate's `build.rs` prefers `ui/node_modules/.bin/esbuild` and falls back to `npx esbuild`, which may download esbuild on first use). `ui/node_modules/` and `ui/dist/` are gitignored.
 
-Release builds do not run the UI build. They verify and embed a prebuilt artifact: `npm run package` in `ui/` bundles minified and writes `ui/dist/manifest.json` (schema version, minified flag, a sha256 over every build input, and the dist file list), and `build.rs` fails the release build with instructions when the manifest is absent, stale against the current sources, unminified, or missing a served file. Re-run `npm run package` before building `--release` after any UI change - and after any debug build, since the debug path wipes and rebuilds `ui/dist/` in place.
+Release builds embed a verified, minified artifact: `build.rs` checks `ui/dist/manifest.json` (schema version, minified flag, a sha256 over every build input, and the dist file list) and, when the manifest is absent or stale against the current sources, produces the artifact itself by running `node build.mjs --package` in `ui/` (the same command as `npm run package`) before verifying and embedding. A single `cargo build --release` is sufficient, including after UI edits and after a debug build wiped `ui/dist/`; the build fails with instructions only when the artifact cannot be produced (for example Node.js or `ui/node_modules` missing) or still does not verify.
 
 Two workflows:
 
