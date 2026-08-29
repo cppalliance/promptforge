@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use promptforge_core::tools::WebSearch;
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_tools::{Tool, ToolCatalog};
+use promptforge_web_search::WebSearch;
 use promptforge_webfetch::WebFetch;
 
 /// A validated gateway configuration produced by argument/environment parsing.

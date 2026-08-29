@@ -12,9 +12,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use promptforge_core::tools::WebSearch;
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_tools::{Tool, ToolCatalog};
+use promptforge_web_search::WebSearch;
 use promptforge_webfetch::WebFetch;
 
 /// The complete set of concrete tools available to one run.

@@ -10,15 +10,14 @@
 //! [`ToolId`], the output and error types) lives in the `promptforge-tools`
 //! crate and is re-exported here unchanged, so existing
 //! `promptforge_core::tools::*` paths keep working. The concrete `WebSearch`
-//! tool remains in this crate for now.
-
-mod web_search;
+//! provider lives in the `promptforge-web-search` crate and is re-exported
+//! here under its historical path for the same reason.
 
 pub use promptforge_tools::{
     OutputTrust, Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind, ToolError,
     ToolErrorKind, ToolId, ToolIdError, ToolIdErrorKind, ToolOutput,
 };
-pub use web_search::WebSearch;
+pub use promptforge_web_search::WebSearch;
 
 /// Diagnostics for two semantic near-duplicates exposed in one model turn.
 ///

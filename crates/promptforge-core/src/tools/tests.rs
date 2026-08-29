@@ -95,3 +95,19 @@ async fn dynamic_dispatch_works_through_the_reexported_path() {
     assert_eq!(output.text(), "reexport-ok");
     assert_eq!(output.trust(), crate::tools::OutputTrust::Trusted);
 }
+
+#[test]
+fn reexported_web_search_is_the_provider_type() {
+    // A function written against the provider crate's type accepts a value
+    // named through the re-exported path only when both names denote the same
+    // type: if the re-export ever became a lookalike, this would not compile.
+    fn takes_provider(
+        tool: &promptforge_web_search::WebSearch,
+    ) -> &promptforge_web_search::WebSearch {
+        tool
+    }
+
+    let tool =
+        crate::tools::WebSearch::new("http://localhost", "tok").expect("valid configuration");
+    let _ = takes_provider(&tool);
+}
