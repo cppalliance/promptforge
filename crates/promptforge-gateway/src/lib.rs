@@ -28,6 +28,12 @@ mod cache;
 mod dialect;
 mod error;
 mod http_util;
+#[cfg(all(feature = "llama-cuda", target_os = "windows", target_arch = "x86_64"))]
+#[expect(
+    dead_code,
+    reason = "consumed by the runtime staging module added next"
+)]
+mod llama_cuda_bundle;
 mod local;
 mod queue;
 mod routing;
