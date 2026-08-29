@@ -298,6 +298,24 @@ pub(super) fn server_args(
         OsString::from(options.gpu_layers.to_string()),
         OsString::from("--jinja"),
     ];
+    // Companion spellings are pinned to the bundled server
+    // (third_party/llama.cpp @ fb0e6b6, common/arg.cpp): `--spec-draft-model`
+    // (alias of `-md`), `--spec-type draft-mtp` (the only speculation type the
+    // configuration can express), `--spec-draft-n-max`, and `--mmproj`. The
+    // legacy `--draft`/`--draft-max` flags were removed at that pin.
+    if let Some(speculative) = &options.speculative {
+        args.extend([
+            OsString::from("--spec-draft-model"),
+            speculative.draft_model.as_os_str().to_owned(),
+            OsString::from("--spec-type"),
+            OsString::from("draft-mtp"),
+            OsString::from("--spec-draft-n-max"),
+            OsString::from(speculative.draft_max.to_string()),
+        ]);
+    }
+    if let Some(projector) = &options.multimodal_projector {
+        args.extend([OsString::from("--mmproj"), projector.as_os_str().to_owned()]);
+    }
     match options.serve_mode {
         ServeMode::Chat => {}
         ServeMode::Embeddings => args.push(OsString::from("--embeddings")),

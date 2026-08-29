@@ -29,7 +29,7 @@ pub(crate) use error::LocalError;
 
 use artifacts::ArtifactStore;
 use dialect::resolve_local_dialect;
-use server::{LaunchOptions, ServeMode, ServerGuard};
+use server::{LaunchOptions, ServeMode, ServerGuard, SpeculativeLaunch};
 use upstream::LocalUpstream;
 
 /// Running local `llama-server` children and the models they back.
@@ -94,6 +94,7 @@ impl LocalRuntime {
             let admission = resolve_admission(&dominion_queues, local_model)?;
             let mut options = launch_options(local_model, admission.parallel);
             options.path_prefix.clone_from(&server.path_prefix);
+            provision_companions(&store, local_model, &mut options)?;
             let guard = ServerGuard::start(
                 &server.executable,
                 &model_path,
@@ -267,8 +268,52 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
             // Chat (and any kind added after this mapping) launches with no flag.
             _ => ServeMode::Chat,
         },
+        speculative: None,
+        multimodal_projector: None,
         path_prefix: Vec::new(),
     }
+}
+
+/// Resolves a model's declared companions through the same `ensure_model`
+/// machinery as the main model and records the owned paths in `options`.
+///
+/// Each companion lands in its own cache slot keyed by its own source
+/// identity, with its own pin verified on hit and after download. Any
+/// resolution failure returns before the caller spawns the child, so a bad
+/// companion never becomes a spawned-then-failing server. A model without
+/// companions leaves `options` untouched, preserving the exact command line
+/// from before companions existed.
+///
+/// # Errors
+/// Returns [`LocalError`] when a companion source cannot be resolved or its
+/// pin does not match.
+fn provision_companions(
+    store: &ArtifactStore,
+    model: &LocalModelConfig,
+    options: &mut LaunchOptions,
+) -> Result<(), LocalError> {
+    if let Some(speculative) = model.speculative() {
+        let draft_model = store.ensure_model(speculative.source(), speculative.sha256())?;
+        tracing::info!(
+            model = %model.name(),
+            path = %draft_model.display(),
+            "provisioned speculative drafter GGUF"
+        );
+        options.speculative = Some(SpeculativeLaunch {
+            draft_model,
+            draft_max: speculative.draft_max().get(),
+        });
+    }
+    if let Some(projector) = model.multimodal_projector() {
+        let projector_path = store.ensure_model(projector.source(), projector.sha256())?;
+        tracing::info!(
+            model = %model.name(),
+            path = %projector_path.display(),
+            "provisioned multimodal projector GGUF"
+        );
+        options.multimodal_projector = Some(projector_path);
+    }
+    Ok(())
 }
 
 /// Best-effort: fetch HF metadata and write a sidecar `.md` beside the GGUF.
@@ -598,5 +643,139 @@ context = 4096
             ServeMode::Reranking
         );
         assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+    }
+
+    fn companion_config(body: &str) -> Config {
+        Config::from_toml_str(&format!(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "q"
+description = "a local model"
+source = "/models/q.gguf"
+context = 4096
+{body}"#
+        ))
+        .expect("config")
+    }
+
+    #[test]
+    fn provision_companions_resolve_to_independent_pinned_slots() {
+        // Each companion resolves through `ensure_model` under its own source
+        // identity and its own pin: a shared verification state or a dropped
+        // pin breaks the distinct markers, and a wiring slip breaks the
+        // resolved paths or the carried draft maximum.
+        use crate::testsupport::hex_sha256;
+
+        let source_dir = tempfile::TempDir::new().expect("source dir");
+        let draft = source_dir.path().join("draft.gguf");
+        let projector = source_dir.path().join("mmproj.gguf");
+        std::fs::write(&draft, b"draft-bytes").expect("write draft");
+        std::fs::write(&projector, b"projector-bytes").expect("write projector");
+        let config = companion_config(&format!(
+            r#"
+[local_model.speculative]
+type = "draft-mtp"
+source = '{}'
+sha256 = "{}"
+draft_max = 2
+
+[local_model.multimodal_projector]
+source = '{}'
+sha256 = "{}"
+"#,
+            draft.display(),
+            hex_sha256(b"draft-bytes"),
+            projector.display(),
+            hex_sha256(b"projector-bytes"),
+        ));
+        let model = &config.local_models()[0];
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let store = ArtifactStore::new(temp.path()).expect("store");
+
+        let mut options = launch_options(model, 1);
+        provision_companions(&store, model, &mut options).expect("provision companions");
+
+        let speculative = options.speculative.expect("speculative launch state");
+        assert_eq!(speculative.draft_model, draft);
+        assert_eq!(speculative.draft_max, 2);
+        assert_eq!(
+            options.multimodal_projector.expect("projector path"),
+            projector
+        );
+
+        // Each pinned path source records its own verification marker, keyed
+        // by its own source identity.
+        let draft_key = artifacts::source_cache_key(&draft.to_string_lossy());
+        let projector_key = artifacts::source_cache_key(&projector.to_string_lossy());
+        assert_ne!(draft_key, projector_key);
+        let markers = temp.path().join("markers");
+        assert!(markers.join(format!("{draft_key}.verified")).is_file());
+        assert!(markers.join(format!("{projector_key}.verified")).is_file());
+    }
+
+    #[test]
+    fn companion_provisioning_failures_precede_child_spawn() {
+        // An unresolvable or pin-mismatching companion fails inside
+        // `provision_companions`, which `LocalRuntime::start` calls before
+        // `ServerGuard::start`: the error is a `LocalError` from provisioning,
+        // never a spawned-then-failing server.
+        use crate::testsupport::hex_sha256;
+
+        let source_dir = tempfile::TempDir::new().expect("source dir");
+        let draft = source_dir.path().join("draft.gguf");
+        std::fs::write(&draft, b"real-draft-bytes").expect("write draft");
+        let mismatching = companion_config(&format!(
+            r#"
+[local_model.speculative]
+type = "draft-mtp"
+source = '{}'
+sha256 = "{}"
+draft_max = 2
+"#,
+            draft.display(),
+            hex_sha256(b"different-bytes"),
+        ));
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let store = ArtifactStore::new(temp.path()).expect("store");
+        let model = &mismatching.local_models()[0];
+        let mut options = launch_options(model, 1);
+        let error = provision_companions(&store, model, &mut options)
+            .expect_err("pin mismatch must fail provisioning");
+        assert!(matches!(error, LocalError::DigestMismatch { .. }));
+        assert!(options.speculative.is_none());
+
+        let missing = companion_config(
+            r#"
+[local_model.multimodal_projector]
+source = "/definitely/not/a/real/mmproj.gguf"
+"#,
+        );
+        let model = &missing.local_models()[0];
+        let mut options = launch_options(model, 1);
+        let error = provision_companions(&store, model, &mut options)
+            .expect_err("a missing local source must fail provisioning");
+        assert!(matches!(error, LocalError::InvalidSource { .. }));
+        assert!(options.multimodal_projector.is_none());
+    }
+
+    #[test]
+    fn model_without_companions_keeps_launch_options_unset() {
+        // Provisioning is a no-op for a companion-less model: the options stay
+        // exactly what `launch_options` produced, so the emitted command line
+        // is unchanged from before companions existed.
+        let config = companion_config("");
+        let model = &config.local_models()[0];
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let store = ArtifactStore::new(temp.path()).expect("store");
+        let mut options = launch_options(model, 1);
+        let before = options.clone();
+        provision_companions(&store, model, &mut options).expect("no companions");
+        assert_eq!(options, before);
+        assert!(options.speculative.is_none());
+        assert!(options.multimodal_projector.is_none());
     }
 }
