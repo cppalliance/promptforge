@@ -4163,6 +4163,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-progress"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "promptforge-store"
 version = "0.1.0"
 dependencies = [

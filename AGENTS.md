@@ -17,6 +17,10 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
 
+## Progress
+
+Long-running work reports progress through `promptforge-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
+
 ## Comments
 
 `///` doc comments on public items are mandatory (above) and are not what this section governs. Any other comment earns its place by exactly four things: a non-obvious why, an invisible constraint no type or test enforces, an external-bug workaround, or a subtle ordering requirement. Comments that narrate what the code already says are deleted on sight. A module doc earns its place by documenting the domain, not by restating the file name.
