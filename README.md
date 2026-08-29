@@ -116,7 +116,8 @@ flowchart LR
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
 | [promptforge-ws-server](crates/promptforge-ws-server) | Workshop HTTP server: chat relay, session tape, voice transcription | not published |
-| [promptforge-ws](crates/promptforge-ws) | Workshop desktop window shell (wry/tao) | not published |
+| [promptforge-desktop-shell](crates/promptforge-desktop-shell) | Workshop desktop shell: windowing, WebView, IPC, platform bridges (wry/tao) | not published |
+| [promptforge-ws](crates/promptforge-ws) | Workshop desktop app: boots the gateway and opens the window | not published |
 
 ## Documentation
 

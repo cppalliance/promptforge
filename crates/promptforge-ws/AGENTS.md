@@ -1,11 +1,11 @@
-# Desktop Shell Rules
+# Desktop Binary Rules
 
 These rules bind `crates/promptforge-ws`. The repo-root AGENTS.md applies on top.
 
 ## Two-zone error policy
 
-Zone one is config discovery plus window and server construction: fail loudly and immediately. Zone two is the running event loop: never panic; degrade and report rather than crash the window.
+Zone one is config discovery plus gateway construction: fail loudly and immediately. Zone two is the running event loop: never panic; degrade and report rather than crash the window. The event loop lives in `promptforge-desktop-shell`, which owns the zone-two policy for the code it hosts.
 
-## file_drop.rs is a guarded module
+## Lifecycle orchestration only
 
-`src/file_drop.rs` is dense working COM with documented failure modes and the workspace's only unsafe code; its module-level lint allowances are deliberate. Do not restructure it casually, and never edit it without running its tests.
+The desktop binary remains lifecycle orchestration: configuration discovery, gateway start, the health wait, shutdown, and feature forwarding. It drives the window through the single `promptforge-desktop-shell::run` entry point and does not reacquire GUI implementation dependencies (tao, wry, or the Windows COM crates). The WebView2 file-drop bridge moved with the shell; its guarded-module rules live in that crate's AGENTS.md.

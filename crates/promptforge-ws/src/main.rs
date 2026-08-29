@@ -1,25 +1,18 @@
-//! The `promptforge-ws` binary: the PromptForge Workshop desktop window
-//! shell.
+//! The `promptforge-ws` binary: the PromptForge Workshop desktop app.
 //!
 //! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
 //! search order), generating a default config and its `default` profile in
 //! the user profile's `.promptforge` directory on first run, boots the
 //! merged gateway (which hosts the workshop UI on a second loopback
 //! listener) in-process, waits for the workshop's health endpoint to
-//! answer, and opens a window pointed at it. Closing the window shuts the
+//! answer, and opens a window pointed at it through
+//! [`promptforge_desktop_shell::run`]. Closing the window shuts the
 //! gateway down cleanly. Development against an external gateway uses the
 //! standalone `promptforge-ws-server` binary and its `workshop.toml`
 //! instead of this shell.
 
 mod discover;
-// The only unsafe module in the workspace: the WebView2 COM surface that
-// reads real OS paths out of dropped File objects has no safe wrapper.
-// The clippy allows cover code the #[implement] macro expands in tests.
-#[cfg(target_os = "windows")]
-#[allow(unsafe_code, clippy::inline_always, clippy::ref_as_ptr)]
-mod file_drop;
 mod health;
-mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -57,7 +50,7 @@ fn run() -> anyhow::Result<()> {
     let window_result = workshop_url(&gateway).and_then(|url| {
         health::wait_for_health(&url, HEALTH_TIMEOUT)
             .context("wait for the hosted workshop")
-            .and_then(|()| window::run(&url))
+            .and_then(|()| promptforge_desktop_shell::run(&url))
     });
     let shutdown_result = gateway.shutdown().context("stop the gateway");
     // A shutdown failure stacked on a window failure is reported, not lost.

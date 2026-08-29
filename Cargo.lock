@@ -3947,6 +3947,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-desktop-shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "open",
+ "png",
+ "serde_json",
+ "tao",
+ "url",
+ "webview2-com",
+ "windows-core 0.61.2",
+ "wry",
+]
+
+[[package]]
 name = "promptforge-dev"
 version = "0.1.0"
 dependencies = [
@@ -4117,17 +4132,10 @@ name = "promptforge-ws"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "open",
- "png",
+ "promptforge-desktop-shell",
  "promptforge-gateway",
  "rand 0.9.5",
- "serde_json",
- "tao",
  "tempfile",
- "url",
- "webview2-com",
- "windows-core 0.61.2",
- "wry",
 ]
 
 [[package]]

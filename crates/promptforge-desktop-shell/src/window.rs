@@ -243,12 +243,16 @@ fn handle_shell_event(
     }
 }
 
-/// Runs the window's event loop until the user closes the window, then
-/// returns.
+/// Opens the workshop window on `url` and runs the event loop until the
+/// user closes the window, then returns.
+///
+/// This is the crate's single entry point: the caller owns everything
+/// before the window opens (configuration, server startup, the health
+/// wait) and everything after it closes (shutdown).
 ///
 /// # Errors
 /// Returns an error if the window or the webview cannot be created.
-pub(crate) fn run(url: &str) -> anyhow::Result<()> {
+pub fn run(url: &str) -> anyhow::Result<()> {
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let builder = WindowBuilder::new()
         .with_title("PromptForge")

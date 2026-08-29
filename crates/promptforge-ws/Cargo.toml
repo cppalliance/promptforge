@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop desktop window shell"
+description = "PromptForge Workshop desktop app: boots the gateway and opens the workshop window"
 
 [[bin]]
 name = "promptforge-ws"
@@ -15,24 +15,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-open.workspace = true
-png.workspace = true
+promptforge-desktop-shell.workspace = true
 promptforge-gateway = { workspace = true, features = ["workshop"] }
 rand.workspace = true
-serde_json.workspace = true
-tao.workspace = true
-url.workspace = true
-wry.workspace = true
-
-# Explorer path drops (src/file_drop.rs): the page posts dropped File
-# objects over the WebView2 web-message channel and the shell reads their
-# real OS paths from ICoreWebView2File. The versions mirror wry's, keeping
-# one build of each crate in the tree.
-[target.'cfg(target_os = "windows")'.dependencies.webview2-com]
-version = "0.38"
-
-[target.'cfg(target_os = "windows")'.dependencies.windows-core]
-version = "0.61"
 
 [features]
 # CUDA by default: the desktop app is voice-capable out of the box, at the
@@ -44,27 +29,5 @@ cuda = ["promptforge-gateway/workshop-cuda"]
 [dev-dependencies]
 tempfile.workspace = true
 
-# Not `workspace = true`: the WebView2 file-drop bridge (file_drop.rs) is
-# raw COM and cannot be written without unsafe, and a workspace `forbid`
-# cannot be overridden by a module allow. The workspace lint set is
-# mirrored with unsafe_code lowered to deny, which file_drop.rs alone opts
-# out of.
-[lints.rust]
-unsafe_code = "deny"
-missing_docs = "warn"
-missing_debug_implementations = "warn"
-unreachable_pub = "warn"
-unsafe_op_in_unsafe_fn = "deny"
-future_incompatible = { level = "warn", priority = -1 }
-
-[lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-
-[lints.clippy]
-all = { level = "deny", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-unwrap_used = "deny"
-expect_used = "deny"
-dbg_macro = "warn"
-doc_markdown = "allow"
+[lints]
+workspace = true
