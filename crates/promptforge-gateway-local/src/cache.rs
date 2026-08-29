@@ -16,26 +16,26 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::local::artifacts::{
+use crate::artifacts::{
     DownloadProgress, download_client, download_with_progress, enforce_private_cache_root,
     ensure_cache_directory, filename_from_url, lock_artifact, parse_expected_digest, part_path,
     remove_cache_entry, rename_confined, safe_relative_path, source_cache_key, validate_cache_path,
     write_synced,
 };
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// The sidecar suffix marking a blob as a cache-API entry.
 const META_SUFFIX: &str = ".meta.json";
 
 /// A blob present in the cache: its path, content digest, and size.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CachedBlob {
+pub struct CachedBlob {
     /// Absolute path of the blob under the cache root.
-    pub(crate) path: PathBuf,
+    pub path: PathBuf,
     /// Lowercase hex SHA-256 of the blob's bytes.
-    pub(crate) sha256: String,
+    pub sha256: String,
     /// Blob length in bytes.
-    pub(crate) size_bytes: u64,
+    pub size_bytes: u64,
 }
 
 /// The `<file>.meta.json` sidecar written when a cache download completes.
@@ -48,15 +48,15 @@ struct BlobMeta {
 
 /// One entry of the cache listing: a blob plus the source it was fetched from.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct CacheEntry {
+pub struct CacheEntry {
     /// The URL the blob was downloaded from.
-    pub(crate) source: String,
+    pub source: String,
     /// Absolute path of the blob under the cache root.
-    pub(crate) path: PathBuf,
+    pub path: PathBuf,
     /// Lowercase hex SHA-256 of the blob's bytes.
-    pub(crate) sha256: String,
+    pub sha256: String,
     /// Blob length in bytes.
-    pub(crate) size_bytes: u64,
+    pub size_bytes: u64,
 }
 
 /// The sidecar path for a cached blob: `<blob>.meta.json`.
@@ -127,7 +127,7 @@ fn cached(destination: &Path, expected: Option<&str>) -> Result<Option<CachedBlo
 /// Construction enforces the same owner-private-root precondition as artifact
 /// provisioning (ART-006), since the cache writes into the same tree.
 #[derive(Debug)]
-pub(crate) struct BlobCache {
+pub struct BlobCache {
     root: PathBuf,
     client: reqwest::blocking::Client,
 }
@@ -138,7 +138,7 @@ impl BlobCache {
     /// # Errors
     /// Returns [`LocalError::Io`], [`LocalError::CacheNotPrivate`], or
     /// [`LocalError::HttpClient`] on setup failure.
-    pub(crate) fn new(root: impl Into<PathBuf>) -> Result<Self, LocalError> {
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self, LocalError> {
         let root = root.into();
         ensure_cache_directory(&root, &root)?;
         enforce_private_cache_root(&root)?;
@@ -168,7 +168,7 @@ impl BlobCache {
     /// # Errors
     /// Returns [`LocalError::InvalidDigest`] for a malformed pin, or
     /// [`LocalError`] on filesystem failure.
-    pub(crate) fn lookup(
+    pub fn lookup(
         &self,
         source: &str,
         expected_sha256: Option<&str>,
@@ -190,7 +190,7 @@ impl BlobCache {
     /// # Errors
     /// Returns [`LocalError`] on transport, digest, confinement, or filesystem
     /// failure.
-    pub(crate) fn download_to_cache(
+    pub fn download_to_cache(
         &self,
         source: &str,
         expected_sha256: Option<&str>,
@@ -270,7 +270,7 @@ impl BlobCache {
     ///
     /// # Errors
     /// Returns [`LocalError::Io`] when the cache tree cannot be walked.
-    pub(crate) fn list(&self) -> Result<Vec<CacheEntry>, LocalError> {
+    pub fn list(&self) -> Result<Vec<CacheEntry>, LocalError> {
         let models = self.root.join("models");
         let key_dirs = match fs::read_dir(&models) {
             Ok(key_dirs) => key_dirs,
@@ -352,7 +352,7 @@ impl BlobCache {
     /// # Errors
     /// Returns [`LocalError::InvalidDigest`] for a malformed digest, or
     /// [`LocalError`] on filesystem failure.
-    pub(crate) fn remove(&self, sha256: &str) -> Result<bool, LocalError> {
+    pub fn remove(&self, sha256: &str) -> Result<bool, LocalError> {
         let wanted = parse_expected_digest(sha256)?;
         for entry in self.list()? {
             if entry.sha256 == wanted {

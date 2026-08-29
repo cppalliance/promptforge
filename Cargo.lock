@@ -3982,33 +3982,28 @@ dependencies = [
 name = "promptforge-gateway"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "axum",
  "dotenvy",
- "flate2",
  "futures-util",
- "indicatif",
  "open",
  "png",
  "promptforge-core",
- "promptforge-gateway-build",
  "promptforge-gateway-config",
+ "promptforge-gateway-local",
  "promptforge-gateway-protocol",
+ "promptforge-gateway-routing",
  "promptforge-ws-server",
- "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "subtle",
- "tar",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
- "zip",
 ]
 
 [[package]]
@@ -4048,6 +4043,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-gateway-local"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "indicatif",
+ "promptforge-gateway-build",
+ "promptforge-gateway-config",
+ "promptforge-gateway-protocol",
+ "promptforge-gateway-routing",
+ "rand 0.9.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "url",
+ "zip",
+]
+
+[[package]]
 name = "promptforge-gateway-protocol"
 version = "0.1.0"
 dependencies = [
@@ -4061,6 +4081,16 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "promptforge-gateway-routing"
+version = "0.1.0"
+dependencies = [
+ "promptforge-gateway-config",
+ "promptforge-gateway-protocol",
+ "thiserror 2.0.19",
+ "tokio",
 ]
 
 [[package]]

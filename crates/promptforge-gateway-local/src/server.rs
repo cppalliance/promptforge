@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use promptforge_gateway_config::Secret;
 
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 use support::{
     ChildSpawner, SharedCapture, capture_reader, display_invocation, free_port,
     listener_is_present, new_capture, random_identity, readiness_belongs_to, server_args,
@@ -544,7 +544,7 @@ impl ServerGuard {
 
     /// Explicit, bounded teardown: terminate the child and join capture readers.
     ///
-    /// Used by [`crate::local::upstream::LocalUpstream::shutdown`] to free the
+    /// Used by [`crate::upstream::LocalUpstream::shutdown`] to free the
     /// child deterministically at profile-switch time, when dropping the runtime
     /// alone would not (routing still holds `Arc<dyn Upstream>` clones).
     ///

@@ -1,0 +1,50 @@
+[package]
+name = "promptforge-gateway-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway local inference: GGUF provisioning, artifact store, and the llama-server child lifecycle"
+readme = "README.md"
+keywords = ["llm", "gateway", "openai", "gguf"]
+categories = ["web-programming::http-server"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+async-trait.workspace = true
+flate2.workspace = true
+indicatif.workspace = true
+promptforge-gateway-config.workspace = true
+promptforge-gateway-protocol.workspace = true
+promptforge-gateway-routing.workspace = true
+rand.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+url.workspace = true
+zip.workspace = true
+
+[build-dependencies]
+# Compiles and embeds the CUDA llama-server bundle; only in the graph when
+# the `llama-cuda` feature is enabled.
+promptforge-gateway-build = { workspace = true, optional = true }
+
+[dev-dependencies]
+promptforge-gateway-routing = { workspace = true, features = ["test-helpers"] }
+tempfile.workspace = true
+
+[features]
+# Compile the pinned llama.cpp submodule into an embedded, host-native CUDA
+# llama-server bundle during the Cargo build. Windows x86-64 with a CUDA
+# Toolkit >= 12.8 only; a no-op on every other target.
+llama-cuda = ["dep:promptforge-gateway-build"]
+
+[lints]
+workspace = true

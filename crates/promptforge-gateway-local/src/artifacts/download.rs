@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use super::Result;
 use super::digest::hex_digest;
 use super::progress::{DownloadProgress, download_label, progress_for_download};
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// Hard ceiling on a single artifact, guarding the cache volume against a
 /// malicious or mistaken endpoint. Generous enough for large GGUF weights.

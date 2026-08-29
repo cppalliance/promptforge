@@ -26,7 +26,7 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
 use super::Result;
-use crate::local::error::LocalError;
+use crate::error::LocalError;
 
 /// Enforces the private-cache ownership precondition on the cache `root`.
 ///

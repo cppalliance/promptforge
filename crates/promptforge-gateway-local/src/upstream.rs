@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use promptforge_gateway_protocol::{ProtocolError, ShutdownError};
 
-use crate::local::error::LocalError;
-use crate::local::server::{LaunchOptions, ServerGuard};
-use crate::upstream::Upstream;
-use crate::wire::{
+use crate::error::LocalError;
+use crate::server::{LaunchOptions, ServerGuard};
+use promptforge_gateway_protocol::upstream::Upstream;
+use promptforge_gateway_protocol::wire::{
     ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
 };
 
@@ -77,8 +77,8 @@ impl LocalUpstream {
                 last_respawn: Mutex::new(None),
                 shut_down: AtomicBool::new(false),
             }),
-            http: crate::http_util::bounded_client(),
-            http_stream: crate::http_util::streaming_client(),
+            http: promptforge_gateway_protocol::http_util::bounded_client(),
+            http_stream: promptforge_gateway_protocol::http_util::streaming_client(),
         }
     }
 
@@ -87,7 +87,7 @@ impl LocalUpstream {
     ///
     /// Called at profile-switch teardown so the old child is freed
     /// deterministically even while the outgoing routing table still holds an
-    /// `Arc<dyn Upstream>` clone (dropping [`crate::local::LocalRuntime`] alone
+    /// `Arc<dyn Upstream>` clone (dropping [`crate::LocalRuntime`] alone
     /// cannot guarantee this - PFGL-MOD-001/PF-GW-SERVER-004).
     ///
     /// The `shut_down` flag is set *before* acquiring the guard, so an in-flight
@@ -243,9 +243,11 @@ impl LocalUpstream {
 
         let status = response.status();
         if !status.is_success() {
-            let body =
-                crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY)
-                    .await;
+            let body = promptforge_gateway_protocol::http_util::read_body_capped(
+                response,
+                promptforge_gateway_protocol::http_util::MAX_ERROR_BODY,
+            )
+            .await;
             let body: String = body.chars().take(2000).collect();
             return Err(ProtocolError::upstream_status(status.as_u16(), body));
         }
@@ -270,9 +272,12 @@ impl LocalUpstream {
         body: &impl serde::Serialize,
     ) -> Result<Vec<u8>, ProtocolError> {
         let response = self.post(&self.http, path, body).await?;
-        crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
-            .await
-            .map_err(ProtocolError::upstream_transport)
+        promptforge_gateway_protocol::http_util::read_bytes_capped(
+            response,
+            promptforge_gateway_protocol::http_util::MAX_JSON_BODY,
+        )
+        .await
+        .map_err(ProtocolError::upstream_transport)
     }
 
     async fn forward(
@@ -318,13 +323,15 @@ impl LocalUpstream {
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<crate::upstream::StreamedChunks, ProtocolError> {
+    ) -> Result<promptforge_gateway_protocol::upstream::StreamedChunks, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         req.stream = true;
         let response = self
             .post(&self.http_stream, "chat/completions", &req)
             .await?;
-        Ok(crate::upstream::sse_chunks(response, requested))
+        Ok(promptforge_gateway_protocol::upstream::sse_chunks(
+            response, requested,
+        ))
     }
 
     /// Run the dead-child recovery after a transport failure.
@@ -409,7 +416,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<crate::upstream::StreamedChunks, ProtocolError> {
+    ) -> Result<promptforge_gateway_protocol::upstream::StreamedChunks, ProtocolError> {
         // Recovery applies only to a pre-stream transport failure: once the
         // chunk stream is open, a mid-stream death surfaces as an `Err` item
         // rather than triggering a respawn under a live response.

@@ -82,11 +82,13 @@ pub(crate) enum GatewayError {
     /// A `/v1/cache` route failed at the storage or transport layer before its
     /// response was committed (mid-stream failures are SSE error events, not
     /// this variant).
+    #[cfg(feature = "local")]
     #[non_exhaustive]
     #[error("cache operation failed")]
     Cache(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// `DELETE /v1/cache/{sha256}` named a digest no cache entry carries.
+    #[cfg(feature = "local")]
     #[non_exhaustive]
     #[error("cache entry not found: {0}")]
     CacheEntryNotFound(String),
@@ -103,6 +105,10 @@ impl From<crate::queue::AdmitError> for GatewayError {
             // Fail-fast rejection is client-visible back-pressure (429), not
             // a server-side failure.
             crate::queue::AdmitError::Rejected => GatewayError::QueueRejected,
+            // `AdmitError` is non-exhaustive across the crate boundary; any
+            // future variant is a "cannot admit now" condition and maps to
+            // the same 503 as a full queue.
+            _ => GatewayError::QueueFull,
         }
     }
 }
@@ -141,6 +147,7 @@ impl GatewayError {
     }
 
     /// Wrap a cache-operation failure, preserving the cause.
+    #[cfg(feature = "local")]
     #[must_use]
     pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> GatewayError {
         GatewayError::Cache(Box::new(source))
@@ -198,11 +205,13 @@ impl GatewayError {
                 "invalid_request_error",
                 "profiles_unavailable",
             ),
+            #[cfg(feature = "local")]
             GatewayError::Cache(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "cache_error",
             ),
+            #[cfg(feature = "local")]
             GatewayError::CacheEntryNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
