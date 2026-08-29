@@ -1,9 +1,9 @@
 {
-  "name": "promptforge-ws-ui",
+  "name": "promptforge-workshop-ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Workshop UI: TypeScript sources bundled by esbuild into dist/ and served by promptforge-ws-server.",
+  "description": "PromptForge Workshop UI: TypeScript sources bundled by esbuild into dist/ and served by promptforge-workshop-server.",
   "engines": {
     "node": ">=22"
   },

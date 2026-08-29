@@ -71,11 +71,11 @@ impl Config {
     ///
     /// # Examples
     /// ```
-    /// let config = promptforge_ws_server::Config::from_toml_str(
+    /// let config = promptforge_workshop_server::Config::from_toml_str(
     ///     "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
     /// )?;
     /// assert_eq!(config.server.bind, "127.0.0.1:7910");
-    /// # Ok::<(), promptforge_ws_server::ConfigError>(())
+    /// # Ok::<(), promptforge_workshop_server::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
         Self::parse(raw, None)

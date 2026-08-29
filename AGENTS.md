@@ -31,4 +31,4 @@ Every platform or external-bug workaround carries its upstream issue URL inline,
 ## Verify
 
 - Rust: `cargo test` at the workspace root.
-- UI: `npm run typecheck && npm test` in `crates/promptforge-ws-server/ui`.
+- UI: `npm run typecheck && npm test` in `crates/promptforge-workshop-server/ui`.

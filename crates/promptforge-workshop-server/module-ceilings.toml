@@ -1,6 +1,6 @@
-# Module size ratchet for promptforge-ws-server. Enforced by the `ratchet`
+# Module size ratchet for promptforge-workshop-server. Enforced by the `ratchet`
 # module of the tests/it integration binary; a module that outgrows its
-# ceiling fails `cargo test -p promptforge-ws-server --test it`.
+# ceiling fails `cargo test -p promptforge-workshop-server --test it`.
 #
 # Counting rule: physical lines, the count diff tooling reports - every
 # newline ends a line, and a final line missing its trailing newline still

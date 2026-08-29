@@ -9,7 +9,7 @@
 //! bridge that recovers real OS paths from dropped files - the
 //! workspace's only unsafe code.
 //!
-//! The desktop binary (`promptforge-ws`) keeps lifecycle orchestration -
+//! The desktop binary (`promptforge-workshop`) keeps lifecycle orchestration -
 //! configuration discovery, gateway start, the health wait, and
 //! shutdown - and drives this crate through [`run`], the entire public
 //! surface.

@@ -63,7 +63,7 @@ cd promptforge
 cargo build
 ```
 
-A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server`. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-ws --no-default-features` (voice transcription then stays off and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
+A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server`. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-workshop --no-default-features` (voice transcription then stays off and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
@@ -127,9 +127,9 @@ flowchart LR
 | [promptforge-web-search-service](crates/promptforge-web-search-service) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search-service.svg)](https://crates.io/crates/promptforge-web-search-service) |
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
-| [promptforge-ws-server](crates/promptforge-ws-server) | Workshop HTTP server: chat relay, session tape, voice transcription | not published |
+| [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: chat relay, session tape, voice transcription | not published |
 | [promptforge-desktop-shell](crates/promptforge-desktop-shell) | Workshop desktop shell: windowing, WebView, IPC, platform bridges (wry/tao) | not published |
-| [promptforge-ws](crates/promptforge-ws) | Workshop desktop app: boots the gateway and opens the window | not published |
+| [promptforge-workshop](crates/promptforge-workshop) | Workshop desktop app: boots the gateway and opens the window | not published |
 
 ## Documentation
 

@@ -1,5 +1,5 @@
 //! Shared helpers for the workshop server integration tests: an in-process
-//! spawn fixture over [`promptforge_ws_server::spawn`] and a typed JSON
+//! spawn fixture over [`promptforge_workshop_server::spawn`] and a typed JSON
 //! WebSocket client over tokio-tungstenite.
 
 // clippy.toml's allow-expect-in-tests covers #[test] functions and
@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use promptforge_ws_server::{
+use promptforge_workshop_server::{
     Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig, VoiceConfig,
 };
 use tokio::net::TcpStream;
@@ -59,7 +59,8 @@ impl TestServer {
             },
             voice,
         };
-        let handle = promptforge_ws_server::spawn(config).expect("the workshop server spawns");
+        let handle =
+            promptforge_workshop_server::spawn(config).expect("the workshop server spawns");
         Self {
             handle: Some(handle),
             tape_dir,
@@ -101,7 +102,7 @@ impl Drop for TestServer {
 
 // The crate's own fixture, shared here instead of duplicated: binds a mock
 // gateway on a free loopback port and returns its base URL.
-pub(crate) use promptforge_ws_server::fixtures::spawn_gateway;
+pub(crate) use promptforge_workshop_server::fixtures::spawn_gateway;
 
 /// A typed JSON WebSocket client: JSON and control frames out, JSON frames
 /// in, every receive bounded by a timeout.

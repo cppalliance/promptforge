@@ -4,8 +4,8 @@
 
 use std::time::Duration;
 
-use promptforge_ws_server::VoiceConfig;
-use promptforge_ws_server::fixtures::{jfk_samples, require_model};
+use promptforge_workshop_server::VoiceConfig;
+use promptforge_workshop_server::fixtures::{jfk_samples, require_model};
 use serde_json::json;
 
 use crate::common::{JsonSocket, TestServer};

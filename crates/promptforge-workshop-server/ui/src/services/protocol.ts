@@ -2,7 +2,7 @@
 // shapes exchanged with the server over /ws, /voice, and /v1/models. Types
 // only - the socket logic that sends and routes these frames stays in
 // workshop-socket.ts and ui/voice.ts. The Rust half of this contract is
-// crates/promptforge-ws-server/src/protocol.rs; the two files cross-cite
+// crates/promptforge-workshop-server/src/protocol.rs; the two files cross-cite
 // each other so a shape change touches both or neither.
 
 /** One observer status update, as sent by the server. */

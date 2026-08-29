@@ -1,6 +1,6 @@
 # Workshop Server Rules
 
-These rules bind `crates/promptforge-ws-server`. The repo-root AGENTS.md applies on top; the embedded UI has its own AGENTS.md under `ui/`. Rules here are target-state: refactor-era code lands in this shape.
+These rules bind `crates/promptforge-workshop-server`. The repo-root AGENTS.md applies on top; the embedded UI has its own AGENTS.md under `ui/`. Rules here are target-state: refactor-era code lands in this shape.
 
 ## Two-zone error policy
 

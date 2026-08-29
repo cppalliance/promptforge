@@ -51,7 +51,7 @@ Release builds embed the verified UI artifact in ui/dist/. The build already
 tried to produce the artifact with `node build.mjs --package`; to produce it
 by hand and see the full packaging output:
 
-    cd crates/promptforge-ws-server/ui
+    cd crates/promptforge-workshop-server/ui
     npm ci              # once per checkout
     npm run package
 

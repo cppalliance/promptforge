@@ -1,8 +1,8 @@
-# promptforge-ws-server
+# promptforge-workshop-server
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway (with streaming over a WebSocket), a JSONL session tape recording every exchange, and a WebSocket voice endpoint that transcribes push-to-talk microphone audio on-device with whisper.cpp. The desktop shell (`promptforge-ws`) embeds it in-process; run standalone it is the browser-tab frame of the same workshop.
+The PromptForge Workshop HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway (with streaming over a WebSocket), a JSONL session tape recording every exchange, and a WebSocket voice endpoint that transcribes push-to-talk microphone audio on-device with whisper.cpp. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame of the same workshop.
 
 ## Quick start
 
@@ -17,12 +17,12 @@ api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 Then run:
 
 ```bash
-cargo run -p promptforge-ws-server
+cargo run -p promptforge-workshop-server
 ```
 
 The server binds `127.0.0.1:7910` by default and serves the chat UI at `http://127.0.0.1:7910/`. Set `server.open_browser = true` to have it open your system browser once it is serving.
 
-The desktop shell (`promptforge-ws`) is the zero-config path: it searches beside its executable, then the current directory, then `~/.promptforge/`, and on first run writes a default `workshop.toml` into `~/.promptforge/` and loads that. The server binary does not generate one - it reads `workshop.toml` from the current directory, or `workbench.toml` there if the canonical name is missing.
+The desktop shell (`promptforge-workshop`) is the zero-config path: it searches beside its executable, then the current directory, then `~/.promptforge/`, and on first run writes a default `workshop.toml` into `~/.promptforge/` and loads that. The server binary does not generate one - it reads `workshop.toml` from the current directory, or `workbench.toml` there if the canonical name is missing.
 
 String values support `${VAR}` environment interpolation; `$$` is a literal `$`, and an unset variable interpolates to the empty string.
 
@@ -69,7 +69,7 @@ Release builds embed a verified, minified artifact: `build.rs` checks `ui/dist/m
 
 Two workflows:
 
-1. **Just cargo:** edit the TypeScript, then `cargo build` (or `cargo run -p promptforge-ws-server`). The build script re-bundles whenever `ui/src/` or the static UI files change, and debug builds read `ui/dist/` from disk on every request.
+1. **Just cargo:** edit the TypeScript, then `cargo build` (or `cargo run -p promptforge-workshop-server`). The build script re-bundles whenever `ui/src/` or the static UI files change, and debug builds read `ui/dist/` from disk on every request.
 2. **esbuild watch:** run `npm run watch` in `ui/` in one terminal and `cargo run` in another. Edit, save, refresh the browser - no Rust recompile for UI changes.
 
 `npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test`, which discovers every test under `ui/test/` plus any colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the chat UI mounts (run `npm run build` first).

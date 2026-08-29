@@ -27,7 +27,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
       - name: Format
@@ -39,18 +39,18 @@ jobs:
       # runners do not have. Their non-CUDA surfaces are exercised by the
       # dedicated steps below.
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
+        run: cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --doc
+        run: cargo test --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe
 
       # The transcription engine without its cuda feature: whisper then builds
       # its CPU backend, which needs no toolkit.
@@ -90,20 +90,20 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
       # --no-default-features: the desktop crate defaults to the cuda
       # feature, and windows-latest has no CUDA toolkit; CI builds the
       # CPU-only whisper path instead.
       - name: Clippy (workshop)
-        run: cargo clippy -p promptforge-ws -p promptforge-ws-server -p promptforge-desktop-shell --all-targets --no-default-features -- -D warnings
+        run: cargo clippy -p promptforge-workshop -p promptforge-workshop-server -p promptforge-desktop-shell --all-targets --no-default-features -- -D warnings
 
       - name: Test (workshop)
-        run: cargo test --locked -p promptforge-ws -p promptforge-ws-server -p promptforge-desktop-shell --no-default-features
+        run: cargo test --locked -p promptforge-workshop -p promptforge-workshop-server -p promptforge-desktop-shell --no-default-features
 
   # The UI build is its own job: it typechecks, tests, and packages the
-  # versioned ui/dist artifact that release builds of promptforge-ws-server
+  # versioned ui/dist artifact that release builds of promptforge-workshop-server
   # verify and embed (the debug-profile cargo jobs above still drive the UI
   # build in place through the crate's build script, hence their npm ci).
   ui:
@@ -116,30 +116,30 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
       - name: Typecheck
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm run typecheck
 
       - name: Build
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm run build
 
       - name: Test
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm test
 
       - name: Package the UI artifact
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm run package
 
       - name: Upload the UI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: promptforge-ws-ui-dist
-          path: crates/promptforge-ws-server/ui/dist/
+          name: promptforge-workshop-ui-dist
+          path: crates/promptforge-workshop-server/ui/dist/
 
   msrv:
     runs-on: ubuntu-latest
@@ -158,13 +158,13 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-ws-server/ui
+        working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
-          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
+          cargo build --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
+          cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-desktop-shell --exclude promptforge-gateway --exclude promptforge-transcribe --all-features
 
       - name: Build and test gateway on MSRV
         run: |

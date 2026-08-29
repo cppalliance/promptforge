@@ -23,7 +23,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build CUDA bundle
-        run: cargo build --locked -p promptforge-ws
+        run: cargo build --locked -p promptforge-workshop
 
       - name: Test (llama-cuda)
         run: cargo test --locked -p promptforge-gateway --features llama-cuda

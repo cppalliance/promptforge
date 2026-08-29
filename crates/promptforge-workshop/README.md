@@ -1,4 +1,4 @@
-# promptforge-ws
+# promptforge-workshop
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
@@ -7,7 +7,7 @@ The PromptForge Workshop desktop window. It boots the merged gateway (`promptfor
 ## Quick start
 
 ```bash
-cargo run -p promptforge-ws
+cargo run -p promptforge-workshop
 ```
 
 ## Configuration
@@ -20,11 +20,11 @@ The shell loads the gateway boot config `gateway.toml` (see the [promptforge-gat
 
 On first run - when no file exists at any of these locations - the shell writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\`: a loopback `[server]` bind on 8081 with a freshly generated random `api_key`, and a `[workshop]` section hosting the UI on a second loopback listener with the current voice-model defaults. It also writes `profiles\default.toml` beside it (the gateway boots into a named profile; the generated one includes the boot config), logs the path, and loads the pair. An existing `profiles\default.toml` is never overwritten. The app never exits on missing config.
 
-The shell always boots the `default` profile. Development against an external gateway uses the standalone `promptforge-ws-server` binary and its `workshop.toml`; that flow is unchanged.
+The shell always boots the `default` profile. Development against an external gateway uses the standalone `promptforge-workshop-server` binary and its `workshop.toml`; that flow is unchanged.
 
 ## Browser opening
 
-The generated config leaves `workshop.open_browser` off. Setting it in a boot config the shell loads opens a browser tab in addition to the desktop window, because the gateway honors the flag wherever it runs; the flag is meant for running the gateway (or the standalone `promptforge-ws-server`) without the shell.
+The generated config leaves `workshop.open_browser` off. Setting it in a boot config the shell loads opens a browser tab in addition to the desktop window, because the gateway honors the flag wherever it runs; the flag is meant for running the gateway (or the standalone `promptforge-workshop-server`) without the shell.
 
 ## Features
 

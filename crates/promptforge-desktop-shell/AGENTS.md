@@ -10,7 +10,7 @@ nothing else: the tao/wry event loop, window creation, the
 custom-title-bar IPC commands, the navigation policy, the microphone
 permission grant, file drops, and the program icon. Lifecycle
 orchestration (configuration discovery, gateway start, the health wait,
-shutdown) stays in the `promptforge-ws` binary, which drives this crate
+shutdown) stays in the `promptforge-workshop` binary, which drives this crate
 through the single documented `run` entry point. Never depend on the
 gateway or any other PromptForge crate.
 

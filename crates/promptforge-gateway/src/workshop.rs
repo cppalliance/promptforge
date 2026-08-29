@@ -23,7 +23,7 @@ mod hosted {
     /// A running hosted workshop server, held by [`crate::GatewayHandle`].
     #[derive(Debug)]
     pub(crate) struct WorkshopHandle {
-        inner: promptforge_ws_server::ServerHandle,
+        inner: promptforge_workshop_server::ServerHandle,
     }
 
     impl WorkshopHandle {
@@ -39,10 +39,10 @@ mod hosted {
         pub(crate) fn shutdown(self) {
             let url = self.inner.url().to_string();
             match self.inner.shutdown() {
-                Ok(promptforge_ws_server::Termination::Graceful) => {
+                Ok(promptforge_workshop_server::Termination::Graceful) => {
                     tracing::info!("workshop at {url} stopped gracefully");
                 }
-                Ok(promptforge_ws_server::Termination::Forced) => {
+                Ok(promptforge_workshop_server::Termination::Forced) => {
                     tracing::warn!("workshop at {url} was forced down after its drain window");
                 }
                 // Termination is non-exhaustive; a future ending is still a
@@ -100,9 +100,13 @@ mod hosted {
         // duplication is harmless - each port answers with its own - but it
         // is the known blocker for the documented future option of nesting
         // the workshop under a path on the gateway listener.
-        let handle =
-            promptforge_ws_server::spawn(ws_config(config.server(), workshop, config_path, bound))
-                .map_err(StartupError::workshop)?;
+        let handle = promptforge_workshop_server::spawn(ws_config(
+            config.server(),
+            workshop,
+            config_path,
+            bound,
+        ))
+        .map_err(StartupError::workshop)?;
         tracing::info!("workshop serving on {}", handle.url());
         if workshop.open_browser() {
             // A browser that will not open is not worth failing a serving
@@ -126,23 +130,24 @@ mod hosted {
         workshop: &WorkshopConfig,
         config_path: &Path,
         bound: SocketAddr,
-    ) -> promptforge_ws_server::Config {
+    ) -> promptforge_workshop_server::Config {
         let boot_dir = config_path.parent().unwrap_or(Path::new("."));
-        promptforge_ws_server::Config {
-            gateway: promptforge_ws_server::GatewayConfig {
+        promptforge_workshop_server::Config {
+            gateway: promptforge_workshop_server::GatewayConfig {
                 base_url: client_url(server, bound),
                 api_key: server.api_key().expose().to_string(),
             },
-            tape: promptforge_ws_server::TapeConfig {
+            tape: promptforge_workshop_server::TapeConfig {
                 path: workshop.tape_path(boot_dir),
             },
-            server: promptforge_ws_server::ServerConfig {
+            server: promptforge_workshop_server::ServerConfig {
                 bind: workshop.bind().to_string(),
                 open_browser: workshop.open_browser(),
             },
-            voice: workshop
-                .voice()
-                .map_or_else(promptforge_ws_server::VoiceConfig::default, voice_config),
+            voice: workshop.voice().map_or_else(
+                promptforge_workshop_server::VoiceConfig::default,
+                voice_config,
+            ),
         }
     }
 
@@ -165,8 +170,8 @@ mod hosted {
 
     /// Mirrors `[workshop.voice]` onto the workshop server's own voice
     /// settings, field for field.
-    fn voice_config(voice: &WorkshopVoiceConfig) -> promptforge_ws_server::VoiceConfig {
-        promptforge_ws_server::VoiceConfig {
+    fn voice_config(voice: &WorkshopVoiceConfig) -> promptforge_workshop_server::VoiceConfig {
+        promptforge_workshop_server::VoiceConfig {
             interim_model: voice.interim_model().to_path_buf(),
             final_model: voice.final_model().to_path_buf(),
             interim_source: voice.interim_source().to_string(),
@@ -261,7 +266,10 @@ vocabulary = ["MCP", "GGUF"]
                 Path::new("gateway.toml"),
                 bound("127.0.0.1:8081"),
             );
-            assert_eq!(ws.voice, promptforge_ws_server::VoiceConfig::default());
+            assert_eq!(
+                ws.voice,
+                promptforge_workshop_server::VoiceConfig::default()
+            );
             assert_eq!(
                 ws.tape.path,
                 Path::new("").join("tape.jsonl"),

@@ -1,5 +1,5 @@
 [package]
-name = "promptforge-ws"
+name = "promptforge-workshop"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ publish = false
 description = "PromptForge Workshop desktop app: boots the gateway and opens the workshop window"
 
 [[bin]]
-name = "promptforge-ws"
+name = "promptforge-workshop"
 path = "src/main.rs"
 
 [dependencies]
