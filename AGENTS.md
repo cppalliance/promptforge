@@ -13,6 +13,7 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 - Each crate's own AGENTS.md binds its subtree. Read the ones governing the paths you touch before writing or reviewing code.
 - The existing test suite stays green and intact during refactors: fix forward; never rewrite a test to make it pass.
 - Library and serve paths never call `process::exit` or install process-global state; failures return through the spawn handshake.
+- Runtime and serve paths never compile native dependencies or invoke compilers or build tools. Native compilation belongs to the Cargo build or packaging process; runtime may only verify, stage, and launch build-produced artifacts.
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
 
