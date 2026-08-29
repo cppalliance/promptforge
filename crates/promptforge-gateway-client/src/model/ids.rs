@@ -27,12 +27,12 @@ impl ModelId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::model::ModelId;
+    /// use promptforge_gateway_client::model::ModelId;
     ///
     /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
     /// assert_eq!(id.server(), "gateway");
     /// assert_eq!(id.name(), "claude-sonnet-4-6");
-    /// # Ok::<(), promptforge_core::model::ModelIdError>(())
+    /// # Ok::<(), promptforge_gateway_client::model::ModelIdError>(())
     /// ```
     pub fn new(
         server: impl Into<String>,
@@ -56,9 +56,11 @@ impl ModelId {
 
     /// Builds an identity from components already known to be valid.
     ///
-    /// For internal callers reconstructing an identity from an existing
-    /// [`ModelId`]'s parts, where [`ModelId::new`]'s validation is redundant.
-    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
+    /// `#[doc(hidden)]`: a cross-crate seam for workspace-internal callers
+    /// reconstructing an identity from an existing [`ModelId`]'s parts, where
+    /// [`ModelId::new`]'s validation is redundant. Not host API.
+    #[doc(hidden)]
+    pub fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
         ModelId {
             server: server.into(),
             name: name.into(),

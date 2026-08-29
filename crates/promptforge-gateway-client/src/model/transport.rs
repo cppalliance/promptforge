@@ -123,8 +123,8 @@ fn catalog_client() -> reqwest::Client {
 /// # Examples
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), promptforge_core::model::CompletionError> {
-/// use promptforge_core::model::fetch_model_catalog;
+/// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
+/// use promptforge_gateway_client::model::fetch_model_catalog;
 ///
 /// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
 /// println!("gateway offers {} models", catalog.models().len());

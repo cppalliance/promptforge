@@ -209,7 +209,7 @@ fn execute_live_tool_binds(
     ];
     let catalog = ToolCatalog::new(&tools).expect("unique test catalog");
     let models = |description: &str, _: &crate::model::ModelBindOpts| {
-        Err(Error::ModelAbsent {
+        Err(promptforge_gateway_client::Error::ModelAbsent {
             capability: description.to_owned(),
         })
     };

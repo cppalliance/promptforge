@@ -33,7 +33,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_core::client::Message;
+    /// use promptforge_gateway_client::client::Message;
     ///
     /// let message = Message::user("hello");
     /// assert_eq!(message.role(), "user");
@@ -77,8 +77,12 @@ impl Message {
     ///
     /// `raw_tool_calls` is the backend's `tool_calls` array echoed back
     /// verbatim so the conversation history matches what the model emitted.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop, not
+    /// host API.
+    #[doc(hidden)]
     #[must_use]
-    pub(crate) fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
+    pub fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
         Message {
             role: "assistant".into(),
             content: String::new(),
@@ -110,25 +114,34 @@ impl Message {
 #[non_exhaustive]
 pub struct ToolSchema {
     /// The tool's wire name.
-    pub(crate) name: String,
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's dispatch map,
+    /// not host API.
+    #[doc(hidden)]
+    pub name: String,
     /// A one-sentence description shown to the model.
-    pub(crate) description: String,
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's scope tests,
+    /// not host API.
+    #[doc(hidden)]
+    pub description: String,
     /// The JSON Schema for the tool's parameters.
     pub(crate) parameters: Value,
 }
 
 /// The reason a [`ToolSchema`] could not be built from its wire parts.
 ///
-/// Crate-private: `ToolSchema` is built only inside the crate (from the
-/// [`crate::tools::Tool`] contract), so the raw-`Value` validation and its
-/// error stay internal and never surface in the public API (client F8,
-/// lib F3).
+/// `#[doc(hidden)]`: `ToolSchema` is built only inside the workspace (from the
+/// executor's `Tool` contract), so the raw-`Value` validation and its error
+/// stay out of the documented API (client F8, lib F3). The type is visible
+/// only so the companion `promptforge-core` crate can box it as an error
+/// source.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[doc(hidden)]
 #[non_exhaustive]
-pub(crate) enum ToolSchemaError {
+pub enum ToolSchemaError {
     /// The wire name was empty or held a character outside `[A-Za-z0-9_.-]`.
     #[error("invalid tool wire name {name:?}: {reason}")]
-    #[non_exhaustive]
     InvalidName {
         /// The rejected wire name.
         name: String,
@@ -137,7 +150,6 @@ pub(crate) enum ToolSchemaError {
     },
     /// The parameters JSON Schema was not a JSON object.
     #[error("tool {name:?} parameters schema must be a JSON object")]
-    #[non_exhaustive]
     NonObjectSchema {
         /// The tool whose schema was rejected.
         name: String,
@@ -147,11 +159,11 @@ pub(crate) enum ToolSchemaError {
 impl ToolSchema {
     /// Builds a tool schema, validating the wire name and object-shaped schema.
     ///
-    /// Crate-private (client F8, lib F3): the raw [`serde_json::Value`] schema
-    /// enters here only from the internal [`crate::tools::Tool::parameters_schema`]
-    /// contract, so the raw JSON never appears in a public constructor
-    /// signature. External callers advertise tools through the `Tool` trait and
-    /// the executor, not by hand-building a `ToolSchema`.
+    /// `#[doc(hidden)]` (client F8, lib F3): the raw [`serde_json::Value`]
+    /// schema enters here only from the executor's internal tool contract, so
+    /// the raw JSON never appears in a documented constructor signature.
+    /// External callers advertise tools through the `Tool` trait and the
+    /// executor, not by hand-building a `ToolSchema`.
     ///
     /// # Errors
     /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains
@@ -159,7 +171,8 @@ impl ToolSchema {
     /// [`ToolSchemaError::NonObjectSchema`] when `parameters` is not a JSON
     /// object, so a tool can never be advertised to the model with an unusable
     /// name or a non-object JSON Schema (F7).
-    pub(crate) fn new(
+    #[doc(hidden)]
+    pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: Value,
@@ -200,11 +213,23 @@ impl ToolSchema {
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
-    pub(crate) id: String,
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop; read
+    /// through [`ToolCall::id`] in host code.
+    #[doc(hidden)]
+    pub id: String,
     /// The name of the tool to invoke.
-    pub(crate) name: String,
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's tool loop; read
+    /// through [`ToolCall::name`] in host code.
+    #[doc(hidden)]
+    pub name: String,
     /// The parsed arguments for the call.
-    pub(crate) arguments: Value,
+    ///
+    /// `#[doc(hidden)]` (F8): the raw wire JSON stays out of the documented
+    /// API; host code inspects arguments through [`ToolCall::arguments`].
+    #[doc(hidden)]
+    pub arguments: Value,
 }
 
 impl ToolCall {
@@ -295,8 +320,8 @@ impl ToolArguments<'_> {
 /// I/O, so the example is `no_run`:
 ///
 /// ```no_run
-/// # async fn example(completion: promptforge_core::client::Completion) {
-/// use promptforge_core::client::CompletionResult;
+/// # async fn example(completion: promptforge_gateway_client::client::Completion) {
+/// use promptforge_gateway_client::client::CompletionResult;
 ///
 /// match completion.result() {
 ///     CompletionResult::Text(reply) => println!("text: {reply}"),
@@ -324,22 +349,28 @@ pub enum CompletionResult {
 ///
 /// [`CompletionResult`] remains the decision the tool loop matches on.
 /// `finish_reason` and `reasoning_content` ride beside it so observers can
-/// report payload-free signals without reading the raw bodies. The request and
-/// response bodies are `pub(crate)` for the opt-in [`crate::debug::DebugCapture`]
-/// seam; they are not part of the public host API.
+/// report payload-free signals without reading the raw bodies. The fields are
+/// `#[doc(hidden)]` cross-crate seams for the executor's tool loop and the
+/// opt-in debug-capture seam; they are not part of the public host API, which
+/// reads through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
-    pub(crate) result: CompletionResult,
+    #[doc(hidden)]
+    pub result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub(crate) finish_reason: Option<String>,
+    #[doc(hidden)]
+    pub finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
-    pub(crate) reasoning_content: Option<String>,
+    #[doc(hidden)]
+    pub reasoning_content: Option<String>,
     /// The JSON body sent to the gateway.
-    pub(crate) request_body: Value,
+    #[doc(hidden)]
+    pub request_body: Value,
     /// The JSON body returned by the gateway.
-    pub(crate) response_body: Value,
+    #[doc(hidden)]
+    pub response_body: Value,
 }
 
 impl Completion {

@@ -115,12 +115,10 @@ fn models_always_provides_completion_options_without_use() {
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
-    let expected = CompletionOptions {
-        model: "small".to_owned(),
-        temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
-        max_tokens: None,
-        thinking: Some(false),
-    };
+    let expected = CompletionOptions::new("small")
+        .with_temperature(0.0)
+        .expect("0.0 is valid")
+        .with_thinking(false);
     assert_eq!(opts, Some(expected));
     vm.teardown(&NullObserver, "Section");
 }
@@ -182,12 +180,10 @@ fn models_always_multi_arg_provides_completion_options() {
         .unwrap();
     let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
-    let expected = CompletionOptions {
-        model: "small".to_owned(),
-        temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
-        max_tokens: None,
-        thinking: Some(false),
-    };
+    let expected = CompletionOptions::new("small")
+        .with_temperature(0.0)
+        .expect("0.0 is valid")
+        .with_thinking(false);
     assert_eq!(opts, Some(expected));
     vm.teardown(&NullObserver, "Section");
 }

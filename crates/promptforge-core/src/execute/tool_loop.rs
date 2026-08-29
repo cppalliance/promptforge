@@ -297,6 +297,10 @@ pub(crate) async fn run_prose_inference(
                     });
                 }
             }
+            // `CompletionResult` is `#[non_exhaustive]` across the crate
+            // boundary: an outcome this build does not recognize can be neither
+            // dispatched nor promoted to an answer.
+            _ => return Err(Error::Internal("unrecognized completion outcome")),
         }
     }
 

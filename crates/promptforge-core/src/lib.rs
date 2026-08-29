@@ -78,7 +78,6 @@ pub(crate) mod fanout;
 pub(crate) mod lua;
 mod lua_models;
 pub mod model;
-pub(crate) mod normalize;
 pub mod observe;
 pub mod parser;
 mod resolve;

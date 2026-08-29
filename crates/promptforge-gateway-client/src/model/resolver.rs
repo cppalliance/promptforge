@@ -18,7 +18,7 @@ fn model_ids(group: &CandidateGroup<'_>) -> Vec<super::ModelId> {
 
 /// Resolver that filters the catalog, then semantically resolves via a picker.
 #[derive(Debug)]
-pub(crate) struct PickerModelResolver<'a> {
+pub struct PickerModelResolver<'a> {
     catalog: &'a ModelCatalog,
     picker: &'a ToolPicker,
 }
@@ -26,7 +26,7 @@ pub(crate) struct PickerModelResolver<'a> {
 impl<'a> PickerModelResolver<'a> {
     /// Borrows a catalog and a picker built over that catalog's descriptors.
     #[must_use]
-    pub(crate) fn new(catalog: &'a ModelCatalog, picker: &'a ToolPicker) -> Self {
+    pub fn new(catalog: &'a ModelCatalog, picker: &'a ToolPicker) -> Self {
         Self { catalog, picker }
     }
 }
