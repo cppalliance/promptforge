@@ -74,8 +74,8 @@ impl LocalRuntime {
         let cache_root = resolve_cache_root(config.local().cache_dir())?;
         tracing::info!(path = %cache_root.display(), "local model cache");
         let store = ArtifactStore::new(cache_root)?;
-        let llama_server = store.provision_llama_server()?;
-        tracing::info!(path = %llama_server.display(), "provisioned llama-server");
+        let server = store.provision_llama_server()?;
+        tracing::info!(path = %server.executable.display(), "provisioned llama-server");
 
         let interrupted = startup_interrupt_flag();
         let dominion_queues = dominion_queues(config);
@@ -92,9 +92,14 @@ impl LocalRuntime {
             maybe_write_sidecar(&store, local_model.source(), &model_path);
 
             let admission = resolve_admission(&dominion_queues, local_model)?;
-            let options = launch_options(local_model, admission.parallel);
-            let guard =
-                ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
+            let mut options = launch_options(local_model, admission.parallel);
+            options.path_prefix.clone_from(&server.path_prefix);
+            let guard = ServerGuard::start(
+                &server.executable,
+                &model_path,
+                &options,
+                interrupted.as_ref(),
+            )?;
             let endpoint_id = format!("local-{}", local_model.name());
             // A non-chat child has no chat completions to dialect-match: like a
             // remote model, it carries the OpenAI default rather than hard-failing
@@ -107,7 +112,7 @@ impl LocalRuntime {
             let base_url = guard.base_url();
             let upstream = Arc::new(LocalUpstream::new(
                 guard,
-                llama_server.clone(),
+                server.executable.clone(),
                 model_path.clone(),
                 options,
                 local_model.name().to_owned(),
@@ -262,6 +267,7 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
             // Chat (and any kind added after this mapping) launches with no flag.
             _ => ServeMode::Chat,
         },
+        path_prefix: Vec::new(),
     }
 }
 

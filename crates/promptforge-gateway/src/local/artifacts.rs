@@ -3,6 +3,9 @@
 //! Downloads land under the operator cache (`~/.promptforge` by default). The
 //! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
+//! A `llama-cuda` Windows x86-64 build instead stages the embedded CUDA bundle
+//! produced by the build script (see [`cuda_bundle`]) and never falls back to
+//! the Vulkan archive.
 //!
 //! The module is split into cohesive units: [`assets`] (release table),
 //! [`digest`] (hashing + pin validation), [`archive`] (extraction),
@@ -11,9 +14,12 @@
 //! (verified-digest markers). This file owns [`ArtifactStore`], the
 //! orchestration that ties them together.
 
+#[cfg(any(not(llama_cuda_embedded), test))]
 mod archive;
 mod assets;
 mod confine;
+#[cfg(any(llama_cuda_embedded, test))]
+pub(crate) mod cuda_bundle;
 mod digest;
 mod download;
 mod progress;
@@ -28,8 +34,15 @@ use sha2::{Digest, Sha256};
 
 use crate::local::error::LocalError;
 
-use archive::{extract_archive, find_executable, require_executable};
-use assets::{ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset};
+#[cfg(not(llama_cuda_embedded))]
+use archive::require_executable;
+#[cfg(any(not(llama_cuda_embedded), test))]
+use archive::{extract_archive, find_executable};
+#[cfg(any(not(llama_cuda_embedded), test))]
+use assets::ArchiveKind;
+use assets::FileAsset;
+#[cfg(not(llama_cuda_embedded))]
+use assets::{LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
 use digest::tree_digest;
 use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker_best_effort};
@@ -59,6 +72,17 @@ const DOWNLOAD_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_
 
 type Result<T> = std::result::Result<T, LocalError>;
 
+/// A provisioned `llama-server`: the executable plus the directories its
+/// child's `PATH` must be prefixed with.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProvisionedServer {
+    /// Absolute path of the `llama-server` executable.
+    pub(crate) executable: PathBuf,
+    /// Child `PATH` prefix: the staged bundle directory, then the CUDA
+    /// Toolkit runtime directory. Empty for archive-installed servers.
+    pub(crate) path_prefix: Vec<PathBuf>,
+}
+
 /// Cache root plus HTTP client for provisioning local inference artifacts.
 #[derive(Debug)]
 pub(crate) struct ArtifactStore {
@@ -85,11 +109,30 @@ impl ArtifactStore {
 
     /// Ensures the pinned GPU-capable `llama-server` for this host is installed.
     ///
+    /// A CUDA-enabled Windows x86-64 build stages its embedded CUDA bundle and
+    /// propagates any validation or staging failure; it never silently falls
+    /// back to the Vulkan archive. Every other build keeps the archive path.
+    ///
     /// # Errors
     /// Returns a [`LocalError`] when the platform is unsupported or provisioning fails.
-    pub(crate) fn provision_llama_server(&self) -> Result<PathBuf> {
-        let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH)?;
-        self.provision_server(asset)
+    pub(crate) fn provision_llama_server(&self) -> Result<ProvisionedServer> {
+        #[cfg(llama_cuda_embedded)]
+        {
+            let staged = cuda_bundle::stage_embedded(&self.cache)?;
+            return Ok(ProvisionedServer {
+                executable: staged.executable,
+                path_prefix: staged.path_prefix,
+            });
+        }
+        #[cfg(not(llama_cuda_embedded))]
+        {
+            let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+            let executable = self.provision_server(asset)?;
+            Ok(ProvisionedServer {
+                executable,
+                path_prefix: Vec::new(),
+            })
+        }
     }
 
     /// Ensures a GGUF (or other blob) from `source` is available locally.
@@ -129,6 +172,7 @@ impl ArtifactStore {
         Ok(path)
     }
 
+    #[cfg(not(llama_cuda_embedded))]
     fn provision_server(&self, asset: ServerAsset<'_>) -> Result<PathBuf> {
         let archive = self.cache_path(Path::new("downloads").join(asset.archive_name))?;
         let archive_asset = FileAsset {
