@@ -94,3 +94,4 @@
 - [2026-08-28-3-digest-marker-child-priority] child process priority: Below-normal llama-server priority improves CPU and I/O responsiveness but cannot cure display-driver contention.
 - [2026-08-28-4-cuda-llama-provisioning] embedded native bundle: A canonical manifest binds source, toolchain, target, options, dependencies, and file digests before atomic staging.
 - [2026-08-28-4-cuda-llama-provisioning] explicit companion artifacts: Draft and projector models carry independent sources and pins through the same provision and respawn lifecycle.
+- [2026-08-29-1-crate-extraction-execution] versioned UI artifact: Rust builds consume a hash-verified UI bundle while release builds preserve a one-command path.

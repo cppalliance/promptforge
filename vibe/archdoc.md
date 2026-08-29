@@ -45,13 +45,14 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
 
-- A86. A merged process completes Workshop shutdown before signaling gateway shutdown.
 
 - A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
 
 - A88. Cached artifacts skip hashing only when digest, size, and mtime match in an operator-trusted cache.
 
 - A89. Native code compiles only during build or packaging; runtime only verifies, stages, and launches its artifacts.
+
+- A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
 
 ## Principles
 
