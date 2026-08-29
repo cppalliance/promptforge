@@ -7,11 +7,16 @@ use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 
 mod accessors;
+mod companion;
 mod imp;
 mod interpolate;
 mod validate;
 mod workshop;
 
+pub use companion::{
+    DraftTokenMax, DraftTokenMaxError, MultimodalProjectorConfig, SpeculationType,
+    SpeculativeConfig,
+};
 #[cfg(test)]
 pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
@@ -315,6 +320,14 @@ pub struct LocalModelConfig {
     /// for Mistral Small Instruct quants) and a tools-capable override is needed.
     #[serde(default)]
     chat_template_file: Option<String>,
+    /// Optional speculative-decoding drafter companion
+    /// (`[local_model.speculative]`). Chat kind only.
+    #[serde(default)]
+    speculative: Option<SpeculativeConfig>,
+    /// Optional multimodal projector companion
+    /// (`[local_model.multimodal_projector]`). Chat kind only.
+    #[serde(default)]
+    multimodal_projector: Option<MultimodalProjectorConfig>,
     /// Capability metadata advertised on the catalog.
     #[serde(default, flatten)]
     capabilities: Capabilities,
