@@ -11,9 +11,8 @@ use std::collections::HashSet;
 
 use url::Url;
 
-use super::{
-    Capabilities, Config, DominionKind, ModelKind, ThinkingMode, ToolDialect, is_sha256_hex,
-};
+use super::companion::validate_artifact_source;
+use super::{Capabilities, Config, DominionKind, ModelKind, ThinkingMode, ToolDialect};
 use crate::error::ConfigError;
 
 impl Config {
@@ -352,33 +351,12 @@ impl Config {
                     local_model.name
                 )));
             }
-            if local_model.source.is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "local_model {} source must not be empty",
-                    local_model.name
-                )));
-            }
-            if local_model.source.starts_with("http://") {
-                return Err(ConfigError::Validation(format!(
-                    "local_model {} source must use https, not plaintext http",
-                    local_model.name
-                )));
-            }
-            // Remote artifacts must be pinned by digest (ART-002); a local
-            // filesystem source is operator-controlled and may be unpinned.
-            let is_remote = local_model.source.starts_with("https://");
-            if is_remote {
-                validate_http_url(
-                    &format!("local_model {} source", local_model.name),
-                    &local_model.source,
-                )?;
-                if local_model.sha256.is_none() {
-                    return Err(ConfigError::Validation(format!(
-                        "local_model {} has a remote source and must set a sha256 pin",
-                        local_model.name
-                    )));
-                }
-            }
+            validate_artifact_source(
+                &format!("local_model {}", local_model.name),
+                "source",
+                &local_model.source,
+                local_model.sha256.as_deref(),
+            )?;
             if local_model.context < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} context must be at least 1",
@@ -397,14 +375,6 @@ impl Config {
                     local_model.name
                 )));
             }
-            if let Some(sha) = &local_model.sha256
-                && !is_sha256_hex(sha)
-            {
-                return Err(ConfigError::Validation(format!(
-                    "local_model {} sha256 must be 64 lowercase hex characters",
-                    local_model.name
-                )));
-            }
             if local_model.parallel < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} parallel must be at least 1",
@@ -418,11 +388,24 @@ impl Config {
                 local_model.kind,
                 local_model.thinking,
                 &local_model.capabilities,
-                &[(
-                    "chat_template_file",
-                    local_model.chat_template_file.is_some(),
-                )],
+                &[
+                    (
+                        "chat_template_file",
+                        local_model.chat_template_file.is_some(),
+                    ),
+                    ("speculative", local_model.speculative.is_some()),
+                    (
+                        "multimodal_projector",
+                        local_model.multimodal_projector.is_some(),
+                    ),
+                ],
             )?;
+            if let Some(speculative) = &local_model.speculative {
+                speculative.validate(&local_model.name)?;
+            }
+            if let Some(projector) = &local_model.multimodal_projector {
+                projector.validate(&local_model.name)?;
+            }
             validate_capabilities(
                 "local_model",
                 &local_model.name,
@@ -545,7 +528,7 @@ fn validate_kind_scope(
 /// This is the single URL gate for operator-supplied origins: a value that
 /// passes here is a real, absolute HTTP(S) URL, so adapters can join a path
 /// onto it structurally rather than concatenating an unvalidated string.
-fn validate_http_url(context: &str, raw: &str) -> Result<(), ConfigError> {
+pub(super) fn validate_http_url(context: &str, raw: &str) -> Result<(), ConfigError> {
     let url = Url::parse(raw).map_err(|error| {
         ConfigError::Validation(format!("{context} is not a valid URL: {error}"))
     })?;

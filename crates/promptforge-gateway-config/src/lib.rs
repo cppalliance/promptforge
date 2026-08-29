@@ -41,10 +41,11 @@ mod profile;
 
 pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
-    Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
-    LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig, WorkshopConfig,
-    WorkshopTapeConfig, WorkshopVoiceConfig,
+    Capabilities, Config, DominionConfig, DominionKind, DraftTokenMax, DraftTokenMaxError,
+    EndpointConfig, LocalConfig, LocalModelConfig, ModelConfig, ModelKind,
+    MultimodalProjectorConfig, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig,
+    SpeculationType, SpeculativeConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
+    WorkshopConfig, WorkshopTapeConfig, WorkshopVoiceConfig,
 };
 pub use crate::profile::{
     ProfileName, ProfileNameError, list_profiles, load_boot_sections, load_server, load_workshop,
