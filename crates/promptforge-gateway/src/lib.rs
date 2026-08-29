@@ -620,7 +620,7 @@ async fn run_switch(
         }
 
         let _ = stages.try_send("starting-models");
-        match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
+        match tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)).await {
             Ok(Ok(runtime)) => runtime,
             Ok(Err(e)) => {
                 return Err(GatewayError::switch_failed("start-local", e));

@@ -29,15 +29,20 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use promptforge_progress::ProgressHandle;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
 use crate::error::LocalError;
 
+#[cfg(test)]
+use archive::extract_archive;
+#[cfg(not(llama_cuda_embedded))]
+use archive::extract_archive_with_progress;
+#[cfg(any(not(llama_cuda_embedded), test))]
+use archive::find_executable;
 #[cfg(not(llama_cuda_embedded))]
 use archive::require_executable;
-#[cfg(any(not(llama_cuda_embedded), test))]
-use archive::{extract_archive, find_executable};
 #[cfg(any(not(llama_cuda_embedded), test))]
 use assets::ArchiveKind;
 use assets::FileAsset;
@@ -45,7 +50,9 @@ use assets::FileAsset;
 use assets::{LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
 use digest::tree_digest;
-use verified::{blob_marker_path, path_source_marker, verify_blob, write_marker_best_effort};
+use verified::{
+    blob_marker_path, path_source_marker, verify_blob_with_progress, write_marker_best_effort,
+};
 
 // Re-exports consumed elsewhere in the crate (`runtime.rs`, `cache.rs`,
 // `testsupport.rs`). Test-only helpers are imported directly from their
@@ -108,7 +115,9 @@ impl ArtifactStore {
         })
     }
 
-    /// Ensures the pinned GPU-capable `llama-server` for this host is installed.
+    /// Ensures the pinned GPU-capable `llama-server` for this host is installed,
+    /// reporting the download, verify, and extract stages into child leaves of
+    /// `progress`, when given.
     ///
     /// A CUDA-enabled Windows x86-64 build stages its embedded CUDA bundle and
     /// propagates any validation or staging failure; it never silently falls
@@ -116,10 +125,17 @@ impl ArtifactStore {
     ///
     /// # Errors
     /// Returns a [`LocalError`] when the platform is unsupported or provisioning fails.
-    pub(crate) fn provision_llama_server(&self) -> Result<ProvisionedServer> {
+    pub(crate) fn provision_llama_server_with_progress(
+        &self,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<ProvisionedServer> {
         #[cfg(llama_cuda_embedded)]
         {
             let staged = cuda_bundle::stage_embedded(&self.cache)?;
+            // The embedded bundle stages no download/verify/extract work.
+            if let Some(handle) = progress {
+                handle.complete();
+            }
             Ok(ProvisionedServer {
                 executable: staged.executable,
                 path_prefix: staged.path_prefix,
@@ -128,7 +144,7 @@ impl ArtifactStore {
         #[cfg(not(llama_cuda_embedded))]
         {
             let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH)?;
-            let executable = self.provision_server(asset)?;
+            let executable = self.provision_server(asset, progress)?;
             Ok(ProvisionedServer {
                 executable,
                 path_prefix: Vec::new(),
@@ -144,6 +160,25 @@ impl ArtifactStore {
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.
     pub(crate) fn ensure_model(&self, source: &str, sha256: Option<&str>) -> Result<PathBuf> {
+        self.ensure_model_with_progress(source, sha256, None)
+    }
+
+    /// [`ensure_model`] variant that reports the download and verify stages
+    /// into child leaves of `progress`, when given. A path source completes
+    /// the download leaf immediately, and an unpinned source completes the
+    /// verify leaf immediately: both stages exist in the subtree whether or
+    /// not they have work.
+    ///
+    /// # Errors
+    /// Returns a [`LocalError`] on download, verification, or path failures.
+    pub(crate) fn ensure_model_with_progress(
+        &self,
+        source: &str,
+        sha256: Option<&str>,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<PathBuf> {
+        let download = progress.map(|handle| handle.child("download", 4.0));
+        let verify = progress.map(|handle| handle.child("verify", 1.0));
         if looks_like_url(source) {
             let name = filename_from_url(source)?;
             // Key the cache slot by normalized source identity (ART-004) so two
@@ -155,8 +190,17 @@ impl ArtifactStore {
                 url: source,
                 sha256,
             };
-            self.ensure_blob(asset, &destination)?;
+            self.ensure_blob_with_progress(
+                asset,
+                &destination,
+                download.as_ref(),
+                verify.as_ref(),
+            )?;
             return Ok(destination);
+        }
+        // A path source is already local: the download stage has no work.
+        if let Some(handle) = &download {
+            handle.complete();
         }
         let path = expand_tilde(source)?;
         if !path.is_file() {
@@ -165,23 +209,48 @@ impl ArtifactStore {
                 reason: "path is not an existing file".to_owned(),
             });
         }
-        if let Some(expected) = sha256 {
-            let expected = parse_expected_digest(expected)?;
-            let marker = path_source_marker(&self.cache, &path)?;
-            let _outcome = verify_blob(&self.cache, &path, &expected, &marker)?;
+        match sha256 {
+            Some(pin) => {
+                let expected = parse_expected_digest(pin)?;
+                let marker = path_source_marker(&self.cache, &path)?;
+                let _outcome = verify_blob_with_progress(
+                    &self.cache,
+                    &path,
+                    &expected,
+                    &marker,
+                    verify.as_ref(),
+                )?;
+            }
+            None => {
+                if let Some(handle) = &verify {
+                    handle.complete();
+                }
+            }
         }
         Ok(path)
     }
 
     #[cfg(not(llama_cuda_embedded))]
-    fn provision_server(&self, asset: ServerAsset<'_>) -> Result<PathBuf> {
+    fn provision_server(
+        &self,
+        asset: ServerAsset<'_>,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<PathBuf> {
+        let download = progress.map(|handle| handle.child("download", 4.0));
+        let verify = progress.map(|handle| handle.child("verify", 1.0));
+        let extract = progress.map(|handle| handle.child("extract", 1.0));
         let archive = self.cache_path(Path::new("downloads").join(asset.archive_name))?;
         let archive_asset = FileAsset {
             name: asset.archive_name,
             url: asset.url,
             sha256: Some(asset.sha256),
         };
-        self.ensure_blob(archive_asset, &archive)?;
+        self.ensure_blob_with_progress(
+            archive_asset,
+            &archive,
+            download.as_ref(),
+            verify.as_ref(),
+        )?;
 
         let install = self.cache_path(
             Path::new("llama.cpp").join(format!("{LLAMA_RELEASE}-{}", asset.platform)),
@@ -189,6 +258,10 @@ impl ArtifactStore {
         let _lock = self.lock_artifact(&install)?;
         validate_cache_path(&self.cache, &install)?;
         if Self::install_is_valid(&install, asset.sha256)? {
+            // A valid install skips extraction entirely.
+            if let Some(handle) = &extract {
+                handle.complete();
+            }
             return find_executable(&install, asset.executable_name, asset.archive_name);
         }
         self.ensure_blob(archive_asset, &archive)?;
@@ -199,7 +272,9 @@ impl ArtifactStore {
         remove_cache_entry(&self.cache, &staging)?;
         ensure_cache_directory(&self.cache, &staging)?;
 
-        if let Err(error) = extract_archive(&archive, &staging, asset.archive_kind) {
+        if let Err(error) =
+            extract_archive_with_progress(&archive, &staging, asset.archive_kind, extract.as_ref())
+        {
             let _ignored = fs::remove_dir_all(&staging);
             return Err(error);
         }
@@ -259,6 +334,21 @@ impl ArtifactStore {
     }
 
     fn ensure_blob(&self, asset: FileAsset<'_>, destination: &Path) -> Result<()> {
+        self.ensure_blob_with_progress(asset, destination, None, None)
+    }
+
+    /// [`ensure_blob`] variant that reports the download and verify stages
+    /// into the given leaves. Both leaves reach their terminal event on every
+    /// exit path: a cache hit completes the download leaf without work, and
+    /// the pin check after a download completes the verify leaf whether the
+    /// digest matches or not.
+    fn ensure_blob_with_progress(
+        &self,
+        asset: FileAsset<'_>,
+        destination: &Path,
+        download: Option<&ProgressHandle>,
+        verify: Option<&ProgressHandle>,
+    ) -> Result<()> {
         let _lock = self.lock_artifact(destination)?;
         validate_cache_path(&self.cache, destination)?;
         let staging = part_path(destination);
@@ -269,21 +359,36 @@ impl ArtifactStore {
         // malformed pin fails fast rather than always mismatching.
         let expected_digest = asset.sha256.map(parse_expected_digest).transpose()?;
 
+        // Set once the verify leaf has emitted its terminal event, so the pin
+        // recheck after a mismatch-repair download never emits it twice.
+        let mut verify_finished = false;
         if destination.is_file() {
-            match expected_digest.as_deref() {
-                Some(expected) => {
-                    let marker = blob_marker_path(destination);
-                    match verify_blob(&self.cache, destination, expected, &marker) {
-                        Ok(_) => return Ok(()),
-                        // A pin mismatch on a cached blob is repaired by
-                        // re-downloading; every other failure propagates.
-                        Err(LocalError::DigestMismatch { .. }) => {
-                            remove_cache_entry(&self.cache, destination)?;
-                        }
-                        Err(error) => return Err(error),
-                    }
+            let Some(expected) = expected_digest.as_deref() else {
+                if let Some(handle) = download {
+                    handle.complete();
                 }
-                None => return Ok(()),
+                if let Some(handle) = verify {
+                    handle.complete();
+                }
+                return Ok(());
+            };
+            let marker = blob_marker_path(destination);
+            match verify_blob_with_progress(&self.cache, destination, expected, &marker, verify) {
+                Ok(_) => {
+                    // A verified cache hit leaves the download stage
+                    // with no work.
+                    if let Some(handle) = download {
+                        handle.complete();
+                    }
+                    return Ok(());
+                }
+                // A pin mismatch on a cached blob is repaired by
+                // re-downloading; every other failure propagates.
+                Err(LocalError::DigestMismatch { .. }) => {
+                    verify_finished = true;
+                    remove_cache_entry(&self.cache, destination)?;
+                }
+                Err(error) => return Err(error),
             }
         } else if destination.exists() {
             remove_cache_entry(&self.cache, destination)?;
@@ -296,13 +401,21 @@ impl ArtifactStore {
         };
         ensure_cache_directory(&self.cache, parent)?;
         validate_cache_path(&self.cache, &staging)?;
-        let actual = match self.download(asset.url, &staging) {
+        let actual = match download::download(&self.client, asset.url, &staging, download) {
             Ok(actual) => actual,
             Err(error) => {
+                if !verify_finished && let Some(handle) = verify {
+                    handle.complete();
+                }
                 let _ignored = fs::remove_file(&staging);
                 return Err(error);
             }
         };
+        // The pin is checked against the digest computed inline during the
+        // download, so the verify stage's work ends here on every outcome.
+        if !verify_finished && let Some(handle) = verify {
+            handle.complete();
+        }
         if let Some(expected) = expected_digest.as_deref()
             && actual != expected
         {
@@ -321,10 +434,6 @@ impl ArtifactStore {
             write_marker_best_effort(&marker, destination, expected);
         }
         Ok(())
-    }
-
-    fn download(&self, url: &str, destination: &Path) -> Result<String> {
-        download::download(&self.client, url, destination)
     }
 
     #[cfg(test)]

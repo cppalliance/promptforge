@@ -120,7 +120,7 @@ impl Gateway {
         profiles: ProfilesContext,
     ) -> Result<Gateway, StartupError> {
         #[cfg(feature = "local")]
-        let local = LocalRuntime::start(config).map_err(StartupError::provisioning)?;
+        let local = LocalRuntime::start(config, None).map_err(StartupError::provisioning)?;
         // A headless build cannot honor a config declaring local models;
         // refuse at assembly rather than silently dropping them.
         #[cfg(not(feature = "local"))]

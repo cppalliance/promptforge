@@ -13,7 +13,9 @@ use super::archive::{extract_archive_with_progress, safe_archive_path};
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
 use super::progress::{DownloadProgress, TreeProgress, download_label, progress_for_download};
-use super::verified::{VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress};
+use super::verified::{
+    VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress, write_marker,
+};
 use super::*;
 use crate::testsupport::{FakeServer, hex_sha256};
 
@@ -769,6 +771,171 @@ fn second_verification_hits_marker_without_rehash() {
     assert_eq!(first, VerifyOutcome::Hashed);
     let second = verify_blob(&root, &blob, &digest, &marker).expect("second");
     assert_eq!(second, VerifyOutcome::MarkerHit);
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn ensure_model_with_progress_reports_download_and_verify_leaves() {
+    // A URL source flows through `ensure_blob`: the download leaf rides the
+    // transfer, and the verify leaf completes on the inline pin check.
+    let body = b"model-bytes";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let model = tree.register("model", 1.0);
+    let url = server.url("model.gguf");
+    let pin = hex_sha256(body);
+
+    let path = store
+        .ensure_model_with_progress(&url, Some(&pin), Some(&model))
+        .expect("ensure model");
+    assert_eq!(std::fs::read(&path).expect("read model"), body);
+    let snapshot = hub.snapshot();
+    let nodes = &snapshot[0].nodes;
+    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
+    assert_eq!(paths, ["model", "model/download", "model/verify"]);
+    assert!(
+        nodes.iter().all(|node| node.fraction == 1.0),
+        "both stages complete after a pinned download: {nodes:?}"
+    );
+
+    // A warm-cache repeat under a fresh subtree: the marker hit completes
+    // verify without a hash pass, and the download leaf completes with no
+    // transfer at all.
+    let cached = tree.register("cached", 1.0);
+    store
+        .ensure_model_with_progress(&url, Some(&pin), Some(&cached))
+        .expect("ensure model from cache");
+    let snapshot = hub.snapshot();
+    let nodes = &snapshot[0].nodes;
+    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "model",
+            "model/download",
+            "model/verify",
+            "cached",
+            "cached/download",
+            "cached/verify",
+        ]
+    );
+    assert!(
+        nodes.iter().all(|node| node.fraction == 1.0),
+        "a cache hit completes both stages without work: {nodes:?}"
+    );
+    assert_eq!(server.requests(), 1, "the cache hit re-downloads nothing");
+}
+
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn ensure_blob_mismatch_repair_finishes_the_verify_leaf_exactly_once() {
+    // A cached blob whose content no longer matches the pin is repaired by
+    // re-downloading: the first hash pass finishes the verify leaf, and the
+    // pin recheck against the fresh download's inline digest must not emit
+    // the leaf's terminal event a second time.
+    let body = b"repaired-blob-bytes";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let destination = temp.path().join("downloads").join("model.gguf");
+    std::fs::create_dir_all(destination.parent().expect("downloads parent"))
+        .expect("mkdir downloads");
+    std::fs::write(&destination, b"stale-bytes").expect("write stale blob");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let blob = tree.register("blob", 1.0);
+    let download = blob.child("download", 4.0);
+    let verify = blob.child("verify", 1.0);
+    let url = server.url("model.gguf");
+    let pin = hex_sha256(body);
+    let asset = FileAsset {
+        name: "model.gguf",
+        url: &url,
+        sha256: Some(&pin),
+    };
+
+    store
+        .ensure_blob_with_progress(asset, &destination, Some(&download), Some(&verify))
+        .expect("mismatch repair re-downloads");
+    assert_eq!(std::fs::read(&destination).expect("read blob"), body);
+    assert_eq!(download.fraction(), 1.0);
+    assert_eq!(verify.fraction(), 1.0);
+    assert_eq!(server.requests(), 1, "the repair downloads once");
+
+    let mut verify_finished = 0;
+    while let Ok(event) = rx.try_recv() {
+        if event.path == "blob/verify" && matches!(event.state, EventState::Finished { .. }) {
+            verify_finished += 1;
+        }
+    }
+    assert_eq!(
+        verify_finished, 1,
+        "the pin recheck after repair must not re-emit the terminal event"
+    );
+}
+
+#[cfg(not(llama_cuda_embedded))]
+#[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
+    // A warm cache - the archive blob with a current verified marker and a
+    // valid install tree - runs no download, hash, or extraction, but every
+    // stage leaf still reaches its terminal event.
+    let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host asset");
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+
+    let archive = temp.path().join("downloads").join(asset.archive_name);
+    std::fs::create_dir_all(archive.parent().expect("downloads parent")).expect("mkdir downloads");
+    std::fs::write(&archive, b"mock-archive-bytes").expect("write archive");
+    // A marker hit trusts the recorded digest plus size and mtime without
+    // re-hashing, so the fixture can record the pinned digest directly.
+    write_marker(&blob_marker_path(&archive), &archive, asset.sha256).expect("write marker");
+
+    let install = temp
+        .path()
+        .join("llama.cpp")
+        .join(format!("{LLAMA_RELEASE}-{}", asset.platform));
+    std::fs::create_dir_all(&install).expect("mkdir install");
+    std::fs::write(install.join(asset.executable_name), b"mock-server").expect("write executable");
+    let tree_digest = super::digest::tree_digest(&install).expect("tree digest");
+    std::fs::write(
+        install.join(INSTALL_MARKER),
+        format!("{}\n{tree_digest}\n", asset.sha256),
+    )
+    .expect("write install marker");
+
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let server = tree.register("llama-server", 1.0);
+
+    let provisioned = store
+        .provision_llama_server_with_progress(Some(&server))
+        .expect("warm-cache provision");
+    assert_eq!(provisioned.executable, install.join(asset.executable_name));
+    assert!(provisioned.path_prefix.is_empty());
+
+    let snapshot = hub.snapshot();
+    let nodes = &snapshot[0].nodes;
+    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "llama-server",
+            "llama-server/download",
+            "llama-server/verify",
+            "llama-server/extract",
+        ]
+    );
+    assert!(
+        nodes.iter().all(|node| node.fraction == 1.0),
+        "a valid install completes every stage without work: {nodes:?}"
+    );
 }
 
 #[test]
