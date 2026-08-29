@@ -15,6 +15,7 @@ promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.1.0" }
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.1.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
+promptforge-tools = { path = "crates/promptforge-tools", version = "0.1.0" }
 promptforge-ws-server = { path = "crates/promptforge-ws-server", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }

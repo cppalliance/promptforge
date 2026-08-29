@@ -10,10 +10,10 @@ use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMo
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
 use promptforge_tool_picker::{
     Catalog, Config, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
+use promptforge_tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
 use serde_json::{Value, json};
 
 const TEXT_EXECUTION: &str = "real-model-text";

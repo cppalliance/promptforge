@@ -11,10 +11,11 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{
     CompletionError, CompletionErrorKind, ModelCatalog, fetch_model_catalog,
 };
-use promptforge_core::tools::{Tool, ToolCatalog, WebSearch};
+use promptforge_core::tools::WebSearch;
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
+use promptforge_tools::{Tool, ToolCatalog};
 use promptforge_webfetch::WebFetch;
 
 use crate::config::{Config, GatewayConfig, ToolsConfig};
@@ -201,7 +202,7 @@ fn is_transient(error: &CompletionError) -> bool {
 fn live_tools(
     gateway: &GatewayConfig,
     tools_config: &ToolsConfig,
-) -> Result<Vec<Arc<dyn Tool>>, promptforge_core::tools::ToolError> {
+) -> Result<Vec<Arc<dyn Tool>>, promptforge_tools::ToolError> {
     let mut live: Vec<Arc<dyn Tool>> = Vec::new();
     if tools_config.web_fetch {
         live.push(Arc::new(WebFetch::new()));

@@ -11,8 +11,8 @@ use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{NullObserver, Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::ToolCatalog;
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+use promptforge_tools::ToolCatalog;
 use tracing::Level;
 
 /// Every frame the queue is holding.

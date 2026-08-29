@@ -6,23 +6,39 @@
 //! can dispatch them uniformly. Stable identity is separate from the wire name
 //! used by the current model transport.
 //!
-//! This facade splits into focused child modules (tools.rs F/AUDIT-FILE-500):
-//! `ids` (identity + validation errors), `output` (trusted output + the
-//! model-safe error), `registry` (the [`Tool`] trait and the caller-provided
-//! [`ToolCatalog`]), and `web_search` (the in-crate WebSearch tool). The
-//! public surface is unchanged; every public item is re-exported here.
+//! The runtime-agnostic contract vocabulary ([`Tool`], [`ToolCatalog`],
+//! [`ToolId`], the output and error types) lives in the `promptforge-tools`
+//! crate and is re-exported here unchanged, so existing
+//! `promptforge_core::tools::*` paths keep working. The concrete `WebSearch`
+//! tool remains in this crate for now.
 
-mod ids;
-mod output;
-mod registry;
 mod web_search;
 
-pub use ids::{ToolId, ToolIdError, ToolIdErrorKind};
-pub use output::{OutputTrust, ToolError, ToolErrorKind, ToolOutput};
-pub use registry::{Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind};
+pub use promptforge_tools::{
+    OutputTrust, Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind, ToolError,
+    ToolErrorKind, ToolId, ToolIdError, ToolIdErrorKind, ToolOutput,
+};
 pub use web_search::WebSearch;
 
-pub(crate) use registry::NearDuplicateDiagnostic;
+/// Diagnostics for two semantic near-duplicates exposed in one model turn.
+///
+/// The near-duplicate check is part of tool-scope validation, so the diagnostic
+/// vocabulary lives here (F10); the internal error substrate references this
+/// type rather than owning it.
+#[derive(Debug)]
+#[non_exhaustive]
+pub(crate) struct NearDuplicateDiagnostic {
+    /// The first prompt-local alias in scope order.
+    pub(crate) first_alias: String,
+    /// The first stable identity.
+    pub(crate) first_id: ToolId,
+    /// The second prompt-local alias in scope order.
+    pub(crate) second_alias: String,
+    /// The second stable identity.
+    pub(crate) second_id: ToolId,
+    /// The cosine similarity the picker reported at bind time.
+    pub(crate) similarity: f64,
+}
 
 #[cfg(test)]
 mod tests;
