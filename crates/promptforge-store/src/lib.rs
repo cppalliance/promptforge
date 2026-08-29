@@ -1,0 +1,565 @@
+//! Run-scoped virtual files, shared by Lua and the model.
+//!
+//! A prompt run keeps its bulk state in virtual files addressed by logical
+//! string paths. [`Store`] is the backend contract, [`MemStore`] is an
+//! in-memory backend, and [`StoreRef`] is the cheaply cloneable, thread-safe
+//! handle the runtime hands to both the Lua VM and (later) the model's file
+//! tools. [`StoreRef::read`] returns verbatim contents for trusted handoff,
+//! [`StoreRef::read_range`] slices a 1-based inclusive line range out of the
+//! same verbatim contents, and [`StoreRef::read_range_numbered`] numbers such
+//! a slice absolutely (with no bounds it numbers the whole file from 1). For
+//! model-facing re-injection the caller wraps a verbatim read in an
+//! untrusted guard envelope (the `untrusted` Lua global).
+//! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
+//! the shape that works for a model.
+//!
+//! This crate wires no execution; it defines the store and its backends only.
+
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+mod error;
+mod file;
+mod glob;
+mod mem;
+mod path;
+
+use error::StorePoisoned;
+pub use error::{PathReason, StoreError, StoreErrorKind};
+pub use file::FileStore;
+use glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
+pub use mem::{MemStore, Store};
+use path::StorePath;
+
+/// The provenance of one fanout arm's scoped write: which fanout, and which
+/// arm within it.
+///
+/// Vended per fanout by [`StoreRef::next_write_token`] and paired with the
+/// arm's 1-based index, so the write registry can tell "another arm of the
+/// same fanout" (a write-write race) from "the same arm again" or "a later
+/// fanout" (both legal).
+///
+/// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout machinery
+/// in `promptforge-core`, not host API.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WriteScope {
+    token: u64,
+    arm: usize,
+}
+
+impl WriteScope {
+    /// Pairs one fanout's token with the arm's 1-based index within it.
+    #[must_use]
+    pub fn new(token: u64, arm: usize) -> WriteScope {
+        WriteScope { token, arm }
+    }
+}
+
+/// A cheaply cloneable, thread-safe handle to a run's virtual files.
+///
+/// The handle wraps `Arc<Mutex<Box<dyn Store + Send>>>`: the `Mutex` supplies
+/// the synchronization around a `Send` (not necessarily `Sync`) backend
+/// (STORE-008), so cloning shares one backend and the store can be held by both
+/// the synchronous Lua VM and an asynchronous tool whose `call` crosses an
+/// `.await`. The inherent
+/// methods mirror [`Store`], each taking the lock, delegating, and
+/// releasing it before returning; no lock is ever held across an await, and the
+/// operations are synchronous in any case.
+///
+/// Beside the backend lock the handle keeps a write registry mapping each
+/// path to the `WriteScope` that last wrote it: a fanout arm's scoped
+/// write (`StoreRef::write_scoped`) to a path already written by a
+/// different arm of the same fanout fails with [`StoreError::WriteRace`].
+/// Plain [`StoreRef::write`] (walk sections), `append`, and reads never
+/// touch the registry.
+///
+/// # Examples
+/// ```
+/// use promptforge_store::StoreRef;
+///
+/// let store = StoreRef::memory();
+/// let clone = store.clone();
+/// store.write("shared.txt", "state")?;
+/// assert_eq!(clone.read("shared.txt")?, "state");
+/// # Ok::<(), promptforge_store::StoreError>(())
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct StoreRef {
+    inner: Arc<Mutex<Box<dyn Store + Send>>>,
+    writers: Arc<Mutex<HashMap<String, WriteScope>>>,
+    write_tokens: Arc<AtomicU64>,
+}
+
+impl fmt::Debug for StoreRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StoreRef").finish_non_exhaustive()
+    }
+}
+
+impl StoreRef {
+    /// Wraps `backend` in a shareable handle.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::{MemStore, StoreRef};
+    ///
+    /// let store = StoreRef::new(Box::new(MemStore::new()));
+    /// # let _ = store;
+    /// ```
+    #[must_use]
+    pub fn new(backend: Box<dyn Store + Send>) -> StoreRef {
+        StoreRef {
+            inner: Arc::new(Mutex::new(backend)),
+            writers: Arc::new(Mutex::new(HashMap::new())),
+            write_tokens: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Builds a handle over a [`MemStore`] pre-populated with the given files.
+    ///
+    /// Each path is validated at construction time. See
+    /// [`MemStore::with_files`] for details.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if any path fails validation.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::with_files([
+    ///     ("data.txt".to_owned(), "contents".to_owned()),
+    /// ])?;
+    /// assert_eq!(store.read("data.txt")?, "contents");
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn with_files(
+        files: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<StoreRef, StoreError> {
+        Ok(StoreRef::new(Box::new(MemStore::with_files(files)?)))
+    }
+
+    /// Builds a handle over a fresh in-memory [`MemStore`] backend.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// # let _ = store;
+    /// ```
+    #[must_use]
+    pub fn memory() -> StoreRef {
+        StoreRef::new(Box::new(MemStore::new()))
+    }
+
+    /// Locks the shared backend, or reports it unavailable if a prior holder
+    /// panicked while mutating it.
+    ///
+    /// STORE-004: the backend behind this handle is an arbitrary [`Store`] trait
+    /// object, not a known-consistent [`MemStore`]. A panic mid-mutation can
+    /// leave a filesystem/network backend in a half-applied state, so we do NOT
+    /// blindly `PoisonError::into_inner` and hand back state we cannot vouch
+    /// for. Absent an explicit backend recovery contract, a poisoned lock is a
+    /// backend failure the caller must see.
+    fn lock(&self) -> Result<MutexGuard<'_, Box<dyn Store + Send>>, StoreError> {
+        self.inner
+            .lock()
+            .map_err(|_| StoreError::backend(StorePoisoned))
+    }
+
+    /// Creates or overwrites the file at `path`. See [`Store::write`].
+    ///
+    /// # Errors
+    /// Propagates any [`StoreError`] from the backend.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "hi")?;
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn write(&self, path: &str, contents: &str) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock()?.write(path.as_str(), contents)
+    }
+
+    /// Vends a fresh token identifying one fanout's write scope.
+    ///
+    /// Each fanout takes one token and every arm pairs it with its own index
+    /// via [`WriteScope::new`]; tokens are unique per [`StoreRef`], so two
+    /// fanouts (sequential or nested) never share a scope.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout
+    /// machinery in `promptforge-core`, not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn next_write_token(&self) -> u64 {
+        self.write_tokens.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Creates or overwrites the file at `path` on behalf of one fanout arm,
+    /// recording the arm's [`WriteScope`] as the path's writer.
+    ///
+    /// The registry is checked and updated atomically before the backend is
+    /// touched: a path already written by a different arm of the SAME fanout
+    /// is a write-write race and fails without reaching the backend; the same
+    /// arm rewriting its own path succeeds, and a write carrying a different
+    /// fanout's token overwrites the record, so sequential fanouts stay
+    /// legal.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the executor's fanout
+    /// machinery in `promptforge-core`, not host API.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriteRace`] on a same-fanout write-write race,
+    /// [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
+    #[doc(hidden)]
+    pub fn write_scoped(
+        &self,
+        path: &str,
+        contents: &str,
+        scope: WriteScope,
+    ) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        {
+            let mut writers = self
+                .writers
+                .lock()
+                .map_err(|_| StoreError::backend(StorePoisoned))?;
+            if let Some(&prior) = writers.get(path.as_str())
+                && prior.token == scope.token
+                && prior.arm != scope.arm
+            {
+                return Err(StoreError::WriteRace {
+                    path: path.as_str().to_owned(),
+                });
+            }
+            writers.insert(path.as_str().to_owned(), scope);
+        }
+        self.lock()?.write(path.as_str(), contents)
+    }
+
+    /// Appends to the file at `path`, creating it if absent. See
+    /// [`Store::append`].
+    ///
+    /// # Errors
+    /// Propagates any [`StoreError`] from the backend.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.append("a.txt", "hi")?;
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn append(&self, path: &str, contents: &str) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock()?.append(path.as_str(), contents)
+    }
+
+    /// Reads the file at `path` exactly as stored, with no line numbering.
+    /// See [`Store::read`].
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "hi\n")?;
+    /// assert_eq!(store.read("a.txt")?, "hi\n");
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn read(&self, path: &str) -> Result<String, StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock()?.read(path.as_str())
+    }
+
+    /// Reads lines `start..=end` of the file at `path`, 1-based and
+    /// inclusive, joined with `"\n"` and no trailing newline.
+    ///
+    /// Bounds are evaluated in a fixed order: a `start` below 1 is an error;
+    /// a `start` past the last line reads as the empty string; an omitted
+    /// `end` means the last line, and a given `end` clamps down to it; an
+    /// `end` before `start` at that point is an error.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`, or
+    /// [`StoreError::InvalidRange`] if `start` is less than 1 or `end` is
+    /// before `start`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "one\ntwo\nthree\n")?;
+    /// assert_eq!(store.read_range("a.txt", 2, None)?, "two\nthree");
+    /// assert_eq!(store.read_range("a.txt", 2, Some(99))?, "two\nthree");
+    /// assert_eq!(store.read_range("a.txt", 99, None)?, "");
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn read_range(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+    ) -> Result<String, StoreError> {
+        self.with_read_range(path, start, end, |lines, _| lines.join("\n"))
+    }
+
+    /// Reads lines `start..=end` of the file at `path` as numbered lines,
+    /// 1-based and inclusive, numbered absolutely from `start`.
+    ///
+    /// Each line is prefixed with its number, right-aligned to the width of
+    /// the largest emitted number, followed by `"| "`; lines are joined with
+    /// `"\n"` and there is no trailing newline. With `start` of 1 and no
+    /// `end` the whole file is numbered from 1. Bounds are evaluated exactly
+    /// as in [`StoreRef::read_range`]: a `start` below 1 is an error; a
+    /// `start` past the last line reads as the empty string; an omitted
+    /// `end` means the last line, and a given `end` clamps down to it; an
+    /// `end` before `start` at that point is an error.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`, or
+    /// [`StoreError::InvalidRange`] if `start` is less than 1 or `end` is
+    /// before `start`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "one\ntwo\nthree\n")?;
+    /// assert_eq!(
+    ///     store.read_range_numbered("a.txt", 1, None)?,
+    ///     "1| one\n2| two\n3| three"
+    /// );
+    /// assert_eq!(store.read_range_numbered("a.txt", 2, Some(3))?, "2| two\n3| three");
+    /// assert_eq!(store.read_range_numbered("a.txt", 99, None)?, "");
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn read_range_numbered(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+    ) -> Result<String, StoreError> {
+        self.with_read_range(path, start, end, number_lines_from)
+    }
+
+    /// Reads and resolves one line range while its owned contents remain live.
+    fn with_read_range(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+        render: impl FnOnce(&[&str], usize) -> String,
+    ) -> Result<String, StoreError> {
+        let path = StorePath::parse(path)?;
+        let contents = self.lock()?.read(path.as_str())?;
+        let lines: Vec<&str> = contents.lines().collect();
+        let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
+            return Ok(String::new());
+        };
+        Ok(render(&lines[start - 1..end], start))
+    }
+
+    /// Replaces the unique occurrence of `old` with `new`. See
+    /// [`Store::str_replace`].
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidAnchor`] when `old` is empty. Otherwise,
+    /// returns [`StoreError::NotFound`], [`StoreError::AnchorNotFound`], or
+    /// [`StoreError::AnchorAmbiguous`] per [`Store::str_replace`].
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "one two")?;
+    /// store.str_replace("a.txt", "two", "three")?;
+    /// assert_eq!(store.read("a.txt")?, "one three");
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        if old.is_empty() {
+            // STORE-007: an empty anchor is a malformed edit request, not an
+            // anchor that merely failed to match; refuse it with a dedicated
+            // invalid-anchor condition before any backend search.
+            return Err(StoreError::InvalidAnchor {
+                path: path.as_str().to_owned(),
+                reason: "anchor must not be empty",
+            });
+        }
+        self.lock()?.str_replace(path.as_str(), old, new)
+    }
+
+    /// Removes the file at `path`. See [`Store::delete`].
+    ///
+    /// Delete is idempotent: a missing file is not an error.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "hi")?;
+    /// store.delete("a.txt")?;
+    /// store.delete("a.txt")?; // already gone; still Ok
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn delete(&self, path: &str) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock()?.delete(path.as_str())
+    }
+
+    /// Returns stored paths matching `pattern`, sorted. See [`Store::glob`].
+    ///
+    /// # Errors
+    /// Propagates any [`StoreError`] from the backend.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "")?;
+    /// store.write("b.md", "")?;
+    /// assert_eq!(store.glob("*.txt")?, vec!["a.txt"]);
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {
+        if pattern.is_empty() {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: "pattern is empty".to_owned(),
+            });
+        }
+        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: format!("pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"),
+            });
+        }
+        if pattern.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: "pattern contains a control character".to_owned(),
+            });
+        }
+        if let Err(reason) = validate_glob_grammar(pattern) {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: reason.to_owned(),
+            });
+        }
+        // AUDIT-MUTEX-EXPENSIVE: snapshot every stored path under a brief lock
+        // (a trivial `**` full enumeration), then release the lock and run the
+        // arbitrary-pattern matcher on the owned snapshot. The O(tokens * path)
+        // matching never executes while the shared backend mutex is held; only
+        // the backend's own enumeration does.
+        let snapshot = self.lock()?.glob("**")?;
+        let tokens = compile_glob(pattern.as_bytes());
+        Ok(snapshot
+            .into_iter()
+            .filter(|path| matches_tokens(&tokens, path.as_bytes()))
+            .collect())
+    }
+
+    /// Returns whether a file exists at `path`. See [`Store::exists`].
+    ///
+    /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// assert!(!store.exists("a.txt")?);
+    /// store.write("a.txt", "hi")?;
+    /// assert!(store.exists("a.txt")?);
+    /// # Ok::<(), promptforge_store::StoreError>(())
+    /// ```
+    pub fn exists(&self, path: &str) -> Result<bool, StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock()?.exists(path.as_str())
+    }
+}
+
+/// Resolves 1-based inclusive bounds against `line_count` into the effective
+/// `(start, end)`, or `None` when the range falls entirely past the last
+/// line. Evaluation order is fixed: a `start` below 1 is an error; a `start`
+/// past the last line reads as empty; an omitted `end` means the last line,
+/// and a given `end` clamps down to it; an `end` before `start` at that
+/// point is an error.
+fn resolve_line_range(
+    path: &str,
+    line_count: usize,
+    start: usize,
+    end: Option<usize>,
+) -> Result<Option<(usize, usize)>, StoreError> {
+    if start == 0 {
+        return Err(StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start must be at least 1",
+        });
+    }
+    if start > line_count {
+        return Ok(None);
+    }
+    let end = end.unwrap_or(line_count).min(line_count);
+    if end < start {
+        return Err(StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "end must not be before start",
+        });
+    }
+    Ok(Some((start, end)))
+}
+
+/// Renders `lines` numbered absolutely from `start`, each number
+/// right-aligned to the width of the largest emitted number, followed by
+/// `"| "`; lines are joined with `"\n"` and there is no trailing newline.
+fn number_lines_from(lines: &[&str], start: usize) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let last = start + lines.len() - 1;
+    let width = last.to_string().len();
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let number = start + index;
+        // Writing to a String is infallible; the result carries no information.
+        let _ = write!(out, "{number:>width$}| {line}");
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests;

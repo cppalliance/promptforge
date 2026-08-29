@@ -51,9 +51,7 @@ struct FailingStore;
 
 impl FailingStore {
     fn error(path: &str) -> StoreError {
-        StoreError::NotFound {
-            path: path.to_owned(),
-        }
+        StoreError::not_found(path)
     }
 }
 

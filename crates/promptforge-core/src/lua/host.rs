@@ -162,10 +162,10 @@ fn read_store_bounded(
                 handle.read(path)
             }
         }
-        None => Err(crate::store::StoreError::InvalidRange {
-            path: path.to_owned(),
-            reason: "start is required when end is given",
-        }),
+        None => Err(crate::store::StoreError::invalid_range(
+            path,
+            "start is required when end is given",
+        )),
         Some(start) => {
             let start = usize::try_from(start).unwrap_or(0);
             let end = end.map(|line| usize::try_from(line).unwrap_or(0));

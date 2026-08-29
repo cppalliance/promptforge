@@ -17,7 +17,7 @@ use super::mem::Store;
 ///
 /// # Examples
 /// ```no_run
-/// use promptforge_core::store::FileStore;
+/// use promptforge_store::FileStore;
 ///
 /// let store = FileStore::new("/tmp/my-run")?;
 /// # Ok::<(), std::io::Error>(())
