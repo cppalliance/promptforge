@@ -16,10 +16,13 @@
 //! directory is resolved from the environment the CUDA Toolkit installer
 //! registers: `CUDA_PATH_V<major>_<minor>` (for example `CUDA_PATH_V13_3`)
 //! wins so a multi-toolkit host selects the matching release, with the
-//! version-agnostic `CUDA_PATH` as the single-toolkit fallback; the runtime
-//! directory is `<root>/bin`. Each external DLL must then be present either in
-//! that directory or, for Windows system DLLs such as `KERNEL32.dll`, in
-//! `<SystemRoot>/System32`. A DLL resolvable in neither place fails staging
+//! version-agnostic `CUDA_PATH` as the single-toolkit fallback. The runtime
+//! directory is `<root>/bin/x64` on CUDA 13 (which moved the Windows runtime
+//! DLLs out of `bin`) or `<root>/bin` on CUDA 12, probed in that order. Each
+//! external DLL must then be present either in that directory or, for Windows
+//! system DLLs such as `KERNEL32.dll`, in `<SystemRoot>/System32` or its
+//! `downlevel` subdirectory (the UCRT API-set stubs ship only in `downlevel`
+//! on Windows 11). A DLL resolvable in none of these places fails staging
 //! before anything is published.
 //!
 //! # Ordering
@@ -153,8 +156,8 @@ pub(crate) enum BundleError {
     },
 
     /// An external DLL is resolvable neither in the toolkit runtime directory
-    /// nor in the system directory.
-    #[error("external DLL `{dll}` not found in `{directory}` or the system directory")]
+    /// nor in the system directories.
+    #[error("external DLL `{dll}` not found in `{directory}` or the system directories")]
     MissingToolkitDependency {
         /// The unresolvable DLL name.
         dll: String,
@@ -315,14 +318,16 @@ fn validate_payload(
     Ok(())
 }
 
-/// Resolves the CUDA Toolkit runtime (`bin`) directory for `toolkit_version`.
+/// Resolves the CUDA Toolkit runtime directory for `toolkit_version`.
 ///
 /// See the module docs for the mechanism: the versioned installer variable
-/// wins, `CUDA_PATH` is the fallback, and the directory must exist.
+/// wins, `CUDA_PATH` is the fallback, and the directory must exist. CUDA 13
+/// moved the Windows runtime DLLs from `bin` to `bin\x64`, so both layouts
+/// are probed, newest first.
 ///
 /// # Errors
 /// Returns [`BundleError::ToolkitNotFound`] when no candidate resolves to an
-/// existing `bin` directory.
+/// existing runtime directory.
 fn toolkit_bin_dir(
     env: &dyn Fn(&str) -> Option<OsString>,
     toolkit_version: &str,
@@ -330,9 +335,11 @@ fn toolkit_bin_dir(
     let versioned = format!("CUDA_PATH_V{}", toolkit_version.replace('.', "_"));
     for variable in [versioned.as_str(), "CUDA_PATH"] {
         if let Some(root) = env(variable).filter(|value| !value.is_empty()) {
-            let bin = PathBuf::from(root).join("bin");
-            if bin.is_dir() {
-                return Ok(bin);
+            for subdir in [Path::new("bin").join("x64"), PathBuf::from("bin")] {
+                let bin = PathBuf::from(&root).join(subdir);
+                if bin.is_dir() {
+                    return Ok(bin);
+                }
             }
         }
     }
@@ -342,21 +349,32 @@ fn toolkit_bin_dir(
 }
 
 /// Requires every manifest-declared external DLL to resolve: in the toolkit
-/// runtime directory, or in `<SystemRoot>/System32` for Windows system DLLs.
+/// runtime directory, or in the system directories for Windows system DLLs.
+///
+/// The system probe covers `<SystemRoot>/System32` and its `downlevel`
+/// subdirectory: Windows 11 ships the UCRT API-set stubs
+/// (`api-ms-win-crt-*`) only in `downlevel`, while `KERNEL32.dll` and the
+/// MSVC runtime stay in `System32`.
 ///
 /// # Errors
 /// Returns [`BundleError::MissingToolkitDependency`] for the first DLL found
-/// in neither place.
+/// in none of the probed directories.
 fn require_external_dlls(
     env: &dyn Fn(&str) -> Option<OsString>,
     manifest: &RuntimeManifest,
     toolkit_bin: &Path,
 ) -> std::result::Result<(), BundleError> {
-    let system32 = env("SystemRoot")
+    let system_dirs: Vec<PathBuf> = env("SystemRoot")
         .filter(|value| !value.is_empty())
-        .map(|root| PathBuf::from(root).join("System32"));
+        .map(|root| {
+            let system32 = PathBuf::from(root).join("System32");
+            [system32.clone(), system32.join("downlevel")]
+        })
+        .into_iter()
+        .flatten()
+        .collect();
     for dll in &manifest.external_dlls {
-        let in_system = system32.as_ref().is_some_and(|dir| dir.join(dll).is_file());
+        let in_system = system_dirs.iter().any(|dir| dir.join(dll).is_file());
         if in_system || toolkit_bin.join(dll).is_file() {
             continue;
         }

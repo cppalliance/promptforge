@@ -333,6 +333,43 @@ fn payload_manifest_mismatches_are_rejected() {
 }
 
 #[test]
+fn toolkit_runtime_directory_prefers_the_cuda_13_bin_x64_layout() {
+    // CUDA 13 on Windows ships its runtime DLLs in `bin\x64` and leaves `bin`
+    // DLL-less; resolving to `bin` breaks both the dependency probe and the
+    // child PATH prefix.
+    let host = SyntheticHost::new();
+    let x64 = host.toolkit_root.join("bin").join("x64");
+    fs::create_dir_all(&x64).expect("toolkit bin x64");
+    fs::rename(
+        host.toolkit_root.join("bin").join(TOOLKIT_DLL),
+        x64.join(TOOLKIT_DLL),
+    )
+    .expect("move toolkit dll into bin x64");
+    let files = bundle_files();
+    let manifest = manifest_json(&files);
+    let staged = stage(&host, &manifest, &files).expect("stage with the bin x64 layout");
+    assert_eq!(staged.path_prefix[1], x64);
+}
+
+#[test]
+fn system_dll_in_downlevel_satisfies_the_probe() {
+    // Windows 11 ships the UCRT API-set stubs (`api-ms-win-crt-*`) only in
+    // `System32\downlevel`; probing `System32` alone rejects every one of
+    // them.
+    let host = SyntheticHost::new();
+    let downlevel = host.system_root.join("System32").join("downlevel");
+    fs::create_dir_all(&downlevel).expect("downlevel dir");
+    fs::rename(
+        host.system_root.join("System32").join(SYSTEM_DLL),
+        downlevel.join(SYSTEM_DLL),
+    )
+    .expect("move system dll into downlevel");
+    let files = bundle_files();
+    let manifest = manifest_json(&files);
+    stage(&host, &manifest, &files).expect("stage with a downlevel system dll");
+}
+
+#[test]
 fn missing_toolkit_dependency_is_rejected() {
     let host = SyntheticHost::new();
     let files = bundle_files();

@@ -297,6 +297,12 @@ pub(super) fn server_args(
         OsString::from("-ngl"),
         OsString::from(options.gpu_layers.to_string()),
         OsString::from("--jinja"),
+        // The pinned server (third_party/llama.cpp @ fb0e6b6, common/log.cpp)
+        // maps llama/ggml INFO messages - device reports and `load_tensors`
+        // offload lines - to its trace verbosity, so the default threshold
+        // hides exactly the evidence the captured diagnostics exist for.
+        OsString::from("-lv"),
+        OsString::from("4"),
     ];
     // Companion spellings are pinned to the bundled server
     // (third_party/llama.cpp @ fb0e6b6, common/arg.cpp): `--spec-draft-model`

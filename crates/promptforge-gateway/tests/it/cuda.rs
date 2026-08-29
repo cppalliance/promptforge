@@ -109,6 +109,20 @@ sha256 = "{PROJECTOR_SHA256}"
     )
 }
 
+/// Renders an error with its full `source` chain: the gateway's public error
+/// types are opaque wrappers whose `Display` shows only the outer message, so
+/// a phase failure must walk the chain to name the root cause.
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut chain = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        chain.push_str(": ");
+        chain.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    chain
+}
+
 /// Runs the real provisioning path (`ensure_model` for the main model and
 /// both companions, plus embedded-bundle staging) and returns the assembled
 /// gateway and the wall-clock cost.
@@ -130,7 +144,7 @@ async fn provision(toml: &str, timeout: Duration, phase: &str) -> (Gateway, Dura
     .await
     .unwrap_or_else(|_| panic!("{phase} exceeded its timeout"))
     .expect("provisioning task panicked")
-    .unwrap_or_else(|error| panic!("{phase} failed: {error}"));
+    .unwrap_or_else(|error| panic!("{phase} failed: {}", error_chain(&error)));
     (gateway, started.elapsed())
 }
 
@@ -369,12 +383,17 @@ async fn prove_staging_offload_and_pins(gateway: &Gateway, cache: &Path) {
     let staged = staged_cuda_executable(cache);
     eprintln!("staged embedded-bundle server at {}", staged.display());
 
+    // The pinned server (third_party/llama.cpp @ fb0e6b6) never emits the
+    // legacy `ggml_cuda_init` banner through llama-server's log path; the
+    // device report is the per-model `llama_prepare_model_devices` line and
+    // the offload evidence is one `offloaded n/n` line per model, so two
+    // matches prove the target and the draft both offloaded.
     let diagnostics = diagnostics_until(gateway, |text| {
-        text.contains("ggml_cuda_init") && text.matches("layers to GPU").count() >= 2
+        text.contains("using device CUDA0") && text.matches("offloaded ").count() >= 2
     })
     .await;
     assert!(
-        diagnostics.contains("Device 0"),
+        diagnostics.contains("CUDA0"),
         "no CUDA device report in child output:\n{diagnostics}"
     );
     assert!(
