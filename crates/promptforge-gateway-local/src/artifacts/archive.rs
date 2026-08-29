@@ -18,6 +18,7 @@ use crate::error::LocalError;
 ///
 /// # Errors
 /// Returns [`LocalError`] on unsafe entries or extraction failures.
+#[cfg(test)]
 pub(super) fn extract_archive(archive: &Path, destination: &Path, kind: ArchiveKind) -> Result<()> {
     extract_archive_with_progress(archive, destination, kind, None)
 }

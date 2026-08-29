@@ -17,8 +17,9 @@ use promptforge_gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolic
 use promptforge_gateway_protocol::ShutdownError;
 use promptforge_gateway_routing::queue::DominionQueue;
 use promptforge_gateway_routing::{Endpoint, Model, dominion_queues};
+use promptforge_progress::ProgressHandle;
 
-use crate::artifacts::{self, ArtifactStore};
+use crate::artifacts::{self, ArtifactStore, ProvisionedServer};
 use crate::dialect::resolve_local_dialect;
 use crate::error::LocalError;
 use crate::server::{LaunchOptions, ServeMode, ServerGuard, SpeculativeLaunch};
@@ -57,98 +58,143 @@ impl LocalRuntime {
     /// When the config declares no `[[local_model]]`, returns an empty runtime
     /// without downloading anything.
     ///
+    /// `progress` is the parent leaf for startup provisioning, when the caller
+    /// runs an operation tree: the pinned server stages once under a
+    /// `llama-server` child (download/verify/extract leaves), and each local
+    /// model gets its own subtree (download/verify leaves from provisioning
+    /// plus an indeterminate `ready` leaf the spawn poll completes).
+    ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
-    pub fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
-        let cache_dir = config.local().cache_dir().map(str::to_owned);
-        if config.local_models().is_empty() {
-            return Ok(LocalRuntime {
-                models: Vec::new(),
-                upstreams: Vec::new(),
-                cache_dir,
-            });
-        }
+    pub fn start(
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<LocalRuntime, LocalError> {
+        start_impl(
+            config,
+            progress,
+            ArtifactStore::provision_llama_server_with_progress,
+            ServerGuard::start,
+        )
+    }
+}
 
-        let cache_root = resolve_cache_root(config.local().cache_dir())?;
-        tracing::info!(path = %cache_root.display(), "local model cache");
-        let store = ArtifactStore::new(cache_root)?;
-        let server = store.provision_llama_server()?;
-        tracing::info!(path = %server.executable.display(), "provisioned llama-server");
-
-        let interrupted = startup_interrupt_flag();
-        let dominion_queues = dominion_queues(config);
-        let mut models = Vec::with_capacity(config.local_models().len());
-        let mut upstreams = Vec::with_capacity(config.local_models().len());
-
-        for local_model in config.local_models() {
-            let model_path = store.ensure_model(local_model.source(), local_model.sha256())?;
-            tracing::info!(
-                model = %local_model.name(),
-                path = %model_path.display(),
-                "provisioned local GGUF"
-            );
-
-            maybe_write_sidecar(&store, local_model.source(), &model_path);
-
-            let admission = resolve_admission(&dominion_queues, local_model)?;
-            let mut options = launch_options(local_model, admission.parallel);
-            options.path_prefix.clone_from(&server.path_prefix);
-            provision_companions(&store, local_model, &mut options)?;
-            let guard = ServerGuard::start(
-                &server.executable,
-                &model_path,
-                &options,
-                interrupted.as_ref(),
-            )?;
-            let endpoint_id = format!("local-{}", local_model.name());
-            // A non-chat child has no chat completions to dialect-match: like a
-            // remote model, it carries the OpenAI default rather than hard-failing
-            // on template-less `/props` evidence.
-            let tool_dialect = match local_model.kind() {
-                ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
-                _ => "openai",
-            };
-            let upstream_name = guard.model_alias().to_owned();
-            let base_url = guard.base_url();
-            let upstream = LocalUpstream::new(
-                guard,
-                server.executable.clone(),
-                model_path.clone(),
-                options,
-                local_model.name().to_owned(),
-            );
-            upstreams.push(upstream.clone());
-            let upstream = Arc::new(upstream);
-            let endpoint = Arc::new(Endpoint {
-                id: endpoint_id,
-                upstream,
-                queue: admission.queue,
-            });
-            models.push(Arc::new(Model {
-                name: local_model.name().to_owned(),
-                kind: local_model.kind(),
-                description: local_model.description().to_owned(),
-                context: local_model.context(),
-                thinking: local_model.thinking(),
-                capabilities: local_model.capabilities().clone(),
-                tool_dialect: tool_dialect.to_owned(),
-                upstream_name,
-                endpoint,
-            }));
-            tracing::info!(
-                model = %local_model.name(),
-                base_url = %base_url,
-                "local llama-server ready"
-            );
-        }
-
-        Ok(LocalRuntime {
-            models,
-            upstreams,
+/// Shared body of [`LocalRuntime::start`] with the two externalities - the
+/// pinned-server provision and the child spawn - injectable, so a test can
+/// drive a start over a mock layout.
+fn start_impl(
+    config: &Config,
+    progress: Option<&ProgressHandle>,
+    provision: impl FnOnce(
+        &ArtifactStore,
+        Option<&ProgressHandle>,
+    ) -> Result<ProvisionedServer, LocalError>,
+    spawn: impl Fn(
+        &Path,
+        &Path,
+        &LaunchOptions,
+        &AtomicBool,
+        Option<&ProgressHandle>,
+    ) -> Result<ServerGuard, LocalError>,
+) -> Result<LocalRuntime, LocalError> {
+    let cache_dir = config.local().cache_dir().map(str::to_owned);
+    if config.local_models().is_empty() {
+        return Ok(LocalRuntime {
+            models: Vec::new(),
+            upstreams: Vec::new(),
             cache_dir,
-        })
+        });
     }
 
+    let cache_root = resolve_cache_root(config.local().cache_dir())?;
+    tracing::info!(path = %cache_root.display(), "local model cache");
+    let store = ArtifactStore::new(cache_root)?;
+    let server_tree = progress.map(|handle| handle.child("llama-server", 1.0));
+    let server = provision(&store, server_tree.as_ref())?;
+    tracing::info!(path = %server.executable.display(), "provisioned llama-server");
+
+    let interrupted = startup_interrupt_flag();
+    let dominion_queues = dominion_queues(config);
+    let mut models = Vec::with_capacity(config.local_models().len());
+    let mut upstreams = Vec::with_capacity(config.local_models().len());
+
+    for local_model in config.local_models() {
+        let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
+        let model_path = store.ensure_model_with_progress(
+            local_model.source(),
+            local_model.sha256(),
+            model_tree.as_ref(),
+        )?;
+        tracing::info!(
+            model = %local_model.name(),
+            path = %model_path.display(),
+            "provisioned local GGUF"
+        );
+
+        maybe_write_sidecar(&store, local_model.source(), &model_path);
+
+        let admission = resolve_admission(&dominion_queues, local_model)?;
+        let mut options = launch_options(local_model, admission.parallel);
+        options.path_prefix.clone_from(&server.path_prefix);
+        provision_companions(&store, local_model, &mut options)?;
+        let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
+        let guard = spawn(
+            &server.executable,
+            &model_path,
+            &options,
+            interrupted.as_ref(),
+            ready.as_ref(),
+        )?;
+        let endpoint_id = format!("local-{}", local_model.name());
+        // A non-chat child has no chat completions to dialect-match: like a
+        // remote model, it carries the OpenAI default rather than hard-failing
+        // on template-less `/props` evidence.
+        let tool_dialect = match local_model.kind() {
+            ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
+            _ => "openai",
+        };
+        let upstream_name = guard.model_alias().to_owned();
+        let base_url = guard.base_url();
+        let upstream = LocalUpstream::new(
+            guard,
+            server.executable.clone(),
+            model_path.clone(),
+            options,
+            local_model.name().to_owned(),
+        );
+        upstreams.push(upstream.clone());
+        let upstream = Arc::new(upstream);
+        let endpoint = Arc::new(Endpoint {
+            id: endpoint_id,
+            upstream,
+            queue: admission.queue,
+        });
+        models.push(Arc::new(Model {
+            name: local_model.name().to_owned(),
+            kind: local_model.kind(),
+            description: local_model.description().to_owned(),
+            context: local_model.context(),
+            thinking: local_model.thinking(),
+            capabilities: local_model.capabilities().clone(),
+            tool_dialect: tool_dialect.to_owned(),
+            upstream_name,
+            endpoint,
+        }));
+        tracing::info!(
+            model = %local_model.name(),
+            base_url = %base_url,
+            "local llama-server ready"
+        );
+    }
+
+    Ok(LocalRuntime {
+        models,
+        upstreams,
+        cache_dir,
+    })
+}
+
+impl LocalRuntime {
     /// Bounded captured-output tails of the running local children, keyed by
     /// configured model name.
     #[must_use]
@@ -464,10 +510,131 @@ endpoints = ["e"]
 "#,
         )
         .expect("config");
-        let runtime = LocalRuntime::start(&config).expect("empty local runtime");
+        let runtime = LocalRuntime::start(&config, None).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
         assert!(runtime.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn start_with_no_local_models_registers_no_leaves() {
+        // An empty `[[local_model]]` set is a no-op start: the parent leaf
+        // gains no children at all.
+        let config = Config::from_toml_str(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "remote"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#,
+        )
+        .expect("config");
+        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        let tree = hub.operation();
+        let parent = tree.register("local-models", 1.0);
+        let runtime = LocalRuntime::start(&config, Some(&parent)).expect("empty local runtime");
+        assert_eq!(runtime.child_count(), 0);
+        let snapshot = hub.snapshot();
+        let paths: Vec<&str> = snapshot[0]
+            .nodes
+            .iter()
+            .map(|node| node.path.as_str())
+            .collect();
+        assert_eq!(paths, ["local-models"]);
+    }
+
+    #[test]
+    #[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+    fn start_over_a_mock_layout_registers_the_expected_subtree_shape() {
+        use crate::testsupport::hex_sha256;
+
+        // The mock layout provisions for real - a path source with a true pin
+        // - but has no `llama-server` binary to spawn, so the start fails at
+        // launch, after the subtree shape is registered.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let model_file = temp.path().join("mock.gguf");
+        std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
+        let config = Config::from_toml_str(&format!(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+cache_dir = '{}'
+
+[[local_model]]
+name = "mock"
+kind = "embedding"
+description = "a mock local model"
+source = '{}'
+sha256 = "{}"
+context = 512
+"#,
+            temp.path().join("cache").display(),
+            model_file.display(),
+            hex_sha256(b"mock-gguf-bytes"),
+        ))
+        .expect("config");
+
+        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        let tree = hub.operation();
+        let parent = tree.register("local-models", 1.0);
+
+        let error = start_impl(
+            &config,
+            Some(&parent),
+            |_store, server| {
+                // An already-staged server has no download/verify/extract work.
+                if let Some(handle) = server {
+                    handle.complete();
+                }
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+            |_, _, _, _, _| {
+                Err(LocalError::EarlyExit {
+                    status: "the mock layout has no llama-server to spawn".to_owned(),
+                })
+            },
+        )
+        .expect_err("the mock layout cannot launch a real child");
+        assert!(matches!(error, LocalError::EarlyExit { .. }));
+
+        let snapshot = hub.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        let nodes = &snapshot[0].nodes;
+        let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "local-models",
+                "local-models/llama-server",
+                "local-models/mock",
+                "local-models/mock/download",
+                "local-models/mock/verify",
+                "local-models/mock/ready",
+            ]
+        );
+        // The path source needed no download and the pin ran a real hash
+        // pass; the readiness poll never ran.
+        assert_eq!(nodes[3].fraction, 1.0);
+        assert_eq!(nodes[4].fraction, 1.0);
+        assert_eq!(nodes[5].fraction, 0.0);
     }
 
     #[tokio::test]

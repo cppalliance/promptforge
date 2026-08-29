@@ -32,7 +32,7 @@ pub(super) fn download_label(url: &str) -> String {
 }
 
 /// Chooses a TTY progress bar or non-TTY tracing progress for `label`.
-pub(super) fn progress_for_download(label: &str, is_tty: bool) -> Box<dyn DownloadProgress> {
+pub(super) fn progress_for_download(label: &str, is_tty: bool) -> Box<dyn DownloadProgress + Sync> {
     if is_tty {
         Box::new(IndicatifProgress::new(label))
     } else {
@@ -85,6 +85,45 @@ impl DownloadProgress for TreeProgress {
         // The handle vocabulary has no failure terminal; the operation owner
         // carries failure through its own exit path, so the leaf completes.
         self.handle.complete();
+    }
+}
+
+/// A [`DownloadProgress`] that fans each callback out to the tree `leaf` and
+/// the TTY/log `presentation` reporter, so both run alongside each other.
+pub(super) struct FanoutProgress<'a> {
+    leaf: &'a TreeProgress,
+    presentation: &'a (dyn DownloadProgress + Sync),
+}
+
+impl<'a> FanoutProgress<'a> {
+    /// Creates a fan-out over the tree `leaf` and the `presentation` reporter.
+    pub(super) fn new(
+        leaf: &'a TreeProgress,
+        presentation: &'a (dyn DownloadProgress + Sync),
+    ) -> Self {
+        Self { leaf, presentation }
+    }
+}
+
+impl DownloadProgress for FanoutProgress<'_> {
+    fn set_len(&self, total: Option<u64>) {
+        self.leaf.set_len(total);
+        self.presentation.set_len(total);
+    }
+
+    fn inc(&self, n: u64) {
+        self.leaf.inc(n);
+        self.presentation.inc(n);
+    }
+
+    fn finish(&self) {
+        self.leaf.finish();
+        self.presentation.finish();
+    }
+
+    fn abandon(&self) {
+        self.leaf.abandon();
+        self.presentation.abandon();
     }
 }
 

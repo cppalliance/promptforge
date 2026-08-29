@@ -56,6 +56,7 @@ pub(super) enum VerifyOutcome {
 /// reading the marker or hashing or inspecting the blob fails, and
 /// [`LocalError::DigestMismatch`] when the blob's actual digest does not
 /// match `expected`.
+#[cfg(test)]
 pub(super) fn verify_blob(
     cache_root: &Path,
     path: &Path,

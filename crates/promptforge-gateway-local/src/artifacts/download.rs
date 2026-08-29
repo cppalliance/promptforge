@@ -4,12 +4,15 @@ use std::fs::File;
 use std::io::{self, BufWriter, IsTerminal, Read, Write};
 use std::path::Path;
 
+use promptforge_progress::ProgressHandle;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
 use super::Result;
 use super::digest::hex_digest;
-use super::progress::{DownloadProgress, download_label, progress_for_download};
+use super::progress::{
+    DownloadProgress, FanoutProgress, TreeProgress, download_label, progress_for_download,
+};
 use crate::error::LocalError;
 
 /// Hard ceiling on a single artifact, guarding the cache volume against a
@@ -58,15 +61,38 @@ pub(super) fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Optio
     None
 }
 
-/// Downloads `url` to `destination`, driving TTY/log progress, and returns the
-/// SHA-256 hex digest of the streamed bytes.
+/// Downloads `url` to `destination`, driving TTY/log progress - plus the
+/// progress-tree leaf when `tree` is given - and returns the SHA-256 hex
+/// digest of the streamed bytes.
 ///
 /// # Errors
 /// Returns [`LocalError`] on transport, size-cap, or filesystem failure.
-pub(super) fn download(client: &Client, url: &str, destination: &Path) -> Result<String> {
+pub(super) fn download(
+    client: &Client,
+    url: &str,
+    destination: &Path,
+    tree: Option<&ProgressHandle>,
+) -> Result<String> {
     let label = download_label(url);
-    let progress = progress_for_download(&label, io::stderr().is_terminal());
-    match download_with_progress(client, url, destination, progress.as_ref()) {
+    let presentation = progress_for_download(&label, io::stderr().is_terminal());
+    match tree {
+        Some(handle) => {
+            let leaf = TreeProgress::new(handle.clone());
+            let progress = FanoutProgress::new(&leaf, presentation.as_ref());
+            run_download(client, url, destination, &progress)
+        }
+        None => run_download(client, url, destination, presentation.as_ref()),
+    }
+}
+
+/// Runs the download, reporting the terminal outcome to `progress`.
+fn run_download(
+    client: &Client,
+    url: &str,
+    destination: &Path,
+    progress: &dyn DownloadProgress,
+) -> Result<String> {
+    match download_with_progress(client, url, destination, progress) {
         Ok(digest) => {
             progress.finish();
             Ok(digest)
