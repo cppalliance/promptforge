@@ -2,7 +2,7 @@
 
 use whisper_rs::WhisperContext;
 
-use crate::transcribe::{MAX_PROMPT_CHARS, MAX_PROMPT_TOKENS};
+use crate::{MAX_PROMPT_CHARS, MAX_PROMPT_TOKENS};
 
 /// The trailing `max` bytes of `text`, cut at a char boundary.
 fn tail_chars(text: &str, max: usize) -> &str {
@@ -127,7 +127,7 @@ mod tests {
 
     use super::*;
 
-    use crate::transcribe::{GLOSSARY_TOKEN_BUDGET, fixtures};
+    use crate::{GLOSSARY_TOKEN_BUDGET, fixtures};
 
     #[test]
     fn sanitize_prompt_strips_nulls_and_caps_length() {

@@ -50,3 +50,7 @@ In-process only: `Router::oneshot` or the spawn fixture, with the typed JSON Web
 ## Asset serving and shutdown
 
 No content hashes in asset filenames and no cache headers: the workshop UI is a windowed SPA served from the local process, so nothing is cacheable and the esbuild output keeps its plain names. API-path misses return 404, never the SPA index. The missing-bundle 404 names the build command. Held sockets must never block shutdown: force-exit watchdog plus stopped barrier.
+
+## Transcription boundary
+
+The Whisper engine - model ownership, inference workers, segmentation, silence gating - lives in `promptforge-transcribe`. This crate keeps the voice WebSocket session, route state, the capability probe, startup degradation, and post-cache provisioning and activation. The engine is constructed only through `promptforge_transcribe::EngineConfig`'s plain values, mapped from `VoiceConfig`; never pass `VoiceConfig` itself, and never let the engine crate depend back on this one. GPU transcription is the `voice-cuda` feature (`cuda` remains as a compatibility alias).

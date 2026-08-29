@@ -24,11 +24,9 @@ mod provision;
 mod push;
 mod relay;
 mod routes;
-mod segment;
 mod serve;
 mod status;
 mod tape;
-mod transcribe;
 mod voice;
 mod workspace;
 
@@ -39,9 +37,14 @@ mod workspace;
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]
 pub mod fixtures {
+    pub use promptforge_transcribe::fixtures::{
+        fixture_dir, jfk_samples, model_path, require_model,
+    };
+
     pub use crate::app::fixtures::spawn_gateway;
-    pub use crate::transcribe::fixtures::{fixture_dir, jfk_samples, model_path, require_model};
 }
+
+pub use promptforge_transcribe::TranscribeError;
 
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
@@ -55,4 +58,3 @@ pub use gateway::{
 pub use protocol::ChatRequest;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use tape::{Tape, TapeError, TapeEvent};
-pub use transcribe::TranscribeError;

@@ -23,6 +23,7 @@
 use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
+use promptforge_transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use tokio::sync::oneshot;
 
 use crate::config::VoiceConfig;
@@ -30,7 +31,6 @@ use crate::gateway::{CacheEvent, CacheResponse, GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
 use crate::protocol::Activity;
 use crate::push::Push;
-use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 
 /// A running provisioning task.
 ///
@@ -152,10 +152,12 @@ async fn provision_once(
     resolved.final_model = final_pass.unwrap_or_default();
     // VoiceEngine::new blocks on the worker threads' model init, so it
     // runs on the blocking pool and never stalls the executor.
-    let engine = tokio::task::spawn_blocking(move || VoiceEngine::new(&resolved))
-        .await
-        .map_err(ProvisionError::EngineTask)?
-        .map_err(ProvisionError::LoadEngine)?;
+    let engine = tokio::task::spawn_blocking(move || {
+        VoiceEngine::new(&promptforge_transcribe::EngineConfig::from(&resolved))
+    })
+    .await
+    .map_err(ProvisionError::EngineTask)?
+    .map_err(ProvisionError::LoadEngine)?;
     voice.activate(engine);
     push.push_status_update(
         "Voice ready",
@@ -358,12 +360,12 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
     use axum::routing::post;
+    use promptforge_transcribe::fixtures;
     use tokio::sync::broadcast;
 
     use crate::catalog::CatalogBus;
     use crate::protocol::{Severity, StatusBarUpdate};
     use crate::status::StatusBus;
-    use crate::transcribe::fixtures;
 
     const INTERIM_SOURCE: &str = "http://gateway.test/models/ggml-large-v3-turbo.bin";
     const FINAL_SOURCE: &str = "http://gateway.test/models/ggml-large-v3.bin";
@@ -611,10 +613,10 @@ mod tests {
         let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
         let slot = VoiceSlot::default();
         slot.activate(
-            VoiceEngine::new(&VoiceConfig {
+            VoiceEngine::new(&promptforge_transcribe::EngineConfig::from(&VoiceConfig {
                 interim_model: fixtures::require_model(),
                 ..VoiceConfig::default()
-            })
+            }))
             .expect("the fixture model loads"),
         );
         let provision = spawn(

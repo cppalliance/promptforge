@@ -6,7 +6,7 @@
 /guide/book/
 *.env
 # Voice test fixtures, downloaded out of band (see design-promptforge-ws-1.md).
-/crates/promptforge-ws-server/tests/fixtures/
+/crates/promptforge-transcribe/tests/fixtures/
 # UI build pipeline: npm install target and esbuild output (rebuilt by build.rs).
 /crates/promptforge-ws-server/ui/node_modules/
 /crates/promptforge-ws-server/ui/dist/

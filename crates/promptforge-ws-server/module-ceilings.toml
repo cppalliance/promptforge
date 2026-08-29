@@ -31,7 +31,9 @@
 "backoff.rs" = 232
 "catalog.rs" = 118
 "chat_ws.rs" = 2963
-"config.rs" = 593
+# Grew by the `From<&VoiceConfig> for promptforge_transcribe::EngineConfig`
+# mapping and its test (the constructor seam into the extracted engine).
+"config.rs" = 634
 "cross_site.rs" = 338
 "deadline.rs" = 112
 "error.rs" = 484
@@ -50,16 +52,8 @@
 "routes/health.rs" = 50
 "routes/voice.rs" = 75
 "routes/workspace.rs" = 19
-"segment.rs" = 231
 "serve.rs" = 566
 "status.rs" = 200
 "tape.rs" = 275
-"transcribe.rs" = 224
-"transcribe/engine.rs" = 237
-"transcribe/error.rs" = 39
-"transcribe/final_pass.rs" = 469
-"transcribe/prompt.rs" = 267
-"transcribe/slot.rs" = 41
-"transcribe/worker.rs" = 153
 "voice.rs" = 1315
 "workspace.rs" = 1018

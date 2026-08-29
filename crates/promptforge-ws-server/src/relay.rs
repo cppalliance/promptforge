@@ -173,13 +173,14 @@ mod tests {
     use axum::{Json, Router};
     use tower::ServiceExt;
 
+    use promptforge_transcribe::VoiceSlot;
+
     use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
     use crate::app::router;
     use crate::catalog::CatalogBus;
     use crate::gateway::GatewayClient;
     use crate::heartbeat::GatewayHealth;
     use crate::status::StatusBus;
-    use crate::transcribe::VoiceSlot;
     use crate::workspace::Workspace;
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;

@@ -232,7 +232,7 @@ fn serve_thread(
         // Voice is GPU-only (see AppState::new): without GPU transcription
         // the provisioning task gets an empty config and exits immediately,
         // so a CPU build never downloads models or announces "Voice ready".
-        let voice_config = if crate::transcribe::gpu_transcription_available() {
+        let voice_config = if promptforge_transcribe::gpu_transcription_available() {
             config.voice.clone()
         } else {
             crate::config::VoiceConfig::default()

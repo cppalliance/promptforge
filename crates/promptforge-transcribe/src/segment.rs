@@ -11,7 +11,7 @@
 
 use std::ops::Range;
 
-use crate::transcribe::{self, SAMPLE_RATE};
+use crate::{SAMPLE_RATE, is_silence};
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
 const FRAME_SAMPLES: usize = SAMPLE_RATE * 30 / 1000;
@@ -32,7 +32,7 @@ const MIN_SPEECH_SAMPLES: usize = SAMPLE_RATE / 4;
 /// a cursor into it and each [`poll`](Segmenter::poll) scans only frames
 /// completed since the last call. Ranges are indices into that buffer.
 #[derive(Debug, Default)]
-pub(crate) struct Segmenter {
+pub struct Segmenter {
     /// Next unscanned sample index.
     cursor: usize,
     /// Start of the speech run currently being tracked, if any.
@@ -46,29 +46,31 @@ pub(crate) struct Segmenter {
 
 impl Segmenter {
     /// A fresh segmenter positioned at the start of a take buffer.
-    pub(crate) fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Rewinds the segmenter for a new take; the caller clears the buffer at
     /// the same time, so indices stay aligned.
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         *self = Self::new();
     }
 
     /// Index past which all audio has been segmented; the unprocessed tail
     /// of the take is `buffer[self.consumed()..]`.
-    pub(crate) fn consumed(&self) -> usize {
+    #[must_use]
+    pub fn consumed(&self) -> usize {
         self.consumed
     }
 
     /// Scans newly arrived frames and returns the range of the next
     /// completed speech segment, if one closed. Call in a loop: a large
     /// arrival can complete more than one segment.
-    pub(crate) fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
+    pub fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
         while self.cursor + FRAME_SAMPLES <= buffer.len() {
             let frame = &buffer[self.cursor..self.cursor + FRAME_SAMPLES];
-            let silent = transcribe::is_silence(frame);
+            let silent = is_silence(frame);
             match (self.speech_start, silent) {
                 (Some(start), true) => {
                     let begin = self.silence_begin.get_or_insert(self.cursor);
