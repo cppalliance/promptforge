@@ -16,6 +16,7 @@ mod cross_site;
 mod deadline;
 mod error;
 mod gateway;
+mod gateway_progress;
 mod heartbeat;
 mod menu;
 mod progress;

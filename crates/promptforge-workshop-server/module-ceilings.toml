@@ -37,6 +37,10 @@
 "deadline.rs" = 112
 "error.rs" = 484
 "gateway.rs" = 1300
+# New module: the gateway progress subscriber, importing the gateway's
+# /admin/progress event stream into the workshop ProgressHub as a
+# RemoteOperation while the heartbeat reads the gateway as reachable.
+"gateway_progress.rs" = 362
 "heartbeat.rs" = 872
 # Grew by the session split's test seams: the fixtures module now re-exports
 # the bus, health, backoff, and heartbeat types the socket behavior tests
