@@ -46,6 +46,19 @@ impl ProgressHandle {
     /// Sets the fraction from completed units out of a total, for example
     /// bytes downloaded. A zero total reports 0.0 while nothing is done and
     /// 1.0 once any unit is done.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let tree = hub.operation();
+    /// let leaf = tree.register("download", 1.0);
+    /// leaf.set_units(1, 4);
+    /// assert_eq!(leaf.fraction(), 0.25);
+    /// ```
     pub fn set_units(&self, done: u64, total: u64) {
         #[expect(
             clippy::cast_precision_loss,
@@ -61,6 +74,8 @@ impl ProgressHandle {
 
     /// Forces the fraction to 1.0 and emits the terminal `Finished` event,
     /// bypassing coalescing. Call on every exit path of the leaf's work.
+    /// Terminal state is sticky: the first of [`complete`](Self::complete) or
+    /// [`fail`](Self::fail) wins and later calls are no-ops.
     ///
     /// # Examples
     ///
@@ -79,6 +94,29 @@ impl ProgressHandle {
         self.tree.complete(&self.node);
     }
 
+    /// Emits the terminal `Finished { ok: false }` event, bypassing
+    /// coalescing, and keeps the leaf's current fraction. Call on every
+    /// error exit path of the leaf's work, the failure counterpart of
+    /// [`complete`](Self::complete). Terminal state is sticky: the first of
+    /// `complete` or `fail` wins and later calls are no-ops.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let tree = hub.operation();
+    /// let leaf = tree.register("download", 1.0);
+    /// leaf.set_fraction(0.3);
+    /// leaf.fail();
+    /// assert_eq!(leaf.fraction(), 0.3);
+    /// ```
+    pub fn fail(&self) {
+        self.tree.finish(&self.node, false);
+    }
+
     /// The leaf's current fraction in `0.0..=1.0`.
     #[must_use]
     pub fn fraction(&self) -> f64 {
@@ -90,6 +128,20 @@ impl ProgressHandle {
     /// Once a leaf has children its own fraction is the weighted aggregate of
     /// theirs, and `weight` is the child's share of the parent's expected
     /// duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let tree = hub.operation();
+    /// let model = tree.register("model", 1.0);
+    /// let download = model.child("download", 3.0);
+    /// download.set_fraction(1.0);
+    /// assert_eq!(tree.fraction(), 1.0);
+    /// ```
     #[must_use]
     pub fn child(&self, label: &str, weight: f64) -> Self {
         let (slot, node) = self.tree.register(Some(self.slot), label, weight);
@@ -198,5 +250,28 @@ mod tests {
             ),
             "Finished must not wait out the coalescing window"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fail_emits_a_terminal_event_and_keeps_the_fraction() {
+        let hub = Arc::new(ProgressHub::new());
+        let mut rx = hub.subscribe();
+        let tree = hub.operation();
+        let leaf = tree.register("download", 1.0);
+        begun(&mut rx);
+        leaf.set_fraction(0.5);
+        assert!(matches!(
+            rx.try_recv().expect("first update emits").state,
+            EventState::Updated { .. }
+        ));
+        leaf.fail();
+        assert!(
+            matches!(
+                rx.try_recv().expect("fail emits Finished at once").state,
+                EventState::Finished { ok: false }
+            ),
+            "a failure terminal must not wait out the coalescing window"
+        );
+        assert_eq!(leaf.fraction(), 0.5, "a failed leaf keeps its fraction");
     }
 }

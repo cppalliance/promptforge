@@ -164,6 +164,40 @@ async fn provision_once(
     let interim_download = download_leaf(&tree, &config.interim_model, &config.interim_source);
     let final_download = download_leaf(&tree, &config.final_model, &config.final_source);
     let engine_load = tree.register("Loading voice models", ENGINE_WEIGHT);
+    let result = provision_attempt(
+        client,
+        push,
+        voice,
+        config,
+        interim_download.as_ref(),
+        final_download.as_ref(),
+        &engine_load,
+    )
+    .await;
+    // Every exit path owes each leaf its terminal event: a failed attempt
+    // fails every leaf still open, including the ones the attempt never
+    // reached. Terminal state is sticky, so leaves already finished inside
+    // (a completed download, a loaded engine) are not failed twice.
+    if result.is_err() {
+        for leaf in [interim_download, final_download].into_iter().flatten() {
+            leaf.fail();
+        }
+        engine_load.fail();
+    }
+    result
+}
+
+/// The body of one provisioning attempt, with the attempt's leaves borrowed
+/// from [`provision_once`], which owns their terminal events on failure.
+async fn provision_attempt(
+    client: &GatewayClient,
+    push: &Push,
+    voice: &VoiceSlot,
+    config: &VoiceConfig,
+    interim_download: Option<&ProgressHandle>,
+    final_download: Option<&ProgressHandle>,
+    engine_load: &ProgressHandle,
+) -> Result<(), ProvisionError> {
     let interim = resolve_model(
         client,
         push,
@@ -178,10 +212,11 @@ async fn provision_once(
     resolved.final_model = final_pass.unwrap_or_default();
     // VoiceEngine::new_with_progress blocks on the worker threads' model
     // init, so it runs on the blocking pool and never stalls the executor.
+    let engine_leaf = engine_load.clone();
     let engine = tokio::task::spawn_blocking(move || {
         VoiceEngine::new_with_progress(
             &promptforge_transcribe::EngineConfig::from(&resolved),
-            Some(engine_load),
+            Some(engine_leaf),
         )
     })
     .await
@@ -216,7 +251,7 @@ async fn resolve_model(
     push: &Push,
     path: &Path,
     source: &str,
-    download: Option<ProgressHandle>,
+    download: Option<&ProgressHandle>,
 ) -> Result<PathBuf, ProvisionError> {
     if path.is_file() {
         return Ok(path.to_path_buf());
@@ -226,7 +261,7 @@ async fn resolve_model(
             path: path.to_path_buf(),
         });
     }
-    cache_fetch(client, push, source, download.as_ref()).await
+    cache_fetch(client, push, source, download).await
 }
 
 /// Resolves the optional final-pass model. A configured final path that is
@@ -237,7 +272,7 @@ async fn resolve_final(
     client: &GatewayClient,
     push: &Push,
     config: &VoiceConfig,
-    download: Option<ProgressHandle>,
+    download: Option<&ProgressHandle>,
 ) -> Result<Option<PathBuf>, ProvisionError> {
     if config.final_model.is_file() {
         return Ok(Some(config.final_model.clone()));
@@ -255,7 +290,7 @@ async fn resolve_final(
         }
         return Ok(None);
     }
-    cache_fetch(client, push, &config.final_source, download.as_ref())
+    cache_fetch(client, push, &config.final_source, download)
         .await
         .map(Some)
 }
@@ -277,6 +312,24 @@ fn source_filename(source: &str) -> &str {
 /// the task's select, so shutdown stays prompt, and startup never waits
 /// on provisioning). A reconnect does not interrupt a stalled attempt.
 async fn cache_fetch(
+    client: &GatewayClient,
+    push: &Push,
+    source: &str,
+    download: Option<&ProgressHandle>,
+) -> Result<PathBuf, ProvisionError> {
+    let result = cache_fetch_events(client, push, source, download).await;
+    // The leaf completes on the terminal ready; every error path fails it,
+    // so the attempt's tree never drops a leaf without a terminal event.
+    if result.is_err()
+        && let Some(leaf) = download
+    {
+        leaf.fail();
+    }
+    result
+}
+
+/// The event-stream body of [`cache_fetch`].
+async fn cache_fetch_events(
     client: &GatewayClient,
     push: &Push,
     source: &str,
@@ -405,7 +458,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
     use axum::routing::post;
-    use promptforge_progress::ProgressHub;
+    use promptforge_progress::{EventState, ProgressHub};
     use promptforge_transcribe::fixtures;
     use tokio::sync::broadcast;
 
@@ -727,10 +780,11 @@ mod tests {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
         let slot = VoiceSlot::default();
+        let hub = Arc::new(ProgressHub::new());
         let provision = spawn(
             client,
             push_over(status),
-            Arc::new(ProgressHub::new()),
+            Arc::clone(&hub),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -743,6 +797,13 @@ mod tests {
             "the gateway's message reaches the status bar: {update:?}"
         );
         assert!(!slot.is_active());
+        // The failure report follows the attempt's return, so the tree is
+        // already gone: nothing lingers on the hub as a permanent status-bar
+        // operation.
+        assert!(
+            hub.snapshot().is_empty(),
+            "a failed attempt detaches its operation tree"
+        );
         provision.shutdown().await;
     }
 
@@ -793,6 +854,18 @@ mod tests {
             let push = push_over(StatusBus::new());
             cache_fetch(&client, &push, INTERIM_SOURCE, Some(&leaf)).await
         });
+        // A null total means the upstream sent no Content-Length: with no
+        // total there is no fraction to report, so the leaf holds.
+        script
+            .send("data: {\"status\":\"downloading\",\"bytes\":5,\"total\":null}\n\n".to_string())
+            .await
+            .expect("the stream is open");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            reporter.fraction(),
+            0.0,
+            "a null-total sample leaves the leaf's fraction untouched"
+        );
         script
             .send("data: {\"status\":\"downloading\",\"bytes\":5,\"total\":10}\n\n".to_string())
             .await
@@ -820,6 +893,43 @@ mod tests {
             reporter.fraction(),
             1.0,
             "the terminal ready completes the leaf"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_download_error_event_fails_the_leaf() {
+        let (app, script) = mock_cache_scripted();
+        let base_url = serve(app).await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let hub = Arc::new(ProgressHub::new());
+        let mut events = hub.subscribe();
+        let tree = hub.operation();
+        let leaf = tree.register("Downloading ggml-large-v3-turbo.bin", DOWNLOAD_WEIGHT);
+        let fetch = tokio::spawn(async move {
+            let push = push_over(StatusBus::new());
+            cache_fetch(&client, &push, INTERIM_SOURCE, Some(&leaf)).await
+        });
+        script
+            .send("data: {\"status\":\"error\",\"message\":\"disk full\"}\n\n".to_string())
+            .await
+            .expect("the stream is open");
+        let result = tokio::time::timeout(Duration::from_secs(5), fetch)
+            .await
+            .expect("the fetch finishes within the deadline")
+            .expect("the fetch task joins");
+        assert!(
+            matches!(result, Err(ProvisionError::Download(_))),
+            "the gateway's error event fails the fetch: {result:?}"
+        );
+        let mut failed = false;
+        while let Ok(event) = events.try_recv() {
+            if let EventState::Finished { ok } = event.state {
+                failed = !ok;
+            }
+        }
+        assert!(
+            failed,
+            "a download error ends the leaf with a failure terminal"
         );
     }
 

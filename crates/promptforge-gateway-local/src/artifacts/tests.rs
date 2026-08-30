@@ -13,9 +13,9 @@ use super::archive::{extract_archive_with_progress, safe_archive_path};
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
 use super::progress::{DownloadProgress, TreeProgress};
-use super::verified::{
-    VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress, write_marker,
-};
+#[cfg(not(llama_cuda_embedded))]
+use super::verified::write_marker;
+use super::verified::{VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress};
 use super::*;
 use crate::testsupport::{FakeServer, hex_sha256};
 
@@ -851,6 +851,83 @@ fn ensure_blob_mismatch_repair_finishes_the_verify_leaf_exactly_once() {
     assert_eq!(
         verify_finished, 1,
         "the pin recheck after repair must not re-emit the terminal event"
+    );
+}
+
+#[test]
+fn extract_failure_fails_the_leaf() {
+    use zip::write::SimpleFileOptions;
+
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("evil.zip");
+    {
+        let file = std::fs::File::create(&archive).expect("create archive");
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file("../escape.txt", SimpleFileOptions::default())
+            .expect("start traversal entry");
+        writer.write_all(b"pwned").expect("write entry");
+        writer.finish().expect("finish zip");
+    }
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+
+    let hub = Arc::new(ProgressHub::new());
+    let mut rx = hub.subscribe();
+    let tree = hub.operation();
+    let leaf = tree.register("extract", 1.0);
+
+    let result = extract_archive_with_progress(&archive, &dest, ArchiveKind::Zip, Some(&leaf));
+    assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
+
+    let mut failed = false;
+    while let Ok(event) = rx.try_recv() {
+        if let EventState::Finished { ok } = event.state {
+            failed = !ok;
+        }
+    }
+    assert!(
+        failed,
+        "an extraction error ends the leaf with a failure terminal"
+    );
+}
+
+#[test]
+fn ensure_model_with_progress_fails_the_verify_leaf_on_a_bad_pin() {
+    // A path source whose pin cannot be parsed returns before any verify
+    // work; the registered verify leaf still owes its terminal event.
+    let dir = TempDir::new().expect("tempdir");
+    let model = dir.path().join("model.gguf");
+    std::fs::write(&model, b"model-bytes").expect("write model");
+    let store = ArtifactStore::new(dir.path().join("cache")).expect("store");
+
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let parent = tree.register("model", 1.0);
+
+    let result = store.ensure_model_with_progress(
+        model.to_str().expect("utf8 path"),
+        Some("abc"),
+        Some(&parent),
+    );
+    assert!(matches!(result, Err(LocalError::InvalidDigest { .. })));
+
+    let nodes = &hub.snapshot()[0].nodes;
+    let download = nodes
+        .iter()
+        .find(|node| node.path == "model/download")
+        .expect("download leaf");
+    let verify = nodes
+        .iter()
+        .find(|node| node.path == "model/verify")
+        .expect("verify leaf");
+    assert!(
+        download.finished && download.ok,
+        "a path source completes the download leaf: {download:?}"
+    );
+    assert!(
+        verify.finished && !verify.ok,
+        "the unparseable pin fails the verify leaf: {verify:?}"
     );
 }
 

@@ -515,7 +515,8 @@ const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(1
 ///
 /// The reply is `text/event-stream` and never terminates on its own: a
 /// freshly connected subscriber first receives the live operations replayed
-/// as synthetic `Begun`/`Updated` events, so it can render current state
+/// as synthetic `Begun`/`Updated` events, plus a `Finished` for each leaf
+/// that already reached its terminal state, so it can render current state
 /// without waiting for the next event, and then every broadcast
 /// [`ProgressEvent`], with heartbeat comment lines every
 /// [`PROGRESS_HEARTBEAT`] while the hub is idle. Intermediate events are
@@ -555,6 +556,17 @@ fn progress_sse_response(hub: &ProgressHub) -> Response {
                     EventState::Updated {
                         fraction: node.fraction,
                     },
+                )));
+            }
+            // A leaf that finished before the subscriber connected replays
+            // its terminal event too, or the subscriber would hold it as
+            // unfinished until the tree detaches.
+            if node.finished {
+                pending.extend(event_line(&ProgressEvent::new(
+                    operation.operation,
+                    node.path.clone(),
+                    node.label.clone(),
+                    EventState::Finished { ok: node.ok },
                 )));
             }
         }
@@ -688,6 +700,7 @@ async fn run_switch(
     let loading = tree.register("loading-profile", 1.0);
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
+        loading.fail();
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
 
@@ -698,18 +711,13 @@ async fn run_switch(
 
     // Build and validate the entire remote side off the live lock. Any failure
     // here returns before mutating live state at all (LIB-009).
-    let config = Config::load_profile(&dir, &name)
-        .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
-    crate::runner::check_server_matches_boot(&state.boot.server, config.server(), &name)
-        .map_err(|e| GatewayError::switch_failed("server-mismatch", e))?;
-    crate::runner::check_workshop_matches_boot(
-        state.boot.workshop.as_ref(),
-        config.workshop(),
-        &name,
-    )
-    .map_err(|e| GatewayError::switch_failed("workshop-mismatch", e))?;
-    let remote_routing = Routing::from_config(&config)
-        .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
+    let (config, remote_routing) = match load_switch_config(&state, &dir, &name) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            loading.fail();
+            return Err(error);
+        }
+    };
     #[cfg(feature = "web-search")]
     let new_web_search = config
         .web_search_config()
@@ -745,8 +753,14 @@ async fn run_switch(
         .await
         {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(GatewayError::switch_failed("shutdown-local", e)),
-            Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
+            Ok(Err(e)) => {
+                stopping.fail();
+                return Err(GatewayError::switch_failed("shutdown-local", e));
+            }
+            Err(e) => {
+                stopping.fail();
+                return Err(GatewayError::switch_failed("shutdown-local-task", e));
+            }
         }
 
         stopping.complete();
@@ -755,9 +769,11 @@ async fn run_switch(
             match tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)).await {
                 Ok(Ok(runtime)) => runtime,
                 Ok(Err(e)) => {
+                    starting.fail();
                     return Err(GatewayError::switch_failed("start-local", e));
                 }
                 Err(e) => {
+                    starting.fail();
                     return Err(GatewayError::switch_failed("start-local-task", e));
                 }
             };
@@ -800,6 +816,29 @@ async fn run_switch(
 
     tracing::info!(profile = %name, "switched profile");
     Ok(name.to_string())
+}
+
+/// Loads and validates the switch target's configuration and builds its
+/// remote routing, all off the live lock (LIB-009): any failure leaves the
+/// live state untouched.
+fn load_switch_config(
+    state: &AppState,
+    dir: &Path,
+    name: &ProfileName,
+) -> Result<(Config, Routing), GatewayError> {
+    let config = Config::load_profile(dir, name)
+        .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
+    crate::runner::check_server_matches_boot(&state.boot.server, config.server(), name)
+        .map_err(|e| GatewayError::switch_failed("server-mismatch", e))?;
+    crate::runner::check_workshop_matches_boot(
+        state.boot.workshop.as_ref(),
+        config.workshop(),
+        name,
+    )
+    .map_err(|e| GatewayError::switch_failed("workshop-mismatch", e))?;
+    let remote_routing = Routing::from_config(&config)
+        .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
+    Ok((config, remote_routing))
 }
 
 /// Builds the switch-profile SSE response: the hub's event stream filtered
@@ -1014,6 +1053,40 @@ mod progress_tests {
         events
     }
 
+    /// Reads `data:` payloads until `stop` matches one, returning everything
+    /// read, the matching event last.
+    async fn read_until<S>(
+        frames: &mut S,
+        stop: impl Fn(&ProgressEvent) -> bool,
+    ) -> Vec<ProgressEvent>
+    where
+        S: futures_util::Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin,
+    {
+        let mut text = String::new();
+        let mut events = Vec::new();
+        loop {
+            let frame = tokio::time::timeout(FRAME_TIMEOUT, frames.next())
+                .await
+                .expect("the progress stream stalled")
+                .expect("the progress stream ended early")
+                .expect("the progress stream errored");
+            let chunk = std::str::from_utf8(&frame).expect("SSE frames are UTF-8");
+            text.push_str(chunk);
+            while let Some(end) = text.find("\n\n") {
+                let block: String = text.drain(..end + 2).collect();
+                if let Some(data) = block.trim().strip_prefix("data: ") {
+                    let event: ProgressEvent =
+                        serde_json::from_str(data).expect("a data line is a ProgressEvent");
+                    let done = stop(&event);
+                    events.push(event);
+                    if done {
+                        return events;
+                    }
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn the_stream_carries_begun_updated_finished_in_order() {
         let hub = Arc::new(ProgressHub::new());
@@ -1052,6 +1125,60 @@ mod progress_tests {
         assert!(matches!(events[0].state, EventState::Begun { weight } if weight == 1.0));
         assert!(matches!(events[1].state, EventState::Updated { fraction } if fraction == 0.5));
         assert_eq!(events[0].operation, tree.operation());
+    }
+
+    #[tokio::test]
+    async fn a_fresh_subscriber_sees_a_finished_leafs_terminal_state() {
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let leaf = tree.register("download", 1.0);
+        leaf.set_fraction(0.5);
+        leaf.fail();
+
+        // The leaf finished before the subscriber connected; without a
+        // replayed Finished the subscriber would hold it as unfinished until
+        // the tree detaches.
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+        let events = read_events(&mut frames, 3).await;
+        assert!(matches!(events[0].state, EventState::Begun { .. }));
+        assert!(
+            matches!(events[1].state, EventState::Updated { fraction } if fraction == 0.5),
+            "a failed leaf keeps its fraction: {:?}",
+            events[1]
+        );
+        assert!(
+            matches!(events[2].state, EventState::Finished { ok: false }),
+            "the terminal state replays: {:?}",
+            events[2]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lagged_subscriber_drops_the_overflow_and_carries_on() {
+        let hub = Arc::new(ProgressHub::new());
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+
+        let tree = hub.operation();
+        // Overflow the hub's 1024-event broadcast ring before the stream's
+        // first poll, so its receiver lags: the Lagged arm must drop the
+        // skipped events and continue rather than ending the stream.
+        let _leaves: Vec<_> = (0..1100)
+            .map(|index| tree.register(&format!("leaf-{index}"), 1.0))
+            .collect();
+        let last = tree.register("last", 1.0);
+        last.complete();
+
+        let events = read_until(&mut frames, |event| {
+            event.path == "last" && matches!(event.state, EventState::Finished { ok: true })
+        })
+        .await;
+        assert!(
+            events.len() <= 1024,
+            "the overflowed prefix is dropped, not delivered: {} events",
+            events.len()
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -1157,5 +1284,33 @@ mod switch_tests {
         let text = body_text(switch_sse_response(rx, operation, switch)).await;
         assert!(text.contains("\"status\":\"error\""), "body: {text}");
         assert!(text.contains("profile not found: ghost"), "body: {text}");
+    }
+
+    #[tokio::test]
+    async fn the_switch_stream_survives_broadcast_lag() {
+        let hub = Arc::new(ProgressHub::new());
+        let rx = hub.subscribe();
+        let tree = hub.operation();
+        let operation = tree.operation();
+
+        // Overflow the hub's 1024-event ring before the stream's first poll,
+        // so the receiver lags: the Lagged arm must drop the skipped events
+        // and carry on rather than ending the stream.
+        let noise = hub.operation();
+        let _noise_leaves: Vec<_> = (0..1100)
+            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
+            .collect();
+        let _leaf = tree.register("loading-profile", 1.0);
+        let switch = tokio::spawn(async { Ok::<_, GatewayError>("beta".to_owned()) });
+
+        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+        assert!(
+            text.contains("\"stage\":\"loading-profile\""),
+            "the stage event survives the lag: {text}"
+        );
+        assert!(
+            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
+            "the terminal event comes from the join result: {text}"
+        );
     }
 }

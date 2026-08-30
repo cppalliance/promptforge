@@ -62,11 +62,36 @@ impl RemoteOperation {
     /// Unknown paths create their leaf on the fly, linked under the longest
     /// already-known prefix parent: intermediate events are lossy, so a
     /// subscriber can see `Updated` before (or without) `Begun`. Fractions
-    /// arrive already coalesced and are re-broadcast verbatim.
+    /// arrive already coalesced and are re-broadcast verbatim. A `Begun`
+    /// weight that is not finite and positive falls back to 1.0, so a
+    /// poisoned weight off the wire cannot corrupt the aggregate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::{EventState, ProgressEvent, ProgressHub, RemoteOperation};
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let remote = RemoteOperation::attach(&hub);
+    /// let event = ProgressEvent::new(
+    ///     remote.operation(),
+    ///     "download",
+    ///     "download",
+    ///     EventState::Finished { ok: true },
+    /// );
+    /// remote.apply(&event);
+    /// assert_eq!(hub.snapshot()[0].nodes[0].fraction, 1.0);
+    /// ```
     pub fn apply(&self, event: &ProgressEvent) {
         let (slot, node) = self.state.ensure_remote(&event.path, &event.label);
         match event.state {
             EventState::Begun { weight } => {
+                let weight = if weight.is_finite() && weight > 0.0 {
+                    weight
+                } else {
+                    1.0
+                };
                 self.state.set_weight(slot, weight);
                 self.state.emit_begun(&node, weight);
             }
@@ -202,6 +227,28 @@ mod tests {
             matches!(seen.state, EventState::Finished { ok: false }),
             "the terminal event carries the failure"
         );
+    }
+
+    #[test]
+    fn apply_sanitizes_a_poisoned_begun_weight() {
+        let hub = Arc::new(ProgressHub::new());
+        let remote = RemoteOperation::attach(&hub);
+        let source = OperationId::next();
+        for (path, weight) in [
+            ("nan", f64::NAN),
+            ("negative", -3.0),
+            ("infinite", f64::INFINITY),
+        ] {
+            remote.apply(&event(source, path, EventState::Begun { weight }));
+        }
+        let snapshot = hub.snapshot();
+        for node in &snapshot[0].nodes {
+            assert_eq!(
+                node.weight, 1.0,
+                "a non-finite or non-positive weight off the wire falls back to 1.0: {}",
+                node.path
+            );
+        }
     }
 
     #[test]

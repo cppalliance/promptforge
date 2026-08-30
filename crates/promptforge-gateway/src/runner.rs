@@ -142,8 +142,9 @@ impl Gateway {
             let progress = tree.register("startup", 1.0);
             let started =
                 LocalRuntime::start(config, Some(&progress)).map_err(StartupError::provisioning);
-            if started.is_ok() {
-                progress.complete();
+            match &started {
+                Ok(_) => progress.complete(),
+                Err(_) => progress.fail(),
             }
             drop(tree);
             started?
@@ -830,6 +831,47 @@ mod tests {
         let gateway =
             super::Gateway::from_config(&config, super::ProfilesContext::default()).unwrap();
         assert!(gateway.local_diagnostics().await.is_empty());
+    }
+
+    /// A provisioning failure fails the startup leaf: the hub sees the
+    /// terminal `Finished { ok: false }` rather than holding the leaf as
+    /// live until the tree detaches.
+    #[cfg(feature = "local")]
+    #[test]
+    fn a_failed_provisioning_fails_the_startup_leaf() {
+        use std::sync::Arc;
+
+        use promptforge_progress::EventState;
+
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let blocked = temp.path().join("blocked");
+        std::fs::write(&blocked, b"not a directory").expect("write blocking file");
+        let config = Config::from_toml_str(&format!(
+            "[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\n\
+             [local]\ncache_dir = '{}'\n\n\
+             [[local_model]]\nname = \"q\"\ndescription = \"a local model\"\n\
+             source = \"q.gguf\"\ncontext = 4096\n",
+            blocked.display()
+        ))
+        .expect("the config parses");
+        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        let mut events = hub.subscribe();
+
+        let error =
+            super::Gateway::from_config_with_hub(&config, super::ProfilesContext::default(), hub)
+                .expect_err("a cache root blocked by a file fails provisioning");
+        assert_eq!(error.kind(), StartupErrorKind::Provisioning);
+
+        let mut terminal = None;
+        while let Ok(event) = events.try_recv() {
+            if event.path == "startup" && matches!(event.state, EventState::Finished { .. }) {
+                terminal = Some(event.state);
+            }
+        }
+        assert!(
+            matches!(terminal, Some(EventState::Finished { ok: false })),
+            "the startup leaf ends failed, not unfinished"
+        );
     }
 
     /// A catalog declaring one `[[local_model]]`; a headless build must

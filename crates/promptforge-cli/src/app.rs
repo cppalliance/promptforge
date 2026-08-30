@@ -155,18 +155,37 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
 
     let progress = SetupProgress::new();
     let models = match &gateway {
-        Gateway::Remote(remote) => fetch_model_catalog(remote.endpoint(), remote.token())
-            .await
-            .context("fetch the model catalog")?,
+        Gateway::Remote(remote) => {
+            match fetch_model_catalog(remote.endpoint(), remote.token()).await {
+                Ok(models) => models,
+                Err(error) => {
+                    progress.catalog.fail();
+                    return Err(error).context("fetch the model catalog");
+                }
+            }
+        }
         Gateway::LocalOnly => ModelCatalog::empty(),
         #[cfg(test)]
         Gateway::Disabled => ModelCatalog::empty(),
     };
     progress.catalog.complete();
 
-    let model = Model::load_with_progress(Some(&progress.model))
-        .context("load the tool embedding model")?;
-    let picker = build_picker(available.catalog().clone(), &model, &progress)?;
+    let model = match Model::load_with_progress(Some(&progress.model))
+        .context("load the tool embedding model")
+    {
+        Ok(model) => model,
+        Err(error) => {
+            progress.model.fail();
+            return Err(error);
+        }
+    };
+    let picker = match build_picker(available.catalog().clone(), &model, &progress) {
+        Ok(picker) => picker,
+        Err(error) => {
+            progress.tools.fail();
+            return Err(error);
+        }
+    };
     // Setup is done: detach the tree and stop the renderer before the run's
     // own output begins.
     drop(progress);

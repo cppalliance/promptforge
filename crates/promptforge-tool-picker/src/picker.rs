@@ -76,8 +76,9 @@ impl ToolPicker {
     ///
     /// The reusable-model path: the cost is one forward pass per tool, and the
     /// model is borrowed rather than reloaded. A `progress` leaf advances one
-    /// tool-count step per embedded tool and completes when indexing finishes;
-    /// `None` indexes without reporting.
+    /// tool-count step per embedded tool and completes when indexing finishes,
+    /// or fails when an embed error cuts indexing short; `None` indexes
+    /// without reporting.
     ///
     /// # Errors
     /// Returns [`IndexError`] when a tool's text cannot be embedded or the
@@ -103,9 +104,15 @@ impl ToolPicker {
         let mut rows = Vec::with_capacity(catalog.len().saturating_mul(EMBEDDING_DIMENSIONS));
         let total = catalog.len() as u64;
         for (embedded, tool) in catalog.as_slice().iter().enumerate() {
-            let vector = model
-                .embed(&tool.enriched_text())
-                .map_err(IndexError::embed)?;
+            let vector = match model.embed(&tool.enriched_text()) {
+                Ok(vector) => vector,
+                Err(error) => {
+                    if let Some(handle) = progress {
+                        handle.fail();
+                    }
+                    return Err(IndexError::embed(error));
+                }
+            };
             rows.extend_from_slice(&vector);
             if let Some(handle) = progress {
                 handle.set_units(embedded as u64 + 1, total);

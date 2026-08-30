@@ -74,6 +74,19 @@ impl ProgressHub {
     /// ring capacity behind drops them. Terminal events are never coalesced
     /// at the source, but a lagging receiver can still drop them; consumers
     /// that must observe completion take it from task join results.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let mut events = hub.subscribe();
+    /// let tree = hub.operation();
+    /// let _leaf = tree.register("download", 1.0);
+    /// assert!(events.try_recv().is_ok());
+    /// ```
     pub fn subscribe(&self) -> broadcast::Receiver<ProgressEvent> {
         self.events.subscribe()
     }

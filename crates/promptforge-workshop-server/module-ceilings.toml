@@ -44,7 +44,10 @@
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
 # RemoteOperation while the heartbeat reads the gateway as reachable.
-"gateway_progress.rs" = 362
+# Grew by the closable mock feed and injected resubscribe delay (the
+# malformed-event skip and stream-end resubscribe tests) - the recorded
+# ceiling had also been set four lines under the module's measured size.
+"gateway_progress.rs" = 466
 "heartbeat.rs" = 872
 # Grew by the session split's test seams: the fixtures module now re-exports
 # the bus, health, backoff, and heartbeat types the socket behavior tests
@@ -57,13 +60,19 @@
 # New module: the ProgressHub-to-status-bar renderer and its anti-flicker
 # state machine (show delay, minimum visible time, detach poll). Grew by
 # the lapsed-deadline detach poll (a past wake instant re-armed would spin
-# the select loop) and its two pinning tests.
-"progress.rs" = 390
+# the select loop) and its two pinning tests. Grew again by the
+# minimum-visible backward-step floor (a new operation attaching during the
+# hold continues from the drained level) and the lagged-receiver,
+# pre-subscription catch, and backward-step tests.
+"progress.rs" = 500
 # Grew by the provision migration to tree leaves: `cache_fetch` applies
 # download samples to a per-model leaf instead of pushing progress frames,
 # the engine load registers on the attempt's operation tree, and the
-# scripted-stream test pins the leaf fraction mid-download.
-"provision.rs" = 972
+# scripted-stream test pins the leaf fraction mid-download. Grew again by
+# the failure terminals (a failed attempt fails every leaf still open,
+# `cache_fetch` fails its leaf on its own error paths) and the null-total
+# hold, download-error, and tree-detach tests.
+"provision.rs" = 1082
 "push.rs" = 274
 "relay.rs" = 537
 "routes.rs" = 8

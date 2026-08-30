@@ -235,10 +235,9 @@ impl DownloadProgress for ChannelProgress {
 /// The download task emits every event before it returns, so once the join
 /// handle resolves the remaining events are already queued on the receiver
 /// and the latest sample is drained ahead of the terminal event. A client
-/// disconnect drops the response body and the receiver; the blocking download
-/// itself runs to
-/// completion (its staging cleanup still applies) and a later POST for the
-/// same source then hits the cache.
+/// disconnect drops the response body and the receiver; the blocking
+/// download itself runs to completion (its staging cleanup still applies)
+/// and a later POST for the same source then hits the cache.
 fn sse_response(
     rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
     operation: OperationId,
@@ -476,5 +475,46 @@ mod tests {
             "the final sample carries every byte: {text}"
         );
         assert_eq!(last["total"], body.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn the_sse_stream_survives_broadcast_lag_and_ends_with_the_join_result() {
+        let body = b"sse-lag-fixture";
+        let url = fake_file_server(body).await;
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let hub = Arc::new(ProgressHub::new());
+
+        let rx = hub.subscribe();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let progress = Arc::new(ChannelProgress::new(tree.register("model.bin", 1.0)));
+
+        // Overflow the hub's 1024-event ring before the stream's first poll,
+        // so the receiver lags: the Lagged arm must drop the skipped events
+        // and carry on rather than ending the stream.
+        let noise = hub.operation();
+        let _noise_leaves: Vec<_> = (0..1100)
+            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
+            .collect();
+
+        let reporter = Arc::clone(&progress);
+        let join = tokio::task::spawn_blocking(move || {
+            let cache = BlobCache::new(root).expect("the cache opens");
+            let result = cache.download_to_cache(&url, None, reporter.as_ref());
+            drop(tree);
+            result
+        });
+
+        let text = body_text(sse_response(rx, operation, progress, join)).await;
+        let terminal = text
+            .split("\n\n")
+            .filter(|block| !block.trim().is_empty())
+            .last()
+            .expect("the stream has events");
+        assert!(
+            terminal.contains("\"status\":\"ready\""),
+            "the download stream still ends with the join result's terminal event: {terminal}"
+        );
     }
 }

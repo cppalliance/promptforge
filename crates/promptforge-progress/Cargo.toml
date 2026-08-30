@@ -22,6 +22,7 @@ serde = ["dep:serde"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -76,9 +76,16 @@ impl RunEnv {
     /// or picker cannot be built, or the gateway URL or key is unusable.
     pub(crate) async fn initialize(gateway: &GatewayEnv, capture: CapturePolicy) -> Result<RunEnv> {
         let progress = SetupProgress::new();
-        let models = fetch_model_catalog(&gateway.base_url, gateway.key.expose())
+        let models = match fetch_model_catalog(&gateway.base_url, gateway.key.expose())
             .await
-            .context("fetch model catalog")?;
+            .context("fetch model catalog")
+        {
+            Ok(models) => models,
+            Err(error) => {
+                progress.catalog.fail();
+                return Err(error);
+            }
+        };
         progress.catalog.complete();
         RunEnv::assemble(gateway, models, capture, Some(&progress))
     }
@@ -108,15 +115,33 @@ impl RunEnv {
     ) -> Result<RunEnv> {
         let tools = tools::available_tools(&gateway.base_url, gateway.key.expose())
             .context("build the live tool set")?;
-        let model = Model::load_with_progress(progress.map(|setup| &setup.model))
-            .context("load the tool embedding model")?;
-        let picker = ToolPicker::build_with_model(
+        let model = match Model::load_with_progress(progress.map(|setup| &setup.model))
+            .context("load the tool embedding model")
+        {
+            Ok(model) => model,
+            Err(error) => {
+                if let Some(setup) = progress {
+                    setup.model.fail();
+                }
+                return Err(error);
+            }
+        };
+        let picker = match ToolPicker::build_with_model(
             &model,
             tools.catalog().clone(),
             PickerConfig::default(),
             progress.map(|setup| &setup.tools),
         )
-        .context("build the live tool picker")?;
+        .context("build the live tool picker")
+        {
+            Ok(picker) => picker,
+            Err(error) => {
+                if let Some(setup) = progress {
+                    setup.tools.fail();
+                }
+                return Err(error);
+            }
+        };
         let endpoint = GatewayEndpoint::new(&gateway.base_url)
             .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
         let key =
