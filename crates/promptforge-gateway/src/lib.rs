@@ -78,7 +78,7 @@ use crate::wire::{
 #[cfg(feature = "web-search")]
 use promptforge_gateway_config::WebSearchConfig;
 use promptforge_gateway_config::{ModelKind, ServerConfig, WorkshopConfig};
-use promptforge_progress::{EventState, ProgressEvent, ProgressHub};
+use promptforge_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
 #[cfg(feature = "web-search")]
 use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSearchState};
 
@@ -630,8 +630,8 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// error event instead of starting children.
 ///
 /// The switch itself runs on its own task ([`run_switch`]) and always runs
-/// to completion: a client disconnect drops only the response body and the
-/// stage receiver, never the half-finished switch.
+/// to completion: a client disconnect drops only the response body and its
+/// hub subscription, never the half-finished switch.
 async fn admin_switch_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -641,14 +641,17 @@ async fn admin_switch_profile(
     let dir = profiles_dir(&state)?.to_path_buf();
     let name = ProfileName::parse(&request.name)
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
-    // Three stage markers into a bound of eight: try_send never drops here,
-    // and even a dropped marker would cost a progress line, not the switch.
-    let (stages, rx) = tokio::sync::mpsc::channel(8);
-    let switch = tokio::spawn(run_switch(state, dir, name, stages));
-    Ok(switch_sse_response(rx, switch))
+    // Subscribe before the tree attaches so no event of this switch is
+    // missed; the response filters the hub stream to this switch's operation.
+    let rx = state.hub.subscribe();
+    let tree = state.hub.operation();
+    let operation = tree.operation();
+    let switch = tokio::spawn(run_switch(state, dir, name, tree));
+    Ok(switch_sse_response(rx, operation, switch))
 }
 
-/// Executes a profile switch, marking each phase on the `stages` channel.
+/// Executes a profile switch, opening each phase as a leaf on its operation
+/// tree.
 ///
 /// Switches are serialized by a dedicated mutex, so two concurrent requests
 /// cannot interleave. The new profile's env file loads before the profile
@@ -672,12 +675,16 @@ async fn run_switch(
     state: AppState,
     dir: PathBuf,
     name: ProfileName,
-    stages: tokio::sync::mpsc::Sender<&'static str>,
+    tree: ProgressTree,
 ) -> Result<String, GatewayError> {
     // Serialize switches for the whole operation (LIB-008).
     let _switch = state.switch.lock().await;
 
-    let _ = stages.try_send("loading-profile");
+    // Each phase registers its leaf as it opens, so the leaf's `Begun` is the
+    // stage marker and a failed switch never announces a phase it did not
+    // reach. Weights track expected duration: starting the new children is
+    // the long pole.
+    let loading = tree.register("loading-profile", 1.0);
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
         return Err(GatewayError::ProfileNotFound(name.to_string()));
@@ -709,13 +716,14 @@ async fn run_switch(
         .map(Arc::new);
     let new_key = config.server_key();
     let new_allowlist = config.model_allowlist().map(<[String]>::to_vec);
+    loading.complete();
 
     // Stop the previous local children before starting new ones so the two
     // never hold VRAM simultaneously. The bearer key, routing, and web-search
     // settings are left untouched here, so auth stays stable if start fails.
     #[cfg(feature = "local")]
     let new_local = {
-        let _ = stages.try_send("stopping-models");
+        let stopping = tree.register("stopping-models", 2.0);
         let old_local = {
             let mut live = state.live.write().await;
             std::mem::replace(&mut live.local, LocalRuntime::empty())
@@ -740,16 +748,20 @@ async fn run_switch(
             Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
         }
 
-        let _ = stages.try_send("starting-models");
-        match tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)).await {
-            Ok(Ok(runtime)) => runtime,
-            Ok(Err(e)) => {
-                return Err(GatewayError::switch_failed("start-local", e));
-            }
-            Err(e) => {
-                return Err(GatewayError::switch_failed("start-local-task", e));
-            }
-        }
+        stopping.complete();
+        let starting = tree.register("starting-models", 5.0);
+        let runtime =
+            match tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)).await {
+                Ok(Ok(runtime)) => runtime,
+                Ok(Err(e)) => {
+                    return Err(GatewayError::switch_failed("start-local", e));
+                }
+                Err(e) => {
+                    return Err(GatewayError::switch_failed("start-local-task", e));
+                }
+            };
+        starting.complete();
+        runtime
     };
     // A headless build cannot honor a profile declaring local models; refuse
     // the switch rather than silently dropping them.
@@ -789,44 +801,98 @@ async fn run_switch(
     Ok(name.to_string())
 }
 
-/// Builds the switch-profile SSE response: stage events drained from the
-/// channel, then the terminal event from the switch task's join result, so
-/// the outcome can never be lost to channel backpressure.
+/// Builds the switch-profile SSE response: the hub's event stream filtered
+/// to this switch's operation, each leaf's `Begun` re-emitted as the
+/// `{"stage": ...}` event the route has always carried, then the terminal
+/// event from the switch task's join result, so the outcome can never be
+/// lost to broadcast lag.
 ///
-/// The channel closes when [`run_switch`] drops its sender, so the stage
-/// stream ends before the terminal event is awaited - the same ordering
-/// contract as the cache download stream.
+/// [`run_switch`] broadcasts every stage event before it returns, so once
+/// the join handle resolves the remaining stages are already queued on the
+/// receiver and are drained ahead of the terminal event - the same ordering
+/// contract the stage channel gave.
 fn switch_sse_response(
-    mut rx: tokio::sync::mpsc::Receiver<&'static str>,
+    rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
+    operation: OperationId,
     switch: tokio::task::JoinHandle<Result<String, GatewayError>>,
 ) -> Response {
-    use futures_util::StreamExt as _;
-
-    let stages = futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx)).map(|stage| {
-        Ok::<_, std::convert::Infallible>(format!(
-            "data: {}\n\n",
-            serde_json::json!({ "stage": stage })
-        ))
-    });
-    let terminal = futures_util::stream::once(async move {
-        let payload = match switch.await {
-            Ok(Ok(profile)) => serde_json::json!({ "status": "ready", "profile": profile }),
-            Ok(Err(error)) => serde_json::json!({
-                "status": "error",
-                "message": error_chain(&error),
-            }),
-            Err(join_error) => serde_json::json!({
-                "status": "error",
-                "message": format!("switch task failed: {join_error}"),
-            }),
-        };
-        Ok::<_, std::convert::Infallible>(format!("data: {payload}\n\n"))
-    });
-    let mut response = Response::new(Body::from_stream(stages.chain(terminal)));
+    let stream = futures_util::stream::unfold(
+        (rx, switch, std::collections::VecDeque::new(), false),
+        move |(mut rx, mut switch, mut pending, mut done)| async move {
+            loop {
+                if let Some(line) = pending.pop_front() {
+                    return Some((
+                        Ok::<_, std::convert::Infallible>(line),
+                        (rx, switch, pending, done),
+                    ));
+                }
+                if done {
+                    return None;
+                }
+                let result = loop {
+                    tokio::select! {
+                        received = rx.recv() => match received {
+                            Ok(event) => {
+                                if event.operation == operation
+                                    && matches!(event.state, EventState::Begun { .. })
+                                {
+                                    return Some((
+                                        Ok(stage_line(&event)),
+                                        (rx, switch, pending, done),
+                                    ));
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                tracing::debug!(skipped, "switch stage subscriber lagged; events dropped");
+                            }
+                            // The hub lives in `AppState` for the process
+                            // lifetime, so its sender never closes first; the
+                            // join result still carries the outcome if it did.
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                break (&mut switch).await;
+                            }
+                        },
+                        result = &mut switch => break result,
+                    }
+                };
+                while let Ok(event) = rx.try_recv() {
+                    if event.operation == operation
+                        && matches!(event.state, EventState::Begun { .. })
+                    {
+                        pending.push_back(stage_line(&event));
+                    }
+                }
+                done = true;
+                pending.push_back(terminal_line(result));
+            }
+        },
+    );
+    let mut response = Response::new(Body::from_stream(stream));
     let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
+}
+
+/// Maps a leaf's `Begun` to the switch stream's stage event.
+fn stage_line(event: &ProgressEvent) -> String {
+    format!("data: {}\n\n", serde_json::json!({ "stage": event.label }))
+}
+
+/// Maps the switch task's join result to the stream's terminal event.
+fn terminal_line(result: Result<Result<String, GatewayError>, tokio::task::JoinError>) -> String {
+    let payload = match result {
+        Ok(Ok(profile)) => serde_json::json!({ "status": "ready", "profile": profile }),
+        Ok(Err(error)) => serde_json::json!({
+            "status": "error",
+            "message": error_chain(&error),
+        }),
+        Err(join_error) => serde_json::json!({
+            "status": "error",
+            "message": format!("switch task failed: {join_error}"),
+        }),
+    };
+    format!("data: {payload}\n\n")
 }
 
 /// Renders `error` with its full source chain for the terminal SSE error
@@ -1029,5 +1095,67 @@ mod progress_tests {
                 .is_err(),
             "a dropped tree must leave the stream quiet until the next heartbeat"
         );
+    }
+}
+
+#[cfg(test)]
+mod switch_tests {
+    use std::sync::Arc;
+
+    use futures_util::StreamExt as _;
+    use promptforge_progress::ProgressHub;
+
+    use super::{GatewayError, switch_sse_response};
+
+    /// Collects the finite switch stream's full body text.
+    async fn body_text(response: axum::response::Response) -> String {
+        let mut frames = response.into_body().into_data_stream();
+        let mut text = String::new();
+        while let Some(frame) = frames.next().await {
+            let frame = frame.expect("the switch stream errored");
+            text.push_str(std::str::from_utf8(&frame).expect("SSE frames are UTF-8"));
+        }
+        text
+    }
+
+    #[tokio::test]
+    async fn the_switch_stream_shows_only_its_own_operations_stages() {
+        let hub = Arc::new(ProgressHub::new());
+        let rx = hub.subscribe();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let other = hub.operation();
+        let _unrelated = other.register("download", 1.0);
+        let _leaf = tree.register("loading-profile", 1.0);
+        let switch = tokio::spawn(async { Ok::<_, GatewayError>("beta".to_owned()) });
+
+        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+        assert!(
+            text.contains("\"stage\":\"loading-profile\""),
+            "body: {text}"
+        );
+        assert!(
+            !text.contains("download"),
+            "another operation's leaf must not leak into the switch stream: {text}"
+        );
+        assert!(
+            text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
+            "the terminal event comes from the join result: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_switch_stream_ends_with_the_terminal_error_from_the_join_result() {
+        let hub = Arc::new(ProgressHub::new());
+        let rx = hub.subscribe();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let switch = tokio::spawn(async {
+            Err::<String, _>(GatewayError::ProfileNotFound("ghost".to_owned()))
+        });
+
+        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+        assert!(text.contains("\"status\":\"error\""), "body: {text}");
+        assert!(text.contains("profile not found: ghost"), "body: {text}");
     }
 }

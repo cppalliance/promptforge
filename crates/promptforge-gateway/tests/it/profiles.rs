@@ -6,7 +6,8 @@ use promptforge_gateway::{Config, Gateway, ProfileName, ProfilesContext};
 use serde_json::Value;
 
 use crate::support::{
-    TestServer, catalog_ids, fake_backend, json_within, parse_sse, send_within, text_within,
+    PHASE_TIMEOUT, TestServer, catalog_ids, fake_backend, join_within, json_within, parse_sse,
+    send_within, text_within,
 };
 
 /// Two remote-only profiles, `alpha` (alpha-model) and `beta` (beta-model),
@@ -158,6 +159,65 @@ async fn headless_switch_streams_loading_stage_then_ready() {
             serde_json::json!({ "status": "ready", "profile": "beta" }),
         ]
     );
+    server.shutdown().await;
+}
+
+/// The switch's stages are hub events: a `/admin/progress` subscriber sees
+/// the switch operation's leaves begin in execution order while the
+/// per-request stream runs - one source of truth for both views.
+#[cfg(feature = "local")]
+#[tokio::test]
+async fn switch_stages_are_published_on_the_progress_hub() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    // Connect the hub stream before the switch so no event is missed; the
+    // hub is idle at this point, so every `Begun` belongs to the switch.
+    let mut progress = send_within(
+        http.get(format!("http://{}/admin/progress", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(progress.status().as_u16(), 200);
+
+    let addr = server.addr;
+    let switch = tokio::spawn(async move {
+        let http = reqwest::Client::new();
+        switch_stream_events(&http, addr, "beta").await
+    });
+
+    let mut labels = Vec::new();
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + PHASE_TIMEOUT;
+    while labels.len() < 3 {
+        let chunk = tokio::time::timeout_at(deadline, progress.chunk())
+            .await
+            .expect("hub stream exceeded the phase timeout")
+            .expect("hub stream read failed")
+            .expect("hub stream ended");
+        text.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
+        while let Some(end) = text.find("\n\n") {
+            let block: String = text.drain(..end + 2).collect();
+            if let Some(data) = block.trim().strip_prefix("data: ") {
+                let event: Value = serde_json::from_str(data).expect("json event");
+                if event["state"].get("Begun").is_some() {
+                    labels.push(event["label"].as_str().expect("label").to_owned());
+                }
+            }
+        }
+    }
+    assert_eq!(
+        labels,
+        ["loading-profile", "stopping-models", "starting-models"]
+    );
+    let events = join_within(switch).await;
+    assert_eq!(
+        events.last(),
+        Some(&serde_json::json!({ "status": "ready", "profile": "beta" }))
+    );
+    // The hub stream is open-ended; dropping the response disconnects so
+    // graceful shutdown is not held by an idle SSE connection.
+    drop(progress);
     server.shutdown().await;
 }
 
