@@ -1,0 +1,27 @@
+{
+  "name": "promptforge-gateway-config-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PromptForge Gateway Config UI: TypeScript sources bundled by esbuild into dist/ and served by promptforge-gateway-config-ui.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "node build.mjs --package",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "lucide": "^1.37.0",
+    "marked": "^18.0.10"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2"
+  }
+}
