@@ -12,7 +12,7 @@ use promptforge_core::model::{
     CompletionError, CompletionErrorKind, ModelCatalog, fetch_model_catalog,
 };
 use promptforge_tool_picker::{
-    Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
+    Catalog, Config as PickerConfig, Model, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
 use promptforge_tools::{Tool, ToolCatalog};
 use promptforge_web_search::WebSearch;
@@ -53,6 +53,10 @@ impl PreparedTools {
     /// Builds the complete MCP live tool catalog, picker, and gateway model
     /// catalog.
     ///
+    /// The picker indexes the live catalog over `model`, the one embedding
+    /// model boot loads and shares with the retrieval index, so the weights
+    /// are parsed once per process.
+    ///
     /// A `GET /v1/models` failure is classified before it is acted on. A
     /// *transient* failure - a connection or timeout, or a 5xx the gateway may
     /// recover from - falls back to an empty catalog: prompts without
@@ -65,10 +69,11 @@ impl PreparedTools {
     /// # Examples
     /// ```no_run
     /// # use promptforge_mcp_server::{Config, PreparedTools};
-    /// # async fn demo(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    /// # use promptforge_tool_picker::Model;
+    /// # async fn demo(config: &Config, model: &Model) -> Result<(), Box<dyn std::error::Error>> {
     /// // A reachable gateway yields a populated catalog; an unreachable one
     /// // still loads, serving without model resolution rather than failing.
-    /// let prepared = PreparedTools::load(config).await?;
+    /// let prepared = PreparedTools::load(config, model).await?;
     /// # let _ = prepared;
     /// # Ok(())
     /// # }
@@ -81,7 +86,7 @@ impl PreparedTools {
     /// underlying failure preserved as the error's source. A transient catalog
     /// failure is not an error here: it is logged and the catalog is left empty,
     /// so prompts without `models.bind` keep working.
-    pub async fn load(config: &Config) -> Result<Self, PreparedToolsError> {
+    pub async fn load(config: &Config, model: &Model) -> Result<Self, PreparedToolsError> {
         let gateway = &config.gateway;
         let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await
         {
@@ -112,7 +117,7 @@ impl PreparedTools {
                 return Err(PreparedToolsError::tools(error));
             }
         };
-        Self::new(gateway, &config.tools, models)
+        Self::new(gateway, &config.tools, models, model)
     }
 
     /// Builds the live catalog and picker over an already-fetched model catalog.
@@ -124,11 +129,17 @@ impl PreparedTools {
         gateway: &GatewayConfig,
         tools_config: &ToolsConfig,
         models: ModelCatalog,
+        model: &Model,
     ) -> Result<Self, PreparedToolsError> {
         let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
         let tools = ToolCatalog::new(&live).map_err(PreparedToolsError::tools)?;
-        let picker = ToolPicker::build(catalog(tools.tools()), PickerConfig::default())
-            .map_err(PreparedToolsError::picker)?;
+        let picker = ToolPicker::build_with_model(
+            model,
+            catalog(tools.tools()),
+            PickerConfig::default(),
+            None,
+        )
+        .map_err(PreparedToolsError::picker)?;
         Ok(Self {
             tools,
             picker,
@@ -283,6 +294,7 @@ mod tests {
             &config.gateway,
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
+            crate::fixture::model(),
         )
         .expect("prepare fixture tools");
         let catalog_ids = tools
@@ -310,6 +322,7 @@ mod tests {
             &config.gateway,
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
+            crate::fixture::model(),
         )
         .expect("prepare fixture tools");
         let outcome = tools
@@ -329,8 +342,13 @@ mod tests {
             ThinkingMode::Never,
         )])
         .expect("the test catalog has a single unique model");
-        let tools = PreparedTools::new(&config.gateway, &config.tools, models)
-            .expect("prepare repository tools");
+        let tools = PreparedTools::new(
+            &config.gateway,
+            &config.tools,
+            models,
+            crate::fixture::model(),
+        )
+        .expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
         collect_markdown(&prompts, &mut files);
@@ -442,7 +460,7 @@ return 'resolved'
 
         let router = Router::new().route("/v1/models", get(models));
         let (addr, stop, serving) = spawn_gateway(router).await;
-        let prepared = PreparedTools::load(&config_for(&addr))
+        let prepared = PreparedTools::load(&config_for(&addr), crate::fixture::model())
             .await
             .expect("a reachable gateway loads");
 
@@ -467,7 +485,7 @@ return 'resolved'
             get(|| async { StatusCode::SERVICE_UNAVAILABLE }),
         );
         let (addr, stop, serving) = spawn_gateway(router).await;
-        let prepared = PreparedTools::load(&config_for(&addr))
+        let prepared = PreparedTools::load(&config_for(&addr), crate::fixture::model())
             .await
             .expect("a transient gateway failure still loads");
         assert!(
@@ -484,7 +502,7 @@ return 'resolved'
         // the bad key, so `load` propagates it instead of falling back.
         let router = Router::new().route("/v1/models", get(|| async { StatusCode::UNAUTHORIZED }));
         let (addr, stop, serving) = spawn_gateway(router).await;
-        let error = PreparedTools::load(&config_for(&addr))
+        let error = PreparedTools::load(&config_for(&addr), crate::fixture::model())
             .await
             .expect_err("a fatal gateway failure refuses to serve an empty catalog");
         assert!(

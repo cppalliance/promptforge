@@ -135,7 +135,8 @@ impl PromptForgeServer {
     /// # async fn demo(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     /// let config = Arc::new(config);
     /// let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
-    /// let tools = Arc::new(PreparedTools::load(&config).await?);
+    /// let model = promptforge_tool_picker::Model::load()?;
+    /// let tools = Arc::new(PreparedTools::load(&config, &model).await?);
     /// let server = PromptForgeServer::new(
     ///     Arc::clone(&config),
     ///     Arc::new(CatalogHandle::new(catalog)),

@@ -1,13 +1,10 @@
-//! One embedding model for the whole test binary, and the catalog it ranks.
+//! The catalog the retrieval tests rank, over the test binary's shared model.
 //!
-//! Loading the model is seconds of CPU and every retrieval test needs one, so it
-//! is loaded once behind a [`LazyLock`] and shared. That is sound rather than
-//! merely cheap: the engine's own contract is that two indexes over one encoder
-//! embed identical text to identical vectors, so sharing cannot change an
-//! answer. A test that wants its own model would be measuring the loader, which
-//! the engine's own suite already does.
+//! The model itself lives in [`crate::fixture`], loaded once for the whole
+//! test binary; what lives here is the prompt-catalog half every ranking test
+//! needs.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use promptforge_tool_picker::Model;
 use tempfile::TempDir;
@@ -16,18 +13,14 @@ use crate::catalog::{Catalog, OnBroken};
 use crate::config::Config;
 use crate::retrieval::Retrieval;
 
-/// The test binary's one loaded model.
-static MODEL: LazyLock<Model> =
-    LazyLock::new(|| Model::load().expect("the compiled-in retrieval model loads"));
-
 /// The shared model, for a test that indexes something itself.
-pub(crate) fn model() -> Model {
-    MODEL.clone()
+pub(crate) fn model() -> &'static Model {
+    crate::fixture::model()
 }
 
 /// Retrieval over `catalog`, over the shared model.
 pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
-    Retrieval::indexed_with(&model(), catalog)
+    Retrieval::start(model(), catalog)
 }
 
 /// A prompt whose Lua returns at once, so it needs no gateway.

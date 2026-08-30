@@ -49,10 +49,33 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
                 &prompts.config.gateway,
                 &prompts.config.tools,
                 promptforge_core::model::ModelCatalog::empty(),
+                fixture::model(),
             )
             .expect("prepare fixture live tools"),
         ),
     )
+}
+
+#[test]
+fn boot_indexes_both_consumers_over_one_loaded_encoder() {
+    // Boot's contract: the model is loaded once and lent to both the retrieval
+    // index and the execution picker. A regression that made either consumer
+    // load its own copy would double the weights parse at every boot.
+    let prompts = fixture::catalog(PROMPTS);
+    let model = fixture::model();
+    let retrieval = Retrieval::start(model, &prompts.catalog);
+    let prepared = PreparedTools::new(
+        &prompts.config.gateway,
+        &prompts.config.tools,
+        promptforge_core::model::ModelCatalog::empty(),
+        model,
+    )
+    .expect("prepare fixture live tools");
+
+    assert!(
+        retrieval.shares_model_with(prepared.picker()),
+        "retrieval and the execution picker must rank over the same loaded encoder"
+    );
 }
 
 #[test]
@@ -137,7 +160,7 @@ fn a_capability_the_engine_default_would_abstain_on_still_returns_candidates() {
 
     // The engine's own default floor, which was tuned for author-register prose.
     let strict =
-        ToolPicker::build_with_model(&fixture::model(), descriptors, PickerConfig::default())
+        ToolPicker::build_with_model(fixture::model(), descriptors, PickerConfig::default(), None)
             .expect("the strict engine indexes the fixture");
     assert!(
         strict

@@ -41,32 +41,17 @@ pub(crate) struct Index {
 }
 
 impl Index {
-    /// Loads the model and indexes `catalog`.
+    /// Indexes `catalog` with the model boot already loaded.
     ///
-    /// `None` means the index could not be built, either because the model would
-    /// not load or because the catalog could not be indexed; the engine's
-    /// `BuildError` does not say which, so neither does the log. The reason is
-    /// reported here because this is the only place that knows it; the caller's
+    /// `None` means the catalog could not be indexed; the reason is reported
+    /// here because this is the only place that knows it, and the caller's
     /// answer is to serve without retrieval.
-    pub(super) fn build(catalog: &Catalog) -> Option<Index> {
-        let config = compiled_config()?;
-        match ToolPicker::build(descriptors(catalog), config) {
-            Ok(picker) => Some(Index { picker }),
-            Err(error) => {
-                tracing::error!("need_prompt cannot answer: retrieval index build failed: {error}");
-                None
-            }
-        }
-    }
-
-    /// Indexes `catalog` with a model somebody else already loaded.
-    #[cfg(test)]
     pub(super) fn build_with(
         model: &promptforge_tool_picker::Model,
         catalog: &Catalog,
     ) -> Option<Index> {
         let config = compiled_config()?;
-        match ToolPicker::build_with_model(model, descriptors(catalog), config) {
+        match ToolPicker::build_with_model(model, descriptors(catalog), config, None) {
             Ok(picker) => Some(Index { picker }),
             Err(error) => {
                 tracing::error!("the shared retrieval model could not index the catalog: {error}");
@@ -92,6 +77,13 @@ impl Index {
     /// How many prompts are indexed.
     pub(super) fn len(&self) -> usize {
         self.picker.len()
+    }
+
+    /// Whether this index's engine shares its loaded model with `picker`,
+    /// which is what the boot-sharing test asserts.
+    #[cfg(test)]
+    pub(super) fn shares_model_with(&self, picker: &ToolPicker) -> bool {
+        self.picker.shares_model(picker)
     }
 
     /// The best `k` prompts for `capability`, best first.

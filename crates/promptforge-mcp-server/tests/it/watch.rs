@@ -81,7 +81,7 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
         .expect("watch defaults to on");
 
     let tools = Arc::new(
-        PreparedTools::load(&config)
+        PreparedTools::load(&config, crate::fixture::model())
             .await
             .expect("prepare fixture live tools"),
     );
