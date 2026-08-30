@@ -82,7 +82,14 @@ pub(crate) enum ShellEvent {
     FileDrop(Vec<PathBuf>),
     /// An external URL a denied navigation opens in the system browser.
     OpenExternal(String),
+    /// The page asked for the native folder picker.
+    PickFolder,
 }
+
+/// The web message the page posts to request the native folder picker.
+/// It shares the channel with the title-bar envelopes and the file-drop
+/// bridge's `workspace-drop` message (file_drop.rs).
+const PICK_FOLDER_MESSAGE: &str = "workspace-pick-folder";
 
 /// The deferred half of a navigation decision: a denied external URL
 /// becomes an [`OpenExternal`](ShellEvent::OpenExternal) event for the
@@ -110,6 +117,19 @@ pub(crate) fn parse_window_command(payload: &str) -> Option<WindowCommand> {
         "close" => Some(WindowCommand::Close),
         _ => None,
     }
+}
+
+/// Parses one message from the page's shared channel into the shell event
+/// it requests: the bare [`PICK_FOLDER_MESSAGE`] string asks for the
+/// native folder picker, and a `{"command": "..."}` envelope names a
+/// title-bar window command. Anything else on the channel (the file-drop
+/// bridge's own message included) parses to `None` and is ignored.
+#[must_use]
+pub(crate) fn parse_web_message(payload: &str) -> Option<ShellEvent> {
+    if payload == PICK_FOLDER_MESSAGE {
+        return Some(ShellEvent::PickFolder);
+    }
+    parse_window_command(payload).map(ShellEvent::Command)
 }
 
 /// Decodes a PNG into 32bpp RGBA pixels plus its dimensions. Only 8-bit
@@ -207,6 +227,71 @@ fn dispatch_file_drop(webview: &WebView, paths: &[PathBuf]) {
     }
 }
 
+/// Opens the native folder picker, modal to the workshop window, and
+/// returns the chosen folder, or `None` when the user cancels.
+///
+/// The dialog is rfd's synchronous `IFileDialog`, shown on the event loop
+/// thread. That blocks this loop iteration, but never the message pump:
+/// the modal runs its own native pump for the whole thread, and the
+/// WebView2 message handler that requested the pick already returned when
+/// the request travelled through the `EventLoopProxy` - the same deferral
+/// the file-drop bridge uses - so no webview callback is ever on the
+/// stack under the modal.
+#[cfg(target_os = "windows")]
+fn pick_folder(window: &Window) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Add Folder to Workspace")
+        .set_parent(window)
+        .pick_folder()
+}
+
+/// The folder picker on platforms without the WebView2 web-message
+/// channel: nothing asks for it there, so an unexpected request logs and
+/// answers as a cancel.
+#[cfg(not(target_os = "windows"))]
+fn pick_folder(_window: &Window) -> Option<PathBuf> {
+    eprintln!("the native folder picker is not wired on this platform");
+    None
+}
+
+/// The JSON payload for the `promptforge:folder-picked` event: the chosen
+/// path, normalized like a dropped path and JSON-encoded so backslashes
+/// and quotes survive the trip into the page's event detail. `None` only
+/// when the path cannot be encoded, which is logged.
+#[must_use]
+fn folder_picked_detail(path: &Path) -> Option<String> {
+    match serde_json::to_string(&normalize_dropped_path(path)) {
+        Ok(detail) => Some(detail),
+        Err(error) => {
+            eprintln!("could not encode the picked folder path: {error}");
+            None
+        }
+    }
+}
+
+/// The `promptforge:folder-picked` dispatch script for a pick outcome, or
+/// `None` for a cancelled pick - a cancel dispatches no event, matching
+/// the file-drop bridge, which dispatches nothing for an empty drop.
+#[must_use]
+fn folder_picked_script(picked: Option<&Path>) -> Option<String> {
+    let detail = folder_picked_detail(picked?)?;
+    Some(format!(
+        "window.dispatchEvent(new CustomEvent(\"promptforge:folder-picked\", {{detail: {{path: {detail}}}}}));"
+    ))
+}
+
+/// Dispatches the `promptforge:folder-picked` event carrying the chosen
+/// path. The page grants the path through the workspace HTTP API, exactly
+/// as it grants a dropped path.
+fn dispatch_folder_picked(webview: &WebView, picked: Option<&Path>) {
+    let Some(script) = folder_picked_script(picked) else {
+        return;
+    };
+    if let Err(error) = webview.evaluate_script(&script) {
+        eprintln!("could not dispatch the folder-picked event: {error}");
+    }
+}
+
 /// Executes one [`ShellEvent`] on the event loop thread, where the tao
 /// `Window` and the `WebView` live. The match is exhaustive on purpose:
 /// a new variant fails to compile here instead of being silently
@@ -234,6 +319,9 @@ fn handle_shell_event(
         }
         ShellEvent::FileDrop(paths) => {
             dispatch_file_drop(webview, &paths);
+        }
+        ShellEvent::PickFolder => {
+            dispatch_folder_picked(webview, pick_folder(window).as_deref());
         }
         ShellEvent::OpenExternal(url) => {
             if let Err(error) = open::that(&url) {
@@ -271,11 +359,11 @@ pub fn run(url: &str) -> anyhow::Result<()> {
         .with_url(url)
         .with_initialization_script("window.__PROMPTFORGE_DESKTOP__ = true;")
         .with_ipc_handler(move |request: wry::http::Request<String>| {
-            let Some(command) = parse_window_command(request.body()) else {
+            let Some(event) = parse_web_message(request.body()) else {
                 return;
             };
-            if let Err(error) = proxy.send_event(ShellEvent::Command(command)) {
-                eprintln!("could not forward the window command to the event loop: {error}");
+            if let Err(error) = proxy.send_event(event) {
+                eprintln!("could not forward the web message to the event loop: {error}");
             }
         })
         // Both decision callbacks below stay inline: wry demands each
@@ -377,8 +465,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        ICON_PNG, Navigation, ShellEvent, WindowCommand, classify_navigation, decode_png_rgba,
-        navigation_effect, normalize_dropped_path, parse_window_command,
+        ICON_PNG, Navigation, PICK_FOLDER_MESSAGE, ShellEvent, WindowCommand, classify_navigation,
+        decode_png_rgba, folder_picked_detail, folder_picked_script, navigation_effect,
+        normalize_dropped_path, parse_web_message, parse_window_command,
     };
 
     #[test]
@@ -429,6 +518,72 @@ mod tests {
         ] {
             assert_eq!(parse_window_command(payload), None, "{payload}");
         }
+    }
+
+    #[test]
+    fn the_pick_folder_message_routes_to_the_picker() {
+        assert_eq!(
+            parse_web_message("workspace-pick-folder"),
+            Some(ShellEvent::PickFolder)
+        );
+        assert_eq!(PICK_FOLDER_MESSAGE, "workspace-pick-folder");
+    }
+
+    #[test]
+    fn title_bar_envelopes_still_route_through_the_shared_parser() {
+        assert_eq!(
+            parse_web_message(r#"{"command":"minimize"}"#),
+            Some(ShellEvent::Command(WindowCommand::Minimize))
+        );
+    }
+
+    #[test]
+    fn foreign_channel_messages_parse_to_no_event() {
+        for payload in [
+            "",
+            "workspace-drop",
+            "workspace-pick-folder ",
+            "Workspace-Pick-Folder",
+            r#"{"command":"workspace-pick-folder"}"#,
+            r#""workspace-pick-folder""#,
+        ] {
+            assert_eq!(parse_web_message(payload), None, "{payload}");
+        }
+    }
+
+    #[test]
+    fn a_cancelled_pick_dispatches_no_event() {
+        assert_eq!(folder_picked_script(None), None);
+    }
+
+    #[test]
+    fn a_chosen_path_round_trips_through_the_event_payload() {
+        for path in [
+            r"C:\Users\Vinnie\Documents\project",
+            r"C:\Users\Vinnie\My Documents\a folder",
+            "D:\\src\\caf\u{e9} \u{4e2d}\u{6587}",
+        ] {
+            let Some(detail) = folder_picked_detail(Path::new(path)) else {
+                panic!("a picked path must encode: {path}");
+            };
+            let round_tripped: String = match serde_json::from_str(&detail) {
+                Ok(value) => value,
+                Err(error) => panic!("the payload must be valid JSON: {error}"),
+            };
+            assert_eq!(round_tripped, path, "{path}");
+        }
+    }
+
+    #[test]
+    fn the_picked_path_script_targets_the_folder_picked_event() {
+        let Some(script) = folder_picked_script(Some(Path::new(r"\\?\C:\Users\Vinnie\proj")))
+        else {
+            panic!("a chosen path must produce a dispatch script");
+        };
+        assert!(script.contains("promptforge:folder-picked"), "{script}");
+        // The verbatim prefix is stripped and the backslashes arrive
+        // JSON-escaped, so the page reads the Explorer spelling back.
+        assert!(script.contains(r#""C:\\Users\\Vinnie\\proj""#), "{script}");
     }
 
     #[test]
