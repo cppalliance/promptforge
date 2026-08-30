@@ -248,10 +248,16 @@ impl Gateway {
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServeError> {
-        axum::serve(listener, build_router(self.state))
-            .with_graceful_shutdown(shutdown)
-            .await
-            .map_err(ServeError::io)
+        // Connect info exposes each request's peer address, so
+        // loopback-only routes (`POST /admin/reveal`) can tell loopback
+        // callers from LAN callers.
+        axum::serve(
+            listener,
+            build_router(self.state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(ServeError::io)
     }
 }
 
