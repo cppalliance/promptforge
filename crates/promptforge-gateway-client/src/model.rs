@@ -29,7 +29,7 @@ pub use options::{
     ModelView, Temperature, TemperatureError, ThinkingMode,
 };
 pub use resolver::PickerModelResolver;
-pub use transport::fetch_model_catalog;
+pub use transport::{fetch_model_catalog, subscribe_progress};
 
 /// Complete live model set for one bind pass.
 ///
