@@ -109,6 +109,12 @@ export interface ApplyOutcome {
   restart_required: boolean;
 }
 
+/** The `POST /admin/profiles/{name}` body: the creation mode. */
+export type CreateProfileBody =
+  | { mode: "empty" }
+  | { mode: "copy"; from: string }
+  | { mode: "include"; from: string };
+
 /** The injectable fetch signature; tests substitute a canned gateway. */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -292,6 +298,53 @@ export class GatewayApi {
   /** Deletes every shadow via `POST /admin/config-revert`. */
   async revertConfig(): Promise<void> {
     const response = await this.send("/admin/config-revert", { method: "POST" });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /**
+   * Creates `profiles/{name}.toml` via `POST /admin/profiles/{name}`.
+   * Throws {@link GatewayHttpError} for a refused name (400), a missing
+   * `from` (404), or an existing profile (409).
+   */
+  async createProfile(name: string, body: CreateProfileBody): Promise<void> {
+    const response = await this.send(`/admin/profiles/${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /**
+   * Deletes a profile file (and its shadow) via
+   * `DELETE /admin/profiles/{name}`. The gateway answers 409 for the
+   * active profile; that refusal surfaces as {@link GatewayHttpError}.
+   */
+  async deleteProfile(name: string): Promise<void> {
+    const response = await this.send(`/admin/profiles/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /**
+   * Stages `body` (a config JSON shape) as the shadow of one included
+   * file via `PUT /admin/include/{path}`. `path` is relative to the
+   * profiles directory; untouched secrets stay `"***"` and restore from
+   * the include file's own current state.
+   */
+  async putInclude(path: string, body: unknown): Promise<void> {
+    const response = await this.send(`/admin/include/${encodeURIComponent(path)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (!response.ok) {
       throw new GatewayHttpError(response.status, await refusalMessage(response));
     }

@@ -94,6 +94,104 @@ function baseName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** One include-chain file derived from the pending view's provenance. */
+export interface ChainFile {
+  /** The include-style path relative to the profiles dir (`common.toml`, `../gateway.toml`). */
+  path: string;
+  /** The file's base name (`common.toml`, `gateway.toml`). */
+  base: string;
+  /** Whether the file lives outside the profiles directory. */
+  outside: boolean;
+}
+
+/** A provenance path normalized: `/` separators, `.next` suffix stripped. */
+function normalizeSource(source: string): string {
+  return source.replace(/\\/g, "/").replace(/\.next$/, "");
+}
+
+/** Every distinct provenance source path in a pending view, normalized. */
+function provenanceSources(pending: EntryData): string[] {
+  const sources = new Set<string>();
+  const map = pending["source_files"];
+  if (map !== null && typeof map === "object" && !Array.isArray(map)) {
+    for (const value of Object.values(map as EntryData)) {
+      if (typeof value === "string") {
+        sources.add(normalizeSource(value));
+      }
+    }
+  }
+  for (const array of ["dominion", "endpoint", "model", "local_model"]) {
+    const entries = pending[array];
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry !== null && typeof entry === "object") {
+        const source = (entry as EntryData)["source_file"];
+        if (typeof source === "string") {
+          sources.add(normalizeSource(source));
+        }
+      }
+    }
+  }
+  return [...sources];
+}
+
+/**
+ * Derives the active profile's include chain from the pending view's
+ * provenance: the distinct files the merge visited, minus the leaf
+ * itself. Provenance is a per-path last-writer map, so two limits hold
+ * and the chain editor states them: the merge ORDER is not recoverable
+ * (rows sort boot-file-first, then alphabetically, until a save writes
+ * an explicit `include` array), and a chain file whose every value was
+ * overridden later leaves no provenance and does not appear.
+ */
+export function deriveIncludeChain(pending: EntryData, activeProfile: string): ChainFile[] {
+  const leafBase = `${activeProfile}.toml`;
+  const sources = provenanceSources(pending);
+  // The profiles directory is the leaf's own directory, when any value
+  // is attributed to the leaf; otherwise paths degrade to base names.
+  const leafPath = sources.find((source) => baseName(source) === leafBase) ?? null;
+  const profilesDir = leafPath === null ? null : leafPath.slice(0, leafPath.lastIndexOf("/"));
+  const files: ChainFile[] = [];
+  for (const source of sources) {
+    const base = baseName(source);
+    if (base === leafBase) {
+      continue;
+    }
+    files.push(chainFile(source, base, profilesDir));
+  }
+  files.sort((a, b) =>
+    a.outside === b.outside ? a.path.localeCompare(b.path) : a.outside ? -1 : 1,
+  );
+  return files;
+}
+
+/** One chain row: the include-relative path for an absolute source. */
+function chainFile(source: string, base: string, profilesDir: string | null): ChainFile {
+  if (profilesDir === null) {
+    // No leaf attribution to anchor on; a bare base name still names
+    // profile-dir files correctly, the overwhelmingly common case.
+    return { path: base, base, outside: false };
+  }
+  if (source.startsWith(`${profilesDir}/`)) {
+    return { path: source.slice(profilesDir.length + 1), base, outside: false };
+  }
+  // Walk up from the profiles dir to the common prefix, then down.
+  const dirParts = profilesDir.split("/");
+  const sourceParts = source.split("/");
+  let shared = 0;
+  while (
+    shared < dirParts.length &&
+    shared < sourceParts.length - 1 &&
+    dirParts[shared] === sourceParts[shared]
+  ) {
+    shared += 1;
+  }
+  const ups = "../".repeat(dirParts.length - shared);
+  return { path: ups + sourceParts.slice(shared).join("/"), base, outside: true };
+}
+
 /**
  * The store. Constructed once per shell mount; views subscribe and read,
  * the composition root drives load/apply/revert.
@@ -356,6 +454,64 @@ export class ConfigStore {
     await this.api.putBootConfig(payload);
     await this.refreshPending();
     this.notify();
+  }
+
+  /** The active profile's derived include chain (see {@link deriveIncludeChain}). */
+  includeChain(): ChainFile[] {
+    return deriveIncludeChain(this.pending, this.activeProfile);
+  }
+
+  /**
+   * The pending content attributable to one chain file (by base name):
+   * the keyed-array entries whose winning definition it supplied, plus
+   * the dotted-path values it last wrote. This is the drill-in editor's
+   * base and the `PUT /admin/include/{path}` payload shape. Values the
+   * file defines but a later file overrode leave no provenance and are
+   * absent, so a drill-in save drops them from the file's shadow.
+   */
+  includeFileBody(base: string): EntryData {
+    const body: EntryData = {};
+    for (const [array] of KEYED_ARRAYS) {
+      const owned = this.entriesOf(this.pending, array)
+        .filter((entry) => {
+          const source = entry["source_file"];
+          return (
+            typeof source === "string" && baseName(source).replace(/\.next$/, "") === base
+          );
+        })
+        .map((entry) => {
+          const data = structuredClone(entry);
+          delete data["source_file"];
+          return data;
+        });
+      if (owned.length > 0) {
+        body[array] = owned;
+      }
+    }
+    const map = this.pending["source_files"];
+    if (map !== null && typeof map === "object" && !Array.isArray(map)) {
+      const paths = Object.entries(map as EntryData)
+        .filter(
+          ([, source]) =>
+            typeof source === "string" && baseName(source).replace(/\.next$/, "") === base,
+        )
+        .map(([path]) => path)
+        .sort();
+      // Sorted, an ancestor path precedes its children; writing the
+      // ancestor copies the whole subtree, so children are skipped.
+      let written: string | null = null;
+      for (const path of paths) {
+        if (written !== null && path.startsWith(`${written}.`)) {
+          continue;
+        }
+        const value = readPath(this.pending, path);
+        if (value !== undefined) {
+          writePath(body, path, structuredClone(value));
+          written = path;
+        }
+      }
+    }
+    return body;
   }
 
   /** The `[[endpoint]]` ids of the pending view. */

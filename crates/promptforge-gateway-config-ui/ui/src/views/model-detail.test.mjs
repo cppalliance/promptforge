@@ -286,6 +286,17 @@ test("provenance renders from common.toml and the first inherited edit notes the
     "from common.toml",
     "an inherited entry names its source file",
   );
+  const editLink = root.querySelector(".detail-header .field-from .field-from-edit");
+  assert.equal(
+    editLink.getAttribute("href"),
+    "#/profiles/include/common.toml",
+    "the annotation links into the include drill-in editor",
+  );
+  assert.equal(
+    editLink.getAttribute("aria-label"),
+    "Edit in common.toml",
+    "the link announces itself as the edit affordance",
+  );
   assert.equal(root.querySelector(".inherit-note"), null, "no note before any edit");
 
   typeInto(dom, root.querySelector(".field-row[data-key='description'] textarea"), "override");

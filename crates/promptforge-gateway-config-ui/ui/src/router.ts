@@ -48,9 +48,18 @@ export function matchRoute(hash: string): RouteMatch | null {
       return null;
     case "discover":
     case "downloads":
-    case "profiles":
     case "secrets":
       return segments.length === 1 ? { view: head } : null;
+    case "profiles":
+      if (segments.length === 1) {
+        return { view: "profiles" };
+      }
+      // #/profiles/include/{encoded-path}: the include-file drill-in.
+      if (segments.length === 3 && detail === "include" && segments[2]) {
+        const path = decodeSegment(segments[2]);
+        return path === null ? null : { view: "profiles", detail: path };
+      }
+      return null;
     case "settings":
       if (segments.length === 1) {
         return { view: "settings", detail: "system" };

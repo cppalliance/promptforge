@@ -24,6 +24,7 @@ import { HfApi } from "./services/hf-api";
 import { createDiscoverView } from "./views/discover-view";
 import { createDownloadsView } from "./views/downloads-view";
 import { createModelsView } from "./views/models-view";
+import { createProfilesView } from "./views/profiles-view";
 import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
@@ -236,6 +237,17 @@ function mountStandaloneShell(
     fetchFn,
   });
   const downloadsView = createDownloadsView({ api, downloads: downloadStore, toasts });
+  const profilesView = createProfilesView({
+    store,
+    api,
+    toasts,
+    overlay,
+    onSwitched: (name) => {
+      switcher.setActiveProfile(name);
+      // The active profile changed, so the running/pending views did too.
+      void store.load();
+    },
+  });
   const stopRouter = startRouter({
     win,
     main,
@@ -244,6 +256,7 @@ function mountStandaloneShell(
       models: (target, match) => modelsView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
       downloads: (target) => downloadsView.mount(target),
+      profiles: (target, match) => profilesView.mount(target, match.detail),
       settings: (target, match) => settingsView.mount(target, match.detail),
     },
   });
