@@ -14,11 +14,11 @@
   align-items: center;
   gap: var(--status-bar-gap, 12px);
   padding-inline: var(--status-bar-padding-inline, 12px);
-  background: var(--status-bar-bg, #14161c);
-  border-top: 1px solid var(--border, #262a33);
+  background: var(--status-bar-bg, #1a1a1a);
+  border-top: 1px solid var(--border, #2a2a2a);
   font-size: 13px;
   line-height: 1.4;
-  color: var(--status-bar-text, #8b90a0);
+  color: var(--status-bar-text, #909090);
   user-select: none;
 }
 
@@ -31,7 +31,7 @@
 }
 
 .status-bar__text--error {
-  color: var(--status-bar-text-error, #cf7f88);
+  color: var(--status-bar-text-error, #e4606d);
 }
 
 .status-bar__right {
@@ -102,9 +102,9 @@
 }
 
 .status-bar__progress::-webkit-progress-value {
-  background: var(--progress-fill, #4caf7d);
+  background: var(--progress-fill, #28a745);
   border-radius: calc(var(--progress-height, 6px) / 2);
-  box-shadow: 0 0 var(--progress-glow, 4px) var(--progress-fill, #4caf7d);
+  box-shadow: 0 0 var(--progress-glow, 4px) var(--progress-fill, #28a745);
 }
 
 /* The activity LED: a small circle standing in the slot whenever no frame
@@ -134,17 +134,17 @@
 }
 
 .status-bar__led--generating {
-  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-green, #4caf7d) 60%);
+  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-green, #28a745) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-green, #4caf7d),
-    0 0 var(--led-glow-radius, 6px) var(--led-green, #4caf7d),
-    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-green, #4caf7d) 55%, transparent);
+    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-green, #28a745),
+    0 0 var(--led-glow-radius, 6px) var(--led-green, #28a745),
+    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-green, #28a745) 55%, transparent);
 }
 
 .status-bar__led--thinking {
-  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-amber, #d9a03f) 60%);
+  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-amber, #f09030) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #d9a03f),
-    0 0 var(--led-glow-radius, 6px) var(--led-amber, #d9a03f),
-    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #d9a03f) 55%, transparent);
+    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #f09030),
+    0 0 var(--led-glow-radius, 6px) var(--led-amber, #f09030),
+    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #f09030) 55%, transparent);
 }

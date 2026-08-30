@@ -16,9 +16,9 @@
   display: flex;
   align-items: stretch;
   height: var(--titlebar-height, 40px);
-  background: var(--titlebar-bg, #0d0e12);
-  border-bottom: 1px solid var(--titlebar-divider, #262a33);
-  color: var(--titlebar-foreground, #d6d9e0);
+  background: var(--titlebar-bg, #0f0f0f);
+  border-bottom: 1px solid var(--titlebar-divider, #2a2a2a);
+  color: var(--titlebar-foreground, #e8e8e8);
   font-size: var(--titlebar-font-size, 13px);
   line-height: 1;
   user-select: none;
@@ -68,23 +68,23 @@
   padding: 0;
   background: none;
   border: none;
-  color: var(--titlebar-glyph, #8b90a0);
+  color: var(--titlebar-glyph, #909090);
   cursor: pointer;
   user-select: none;
 }
 
 .window-titlebar__control:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline: 1px solid var(--titlebar-accent, #e05a2b);
   outline-offset: -1px;
 }
 
 .window-titlebar__control--minimize:hover,
 .window-titlebar__control--maximize:hover {
-  background: var(--titlebar-hover, #1a1d25);
+  background: var(--titlebar-hover, #252525);
 }
 
 .window-titlebar__control--close:hover {
-  background: var(--titlebar-close-hover, #b0606a);
+  background: var(--titlebar-close-hover, #dc3545);
   color: var(--titlebar-close-glyph-hover, #ffffff);
 }
 
