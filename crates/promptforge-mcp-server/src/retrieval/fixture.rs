@@ -20,7 +20,7 @@ pub(crate) fn model() -> &'static Model {
 
 /// Retrieval over `catalog`, over the shared model.
 pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
-    Retrieval::start(model(), catalog)
+    Retrieval::start(model(), catalog, None)
 }
 
 /// A prompt whose Lua returns at once, so it needs no gateway.

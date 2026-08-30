@@ -4133,6 +4133,7 @@ dependencies = [
  "humantime-serde",
  "notify",
  "promptforge-core",
+ "promptforge-progress",
  "promptforge-tool-picker",
  "promptforge-tools",
  "promptforge-web-search",

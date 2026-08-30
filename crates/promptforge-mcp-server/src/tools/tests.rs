@@ -67,6 +67,7 @@ fn fixture_server_parts() -> (Arc<Config>, Arc<PreparedTools>) {
             &config.tools,
             ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture tools"),
     );

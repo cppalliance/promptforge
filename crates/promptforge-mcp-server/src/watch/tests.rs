@@ -392,6 +392,7 @@ async fn a_value_with_quotes_and_newlines_round_trips_through_the_fixture() {
                 &fixture.config.tools,
                 promptforge_core::model::ModelCatalog::empty(),
                 crate::fixture::model(),
+                None,
             )
             .expect("prepare fixture live tools"),
         ),

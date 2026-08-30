@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use arc_swap::ArcSwap;
 use promptforge_core::parser::Prompt;
+use promptforge_progress::ProgressHandle;
 
 use crate::config::Config;
 use crate::error::{CatalogError, FaultKind};
@@ -253,7 +254,22 @@ impl Catalog {
     /// # }
     /// ```
     pub fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, CatalogError> {
-        resolve::resolve(config, on_broken)
+        resolve::resolve(config, on_broken, None)
+    }
+
+    /// Resolves the catalog as [`resolve`](Catalog::resolve) does, reporting
+    /// each file the pass admits to `progress` as one unit of the leaf's file
+    /// count and completing the leaf when the pass succeeds.
+    ///
+    /// Boot's operation tree is the only caller: a reload through the watcher
+    /// runs the same pass but reports nothing, since no operation tree
+    /// survives boot for it to report into.
+    pub(crate) fn resolve_with_progress(
+        config: &Config,
+        on_broken: OnBroken,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<Catalog, CatalogError> {
+        resolve::resolve(config, on_broken, progress)
     }
 
     /// Builds a catalog from entries, ordering them by name, then a healthy
