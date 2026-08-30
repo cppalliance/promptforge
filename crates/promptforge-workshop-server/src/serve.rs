@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::app::{AppState, StateError, router};
 use crate::config::Config;
+use crate::gateway_progress;
 use crate::heartbeat;
 use crate::progress;
 use crate::provision;
@@ -220,9 +221,10 @@ fn serve_thread(
             Err(error) => return (Termination::Graceful, Err(error)),
         };
         let _ = ready.send(Ok(format!("http://{address}")));
-        // The heartbeat, the voice provisioning task, and the progress
-        // renderer start with serving and stop inside the same
-        // graceful-shutdown signal, so they never outlive the server.
+        // The heartbeat, the voice provisioning task, the gateway
+        // progress subscriber, and the progress renderer start with
+        // serving and stop inside the same graceful-shutdown signal, so
+        // they never outlive the server.
         let heartbeat = heartbeat::spawn(
             state.gateway_client().clone(),
             state.push(),
@@ -246,6 +248,12 @@ fn serve_thread(
             voice_config,
         );
         let renderer = progress::spawn(Arc::clone(state.progress()), state.push());
+        let subscriber = gateway_progress::spawn(
+            config.gateway.base_url.clone(),
+            config.gateway.api_key.clone(),
+            Arc::clone(state.progress()),
+            state.health().clone(),
+        );
         let (draining_tx, draining_rx) = tokio::sync::oneshot::channel();
         let serve = async {
             axum::serve(listener, router(state))
@@ -257,6 +265,7 @@ fn serve_thread(
                     heartbeat.shutdown().await;
                     provision.shutdown().await;
                     renderer.shutdown().await;
+                    subscriber.shutdown().await;
                 })
                 .await
         };
