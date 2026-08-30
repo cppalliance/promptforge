@@ -4042,6 +4042,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "url",

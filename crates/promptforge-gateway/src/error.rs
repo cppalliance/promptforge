@@ -80,6 +80,35 @@ pub(crate) enum GatewayError {
     #[error("profiles directory not configured")]
     ProfilesUnavailable,
 
+    /// A boot-config route was reached without a known boot config path
+    /// (the gateway was assembled without one, as in embedded use).
+    #[error("boot config path not configured")]
+    BootConfigUnavailable,
+
+    /// A shadow-write route refused the payload: the body could not be
+    /// rendered as TOML, a redacted secret had no existing value to
+    /// preserve, or the merged pending configuration failed validation.
+    /// The message carries the full cause chain so the UI can show why.
+    #[non_exhaustive]
+    #[error("config write rejected: {0}")]
+    ConfigWriteRejected(String),
+
+    /// A shadow file could not be written to disk after validation passed.
+    #[non_exhaustive]
+    #[error("config write failed")]
+    ConfigWriteIo(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// `PUT /admin/include/{path}` named a file absent from the profiles
+    /// directory.
+    #[non_exhaustive]
+    #[error("include file not found: {0}")]
+    IncludeNotFound(String),
+
+    /// An `.env` file could not be read or parsed for `GET /admin/env`.
+    #[non_exhaustive]
+    #[error("env file unreadable")]
+    EnvFile(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// The `GET /admin/system` sampling task did not run to completion.
     #[non_exhaustive]
     #[error("system metrics sampling failed")]
@@ -241,6 +270,31 @@ impl GatewayError {
                 "invalid_request_error",
                 "profiles_unavailable",
             ),
+            GatewayError::BootConfigUnavailable => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "boot_config_unavailable",
+            ),
+            GatewayError::ConfigWriteRejected(_) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_request_error",
+                "config_write_rejected",
+            ),
+            GatewayError::ConfigWriteIo(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "config_write_error",
+            ),
+            GatewayError::IncludeNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+                "include_not_found",
+            ),
+            GatewayError::EnvFile(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "env_file_error",
+            ),
             GatewayError::SystemMetrics(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
@@ -352,6 +406,55 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "system_metrics_error",
+                ),
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.classify(), expected);
+        }
+    }
+
+    #[test]
+    fn shadow_route_errors_classify_is_table_driven() {
+        let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
+            (
+                GatewayError::ConfigWriteRejected("invalid config: bad".to_owned()),
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_request_error",
+                    "config_write_rejected",
+                ),
+            ),
+            (
+                GatewayError::ConfigWriteIo(Box::new(std::io::Error::other("disk"))),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "config_write_error",
+                ),
+            ),
+            (
+                GatewayError::IncludeNotFound("ghost.toml".to_owned()),
+                (
+                    StatusCode::NOT_FOUND,
+                    "invalid_request_error",
+                    "include_not_found",
+                ),
+            ),
+            (
+                GatewayError::BootConfigUnavailable,
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    "boot_config_unavailable",
+                ),
+            ),
+            (
+                GatewayError::EnvFile(Box::new(std::io::Error::other("bad line"))),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "env_file_error",
                 ),
             ),
         ];

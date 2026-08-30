@@ -30,14 +30,20 @@
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
 //! metrics, a bearer-authed `GET /admin/hf/search` and
 //! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
-//! (attaching the process `HF_TOKEN` when set), and
+//! (attaching the process `HF_TOKEN` when set), bearer-authed shadow-file
+//! write routes staging pending edits beside the real files without ever
+//! touching them (`PUT /admin/config`, `PUT /admin/boot-config`,
+//! `PUT /admin/include/{path}`, `PUT /admin/env`) plus a bearer-authed
+//! `GET /admin/env` readout of the real boot and profile `.env` files, and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
 #[cfg(feature = "local")]
 mod cache;
+mod config_write;
 mod dialect;
+mod env_file;
 mod error;
 mod hf;
 #[cfg(feature = "local")]
@@ -81,7 +87,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 #[cfg(feature = "local")]
 use axum::routing::delete;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
@@ -145,6 +151,10 @@ pub(crate) struct BootOwned {
     /// The boot `[workshop]`, when present: the hosted workshop is started
     /// once at boot and cannot be moved, reconfigured, or removed mid-run.
     pub(crate) workshop: Option<WorkshopConfig>,
+    /// The boot config path, when known: `PUT /admin/boot-config` writes
+    /// its shadow and the env routes read its sibling `.env` file. `None`
+    /// in embedded assemblies built straight from a `Config`.
+    pub(crate) config_path: Option<PathBuf>,
 }
 
 /// Shared handler state: live routing/key/local runtime, the boot-owned
@@ -234,7 +244,22 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
         .route("/admin/system", get(system::admin_system))
-        .route("/admin/config", get(admin_config))
+        .route(
+            "/admin/config",
+            get(admin_config).put(config_write::admin_put_config),
+        )
+        .route(
+            "/admin/boot-config",
+            put(config_write::admin_put_boot_config),
+        )
+        .route(
+            "/admin/include/{*path}",
+            put(config_write::admin_put_include),
+        )
+        .route(
+            "/admin/env",
+            get(env_file::admin_get_env).put(env_file::admin_put_env),
+        )
         .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile))
         .route("/admin/hf/search", get(hf::admin_hf_search))

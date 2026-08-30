@@ -20,6 +20,13 @@
 //! Failures are reported as the opaque
 //! [`ConfigError`]; classify them with [`ConfigError::kind`].
 //!
+//! Pending edits stage as shadow files beside the real ones
+//! (`default.toml` gains `default.toml.next`): [`save_profile_shadow`],
+//! [`save_include_shadow`], and [`save_boot_shadow`] validate the merged
+//! pending state before writing, [`write_shadow`] stages arbitrary sibling
+//! content (env files), and [`shadow_path`] names the shadow for any
+//! managed file. No save ever touches a real file.
+//!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
 //!
@@ -49,4 +56,5 @@ pub use crate::config::{
 };
 pub use crate::profile::{
     ProfileName, ProfileNameError, list_profiles, load_boot_sections, load_server, load_workshop,
+    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
 };
