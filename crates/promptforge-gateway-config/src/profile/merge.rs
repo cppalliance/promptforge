@@ -7,12 +7,20 @@ use std::path::Path;
 
 use toml::Value;
 
+use super::provenance::Provenance;
 use crate::error::ConfigError;
 
 /// Merges `overlay` into `base` (later wins for scalars; arrays merge by id/name).
 ///
-/// `path` is the file that produced `overlay`, used in merge error locations.
-pub(super) fn merge_docs(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
+/// `path` is the file that produced `overlay`, used in merge error locations
+/// and recorded into `provenance` as the origin of everything the overlay
+/// writes. The recording is a side channel: it never changes the merge.
+pub(super) fn merge_docs(
+    base: &mut Value,
+    overlay: Value,
+    path: &Path,
+    provenance: &mut Provenance,
+) -> Result<(), ConfigError> {
     let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
         return Err(ConfigError::Validation(format!(
             "{}: profile root must be a table",
@@ -26,16 +34,24 @@ pub(super) fn merge_docs(base: &mut Value, overlay: Value, path: &Path) -> Resul
                 let entry = base_table
                     .entry(key.clone())
                     .or_insert_with(|| Value::Array(Vec::new()));
-                merge_keyed_array(entry, overlay_val, identity_key(&key)?, path, &key)?;
+                merge_keyed_array(
+                    entry,
+                    overlay_val,
+                    identity_key(&key)?,
+                    path,
+                    &key,
+                    provenance,
+                )?;
             }
             "include" => {
                 // Already consumed by the loader; ignore if somehow present.
             }
             _ => match base_table.get_mut(&key) {
                 Some(base_val) if base_val.is_table() && overlay_val.is_table() => {
-                    merge_tables(base_val, overlay_val, path)?;
+                    merge_tables(base_val, overlay_val, path, &key, provenance)?;
                 }
                 _ => {
+                    record_subtree(&key, &overlay_val, path, provenance);
                     base_table.insert(key, overlay_val);
                 }
             },
@@ -54,7 +70,13 @@ fn identity_key(array_name: &str) -> Result<&'static str, ConfigError> {
     }
 }
 
-fn merge_tables(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
+fn merge_tables(
+    base: &mut Value,
+    overlay: Value,
+    path: &Path,
+    prefix: &str,
+    provenance: &mut Provenance,
+) -> Result<(), ConfigError> {
     let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
         return Err(ConfigError::Validation(format!(
             "{}: expected tables while merging profile scalars",
@@ -62,16 +84,29 @@ fn merge_tables(base: &mut Value, overlay: Value, path: &Path) -> Result<(), Con
         )));
     };
     for (key, overlay_val) in overlay_table {
+        let dotted = format!("{prefix}.{key}");
         match base_table.get_mut(&key) {
             Some(base_val) if base_val.is_table() && overlay_val.is_table() => {
-                merge_tables(base_val, overlay_val, path)?;
+                merge_tables(base_val, overlay_val, path, &dotted, provenance)?;
             }
             _ => {
+                record_subtree(&dotted, &overlay_val, path, provenance);
                 base_table.insert(key, overlay_val);
             }
         }
     }
     Ok(())
+}
+
+/// Record `prefix` and, when the written value is a table, every path beneath
+/// it: a wholesale insert means the entire subtree came from `source`.
+fn record_subtree(prefix: &str, value: &Value, source: &Path, provenance: &mut Provenance) {
+    provenance.record_path(prefix, source);
+    if let Value::Table(table) = value {
+        for (key, child) in table {
+            record_subtree(&format!("{prefix}.{key}"), child, source, provenance);
+        }
+    }
 }
 
 fn merge_keyed_array(
@@ -80,6 +115,7 @@ fn merge_keyed_array(
     key_field: &str,
     path: &Path,
     array_name: &str,
+    provenance: &mut Provenance,
 ) -> Result<(), ConfigError> {
     let Value::Array(overlay_items) = overlay else {
         return Err(merge_type_error(
@@ -115,6 +151,7 @@ fn merge_keyed_array(
 
     for item in overlay_items {
         if let Some(k) = item_key(&item, key_field) {
+            provenance.record_entry(array_name, &k, path);
             if let Some(&idx) = index_by_key.get(&k) {
                 base_items[idx] = item;
             } else {
@@ -189,6 +226,8 @@ fn item_key(item: &Value, key_field: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -198,8 +237,15 @@ mod tests {
         // array that discards the malformed state.
         let mut base = Value::String("oops".to_owned());
         let overlay = Value::Array(Vec::new());
-        let err = merge_keyed_array(&mut base, overlay, "id", Path::new("p.toml"), "model")
-            .expect_err("non-array inherited base must error");
+        let err = merge_keyed_array(
+            &mut base,
+            overlay,
+            "id",
+            Path::new("p.toml"),
+            "model",
+            &mut Provenance::default(),
+        )
+        .expect_err("non-array inherited base must error");
         assert!(matches!(err, ConfigError::Validation(_)));
         assert!(err.to_string().contains("model"));
     }
@@ -217,7 +263,13 @@ mod tests {
         let overlay: Value =
             toml::from_str("[[dominion]]\nid = 'pool'\nkind = 'remote'\nmax_concurrency = 8\n")
                 .expect("parse overlay");
-        merge_docs(&mut base, overlay, Path::new("p.toml")).expect("merge dominions");
+        merge_docs(
+            &mut base,
+            overlay,
+            Path::new("p.toml"),
+            &mut Provenance::default(),
+        )
+        .expect("merge dominions");
         let dominions = base
             .get("dominion")
             .and_then(Value::as_array)
@@ -237,6 +289,94 @@ mod tests {
                 .iter()
                 .any(|d| d.get("id").and_then(Value::as_str) == Some("gpu0")),
             "inherited dominion survives"
+        );
+    }
+
+    #[test]
+    fn keyed_array_provenance_tracks_the_winning_file() {
+        // The loader merges parents first, so the base file's entries are
+        // recorded before the overlay's: base entries name the base file, a
+        // replacement and an addition both name the overlay file.
+        let mut merged: Value = Value::Table(toml::map::Map::new());
+        let mut provenance = Provenance::default();
+        merge_docs(
+            &mut merged,
+            toml::from_str("[[model]]\nname = 'keep'\n\n[[model]]\nname = 'replaced'\n")
+                .expect("parse base"),
+            Path::new("base.toml"),
+            &mut provenance,
+        )
+        .expect("merge base");
+        merge_docs(
+            &mut merged,
+            toml::from_str("[[model]]\nname = 'replaced'\n\n[[model]]\nname = 'added'\n")
+                .expect("parse overlay"),
+            Path::new("child.toml"),
+            &mut provenance,
+        )
+        .expect("merge overlay");
+
+        assert_eq!(
+            provenance.entry_source("model", "keep"),
+            Some(Path::new("base.toml")),
+            "an inherited entry names the file that defined it"
+        );
+        assert_eq!(
+            provenance.entry_source("model", "replaced"),
+            Some(Path::new("child.toml")),
+            "a replaced entry names the file whose definition won"
+        );
+        assert_eq!(
+            provenance.entry_source("model", "added"),
+            Some(Path::new("child.toml")),
+            "an appended entry names its own file"
+        );
+    }
+
+    #[test]
+    fn table_path_provenance_tracks_each_written_leaf() {
+        // A wholesale-inserted table records every path beneath it; a later
+        // field-level override re-records just the overridden leaf.
+        let mut merged: Value = Value::Table(toml::map::Map::new());
+        let mut provenance = Provenance::default();
+        merge_docs(
+            &mut merged,
+            toml::from_str(
+                "[server]\nbind = 'a:1'\napi_key = 'k'\n\n[local]\ncache_dir = '/base'\n",
+            )
+            .expect("parse base"),
+            Path::new("base.toml"),
+            &mut provenance,
+        )
+        .expect("merge base");
+        merge_docs(
+            &mut merged,
+            toml::from_str("[local]\ncache_dir = '/child'\n").expect("parse overlay"),
+            Path::new("child.toml"),
+            &mut provenance,
+        )
+        .expect("merge overlay");
+
+        let source = |path: &str| {
+            provenance
+                .paths()
+                .find(|(p, _)| *p == path)
+                .map(|(_, source)| source.to_path_buf())
+        };
+        assert_eq!(
+            source("server.api_key"),
+            Some(PathBuf::from("base.toml")),
+            "an inherited scalar keeps the base file"
+        );
+        assert_eq!(
+            source("local"),
+            Some(PathBuf::from("base.toml")),
+            "the table itself was established by the base file"
+        );
+        assert_eq!(
+            source("local.cache_dir"),
+            Some(PathBuf::from("child.toml")),
+            "an overridden leaf names the overriding file"
         );
     }
 }

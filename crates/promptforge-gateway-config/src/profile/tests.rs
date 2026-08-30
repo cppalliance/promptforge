@@ -372,7 +372,7 @@ fn config_chain_ordering_is_root_first_depth_first() {
         "include = [\"nested/child.toml\"]\n",
     );
 
-    let (_value, chain) = collect_config_chain(&tmp.path().join("root.toml")).unwrap();
+    let (_value, chain, _provenance) = collect_config_chain(&tmp.path().join("root.toml")).unwrap();
     assert_eq!(chain.len(), 3);
     assert!(
         chain[0].ends_with("root.toml"),
@@ -693,4 +693,206 @@ fn load_boot_sections_requires_a_server_section() {
     let err = load_boot_sections(&tmp.path().join("gateway.toml")).unwrap_err();
     assert_eq!(err.kind(), crate::ConfigErrorKind::Validation);
     assert!(err.to_string().contains("[server]"), "got: {err}");
+}
+
+// ---- to_json: serialized payload with merge provenance ----
+
+/// A base/child fixture: the child overrides one scalar, one model entry,
+/// and adds entries of its own, so every provenance case shows up in one
+/// merged document.
+fn provenance_fixture() -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "base.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "base-server-secret"
+
+[local]
+cache_dir = "/base-cache"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = "base-endpoint-secret"
+
+[[model]]
+name = "m1"
+description = "from base"
+context = 1000
+upstream = "u-base"
+endpoints = ["e"]
+
+[[local_model]]
+name = "q"
+description = "base local"
+source = "https://example.com/q.gguf"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+context = 1024
+"#,
+    );
+    write(
+        tmp.path(),
+        "child.toml",
+        r#"
+include = ["base.toml"]
+
+[server]
+api_key = "child-server-secret"
+
+[local]
+cache_dir = "/child-cache"
+
+[[model]]
+name = "m1"
+description = "from child"
+context = 2000
+upstream = "u-child"
+endpoints = ["e"]
+
+[[model]]
+name = "m2"
+description = "leaf only"
+context = 3000
+upstream = "u2"
+endpoints = ["e"]
+"#,
+    );
+    let path = tmp.path().join("child.toml");
+    (tmp, path)
+}
+
+/// The `source_file` annotation of the keyed-array entry named `key` in
+/// `array`.
+fn entry_source_file<'a>(json: &'a serde_json::Value, array: &str, key: &str) -> &'a str {
+    json[array]
+        .as_array()
+        .unwrap_or_else(|| panic!("{array} is an array"))
+        .iter()
+        .find(|entry| {
+            entry
+                .get("name")
+                .or_else(|| entry.get("id"))
+                .and_then(serde_json::Value::as_str)
+                == Some(key)
+        })
+        .unwrap_or_else(|| panic!("{array} entry {key} exists"))
+        .get("source_file")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("{array} entry {key} carries a source_file"))
+}
+
+#[test]
+fn to_json_mirrors_the_toml_shape_with_redacted_secrets() {
+    let (_tmp, path) = provenance_fixture();
+    let config = load_path(&path).unwrap();
+    let json = config.to_json();
+
+    let top = json.as_object().expect("a top-level object");
+    for key in [
+        "server",
+        "local",
+        "dominion",
+        "endpoint",
+        "model",
+        "local_model",
+    ] {
+        assert!(top.contains_key(key), "missing top-level key `{key}`");
+    }
+    assert_eq!(json["local"]["cache_dir"], "/child-cache");
+    assert_eq!(json["model"][0]["description"], "from child");
+    assert_eq!(json["local_model"][0]["context"], 1024);
+
+    assert_eq!(json["server"]["api_key"], "***");
+    assert_eq!(json["endpoint"][0]["api_key"], "***");
+    let text = serde_json::to_string(&json).expect("serializes");
+    for secret in [
+        "base-server-secret",
+        "child-server-secret",
+        "base-endpoint-secret",
+    ] {
+        assert!(!text.contains(secret), "the payload leaked `{secret}`");
+    }
+}
+
+#[test]
+fn to_json_annotates_each_keyed_entry_with_its_source_file() {
+    let (_tmp, path) = provenance_fixture();
+    let config = load_path(&path).unwrap();
+    let json = config.to_json();
+
+    // Leaf-defined and leaf-overridden entries name the leaf file; entries
+    // the leaf never touched name the parent file.
+    assert!(
+        entry_source_file(&json, "model", "m1").ends_with("child.toml"),
+        "an overridden entry names the leaf: {}",
+        entry_source_file(&json, "model", "m1")
+    );
+    assert!(
+        entry_source_file(&json, "model", "m2").ends_with("child.toml"),
+        "a leaf-defined entry names the leaf"
+    );
+    assert!(
+        entry_source_file(&json, "endpoint", "e").ends_with("base.toml"),
+        "an inherited endpoint names the parent"
+    );
+    assert!(
+        entry_source_file(&json, "dominion", "gpu0").ends_with("base.toml"),
+        "an inherited dominion names the parent"
+    );
+    assert!(
+        entry_source_file(&json, "local_model", "q").ends_with("base.toml"),
+        "an inherited local model names the parent"
+    );
+}
+
+#[test]
+fn to_json_maps_overridden_table_paths_to_their_files() {
+    let (_tmp, path) = provenance_fixture();
+    let config = load_path(&path).unwrap();
+    let json = config.to_json();
+
+    let sources = json["source_files"].as_object().expect("a path map");
+    let source = |path: &str| {
+        sources
+            .get(path)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("source_files records `{path}`"))
+    };
+    assert!(
+        source("server.api_key").ends_with("child.toml"),
+        "the overridden key names the leaf: {}",
+        source("server.api_key")
+    );
+    assert!(
+        source("server.bind").ends_with("base.toml"),
+        "the inherited key names the parent"
+    );
+    assert!(
+        source("local.cache_dir").ends_with("child.toml"),
+        "the overridden table leaf names the leaf"
+    );
+}
+
+#[test]
+fn to_json_without_include_resolution_carries_no_provenance() {
+    let config = Config::from_toml_str(MINIMAL_CONFIG).unwrap();
+    let json = config.to_json();
+
+    assert!(
+        json.get("source_files").is_none(),
+        "no provenance was recorded, so no path map is emitted: {json}"
+    );
+    assert!(
+        json["model"][0].get("source_file").is_none(),
+        "entries carry no source_file without include resolution: {json}"
+    );
+    assert_eq!(json["server"]["api_key"], "***");
 }

@@ -9,6 +9,7 @@ use std::path::Path;
 
 use super::{Config, RawConfig, Secret, WebSearchConfig, interpolate_value};
 use crate::error::ConfigError;
+use crate::profile::Provenance;
 
 impl Config {
     /// Load a configuration file with recursive `include` resolution.
@@ -108,6 +109,118 @@ impl Config {
         self.tools
             .as_ref()
             .and_then(|tools| tools.web_search.as_ref())
+    }
+
+    /// Attach the provenance recorded during include resolution. Called by
+    /// the profile loader once the merge pass has produced the document this
+    /// config was validated from.
+    pub(crate) fn set_provenance(&mut self, provenance: Provenance) {
+        self.provenance = provenance;
+    }
+
+    /// Reconstruct the raw TOML-shaped DTO from the validated config: the
+    /// inverse of the validating `From<RawConfig>` conversion, cloning every
+    /// field straight across so the result serializes to the shape the
+    /// operator wrote, with `Secret` fields redacted by `ser_redacted`.
+    pub(crate) fn to_raw(&self) -> RawConfig {
+        RawConfig {
+            server: self.server.clone(),
+            local: self.local.clone(),
+            dominions: self.dominions.clone(),
+            endpoints: self.endpoints.clone(),
+            models: self.models.clone(),
+            local_models: self.local_models.clone(),
+            model_allowlist: self.model_allowlist.clone(),
+            tools: self.tools.clone(),
+            workshop: self.workshop.clone(),
+        }
+    }
+
+    /// Serialize the resolved configuration as a JSON object in the TOML
+    /// shape, annotated with merge provenance.
+    ///
+    /// The payload mirrors the operator-authored TOML structure (`server`,
+    /// `local`, `dominion`, `endpoint`, `model`, `local_model`, `models`,
+    /// `tools`, `workshop`), with `Secret` fields redacted to `"***"`. When
+    /// the config was loaded with include resolution, each keyed-array entry
+    /// (`[[model]]`, `[[local_model]]`, `[[endpoint]]`, `[[dominion]]`)
+    /// carries a `source_file` field naming the file whose definition won
+    /// the merge, and a top-level `source_files` object maps each written
+    /// dotted TOML path to the file that last wrote it. A config built
+    /// without include resolution (for example [`Config::from_toml_str`])
+    /// carries no provenance, and the payload is the plain serialized shape.
+    ///
+    /// # Panics
+    /// Panics if the raw shape fails to serialize. Its serializers are
+    /// infallible (plain data plus the redacting `Secret` marker), so a
+    /// failure is a schema bug, not operator input.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let toml = r#"
+    /// [server]
+    /// bind = "127.0.0.1:8080"
+    /// api_key = "secret"
+    /// "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.to_json()["server"]["api_key"], "***");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut value = serde_json::to_value(self.to_raw()).unwrap_or_else(|error| {
+            // The raw shape is plain data whose serializers cannot fail; a
+            // failure here is a schema bug, not operator input.
+            panic!("config serialization to JSON failed: {error}");
+        });
+        let Some(table) = value.as_object_mut() else {
+            unreachable!("RawConfig serializes to a JSON object");
+        };
+        for (array_name, key_field) in [
+            ("dominion", "id"),
+            ("endpoint", "id"),
+            ("model", "name"),
+            ("local_model", "name"),
+        ] {
+            let Some(entries) = table
+                .get_mut(array_name)
+                .and_then(serde_json::Value::as_array_mut)
+            else {
+                continue;
+            };
+            for entry in entries {
+                let Some(identity) = entry.get(key_field).and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+                if let Some(source) = self.provenance.entry_source(array_name, identity)
+                    && let Some(object) = entry.as_object_mut()
+                {
+                    object.insert(
+                        "source_file".to_owned(),
+                        serde_json::Value::from(source.display().to_string()),
+                    );
+                }
+            }
+        }
+        let sources: serde_json::Map<String, serde_json::Value> = self
+            .provenance
+            .paths()
+            .map(|(path, source)| {
+                (
+                    path.to_owned(),
+                    serde_json::Value::from(source.display().to_string()),
+                )
+            })
+            .collect();
+        if !sources.is_empty() {
+            table.insert(
+                "source_files".to_owned(),
+                serde_json::Value::Object(sources),
+            );
+        }
+        value
     }
 
     /// Interpolate, parse, and validate a configuration from a TOML string.

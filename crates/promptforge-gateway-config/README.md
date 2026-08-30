@@ -22,7 +22,13 @@ What it provides:
   `load_boot_sections` reads `[server]` and `[workshop]` together in a
   single include-resolution pass.
 - [`Secret`](src/config.rs): a credential wrapper that redacts in `Debug` and
-  `Display` and never serializes.
+  `Display` and serializes only as the `"***"` marker.
+- `Config::to_json`: the resolved configuration rendered as a JSON object in
+  the TOML shape, with each keyed-array entry (`[[model]]`, `[[local_model]]`,
+  `[[endpoint]]`, `[[dominion]]`) annotated with the `source_file` its winning
+  definition came from and a top-level `source_files` map of every written
+  dotted TOML path - the merge pass records provenance without changing merge
+  semantics.
 - Local-model companion types ([`SpeculativeConfig`,
   `MultimodalProjectorConfig`, `SpeculationType`, and
   `DraftTokenMax`](src/config/companion.rs)): declarative speculative-decoding

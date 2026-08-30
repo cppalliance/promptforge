@@ -14,12 +14,13 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 serde.workspace = true
+# JSON rendering of the resolved config for `Config::to_json`.
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true
 
 [lints]

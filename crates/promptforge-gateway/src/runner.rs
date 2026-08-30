@@ -165,6 +165,7 @@ impl Gateway {
         let state = AppState::from_parts(
             Arc::new(routing),
             config.server_key(),
+            Arc::new(config.clone()),
             #[cfg(feature = "local")]
             local,
             #[cfg(feature = "web-search")]
@@ -1298,6 +1299,169 @@ endpoints = ["e"]
             .read_to_string(&mut response)
             .expect("the response reads");
         response
+    }
+
+    /// [`http_get`] with a bearer `Authorization` header.
+    fn http_get_authed(url: &str, path: &str, key: &str) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let address = url.strip_prefix("http://").expect("the URL is http");
+        let mut stream = std::net::TcpStream::connect(address).expect("the gateway accepts");
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: gateway\r\nAuthorization: Bearer {key}\r\nConnection: close\r\n\r\n"
+        )
+        .expect("the request sends");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("the response reads");
+        response
+    }
+
+    /// A boot catalog plus a `common.toml` include and a `main` profile that
+    /// overrides one inherited model, so every provenance case (inherited
+    /// from the boot file, inherited from the include, overridden by the
+    /// leaf, leaf-defined) appears in one running config.
+    fn config_endpoint_fixture() -> (tempfile::TempDir, ServeOptions) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write(tmp.path(), "gateway.toml", CATALOG_EPHEMERAL);
+        let profiles = tmp.path().join("profiles");
+        std::fs::create_dir(&profiles).unwrap();
+        write(
+            &profiles,
+            "common.toml",
+            r#"
+[[endpoint]]
+id = "e2"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = "common-endpoint-secret"
+
+[[model]]
+name = "m2"
+description = "from common"
+context = 1
+upstream = "u2"
+endpoints = ["e2"]
+"#,
+        );
+        write(
+            &profiles,
+            "main.toml",
+            r#"
+include = ["../gateway.toml", "common.toml"]
+
+[[model]]
+name = "m2"
+description = "overridden by the leaf"
+context = 2
+upstream = "u2"
+endpoints = ["e2"]
+
+[[model]]
+name = "m3"
+description = "leaf only"
+context = 1
+upstream = "u3"
+endpoints = ["e"]
+"#,
+        );
+        let options = ServeOptions::new(
+            tmp.path().join("gateway.toml"),
+            ProfileName::parse("main").unwrap(),
+        );
+        (tmp, options)
+    }
+
+    /// The `source_file` annotation of the keyed-array entry named `key` in
+    /// `array`.
+    fn entry_source_file<'a>(json: &'a serde_json::Value, array: &str, key: &str) -> &'a str {
+        json[array]
+            .as_array()
+            .unwrap_or_else(|| panic!("{array} is an array"))
+            .iter()
+            .find(|entry| {
+                entry
+                    .get("name")
+                    .or_else(|| entry.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some(key)
+            })
+            .unwrap_or_else(|| panic!("{array} entry {key} exists"))
+            .get("source_file")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("{array} entry {key} carries a source_file"))
+    }
+
+    #[test]
+    fn admin_config_serves_the_running_config_with_provenance() {
+        let (_tmp, options) = config_endpoint_fixture();
+        let gateway = spawn(&options).expect("gateway spawns");
+
+        let response = http_get_authed(gateway.url(), "/admin/config", "boot-key");
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        let body = response
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("a body follows the headers");
+        let json: serde_json::Value =
+            serde_json::from_str(body).expect("the body is a JSON document");
+
+        // The shape mirrors the TOML structure.
+        let top = json.as_object().expect("a top-level object");
+        for key in ["server", "endpoint", "model"] {
+            assert!(top.contains_key(key), "missing top-level key `{key}`");
+        }
+        assert_eq!(json["server"]["bind"], "127.0.0.1:0");
+        assert_eq!(json["model"][0]["name"], "m");
+
+        // Secrets never leave the process.
+        assert_eq!(json["server"]["api_key"], "***");
+        assert!(
+            !body.contains("boot-key") && !body.contains("common-endpoint-secret"),
+            "the payload leaked a secret: {body}"
+        );
+
+        // Each keyed-array entry names the file its winning definition came
+        // from: the boot file, the include, or the leaf profile.
+        assert!(
+            entry_source_file(&json, "model", "m").ends_with("gateway.toml"),
+            "m is inherited from the boot file"
+        );
+        assert!(
+            entry_source_file(&json, "endpoint", "e2").ends_with("common.toml"),
+            "e2 is inherited from the include"
+        );
+        assert!(
+            entry_source_file(&json, "model", "m2").ends_with("main.toml"),
+            "m2 is overridden by the leaf"
+        );
+        assert_eq!(json["model"][1]["description"], "overridden by the leaf");
+        assert!(
+            entry_source_file(&json, "model", "m3").ends_with("main.toml"),
+            "m3 is defined by the leaf"
+        );
+        assert!(
+            json["source_files"]["server"]
+                .as_str()
+                .expect("a server source")
+                .ends_with("gateway.toml"),
+            "the [server] table comes from the boot file"
+        );
+
+        gateway.shutdown().expect("graceful shutdown succeeds");
+    }
+
+    #[test]
+    fn admin_config_requires_the_bearer_key() {
+        let (_tmp, options) = config_endpoint_fixture();
+        let gateway = spawn(&options).expect("gateway spawns");
+
+        let response = http_get(gateway.url(), "/admin/config");
+        assert!(response.starts_with("HTTP/1.1 401"), "got: {response}");
+
+        gateway.shutdown().expect("graceful shutdown succeeds");
     }
 
     #[test]

@@ -120,6 +120,50 @@ async fn switch_profile_updates_models_catalog() {
     server.shutdown().await;
 }
 
+/// `GET /admin/config` reports the running profile's configuration: a
+/// switch swaps the retained config, so the payload reflects the new
+/// profile and its provenance, not the boot-time one.
+#[tokio::test]
+async fn switch_profile_updates_admin_config() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    let admin_config = |addr: std::net::SocketAddr| {
+        let http = http.clone();
+        async move {
+            json_within(
+                send_within(
+                    http.get(format!("http://{addr}/admin/config"))
+                        .bearer_auth("test-token"),
+                )
+                .await,
+            )
+            .await
+        }
+    };
+
+    let config = admin_config(server.addr).await;
+    assert_eq!(config["model"][0]["name"], "alpha-model");
+
+    let events = switch_stream_events(&http, server.addr, "beta").await;
+    assert_eq!(
+        events.last(),
+        Some(&serde_json::json!({ "status": "ready", "profile": "beta" }))
+    );
+
+    let config = admin_config(server.addr).await;
+    assert_eq!(config["model"][0]["name"], "beta-model");
+    assert_eq!(config["model"][0]["context"], 4096);
+    assert!(
+        config["model"][0]["source_file"]
+            .as_str()
+            .expect("the entry carries a source_file")
+            .ends_with("beta.toml"),
+        "the swapped config carries the new profile's provenance"
+    );
+    server.shutdown().await;
+}
+
 /// The switch stream carries its stage markers in execution order -
 /// loading-profile, then stopping-models, then starting-models - and ends
 /// with the terminal ready event naming the new profile. No drain stage
