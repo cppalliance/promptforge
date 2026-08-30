@@ -22,6 +22,7 @@ import { GatewayApi } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { createDiscoverView } from "./views/discover-view";
+import { createDownloadsView } from "./views/downloads-view";
 import { createModelsView } from "./views/models-view";
 import { createSettingsView } from "./views/settings-view";
 
@@ -203,7 +204,8 @@ function mountStandaloneShell(
 
   // Top progress strip [Adapted: LocalAI]: a thin lava-gradient bar at
   // the very top of the window while any download is active, fed by
-  // the global download store so it survives view navigation.
+  // the global download store so it survives view navigation. The same
+  // subscription drives the Downloads tab's active-count badge.
   const strip = document.createElement("div");
   strip.className = "progress-strip global-progress";
   strip.hidden = true;
@@ -214,6 +216,7 @@ function mountStandaloneShell(
     const active = downloadStore.active();
     strip.hidden = active.length === 0;
     stripBar.style.setProperty("--progress", String(downloadStore.overallFraction()));
+    tabBar.setDownloadsBadge(active.length);
   };
   const unsubscribeDownloads = downloadStore.subscribe(renderStrip);
 
@@ -232,6 +235,7 @@ function mountStandaloneShell(
     toasts,
     fetchFn,
   });
+  const downloadsView = createDownloadsView({ api, downloads: downloadStore, toasts });
   const stopRouter = startRouter({
     win,
     main,
@@ -239,6 +243,7 @@ function mountStandaloneShell(
     views: {
       models: (target, match) => modelsView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
+      downloads: (target) => downloadsView.mount(target),
       settings: (target, match) => settingsView.mount(target, match.detail),
     },
   });

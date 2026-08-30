@@ -71,6 +71,21 @@ export interface SystemSnapshot {
   gpu: { name: string; vram_used_bytes: number; vram_total_bytes: number } | null;
 }
 
+/**
+ * One cached blob from `GET /v1/cache`. The sidecar records no
+ * timestamp, so the listing carries no download date.
+ */
+export interface CacheListEntry {
+  /** The URL the blob was downloaded from. */
+  source: string;
+  /** Absolute path of the blob under the cache root. */
+  path: string;
+  /** Lowercase hex SHA-256 of the blob's bytes. */
+  sha256: string;
+  /** Blob length in bytes. */
+  size_bytes: number;
+}
+
 /** One progress sample from a `POST /v1/cache` download stream. */
 export interface CacheProgressSample {
   /** Bytes downloaded so far. */
@@ -313,6 +328,12 @@ export class GatewayApi {
     if (!response.ok) {
       throw new GatewayHttpError(response.status, await refusalMessage(response));
     }
+  }
+
+  /** Lists the cached blobs via `GET /v1/cache`. */
+  async listCache(): Promise<CacheListEntry[]> {
+    const data = await this.getJson("/v1/cache");
+    return Array.isArray(data) ? (data as CacheListEntry[]) : [];
   }
 
   /** Deletes a cached artifact via `DELETE /v1/cache/{sha256}`. */

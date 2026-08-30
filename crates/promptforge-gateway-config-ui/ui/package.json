@@ -12,6 +12,8 @@
     "package": "node build.mjs --package",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
+    "check-layers": "node check-layers.mjs",
+    "pretest": "npm run check-layers",
     "test": "node --test \"src/**/*.test.mjs\""
   },
   "dependencies": {

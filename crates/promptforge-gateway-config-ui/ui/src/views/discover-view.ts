@@ -13,6 +13,7 @@ import { BadgeCheck, Star, createElement as lucideElement } from "lucide";
 
 import { renderMarkdown } from "../components/markdown";
 import type { ToastStack } from "../components/toast";
+import { formatBytes } from "../format";
 import type { FetchLike, GatewayApi, SystemSnapshot } from "../services/gateway-api";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type { HfApi, HfModelDetail, HfQuant, HfSearchRow, HfSort } from "../services/hf-api";
@@ -774,14 +775,3 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-/** Human-readable byte size (GiB/MiB/KiB). */
-function formatBytes(bytes: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
-}
