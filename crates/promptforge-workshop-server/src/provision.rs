@@ -6,11 +6,14 @@
 //! flag and, whenever the gateway answers and the voice engine is not
 //! loaded, calls `POST /v1/cache` for each configured model source. A cache
 //! hit answers immediately with the cached path; a miss streams download
-//! progress events (forwarded to the status bar) that end in a terminal
-//! `ready` event carrying the path. When both models resolve, the engine
-//! loads from the resolved paths - on the blocking pool, since model
-//! loading waits on worker-thread init - and the shared [`VoiceSlot`] is
-//! activated, so the next `/voice` session transcribes. One successful
+//! progress events that drive a leaf of the attempt's operation tree on
+//! the process progress hub (the renderer task turns the tree into the
+//! status bar's progress indicator), ending in a terminal `ready` event
+//! carrying the path. When both models resolve, the engine loads from the
+//! resolved paths - on the blocking pool, since model loading waits on
+//! worker-thread init, reporting its prewarm and init leaves on the same
+//! tree - and the shared [`VoiceSlot`] is activated, so the next `/voice`
+//! session transcribes. One successful
 //! provisioning ends the task; a failure is logged and reported on the
 //! status bus, and the next gateway reconnect retries - a retry hits the
 //! cache for every blob the failed attempt already fetched, so it is cheap.
@@ -21,8 +24,10 @@
 //! graceful-shutdown future, next to the heartbeat's.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use futures_util::StreamExt;
+use promptforge_progress::{ProgressHandle, ProgressHub, ProgressTree};
 use promptforge_transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use tokio::sync::oneshot;
 
@@ -55,18 +60,20 @@ impl Provision {
     }
 }
 
-/// Spawns the provisioning task against `client`, reporting through
-/// `push`, waiting on `health`, and activating `voice` on success.
+/// Spawns the provisioning task against `client`, reporting status
+/// through `push` and fractional progress through `hub`, waiting on
+/// `health`, and activating `voice` on success.
 pub(crate) fn spawn(
     client: GatewayClient,
     push: Push,
+    hub: Arc<ProgressHub>,
     health: GatewayHealth,
     voice: VoiceSlot,
     config: VoiceConfig,
 ) -> Provision {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&client, &push, &health, &voice, &config, &mut stopped).await;
+        run(&client, &push, &hub, &health, &voice, &config, &mut stopped).await;
     });
     Provision {
         stop: Some(stop),
@@ -80,6 +87,7 @@ pub(crate) fn spawn(
 async fn run(
     client: &GatewayClient,
     push: &Push,
+    hub: &Arc<ProgressHub>,
     health: &GatewayHealth,
     voice: &VoiceSlot,
     config: &VoiceConfig,
@@ -107,7 +115,7 @@ async fn run(
         }
         let outcome = tokio::select! {
             _ = &mut *stop => return,
-            outcome = provision_once(client, push, voice, config) => outcome,
+            outcome = provision_once(client, push, hub, voice, config) => outcome,
         };
         match outcome {
             Ok(()) => return,
@@ -135,25 +143,46 @@ fn can_provision(config: &VoiceConfig) -> bool {
     config.interim_model.is_file() || !config.interim_source.is_empty()
 }
 
+/// Leaf weights track expected time: a multi-gigabyte model download
+/// dominates the seconds-long engine load.
+const DOWNLOAD_WEIGHT: f64 = 9.0;
+const ENGINE_WEIGHT: f64 = 1.0;
+
 /// Resolves both whisper models to local paths - the interim model, and
 /// the final-pass model when one is configured or sourced - then loads the
 /// voice engine from them and activates the slot.
 async fn provision_once(
     client: &GatewayClient,
     push: &Push,
+    hub: &Arc<ProgressHub>,
     voice: &VoiceSlot,
     config: &VoiceConfig,
 ) -> Result<(), ProvisionError> {
-    let interim =
-        resolve_model(client, push, &config.interim_model, &config.interim_source).await?;
-    let final_pass = resolve_final(client, push, config).await?;
+    // One operation tree per attempt, every leaf registered up front: a
+    // download leaf per model that will be fetched, plus the engine load.
+    let tree = hub.operation();
+    let interim_download = download_leaf(&tree, &config.interim_model, &config.interim_source);
+    let final_download = download_leaf(&tree, &config.final_model, &config.final_source);
+    let engine_load = tree.register("Loading voice models", ENGINE_WEIGHT);
+    let interim = resolve_model(
+        client,
+        push,
+        &config.interim_model,
+        &config.interim_source,
+        interim_download,
+    )
+    .await?;
+    let final_pass = resolve_final(client, push, config, final_download).await?;
     let mut resolved = config.clone();
     resolved.interim_model = interim;
     resolved.final_model = final_pass.unwrap_or_default();
-    // VoiceEngine::new blocks on the worker threads' model init, so it
-    // runs on the blocking pool and never stalls the executor.
+    // VoiceEngine::new_with_progress blocks on the worker threads' model
+    // init, so it runs on the blocking pool and never stalls the executor.
     let engine = tokio::task::spawn_blocking(move || {
-        VoiceEngine::new(&promptforge_transcribe::EngineConfig::from(&resolved))
+        VoiceEngine::new_with_progress(
+            &promptforge_transcribe::EngineConfig::from(&resolved),
+            Some(engine_load),
+        )
     })
     .await
     .map_err(ProvisionError::EngineTask)?
@@ -167,6 +196,19 @@ async fn provision_once(
     Ok(())
 }
 
+/// Registers the download leaf for a model that resolution will fetch:
+/// the file is missing and a source URL exists. Returns `None` when
+/// resolution will not fetch, so the tree carries no leaf for it.
+fn download_leaf(tree: &ProgressTree, path: &Path, source: &str) -> Option<ProgressHandle> {
+    if path.is_file() || source.is_empty() {
+        return None;
+    }
+    Some(tree.register(
+        &format!("Downloading {}", source_filename(source)),
+        DOWNLOAD_WEIGHT,
+    ))
+}
+
 /// Resolves one model to a local path: the configured path when the file
 /// exists, otherwise a cache fetch of its source URL.
 async fn resolve_model(
@@ -174,6 +216,7 @@ async fn resolve_model(
     push: &Push,
     path: &Path,
     source: &str,
+    download: Option<ProgressHandle>,
 ) -> Result<PathBuf, ProvisionError> {
     if path.is_file() {
         return Ok(path.to_path_buf());
@@ -183,7 +226,7 @@ async fn resolve_model(
             path: path.to_path_buf(),
         });
     }
-    cache_fetch(client, push, source).await
+    cache_fetch(client, push, source, download.as_ref()).await
 }
 
 /// Resolves the optional final-pass model. A configured final path that is
@@ -194,6 +237,7 @@ async fn resolve_final(
     client: &GatewayClient,
     push: &Push,
     config: &VoiceConfig,
+    download: Option<ProgressHandle>,
 ) -> Result<Option<PathBuf>, ProvisionError> {
     if config.final_model.is_file() {
         return Ok(Some(config.final_model.clone()));
@@ -211,7 +255,7 @@ async fn resolve_final(
         }
         return Ok(None);
     }
-    cache_fetch(client, push, &config.final_source)
+    cache_fetch(client, push, &config.final_source, download.as_ref())
         .await
         .map(Some)
 }
@@ -224,8 +268,8 @@ fn source_filename(source: &str) -> &str {
 
 /// Ensures the blob at `source` is cached, returning its local path. A
 /// cache hit answers immediately; a miss consumes the download event
-/// stream, forwarding each progress sample to the status bar, until the
-/// terminal `ready` or `error` event.
+/// stream, applying each progress sample to the `download` leaf, until
+/// the terminal `ready` or `error` event.
 ///
 /// The stream carries no stall timeout, matching the chat stream's
 /// posture: a download that stops mid-way holds the attempt until the
@@ -236,6 +280,7 @@ async fn cache_fetch(
     client: &GatewayClient,
     push: &Push,
     source: &str,
+    download: Option<&ProgressHandle>,
 ) -> Result<PathBuf, ProvisionError> {
     match client.cache_ensure(source).await? {
         CacheResponse::Buffered(answer) if answer.status.is_success() => {
@@ -264,17 +309,17 @@ async fn cache_fetch(
             match event {
                 CacheEvent::Downloading { bytes, total } => {
                     // A null total means the upstream sent no
-                    // Content-Length; it crosses the wire as a 0 total,
-                    // which the status bar clamps to a degenerate bar.
-                    push.push_progress(
-                        format!("Downloading {filename}"),
-                        format!("{source} through the gateway cache"),
-                        bytes,
-                        total.unwrap_or(0),
-                        Activity::General,
-                    );
+                    // Content-Length; with no total there is no fraction
+                    // to report, so the leaf holds until a known total
+                    // or the terminal ready.
+                    if let (Some(leaf), Some(total)) = (download, total) {
+                        leaf.set_units(bytes, total);
+                    }
                 }
                 CacheEvent::Ready { path } => {
+                    if let Some(leaf) = download {
+                        leaf.complete();
+                    }
                     push.push_status_update(
                         "Download complete",
                         format!("{filename} is cached at {}", path.display()),
@@ -360,6 +405,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
     use axum::routing::post;
+    use promptforge_progress::ProgressHub;
     use promptforge_transcribe::fixtures;
     use tokio::sync::broadcast;
 
@@ -492,6 +538,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(status),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -535,6 +582,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(status),
+            Arc::new(ProgressHub::new()),
             health.clone(),
             slot.clone(),
             sourced_config(),
@@ -567,6 +615,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(status),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -585,6 +634,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(StatusBus::new()),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             VoiceSlot::default(),
             VoiceConfig::default(),
@@ -622,6 +672,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(StatusBus::new()),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             slot,
             sourced_config(),
@@ -647,6 +698,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(StatusBus::new()),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             slot.clone(),
             config,
@@ -678,6 +730,7 @@ mod tests {
         let provision = spawn(
             client,
             push_over(status),
+            Arc::new(ProgressHub::new()),
             GatewayHealth::new(),
             slot.clone(),
             sourced_config(),
@@ -693,6 +746,83 @@ mod tests {
         provision.shutdown().await;
     }
 
+    /// A mock cache whose download stream the test scripts line by line:
+    /// each sent string goes out verbatim as it is sent, and the stream
+    /// stays open until the sender drops.
+    fn mock_cache_scripted() -> (Router, tokio::sync::mpsc::Sender<String>) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(8);
+        let rx = Arc::new(std::sync::Mutex::new(Some(rx)));
+        let app = Router::new().route(
+            "/v1/cache",
+            post(move || {
+                let rx = Arc::clone(&rx);
+                async move {
+                    let mut rx = rx
+                        .lock()
+                        .expect("the script receiver is not poisoned")
+                        .take()
+                        .expect("the test makes one cache request");
+                    let stream = futures_util::stream::poll_fn(move |cx| {
+                        rx.poll_recv(cx)
+                            .map(|line| line.map(Ok::<_, std::io::Error>))
+                    });
+                    (
+                        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                        axum::body::Body::from_stream(stream),
+                    )
+                }
+            }),
+        );
+        (app, tx)
+    }
+
+    #[tokio::test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "leaf fractions are fixed-point millionths, so equality is exact"
+    )]
+    async fn a_download_sample_drives_the_leaf_fraction() {
+        let (app, script) = mock_cache_scripted();
+        let base_url = serve(app).await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let leaf = tree.register("Downloading ggml-large-v3-turbo.bin", DOWNLOAD_WEIGHT);
+        let reporter = leaf.clone();
+        let fetch = tokio::spawn(async move {
+            let push = push_over(StatusBus::new());
+            cache_fetch(&client, &push, INTERIM_SOURCE, Some(&leaf)).await
+        });
+        script
+            .send("data: {\"status\":\"downloading\",\"bytes\":5,\"total\":10}\n\n".to_string())
+            .await
+            .expect("the stream is open");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while reporter.fraction() != 0.5 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the downloading sample drives the leaf to 5/10"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let ready = serde_json::json!({"status": "ready", "path": "/cached/model.bin"});
+        script
+            .send(format!("data: {ready}\n\n"))
+            .await
+            .expect("the stream is open");
+        let path = tokio::time::timeout(Duration::from_secs(5), fetch)
+            .await
+            .expect("the fetch finishes within the deadline")
+            .expect("the fetch task joins")
+            .expect("the terminal ready resolves the cached path");
+        assert_eq!(path, PathBuf::from("/cached/model.bin"));
+        assert_eq!(
+            reporter.fraction(),
+            1.0,
+            "the terminal ready completes the leaf"
+        );
+    }
+
     /// A `/ws` client socket connected to a live workshop test server,
     /// plus the state pieces the provision task spawns with.
     struct Workshop {
@@ -701,6 +831,7 @@ mod tests {
         >,
         gateway: GatewayClient,
         push: Push,
+        progress: Arc<ProgressHub>,
         health: GatewayHealth,
         slot: VoiceSlot,
         voice: VoiceConfig,
@@ -725,6 +856,7 @@ mod tests {
         let state = crate::AppState::new(&config).expect("state builds in tests");
         let gateway = state.gateway_client().clone();
         let push = state.push();
+        let progress = state.progress().clone();
         let health = state.health().clone();
         let slot = state.voice_slot();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -743,6 +875,7 @@ mod tests {
             socket,
             gateway,
             push,
+            progress,
             health,
             slot,
             voice: config.voice.clone(),
@@ -768,10 +901,13 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
-    async fn download_progress_flows_to_the_main_ws_status_feed() {
-        // A mock cache answering with an SSE download stream: the first
-        // sample has a null total (no Content-Length upstream), the second
-        // a known total, then the terminal ready.
+    async fn a_sub_second_download_pushes_only_the_terminal_status_frames() {
+        // A mock cache answering with an SSE download stream: two progress
+        // samples, then the terminal ready. The mock download completes in
+        // milliseconds, so the renderer's anti-flicker threshold suppresses
+        // the progress indicator and only the terminal status frames reach
+        // the client (the threshold itself is pinned by the renderer's
+        // paused-time unit tests).
         let base_url = serve(mock_cache_stream(concat!(
             "data: {\"status\":\"downloading\",\"bytes\":5,\"total\":null}\n\n",
             "data: {\"status\":\"downloading\",\"bytes\":12,\"total\":12}\n\n",
@@ -789,6 +925,7 @@ mod tests {
         let provision = spawn(
             workshop.gateway.clone(),
             workshop.push.clone(),
+            workshop.progress.clone(),
             workshop.health.clone(),
             workshop.slot.clone(),
             workshop.voice.clone(),
@@ -821,29 +958,15 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            [
-                "Downloading ggml-large-v3-turbo.bin",
-                "Downloading ggml-large-v3-turbo.bin",
-                "Download complete",
-                "Voice ready",
-            ],
-            "progress samples, then the terminal pair: {labels:?}"
+            ["Download complete", "Voice ready"],
+            "a sub-second download shows no progress frames, only the terminal pair: {labels:?}"
         );
-        assert_eq!(
-            frames[0]["progress"],
-            serde_json::json!({"current": 5, "total": 0}),
-            "a null total crosses the wire as 0"
-        );
-        assert_eq!(
-            frames[1]["progress"],
-            serde_json::json!({"current": 12, "total": 12})
+        assert!(
+            frames[0]["progress"].is_null(),
+            "a status text frame carries no progress bar"
         );
         assert_eq!(frames[0]["severity"], "info");
         assert_eq!(frames[0]["activity"], "general");
-        assert!(
-            frames[2]["progress"].is_null(),
-            "the terminal download frame clears the progress bar"
-        );
         provision.shutdown().await;
     }
 }

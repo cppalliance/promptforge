@@ -243,6 +243,7 @@ fn serve_thread(
         let provision = provision::spawn(
             state.gateway_client().clone(),
             state.push(),
+            Arc::clone(state.progress()),
             state.health().clone(),
             state.voice_slot(),
             voice_config,

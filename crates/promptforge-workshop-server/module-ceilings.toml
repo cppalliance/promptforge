@@ -25,7 +25,11 @@
 # the ceiling downward in the same commit to bank the gain.
 
 [modules]
-"app.rs" = 544
+# Grew by the startup engine load's progress wiring: `startup_engine` and
+# `degrade` load through `load_engine`, which registers a one-leaf
+# operation tree on the hub for `VoiceEngine::new_with_progress`, plus the
+# tree-detach regression test.
+"app.rs" = 611
 "assets.rs" = 69
 "atomic.rs" = 230
 "backoff.rs" = 232
@@ -55,7 +59,11 @@
 # the lapsed-deadline detach poll (a past wake instant re-armed would spin
 # the select loop) and its two pinning tests.
 "progress.rs" = 390
-"provision.rs" = 839
+# Grew by the provision migration to tree leaves: `cache_fetch` applies
+# download samples to a per-model leaf instead of pushing progress frames,
+# the engine load registers on the attempt's operation tree, and the
+# scripted-stream test pins the leaf fraction mid-download.
+"provision.rs" = 972
 "push.rs" = 274
 "relay.rs" = 537
 "routes.rs" = 8
