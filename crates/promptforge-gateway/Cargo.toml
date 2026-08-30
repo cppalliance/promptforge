@@ -20,6 +20,8 @@ path = "src/main.rs"
 axum.workspace = true
 dotenvy.workspace = true
 futures-util.workspace = true
+# TTY progress bars drawn by the renderer task.
+indicatif.workspace = true
 # Optional: opens the system browser at the hosted workshop URL.
 open = { workspace = true, optional = true }
 promptforge-core.workspace = true

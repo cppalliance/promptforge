@@ -562,7 +562,7 @@ context = 512
 
 The cache directory defaults to `~/.promptforge` (set `[local].cache_dir` to override). Models land in `<cache>/models/`, the llama.cpp binary in `<cache>/llama.cpp/`.
 
-First-time downloads show an indicatif progress bar on interactive TTY stderr - percent, bytes, rate, and ETA. On non-TTY stderr, periodic tracing progress lines are emitted instead.
+First-time downloads and other long-running operations show indicatif progress bars on interactive TTY stderr. On non-TTY stderr, periodic tracing progress lines are emitted instead.
 
 When `sha256` is set, the downloaded file is verified against the digest.
 

@@ -15,7 +15,6 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 async-trait.workspace = true
 flate2.workspace = true
-indicatif.workspace = true
 promptforge-gateway-config.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true

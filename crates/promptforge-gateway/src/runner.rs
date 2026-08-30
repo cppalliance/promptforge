@@ -119,7 +119,21 @@ impl Gateway {
         config: &Config,
         profiles: ProfilesContext,
     ) -> Result<Gateway, StartupError> {
-        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        Self::from_config_with_hub(
+            config,
+            profiles,
+            Arc::new(promptforge_progress::ProgressHub::new()),
+        )
+    }
+
+    /// [`from_config`](Self::from_config) over a caller-provided progress
+    /// hub, so the serving lifecycle's renderer thread can watch startup
+    /// provisioning.
+    pub(crate) fn from_config_with_hub(
+        config: &Config,
+        profiles: ProfilesContext,
+        hub: Arc<promptforge_progress::ProgressHub>,
+    ) -> Result<Gateway, StartupError> {
         // Startup provisioning is the hub's first operation tree: it lives
         // for the provisioning call and detaches when the tree drops.
         #[cfg(feature = "local")]
@@ -445,7 +459,12 @@ fn serve_thread(
         }
     };
     let bind = config.bind_addr();
-    let gateway = match Gateway::from_config(&config, profiles) {
+    let hub = Arc::new(promptforge_progress::ProgressHub::new());
+    // The renderer starts before provisioning so boot downloads draw; it is
+    // a plain thread because provisioning runs before the runtime exists,
+    // and its Drop stops it on every exit path below.
+    let _renderer = crate::render::Renderer::start(&hub);
+    let gateway = match Gateway::from_config_with_hub(&config, profiles, hub) {
         Ok(gateway) => gateway,
         Err(error) => {
             let _ = ready.send(Err(error));

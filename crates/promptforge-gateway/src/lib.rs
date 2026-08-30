@@ -29,6 +29,7 @@ mod api_error;
 mod cache;
 mod dialect;
 mod error;
+mod render;
 mod routing;
 mod runner;
 mod workshop;
