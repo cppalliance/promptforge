@@ -62,14 +62,14 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
-default = ["local", "web-search"]
+default = ["local", "web-search", "config-ui"]
 # Gateway-owned local inference via the `promptforge-gateway-local` crate.
 local = ["dep:promptforge-gateway-local"]
 # The Brave-powered `POST /v1/tools/web_search` tool service.
 web-search = ["dep:promptforge-web-search-service"]
 # Serve the embedded config UI SPA at /config/ on the gateway's own port,
-# loopback-only. The default stays empty so headless builds never compile
-# the SPA crate, its embedded assets, or its Node build pipeline.
+# loopback-only. Default, so plain builds need Node 22 for the SPA's esbuild
+# pipeline; --no-default-features builds skip the SPA crate entirely.
 config-ui = ["dep:promptforge-gateway-config-ui"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull whisper, CUDA, or the

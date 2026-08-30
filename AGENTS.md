@@ -17,6 +17,15 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
 
+## Binaries and features
+
+Two products ship from this workspace: `promptforge-gateway.exe`, the lean server, and `promptforge-workshop.exe`, the batteries-included desktop app that boots the gateway in-process. The binary is the feature set; features are not product variants.
+
+- A Cargo feature exists only to gate a real constraint: a toolchain requirement (`cuda`) or a heavy native build (`local`). Do not add features that merely describe product shape.
+- `config-ui` is a default gateway feature and always present in the desktop build. Plain gateway builds therefore require Node 22 (the config-ui `build.rs` runs esbuild); if that ever bites a Node-less builder, check the packaged `dist/` into the repo and verify it in `build.rs` - do not re-flag the feature.
+- Never make `workshop` a default gateway feature. The desktop exe is the everything-build; the gateway stays the lean one. That asymmetry is the product boundary.
+- Keep `cargo check -p promptforge-gateway --no-default-features` green. Nobody ships that build, but it is the cheap gate that catches optional-feature types leaking into core paths.
+
 ## Progress
 
 Long-running work reports progress through `promptforge-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
