@@ -9,6 +9,7 @@ import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartIni
 import { Disposable } from "../../base/lifecycle";
 import { ChatPanel } from "./chat-panel";
 import { EditorPanel } from "./editor-panel";
+import { GatewayConfigPanel } from "./gateway-config-panel";
 import { WorkshopTreePanel } from "./workshop-panel";
 import type { ZoneName } from "./zones";
 
@@ -49,6 +50,13 @@ export const PANEL_TYPES = {
     title: "Agent",
     tabComponent: undefined,
     factory: (): IContentRenderer => new ChatPanel(),
+  },
+  config: {
+    type: "config",
+    defaultZone: "main",
+    title: "Gateway Config",
+    tabComponent: undefined,
+    factory: (): IContentRenderer => new GatewayConfigPanel(),
   },
 } as const satisfies Record<string, PanelTypeEntry>;
 

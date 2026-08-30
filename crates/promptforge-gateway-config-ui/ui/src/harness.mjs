@@ -654,9 +654,10 @@ export function gatewayStub({
 /**
  * Boots the app into a fresh jsdom: optionally seeds the stored key,
  * mounts a container, and calls the bundle's `boot` with the stub's
- * fetch. Returns the dom and the mounted root.
+ * fetch plus any extra boot options (the panel-mode bridge seams).
+ * Returns the dom and the mounted root.
  */
-export async function bootApp({ url = CONFIG_URL, key, stub } = {}) {
+export async function bootApp({ url = CONFIG_URL, key, stub, options } = {}) {
   const app = await loadApp();
   const dom = makeDom(url);
   if (key !== undefined) {
@@ -664,7 +665,7 @@ export async function bootApp({ url = CONFIG_URL, key, stub } = {}) {
   }
   const root = dom.window.document.createElement("div");
   dom.window.document.body.append(root);
-  app.boot(root, { win: dom.window, fetchFn: stub?.fetchFn });
+  app.boot(root, { win: dom.window, fetchFn: stub?.fetchFn, ...(options ?? {}) });
   await settle();
   return { dom, root };
 }

@@ -16,6 +16,7 @@ import { ModelService } from "./services/model-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopProvider } from "./services/workshop-provider";
 import { WorkshopSocket } from "./services/workshop-socket";
+import { setupGatewayConfigBridge } from "./ui/gateway-config-bridge";
 import { StatusBar } from "./ui/status-bar";
 import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./ui/voice";
 import { setupWindowChrome } from "./ui/window-chrome";
@@ -45,6 +46,10 @@ disposables.add(setupWindowChrome());
 // Native Explorer drops arrive as a typed event from the desktop shell;
 // each path becomes a workspace grant. Inert in a plain browser.
 disposables.add(setupWorkspaceDrops(statusBar));
+// The Gateway Config panel's postMessage bridge: API forwards go through
+// the workshop server's key-attaching proxy, and the panel's action
+// notifications (apply, revert, download-started) land on the status bar.
+disposables.add(setupGatewayConfigBridge({ statusBar }));
 const workshopSocket = disposables.add(new WorkshopSocket());
 
 // The model catalog and selection live in the ModelService, not module
@@ -251,7 +256,12 @@ const modelMenu: ModelMenuService = {
 disposables.add(
   setupWindowMenus({
     agents,
-    workshop: { toggleWorkshopPanel: () => toggleWorkshopPanel(dock) },
+    workshop: {
+      toggleWorkshopPanel: () => toggleWorkshopPanel(dock),
+      openGatewayConfig: () => {
+        openInZone("config", {});
+      },
+    },
     modelMenu,
     profileMenu,
   }),

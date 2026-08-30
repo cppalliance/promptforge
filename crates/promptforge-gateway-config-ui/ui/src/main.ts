@@ -1,9 +1,13 @@
 // Composition root for the gateway config SPA. Boot detects the mode:
 // the workshop panel (`?mode=panel`) mounts the shell without medallion
-// or key prompt - its API access arrives with the postMessage bridge -
-// while standalone mounts the key prompt first (when no key is stored)
-// and then the live shell: tab bar, profile switcher, hash router, and
-// the progress subscription.
+// or key prompt - its API access rides the postMessage bridge to the
+// workshop, which forwards calls with the bearer key attached, so the
+// key never enters this frame - while standalone mounts the key prompt
+// first (when no key is stored) and then the live shell: tab bar,
+// profile switcher, hash router, and the progress subscription. In
+// panel mode the workshop owns all progress display, so the shell never
+// subscribes to the progress stream and instead announces its actions
+// (apply, revert, download-started) to the parent.
 
 import "./styles/base.css";
 import "./styles/controls.css";
@@ -22,6 +26,7 @@ import { DownloadStore } from "./services/download-store";
 import { GatewayApi } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
+import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
 import { createDiscoverView } from "./views/discover-view";
 import { createDownloadsView } from "./views/downloads-view";
 import { createModelsView } from "./views/models-view";
@@ -50,16 +55,20 @@ export interface BootOptions {
   win?: BootWindow;
   /** The transport; defaults to the global fetch. */
   fetchFn?: FetchLike;
+  /** Panel-mode outgoing-post seam; production posts to the parent window. */
+  bridgePost?: (message: unknown) => void;
+  /** Panel-mode bridge reply deadline override, for tests. */
+  bridgeTimeoutMs?: number;
 }
 
 /** Boots the SPA into `root`. */
 export function boot(root: HTMLElement, options: BootOptions = {}): void {
   const win = options.win ?? (window as unknown as BootWindow);
   const fetchFn = options.fetchFn ?? ((input, init) => fetch(input, init));
-  const panel = new URLSearchParams(win.location.search).get("mode") === "panel";
+  const params = new URLSearchParams(win.location.search);
 
-  if (panel) {
-    mountPanelShell(root, win);
+  if (params.get("mode") === "panel") {
+    mountPanelMode(root, win, params.get("bridge"), options);
     return;
   }
 
@@ -74,7 +83,7 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   };
   const showShell = () => {
     dispose();
-    dispose = mountStandaloneShell(root, win, api, fetchFn);
+    dispose = mountLiveShell(root, win, api, fetchFn, null);
   };
   // Any 401 clears the stored key and returns to the prompt.
   api.onUnauthorized = showPrompt;
@@ -86,14 +95,94 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
 }
 
 /**
- * Mounts the full standalone shell and starts its data flows. Returns
- * the teardown that stops the router and the progress subscription.
+ * Boots panel mode. Without a usable `bridge` origin parameter the
+ * shell stays inert (the bridge-pending banner, no network calls at
+ * all). With one, the bridge announces itself to the pinned workshop
+ * origin, waits for the context message, and then mounts the live
+ * shell whose transport is the bridge - no sessionStorage key and no
+ * direct gateway fetch exist in this frame.
  */
-function mountStandaloneShell(
+function mountPanelMode(
+  root: HTMLElement,
+  win: BootWindow,
+  bridgeParam: string | null,
+  options: BootOptions,
+): void {
+  const origin = parseBridgeOrigin(bridgeParam);
+  if (origin === null) {
+    mountPanelPending(root, win);
+    return;
+  }
+  const bridge = new PanelBridge({
+    win: win as unknown as BridgeWindow,
+    origin,
+    post: options.bridgePost,
+    timeoutMs: options.bridgeTimeoutMs,
+  });
+  // Whether the iframe URL itself carried a route, read before the
+  // pending shell's router normalizes an empty hash to #/models: an
+  // explicit hash outranks the workshop's initial-route context.
+  const hadInitialHash = win.location.hash !== "";
+  const disposePending = mountPanelPending(root, win);
+  let mounted = false;
+  bridge.onContext = (context) => {
+    // Theme context: the shell's CSS keys off the attribute, and any
+    // later context message keeps it fresh without remounting.
+    root.setAttribute("data-theme", context.theme);
+    if (mounted) {
+      return;
+    }
+    mounted = true;
+    disposePending();
+    if (!hadInitialHash && context.route.startsWith("#/")) {
+      win.location.hash = context.route;
+    }
+    const api = new GatewayApi({ fetchFn: bridge.fetchLike, storage: memoryStorage(), base: "" });
+    // Hub-served bytes (the Discover README) carry no gateway key and
+    // load straight from the hub; everything else rides the bridge.
+    const hubFetch = options.fetchFn ?? ((input, init) => fetch(input, init));
+    mountLiveShell(root, win, api, hubFetch, bridge);
+  };
+  bridge.start();
+}
+
+/**
+ * An in-memory Storage stand-in for panel mode: the frame never holds a
+ * bearer key, so nothing must ever reach sessionStorage.
+ */
+function memoryStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => [...map.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      map.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      map.set(key, value);
+    },
+  };
+}
+
+/**
+ * Mounts the live shell and starts its data flows, in either mode:
+ * standalone (`bridge` null - medallion, progress subscription) or
+ * workshop panel (`bridge` set - no medallion, no progress subscription
+ * because the workshop owns progress display, and apply/revert/
+ * download-started announced to the parent). `hubFetch` carries only
+ * hub-served bytes (the Discover README); gateway calls go through
+ * `api`. Returns the teardown that stops the router and subscriptions.
+ */
+function mountLiveShell(
   root: HTMLElement,
   win: BootWindow,
   api: GatewayApi,
-  fetchFn: FetchLike,
+  hubFetch: FetchLike,
+  bridge: PanelBridge | null,
 ): () => void {
   const toasts = createToastStack();
   const overlay = createApplyOverlay(root);
@@ -130,6 +219,7 @@ function mountStandaloneShell(
           : "Configuration applied",
         "success",
       );
+      bridge?.notifyAction("apply");
     } catch (error) {
       const message = error instanceof Error ? error.message : "The apply failed";
       overlay.fail(message);
@@ -153,13 +243,14 @@ function mountStandaloneShell(
     try {
       await store.revertAll();
       toasts.show("Pending changes reverted", "success");
+      bridge?.notifyAction("revert");
     } catch (error) {
       toasts.show(error instanceof Error ? error.message : "The revert failed", "error");
     }
   };
 
   const tabBar = createTabBar({
-    showMedallion: true,
+    showMedallion: bridge === null,
     switcher: switcher.element,
     onApply: () => void runApply(),
     onRevertAll: () => void runRevertAll(),
@@ -220,8 +311,15 @@ function mountStandaloneShell(
   const stripBar = document.createElement("div");
   stripBar.className = "progress-strip-bar";
   strip.append(stripBar);
+  // In panel mode every newly active download is announced to the
+  // workshop, whose status bar owns the visible progress story.
+  let lastActiveCount = 0;
   const renderStrip = (): void => {
     const active = downloadStore.active();
+    if (bridge !== null && active.length > lastActiveCount) {
+      bridge.notifyAction("download-started");
+    }
+    lastActiveCount = active.length;
     strip.hidden = active.length === 0;
     stripBar.style.setProperty("--progress", String(downloadStore.overallFraction()));
     tabBar.setDownloadsBadge(active.length);
@@ -241,7 +339,7 @@ function mountStandaloneShell(
     hf: new HfApi(api),
     downloads: downloadStore,
     toasts,
-    fetchFn,
+    fetchFn: hubFetch,
   });
   const downloadsView = createDownloadsView({ api, downloads: downloadStore, toasts });
   const secretsView = createSecretsView({ store, api, toasts });
@@ -282,15 +380,20 @@ function mountStandaloneShell(
   // events feed the overlay; downloads consume the same stream once
   // that surface exists. Subscribing at boot keeps the shell an
   // independent subscriber whether or not the workshop is connected.
-  const stopProgress = api.subscribeProgress((event) => {
-    if (!applying || event === null || typeof event !== "object") {
-      return;
-    }
-    const stage = (event as Record<string, unknown>)["stage"];
-    if (typeof stage === "string") {
-      overlay.beginStage(stage);
-    }
-  });
+  // Panel mode never subscribes: the workshop already consumes the same
+  // stream and owns all progress display.
+  const stopProgress =
+    bridge === null
+      ? api.subscribeProgress((event) => {
+          if (!applying || event === null || typeof event !== "object") {
+            return;
+          }
+          const stage = (event as Record<string, unknown>)["stage"];
+          if (typeof stage === "string") {
+            overlay.beginStage(stage);
+          }
+        })
+      : () => undefined;
   return () => {
     stopRouter();
     stopProgress();
@@ -300,11 +403,14 @@ function mountStandaloneShell(
 }
 
 /**
- * Mounts the panel-mode shell: the same chrome minus the medallion and
- * key prompt. Gateway data waits on the workshop's postMessage bridge,
- * so the profile switcher is an inert placeholder and a banner says so.
+ * Mounts the inert panel-mode shell: the same chrome minus the
+ * medallion and key prompt, with no network calls at all. It shows
+ * until the workshop's context message arrives (and for good when the
+ * iframe URL carries no usable bridge origin); the profile switcher is
+ * an inert placeholder and a banner says so. Returns the teardown that
+ * stops its router, so the live shell can replace it cleanly.
  */
-function mountPanelShell(root: HTMLElement, win: BootWindow): void {
+function mountPanelPending(root: HTMLElement, win: BootWindow): () => void {
   const placeholder = document.createElement("button");
   placeholder.type = "button";
   placeholder.className = "select select-sm";
@@ -318,7 +424,7 @@ function mountPanelShell(root: HTMLElement, win: BootWindow): void {
   note.textContent = "Workshop bridge pending: gateway data is unavailable in panel mode.";
 
   const main = mountChrome(root, tabBar.element, [], note);
-  startRouter({ win, main, onRoute: (view) => tabBar.setActiveView(view) });
+  return startRouter({ win, main, onRoute: (view) => tabBar.setActiveView(view) });
 }
 
 /**

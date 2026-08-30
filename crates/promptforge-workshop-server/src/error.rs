@@ -66,6 +66,11 @@ pub(crate) enum AppError {
     #[error("request body is not application/json")]
     NotJson,
 
+    /// The config-panel proxy refused to forward a path outside its
+    /// allowlist (see [`crate::routes::gateway_config`]).
+    #[error("path is not forwardable to the gateway")]
+    ForwardDenied,
+
     /// A granted workspace path could not be canonicalized.
     #[error("grant path cannot be resolved")]
     ResolveGrant {
@@ -167,9 +172,10 @@ impl AppError {
             | Self::StreamUnsupported
             | Self::NotADirectory
             | Self::NotAFile => StatusCode::BAD_REQUEST,
-            Self::OutsideGrants | Self::ForbiddenComponent | Self::CrossSite => {
-                StatusCode::FORBIDDEN
-            }
+            Self::OutsideGrants
+            | Self::ForbiddenComponent
+            | Self::CrossSite
+            | Self::ForwardDenied => StatusCode::FORBIDDEN,
             Self::NotFound | Self::AssetMissing(_) => StatusCode::NOT_FOUND,
             Self::BinaryFile | Self::NotUtf8 | Self::NotJson => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
@@ -192,6 +198,7 @@ impl AppError {
             Self::StreamUnsupported => Some("stream_unsupported"),
             Self::CrossSite => Some("cross_site"),
             Self::NotJson => Some("not_json"),
+            Self::ForwardDenied => Some("forward_denied"),
             Self::ResolveGrant { .. } => Some("resolve_grant"),
             Self::ResolvePath { .. } => Some("resolve_path"),
             Self::InspectPath { .. } => Some("inspect_path"),
