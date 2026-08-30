@@ -53,7 +53,9 @@ What it provides:
   `pending_report` lists which real files carry shadows and which
   top-level sections differ between the real and pending views (an absent
   section equals a vacant one, so serialized empty defaults report no
-  phantom change).
+  phantom change). `promote_shadow` is the explicit apply step: one atomic
+  rename makes the shadow the real file, so the shadow disappears and a
+  reader observes either the old or the new content, never a mix.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
   classify failures with `ConfigError::kind` and `ConfigErrorKind`.
 

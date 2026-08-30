@@ -125,6 +125,59 @@ fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
     Ok(shadow)
 }
 
+/// Promotes `target`'s shadow to the real file by one atomic rename.
+///
+/// The shadow becomes the real file and disappears in the same rename, so
+/// a reader observes either the old or the new content, never a mix. When
+/// the destination cannot be replaced in place (locked or read-only -
+/// Windows sharing violations are the common case) the promotion falls
+/// back to remove-then-rename; either state a reader can observe is a
+/// complete file.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) of kind
+/// [`ConfigErrorKind::Write`](crate::ConfigErrorKind::Write) when `target`
+/// has no shadow to promote or the rename fails.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::{promote_shadow, shadow_path};
+/// use std::path::Path;
+///
+/// let target = Path::new("profiles/default.toml");
+/// promote_shadow(target)?;
+/// assert!(!shadow_path(target).exists());
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
+    promote_shadow_repr(target).map_err(crate::ConfigError::from)
+}
+
+/// The crate-internal form of [`promote_shadow`].
+fn promote_shadow_repr(target: &Path) -> Result<(), Repr> {
+    let shadow = shadow_path(target);
+    if !shadow.is_file() {
+        return Err(Repr::Write {
+            path: shadow,
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no shadow to promote"),
+        });
+    }
+    if fs::rename(&shadow, target).is_err() {
+        // The rename can fail when the destination exists but cannot be
+        // replaced in place (locked or read-only - Windows sharing
+        // violations are the common case); replace in two steps. Either
+        // state a reader can observe is a complete file.
+        let _ = fs::remove_file(target);
+        if let Err(source) = fs::rename(&shadow, target) {
+            return Err(Repr::Write {
+                path: target.to_path_buf(),
+                source,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Saves a candidate document as the active profile leaf's shadow.
 ///
 /// `document` is the full config in the TOML shape (what
@@ -703,6 +756,52 @@ endpoints = ["e"]
         assert!(
             litter.is_empty(),
             "no temp file remains after a failed rename: {litter:?}"
+        );
+    }
+
+    #[test]
+    fn promote_shadow_makes_the_shadow_the_real_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let target = write(temp.path(), "default.toml", "old = 1\n");
+        write_shadow(&target, "new = 2\n").unwrap();
+
+        promote_shadow(&target).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "new = 2\n",
+            "the real file carries the shadow's content"
+        );
+        assert!(
+            !shadow_path(&target).exists(),
+            "the shadow disappears in the promotion"
+        );
+    }
+
+    #[test]
+    fn promote_shadow_creates_a_real_file_that_did_not_exist() {
+        // An env shadow can precede its real file; promotion creates it.
+        let temp = tempfile::TempDir::new().unwrap();
+        let target = temp.path().join("default.env");
+        write_shadow(&target, "HF_TOKEN=x\n").unwrap();
+
+        promote_shadow(&target).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "HF_TOKEN=x\n");
+        assert!(!shadow_path(&target).exists());
+    }
+
+    #[test]
+    fn promote_shadow_without_a_shadow_errors() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let target = write(temp.path(), "default.toml", "old = 1\n");
+
+        let error = promote_shadow(&target).unwrap_err();
+        assert_eq!(error.kind(), crate::ConfigErrorKind::Write);
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "old = 1\n",
+            "the real file is untouched by a failed promotion"
         );
     }
 

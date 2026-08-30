@@ -71,6 +71,8 @@ pub(crate) async fn admin_put_env(
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(vars) =
         vars.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    // Saves take the apply lock; see `admin_put_config` for the why.
+    let _guard = state.apply.lock().await;
     let env = profile_env_path(&state)
         .await
         .ok_or(GatewayError::ProfilesUnavailable)?;
