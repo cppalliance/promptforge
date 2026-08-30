@@ -391,3 +391,299 @@
 		color: var(--text-secondary, #888888);
 	}
 }
+
+/* Models view: toolbar, list rows, orphan section, detail pane, and the
+   registry-driven field rows with dirty/pending/provenance marks. */
+@layer components {
+	.models-toolbar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		padding-block-end: 0.75rem;
+	}
+	.models-toolbar .input {
+		flex: 1;
+		min-width: 10rem;
+	}
+	.filter-chips {
+		display: flex;
+		gap: 0.25rem;
+	}
+	.filter-chip {
+		border: 1px solid transparent;
+		cursor: pointer;
+	}
+	.filter-chip:hover {
+		background: rgb(255 255 255 / 0.1);
+	}
+	.filter-chip[aria-pressed="true"] {
+		background: var(--accent-subtle, rgba(224, 90, 43, 0.15));
+		border-color: var(--accent, #E05A2B);
+	}
+	.filter-chip:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.model-list,
+	.orphan-list {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.model-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 0.75rem;
+		border-radius: var(--radius, 8px);
+		color: var(--text-primary, #E8E8E8);
+		text-decoration: none;
+	}
+	.model-row:hover {
+		background: var(--bg-tertiary, #252525);
+	}
+	.model-row[aria-current="true"] {
+		background: var(--accent-subtle, rgba(224, 90, 43, 0.15));
+	}
+	.model-name {
+		font-family: var(--font-mono, ui-monospace, monospace);
+		font-size: 0.8125rem;
+		overflow-wrap: anywhere;
+	}
+	.model-row .source-icon {
+		display: inline-flex;
+		margin-inline-start: auto;
+		color: var(--text-secondary, #888888);
+	}
+
+	/* Loading skeletons: pulsing surface rectangles standing in for
+	   rows; the pulse pauses for reduced-motion users. */
+	.skeleton-row {
+		height: 2.5rem;
+		margin-block-end: 0.5rem;
+		border-radius: var(--radius, 8px);
+		background: var(--bg-tertiary, #252525);
+		animation: skeleton-pulse 1.2s ease-in-out infinite alternate;
+	}
+	@keyframes skeleton-pulse {
+		to {
+			opacity: 0.45;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.skeleton-row {
+			animation: none;
+		}
+	}
+
+	.orphan-section {
+		margin-block-start: 1rem;
+		padding-block-start: 0.75rem;
+		border-block-start: 1px solid var(--border, #2A2A2A);
+	}
+	.orphan-heading {
+		margin: 0 0 0.5rem;
+		color: var(--text-secondary, #888888);
+		font-size: 0.6875rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.orphan-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.375rem 0.75rem;
+	}
+	.orphan-size {
+		margin-inline-start: auto;
+		color: var(--text-secondary, #888888);
+		font-size: 0.75rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.empty-state {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.75rem;
+		padding: 1.5rem 0.75rem;
+	}
+	.empty-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.empty-actions .button {
+		text-decoration: none;
+	}
+
+	/* Detail pane. */
+	.split-detail {
+		padding-inline: 1rem;
+	}
+	.detail-header {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding-block-end: 1rem;
+		border-block-end: 1px solid var(--border, #2A2A2A);
+	}
+	/* The editable title: an input drawn as the heading until hover
+	   or focus reveals the field surface. */
+	.detail-title {
+		width: 100%;
+		padding: 0.25rem 0.5rem;
+		border: 1px solid transparent;
+		border-radius: var(--radius, 8px);
+		background: transparent;
+		color: var(--text-primary, #E8E8E8);
+		font-family: var(--font-mono, ui-monospace, monospace);
+		font-size: 1.375rem;
+		font-weight: 600;
+	}
+	.detail-title:hover,
+	.detail-title:focus-visible {
+		background: rgba(232, 232, 232, 0.05);
+	}
+	.detail-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.detail-status {
+		color: var(--text-secondary, #888888);
+		font-size: 0.8125rem;
+	}
+	.detail-source {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 0;
+		color: var(--text-secondary, #888888);
+	}
+	.detail-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.detail-section {
+		padding-block: 0.75rem;
+		border-block-end: 1px solid var(--border, #2A2A2A);
+	}
+	.section-heading {
+		margin: 0;
+	}
+	.section-toggle {
+		display: flex;
+		align-items: center;
+		width: 100%;
+		padding: 0.375rem 0;
+		border: 0;
+		background: none;
+		color: var(--text-primary, #E8E8E8);
+		font-size: 0.9375rem;
+		font-weight: 600;
+		text-align: start;
+		cursor: pointer;
+	}
+	.section-toggle::before {
+		content: "";
+		margin-inline-end: 0.5rem;
+		border-block: 4px solid transparent;
+		border-inline-start: 6px solid var(--text-secondary, #888888);
+		transition: transform 140ms ease-out;
+	}
+	.section-toggle[aria-expanded="true"]::before {
+		transform: rotate(90deg);
+	}
+	.section-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.875rem;
+		padding-block-start: 0.5rem;
+	}
+	.section-add {
+		margin-block: 0.25rem;
+	}
+
+	/* One registry field: label row with marks, the control, help. */
+	.field-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.field-head {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+	.field-head label {
+		font-size: 0.8125rem;
+		font-weight: 500;
+	}
+	.field-help {
+		margin: 0;
+		color: var(--text-secondary, #888888);
+		font-size: 0.75rem;
+	}
+	.field-from {
+		margin: 0;
+		color: var(--text-secondary, #888888);
+		font-size: 0.75rem;
+		font-style: italic;
+	}
+	/* Dirty dot: an unsaved edit on the field. */
+	.dirty-dot {
+		width: 0.375rem;
+		height: 0.375rem;
+		border-radius: 50%;
+		background: var(--accent, #E05A2B);
+	}
+	.field-reset {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.5rem;
+		height: 1.5rem;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: transparent;
+		color: var(--text-secondary, #888888);
+		cursor: pointer;
+	}
+	.field-reset:hover {
+		background: rgb(255 255 255 / 0.1);
+		color: var(--text-primary, #E8E8E8);
+	}
+
+	.slider-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.slider-row .slider {
+		flex: 1;
+	}
+	.input-readout {
+		width: 6.5rem;
+		flex: none;
+		text-align: end;
+		font-variant-numeric: tabular-nums;
+	}
+	.readout-suffix {
+		color: var(--text-secondary, #888888);
+		font-size: 0.75rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	.inherit-note {
+		justify-content: space-between;
+		margin-block-end: 0.75rem;
+		font-size: 0.8125rem;
+	}
+}

@@ -78,14 +78,147 @@ export function sseChannel() {
   };
 }
 
+/** An empty dirty report: no shadow files exist. */
+function cleanDirty() {
+  return { dirty: false, pending_files: [], changed_sections: [] };
+}
+
+/**
+ * A config fixture: a leaf profile (`default.toml`) including
+ * `common.toml`, so provenance and inheritance render. One remote model
+ * and one endpoint live in the leaf; one local model and the dominion
+ * are inherited from the common file; a second local model lives in the
+ * leaf with flash attention off.
+ */
+export function modelsFixture() {
+  const common = "C:/pf/profiles/common.toml";
+  const leaf = "C:/pf/profiles/default.toml";
+  return {
+    server: { bind: "127.0.0.1:8081", api_key: "***" },
+    local: { cache_dir: "~/.promptforge" },
+    dominion: [
+      {
+        id: "gpu0",
+        kind: "local",
+        max_queue: 100,
+        policy: "queue",
+        fair_scheduling: true,
+        source_file: common,
+      },
+    ],
+    endpoint: [
+      {
+        id: "openai",
+        protocol: "openai",
+        base_url: "https://api.openai.com/v1",
+        api_key: "***",
+        source_file: leaf,
+      },
+    ],
+    model: [
+      {
+        name: "gpt-remote",
+        kind: "chat",
+        description: "remote chat model",
+        context: 128000,
+        thinking: "switchable",
+        upstream: "gpt-4.1",
+        endpoints: ["openai"],
+        default_max_tokens: null,
+        tool_dialect: "openai",
+        images: false,
+        parallel_tool_calls: true,
+        effort_levels: ["low", "high"],
+        default_effort: "low",
+        adaptive_thinking: false,
+        source_file: leaf,
+      },
+    ],
+    local_model: [
+      {
+        name: "qwen-common",
+        kind: "chat",
+        description: "inherited from common",
+        source: "models/Qwen3-8B-Q4_K_M.gguf",
+        sha256: null,
+        dominion: "gpu0",
+        parallel: 1,
+        vram_gb: 8,
+        context: 8192,
+        thinking: "switchable",
+        gpu_layers: 99,
+        flash_attention: true,
+        cache_type_k: "q8_0",
+        cache_type_v: "q4_0",
+        n_predict: 8192,
+        chat_template_file: null,
+        speculative: null,
+        multimodal_projector: null,
+        images: false,
+        parallel_tool_calls: false,
+        effort_levels: [],
+        adaptive_thinking: false,
+        source_file: common,
+      },
+      {
+        name: "llama-leaf",
+        kind: "chat",
+        description: "defined in the leaf",
+        source: "models/Llama-3-8B-Q8_0.gguf",
+        sha256: null,
+        dominion: null,
+        parallel: 1,
+        vram_gb: null,
+        context: 4096,
+        thinking: "never",
+        gpu_layers: 40,
+        flash_attention: false,
+        cache_type_k: "q8_0",
+        cache_type_v: "q4_0",
+        n_predict: 8192,
+        chat_template_file: null,
+        speculative: null,
+        multimodal_projector: null,
+        images: false,
+        parallel_tool_calls: false,
+        effort_levels: [],
+        adaptive_thinking: false,
+        source_file: leaf,
+      },
+    ],
+    source_files: { "server.bind": leaf },
+  };
+}
+
 /**
  * A canned gateway behind the fetch signature: status, profiles, an
- * idle progress stream, and switch-profile (overridable through
- * `onSwitch`). When `key` is set, requests without that bearer answer
- * 401. Every call is recorded in `calls`.
+ * idle progress stream, switch-profile (overridable through `onSwitch`),
+ * and the config surface - running/pending/dirty views, shadow saves
+ * (PUT re-points the pending view and flips the dirty report), apply,
+ * revert, orphans, model-info, reveal, and cache deletes. When `key` is
+ * set, requests without that bearer answer 401. Every call is recorded
+ * in `calls`; the mutable config state is exposed as `state`.
  */
-export function gatewayStub({ profile = "default", profiles = ["default"], key, onSwitch } = {}) {
+export function gatewayStub({
+  profile = "default",
+  profiles = ["default"],
+  models = [],
+  key,
+  onSwitch,
+  config,
+  pending,
+  dirty,
+  orphans,
+  modelInfo,
+  dirtyAfterSave,
+} = {}) {
   const calls = [];
+  const state = {
+    config: config ?? {},
+    pending: pending ?? structuredClone(config ?? {}),
+    dirty: dirty ?? cleanDirty(),
+    orphans: orphans ?? [],
+  };
   const fetchFn = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
@@ -97,13 +230,61 @@ export function gatewayStub({ profile = "default", profiles = ["default"], key, 
       }
     }
     if (url.endsWith("/admin/status")) {
-      return jsonResponse({ profile, models: [] });
+      return jsonResponse({ profile, models });
     }
     if (url.endsWith("/admin/profiles")) {
       return jsonResponse({ profiles });
     }
     if (url.endsWith("/admin/progress")) {
       return sseChannel().response;
+    }
+    if (url.endsWith("/admin/config-pending")) {
+      return jsonResponse({ profile: state.pending, boot: null });
+    }
+    if (url.endsWith("/admin/config-dirty")) {
+      return jsonResponse(state.dirty);
+    }
+    if (url.endsWith("/admin/config-apply")) {
+      state.config = structuredClone(state.pending);
+      state.dirty = cleanDirty();
+      return jsonResponse({
+        applied: ["profiles/default.toml"],
+        reloaded: true,
+        restart_required: false,
+      });
+    }
+    if (url.endsWith("/admin/config-revert")) {
+      state.pending = structuredClone(state.config);
+      state.dirty = cleanDirty();
+      return jsonResponse({ reverted: ["profiles/default.toml.next"] });
+    }
+    if (url.endsWith("/admin/config")) {
+      if ((init.method ?? "GET") === "PUT") {
+        state.pending = JSON.parse(init.body);
+        state.dirty = dirtyAfterSave ?? {
+          dirty: true,
+          pending_files: ["profiles/default.toml"],
+          changed_sections: [],
+        };
+        return jsonResponse({ shadow: "profiles/default.toml.next" });
+      }
+      return jsonResponse(state.config);
+    }
+    if (url.endsWith("/admin/orphans")) {
+      return jsonResponse({ orphans: state.orphans });
+    }
+    if (url.includes("/admin/model-info")) {
+      return modelInfo
+        ? jsonResponse(modelInfo)
+        : jsonResponse({ error: "not a gguf" }, 422);
+    }
+    if (url.endsWith("/admin/reveal")) {
+      return jsonResponse({});
+    }
+    if (url.includes("/v1/cache/") && init.method === "DELETE") {
+      const sha = url.slice(url.lastIndexOf("/") + 1);
+      state.orphans = state.orphans.filter((orphan) => orphan.sha256 !== sha);
+      return jsonResponse({});
     }
     if (url.endsWith("/admin/switch-profile")) {
       if (onSwitch) {
@@ -116,7 +297,7 @@ export function gatewayStub({ profile = "default", profiles = ["default"], key, 
     }
     return jsonResponse({ error: `unstubbed route: ${url}` }, 404);
   };
-  return { fetchFn, calls };
+  return { fetchFn, calls, state };
 }
 
 /**

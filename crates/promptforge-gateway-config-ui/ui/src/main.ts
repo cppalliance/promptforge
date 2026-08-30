@@ -10,13 +10,16 @@ import "./styles/controls.css";
 import "./styles/layout.css";
 
 import { createApplyOverlay } from "./components/apply-overlay";
+import { confirmDialog } from "./components/confirm-modal";
 import { mountKeyPrompt } from "./components/key-prompt";
 import { createProfileSwitcher } from "./components/profile-switcher";
 import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "./components/toast";
 import { startRouter } from "./router";
+import { ConfigStore } from "./services/config-store";
 import { GatewayApi } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
+import { createModelsView } from "./views/models-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
 export { matchRoute } from "./router";
@@ -82,11 +85,111 @@ function mountStandaloneShell(root: HTMLElement, win: BootWindow, api: GatewayAp
   const toasts = createToastStack();
   const overlay = createApplyOverlay(root);
   const switcher = createProfileSwitcher({ api, overlay, toasts });
-  const tabBar = createTabBar({ showMedallion: true, switcher: switcher.element });
-  const main = mountChrome(root, tabBar.element, [toasts.element]);
+  const store = new ConfigStore(api);
+  let applying = false;
+
+  const runApply = async (): Promise<void> => {
+    if (applying) {
+      return;
+    }
+    applying = true;
+    overlay.open("Applying configuration");
+    try {
+      const outcome = await store.apply();
+      overlay.finish();
+      toasts.show(
+        outcome.restart_required
+          ? "Configuration applied - restart the gateway to finish"
+          : "Configuration applied",
+        "success",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The apply failed";
+      overlay.fail(message);
+      toasts.show(message, "error");
+    } finally {
+      applying = false;
+    }
+  };
+
+  const runRevertAll = async (): Promise<void> => {
+    const count = store.dirty.pending_files.length;
+    const yes = await confirmDialog(root, {
+      title: "Revert all pending changes?",
+      body: `This discards the pending changes across ${count} file${count === 1 ? "" : "s"} and returns to the running configuration.`,
+      confirmLabel: "Revert All",
+      danger: true,
+    });
+    if (!yes) {
+      return;
+    }
+    try {
+      await store.revertAll();
+      toasts.show("Pending changes reverted", "success");
+    } catch (error) {
+      toasts.show(error instanceof Error ? error.message : "The revert failed", "error");
+    }
+  };
+
+  const tabBar = createTabBar({
+    showMedallion: true,
+    switcher: switcher.element,
+    onApply: () => void runApply(),
+    onRevertAll: () => void runRevertAll(),
+  });
+
+  // Pending-changes banner [INVENTED]: raised only when shadows already
+  // exist when the shell loads (a previous session's saves), cleared
+  // once they are applied or reverted.
+  const banner = document.createElement("div");
+  banner.className = "banner banner-pending";
+  banner.hidden = true;
+  let bannerArmed: boolean | null = null;
+
+  const renderPendingState = (): void => {
+    const count = store.dirty.pending_files.length;
+    tabBar.setPendingCount(count);
+    if (bannerArmed === null && store.loaded && !store.loadError) {
+      bannerArmed = store.dirty.dirty;
+    }
+    if (bannerArmed && count === 0) {
+      // The previous session's shadows are gone (applied or reverted);
+      // later same-session saves are not "from a previous session".
+      bannerArmed = false;
+    }
+    if (!bannerArmed || count === 0) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    const text = document.createElement("span");
+    text.textContent = `You have ${count} pending change${count === 1 ? "" : "s"} from a previous session.`;
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button button-xs button-primary banner-apply";
+    apply.textContent = "Apply";
+    apply.addEventListener("click", () => void runApply());
+    const revert = document.createElement("button");
+    revert.type = "button";
+    revert.className = "button button-xs button-outline banner-revert";
+    revert.textContent = "Revert All";
+    revert.addEventListener("click", () => void runRevertAll());
+    banner.replaceChildren(text, apply, revert);
+  };
+  const unsubscribe = store.subscribe(renderPendingState);
+
+  const main = mountChrome(root, tabBar.element, [toasts.element], banner);
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
-  const stopRouter = startRouter({ win, main, onRoute: (view) => tabBar.setActiveView(view) });
+  const modelsView = createModelsView({ store, api, toasts });
+  const stopRouter = startRouter({
+    win,
+    main,
+    onRoute: (view) => tabBar.setActiveView(view),
+    views: {
+      models: (target, match) => modelsView.mount(target, match.detail),
+    },
+  });
 
   void api
     .getStatus()
@@ -95,13 +198,24 @@ function mountStandaloneShell(root: HTMLElement, win: BootWindow, api: GatewayAp
       // The dot already went red via onHealth; a 401 already routed to
       // the key prompt via onUnauthorized.
     });
-  // The live progress stream: downloads and apply progress consume it
-  // once those surfaces exist; subscribing at boot keeps the shell an
+  void store.load();
+  // The live progress stream: while an apply is in flight, stage-shaped
+  // events feed the overlay; downloads consume the same stream once
+  // that surface exists. Subscribing at boot keeps the shell an
   // independent subscriber whether or not the workshop is connected.
-  const stopProgress = api.subscribeProgress(() => undefined);
+  const stopProgress = api.subscribeProgress((event) => {
+    if (!applying || event === null || typeof event !== "object") {
+      return;
+    }
+    const stage = (event as Record<string, unknown>)["stage"];
+    if (typeof stage === "string") {
+      overlay.beginStage(stage);
+    }
+  });
   return () => {
     stopRouter();
     stopProgress();
+    unsubscribe();
   };
 }
 

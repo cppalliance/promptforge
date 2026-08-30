@@ -84,6 +84,9 @@ export interface RouterWindow {
   removeEventListener(type: string, listener: () => void): void;
 }
 
+/** Mounts one view into `<main>` for a matched route. */
+export type ViewMount = (main: HTMLElement, match: RouteMatch) => void;
+
 /** Construction options for {@link startRouter}. */
 export interface RouterOptions {
   /** The window carrying the hash and the hashchange events. */
@@ -92,6 +95,8 @@ export interface RouterOptions {
   main: HTMLElement;
   /** Fired after every render so the tab bar can follow the route. */
   onRoute: (view: ViewId) => void;
+  /** Real view mounts by destination; unlisted views render the stub. */
+  views?: Partial<Record<ViewId, ViewMount>>;
 }
 
 /**
@@ -108,7 +113,12 @@ export function startRouter(options: RouterOptions): () => void {
       options.win.location.hash = "#/models";
       match = { view: "models" };
     }
-    mountStubView(options.main, match);
+    const mount = options.views?.[match.view];
+    if (mount) {
+      mount(options.main, match);
+    } else {
+      mountStubView(options.main, match);
+    }
     options.onRoute(match.view);
   };
   options.win.addEventListener("hashchange", render);
