@@ -13,7 +13,7 @@
   padding: 0 var(--space-lg, 12px);
   background: none;
   border: none;
-  color: var(--titlebar-foreground, #d6d9e0);
+  color: var(--titlebar-foreground, #e8e8e8);
   font: inherit;
   cursor: pointer;
   user-select: none;
@@ -21,11 +21,11 @@
 
 .window-titlebar__menu:hover,
 .window-titlebar__menu[aria-expanded="true"] {
-  background: var(--titlebar-hover, #1a1d25);
+  background: var(--titlebar-hover, #252525);
 }
 
 .window-titlebar__menu:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline: 1px solid var(--titlebar-accent, #e05a2b);
   outline-offset: -1px;
 }
 
@@ -39,9 +39,9 @@
   z-index: 100;
   min-width: var(--titlebar-popover-min-width, 200px);
   padding: var(--space-xs, 4px) 0;
-  background: var(--bg-raised, #14161c);
-  border: 1px solid var(--border, #262a33);
-  border-radius: var(--radius, 6px);
+  background: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
   box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
 }
 
@@ -58,7 +58,7 @@
   padding: var(--space-xs, 4px) var(--space-lg, 12px);
   background: none;
   border: none;
-  color: var(--text, #d6d9e0);
+  color: var(--text, #e8e8e8);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -66,17 +66,17 @@
 }
 
 .window-titlebar__item:hover {
-  background: var(--bg-hover, #1a1d25);
+  background: var(--bg-hover, #252525);
 }
 
 .window-titlebar__item:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline: 1px solid var(--titlebar-accent, #e05a2b);
   outline-offset: -1px;
-  background: var(--bg-hover, #1a1d25);
+  background: var(--bg-hover, #252525);
 }
 
 .window-titlebar__item[aria-disabled="true"] {
-  color: var(--text-muted, #8b90a0);
+  color: var(--text-muted, #909090);
   cursor: default;
 }
 
@@ -85,7 +85,7 @@
 }
 
 .window-titlebar__shortcut {
-  color: var(--text-muted, #8b90a0);
+  color: var(--text-muted, #909090);
   font-size: 12px;
 }
 
@@ -98,17 +98,17 @@
 .window-titlebar__item-check {
   width: 1.2em;
   flex: none;
-  color: var(--accent, #7c7fd4);
+  color: var(--accent, #e05a2b);
 }
 
 /* The pending mark: an ellipsis on the profile a switch is loading,
    muted where the settled check is accented. */
 .window-titlebar__item-check--pending {
-  color: var(--text-muted, #8b90a0);
+  color: var(--text-muted, #909090);
 }
 
 .window-titlebar__separator {
   height: 1px;
   margin: var(--space-xs, 4px) 0;
-  background: var(--border, #262a33);
+  background: var(--border, #2a2a2a);
 }

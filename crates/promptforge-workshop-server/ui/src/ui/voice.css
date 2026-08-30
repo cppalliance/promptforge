@@ -13,8 +13,8 @@
 .voice-mic:hover {
   background-color: transparent;
   box-shadow:
-    0 0 0 1px var(--hover-glow, #7c7fd4),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #7c7fd4) 40%, transparent);
+    0 0 0 1px var(--hover-glow, #e05a2b),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #e05a2b) 40%, transparent);
 }
 
 .voice-mic {
@@ -27,27 +27,27 @@
    outrank this and strip the fill. */
 .voice-mic--recording {
   color: var(--on-danger, #ffffff);
-  background: var(--danger, #b0606a);
+  background: var(--danger, #dc3545);
   border-radius: 50%;
   box-shadow:
-    0 0 0 1px var(--danger, #b0606a),
-    0 0 6px color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
+    0 0 0 1px var(--danger, #dc3545),
+    0 0 6px color-mix(in oklab, var(--danger, #dc3545) 55%, transparent);
 }
 
 .voice-mic--recording:hover:not(:disabled) {
   color: var(--on-danger, #ffffff);
-  background: var(--danger, #b0606a);
+  background: var(--danger, #dc3545);
   border-radius: 50%;
   box-shadow:
-    0 0 0 1px var(--danger, #b0606a),
-    0 0 8px color-mix(in oklab, var(--danger, #b0606a) 70%, transparent);
+    0 0 0 1px var(--danger, #dc3545),
+    0 0 8px color-mix(in oklab, var(--danger, #dc3545) 70%, transparent);
 }
 
 /* Send button hover: accent glow in both normal and generating states. */
 .mur-action-btn:hover:not(:disabled) {
   box-shadow:
-    0 0 0 1px var(--hover-glow, #7c7fd4),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #7c7fd4) 40%, transparent);
+    0 0 0 1px var(--hover-glow, #e05a2b),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #e05a2b) 40%, transparent);
 }
 
 /* Composer overlap fix: make the form container participate in the column

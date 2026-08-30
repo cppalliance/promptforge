@@ -76,53 +76,56 @@ export interface EditorSurface {
 const promptforgeTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "var(--bg, #0d0e12)",
-      color: "var(--text, #d6d9e0)",
+      backgroundColor: "var(--bg, #0f0f0f)",
+      color: "var(--text, #e8e8e8)",
       height: "100%",
       fontSize: "13px",
     },
     ".cm-content": {
       fontFamily: 'var(--code-font, ui-monospace, "Cascadia Code", Consolas, monospace)',
-      caretColor: "var(--text, #d6d9e0)",
+      caretColor: "var(--text, #e8e8e8)",
     },
     ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--text, #d6d9e0)",
+      borderLeftColor: "var(--text, #e8e8e8)",
     },
     ".cm-gutters": {
-      backgroundColor: "var(--bg-raised, #14161c)",
-      color: "var(--text-muted, #8b90a0)",
+      backgroundColor: "var(--bg-raised, #1a1a1a)",
+      color: "var(--text-muted, #909090)",
       border: "none",
-      borderRight: "1px solid var(--border, #262a33)",
+      borderRight: "1px solid var(--border, #2a2a2a)",
     },
+    // Not --bg-hover: its #252525 wash drops accent-colored syntax tokens
+    // to 4.14:1, under the 4.5:1 floor. A 4% white wash over --bg keeps
+    // every syntax color at or above 4.5:1 on the active line.
     ".cm-activeLineGutter": {
-      backgroundColor: "var(--bg-hover, #1a1d25)",
+      backgroundColor: "rgba(255, 255, 255, 0.04)",
     },
     ".cm-activeLine": {
-      backgroundColor: "var(--bg-hover, #1a1d25)",
+      backgroundColor: "rgba(255, 255, 255, 0.04)",
     },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-      backgroundColor: "var(--accent-dim, #5658a0)",
+      backgroundColor: "var(--accent-dim, #b04722)",
     },
     "&.cm-focused": {
-      outline: "1px solid var(--accent-dim, #5658a0)",
+      outline: "1px solid var(--accent-dim, #b04722)",
       outlineOffset: "-1px",
     },
     ".cm-searchMatch": {
-      backgroundColor: "var(--accent-dim, #5658a0)",
-      outline: "1px solid var(--accent, #7c7fd4)",
+      backgroundColor: "var(--accent-dim, #b04722)",
+      outline: "1px solid var(--accent, #e05a2b)",
     },
     ".cm-searchMatch-selected": {
-      backgroundColor: "var(--accent, #7c7fd4)",
+      backgroundColor: "var(--accent, #e05a2b)",
     },
     ".cm-panels": {
-      backgroundColor: "var(--bg-raised, #14161c)",
-      color: "var(--text, #d6d9e0)",
+      backgroundColor: "var(--bg-raised, #1a1a1a)",
+      color: "var(--text, #e8e8e8)",
     },
     ".cm-panels input, .cm-panels button": {
-      backgroundColor: "var(--bg, #0d0e12)",
-      color: "var(--text, #d6d9e0)",
-      border: "1px solid var(--border, #262a33)",
-      borderRadius: "var(--radius, 6px)",
+      backgroundColor: "var(--bg, #0f0f0f)",
+      color: "var(--text, #e8e8e8)",
+      border: "1px solid var(--border, #2a2a2a)",
+      borderRadius: "var(--radius, 8px)",
     },
   },
   { dark: true },
@@ -132,20 +135,20 @@ const promptforgeTheme = EditorView.theme(
 // the LED green/amber for strings and literals, muted gray for comments
 // and punctuation. Every value stays at or above 4.5:1 on --bg.
 const promptforgeHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent, #7c7fd4)" },
-  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green, #4caf7d)" },
-  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber, #d9a03f)" },
-  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted, #8b90a0)", fontStyle: "italic" },
-  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent, #7c7fd4)" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text, #d6d9e0)" },
-  { tag: [tags.propertyName, tags.attributeName], color: "var(--text, #d6d9e0)" },
-  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted, #8b90a0)" },
-  { tag: tags.heading, color: "var(--accent, #7c7fd4)", fontWeight: "bold" },
-  { tag: tags.link, color: "var(--accent, #7c7fd4)", textDecoration: "underline" },
+  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent, #e05a2b)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green, #28a745)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber, #f09030)" },
+  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted, #909090)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent, #e05a2b)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text, #e8e8e8)" },
+  { tag: [tags.propertyName, tags.attributeName], color: "var(--text, #e8e8e8)" },
+  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted, #909090)" },
+  { tag: tags.heading, color: "var(--accent, #e05a2b)", fontWeight: "bold" },
+  { tag: tags.link, color: "var(--accent, #e05a2b)", textDecoration: "underline" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: tags.invalid, color: "var(--danger-text, #cf7f88)" },
+  { tag: tags.invalid, color: "var(--danger-text, #e4606d)" },
 ]);
 
 /** The lowercase file extension of a path, or null when it has none. */

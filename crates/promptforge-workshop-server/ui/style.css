@@ -25,23 +25,23 @@
 
 :root {
   /* Surfaces */
-  --bg: #0d0e12; /* window background, chat background */
-  --bg-raised: #14161c; /* raised surfaces: status bar, cards */
-  --bg-hover: #1a1d25; /* hover washes and user message bubbles */
-  --bg-composer: var(--bg, #0d0e12); /* the chat composer form */
+  --bg: #0f0f0f; /* window background, chat background */
+  --bg-raised: #1a1a1a; /* raised surfaces: status bar, cards */
+  --bg-hover: #252525; /* hover washes and user message bubbles */
+  --bg-composer: var(--bg, #0f0f0f); /* the chat composer form */
 
   /* Text and borders */
-  --text: #d6d9e0; /* 13:1 on --bg */
-  --text-muted: #8b90a0; /* 6.0:1 on --bg, the dimmest legal body text */
-  --border: #262a33;
+  --text: #e8e8e8; /* 15:1 on --bg */
+  --text-muted: #909090; /* 6.0:1 on --bg, 4.8:1 on --bg-hover; #888888 would fail 4.5:1 on hovered surfaces */
+  --border: #2a2a2a;
 
   /* Accent and semantics */
-  --accent: #7c7fd4; /* primary action (send button) */
-  --accent-dim: #5658a0; /* focus borders */
-  --danger: #b0606a; /* recording background, non-text danger accents */
-  --danger-text: #cf7f88; /* danger lightened past 4.5:1 for text on --bg */
+  --accent: #e05a2b; /* primary action (send button) */
+  --accent-dim: #b04722; /* focus borders; 3.4:1 on --bg, 3.1:1 on --bg-raised */
+  --danger: #dc3545; /* recording background, non-text danger accents */
+  --danger-text: #e4606d; /* --danger lightened past 4.5:1 on every surface (4.5:1 on --bg-hover) */
   --on-danger: #ffffff; /* icon or text on a --danger fill (recording mic) */
-  --hover-glow: var(--accent, #7c7fd4); /* ring and bloom on hover */
+  --hover-glow: var(--accent, #e05a2b); /* ring and bloom on hover */
 
   /* Type */
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -53,27 +53,27 @@
   --space-md: 8px;
   --space-lg: 12px;
   --space-xl: 16px;
-  --radius: 6px;
+  --radius: 8px;
 
   /* Status bar */
   --status-bar-height: 28px;
-  --status-bar-bg: var(--bg-raised, #14161c);
-  --status-bar-text: var(--text-muted, #8b90a0);
-  --status-bar-text-error: var(--danger-text, #cf7f88);
+  --status-bar-bg: var(--bg-raised, #1a1a1a);
+  --status-bar-text: var(--text-muted, #909090);
+  --status-bar-text-error: var(--danger-text, #e4606d);
   --status-bar-padding-inline: var(--space-lg, 12px);
   --status-bar-gap: var(--space-lg, 12px);
 
   /* Status bar progress bar */
   --progress-width: 96px;
   --progress-height: 6px;
-  --progress-fill: #4caf7d;
+  --progress-fill: #28a745;
   --progress-track: rgba(255, 255, 255, 0.08);
   --progress-glow: 4px; /* blur radius of the fill's box-shadow glow */
 
   /* Status bar activity LED */
   --led-size: 10px;
-  --led-green: #4caf7d; /* generating activity */
-  --led-amber: #d9a03f; /* thinking activity */
+  --led-green: #28a745; /* generating activity */
+  --led-amber: #f09030; /* thinking activity */
   --led-off: rgba(255, 255, 255, 0.08); /* the unlit lens */
   --led-core: #ffffff; /* hot center of the lit gradient */
   --led-glow-radius: 6px; /* base blur of the layered bloom */
@@ -88,14 +88,14 @@
 
   /* Window title bar (custom Windows chrome) */
   --titlebar-height: 40px;
-  --titlebar-bg: var(--bg, #0d0e12);
-  --titlebar-foreground: var(--text, #d6d9e0);
-  --titlebar-divider: var(--border, #262a33); /* the one-pixel lower edge */
-  --titlebar-accent: var(--accent, #7c7fd4); /* focus/selection states only */
-  --titlebar-glyph: var(--text-muted, #8b90a0); /* window-control SVG strokes */
-  --titlebar-hover: var(--bg-hover, #1a1d25); /* neutral wash: menus, Minimize, Maximize */
+  --titlebar-bg: var(--bg, #0f0f0f);
+  --titlebar-foreground: var(--text, #e8e8e8);
+  --titlebar-divider: var(--border, #2a2a2a); /* the one-pixel lower edge */
+  --titlebar-accent: var(--accent, #e05a2b); /* focus/selection states only */
+  --titlebar-glyph: var(--text-muted, #909090); /* window-control SVG strokes */
+  --titlebar-hover: var(--bg-hover, #252525); /* neutral wash: menus, Minimize, Maximize */
   --titlebar-control-width: 46px;
-  --titlebar-close-hover: var(--danger, #b0606a);
+  --titlebar-close-hover: var(--danger, #dc3545);
   --titlebar-close-glyph-hover: var(--on-danger, #ffffff);
   --titlebar-icon-size: 20px;
   --titlebar-font-size: 13px;
@@ -134,26 +134,26 @@
    workshop's template always sets data-theme="dark" on .mur-app.
    -------------------------------------------------------------------------- */
 .mur-app[data-theme="dark"] {
-  --mur-bg: var(--bg, #0d0e12);
-  --mur-surface: var(--bg-raised, #14161c);
-  --mur-surface-user: var(--bg-hover, #1a1d25);
-  --mur-hover-bg: var(--bg-hover, #1a1d25);
-  --mur-text: var(--text, #d6d9e0);
-  --mur-text-secondary: var(--text, #d6d9e0);
-  --mur-text-muted: var(--text-muted, #8b90a0);
-  --mur-inverse-text: var(--bg, #0d0e12);
-  --mur-border: var(--border, #262a33);
-  --mur-primary: var(--accent, #7c7fd4);
-  --mur-danger: var(--danger, #b0606a);
-  --mur-danger-text: var(--danger-text, #cf7f88);
-  --mur-danger-bg: color-mix(in oklab, var(--danger, #b0606a) 20%, transparent);
-  --mur-danger-border: color-mix(in oklab, var(--danger, #b0606a) 38%, transparent);
-  --mur-danger-hover-bg: color-mix(in oklab, var(--danger, #b0606a) 14%, transparent);
-  --mur-success: var(--led-green, #4caf7d);
-  --mur-code-heading-bg: var(--bg-hover, #1a1d25);
+  --mur-bg: var(--bg, #0f0f0f);
+  --mur-surface: var(--bg-raised, #1a1a1a);
+  --mur-surface-user: var(--bg-hover, #252525);
+  --mur-hover-bg: var(--bg-hover, #252525);
+  --mur-text: var(--text, #e8e8e8);
+  --mur-text-secondary: var(--text, #e8e8e8);
+  --mur-text-muted: var(--text-muted, #909090);
+  --mur-inverse-text: var(--bg, #0f0f0f);
+  --mur-border: var(--border, #2a2a2a);
+  --mur-primary: var(--accent, #e05a2b);
+  --mur-danger: var(--danger, #dc3545);
+  --mur-danger-text: var(--danger-text, #e4606d);
+  --mur-danger-bg: color-mix(in oklab, var(--danger, #dc3545) 20%, transparent);
+  --mur-danger-border: color-mix(in oklab, var(--danger, #dc3545) 38%, transparent);
+  --mur-danger-hover-bg: color-mix(in oklab, var(--danger, #dc3545) 14%, transparent);
+  --mur-success: var(--led-green, #28a745);
+  --mur-code-heading-bg: var(--bg-hover, #252525);
   --mur-font: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
-  --mur-header-button-bg: color-mix(in oklab, var(--bg-raised, #14161c) 82%, transparent);
-  --mur-header-title-bg: color-mix(in oklab, var(--bg-raised, #14161c) 62%, transparent);
+  --mur-header-button-bg: color-mix(in oklab, var(--bg-raised, #1a1a1a) 82%, transparent);
+  --mur-header-title-bg: color-mix(in oklab, var(--bg-raised, #1a1a1a) 62%, transparent);
 
   /* Composer growth cap: murm-ui defaults --mur-input-max-height to 200px,
      which clips long voice transcripts; 40vh keeps them visible. It must be
@@ -174,7 +174,7 @@
 /* The composer form floats over the chat on murm-ui's --mur-bg; give the
    skin its own hook so the composer can differ from the chat background. */
 .mur-app .mur-chat-form {
-  background-color: var(--bg-composer, #0d0e12);
+  background-color: var(--bg-composer, #0f0f0f);
 }
 
 * {
@@ -220,8 +220,8 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg, #0d0e12);
-  color: var(--text, #d6d9e0);
+  background: var(--bg, #0f0f0f);
+  color: var(--text, #e8e8e8);
   font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 14px;
   line-height: 1.55;
