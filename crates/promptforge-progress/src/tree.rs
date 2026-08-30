@@ -51,6 +51,7 @@ pub(crate) struct Node {
     label: String,
     fraction: AtomicU64,
     finished: AtomicBool,
+    ok: AtomicBool,
     last_emit_ms: AtomicU64,
     last_emit_fraction: AtomicU64,
 }
@@ -62,6 +63,7 @@ impl Node {
             label,
             fraction: AtomicU64::new(0),
             finished: AtomicBool::new(false),
+            ok: AtomicBool::new(false),
             last_emit_ms: AtomicU64::new(u64::MAX),
             last_emit_fraction: AtomicU64::new(0),
         }
@@ -251,11 +253,16 @@ impl TreeState {
     }
 
     pub(crate) fn finish(&self, node: &Node, ok: bool) {
+        // Terminal state is sticky: the first terminal event wins, so an
+        // error-path `fail` after a successful `complete` cannot double-emit.
+        if node.finished.swap(true, Ordering::Relaxed) {
+            return;
+        }
         if ok {
             node.fraction.store(SCALE, Ordering::Relaxed);
             node.last_emit_fraction.store(SCALE, Ordering::Relaxed);
         }
-        node.finished.store(true, Ordering::Relaxed);
+        node.ok.store(ok, Ordering::Relaxed);
         node.last_emit_ms
             .store(self.elapsed_ms(), Ordering::Relaxed);
         self.emit(node, EventState::Finished { ok });
@@ -290,6 +297,8 @@ impl TreeState {
                     label: slot.node.label.clone(),
                     weight: slot.weight,
                     fraction: slot_fraction(&inner, i),
+                    finished: slot.node.finished.load(Ordering::Relaxed),
+                    ok: slot.node.ok.load(Ordering::Relaxed),
                 }
             })
             .collect()
@@ -417,6 +426,19 @@ impl ProgressTree {
     ///
     /// `weight` is the leaf's proportional share of the operation's expected
     /// duration: weights track time, not bytes or unit counts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let tree = hub.operation();
+    /// let leaf = tree.register("download", 3.0);
+    /// leaf.set_fraction(0.5);
+    /// assert_eq!(tree.fraction(), 0.5);
+    /// ```
     #[must_use]
     pub fn register(&self, label: &str, weight: f64) -> ProgressHandle {
         let (slot, node) = self.state.register(None, label, weight);
@@ -470,5 +492,25 @@ mod tests {
         assert_eq!(tree.fraction(), 0.3);
         leaf.complete();
         assert_eq!(tree.fraction(), 1.0);
+    }
+
+    #[test]
+    fn terminal_state_is_sticky() {
+        let hub = Arc::new(ProgressHub::new());
+        let mut rx = hub.subscribe();
+        let tree = hub.operation();
+        let leaf = tree.register("leaf", 1.0);
+        assert!(rx.try_recv().is_ok(), "register emits Begun");
+        leaf.complete();
+        leaf.fail();
+        leaf.complete();
+        let mut finished = 0;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event.state, EventState::Finished { .. }) {
+                finished += 1;
+            }
+        }
+        assert_eq!(finished, 1, "later terminal calls are no-ops");
+        assert_eq!(leaf.fraction(), 1.0, "the first terminal event wins");
     }
 }

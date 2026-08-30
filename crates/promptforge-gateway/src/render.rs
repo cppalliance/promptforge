@@ -147,9 +147,10 @@ fn bar_position(fraction: f64) -> u64 {
 
 /// Non-TTY rendering as a pure snapshot-to-lines transform: a `started` line
 /// on first sight of a node, a percent line per [`LOG_STEP_PERCENT`] step,
-/// and a `done` line at completion. State for a node that leaves the
-/// snapshot is dropped, so a later operation reusing the path reports
-/// afresh and the map stays bounded by the live operations.
+/// and a `done` line at completion - a node first seen already complete
+/// earns its `started` and `done` lines together. State for a node that
+/// leaves the snapshot is dropped, so a later operation reusing the path
+/// reports afresh and the map stays bounded by the live operations.
 #[derive(Debug, Default)]
 pub(crate) struct LineRenderer {
     emitted: HashMap<(OperationId, String), u64>,
@@ -170,19 +171,29 @@ impl LineRenderer {
                 let key = (operation.operation, node.path.clone());
                 seen.insert(key.clone());
                 let percent = (node.fraction * 100.0).round() as u64;
-                let line = match self.emitted.get(&key) {
-                    None => Some(format!("{}: started", node.path)),
-                    Some(&previous) if percent == 100 && previous < 100 => {
-                        Some(format!("{}: done", node.path))
+                match self.emitted.get(&key) {
+                    None => {
+                        lines.push(format!("{}: started", node.path));
+                        // A sub-poll-interval operation is first seen
+                        // complete; it still earns its `done` line.
+                        if percent == 100 {
+                            lines.push(format!("{}: done", node.path));
+                        }
+                        self.emitted.insert(key, percent);
                     }
-                    Some(&previous) if percent >= previous + LOG_STEP_PERCENT => {
-                        Some(format!("{}: {}%", node.path, percent))
+                    Some(&previous) => {
+                        let line = if percent == 100 && previous < 100 {
+                            Some(format!("{}: done", node.path))
+                        } else if percent >= previous + LOG_STEP_PERCENT {
+                            Some(format!("{}: {}%", node.path, percent))
+                        } else {
+                            None
+                        };
+                        if let Some(line) = line {
+                            lines.push(line);
+                            self.emitted.insert(key, percent);
+                        }
                     }
-                    _ => None,
-                };
-                if let Some(line) = line {
-                    lines.push(line);
-                    self.emitted.insert(key, percent);
                 }
             }
         }
@@ -219,6 +230,25 @@ mod tests {
     }
 
     #[test]
+    fn a_node_first_seen_complete_reports_started_and_done() {
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let leaf = tree.register("quick.bin", 1.0);
+        leaf.complete();
+        let mut renderer = LineRenderer::default();
+
+        assert_eq!(
+            renderer.lines(&hub.snapshot()),
+            ["quick.bin: started", "quick.bin: done"],
+            "a sub-poll-interval operation still earns its done line"
+        );
+        assert!(
+            renderer.lines(&hub.snapshot()).is_empty(),
+            "a finished node does not report twice"
+        );
+    }
+
+    #[test]
     fn a_detached_operation_drops_its_state_and_reports_afresh() {
         let hub = Arc::new(ProgressHub::new());
         let mut renderer = LineRenderer::default();
@@ -242,5 +272,17 @@ mod tests {
             ["model.bin: started"],
             "a re-attached operation reports from the beginning"
         );
+    }
+
+    #[test]
+    fn bar_position_clamps_and_rounds() {
+        assert_eq!(bar_position(0.0), 0);
+        assert_eq!(bar_position(0.5), 500);
+        assert_eq!(bar_position(1.0), BAR_STEPS);
+        assert_eq!(bar_position(2.0), BAR_STEPS, "over-range clamps to full");
+        assert_eq!(bar_position(-0.5), 0, "under-range clamps to empty");
+        assert_eq!(bar_position(f64::NAN), 0, "NaN maps to empty");
+        assert_eq!(bar_position(0.0004), 0, "sub-step rounds down");
+        assert_eq!(bar_position(0.0006), 1, "half a step rounds up");
     }
 }

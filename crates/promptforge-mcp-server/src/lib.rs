@@ -392,10 +392,14 @@ mod tests {
             }
         }
         for leaf in ["catalog resolve", "retrieval index", "tool build"] {
-            assert!(
-                advanced.contains(leaf),
-                "the {leaf} leaf must report its unit count, not only complete"
-            );
+            // Without the picker there is no index to build: the retrieval
+            // leaf completes vacuously, with no units to report.
+            if leaf != "retrieval index" || cfg!(feature = "picker") {
+                assert!(
+                    advanced.contains(leaf),
+                    "the {leaf} leaf must report its unit count, not only complete"
+                );
+            }
             assert_eq!(
                 finished.get(leaf),
                 Some(&true),

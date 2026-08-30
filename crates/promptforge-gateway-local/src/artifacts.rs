@@ -167,7 +167,8 @@ impl ArtifactStore {
     /// into child leaves of `progress`, when given. A path source completes
     /// the download leaf immediately, and an unpinned source completes the
     /// verify leaf immediately: both stages exist in the subtree whether or
-    /// not they have work.
+    /// not they have work. An error exit fails any leaf that has not already
+    /// finished.
     ///
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.
@@ -179,6 +180,28 @@ impl ArtifactStore {
     ) -> Result<PathBuf> {
         let download = progress.map(|handle| handle.child("download", 4.0));
         let verify = progress.map(|handle| handle.child("verify", 1.0));
+        let result =
+            self.ensure_model_reporting(source, sha256, download.as_ref(), verify.as_ref());
+        // Terminal state is sticky, so leaves already finished inside (a
+        // verified cache hit, a digest mismatch) are not failed twice.
+        if result.is_err() {
+            if let Some(handle) = &download {
+                handle.fail();
+            }
+            if let Some(handle) = &verify {
+                handle.fail();
+            }
+        }
+        result
+    }
+
+    fn ensure_model_reporting(
+        &self,
+        source: &str,
+        sha256: Option<&str>,
+        download: Option<&ProgressHandle>,
+        verify: Option<&ProgressHandle>,
+    ) -> Result<PathBuf> {
         if looks_like_url(source) {
             let name = filename_from_url(source)?;
             // Key the cache slot by normalized source identity (ART-004) so two
@@ -190,16 +213,11 @@ impl ArtifactStore {
                 url: source,
                 sha256,
             };
-            self.ensure_blob_with_progress(
-                asset,
-                &destination,
-                download.as_ref(),
-                verify.as_ref(),
-            )?;
+            self.ensure_blob_with_progress(asset, &destination, download, verify)?;
             return Ok(destination);
         }
         // A path source is already local: the download stage has no work.
-        if let Some(handle) = &download {
+        if let Some(handle) = download {
             handle.complete();
         }
         let path = expand_tilde(source)?;
@@ -213,16 +231,11 @@ impl ArtifactStore {
             Some(pin) => {
                 let expected = parse_expected_digest(pin)?;
                 let marker = path_source_marker(&self.cache, &path)?;
-                let _outcome = verify_blob_with_progress(
-                    &self.cache,
-                    &path,
-                    &expected,
-                    &marker,
-                    verify.as_ref(),
-                )?;
+                let _outcome =
+                    verify_blob_with_progress(&self.cache, &path, &expected, &marker, verify)?;
             }
             None => {
-                if let Some(handle) = &verify {
+                if let Some(handle) = verify {
                     handle.complete();
                 }
             }

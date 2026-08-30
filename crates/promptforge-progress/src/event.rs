@@ -21,6 +21,17 @@ impl OperationId {
     }
 
     /// The raw numeric id.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use promptforge_progress::ProgressHub;
+    ///
+    /// let hub = Arc::new(ProgressHub::new());
+    /// let tree = hub.operation();
+    /// assert!(tree.operation().get() > 0);
+    /// ```
     #[must_use]
     pub const fn get(self) -> u64 {
         self.0
@@ -107,5 +118,24 @@ mod tests {
         let a = OperationId::next();
         let b = OperationId::next();
         assert!(a < b, "later ids must sort after earlier ones: {a} vs {b}");
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn progress_event_survives_a_serde_json_round_trip() {
+        for state in [
+            EventState::Begun { weight: 2.5 },
+            EventState::Updated { fraction: 0.25 },
+            EventState::Finished { ok: false },
+        ] {
+            let event = ProgressEvent::new(OperationId::next(), "op/leaf", "leaf", state);
+            let json = serde_json::to_string(&event).expect("the event serializes");
+            let back: ProgressEvent = serde_json::from_str(&json).expect("the event deserializes");
+            assert_eq!(event, back, "the wire shape must round-trip");
+        }
     }
 }

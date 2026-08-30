@@ -65,9 +65,28 @@ pub(crate) fn spawn(
     hub: Arc<ProgressHub>,
     health: GatewayHealth,
 ) -> Subscriber {
+    spawn_with_delay(base_url, api_key, hub, health, RESUBSCRIBE_DELAY)
+}
+
+/// [`spawn`] with the resubscribe delay injected, so tests can shorten it.
+fn spawn_with_delay(
+    base_url: String,
+    api_key: String,
+    hub: Arc<ProgressHub>,
+    health: GatewayHealth,
+    resubscribe_delay: Duration,
+) -> Subscriber {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&base_url, &api_key, &hub, &health, &mut stopped).await;
+        run(
+            &base_url,
+            &api_key,
+            &hub,
+            &health,
+            resubscribe_delay,
+            &mut stopped,
+        )
+        .await;
     });
     Subscriber {
         stop: Some(stop),
@@ -84,6 +103,7 @@ async fn run(
     api_key: &str,
     hub: &Arc<ProgressHub>,
     health: &GatewayHealth,
+    resubscribe_delay: Duration,
     stop: &mut oneshot::Receiver<()>,
 ) {
     let mut reachable = health.subscribe();
@@ -110,7 +130,7 @@ async fn run(
                     tokio::select! {
                         _ = &mut *stop => return,
                         _ = reachable.changed() => {}
-                        () = tokio::time::sleep(RESUBSCRIBE_DELAY) => {}
+                        () = tokio::time::sleep(resubscribe_delay) => {}
                     }
                     continue;
                 }
@@ -138,7 +158,7 @@ async fn run(
             tokio::select! {
                 _ = &mut *stop => return,
                 _ = reachable.changed() => {}
-                () = tokio::time::sleep(RESUBSCRIBE_DELAY) => {}
+                () = tokio::time::sleep(resubscribe_delay) => {}
             }
         }
     }
@@ -162,21 +182,22 @@ mod tests {
 
     use crate::app::fixtures::spawn_gateway;
 
-    /// A mock `GET /admin/progress`: every payload published to `feeds`
+    /// A mock `GET /admin/progress`: every payload published to the feed
     /// streams to every connected subscriber as an SSE `data:` frame, and
     /// `connections` counts how often the endpoint was hit. The receiver
     /// is created before the count increments, so a test that observes a
-    /// connection can publish without losing the frame.
+    /// connection can publish without losing the frame. [`close`](Self::close)
+    /// ends every live stream, so a test can drive the resubscribe path.
     struct MockProgress {
         connections: AtomicUsize,
-        feeds: broadcast::Sender<String>,
+        feeds: std::sync::Mutex<broadcast::Sender<String>>,
     }
 
     impl MockProgress {
         fn new() -> Self {
             Self {
                 connections: AtomicUsize::new(0),
-                feeds: broadcast::channel(16).0,
+                feeds: std::sync::Mutex::new(broadcast::channel(16).0),
             }
         }
 
@@ -185,10 +206,29 @@ mod tests {
                 .route("/admin/progress", axum::routing::get(serve_feed))
                 .with_state(self)
         }
+
+        /// Publishes one payload to every connected subscriber.
+        fn send(&self, payload: String) {
+            self.feeds
+                .lock()
+                .expect("the feed lock is not poisoned")
+                .send(payload)
+                .expect("the mock has a subscriber");
+        }
+
+        /// Ends every live stream; later connections subscribe to the
+        /// fresh feed.
+        fn close(&self) {
+            *self.feeds.lock().expect("the feed lock is not poisoned") = broadcast::channel(16).0;
+        }
     }
 
     async fn serve_feed(State(mock): State<Arc<MockProgress>>) -> Response {
-        let rx = mock.feeds.subscribe();
+        let rx = mock
+            .feeds
+            .lock()
+            .expect("the feed lock is not poisoned")
+            .subscribe();
         mock.connections.fetch_add(1, Ordering::Relaxed);
         let stream = futures_util::stream::unfold(rx, |mut rx| async move {
             loop {
@@ -268,18 +308,14 @@ mod tests {
         );
 
         wait_for_connections(&mock, 1).await;
-        mock.feeds
-            .send(event_json(
-                "download",
-                &serde_json::json!({"Begun": {"weight": 1.0}}),
-            ))
-            .expect("the mock has a subscriber");
-        mock.feeds
-            .send(event_json(
-                "download",
-                &serde_json::json!({"Updated": {"fraction": 0.5}}),
-            ))
-            .expect("the mock has a subscriber");
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Begun": {"weight": 1.0}}),
+        ));
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Updated": {"fraction": 0.5}}),
+        ));
 
         let snapshot = snapshot_where(&hub, |s| {
             s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
@@ -287,6 +323,76 @@ mod tests {
         .await;
         assert_eq!(snapshot[0].nodes[0].path, "download");
         assert_eq!(snapshot[0].nodes[0].label, "download");
+        subscriber.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_malformed_event_is_skipped_and_the_stream_continues() {
+        let mock = Arc::new(MockProgress::new());
+        let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
+        let hub = Arc::new(ProgressHub::new());
+        let subscriber = spawn(
+            base_url,
+            String::new(),
+            Arc::clone(&hub),
+            GatewayHealth::new(),
+        );
+
+        wait_for_connections(&mock, 1).await;
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Begun": {"weight": 1.0}}),
+        ));
+        // One undecodable `data:` block between two valid events: the
+        // subscriber warns and continues rather than dropping the stream.
+        mock.send("{not valid json".to_owned());
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Updated": {"fraction": 0.5}}),
+        ));
+
+        let snapshot = snapshot_where(&hub, |s| {
+            s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
+        })
+        .await;
+        assert_eq!(
+            snapshot[0].nodes[0].path, "download",
+            "the event after the malformed one still lands on the hub"
+        );
+        subscriber.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_ends_while_reachable_resubscribes_after_the_delay() {
+        let mock = Arc::new(MockProgress::new());
+        let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
+        let hub = Arc::new(ProgressHub::new());
+        let delay = Duration::from_millis(50);
+        let subscriber = spawn_with_delay(
+            base_url,
+            String::new(),
+            Arc::clone(&hub),
+            GatewayHealth::new(),
+            delay,
+        );
+
+        wait_for_connections(&mock, 1).await;
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Begun": {"weight": 1.0}}),
+        ));
+        snapshot_where(&hub, |s| s.len() == 1).await;
+
+        // The stream ends while the gateway still reads reachable: the
+        // import detaches, and a fresh subscription follows the delay.
+        let closed = std::time::Instant::now();
+        mock.close();
+        snapshot_where(&hub, <[OperationSnapshot]>::is_empty).await;
+        wait_for_connections(&mock, 2).await;
+        assert!(
+            closed.elapsed() >= delay,
+            "the resubscribe waits out the delay rather than spinning"
+        );
         subscriber.shutdown().await;
     }
 
@@ -323,12 +429,10 @@ mod tests {
         let subscriber = spawn(base_url, String::new(), Arc::clone(&hub), health.clone());
 
         wait_for_connections(&mock, 1).await;
-        mock.feeds
-            .send(event_json(
-                "download",
-                &serde_json::json!({"Begun": {"weight": 1.0}}),
-            ))
-            .expect("the mock has a subscriber");
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Begun": {"weight": 1.0}}),
+        ));
         let first = snapshot_where(&hub, |s| s.len() == 1).await;
 
         health.publish(false);
@@ -336,18 +440,14 @@ mod tests {
 
         health.publish(true);
         wait_for_connections(&mock, 2).await;
-        mock.feeds
-            .send(event_json(
-                "download",
-                &serde_json::json!({"Begun": {"weight": 1.0}}),
-            ))
-            .expect("the mock has a subscriber");
-        mock.feeds
-            .send(event_json(
-                "download",
-                &serde_json::json!({"Updated": {"fraction": 0.5}}),
-            ))
-            .expect("the mock has a subscriber");
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Begun": {"weight": 1.0}}),
+        ));
+        mock.send(event_json(
+            "download",
+            &serde_json::json!({"Updated": {"fraction": 0.5}}),
+        ));
         let reconnected = snapshot_where(&hub, |s| {
             s.len() == 1 && s[0].nodes.iter().any(|n| n.fraction == 0.5)
         })

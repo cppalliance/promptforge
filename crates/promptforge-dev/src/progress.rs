@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use promptforge_progress::{ProgressHandle, ProgressHub, ProgressTree};
+use promptforge_progress::{OperationSnapshot, ProgressHandle, ProgressHub, ProgressTree};
 
 /// Snapshot poll cadence of the renderer thread.
 const RENDER_INTERVAL: Duration = Duration::from_millis(120);
@@ -113,6 +113,23 @@ impl Drop for TtyRenderer {
     }
 }
 
+/// One render tick's pure mapping: every live node's path, label, and bar
+/// position. The render loop applies it to indicatif; the mapping itself is
+/// testable without a terminal.
+fn tick(snapshot: &[OperationSnapshot]) -> Vec<(String, String, u64)> {
+    let mut bars = Vec::new();
+    for operation in snapshot {
+        for node in &operation.nodes {
+            bars.push((
+                node.path.clone(),
+                node.label.clone(),
+                bar_position(node.fraction),
+            ));
+        }
+    }
+    bars
+}
+
 /// One indicatif bar per live node, keyed by path; bars for nodes that leave
 /// the snapshot are cleared.
 fn render_loop(hub: &ProgressHub, stop: &AtomicBool) {
@@ -120,21 +137,21 @@ fn render_loop(hub: &ProgressHub, stop: &AtomicBool) {
     let mut bars: HashMap<String, ProgressBar> = HashMap::new();
     while !stop.load(Ordering::Relaxed) {
         let mut seen = HashSet::with_capacity(bars.len());
-        for operation in hub.snapshot() {
-            for node in &operation.nodes {
-                seen.insert(node.path.clone());
-                let bar = bars.entry(node.path.clone()).or_insert_with(|| {
-                    let bar = multi.add(ProgressBar::new(BAR_STEPS));
-                    if let Ok(style) =
-                        ProgressStyle::with_template("{msg} [{bar:40.cyan/blue}] {percent:>3}%")
-                    {
-                        bar.set_style(style.progress_chars("=>-"));
-                    }
-                    bar.set_message(node.label.clone());
-                    bar
-                });
-                bar.set_position(bar_position(node.fraction));
-            }
+        for (path, label, position) in tick(&hub.snapshot()) {
+            seen.insert(path.clone());
+            let bar = bars.entry(path).or_insert_with(|| {
+                let bar = multi.add(ProgressBar::new(BAR_STEPS));
+                // A parse failure on a constant template is a build-time
+                // bug; the default style still renders a working bar.
+                if let Ok(style) =
+                    ProgressStyle::with_template("{msg} [{bar:40.cyan/blue}] {percent:>3}%")
+                {
+                    bar.set_style(style.progress_chars("=>-"));
+                }
+                bar.set_message(label.clone());
+                bar
+            });
+            bar.set_position(position);
         }
         bars.retain(|path, bar| {
             let live = seen.contains(path);
@@ -176,6 +193,42 @@ mod tests {
         assert_eq!(bar_position(1.0), BAR_STEPS);
         assert_eq!(bar_position(2.0), BAR_STEPS);
         assert_eq!(bar_position(f64::NAN), 0);
+    }
+
+    #[test]
+    fn the_snapshot_maps_to_one_bar_per_live_node() {
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let download = tree.register("download", 1.0);
+        download.set_fraction(0.5);
+        let _verify = tree.register("verify", 1.0);
+        assert_eq!(
+            tick(&hub.snapshot()),
+            [
+                ("download".to_owned(), "download".to_owned(), 500),
+                ("verify".to_owned(), "verify".to_owned(), 0),
+            ]
+        );
+        drop(tree);
+        assert!(
+            tick(&hub.snapshot()).is_empty(),
+            "a detached tree maps to no bars"
+        );
+    }
+
+    #[test]
+    fn off_terminal_the_renderer_stays_inert() {
+        // A --nocapture run from a terminal spawns the real thread; the
+        // inert path exists only off a terminal.
+        if std::io::stderr().is_terminal() {
+            return;
+        }
+        let hub = Arc::new(ProgressHub::new());
+        let renderer = TtyRenderer::start(&hub);
+        assert!(
+            renderer.thread.is_none(),
+            "off a terminal nothing spawns and nothing prints"
+        );
     }
 
     #[test]

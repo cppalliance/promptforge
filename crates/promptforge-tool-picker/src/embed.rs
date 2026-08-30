@@ -39,8 +39,6 @@ pub(crate) struct Encoder {
 }
 
 impl Encoder {
-    /// Loads the compiled-in model.
-    ///
     /// Loads the compiled-in model, reporting the weights copy to `progress`.
     ///
     /// The copy of the compiled-in safetensors blob into an aligned, owned

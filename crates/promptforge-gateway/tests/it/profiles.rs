@@ -325,6 +325,64 @@ async fn failed_switch_leaves_live_profile_intact() {
     server.shutdown().await;
 }
 
+/// A failed switch fails its phase leaf on the hub: a `/admin/progress`
+/// subscriber sees `loading-profile` end with `Finished { ok: false }`
+/// rather than staying live until the switch's tree detaches.
+#[tokio::test]
+async fn a_failed_switch_fails_its_phase_leaf_on_the_hub() {
+    let (_profiles, server) = alpha_beta_server().await;
+    let http = reqwest::Client::new();
+
+    // Connect the hub stream before the switch so no event is missed; the
+    // hub is idle at this point, so every event belongs to the switch.
+    let mut progress = send_within(
+        http.get(format!("http://{}/admin/progress", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(progress.status().as_u16(), 200);
+
+    let addr = server.addr;
+    let switch = tokio::spawn(async move {
+        let http = reqwest::Client::new();
+        switch_stream_events(&http, addr, "ghost").await
+    });
+
+    let mut terminal = None;
+    let mut text = String::new();
+    let deadline = tokio::time::Instant::now() + PHASE_TIMEOUT;
+    while terminal.is_none() {
+        let chunk = tokio::time::timeout_at(deadline, progress.chunk())
+            .await
+            .expect("hub stream exceeded the phase timeout")
+            .expect("hub stream read failed")
+            .expect("hub stream ended");
+        text.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
+        while let Some(end) = text.find("\n\n") {
+            let block: String = text.drain(..end + 2).collect();
+            if let Some(data) = block.trim().strip_prefix("data: ") {
+                let event: Value = serde_json::from_str(data).expect("json event");
+                if event["label"] == "loading-profile"
+                    && let Some(finished) = event["state"].get("Finished")
+                {
+                    terminal = Some(finished["ok"].as_bool().expect("ok flag"));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        terminal,
+        Some(false),
+        "the missing profile fails the loading-profile leaf"
+    );
+    let events = join_within(switch).await;
+    assert_eq!(events.last().expect("a terminal event")["status"], "error");
+    // The hub stream is open-ended; dropping the response disconnects so
+    // graceful shutdown is not held by an idle SSE connection.
+    drop(progress);
+    server.shutdown().await;
+}
+
 /// The boot file owns `[server]`: a profile whose merged `[server]` differs
 /// is rejected at switch time - a terminal error event on the stream -
 /// leaving the live profile fully intact.

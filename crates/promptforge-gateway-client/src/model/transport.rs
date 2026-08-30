@@ -273,10 +273,11 @@ pub async fn subscribe_progress(
 }
 
 /// Decodes an SSE body into an event stream: chunks are buffered until a
-/// blank line terminates an event block, comment-only blocks (heartbeats) are
-/// skipped, and an undecodable block becomes one `Err` item rather than
-/// killing the stream. A mid-stream read failure likewise surfaces as one
-/// `Err` item, after which the stream ends. A block that grows past
+/// blank line terminates an event block (LF or CRLF line endings alike),
+/// comment-only blocks (heartbeats) are skipped, and an undecodable block
+/// becomes one `Err` item rather than killing the stream. A mid-stream read
+/// failure likewise surfaces as one `Err` item, after which the stream ends.
+/// A block that grows past
 /// [`MAX_EVENT_BLOCK`] without a terminator is refused as one `Err` item,
 /// after which the stream ends, so a peer cannot buffer the client unbounded.
 fn progress_event_stream(
@@ -323,12 +324,26 @@ fn progress_event_stream(
 /// skipped.
 fn next_buffered_event(buffer: &mut Vec<u8>) -> Option<ProgressStreamItem> {
     loop {
-        let end = buffer.windows(2).position(|pair| pair == b"\n\n")?;
-        let block: Vec<u8> = buffer.drain(..end + 2).collect();
+        let end = block_end(buffer)?;
+        let block: Vec<u8> = buffer.drain(..end).collect();
         if let Some(item) = parse_event_block(&block) {
             return Some(item);
         }
     }
+}
+
+/// The end (terminator included) of the first complete event block: a blank
+/// line, whether the peer terminates its lines with LF or CRLF.
+fn block_end(buffer: &[u8]) -> Option<usize> {
+    let lf = buffer
+        .windows(2)
+        .position(|pair| pair == b"\n\n")
+        .map(|at| at + 2);
+    let crlf = buffer
+        .windows(4)
+        .position(|quad| quad == b"\r\n\r\n")
+        .map(|at| at + 4);
+    [lf, crlf].into_iter().flatten().min()
 }
 
 /// Decodes one SSE event block: `data:` lines join into the payload, comment
@@ -691,5 +706,60 @@ mod tests {
             err.to_string().contains("exceeds"),
             "the bound must report the size limit, got {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_decodes_crlf_terminated_blocks() {
+        use futures_util::StreamExt;
+
+        // A peer that terminates its lines with CRLF still dispatches: the
+        // blank-line terminator is `\r\n\r\n`, which contains no `\n\n`.
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+        let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+        let body = format!("data: {begun}\r\n\r\ndata: {finished}\r\n\r\n");
+        let addr = spawn_models(mock_progress(body)).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        let states: Vec<EventState> = events
+            .iter()
+            .map(|item| item.as_ref().expect("every item decodes").state)
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                EventState::Begun { weight: 1.0 },
+                EventState::Finished { ok: true },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_discards_an_incomplete_trailing_block() {
+        use futures_util::StreamExt;
+
+        // The body ends mid-block: only blank-line-terminated blocks
+        // dispatch, so the partial event is dropped and the stream ends.
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+        let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+        let body = format!("data: {begun}\n\ndata: {finished}");
+        let addr = spawn_models(mock_progress(body)).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        assert_eq!(
+            events.len(),
+            1,
+            "the unterminated trailing block is discarded"
+        );
+        assert!(events[0].is_ok(), "the complete event decodes");
     }
 }

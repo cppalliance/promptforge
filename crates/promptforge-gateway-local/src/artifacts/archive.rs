@@ -34,10 +34,18 @@ pub(super) fn extract_archive_with_progress(
     kind: ArchiveKind,
     progress: Option<&ProgressHandle>,
 ) -> Result<()> {
-    match kind {
+    let result = match kind {
         ArchiveKind::TarGz => extract_tar_gz(archive, destination, progress),
         ArchiveKind::Zip => extract_zip(archive, destination, progress),
+    };
+    // Every exit path owes the leaf its terminal event; the success path
+    // completed it inside, and terminal state is sticky.
+    if result.is_err()
+        && let Some(handle) = progress
+    {
+        handle.fail();
     }
+    result
 }
 
 /// Reports `done` of `total` entries into `progress`, when both are known.

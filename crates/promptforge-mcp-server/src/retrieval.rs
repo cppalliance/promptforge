@@ -50,6 +50,9 @@ mod tests;
 use std::sync::Arc;
 
 use promptforge_progress::ProgressHandle;
+use promptforge_tool_picker::Model;
+#[cfg(all(test, feature = "picker"))]
+use promptforge_tool_picker::ToolPicker;
 #[cfg(feature = "picker")]
 use serde::Serialize;
 
@@ -96,7 +99,7 @@ pub(crate) enum Shortlist {
     /// The prompts closest to the capability, best first, at most three of
     /// them. Empty when the catalog offered none.
     Candidates(Vec<Candidate>),
-    /// Retrieval is not part of this build, or its model could not be loaded.
+    /// Retrieval is not part of this build, or its index could not be built.
     Unavailable,
     /// The engine could not embed the capability, carrying the reason.
     Failed(String),
@@ -117,8 +120,8 @@ pub(crate) enum Shortlist {
 #[non_exhaustive]
 pub(crate) struct Retrieval {
     /// The engine over the catalog's descriptors, absent when no index was
-    /// built - a build without the `picker` feature, or a model that would not
-    /// load.
+    /// built - a build without the `picker` feature, or an index build that
+    /// failed.
     #[cfg(feature = "picker")]
     index: Option<Arc<index::Index>>,
 }
@@ -148,10 +151,11 @@ impl Retrieval {
     /// tool says it is unavailable.
     ///
     /// A `progress` leaf advances one prompt-count step per embedded prompt
-    /// and completes when indexing finishes; `None` builds without reporting.
+    /// and completes when indexing finishes, or fails when the index cannot
+    /// be built; `None` builds without reporting.
     #[must_use]
     pub(crate) fn start(
-        model: &promptforge_tool_picker::Model,
+        model: &Model,
         catalog: &Catalog,
         progress: Option<&ProgressHandle>,
     ) -> Retrieval {
@@ -221,29 +225,26 @@ impl Retrieval {
 
     /// Builds the index over `catalog`, or reports why it could not.
     #[cfg(feature = "picker")]
-    fn built(
-        model: &promptforge_tool_picker::Model,
-        catalog: &Catalog,
-        progress: Option<&ProgressHandle>,
-    ) -> Retrieval {
-        match index::Index::build_with(model, catalog, progress) {
-            Some(index) => {
-                tracing::info!("need_prompt ranks {} prompt(s)", index.len());
-                Retrieval {
-                    index: Some(Arc::new(index)),
-                }
+    fn built(model: &Model, catalog: &Catalog, progress: Option<&ProgressHandle>) -> Retrieval {
+        if let Some(index) = index::Index::build_with(model, catalog, progress) {
+            tracing::info!("need_prompt ranks {} prompt(s)", index.len());
+            Retrieval {
+                index: Some(Arc::new(index)),
             }
-            None => Retrieval::idle(),
+        } else {
+            // A successful boot owes the leaf its terminal event even when
+            // the index cannot be built; sticky, so an embed failure
+            // already reported by the picker is not failed twice.
+            if let Some(handle) = progress {
+                handle.fail();
+            }
+            Retrieval::idle()
         }
     }
 
     /// Without the ranking engine there is nothing to build.
     #[cfg(not(feature = "picker"))]
-    fn built(
-        _model: &promptforge_tool_picker::Model,
-        _catalog: &Catalog,
-        progress: Option<&ProgressHandle>,
-    ) -> Retrieval {
+    fn built(_model: &Model, _catalog: &Catalog, progress: Option<&ProgressHandle>) -> Retrieval {
         // The step is vacuously done: there is no index to build, so the leaf
         // completes rather than hanging unfinished under a boot that succeeds.
         if let Some(handle) = progress {
@@ -309,7 +310,7 @@ impl Retrieval {
     /// which is what the boot-sharing test asserts: one model, loaded once,
     /// behind both the retrieval index and the execution picker.
     #[cfg(all(test, feature = "picker"))]
-    pub(crate) fn shares_model_with(&self, picker: &promptforge_tool_picker::ToolPicker) -> bool {
+    pub(crate) fn shares_model_with(&self, picker: &ToolPicker) -> bool {
         self.index
             .as_ref()
             .is_some_and(|index| index.shares_model_with(picker))
@@ -402,5 +403,43 @@ impl std::fmt::Debug for Retrieval {
         f.debug_struct("Retrieval")
             .field("available", &self.is_available())
             .finish_non_exhaustive()
+    }
+}
+
+// Two `cfg` attributes rather than one `all(..)`, matching the module gates
+// above: the lint policy reads a bare `cfg(test)`.
+#[cfg(test)]
+#[cfg(not(feature = "picker"))]
+mod no_picker_tests {
+    use std::sync::Arc;
+
+    use promptforge_progress::{EventState, ProgressHub};
+
+    use super::*;
+
+    #[test]
+    fn a_build_without_the_picker_completes_the_leaf() {
+        let hub = Arc::new(ProgressHub::new());
+        let mut events = hub.subscribe();
+        let tree = hub.operation();
+        let leaf = tree.register("retrieval index", 1.0);
+
+        let retrieval = Retrieval::start(
+            crate::fixture::model(),
+            &Catalog::new(Vec::new()),
+            Some(&leaf),
+        );
+
+        assert!(!retrieval.is_available(), "no picker, no index");
+        let mut terminal = None;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event.state, EventState::Finished { .. }) {
+                terminal = Some(event.state);
+            }
+        }
+        assert!(
+            matches!(terminal, Some(EventState::Finished { ok: true })),
+            "the vacuous build completes the leaf rather than leaving it unfinished"
+        );
     }
 }

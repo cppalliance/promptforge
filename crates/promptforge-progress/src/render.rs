@@ -16,6 +16,10 @@ pub struct NodeSnapshot {
     /// Current fraction in `0.0..=1.0`; for a parent, the weighted aggregate
     /// of its children.
     pub fraction: f64,
+    /// Whether the node emitted its terminal `Finished` event.
+    pub finished: bool,
+    /// The terminal event's success flag; meaningful only when `finished`.
+    pub ok: bool,
 }
 
 /// One live operation's rendering rows.
@@ -145,6 +149,27 @@ mod tests {
             ["b-leaf", "a-leaf"],
             "registration order, not sorted"
         );
+    }
+
+    #[test]
+    fn snapshot_carries_the_terminal_state() {
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let done = tree.register("done", 1.0);
+        let failed = tree.register("failed", 1.0);
+        let _live = tree.register("live", 1.0);
+        done.complete();
+        failed.fail();
+        let nodes = &hub.snapshot()[0].nodes;
+        assert!(
+            nodes[0].finished && nodes[0].ok,
+            "a completed node snapshots as finished and ok"
+        );
+        assert!(
+            nodes[1].finished && !nodes[1].ok,
+            "a failed node snapshots as finished and not ok"
+        );
+        assert!(!nodes[2].finished, "a live node snapshots as unfinished");
     }
 
     #[test]

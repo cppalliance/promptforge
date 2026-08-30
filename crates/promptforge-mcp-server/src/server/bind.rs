@@ -93,7 +93,9 @@ impl PreparedTools {
 
     /// Loads as [`load`](PreparedTools::load) does, reporting the tool-picker
     /// build to `progress`: one tool-count step per embedded tool, completed
-    /// when indexing finishes. Boot's operation tree is the only caller.
+    /// when indexing finishes. A failure refuses the boot and leaves the leaf
+    /// unfinished: the boot's operation tree dies with the boot, so no
+    /// terminal event is emitted. Boot's operation tree is the only caller.
     pub(crate) async fn load_with_progress(
         config: &Config,
         model: &Model,
