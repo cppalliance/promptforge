@@ -22,6 +22,9 @@ dotenvy.workspace = true
 futures-util.workspace = true
 # TTY progress bars drawn by the renderer task.
 indicatif.workspace = true
+# GPU name and VRAM for GET /admin/system; probes NVML at runtime, so builds
+# and machines without an NVIDIA driver keep working.
+nvml-wrapper.workspace = true
 # Optional: opens the system browser at the hosted workshop URL.
 open = { workspace = true, optional = true }
 promptforge-core.workspace = true
@@ -38,6 +41,8 @@ promptforge-workshop-server = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# Host CPU/RAM/disk metrics for GET /admin/system.
+sysinfo.workspace = true
 subtle.workspace = true
 url.workspace = true
 reqwest = { workspace = true, features = ["stream"] }

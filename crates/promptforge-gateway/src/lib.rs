@@ -24,7 +24,9 @@
 //! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
 //! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, a
 //! bearer-authed `GET /admin/orphans` listing of cache files no loaded
-//! `[[local_model]]` entry references (local builds), and
+//! `[[local_model]]` entry references (local builds), a bearer-authed
+//! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
+//! metrics, and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
@@ -38,6 +40,7 @@ mod orphans;
 mod render;
 mod routing;
 mod runner;
+mod system;
 mod workshop;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
@@ -150,6 +153,10 @@ pub(crate) struct AppState {
     /// The process-lifetime progress broker: operations attach trees for
     /// their own lifetimes, and `GET /admin/progress` streams its events.
     hub: Arc<ProgressHub>,
+    /// Shared host-metrics sampler for `GET /admin/system`: one process-wide
+    /// `sysinfo::System` so CPU-utilization deltas span requests, plus the
+    /// once-per-process NVML probe.
+    metrics: Arc<std::sync::Mutex<system::SystemSampler>>,
 }
 
 impl AppState {
@@ -186,6 +193,7 @@ impl AppState {
             boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
             hub,
+            metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
         }
     }
 
@@ -212,6 +220,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
+        .route("/admin/system", get(system::admin_system))
         .route("/admin/config", get(admin_config))
         .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile));
