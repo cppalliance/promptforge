@@ -1,7 +1,7 @@
 //! HTTP blob download with connect timeout, size cap, and scoped HF auth.
 
 use std::fs::File;
-use std::io::{self, BufWriter, IsTerminal, Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
 use promptforge_progress::ProgressHandle;
@@ -10,9 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::Result;
 use super::digest::hex_digest;
-use super::progress::{
-    DownloadProgress, FanoutProgress, TreeProgress, download_label, progress_for_download,
-};
+use super::progress::{DownloadProgress, NoopProgress, TreeProgress};
 use crate::error::LocalError;
 
 /// Hard ceiling on a single artifact, guarding the cache volume against a
@@ -61,8 +59,8 @@ pub(super) fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Optio
     None
 }
 
-/// Downloads `url` to `destination`, driving TTY/log progress - plus the
-/// progress-tree leaf when `tree` is given - and returns the SHA-256 hex
+/// Downloads `url` to `destination`, reporting byte counts into a leaf of
+/// the progress tree when `tree` is given, and returns the SHA-256 hex
 /// digest of the streamed bytes.
 ///
 /// # Errors
@@ -73,15 +71,12 @@ pub(super) fn download(
     destination: &Path,
     tree: Option<&ProgressHandle>,
 ) -> Result<String> {
-    let label = download_label(url);
-    let presentation = progress_for_download(&label, io::stderr().is_terminal());
     match tree {
         Some(handle) => {
             let leaf = TreeProgress::new(handle.clone());
-            let progress = FanoutProgress::new(&leaf, presentation.as_ref());
-            run_download(client, url, destination, &progress)
+            run_download(client, url, destination, &leaf)
         }
-        None => run_download(client, url, destination, presentation.as_ref()),
+        None => run_download(client, url, destination, &NoopProgress),
     }
 }
 

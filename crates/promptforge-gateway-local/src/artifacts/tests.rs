@@ -12,7 +12,7 @@ use promptforge_progress::{EventState, ProgressHub};
 use super::archive::{extract_archive_with_progress, safe_archive_path};
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
-use super::progress::{DownloadProgress, TreeProgress, download_label, progress_for_download};
+use super::progress::{DownloadProgress, TreeProgress};
 use super::verified::{
     VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress, write_marker,
 };
@@ -511,31 +511,6 @@ impl DownloadProgress for RecordingProgress {
     fn abandon(&self) {
         self.abandoned.fetch_add(1, Ordering::Relaxed);
     }
-}
-
-#[test]
-fn download_label_uses_url_basename() {
-    assert_eq!(
-        download_label("https://huggingface.co/google/gemma/resolve/main/gemma-3-27b-it-q4_0.gguf"),
-        "gemma-3-27b-it-q4_0.gguf"
-    );
-    assert_eq!(
-        download_label("https://example.com/file.gguf?download=true"),
-        "file.gguf"
-    );
-}
-
-#[test]
-fn progress_for_download_picks_bar_on_tty_and_log_off_tty() {
-    let tty = progress_for_download("x.gguf", true);
-    let log = progress_for_download("x.gguf", false);
-    // Type names are enough: both implement the trait and accept a finish.
-    tty.set_len(Some(10));
-    tty.inc(10);
-    tty.finish();
-    log.set_len(Some(10));
-    log.inc(10);
-    log.finish();
 }
 
 #[test]

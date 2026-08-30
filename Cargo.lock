@@ -3994,6 +3994,7 @@ dependencies = [
  "axum",
  "dotenvy",
  "futures-util",
+ "indicatif",
  "open",
  "png",
  "promptforge-core",
@@ -4059,7 +4060,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "flate2",
- "indicatif",
  "promptforge-gateway-build",
  "promptforge-gateway-config",
  "promptforge-gateway-protocol",

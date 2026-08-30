@@ -1,12 +1,12 @@
-//! Download progress reporting: interactive TTY bar or non-TTY tracing lines.
+//! Download progress reporting into progress-tree leaves.
+//!
+//! The library never chooses a presentation: the owning process renders the
+//! hub (the gateway binary draws indicatif bars on a TTY, tracing lines
+//! otherwise).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use indicatif::{ProgressBar, ProgressStyle};
 use promptforge_progress::ProgressHandle;
-
-/// Non-TTY log cadence: every 64 MiB or 5% of Content-Length, whichever fires first.
-const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Progress updates for a single HTTP blob download.
 pub trait DownloadProgress: Send {
@@ -20,24 +20,18 @@ pub trait DownloadProgress: Send {
     fn abandon(&self);
 }
 
-/// Basename (or short fallback) shown on the progress bar / log lines.
-pub(super) fn download_label(url: &str) -> String {
-    url.rsplit('/')
-        .next()
-        .and_then(|part| {
-            let name = part.split('?').next().unwrap_or(part);
-            (!name.is_empty()).then(|| name.to_owned())
-        })
-        .unwrap_or_else(|| "download".to_owned())
-}
+/// A [`DownloadProgress`] that discards every callback, for callers with no
+/// progress tree.
+pub(super) struct NoopProgress;
 
-/// Chooses a TTY progress bar or non-TTY tracing progress for `label`.
-pub(super) fn progress_for_download(label: &str, is_tty: bool) -> Box<dyn DownloadProgress + Sync> {
-    if is_tty {
-        Box::new(IndicatifProgress::new(label))
-    } else {
-        Box::new(TracingProgress::new(label))
-    }
+impl DownloadProgress for NoopProgress {
+    fn set_len(&self, _total: Option<u64>) {}
+
+    fn inc(&self, _n: u64) {}
+
+    fn finish(&self) {}
+
+    fn abandon(&self) {}
 }
 
 /// A [`DownloadProgress`] that reports byte counts into a progress-tree leaf.
@@ -85,186 +79,5 @@ impl DownloadProgress for TreeProgress {
         // The handle vocabulary has no failure terminal; the operation owner
         // carries failure through its own exit path, so the leaf completes.
         self.handle.complete();
-    }
-}
-
-/// A [`DownloadProgress`] that fans each callback out to the tree `leaf` and
-/// the TTY/log `presentation` reporter, so both run alongside each other.
-pub(super) struct FanoutProgress<'a> {
-    leaf: &'a TreeProgress,
-    presentation: &'a (dyn DownloadProgress + Sync),
-}
-
-impl<'a> FanoutProgress<'a> {
-    /// Creates a fan-out over the tree `leaf` and the `presentation` reporter.
-    pub(super) fn new(
-        leaf: &'a TreeProgress,
-        presentation: &'a (dyn DownloadProgress + Sync),
-    ) -> Self {
-        Self { leaf, presentation }
-    }
-}
-
-impl DownloadProgress for FanoutProgress<'_> {
-    fn set_len(&self, total: Option<u64>) {
-        self.leaf.set_len(total);
-        self.presentation.set_len(total);
-    }
-
-    fn inc(&self, n: u64) {
-        self.leaf.inc(n);
-        self.presentation.inc(n);
-    }
-
-    fn finish(&self) {
-        self.leaf.finish();
-        self.presentation.finish();
-    }
-
-    fn abandon(&self) {
-        self.leaf.abandon();
-        self.presentation.abandon();
-    }
-}
-
-/// Interactive stderr progress bar via indicatif.
-struct IndicatifProgress {
-    bar: ProgressBar,
-}
-
-impl IndicatifProgress {
-    fn new(label: &str) -> Self {
-        let bar = ProgressBar::new_spinner();
-        bar.set_message(label.to_owned());
-        if let Some(style) = bar_style() {
-            bar.set_style(style);
-        }
-        Self { bar }
-    }
-}
-
-fn bar_style() -> Option<ProgressStyle> {
-    ProgressStyle::with_template(
-        "{spinner:.green} {msg} [{bar:40.cyan/blue}] {percent:>3}% {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
-    )
-    .ok()
-    .map(|style| style.progress_chars("=>-"))
-}
-
-fn spinner_style() -> Option<ProgressStyle> {
-    ProgressStyle::with_template("{spinner:.green} {msg} {bytes} ({bytes_per_sec})").ok()
-}
-
-impl DownloadProgress for IndicatifProgress {
-    fn set_len(&self, total: Option<u64>) {
-        match total {
-            Some(len) if len > 0 => {
-                self.bar.set_length(len);
-                if let Some(style) = bar_style() {
-                    self.bar.set_style(style);
-                }
-            }
-            _ => {
-                if let Some(style) = spinner_style() {
-                    self.bar.set_style(style);
-                }
-            }
-        }
-    }
-
-    fn inc(&self, n: u64) {
-        self.bar.inc(n);
-    }
-
-    fn finish(&self) {
-        self.bar.finish_and_clear();
-    }
-
-    fn abandon(&self) {
-        self.bar.abandon();
-    }
-}
-
-/// Non-TTY progress: periodic `tracing::info!` lines.
-struct TracingProgress {
-    label: String,
-    total: AtomicU64,
-    downloaded: AtomicU64,
-    last_logged: AtomicU64,
-}
-
-impl TracingProgress {
-    fn new(label: &str) -> Self {
-        Self {
-            label: label.to_owned(),
-            total: AtomicU64::new(0),
-            downloaded: AtomicU64::new(0),
-            last_logged: AtomicU64::new(0),
-        }
-    }
-
-    fn maybe_log(&self, force: bool) {
-        let downloaded = self.downloaded.load(Ordering::Relaxed);
-        let total = self.total.load(Ordering::Relaxed);
-        let last = self.last_logged.load(Ordering::Relaxed);
-        let step = if total > 0 {
-            (total / 20).max(LOG_PROGRESS_BYTES)
-        } else {
-            LOG_PROGRESS_BYTES
-        };
-        if !force && downloaded.saturating_sub(last) < step && downloaded != 0 {
-            return;
-        }
-        self.last_logged.store(downloaded, Ordering::Relaxed);
-        if let Some(percent) = downloaded.saturating_mul(100).checked_div(total) {
-            tracing::info!(
-                file = %self.label,
-                downloaded,
-                total,
-                percent,
-                "download progress"
-            );
-        } else {
-            tracing::info!(
-                file = %self.label,
-                downloaded,
-                "download progress"
-            );
-        }
-    }
-}
-
-impl DownloadProgress for TracingProgress {
-    fn set_len(&self, total: Option<u64>) {
-        if let Some(len) = total {
-            self.total.store(len, Ordering::Relaxed);
-        }
-        tracing::info!(
-            file = %self.label,
-            total = total.unwrap_or(0),
-            "download started"
-        );
-    }
-
-    fn inc(&self, n: u64) {
-        self.downloaded.fetch_add(n, Ordering::Relaxed);
-        self.maybe_log(false);
-    }
-
-    fn finish(&self) {
-        self.maybe_log(true);
-        tracing::info!(
-            file = %self.label,
-            downloaded = self.downloaded.load(Ordering::Relaxed),
-            "download finished"
-        );
-    }
-
-    fn abandon(&self) {
-        tracing::warn!(
-            file = %self.label,
-            downloaded = self.downloaded.load(Ordering::Relaxed),
-            "download abandoned"
-        );
     }
 }
