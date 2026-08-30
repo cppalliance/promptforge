@@ -53,6 +53,11 @@ export interface TabBar {
    * report.
    */
   setPendingCount(count: number): void;
+  /**
+   * Shows the active-download count as a badge on the Downloads tab,
+   * removing the badge at zero.
+   */
+  setDownloadsBadge(count: number): void;
 }
 
 /** Builds the tab bar. */
@@ -104,8 +109,25 @@ export function createTabBar(options: TabBarOptions): TabBar {
   actions.append(dot, pending);
   element.append(actions);
 
+  // The Downloads tab's active-count badge, mounted while downloads run.
+  const badge = document.createElement("span");
+  badge.className = "tab-badge";
+
   return {
     element,
+    setDownloadsBadge(count: number): void {
+      if (count <= 0) {
+        badge.remove();
+        return;
+      }
+      badge.replaceChildren();
+      badge.append(String(count));
+      const hidden = document.createElement("span");
+      hidden.className = "visually-hidden";
+      hidden.textContent = count === 1 ? " active download" : " active downloads";
+      badge.append(hidden);
+      tabByView.get("downloads")?.append(badge);
+    },
     setPendingCount(count: number): void {
       if (count <= 0) {
         pending.replaceChildren();

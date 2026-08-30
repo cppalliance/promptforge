@@ -31,6 +31,7 @@ import {
 } from "../components/settings-registry";
 import type { SectionDef, SettingContext, SettingDef } from "../components/settings-registry";
 import type { ToastStack } from "../components/toast";
+import { fileName, formatBytes } from "../format";
 import type { ConfigStore, ModelEntry } from "../services/config-store";
 import type { GatewayApi, OrphanFile } from "../services/gateway-api";
 
@@ -1028,12 +1029,6 @@ function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** The last path segment (either separator). */
-function fileName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
-
 /** The quant tag parsed from a GGUF filename, when present. */
 function quantFromSource(entry: ModelEntry): string | null {
   const source = entry.data["source"];
@@ -1045,14 +1040,3 @@ function quantFromSource(entry: ModelEntry): string | null {
   return match?.[1]?.toUpperCase() ?? null;
 }
 
-/** Human-readable byte size (GiB/MiB/KiB). */
-function formatBytes(bytes: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
-}

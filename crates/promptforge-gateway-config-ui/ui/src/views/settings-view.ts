@@ -25,6 +25,7 @@ import { createDropdownControl } from "../components/dropdown-control";
 import { createSliderControl } from "../components/slider-control";
 import { createToggleControl } from "../components/toggle-control";
 import type { ToastStack } from "../components/toast";
+import { formatBytes } from "../format";
 import { readPath, writePath } from "../services/config-store";
 import type { ConfigStore, EntryData } from "../services/config-store";
 import type { GatewayApi, SystemSnapshot } from "../services/gateway-api";
@@ -121,18 +122,6 @@ interface FieldSpec {
 /** Bytes rendered as GiB with one decimal. */
 function gib(bytes: number): string {
   return (bytes / 1024 ** 3).toFixed(1);
-}
-
-/** Human-readable byte size (GiB/TiB). */
-function formatBytes(bytes: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
 /** Structural equality through JSON, matching the store's notion. */

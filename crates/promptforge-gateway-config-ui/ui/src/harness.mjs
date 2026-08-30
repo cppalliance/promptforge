@@ -251,6 +251,27 @@ export function hfModelFixture() {
   };
 }
 
+/**
+ * A cache listing as `GET /v1/cache` emits it: source URL, absolute
+ * blob path, sha256, and size - the sidecars carry no timestamp.
+ */
+export function cacheListFixture() {
+  return [
+    {
+      source: "https://huggingface.co/u/r/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+      path: "C:/pf/cache/models/Qwen3-8B-Q4_K_M.gguf",
+      sha256: "a".repeat(64),
+      size_bytes: 10 * GIB,
+    },
+    {
+      source: "https://huggingface.co/u/r/resolve/main/Llama-3-8B-Q8_0.gguf",
+      path: "C:/pf/cache/models/Llama-3-8B-Q8_0.gguf",
+      sha256: "b".repeat(64),
+      size_bytes: 8 * GIB,
+    },
+  ];
+}
+
 /** A README carrying the XSS vectors the sanitizer must neutralize. */
 export function readmeFixture() {
   return [
@@ -297,9 +318,11 @@ function redactSecrets(view) {
  * model-info, reveal, and cache deletes. The Discover
  * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
  * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
- * pass-through 401), hub README fetches (`readme`), and `POST
+ * pass-through 401), hub README fetches (`readme`), `POST
  * /v1/cache` (an immediately-completing SSE unless `onCache` supplies
- * the response). When `key` is set, gateway requests without that
+ * the response), and the `GET /v1/cache` listing (`cache`; a DELETE
+ * removes the matching entry; `onCacheList` overrides the listing
+ * response, for failure staging). When `key` is set, gateway requests without that
  * bearer answer 401; absolute (hub) URLs are exempt. Every call is
  * recorded in `calls`; the mutable config state is exposed as `state`.
  */
@@ -321,6 +344,8 @@ export function gatewayStub({
   hfAuth401 = false,
   readme,
   onCache,
+  cache,
+  onCacheList,
   applyOutcome,
 } = {}) {
   const calls = [];
@@ -329,6 +354,8 @@ export function gatewayStub({
     pending: pending ?? structuredClone(config ?? {}),
     dirty: dirty ?? cleanDirty(),
     orphans: orphans ?? [],
+    /** The GET /v1/cache listing; deletes remove matching entries. */
+    cache: cache ?? [],
     /** The last PUT /admin/boot-config body, null until one arrives. */
     boot: null,
   };
@@ -381,6 +408,12 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/system")) {
       return jsonResponse(system ?? systemFixture());
+    }
+    if (url.endsWith("/v1/cache") && (init.method ?? "GET") === "GET") {
+      if (onCacheList) {
+        return onCacheList(init);
+      }
+      return jsonResponse(state.cache);
     }
     if (url.endsWith("/v1/cache") && init.method === "POST") {
       if (onCache) {
@@ -484,6 +517,7 @@ export function gatewayStub({
     if (url.includes("/v1/cache/") && init.method === "DELETE") {
       const sha = url.slice(url.lastIndexOf("/") + 1);
       state.orphans = state.orphans.filter((orphan) => orphan.sha256 !== sha);
+      state.cache = state.cache.filter((entry) => entry.sha256 !== sha);
       return jsonResponse({});
     }
     if (url.endsWith("/admin/switch-profile")) {
