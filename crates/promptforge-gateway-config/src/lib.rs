@@ -25,7 +25,10 @@
 //! [`save_include_shadow`], and [`save_boot_shadow`] validate the merged
 //! pending state before writing, [`write_shadow`] stages arbitrary sibling
 //! content (env files), and [`shadow_path`] names the shadow for any
-//! managed file. No save ever touches a real file.
+//! managed file. No save ever touches a real file. Reading the pending
+//! state back, [`load_pending_profile`] loads the chain with shadows
+//! preferred (provenance names the `.next` files), and [`pending_report`]
+//! summarizes which files carry shadows and which sections they change.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -55,6 +58,7 @@ pub use crate::config::{
     WorkshopConfig, WorkshopTapeConfig, WorkshopVoiceConfig,
 };
 pub use crate::profile::{
-    ProfileName, ProfileNameError, list_profiles, load_boot_sections, load_server, load_workshop,
-    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
+    PendingReport, ProfileName, ProfileNameError, list_profiles, load_boot_sections,
+    load_pending_profile, load_server, load_workshop, pending_report, save_boot_shadow,
+    save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
 };

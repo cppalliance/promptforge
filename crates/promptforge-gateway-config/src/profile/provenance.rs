@@ -46,6 +46,17 @@ impl Provenance {
             .map(PathBuf::as_path)
     }
 
+    /// Rewrites every recorded source file through `map`; `None` keeps the
+    /// existing path. The pending view uses this to name the shadow file as
+    /// the origin wherever a shadow supplied the winning definition.
+    pub(crate) fn map_sources(&mut self, map: impl Fn(&Path) -> Option<PathBuf>) {
+        for source in self.entries.values_mut().chain(self.paths.values_mut()) {
+            if let Some(mapped) = map(source) {
+                *source = mapped;
+            }
+        }
+    }
+
     /// Iterate the recorded dotted paths and their source files.
     pub(crate) fn paths(&self) -> impl Iterator<Item = (&str, &Path)> {
         self.paths

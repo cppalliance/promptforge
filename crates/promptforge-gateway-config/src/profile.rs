@@ -41,7 +41,8 @@ use merge::merge_docs;
 pub use name::{ProfileName, ProfileNameError};
 pub(crate) use provenance::Provenance;
 pub use shadow::{
-    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
+    PendingReport, load_pending_profile, pending_report, save_boot_shadow, save_include_shadow,
+    save_profile_shadow, shadow_path, write_shadow,
 };
 
 #[cfg(test)]

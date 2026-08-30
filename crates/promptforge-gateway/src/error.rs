@@ -104,6 +104,15 @@ pub(crate) enum GatewayError {
     #[error("include file not found: {0}")]
     IncludeNotFound(String),
 
+    /// A pending-state read could not resolve the shadow-overlaid
+    /// configuration: a chain file or shadow is unreadable, unparsable, or
+    /// the merged pending result fails validation. Saves validate before
+    /// writing, so this means the on-disk pending state was corrupted out
+    /// of band. The message carries the full cause chain.
+    #[non_exhaustive]
+    #[error("pending config unreadable: {0}")]
+    PendingConfig(String),
+
     /// An `.env` file could not be read or parsed for `GET /admin/env`.
     #[non_exhaustive]
     #[error("env file unreadable")]
@@ -218,6 +227,10 @@ impl GatewayError {
     }
 
     /// The `(status, type, code)` triple for the OpenAI error envelope.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat status table with one arm per error variant"
+    )]
     fn classify(&self) -> (StatusCode, &'static str, &'static str) {
         match self {
             GatewayError::Unauthorized => (
@@ -289,6 +302,11 @@ impl GatewayError {
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "include_not_found",
+            ),
+            GatewayError::PendingConfig(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "pending_config_error",
             ),
             GatewayError::EnvFile(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -455,6 +473,14 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "env_file_error",
+                ),
+            ),
+            (
+                GatewayError::PendingConfig("corrupt shadow".to_owned()),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "pending_config_error",
                 ),
             ),
         ];

@@ -34,13 +34,19 @@
 //! write routes staging pending edits beside the real files without ever
 //! touching them (`PUT /admin/config`, `PUT /admin/boot-config`,
 //! `PUT /admin/include/{path}`, `PUT /admin/env`) plus a bearer-authed
-//! `GET /admin/env` readout of the real boot and profile `.env` files, and
+//! `GET /admin/env` readout of the real boot and profile `.env` files,
+//! bearer-authed pending-state reads - `GET /admin/config-pending` (the
+//! merged real-plus-shadow view in the `GET /admin/config` shape, with a
+//! distinct boot side for the restart-required banner) and
+//! `GET /admin/config-dirty` (shadow existence, pending files, changed
+//! sections) - and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
 #[cfg(feature = "local")]
 mod cache;
+mod config_pending;
 mod config_write;
 mod dialect;
 mod env_file;
@@ -247,6 +253,14 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route(
             "/admin/config",
             get(admin_config).put(config_write::admin_put_config),
+        )
+        .route(
+            "/admin/config-pending",
+            get(config_pending::admin_config_pending),
+        )
+        .route(
+            "/admin/config-dirty",
+            get(config_pending::admin_config_dirty),
         )
         .route(
             "/admin/boot-config",

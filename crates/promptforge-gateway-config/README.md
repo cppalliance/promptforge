@@ -48,6 +48,12 @@ What it provides:
   (it could not be validated); `write_shadow`
   stages arbitrary sibling content such as `.env` files, and `shadow_path`
   names the shadow for any managed file. No save ever touches a real file.
+  Reading the pending state back, `load_pending_profile` loads the chain
+  with shadows preferred (provenance names the `.next` files), and
+  `pending_report` lists which real files carry shadows and which
+  top-level sections differ between the real and pending views (an absent
+  section equals a vacant one, so serialized empty defaults report no
+  phantom change).
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
   classify failures with `ConfigError::kind` and `ConfigErrorKind`.
 

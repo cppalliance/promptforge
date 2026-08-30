@@ -28,7 +28,10 @@ use toml::Value;
 use crate::config::{Config, interpolate_value};
 use crate::error::ConfigError as Repr;
 
-use super::{collect_config_chain_with, read_doc_from_disk, server_section, workshop_section};
+use super::{
+    collect_config_chain, collect_config_chain_with, read_doc_from_disk, server_section,
+    workshop_section,
+};
 
 /// The redaction marker serialized in place of every secret; on write it
 /// means "preserve the existing value".
@@ -315,6 +318,152 @@ fn save_boot_shadow_repr(
         validate_chain(leaf, boot, &document)?;
     }
     write_shadow_repr(boot, &render_toml(&document)?)
+}
+
+/// Loads the pending configuration rooted at `leaf`: the include chain
+/// resolved with existing shadows preferred, merged and validated exactly
+/// like a real profile load.
+///
+/// Provenance names the shadow file (`<file>.toml.next`) wherever the
+/// winning definition came from a file that carries a shadow, so the
+/// `Config::to_json` annotations distinguish pending entries from running
+/// ones. With no shadows on disk the result equals a real load of `leaf`.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) when a chain file or
+/// shadow cannot be read or parsed, an include cycles or exceeds depth, an
+/// interpolation fails, or the merged pending result fails config
+/// validation.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::load_pending_profile;
+/// use std::path::Path;
+///
+/// let pending = load_pending_profile(Path::new("profiles/default.toml"))?;
+/// assert_eq!(pending.to_json()["server"]["api_key"], "***");
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn load_pending_profile(leaf: &Path) -> Result<Config, crate::ConfigError> {
+    load_pending_profile_repr(leaf).map_err(crate::ConfigError::from)
+}
+
+/// The crate-internal form of [`load_pending_profile`].
+fn load_pending_profile_repr(leaf: &Path) -> Result<Config, Repr> {
+    let read = shadow_reader(None);
+    let (merged, _chain, mut provenance) = collect_config_chain_with(leaf, &read)?;
+    provenance.map_sources(|source| {
+        let shadow = shadow_path(source);
+        shadow.is_file().then_some(shadow)
+    });
+    let mut config = Config::from_value(merged)?;
+    config.set_provenance(provenance);
+    Ok(config)
+}
+
+/// The pending state of the include chain rooted at one file: which real
+/// files carry shadows and which top-level sections the shadows change.
+///
+/// Produced by [`pending_report`]. `changed_sections` treats an absent
+/// section and a vacant one (an empty table or array) as equal, so a
+/// round-tripped document that spells out empty defaults reports no
+/// phantom change.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct PendingReport {
+    /// Real files in the chain (real or pending view) that carry a shadow,
+    /// in chain order, without duplicates.
+    pub shadowed_files: Vec<PathBuf>,
+    /// Top-level sections whose merged value differs between the real and
+    /// pending views, sorted.
+    pub changed_sections: Vec<String>,
+}
+
+/// Reports the pending state of the include chain rooted at `root`: the
+/// real files that carry shadows, and the top-level sections whose merged
+/// value differs between the real view and the pending (shadow-preferring)
+/// view.
+///
+/// `root` may be a profile leaf or the boot config: both views are merged
+/// without validation, so the boot file's catalog shape is fine. Files are
+/// listed by their real paths, never the `.next` names.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) when a chain file or
+/// shadow cannot be read or parsed, or an include cycles or exceeds depth,
+/// in either view.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::pending_report;
+/// use std::path::Path;
+///
+/// let report = pending_report(Path::new("profiles/default.toml"))?;
+/// if !report.shadowed_files.is_empty() {
+///     println!("pending sections: {:?}", report.changed_sections);
+/// }
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn pending_report(root: &Path) -> Result<PendingReport, crate::ConfigError> {
+    pending_report_repr(root).map_err(crate::ConfigError::from)
+}
+
+/// The crate-internal form of [`pending_report`].
+fn pending_report_repr(root: &Path) -> Result<PendingReport, Repr> {
+    let (real, real_chain, _real_provenance) = collect_config_chain(root)?;
+    let reader = shadow_reader(None);
+    let (pending, pending_chain, _pending_provenance) = collect_config_chain_with(root, &reader)?;
+    // Both chains contribute: a shadow can add an include the real chain
+    // never reaches, and vice versa.
+    let mut shadowed_files: Vec<PathBuf> = Vec::new();
+    for file in real_chain.iter().chain(pending_chain.iter()) {
+        if shadow_path(file).is_file() && !shadowed_files.iter().any(|seen| same_file(seen, file)) {
+            shadowed_files.push(file.clone());
+        }
+    }
+    Ok(PendingReport {
+        shadowed_files,
+        changed_sections: changed_sections(&real, &pending),
+    })
+}
+
+/// The top-level sections whose value differs between the two merged
+/// views, sorted and deduplicated.
+fn changed_sections(real: &Value, pending: &Value) -> Vec<String> {
+    let empty = toml::map::Map::new();
+    let real = real.as_table().unwrap_or(&empty);
+    let pending = pending.as_table().unwrap_or(&empty);
+    let mut sections: Vec<String> = real
+        .keys()
+        .chain(pending.keys())
+        .filter(|key| section_differs(real.get(key.as_str()), pending.get(key.as_str())))
+        .cloned()
+        .collect();
+    sections.sort_unstable();
+    sections.dedup();
+    sections
+}
+
+/// Whether one section's two views differ. When the section is present in
+/// both, plain value inequality decides; otherwise the present side must
+/// be vacant for the views to count as equal.
+fn section_differs(real: Option<&Value>, pending: Option<&Value>) -> bool {
+    match (real, pending) {
+        (Some(real), Some(pending)) => real != pending,
+        (real, pending) => !(vacant(real) && vacant(pending)),
+    }
+}
+
+/// Whether a section value is as good as absent: missing, an empty table,
+/// or an empty array. A serialized document spells out empty defaults
+/// (`dominion = []`) that an operator-authored file simply omits.
+fn vacant(value: Option<&Value>) -> bool {
+    match value {
+        None => true,
+        Some(Value::Table(table)) => table.is_empty(),
+        Some(Value::Array(items)) => items.is_empty(),
+        Some(_) => false,
+    }
 }
 
 /// The target's current document for secret restoration: its existing
@@ -841,6 +990,147 @@ endpoints = ["e"]
         assert!(
             temp.path().join("common.toml.next").is_file(),
             "the shadow sits beside the include"
+        );
+    }
+
+    /// A leaf including `common.toml`, whose model routes through the
+    /// endpoint `shared` that common defines.
+    const CHAIN_LEAF: &str = "include = ['common.toml']\n\n\
+         [server]\nbind = '127.0.0.1:0'\napi_key = 'k'\n\n\
+         [[model]]\nname = 'm'\ndescription = 'p'\ncontext = 1\n\
+         upstream = 'u'\nendpoints = ['shared']\n";
+
+    /// The `common.toml` body for the chain fixtures, with a swappable
+    /// base URL.
+    fn common_body(base_url: &str) -> String {
+        format!(
+            "[[endpoint]]\nid = 'shared'\nprotocol = 'openai'\n\
+             base_url = '{base_url}'\napi_key = ''\n"
+        )
+    }
+
+    #[test]
+    fn load_pending_profile_prefers_shadows_and_names_them_in_provenance() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let common = write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        write_shadow(&common, &common_body("http://127.0.0.1:10")).unwrap();
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let json = load_pending_profile(&leaf).unwrap().to_json();
+        assert_eq!(
+            json["endpoint"][0]["base_url"], "http://127.0.0.1:10",
+            "the shadow's definition wins the pending merge"
+        );
+        let endpoint_source = json["endpoint"][0]["source_file"]
+            .as_str()
+            .expect("a source_file annotation");
+        assert!(
+            endpoint_source.ends_with("common.toml.next"),
+            "a shadow-supplied entry names the shadow file: {endpoint_source}"
+        );
+        let model_source = json["model"][0]["source_file"]
+            .as_str()
+            .expect("a source_file annotation");
+        assert!(
+            model_source.ends_with("main.toml"),
+            "an unshadowed file keeps its real name: {model_source}"
+        );
+    }
+
+    #[test]
+    fn load_pending_profile_without_shadows_equals_a_real_load() {
+        let temp = tempfile::TempDir::new().unwrap();
+        write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let pending = load_pending_profile(&leaf).unwrap().to_json();
+        let real = crate::Config::load(&leaf).unwrap().to_json();
+        assert_eq!(
+            pending, real,
+            "no shadows: the pending view is the real view"
+        );
+    }
+
+    #[test]
+    fn pending_report_lists_shadowed_files_and_changed_sections() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let common = write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let clean = pending_report(&leaf).unwrap();
+        assert!(
+            clean.shadowed_files.is_empty(),
+            "{:?}",
+            clean.shadowed_files
+        );
+        assert!(
+            clean.changed_sections.is_empty(),
+            "{:?}",
+            clean.changed_sections
+        );
+
+        write_shadow(&common, &common_body("http://127.0.0.1:10")).unwrap();
+        let report = pending_report(&leaf).unwrap();
+        assert_eq!(
+            report.shadowed_files,
+            std::slice::from_ref(&common),
+            "the shadowed chain file is listed by its real path"
+        );
+        assert_eq!(
+            report.changed_sections,
+            ["endpoint"],
+            "only the section the shadow changes is reported"
+        );
+    }
+
+    #[test]
+    fn pending_report_treats_vacant_sections_as_absent() {
+        // A round-tripped document spells out empty defaults
+        // (`dominion = []`, `[local]`); those must not read as changes
+        // against a real file that simply omits them.
+        let temp = tempfile::TempDir::new().unwrap();
+        let leaf = write(temp.path(), "default.toml", LEAF);
+        write_shadow(&leaf, &format!("dominion = []\n\n[local]\n{LEAF}")).unwrap();
+
+        let report = pending_report(&leaf).unwrap();
+        assert_eq!(report.shadowed_files, std::slice::from_ref(&leaf));
+        assert_eq!(
+            report.changed_sections,
+            Vec::<String>::new(),
+            "vacant sections in the shadow report no change"
+        );
+    }
+
+    #[test]
+    fn pending_report_reports_deleted_and_added_sections() {
+        // The absent-equals-vacant rule must not mask a real deletion: a
+        // shadow that drops a populated section still reports it, and a
+        // section the shadow introduces reports symmetrically.
+        let temp = tempfile::TempDir::new().unwrap();
+        let leaf = write(temp.path(), "default.toml", LEAF);
+        let without_model = LEAF
+            .split("[[model]]")
+            .next()
+            .expect("LEAF carries a model block");
+        write_shadow(&leaf, &format!("{without_model}[local]\ncache_dir = 'c'\n")).unwrap();
+
+        let report = pending_report(&leaf).unwrap();
+        assert_eq!(
+            report.changed_sections,
+            ["local", "model"],
+            "the deleted model section and the added local section both report"
         );
     }
 
