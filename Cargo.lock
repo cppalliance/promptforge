@@ -4300,6 +4300,7 @@ dependencies = [
  "open",
  "percent-encoding",
  "promptforge-gateway-protocol",
+ "promptforge-progress",
  "promptforge-transcribe",
  "promptforge-workshop-server",
  "reqwest 0.12.28",

@@ -46,6 +46,11 @@
 "main.rs" = 47
 "menu.rs" = 926
 "protocol.rs" = 738
+# New module: the ProgressHub-to-status-bar renderer and its anti-flicker
+# state machine (show delay, minimum visible time, detach poll). Grew by
+# the lapsed-deadline detach poll (a past wake instant re-armed would spin
+# the select loop) and its two pinning tests.
+"progress.rs" = 390
 "provision.rs" = 839
 "push.rs" = 274
 "relay.rs" = 537
