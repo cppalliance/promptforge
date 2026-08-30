@@ -22,6 +22,7 @@ use promptforge_core::observe::{NullObserver, Observer};
 use crate::app::{Cli, Command, RunRequest};
 
 mod app;
+mod progress;
 mod tools;
 
 /// Parses arguments, runs the requested command, and maps its result to a

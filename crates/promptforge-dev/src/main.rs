@@ -13,6 +13,7 @@
 mod config;
 mod diagnostics;
 mod dump;
+mod progress;
 mod run;
 mod tools;
 mod watch;

@@ -25,11 +25,12 @@ use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::{FileStore, StoreRef};
-use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
+use promptforge_tool_picker::{Config as PickerConfig, Model, ToolPicker};
 
 use crate::config::GatewayEnv;
 use crate::diagnostics::VerboseObserver;
 use crate::dump::{self, SensitiveCapture};
+use crate::progress::SetupProgress;
 use crate::tools::{self, AvailableTools};
 
 /// Whether a run persists raw, sensitive turn traces.
@@ -67,31 +68,55 @@ impl std::fmt::Debug for RunEnv {
 impl RunEnv {
     /// Builds a run environment, fetching the model catalog once.
     ///
+    /// Setup reports through a small progress tree rendered to indicatif bars
+    /// while stderr is a terminal.
+    ///
     /// # Errors
     /// Returns an error when the catalog cannot be fetched, the live tool set
     /// or picker cannot be built, or the gateway URL or key is unusable.
     pub(crate) async fn initialize(gateway: &GatewayEnv, capture: CapturePolicy) -> Result<RunEnv> {
+        let progress = SetupProgress::new();
         let models = fetch_model_catalog(&gateway.base_url, gateway.key.expose())
             .await
             .context("fetch model catalog")?;
-        RunEnv::with_catalog(gateway, models, capture)
+        progress.catalog.complete();
+        RunEnv::assemble(gateway, models, capture, Some(&progress))
     }
 
     /// Builds a run environment from an explicit catalog, skipping the network
-    /// fetch. Used by the watch loop's first init and by offline tests.
+    /// fetch. Used by offline tests.
     ///
     /// # Errors
     /// Returns an error when the live tool set or picker cannot be built, or
     /// the gateway URL or key is unusable.
+    #[cfg(test)]
     pub(crate) fn with_catalog(
         gateway: &GatewayEnv,
         models: ModelCatalog,
         capture: CapturePolicy,
     ) -> Result<RunEnv> {
+        RunEnv::assemble(gateway, models, capture, None)
+    }
+
+    /// Assembles a run environment from a catalog, reporting the model load
+    /// and tool indexing through `progress` when one is attached.
+    fn assemble(
+        gateway: &GatewayEnv,
+        models: ModelCatalog,
+        capture: CapturePolicy,
+        progress: Option<&SetupProgress>,
+    ) -> Result<RunEnv> {
         let tools = tools::available_tools(&gateway.base_url, gateway.key.expose())
             .context("build the live tool set")?;
-        let picker = ToolPicker::build(tools.catalog().clone(), PickerConfig::default())
-            .context("build the live tool picker")?;
+        let model = Model::load_with_progress(progress.map(|setup| &setup.model))
+            .context("load the tool embedding model")?;
+        let picker = ToolPicker::build_with_model(
+            &model,
+            tools.catalog().clone(),
+            PickerConfig::default(),
+            progress.map(|setup| &setup.tools),
+        )
+        .context("build the live tool picker")?;
         let endpoint = GatewayEndpoint::new(&gateway.base_url)
             .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
         let key =
@@ -261,6 +286,7 @@ mod tests {
     use promptforge_core::observe::{Observation, Observer};
 
     use crate::config::{GatewayEnv, GatewayKey};
+    use crate::progress::SetupProgress;
 
     use super::{CapturePolicy, RunEnv, new_execution_id, store_directory};
 
@@ -319,6 +345,28 @@ mod tests {
         assert_eq!(
             store_directory(Path::new("/abs/path/demo.yaml")),
             Path::new("/abs/path/demo")
+        );
+    }
+
+    #[test]
+    #[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+    fn setup_progress_reaches_completion_after_a_real_build() {
+        let progress = SetupProgress::new();
+        RunEnv::assemble(
+            &fixture_gateway(),
+            ModelCatalog::empty(),
+            CapturePolicy::Off,
+            Some(&progress),
+        )
+        .expect("the environment assembles over an empty catalog");
+        progress.catalog.complete();
+
+        assert_eq!(progress.model.fraction(), 1.0, "the model leaf must finish");
+        assert_eq!(progress.tools.fraction(), 1.0, "the tools leaf must finish");
+        assert_eq!(
+            progress.fraction(),
+            1.0,
+            "every setup leaf must report completion"
         );
     }
 
