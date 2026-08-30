@@ -96,6 +96,10 @@ pub(crate) enum WorkspaceError {
     #[error("path does not exist")]
     NotFound,
 
+    /// A revoke named a path that is not a granted root.
+    #[error("path is not a granted root")]
+    NotGranted,
+
     /// A tree listing was requested for something that is not a directory.
     #[error("path is not a directory")]
     NotADirectory,
@@ -212,6 +216,41 @@ impl Workspace {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(root.clone());
         Ok(root)
+    }
+
+    /// Removes `path` from the granted roots by exact canonical match.
+    /// A root deleted from disk stays revocable by the literal stored
+    /// key. Nested grants are independent: revoking a parent leaves a
+    /// separately granted child intact, and files under the child stay
+    /// reachable while everything else under the parent loses access on
+    /// its next operation.
+    ///
+    /// # Errors
+    /// Returns [`WorkspaceError::ForbiddenComponent`] when the path carries
+    /// a `..` or stream name, [`WorkspaceError::ResolveGrant`] when
+    /// canonicalization fails for a reason other than absence, and
+    /// [`WorkspaceError::NotGranted`] when the resolved path is not a
+    /// granted root.
+    pub(crate) fn revoke(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+        reject_forbidden(path)?;
+        // A root deleted from disk no longer canonicalizes, but its grant
+        // must stay removable: fall back to the literal path, which matches
+        // the stored canonical key the roots listing handed the client.
+        let canonical = match canonicalize_simplified(path) {
+            Ok(canonical) => canonical,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => path.to_path_buf(),
+            Err(source) => return Err(WorkspaceError::ResolveGrant { source }),
+        };
+        let removed = self
+            .grants
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&canonical);
+        if removed {
+            Ok(canonical)
+        } else {
+            Err(WorkspaceError::NotGranted)
+        }
     }
 
     /// The granted roots in stable sorted order.
@@ -565,6 +604,20 @@ pub(crate) struct GrantResponse {
     granted: PathBuf,
 }
 
+/// The JSON body of `POST /workspace/revoke`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RevokeRequest {
+    /// The granted root to remove, as listed by the roots tree.
+    path: String,
+}
+
+/// The JSON body of a successful revoke.
+#[derive(Debug, Serialize)]
+pub(crate) struct RevokeResponse {
+    /// The root that was removed.
+    revoked: PathBuf,
+}
+
 /// Percent-decodes a workspace path parameter before validation. The query
 /// layer already decoded once, so any surviving `%XX` sequence is a second
 /// encoding layer - decoding it here means an encoded traversal (`%2e%2e`)
@@ -616,6 +669,18 @@ pub(crate) async fn grant(
         workspace
             .grant(Path::new(&body.path))
             .map(|granted| GrantResponse { granted }),
+    )
+}
+
+/// Removes a granted root; paths under it fail their next operation.
+pub(crate) async fn revoke(
+    State(workspace): State<Workspace>,
+    Json(body): Json<RevokeRequest>,
+) -> Response {
+    respond(
+        workspace
+            .revoke(Path::new(&body.path))
+            .map(|revoked| RevokeResponse { revoked }),
     )
 }
 
@@ -1000,6 +1065,161 @@ mod tests {
                 "the traversal must be caught lexically, not by a lookup miss: {uri}"
             );
         }
+    }
+
+    #[test]
+    fn a_revoke_removes_the_granted_root() {
+        let (workspace, dir) = granted_dir();
+        let revoked = workspace.revoke(dir.path()).expect("revoke the grant");
+        assert_eq!(revoked, simplified(dir.path()));
+        assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn revoking_an_unknown_root_errors() {
+        let workspace = Workspace::new();
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let error = workspace
+            .revoke(dir.path())
+            .expect_err("an ungranted root must not revoke");
+        assert!(
+            matches!(error, WorkspaceError::NotGranted),
+            "expected NotGranted, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_deleted_root_can_still_be_revoked() {
+        let (workspace, dir) = granted_dir();
+        let root = simplified(dir.path());
+        dir.close().expect("delete the granted directory");
+        let revoked = workspace.revoke(&root).expect("revoke the deleted root");
+        assert_eq!(revoked, root);
+        assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn a_spelling_variant_revokes_the_same_root() {
+        let (workspace, dir) = granted_dir();
+        let variant = PathBuf::from(format!(
+            "{}{}",
+            dir.path().display(),
+            std::path::MAIN_SEPARATOR
+        ));
+        let revoked = workspace
+            .revoke(&variant)
+            .expect("a trailing separator names the same root");
+        assert_eq!(revoked, simplified(dir.path()));
+        assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn reads_and_writes_under_a_revoked_root_are_rejected() {
+        let (workspace, dir) = granted_dir();
+        let file = dir.path().join("notes.txt");
+        let written = workspace
+            .write_file(&file, "hello", None)
+            .expect("write before the revoke");
+        workspace.revoke(dir.path()).expect("revoke the grant");
+        let error = workspace
+            .read_file(&file)
+            .expect_err("a read under a revoked root must be rejected");
+        assert!(
+            matches!(error, WorkspaceError::OutsideGrants),
+            "expected OutsideGrants, got {error:?}"
+        );
+        let error = workspace
+            .write_file(&file, "later", Some(&written.token))
+            .expect_err("a write under a revoked root must be rejected");
+        assert!(
+            matches!(error, WorkspaceError::OutsideGrants),
+            "expected OutsideGrants, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_nested_grant_survives_its_parents_revoke() {
+        let workspace = Workspace::new();
+        let parent = tempfile::TempDir::new().expect("tempdir");
+        let child = parent.path().join("child");
+        fs::create_dir(&child).expect("create the nested directory");
+        fs::write(parent.path().join("outer.txt"), "outer").expect("seed the parent");
+        fs::write(child.join("inner.txt"), "inner").expect("seed the child");
+        workspace.grant(parent.path()).expect("grant the parent");
+        workspace.grant(&child).expect("grant the child");
+        workspace.revoke(parent.path()).expect("revoke the parent");
+        assert_eq!(workspace.granted_roots(), vec![simplified(&child)]);
+        let read = workspace
+            .read_file(&child.join("inner.txt"))
+            .expect("the nested grant stays usable");
+        assert_eq!(read.text, "inner");
+        let error = workspace
+            .read_file(&parent.path().join("outer.txt"))
+            .expect_err("the parent's own files lose access");
+        assert!(
+            matches!(error, WorkspaceError::OutsideGrants),
+            "expected OutsideGrants, got {error:?}"
+        );
+    }
+
+    /// Builds a `POST /workspace/revoke` request with a raw JSON body.
+    fn revoke_request(body: String) -> axum::http::Request<axum::body::Body> {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/workspace/revoke")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(body))
+            .expect("static request parts are valid")
+    }
+
+    #[tokio::test]
+    async fn a_revoke_over_http_removes_the_root() {
+        use tower::ServiceExt as _;
+
+        let (workspace, dir) = granted_dir();
+        let router = crate::routes::workspace::routes(workspace.clone());
+        let root = simplified(dir.path());
+        let body = serde_json::json!({ "path": root }).to_string();
+        let response = router
+            .oneshot(revoke_request(body))
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = crate::app::fixtures::body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("the body is JSON");
+        assert_eq!(json["revoked"], serde_json::json!(root));
+        assert_eq!(workspace.granted_roots(), Vec::<PathBuf>::new());
+    }
+
+    #[tokio::test]
+    async fn an_unknown_root_revoke_answers_not_found() {
+        use tower::ServiceExt as _;
+
+        let (workspace, _dir) = granted_dir();
+        let outside = tempfile::TempDir::new().expect("outside tempdir");
+        let router = crate::routes::workspace::routes(workspace);
+        let body = serde_json::json!({ "path": outside.path() }).to_string();
+        let response = router
+            .oneshot(revoke_request(body))
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let bytes = crate::app::fixtures::body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("the body is JSON");
+        assert_eq!(json["error"]["code"], "not_granted");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_revoke_body_answers_bad_request() {
+        use tower::ServiceExt as _;
+
+        let (workspace, _dir) = granted_dir();
+        let router = crate::routes::workspace::routes(workspace);
+        let response = router
+            .oneshot(revoke_request("{".to_owned()))
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
