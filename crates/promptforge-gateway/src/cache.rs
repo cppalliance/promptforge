@@ -234,9 +234,9 @@ impl DownloadProgress for ChannelProgress {
 ///
 /// The download task emits every event before it returns, so once the join
 /// handle resolves the remaining events are already queued on the receiver
-/// and the latest sample is drained ahead of the terminal event - the same
-/// ordering contract the progress channel gave. A client disconnect drops
-/// the response body and the receiver; the blocking download itself runs to
+/// and the latest sample is drained ahead of the terminal event. A client
+/// disconnect drops the response body and the receiver; the blocking download
+/// itself runs to
 /// completion (its staging cleanup still applies) and a later POST for the
 /// same source then hits the cache.
 fn sse_response(

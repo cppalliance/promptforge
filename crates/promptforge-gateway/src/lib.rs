@@ -810,8 +810,7 @@ async fn run_switch(
 ///
 /// [`run_switch`] broadcasts every stage event before it returns, so once
 /// the join handle resolves the remaining stages are already queued on the
-/// receiver and are drained ahead of the terminal event - the same ordering
-/// contract the stage channel gave.
+/// receiver and are drained ahead of the terminal event.
 fn switch_sse_response(
     rx: tokio::sync::broadcast::Receiver<ProgressEvent>,
     operation: OperationId,
