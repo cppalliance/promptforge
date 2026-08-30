@@ -12,6 +12,14 @@ function dirtyStub() {
   const config = modelsFixture();
   const pending = structuredClone(config);
   pending.local_model[1].description = "saved last session";
+  // A wholly-new pending endpoint: its api_key arrives redacted, the way
+  // the gateway's pending view serializes every secret.
+  pending.endpoint.push({
+    id: "new-ep",
+    protocol: "openai",
+    base_url: "https://api.example.test/v1",
+    api_key: "***",
+  });
   return gatewayStub({
     key: "k",
     config,
@@ -19,7 +27,7 @@ function dirtyStub() {
     dirty: {
       dirty: true,
       pending_files: ["profiles/default.toml"],
-      changed_sections: ["local_model"],
+      changed_sections: ["local_model", "endpoint"],
     },
   });
 }
@@ -78,6 +86,94 @@ test("after Apply, a fresh same-session save raises the count but not the banner
     true,
     "the previous-session banner stays disarmed for same-session saves",
   );
+});
+
+test("the banner's Review opens the pending-vs-running diff table", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  const doc = dom.window.document;
+
+  const review = root.querySelector(".banner-review");
+  assert.ok(review, "the banner offers Review");
+  review.click();
+  await settle();
+
+  const table = doc.querySelector(".review-overlay .diff-table");
+  assert.ok(table, "Review opens the two-column value table");
+  const rows = new Map(
+    [...table.querySelectorAll("tbody tr")].map((tr) => [
+      tr.querySelector(".diff-path").textContent,
+      {
+        running: tr.querySelector(".diff-running").textContent,
+        pending: tr.querySelector(".diff-pending").textContent,
+      },
+    ]),
+  );
+  assert.deepEqual(
+    rows.get("local_model[llama-leaf].description"),
+    { running: "defined in the leaf", pending: "saved last session" },
+    "a changed value renders running against pending",
+  );
+  assert.equal(
+    rows.get("endpoint[new-ep].api_key").pending,
+    "***",
+    "a pending secret stays redacted in the diff",
+  );
+  assert.equal(
+    rows.get("endpoint[new-ep].api_key").running,
+    "(absent)",
+    "the running side of a new entry reads absent",
+  );
+
+  doc.querySelector(".review-close").click();
+  await settle();
+  assert.equal(doc.querySelector(".review-overlay"), null, "Close dismisses the dialog");
+});
+
+test("the Review dialog notes the redaction blind spot, traps Tab, and restores focus", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  const doc = dom.window.document;
+
+  const review = root.querySelector(".banner-review");
+  review.focus();
+  review.click();
+  await settle();
+
+  const overlay = doc.querySelector(".review-overlay");
+  assert.match(
+    overlay.querySelector(".review-note").textContent,
+    /secret values and staged \.env file edits are not shown/i,
+    "the dialog says what the redacted diff cannot show",
+  );
+
+  const close = overlay.querySelector(".review-close");
+  assert.equal(doc.activeElement, close, "the dialog moves focus to Close on open");
+  close.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+  );
+  assert.equal(doc.activeElement, close, "Tab wraps inside the aria-modal card");
+  close.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  assert.equal(doc.activeElement, close, "Shift+Tab wraps too");
+
+  close.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  assert.equal(doc.querySelector(".review-overlay"), null, "Escape dismisses the dialog");
+  assert.equal(doc.activeElement, review, "focus returns to the opener");
+
+  // The backdrop dismisses as well.
+  review.click();
+  await settle();
+  doc.querySelector(".review-overlay").click();
+  assert.equal(doc.querySelector(".review-overlay"), null, "the backdrop dismisses the dialog");
 });
 
 test("Revert All confirms first, then calls config-revert", async () => {

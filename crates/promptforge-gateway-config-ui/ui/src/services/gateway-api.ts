@@ -109,6 +109,33 @@ export interface ApplyOutcome {
   restart_required: boolean;
 }
 
+/** One side of `GET /admin/env`: an env file's path and parsed variables. */
+export interface EnvSide {
+  /** The `.env` file's absolute path. */
+  path: string;
+  /** The parsed variables, values included (the route is key-guarded). */
+  vars: Record<string, string>;
+}
+
+/** The `GET /admin/env` reply: both env files, null where unconfigured. */
+export interface EnvFiles {
+  /** The boot config's sibling (`gateway.env`). */
+  boot: EnvSide | null;
+  /** The active profile's (`<profile>.env`). */
+  profile: EnvSide | null;
+  /**
+   * Each `${VAR}` name the pending config chain references, mapped to
+   * labels of the referencing fields (`endpoint openai api_key`).
+   * Computed server-side from the raw pre-interpolation chain - the
+   * client never sees references, because the config views arrive
+   * interpolated with secrets redacted.
+   */
+  references: Record<string, string[]>;
+}
+
+/** Which env file a `PUT /admin/env` targets. */
+export type EnvScope = "profile" | "boot";
+
 /** The `POST /admin/profiles/{name}` body: the creation mode. */
 export type CreateProfileBody =
   | { mode: "empty" }
@@ -344,6 +371,44 @@ export class GatewayApi {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /**
+   * Reads both real `.env` files via `GET /admin/env`. Values arrive in
+   * plaintext (the route is loopback-and-bearer-guarded); the caller
+   * masks them in the DOM and never logs them.
+   */
+  async getEnv(): Promise<EnvFiles> {
+    const data = (await this.getJson("/admin/env")) as {
+      boot?: Partial<EnvSide> | null;
+      profile?: Partial<EnvSide> | null;
+      references?: Record<string, string[]>;
+    };
+    const side = (raw: Partial<EnvSide> | null | undefined): EnvSide | null =>
+      raw ? { path: raw.path ?? "", vars: raw.vars ?? {} } : null;
+    return {
+      boot: side(data.boot),
+      profile: side(data.profile),
+      references: data.references ?? {},
+    };
+  }
+
+  /**
+   * Stages `vars` as one env file's `.env.next` shadow via
+   * `PUT /admin/env` - the active profile's by default, the boot
+   * config's with `scope: "boot"`. The real file is untouched until an
+   * explicit apply plus a restart or profile switch.
+   */
+  async putEnv(vars: Record<string, string>, scope: EnvScope = "profile"): Promise<void> {
+    const query = scope === "boot" ? "?scope=boot" : "";
+    const response = await this.send(`/admin/env${query}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(vars),
     });
     if (!response.ok) {
       throw new GatewayHttpError(response.status, await refusalMessage(response));
