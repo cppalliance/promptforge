@@ -26,9 +26,11 @@ What it provides:
 - `Config::to_json`: the resolved configuration rendered as a JSON object in
   the TOML shape, with each keyed-array entry (`[[model]]`, `[[local_model]]`,
   `[[endpoint]]`, `[[dominion]]`) annotated with the `source_file` its winning
-  definition came from and a top-level `source_files` map of every written
+  definition came from, a top-level `source_files` map of every written
   dotted TOML path - the merge pass records provenance without changing merge
-  semantics.
+  semantics - and a top-level `include` array carrying the loaded root file's
+  own include line verbatim and ordered (the leaf shadow's on a pending load;
+  absent when the root declares none).
 - Local-model companion types ([`SpeculativeConfig`,
   `MultimodalProjectorConfig`, `SpeculationType`, and
   `DraftTokenMax`](src/config/companion.rs)): declarative speculative-decoding

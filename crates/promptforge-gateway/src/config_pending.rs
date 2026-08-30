@@ -30,12 +30,18 @@ use crate::{AppState, check_auth};
 /// The reply is `{"profile": ..., "boot": ...}`. `profile` is the active
 /// profile's include chain resolved with existing shadows preferred,
 /// serialized exactly like `GET /admin/config`: same JSON shape, secrets
-/// `"***"`, and provenance naming the shadow file (`<file>.toml.next`)
-/// wherever the winning definition came from a shadow. With no shadows on
-/// disk `profile` equals the `GET /admin/config` payload. `boot` is
-/// `null` until the boot config has a shadow, then
+/// `"***"`, provenance naming the shadow file (`<file>.toml.next`)
+/// wherever the winning definition came from a shadow, and the top-level
+/// `include` array carrying the leaf's own include line verbatim and
+/// ordered - the leaf shadow's when one exists. With no shadows on disk
+/// `profile` equals the `GET /admin/config` payload. `boot` is `null`
+/// until the boot config has a shadow, then
 /// `{"shadow", "changed_sections"}` - kept apart from the profile view so
-/// the UI can raise the restart-required banner for boot edits.
+/// the UI can raise the restart-required banner for boot edits. The boot
+/// object carries no `include` array by design: the UI's chain editor
+/// edits only the active profile's chain, so the boot file's own includes
+/// are out of scope here (their merged values still flow into `profile`
+/// wherever the profile chain reaches the boot file).
 pub(crate) async fn admin_config_pending(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -363,6 +369,37 @@ api_key = "common-endpoint-secret"
             "the shadow is named by its real file, relative to the config root"
         );
         assert_eq!(dirty["changed_sections"], serde_json::json!(["model"]));
+    }
+
+    #[tokio::test]
+    async fn the_pending_view_carries_the_leaf_include_array_shadow_preferred() {
+        // The chain editor reads its rows from this array; if the payload
+        // dropped it or ignored a staged leaf shadow's reorder, the editor
+        // would fall back to guessing membership and order.
+        let (_temp, config, paths) = fixture();
+        let leaf = paths.profiles_dir.join("main.toml");
+        let addr = serve_with_paths(config, paths).await;
+
+        let pending = get_json(addr, "admin/config-pending").await;
+        assert_eq!(
+            pending["profile"]["include"],
+            serde_json::json!(["../gateway.toml", "common.toml"]),
+            "no shadow: the real leaf's include line, verbatim and ordered"
+        );
+
+        write_shadow(&leaf, "include = [\"common.toml\", \"../gateway.toml\"]\n")
+            .expect("stage the reordered leaf shadow");
+        let pending = get_json(addr, "admin/config-pending").await;
+        assert_eq!(
+            pending["profile"]["include"],
+            serde_json::json!(["common.toml", "../gateway.toml"]),
+            "a leaf shadow's include array outranks the real file's"
+        );
+        assert_eq!(
+            get_json(addr, "admin/config").await["include"],
+            serde_json::json!(["../gateway.toml", "common.toml"]),
+            "the running view keeps the loaded include line"
+        );
     }
 
     #[tokio::test]

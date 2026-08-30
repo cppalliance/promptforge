@@ -118,6 +118,15 @@ impl Config {
         self.provenance = provenance;
     }
 
+    /// Attach the loaded root file's own `include` array, verbatim and
+    /// ordered as written. Called by the loaders alongside
+    /// [`Config::set_provenance`]; the merge consumes the `include` keys,
+    /// so this is what lets [`Config::to_json`] hand the chain declaration
+    /// back to a reader.
+    pub(crate) fn set_include(&mut self, include: Vec<String>) {
+        self.include = include;
+    }
+
     /// Reconstruct the raw TOML-shaped DTO from the validated config: the
     /// inverse of the validating `From<RawConfig>` conversion, cloning every
     /// field straight across so the result serializes to the shape the
@@ -145,10 +154,14 @@ impl Config {
     /// the config was loaded with include resolution, each keyed-array entry
     /// (`[[model]]`, `[[local_model]]`, `[[endpoint]]`, `[[dominion]]`)
     /// carries a `source_file` field naming the file whose definition won
-    /// the merge, and a top-level `source_files` object maps each written
-    /// dotted TOML path to the file that last wrote it. A config built
-    /// without include resolution (for example [`Config::from_toml_str`])
-    /// carries no provenance, and the payload is the plain serialized shape.
+    /// the merge, a top-level `source_files` object maps each written
+    /// dotted TOML path to the file that last wrote it, and a top-level
+    /// `include` array carries the loaded root file's own `include` line
+    /// verbatim and ordered (the shadow's when a pending load preferred
+    /// one) - a root with no includes gets no `include` key, never a
+    /// fabricated one. A config built without include resolution (for
+    /// example [`Config::from_toml_str`]) carries no provenance and no
+    /// `include`, and the payload is the plain serialized shape.
     ///
     /// # Panics
     /// Panics if the raw shape fails to serialize. Its serializers are
@@ -218,6 +231,12 @@ impl Config {
             table.insert(
                 "source_files".to_owned(),
                 serde_json::Value::Object(sources),
+            );
+        }
+        if !self.include.is_empty() {
+            table.insert(
+                "include".to_owned(),
+                serde_json::Value::from(self.include.clone()),
             );
         }
         value

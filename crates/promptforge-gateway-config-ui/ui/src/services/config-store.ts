@@ -94,102 +94,40 @@ function baseName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-/** One include-chain file derived from the pending view's provenance. */
+/** One include-chain file from the pending view's `include` array. */
 export interface ChainFile {
-  /** The include-style path relative to the profiles dir (`common.toml`, `../gateway.toml`). */
+  /** The include entry verbatim as written in the leaf file (`common.toml`, `../gateway.toml`). */
   path: string;
   /** The file's base name (`common.toml`, `gateway.toml`). */
   base: string;
-  /** Whether the file lives outside the profiles directory. */
+  /** Whether the entry points outside the profiles directory. */
   outside: boolean;
 }
 
-/** A provenance path normalized: `/` separators, `.next` suffix stripped. */
-function normalizeSource(source: string): string {
-  return source.replace(/\\/g, "/").replace(/\.next$/, "");
-}
-
-/** Every distinct provenance source path in a pending view, normalized. */
-function provenanceSources(pending: EntryData): string[] {
-  const sources = new Set<string>();
-  const map = pending["source_files"];
-  if (map !== null && typeof map === "object" && !Array.isArray(map)) {
-    for (const value of Object.values(map as EntryData)) {
-      if (typeof value === "string") {
-        sources.add(normalizeSource(value));
-      }
-    }
-  }
-  for (const array of ["dominion", "endpoint", "model", "local_model"]) {
-    const entries = pending[array];
-    if (!Array.isArray(entries)) {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry !== null && typeof entry === "object") {
-        const source = (entry as EntryData)["source_file"];
-        if (typeof source === "string") {
-          sources.add(normalizeSource(source));
-        }
-      }
-    }
-  }
-  return [...sources];
-}
-
 /**
- * Derives the active profile's include chain from the pending view's
- * provenance: the distinct files the merge visited, minus the leaf
- * itself. Provenance is a per-path last-writer map, so two limits hold
- * and the chain editor states them: the merge ORDER is not recoverable
- * (rows sort boot-file-first, then alphabetically, until a save writes
- * an explicit `include` array), and a chain file whose every value was
- * overridden later leaves no provenance and does not appear.
+ * The include chain read from a config payload's top-level `include`
+ * array: the active profile leaf's own include line, verbatim and
+ * ordered as written (the gateway serves the leaf shadow's array when
+ * one is staged). Membership and order are authoritative, so a parent
+ * whose every value a later file overrides still appears. An absent
+ * array means the profile stands alone. The UI ships with its gateway,
+ * so there is no fallback derivation for a payload without the field.
  */
-export function deriveIncludeChain(pending: EntryData, activeProfile: string): ChainFile[] {
-  const leafBase = `${activeProfile}.toml`;
-  const sources = provenanceSources(pending);
-  // The profiles directory is the leaf's own directory, when any value
-  // is attributed to the leaf; otherwise paths degrade to base names.
-  const leafPath = sources.find((source) => baseName(source) === leafBase) ?? null;
-  const profilesDir = leafPath === null ? null : leafPath.slice(0, leafPath.lastIndexOf("/"));
-  const files: ChainFile[] = [];
-  for (const source of sources) {
-    const base = baseName(source);
-    if (base === leafBase) {
-      continue;
-    }
-    files.push(chainFile(source, base, profilesDir));
+export function includeChainOf(pending: EntryData): ChainFile[] {
+  const include = pending["include"];
+  if (!Array.isArray(include)) {
+    return [];
   }
-  files.sort((a, b) =>
-    a.outside === b.outside ? a.path.localeCompare(b.path) : a.outside ? -1 : 1,
-  );
-  return files;
+  return include
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => ({ path: entry, base: baseName(entry), outside: isOutside(entry) }));
 }
 
-/** One chain row: the include-relative path for an absolute source. */
-function chainFile(source: string, base: string, profilesDir: string | null): ChainFile {
-  if (profilesDir === null) {
-    // No leaf attribution to anchor on; a bare base name still names
-    // profile-dir files correctly, the overwhelmingly common case.
-    return { path: base, base, outside: false };
-  }
-  if (source.startsWith(`${profilesDir}/`)) {
-    return { path: source.slice(profilesDir.length + 1), base, outside: false };
-  }
-  // Walk up from the profiles dir to the common prefix, then down.
-  const dirParts = profilesDir.split("/");
-  const sourceParts = source.split("/");
-  let shared = 0;
-  while (
-    shared < dirParts.length &&
-    shared < sourceParts.length - 1 &&
-    dirParts[shared] === sourceParts[shared]
-  ) {
-    shared += 1;
-  }
-  const ups = "../".repeat(dirParts.length - shared);
-  return { path: ups + sourceParts.slice(shared).join("/"), base, outside: true };
+/** Whether an include-style path leaves the profiles directory. */
+function isOutside(path: string): boolean {
+  return (
+    path.startsWith("../") || path.startsWith("..\\") || path.startsWith("/") || /^[A-Za-z]:/.test(path)
+  );
 }
 
 /**
@@ -406,7 +344,9 @@ export class ConfigStore {
    * The full `PUT /admin/config` payload base: the pending view stripped
    * of provenance and of the boot-owned sections. Callers mutate it and
    * pass it to `savePayload`. Untouched secrets are still the `"***"`
-   * the gateway sent, so the gateway preserves them.
+   * the gateway sent, so the gateway preserves them, and the pending
+   * view's `include` array rides along untouched, so a save keeps the
+   * chain explicit - order and membership included.
    */
   buildConfigPayload(): EntryData {
     const payload = structuredClone(this.pending);
@@ -456,9 +396,9 @@ export class ConfigStore {
     this.notify();
   }
 
-  /** The active profile's derived include chain (see {@link deriveIncludeChain}). */
+  /** The active profile's include chain (see {@link includeChainOf}). */
   includeChain(): ChainFile[] {
-    return deriveIncludeChain(this.pending, this.activeProfile);
+    return includeChainOf(this.pending);
   }
 
   /**

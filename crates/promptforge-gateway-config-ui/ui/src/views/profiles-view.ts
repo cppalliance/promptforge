@@ -7,11 +7,14 @@
 // answers 409 for the active profile), and a [New Profile] dialog
 // [Adapted: Unsloth] with Empty / Copy of / Include modes. Right: the
 // active profile's summary card - model counts, allowlist chips, and
-// the include chain editor with exists/missing indicators (a deleted
-// parent renders as Missing: the accepted-risk surface), up/down
-// reorder buttons, remove, and Add Include with autocomplete over the
-// existing .toml files plus create-new. Saving the chain PUTs the leaf
-// shadow with an explicit `include` array; server cycle/depth
+// the include chain editor. Its rows come from the payload's top-level
+// `include` array (the leaf's own line, verbatim and ordered - shadow
+// preferred), so order is authoritative and a fully-overridden parent
+// still lists; exists/missing indicators flag a deleted parent (the
+// accepted-risk surface), with up/down reorder buttons, remove, and
+// Add Include with autocomplete over the existing .toml files plus
+// create-new. Saving the chain PUTs the leaf shadow with an explicit
+// `include` array; server cycle/depth
 // validation errors surface on the banner. [Edit] drills into
 // #/profiles/include/{path}, where a simplified generic editor (one
 // labeled JSON textarea per top-level section of the file's
@@ -229,11 +232,12 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
    * Whether a chain file is missing from disk: a plain profile-dir file
    * absent from the listing. This is the accepted-risk surface: a
    * deleted parent renders as Missing. Files outside the profiles dir
-   * (the boot file) are not listable and never flagged.
+   * (the boot file) and subdirectory entries are not listable and never
+   * flagged.
    */
   const isMissing = (row: ChainFile): boolean =>
     !row.outside &&
-    !row.path.includes("/") &&
+    !/[/\\]/.test(row.path) &&
     profiles !== null &&
     !profiles.includes(stem(row.path));
 
@@ -668,13 +672,6 @@ export function createProfilesView(deps: ProfilesViewDeps): ProfilesView {
     orderNote.className = "field-help chain-note";
     orderNote.textContent = "Later files override earlier ones.";
     box.append(orderNote);
-    if (chainEdit === null && rows.length > 1) {
-      const derived = document.createElement("p");
-      derived.className = "field-help chain-derived-note";
-      derived.textContent =
-        "Row order is derived from value attribution and may not match the include order on disk; reordering and saving writes an explicit order.";
-      box.append(derived);
-    }
 
     const save = document.createElement("button");
     save.type = "button";

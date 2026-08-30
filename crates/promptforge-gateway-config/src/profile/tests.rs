@@ -372,7 +372,9 @@ fn config_chain_ordering_is_root_first_depth_first() {
         "include = [\"nested/child.toml\"]\n",
     );
 
-    let (_value, chain, _provenance) = collect_config_chain(&tmp.path().join("root.toml")).unwrap();
+    let chain = collect_config_chain(&tmp.path().join("root.toml"))
+        .unwrap()
+        .chain;
     assert_eq!(chain.len(), 3);
     assert!(
         chain[0].ends_with("root.toml"),
@@ -389,6 +391,55 @@ fn config_chain_ordering_is_root_first_depth_first() {
         "third should be grandchild, got {:?}",
         chain[2]
     );
+}
+
+#[test]
+fn to_json_carries_the_leaf_include_array_verbatim_and_ordered() {
+    // The include editor needs the real order as written; a payload that
+    // re-derived it (say alphabetically) would flip b/a here and break.
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "b.toml", "[local]\ncache_dir = 'b'\n");
+    write(tmp.path(), "a.toml", "[local]\ncache_dir = 'a'\n");
+    let leaf_body = format!("include = [\"b.toml\", \"a.toml\"]\n{MINIMAL_CONFIG}");
+    write(tmp.path(), "leaf.toml", &leaf_body);
+
+    let json = load_path(&tmp.path().join("leaf.toml")).unwrap().to_json();
+    assert_eq!(
+        json["include"],
+        serde_json::json!(["b.toml", "a.toml"]),
+        "the payload carries the leaf's include line as written, not re-sorted"
+    );
+}
+
+#[test]
+fn to_json_omits_include_for_a_leaf_without_one() {
+    // A chainless leaf must not gain a fabricated (empty or invented)
+    // include array in the payload.
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "bare.toml", MINIMAL_CONFIG);
+    let json = load_path(&tmp.path().join("bare.toml")).unwrap().to_json();
+    assert!(
+        json.get("include").is_none(),
+        "no include line, no include key: {json}"
+    );
+}
+
+#[test]
+fn to_json_include_names_only_the_leaf_line_not_nested_includes() {
+    // Only the root's own declaration is the chain editor's document; a
+    // parent's include line leaking in would double-list grandparents.
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "grandparent.toml", "[local]\ncache_dir = 'g'\n");
+    write(
+        tmp.path(),
+        "parent.toml",
+        "include = [\"grandparent.toml\"]\n",
+    );
+    let leaf_body = format!("include = [\"parent.toml\"]\n{MINIMAL_CONFIG}");
+    write(tmp.path(), "leaf.toml", &leaf_body);
+
+    let json = load_path(&tmp.path().join("leaf.toml")).unwrap().to_json();
+    assert_eq!(json["include"], serde_json::json!(["parent.toml"]));
 }
 
 #[test]

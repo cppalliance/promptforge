@@ -19,11 +19,13 @@
 //! is replaced with the existing value from the current pending state
 //! before validation and write.
 //!
-//! The include chain round-trips the same way: `Config::to_json` never
-//! emits the `include` array, so a candidate that carries no `include`
-//! key inherits the target file's current one (existing shadow first,
-//! then the real file) before validation and write. A save can therefore
-//! never sever the chain by accident; only a candidate that spells out
+//! The include chain round-trips explicitly: `Config::to_json` emits the
+//! loaded root's `include` array, so a round-tripped body carries it and
+//! the save keeps it verbatim. As a safety net for a candidate that
+//! carries no `include` key (an older or partial client), the target
+//! file's current one (existing shadow first, then the real file) is
+//! grafted on before validation and write. A save can therefore never
+//! sever the chain by accident; only a candidate that spells out
 //! `include` (even an empty array) changes it.
 
 use std::fs;
@@ -191,11 +193,12 @@ fn promote_shadow_repr(target: &Path) -> Result<(), Repr> {
 /// `GET /admin/config` returns, secrets as `"***"`). Redacted secrets are
 /// restored from the current pending state - the include chain resolved
 /// with existing shadows preferred - so the winning definition's secret is
-/// preserved wherever in the chain it lives. A candidate without an
-/// `include` key inherits the leaf's current one (existing shadow first,
-/// then the real file), so a round-tripped `GET /admin/config` body -
-/// which never carries `include` - can not sever the include chain; a
-/// candidate that spells out `include` (even an empty array) keeps it.
+/// preserved wherever in the chain it lives. A round-tripped
+/// `GET /admin/config` body carries the leaf's `include` array explicitly
+/// and the save keeps it verbatim; a candidate without an `include` key
+/// inherits the leaf's current one (existing shadow first, then the real
+/// file), so no save can sever the include chain by accident. A candidate
+/// that spells out `include` (even an empty array) keeps it.
 /// The candidate then passes the same merge-and-validate pass as a real
 /// profile load (its `include` array drives the resolution), and only a
 /// valid result is written to `<leaf>.toml.next`. The real files are
@@ -237,7 +240,7 @@ fn save_profile_shadow_repr(leaf: &Path, mut document: Value) -> Result<PathBuf,
     // config, so an inherited entry's secret lives in whichever chain file
     // (or shadow) currently defines it.
     let read = shadow_reader(None);
-    let (current, _chain, _provenance) = collect_config_chain_with(leaf, &read)?;
+    let current = collect_config_chain_with(leaf, &read)?.value;
     restore_secrets(&mut document, Some(&current))?;
     validate_chain(leaf, leaf, &document)?;
     write_shadow_repr(leaf, &render_toml(&document)?)
@@ -309,16 +312,16 @@ fn save_include_shadow_repr(
     graft_include(&mut document, current.as_ref());
     restore_secrets(&mut document, current.as_ref())?;
     let read = shadow_reader(Some((target, &document)));
-    let (merged, chain, _provenance) = collect_config_chain_with(leaf, &read)?;
+    let resolved = collect_config_chain_with(leaf, &read)?;
     // A target the chain never reaches is never substituted into the
     // merge, so "validated" would prove nothing about the candidate.
-    if !chain.iter().any(|entry| same_file(entry, target)) {
+    if !resolved.chain.iter().any(|entry| same_file(entry, target)) {
         return Err(Repr::Validation(format!(
             "{} is not part of the active profile's pending include chain",
             target.display()
         )));
     }
-    Config::from_value(merged)?;
+    Config::from_value(resolved.value)?;
     write_shadow_repr(target, &render_toml(&document)?)
 }
 
@@ -385,7 +388,7 @@ fn save_boot_shadow_repr(
     // validation, so the gate on the candidate itself is the boot-owned
     // sections: resolve its includes, interpolate, and require [server].
     let read = shadow_reader(Some((boot, &document)));
-    let (mut resolved, _chain, _provenance) = collect_config_chain_with(boot, &read)?;
+    let mut resolved = collect_config_chain_with(boot, &read)?.value;
     interpolate_value(&mut resolved)?;
     server_section(&resolved, boot)?;
     workshop_section(&resolved, boot)?;
@@ -426,13 +429,17 @@ pub fn load_pending_profile(leaf: &Path) -> Result<Config, crate::ConfigError> {
 /// The crate-internal form of [`load_pending_profile`].
 fn load_pending_profile_repr(leaf: &Path) -> Result<Config, Repr> {
     let read = shadow_reader(None);
-    let (merged, _chain, mut provenance) = collect_config_chain_with(leaf, &read)?;
+    let resolved = collect_config_chain_with(leaf, &read)?;
+    let mut provenance = resolved.provenance;
     provenance.map_sources(|source| {
         let shadow = shadow_path(source);
         shadow.is_file().then_some(shadow)
     });
-    let mut config = Config::from_value(merged)?;
+    let mut config = Config::from_value(resolved.value)?;
     config.set_provenance(provenance);
+    // The reader preferred the leaf's shadow, so the recorded include
+    // array is the pending one whenever a leaf shadow exists.
+    config.set_include(resolved.root_include);
     Ok(config)
 }
 
@@ -485,20 +492,20 @@ pub fn pending_report(root: &Path) -> Result<PendingReport, crate::ConfigError> 
 
 /// The crate-internal form of [`pending_report`].
 fn pending_report_repr(root: &Path) -> Result<PendingReport, Repr> {
-    let (real, real_chain, _real_provenance) = collect_config_chain(root)?;
+    let real = collect_config_chain(root)?;
     let reader = shadow_reader(None);
-    let (pending, pending_chain, _pending_provenance) = collect_config_chain_with(root, &reader)?;
+    let pending = collect_config_chain_with(root, &reader)?;
     // Both chains contribute: a shadow can add an include the real chain
     // never reaches, and vice versa.
     let mut shadowed_files: Vec<PathBuf> = Vec::new();
-    for file in real_chain.iter().chain(pending_chain.iter()) {
+    for file in real.chain.iter().chain(pending.chain.iter()) {
         if shadow_path(file).is_file() && !shadowed_files.iter().any(|seen| same_file(seen, file)) {
             shadowed_files.push(file.clone());
         }
     }
     Ok(PendingReport {
         shadowed_files,
-        changed_sections: changed_sections(&real, &pending),
+        changed_sections: changed_sections(&real.value, &pending.value),
     })
 }
 
@@ -556,11 +563,13 @@ fn current_file_doc(target: &Path) -> Result<Option<Value>, Repr> {
 }
 
 /// Grafts `current`'s `include` array onto a candidate that carries no
-/// `include` key of its own. `Config::to_json` never emits `include`, so
-/// a round-tripped save body would otherwise replace the target file with
-/// a chainless copy - severing inheritance and baking inherited entries
-/// flat into the shadow. A candidate that spells out `include` (even an
-/// empty array) keeps it: removing the chain must be deliberate.
+/// `include` key of its own. `Config::to_json` emits `include`, so a
+/// round-tripped body normally spells it out; this is the safety net for
+/// an older or partial client whose chainless body would otherwise
+/// replace the target file with a chainless copy - severing inheritance
+/// and baking inherited entries flat into the shadow. A candidate that
+/// spells out `include` (even an empty array) keeps it: removing the
+/// chain must be deliberate.
 fn graft_include(candidate: &mut Value, current: Option<&Value>) {
     let Value::Table(table) = candidate else {
         return;
@@ -578,7 +587,7 @@ fn graft_include(candidate: &mut Value, current: Option<&Value>) {
 /// the merged result.
 fn validate_chain(leaf: &Path, target: &Path, candidate: &Value) -> Result<(), Repr> {
     let read = shadow_reader(Some((target, candidate)));
-    let (merged, _chain, _provenance) = collect_config_chain_with(leaf, &read)?;
+    let merged = collect_config_chain_with(leaf, &read)?.value;
     Config::from_value(merged)?;
     Ok(())
 }
@@ -1348,6 +1357,47 @@ endpoints = ["e"]
         assert!(
             model_source.ends_with("main.toml"),
             "an unshadowed file keeps its real name: {model_source}"
+        );
+    }
+
+    #[test]
+    fn the_pending_view_prefers_the_leaf_shadows_include_array() {
+        // The chain editor reads the pending payload; a staged reorder or
+        // repoint of the leaf's include line must show there, not the real
+        // file's old order.
+        let temp = tempfile::TempDir::new().unwrap();
+        write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        write(
+            temp.path(),
+            "common2.toml",
+            &common_body("http://127.0.0.1:10"),
+        );
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let real = load_pending_profile(&leaf).unwrap().to_json();
+        assert_eq!(
+            real["include"],
+            serde_json::json!(["common.toml"]),
+            "no shadow: the real leaf's include line renders"
+        );
+
+        write_shadow(
+            &leaf,
+            &CHAIN_LEAF.replace(
+                "include = ['common.toml']",
+                "include = ['common2.toml', 'common.toml']",
+            ),
+        )
+        .unwrap();
+        let pending = load_pending_profile(&leaf).unwrap().to_json();
+        assert_eq!(
+            pending["include"],
+            serde_json::json!(["common2.toml", "common.toml"]),
+            "the leaf shadow's include array outranks the real file's"
         );
     }
 
