@@ -28,7 +28,9 @@
 //! `GET /admin/model-info` GGUF-header readout of a cache file's layer and
 //! parameter counts (local builds), a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
-//! metrics, and
+//! metrics, a bearer-authed `GET /admin/hf/search` and
+//! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
+//! (attaching the process `HF_TOKEN` when set), and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
@@ -37,6 +39,7 @@ mod api_error;
 mod cache;
 mod dialect;
 mod error;
+mod hf;
 #[cfg(feature = "local")]
 mod model_info;
 #[cfg(feature = "local")]
@@ -163,6 +166,9 @@ pub(crate) struct AppState {
     /// `sysinfo::System` so CPU-utilization deltas span requests, plus the
     /// once-per-process NVML probe.
     metrics: Arc<std::sync::Mutex<system::SystemSampler>>,
+    /// Shared Hugging Face hub client for the `GET /admin/hf/*` proxy
+    /// routes: one reqwest client plus the boot-time `HF_TOKEN`.
+    hf: Arc<hf::HfProxy>,
 }
 
 impl AppState {
@@ -200,6 +206,7 @@ impl AppState {
             switch: Arc::new(tokio::sync::Mutex::new(())),
             hub,
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
+            hf: Arc::new(hf::HfProxy::from_env()),
         }
     }
 
@@ -229,7 +236,9 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/system", get(system::admin_system))
         .route("/admin/config", get(admin_config))
         .route("/admin/progress", get(admin_progress))
-        .route("/admin/switch-profile", post(admin_switch_profile));
+        .route("/admin/switch-profile", post(admin_switch_profile))
+        .route("/admin/hf/search", get(hf::admin_hf_search))
+        .route("/admin/hf/model/{*repo}", get(hf::admin_hf_model));
     // The web-search tool route delegates to the service crate, so it exists
     // only in builds with the `web-search` feature.
     #[cfg(feature = "web-search")]
