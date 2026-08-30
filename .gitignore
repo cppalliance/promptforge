@@ -10,5 +10,7 @@
 # UI build pipeline: npm install target and esbuild output (rebuilt by build.rs).
 /crates/promptforge-workshop-server/ui/node_modules/
 /crates/promptforge-workshop-server/ui/dist/
+/crates/promptforge-gateway-config-ui/ui/node_modules/
+/crates/promptforge-gateway-config-ui/ui/dist/
 # Workshop tape, written to the cwd when the server runs from the repo root.
 /tape.jsonl
