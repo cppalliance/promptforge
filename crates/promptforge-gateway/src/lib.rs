@@ -22,7 +22,9 @@
 //! stream of the process progress hub, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, an on-demand blob cache
 //! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
-//! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, and
+//! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, a
+//! bearer-authed `GET /admin/orphans` listing of cache files no loaded
+//! `[[local_model]]` entry references (local builds), and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
@@ -31,6 +33,8 @@ mod api_error;
 mod cache;
 mod dialect;
 mod error;
+#[cfg(feature = "local")]
+mod orphans;
 mod render;
 mod routing;
 mod runner;
@@ -215,10 +219,11 @@ pub(crate) fn build_router(state: AppState) -> Router {
     // only in builds with the `web-search` feature.
     #[cfg(feature = "web-search")]
     let router = router.route("/v1/tools/web_search", post(web_search));
-    // The blob-cache routes serve the local artifact store, so they exist
-    // only in builds with local inference.
+    // The blob-cache and orphan routes serve the local artifact store, so
+    // they exist only in builds with local inference.
     #[cfg(feature = "local")]
     let router = router
+        .route("/admin/orphans", get(orphans::admin_orphans))
         .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
         .route("/v1/cache/{sha256}", delete(cache::delete_cache));
     router.with_state(state)

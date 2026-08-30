@@ -4,7 +4,9 @@ Gateway-owned local inference for the PromptForge inference gateway: the
 pinned `llama-server` artifact store, GGUF provisioning with digest pins,
 dialect probing, the managed `llama-server` child lifecycle with supervised
 respawn, HF metadata sidecars, the blob cache store behind the gateway's
-`/v1/cache` routes, and CUDA bundle staging.
+`/v1/cache` routes, the orphan scan behind the gateway's `GET /admin/orphans`
+route (files under the cache's `models/` tree no loaded `[[local_model]]`
+entry references), and CUDA bundle staging.
 
 The gateway drives this crate through `LocalRuntime`: `start` provisions and
 launches one child per `[[local_model]]`, `models` yields the routing table
