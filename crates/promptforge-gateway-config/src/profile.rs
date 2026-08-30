@@ -34,9 +34,11 @@ pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
 
 mod merge;
 mod name;
+mod provenance;
 
 use merge::merge_docs;
 pub use name::{ProfileName, ProfileNameError};
+pub(crate) use provenance::Provenance;
 
 #[cfg(test)]
 mod tests;
@@ -123,8 +125,9 @@ pub(crate) fn load_named_with_chain(
     name: &ProfileName,
 ) -> Result<(Config, Vec<PathBuf>), ConfigError> {
     let path = dir.join(format!("{}.toml", name.as_str()));
-    let (value, chain) = collect_config_chain(&path)?;
-    let config = Config::from_value(value)?;
+    let (value, chain, provenance) = collect_config_chain(&path)?;
+    let mut config = Config::from_value(value)?;
+    config.set_provenance(provenance);
     Ok((config, chain))
 }
 
@@ -157,7 +160,7 @@ pub fn load_server(path: &Path) -> Result<ServerConfig, crate::api_error::Config
 /// The crate-internal form of [`load_server`], returning the private
 /// representation.
 fn load_server_repr(path: &Path) -> Result<ServerConfig, ConfigError> {
-    let (mut value, _chain) = collect_config_chain(path)?;
+    let (mut value, _chain, _provenance) = collect_config_chain(path)?;
     interpolate_value(&mut value)?;
     server_section(&value, path)
 }
@@ -194,7 +197,7 @@ pub fn load_workshop(path: &Path) -> Result<Option<WorkshopConfig>, crate::api_e
 /// The crate-internal form of [`load_workshop`], returning the private
 /// representation.
 fn load_workshop_repr(path: &Path) -> Result<Option<WorkshopConfig>, ConfigError> {
-    let (mut value, _chain) = collect_config_chain(path)?;
+    let (mut value, _chain, _provenance) = collect_config_chain(path)?;
     interpolate_value(&mut value)?;
     workshop_section(&value, path)
 }
@@ -233,7 +236,7 @@ pub fn load_boot_sections(
 fn load_boot_sections_repr(
     path: &Path,
 ) -> Result<(ServerConfig, Option<WorkshopConfig>), ConfigError> {
-    let (mut value, _chain) = collect_config_chain(path)?;
+    let (mut value, _chain, _provenance) = collect_config_chain(path)?;
     interpolate_value(&mut value)?;
     Ok((
         server_section(&value, path)?,
@@ -282,24 +285,38 @@ fn workshop_section(value: &Value, path: &Path) -> Result<Option<WorkshopConfig>
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
 pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
-    let (value, _chain) = collect_config_chain(path)?;
-    Config::from_value(value)
+    let (value, _chain, provenance) = collect_config_chain(path)?;
+    let mut config = Config::from_value(value)?;
+    config.set_provenance(provenance);
+    Ok(config)
 }
 
 /// Collects config file paths in include-chain order (root first, depth-first)
-/// alongside the merged TOML value.
+/// alongside the merged TOML value and the merge's provenance record.
 ///
 /// The returned path list lets the caller log the resolved chain and check
-/// whether another file (for example the boot config) appears in it.
+/// whether another file (for example the boot config) appears in it. The
+/// provenance records which file produced each merged entry without changing
+/// the merge itself.
 ///
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
-pub(crate) fn collect_config_chain(path: &Path) -> Result<(Value, Vec<PathBuf>), ConfigError> {
+pub(crate) fn collect_config_chain(
+    path: &Path,
+) -> Result<(Value, Vec<PathBuf>, Provenance), ConfigError> {
     let mut stack = Vec::new();
     let mut visiting = HashSet::new();
     let mut config_chain = Vec::new();
-    let value = load_value(path, 0, &mut stack, &mut visiting, &mut config_chain)?;
-    Ok((value, config_chain))
+    let mut provenance = Provenance::default();
+    let value = load_value(
+        path,
+        0,
+        &mut stack,
+        &mut visiting,
+        &mut config_chain,
+        &mut provenance,
+    )?;
+    Ok((value, config_chain, provenance))
 }
 
 fn load_value(
@@ -308,6 +325,7 @@ fn load_value(
     stack: &mut Vec<PathBuf>,
     visiting: &mut HashSet<PathBuf>,
     config_chain: &mut Vec<PathBuf>,
+    provenance: &mut Provenance,
 ) -> Result<Value, ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth {
@@ -341,10 +359,17 @@ fn load_value(
     let mut merged = Value::Table(toml::map::Map::new());
     for include_name in &includes {
         let include_path = resolve_include(base_dir, include_name)?;
-        let parent_doc = load_value(&include_path, depth + 1, stack, visiting, config_chain)?;
-        merge_docs(&mut merged, parent_doc, &include_path)?;
+        let parent_doc = load_value(
+            &include_path,
+            depth + 1,
+            stack,
+            visiting,
+            config_chain,
+            provenance,
+        )?;
+        merge_docs(&mut merged, parent_doc, &include_path, provenance)?;
     }
-    merge_docs(&mut merged, doc, path)?;
+    merge_docs(&mut merged, doc, path, provenance)?;
 
     stack.pop();
     visiting.remove(&canonical);

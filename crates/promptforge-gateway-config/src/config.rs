@@ -162,6 +162,10 @@ pub struct Config {
     /// Optional hosted-workshop configuration. Absent when no `[workshop]`
     /// section is present. Boot-only, like `[server]`.
     workshop: Option<WorkshopConfig>,
+    /// Which file each merged entry came from, recorded during include
+    /// resolution. Empty when the config was built without it (for example
+    /// [`Config::from_toml_str`]).
+    provenance: crate::profile::Provenance,
 }
 
 /// Private DTO for [`Config`]. Holds the raw TOML shape before validation and
@@ -170,7 +174,7 @@ pub struct Config {
 /// with `Secret` fields redacted.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawConfig {
+pub(crate) struct RawConfig {
     server: ServerConfig,
     #[serde(default)]
     local: LocalConfig,
@@ -204,6 +208,7 @@ impl From<RawConfig> for Config {
             model_allowlist: raw.model_allowlist,
             tools: raw.tools,
             workshop: raw.workshop,
+            provenance: crate::profile::Provenance::default(),
         }
     }
 }

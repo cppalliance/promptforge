@@ -16,7 +16,9 @@
 //! subprocess (`[[local_model]]`), named profiles with recursive `include`
 //! and immediate `POST /admin/switch-profile` streaming its stages over
 //! SSE, a bearer-authed
-//! `GET /v1/models` catalog, a bearer-authed `GET /admin/progress` SSE
+//! `GET /v1/models` catalog, a bearer-authed `GET /admin/config` view of the
+//! running configuration as JSON (secrets redacted, per-file provenance), a
+//! bearer-authed `GET /admin/progress` SSE
 //! stream of the process progress hub, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, an on-demand blob cache
 //! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
@@ -89,6 +91,9 @@ use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSea
 struct LiveState {
     routing: Arc<Routing>,
     key: Secret,
+    /// The running configuration, retained so `GET /admin/config` can render
+    /// it; swapped with the rest of the live state on a profile switch.
+    config: Arc<Config>,
     #[cfg(feature = "web-search")]
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
@@ -153,6 +158,7 @@ impl AppState {
     pub(crate) fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
+        config: Arc<Config>,
         #[cfg(feature = "local")] local: LocalRuntime,
         #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
@@ -164,6 +170,7 @@ impl AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
                 key,
+                config,
                 #[cfg(feature = "web-search")]
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 #[cfg(feature = "local")]
@@ -201,6 +208,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
+        .route("/admin/config", get(admin_config))
         .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile));
     // The web-search tool route delegates to the service crate, so it exists
@@ -506,6 +514,18 @@ async fn admin_status(
     })))
 }
 
+/// The `GET /admin/config` route: bearer-authed, renders the running
+/// configuration as JSON in the TOML shape, with secrets redacted and each
+/// keyed-array entry annotated with the file its definition came from.
+async fn admin_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let live = state.live.read().await;
+    Ok(Json(live.config.to_json()))
+}
+
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
 /// idle connection alive through NAT and firewall timeouts.
 const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -765,8 +785,12 @@ async fn run_switch(
 
         stopping.complete();
         let starting = tree.register("starting-models", 5.0);
+        // A clone feeds the blocking start so `config` survives to the swap.
+        let start_config = config.clone();
         let runtime =
-            match tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)).await {
+            match tokio::task::spawn_blocking(move || LocalRuntime::start(&start_config, None))
+                .await
+            {
                 Ok(Ok(runtime)) => runtime,
                 Ok(Err(e)) => {
                     starting.fail();
@@ -802,6 +826,7 @@ async fn run_switch(
         let mut live = state.live.write().await;
         live.routing = Arc::new(routing);
         live.key = new_key;
+        live.config = Arc::new(config);
         #[cfg(feature = "web-search")]
         {
             live.web_search = new_web_search;

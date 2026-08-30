@@ -20,7 +20,7 @@ promptforge-gateway serve gateway.toml --profile main
 
 Boot requires two things: a config path and a profile name. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). The profile is required and is loaded from the `profiles/` directory beside the boot file; a minimal `profiles/main.toml` containing only `include = ["../gateway.toml"]` loads the full catalog.
 
-Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`. Bearer-authed admin routes cover profile switching and status, and `GET /admin/progress` streams the process's live operation progress as server-sent events.
+Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`. Bearer-authed admin routes cover profile switching and status, `GET /admin/config` renders the running configuration as JSON (secrets redacted, each entry annotated with the file it came from), and `GET /admin/progress` streams the process's live operation progress as server-sent events.
 
 Embedding hosts use the library API instead of the binary: `spawn` starts the gateway on a dedicated thread with its own runtime and blocks until the listener is bound, returning a `GatewayHandle` that carries the bound URL and a graceful-shutdown switch (`url()`, `shutdown()`, `join()`).
 
