@@ -1,22 +1,31 @@
-//! Voice model provisioning: fetching the configured whisper models through
-//! the gateway's cache API once the gateway is reachable, then activating
-//! the voice engine from the cached paths.
+//! Voice engine provisioning: loading the configured whisper models - from
+//! local files at startup, or through the gateway's cache API once the
+//! gateway is reachable - then activating the voice engine from the
+//! resolved paths.
 //!
-//! The task spawned by [`spawn`] subscribes to the heartbeat's reachability
-//! flag and, whenever the gateway answers and the voice engine is not
-//! loaded, calls `POST /v1/cache` for each configured model source. A cache
-//! hit answers immediately with the cached path; a miss streams download
-//! progress events that drive a leaf of the attempt's operation tree on
-//! the process progress hub (the renderer task turns the tree into the
-//! status bar's progress indicator), ending in a terminal `ready` event
-//! carrying the path. When both models resolve, the engine loads from the
-//! resolved paths - on the blocking pool, since model loading waits on
-//! worker-thread init, reporting its prewarm and init leaves on the same
-//! tree - and the shared [`VoiceSlot`] is activated, so the next `/voice`
-//! session transcribes. One successful
-//! provisioning ends the task; a failure is logged and reported on the
-//! status bus, and the next gateway reconnect retries - a retry hits the
-//! cache for every blob the failed attempt already fetched, so it is cheap.
+//! The task spawned by [`spawn`] unifies the two load moments. When every
+//! configured model is a local file the first attempt fires immediately,
+//! so the startup load's operation tree reports through the live progress
+//! renderer instead of blocking server startup. When a model is missing
+//! and has a source URL, the task subscribes to the heartbeat's
+//! reachability flag and, whenever the gateway answers and the voice
+//! engine is not loaded, calls `POST /v1/cache` for each configured
+//! model source. A cache hit answers immediately with the cached path; a
+//! miss streams download progress events that drive a leaf of the
+//! attempt's operation tree on the process progress hub (the renderer
+//! task turns the tree into the status bar's progress indicator), ending
+//! in a terminal `ready` event carrying the path. When both models
+//! resolve, the engine loads from the resolved paths - on the blocking
+//! pool, since model loading waits on worker-thread init, reporting its
+//! prewarm and init leaves on the same tree - and the shared
+//! [`VoiceSlot`] is activated, so the next `/voice` session transcribes.
+//! One successful provisioning ends the task; a failure is logged and
+//! reported on the status bus, and the next gateway reconnect retries - a
+//! retry hits the cache for every blob the failed attempt already
+//! fetched, so it is cheap.
+//! A configured interim model that can neither load nor be fetched degrades
+//! to disabled voice with a status-bar explanation, once, without waiting
+//! on the gateway.
 //!
 //! The task stops through its [`Provision`] handle: the stop signal wins
 //! the loop's selects, so shutdown never waits out a watch change or an
@@ -62,7 +71,9 @@ impl Provision {
 
 /// Spawns the provisioning task against `client`, reporting status
 /// through `push` and fractional progress through `hub`, waiting on
-/// `health`, and activating `voice` on success.
+/// `health` when a fetch is needed, and activating `voice` on success.
+/// A configuration whose models are all local files loads immediately,
+/// without waiting on the gateway.
 pub(crate) fn spawn(
     client: GatewayClient,
     push: Push,
@@ -81,9 +92,10 @@ pub(crate) fn spawn(
     }
 }
 
-/// The task loop: wait for a reachable gateway, provision, and either
-/// finish (success) or park until the next reachability change (failure),
-/// so a persistent failure can never spin.
+/// The task loop: a never-resolvable config degrades once, a purely local
+/// load fires immediately, and a fetch waits for a reachable gateway,
+/// then either finishes (success) or parks until the next reachability
+/// change (failure), so a persistent failure can never spin.
 async fn run(
     client: &GatewayClient,
     push: &Push,
@@ -93,23 +105,39 @@ async fn run(
     config: &VoiceConfig,
     stop: &mut oneshot::Receiver<()>,
 ) {
-    // A loaded engine is never re-provisioned; a configuration with no
-    // resolvable interim model can never succeed.
-    if voice.is_active() || !can_provision(config) {
+    // A loaded engine is never re-provisioned; an unconfigured voice -
+    // no interim model path and no source to fetch one from - exits
+    // silently.
+    if voice.is_active() || (!config.enabled() && config.interim_source.is_empty()) {
+        return;
+    }
+    // An interim model that can never resolve - missing, with no source to
+    // fetch - degrades to disabled with the engine's own verdict rather
+    // than parking on a gateway that cannot help.
+    if !can_provision(config) {
+        degrade_unresolvable(push, voice, config).await;
         return;
     }
     let mut reachable = health.subscribe();
+    // A purely local load needs no gateway: the first attempt fires
+    // immediately, so the startup load reports while the renderer is live
+    // instead of blocking spawn. Fetches, and every retry, wait for
+    // reachability.
+    let mut wait_for_gateway = needs_fetch(config);
     loop {
-        while !*reachable.borrow_and_update() {
-            tokio::select! {
-                _ = &mut *stop => return,
-                changed = reachable.changed() => {
-                    if changed.is_err() {
-                        return;
+        if wait_for_gateway {
+            while !*reachable.borrow_and_update() {
+                tokio::select! {
+                    _ = &mut *stop => return,
+                    changed = reachable.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
                     }
                 }
             }
         }
+        wait_for_gateway = true;
         if voice.is_active() {
             return;
         }
@@ -141,6 +169,38 @@ async fn run(
 /// to load, or a source URL to fetch.
 fn can_provision(config: &VoiceConfig) -> bool {
     config.interim_model.is_file() || !config.interim_source.is_empty()
+}
+
+/// Whether an attempt must fetch anything: the interim model is missing
+/// (its source is then set, or [`can_provision`] would have failed), or
+/// the final model is configured, missing, and sourced.
+fn needs_fetch(config: &VoiceConfig) -> bool {
+    !config.interim_model.is_file()
+        || (!config.final_model.as_os_str().is_empty()
+            && !config.final_model.is_file()
+            && !config.final_source.is_empty())
+}
+
+/// Reports why voice can never run: the interim model is missing with no
+/// source to fetch. The engine constructor is the one validator of
+/// `[voice]` tuning and checks it before touching the disk, so its error
+/// names a bad window or interval ahead of the missing file - the load is
+/// doomed either way, so running it costs nothing and the verdict is the
+/// engine's own words.
+async fn degrade_unresolvable(push: &Push, voice: &VoiceSlot, config: &VoiceConfig) {
+    let engine_config = promptforge_transcribe::EngineConfig::from(config);
+    match tokio::task::spawn_blocking(move || VoiceEngine::new(&engine_config)).await {
+        // The model file raced into existence: keep the engine.
+        Ok(Ok(engine)) => activate(voice, push, engine),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "voice disabled");
+            push.push_failure("Voice disabled", error.to_string(), Activity::General);
+        }
+        Err(error) => {
+            tracing::warn!(%error, "voice engine load task failed");
+            push.push_failure("Voice disabled", error.to_string(), Activity::General);
+        }
+    }
 }
 
 /// Leaf weights track expected time: a multi-gigabyte model download
@@ -222,13 +282,18 @@ async fn provision_attempt(
     .await
     .map_err(ProvisionError::EngineTask)?
     .map_err(ProvisionError::LoadEngine)?;
+    activate(voice, push, engine);
+    Ok(())
+}
+
+/// Activates the loaded engine and announces it.
+fn activate(voice: &VoiceSlot, push: &Push, engine: VoiceEngine) {
     voice.activate(engine);
     push.push_status_update(
         "Voice ready",
         "the whisper models are loaded; push-to-talk transcription is available",
         Activity::General,
     );
-    Ok(())
 }
 
 /// Registers the download leaf for a model that resolution will fetch:
@@ -388,12 +453,18 @@ async fn cache_fetch_events(
 
 /// Reports a provisioning failure. A transport failure means the gateway
 /// is not there - the heartbeat's story to tell - so it speaks at Info
-/// with the retry note; every other failure is a user-visible error.
+/// with the retry note; a load failure carries the engine's own verdict
+/// under the disabled label; every other failure is a user-visible error.
 fn report_failure(push: &Push, error: &ProvisionError) {
     match error {
         ProvisionError::Transport(_) => push.push_status_update(
             "Voice models wait on the gateway",
             format!("{error}; provisioning retries when the gateway reconnects"),
+            Activity::General,
+        ),
+        ProvisionError::LoadEngine(source) => push.push_failure(
+            "Voice disabled",
+            format!("{source}; voice stays disabled; a gateway reconnect retries"),
             Activity::General,
         ),
         _ => push.push_failure(
@@ -695,6 +766,249 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), provision.shutdown())
             .await
             .expect("the task exits without waiting on the gateway");
+    }
+
+    #[tokio::test]
+    async fn a_missing_interim_model_with_no_source_degrades_to_disabled_voice() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("definitely-missing-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::new(ProgressHub::new()),
+            GatewayHealth::new(),
+            slot.clone(),
+            config,
+        );
+        let verdict = next_update(&mut rx).await;
+        assert_eq!(verdict.label, "Voice disabled");
+        assert_eq!(verdict.severity, Severity::Error);
+        assert!(
+            verdict.description.contains("definitely-missing-model.bin"),
+            "the explanation names the missing path: {verdict:?}"
+        );
+        assert!(!slot.is_active(), "voice degrades to disabled, not fatal");
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_unresolvable_config_degrades_without_attaching_a_tree() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let hub = Arc::new(ProgressHub::new());
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("definitely-missing-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::clone(&hub),
+            GatewayHealth::new(),
+            VoiceSlot::default(),
+            config,
+        );
+        let _verdict = next_update(&mut rx).await;
+        assert!(
+            hub.snapshot().is_empty(),
+            "a load that never starts leaves no operation on the hub"
+        );
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn invalid_voice_tuning_degrades_instead_of_failing_startup() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("model.bin"),
+            window_seconds: 0,
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::new(ProgressHub::new()),
+            GatewayHealth::new(),
+            slot.clone(),
+            config,
+        );
+        let verdict = next_update(&mut rx).await;
+        assert_eq!(verdict.label, "Voice disabled");
+        assert!(
+            verdict.description.contains("window_seconds"),
+            "the explanation names the bad field, ahead of the missing file: {verdict:?}"
+        );
+        assert!(!slot.is_active(), "invalid tuning costs voice, not startup");
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_sourced_config_waits_for_the_gateway_before_fetching() {
+        let calls = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&calls);
+        let base_url = serve(Router::new().route(
+            "/v1/cache",
+            post(move || {
+                let seen = Arc::clone(&seen);
+                async move {
+                    seen.store(true, Ordering::Relaxed);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
+            }),
+        ))
+        .await;
+        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let health = GatewayHealth::new();
+        // The outage is published before the task spawns, so its first
+        // read of the flag already sees unreachable.
+        health.publish(false);
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::new(ProgressHub::new()),
+            health.clone(),
+            slot.clone(),
+            sourced_config(),
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !calls.load(Ordering::Relaxed),
+            "no cache request fires while the gateway is unreachable"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "no status frame fires while the task waits"
+        );
+        health.publish(true);
+        let update = next_update(&mut rx).await;
+        assert_eq!(update.label, "Voice provisioning failed");
+        assert!(
+            calls.load(Ordering::Relaxed),
+            "reachability fires the fetch"
+        );
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_garbage_local_model_fails_fast_and_reports_disabled_voice() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let hub = Arc::new(ProgressHub::new());
+        let health = GatewayHealth::new();
+        // The outage is published before the task spawns, so its first
+        // read of the flag already sees unreachable; the verdict arriving
+        // at all pins that a purely local config never waits on the
+        // gateway.
+        health.publish(false);
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let garbage = dir.path().join("not-a-model.bin");
+        std::fs::write(&garbage, "this is not a whisper model").expect("the garbage file writes");
+        let config = VoiceConfig {
+            interim_model: garbage,
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::clone(&hub),
+            health,
+            slot.clone(),
+            config,
+        );
+        let verdict = next_update(&mut rx).await;
+        assert_eq!(verdict.label, "Voice disabled");
+        assert_eq!(verdict.severity, Severity::Error);
+        assert!(
+            verdict.description.contains("not-a-model.bin"),
+            "the load failure carries the engine's own verdict: {verdict:?}"
+        );
+        assert!(!slot.is_active(), "a failed local load activates nothing");
+        assert!(
+            hub.snapshot().is_empty(),
+            "the failed attempt's tree detaches"
+        );
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
+    async fn a_local_model_loads_without_waiting_for_the_gateway() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let health = GatewayHealth::new();
+        // The gateway is unreachable from the task's first read: a local
+        // load must not wait on it.
+        health.publish(false);
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::new(ProgressHub::new()),
+            health,
+            slot.clone(),
+            config,
+        );
+        assert!(
+            wait_active(&slot).await,
+            "the local model loads despite the unreachable gateway"
+        );
+        let update = next_update(&mut rx).await;
+        assert_eq!(update.label, "Voice ready");
+        provision.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
+    async fn a_missing_unsourced_final_model_drops_the_final_pass() {
+        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let slot = VoiceSlot::default();
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: PathBuf::from("definitely-missing-final-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let provision = spawn(
+            client,
+            push_over(status),
+            Arc::new(ProgressHub::new()),
+            GatewayHealth::new(),
+            slot.clone(),
+            config,
+        );
+        assert!(wait_active(&slot).await, "the interim model still loads");
+        let engine = slot.engine().expect("the slot holds the engine");
+        assert!(
+            engine.final_pass_absent_for_test(),
+            "the final pass was dropped"
+        );
+        let note = next_update(&mut rx).await;
+        assert_eq!(note.label, "Voice final pass unavailable");
+        assert_eq!(note.severity, Severity::Info);
+        let ready = next_update(&mut rx).await;
+        assert_eq!(ready.label, "Voice ready");
+        provision.shutdown().await;
     }
 
     #[tokio::test]
