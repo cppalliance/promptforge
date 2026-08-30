@@ -4,9 +4,9 @@
 //! The gateway loads two env files at boot: the boot config's sibling
 //! (`gateway.env`) and the active profile's (`<profile>.env`). `GET`
 //! returns both parsed, values included - the caller already presented the
-//! gateway's own bearer key, and these routes gain the loopback guard when
-//! the config-ui middleware lands. `PUT` writes one env file's shadow
-//! atomically - the active profile's (`<profile>.env.next`) by default,
+//! gateway's own bearer key, and `build_router` puts these routes behind
+//! the shared loopback wall in every build. `PUT` writes one env file's
+//! shadow atomically - the active profile's (`<profile>.env.next`) by default,
 //! the boot config's (`gateway.env.next`) with `?scope=boot`; the real
 //! file is untouched and the process environment does not change until an
 //! explicit apply and restart or profile switch.
