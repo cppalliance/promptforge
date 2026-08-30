@@ -57,6 +57,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A93. Operation-scoped progress trees attach to a process hub; owners schedule, producers report, renderers format.
 
+- A94. Config writes enter validated persistent shadows; only Apply promotes them and Revert removes them.
+
 ## Principles
 
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.

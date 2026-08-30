@@ -97,3 +97,5 @@
 - [2026-08-29-2-rename-ws-crates-to-workshop] atomic product rename: Package, binary, directory, UI, and CI names move together while historical decision records keep their dated identity.
 - [2026-08-29-3-chat-ws-decomposition] responsibility ratchet: Module ceilings prevent size regrowth but ownership drift still requires a rename or split.
 - [2026-08-29-4-progress-architecture-rollout] terminal progress authority: Intermediate samples may coalesce, but sticky terminal outcomes and reconnect snapshots define completion.
+- [2026-08-29-5-gateway-config-spa] loopback config wall: Sensitive config and secret APIs remain loopback-only even when bearer-authenticated.
+- [2026-08-29-5-gateway-config-spa] app-owned configuration: Managed TOML and env files are canonical machine output rather than comment-preserving hand-edited documents.
