@@ -39,7 +39,10 @@
 "cross_site.rs" = 338
 "deadline.rs" = 112
 "error.rs" = 484
-"gateway.rs" = 1300
+# Grew by the config-panel proxy seam: the `base_url` accessor,
+# `ForwardedResponse`, and the `forward` relay the /gateway/api route
+# calls - one more request shape on the same gateway HTTP client.
+"gateway.rs" = 1365
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
 # RemoteOperation while the heartbeat reads the gateway as reachable.
@@ -82,6 +85,9 @@
 "routes.rs" = 8
 "routes/assets.rs" = 117
 "routes/chat.rs" = 46
+# New module: the gateway-config panel's origin probe and the
+# allowlisted key-attaching proxy the panel's postMessage bridge calls.
+"routes/gateway_config.rs" = 334
 "routes/health.rs" = 50
 "routes/voice.rs" = 75
 "routes/workspace.rs" = 19

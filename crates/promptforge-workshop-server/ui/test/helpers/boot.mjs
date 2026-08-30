@@ -205,6 +205,15 @@ export async function bootWorkbench(name, run) {
         }),
       );
     }
+    if (url === "/gateway/origin") {
+      // The Gateway Config panel asks for the gateway origin when opened.
+      return Promise.resolve(
+        new Response(JSON.stringify({ origin: "http://127.0.0.1:8081" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
     return Promise.reject(new Error(`unexpected fetch in a booted workbench test: ${url}`));
   };
 
@@ -215,6 +224,7 @@ export async function bootWorkbench(name, run) {
     "localStorage",
     "HTMLElement",
     "HTMLTemplateElement",
+    "HTMLInputElement",
     "HTMLTextAreaElement",
     "HTMLButtonElement",
     "Node",

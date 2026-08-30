@@ -71,9 +71,13 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     },
   };
   let workshopToggles = 0;
+  let gatewayConfigOpens = 0;
   const workshop = {
     toggleWorkshopPanel: () => {
       workshopToggles += 1;
+    },
+    openGatewayConfig: () => {
+      gatewayConfigOpens += 1;
     },
   };
   globalThis.window = window;
@@ -97,7 +101,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const isOpen = (id) => !popoverOf(id).hidden;
   const keydown = (key) =>
     window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
-  const stats = () => ({ agentsOpened, workshopToggles, execCalls: [...execCalls] });
+  const stats = () => ({ agentsOpened, workshopToggles, gatewayConfigOpens, execCalls: [...execCalls] });
   return { window, commands, menus, posted, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
 }
 
@@ -241,6 +245,24 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
         JSON.stringify({ command: "toggle-maximize" }),
       ].join("|"),
   );
+}
+
+// --- Window menu: Gateway Config opens the panel next to Workshop Panel ------
+
+{
+  const { menus, itemsOf, itemByLabel, isOpen, stats } = scenario();
+  menus.window.click();
+  const configItem = itemByLabel("window", "Gateway Config");
+  check("the Window menu lists Gateway Config", configItem !== undefined);
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  const labels = itemsOf("window").map(rowLabel);
+  check(
+    "Gateway Config sits next to Workshop Panel",
+    labels.indexOf("Gateway Config") === labels.indexOf("Workshop Panel") + 1,
+  );
+  configItem.click();
+  check("Gateway Config dispatches the open command", stats().gatewayConfigOpens === 1);
+  check("running Gateway Config closes the menu", !isOpen("window"));
 }
 
 // --- Edit menu: disabled without a target, preserved target with one ---------

@@ -43,6 +43,20 @@ pub struct GatewayResponse {
     pub body: Vec<u8>,
 }
 
+/// A gateway response captured for the config-panel proxy: the relay
+/// keeps the content type alongside the status and body, because the
+/// config UI distinguishes a buffered JSON answer from an SSE stream by
+/// it.
+#[derive(Debug)]
+pub(crate) struct ForwardedResponse {
+    /// The gateway's status code, relayed unchanged.
+    pub(crate) status: reqwest::StatusCode,
+    /// The gateway's `Content-Type`, when it sent one.
+    pub(crate) content_type: Option<String>,
+    /// The gateway's response body, relayed byte-for-byte.
+    pub(crate) body: Vec<u8>,
+}
+
 /// A stream of SSE `data:` payloads from the gateway, in arrival order.
 ///
 /// Each item is one event's data, verbatim; the OpenAI terminal sentinel
@@ -372,6 +386,59 @@ impl GatewayClient {
         } else {
             request.bearer_auth(&self.api_key)
         }
+    }
+
+    /// The gateway's base URL as configured, trailing slash trimmed -
+    /// also the origin the config-panel iframe loads from.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Forwards one request to the gateway: `method` on
+    /// `path_and_query`, with an optional JSON `body`, authenticated
+    /// with the client's bearer key. Only the wait for the response
+    /// headers is bounded - a forwarded cache download or profile
+    /// switch legitimately streams for minutes - and the whole body is
+    /// buffered for relay. A non-success status is relayed in the
+    /// returned [`ForwardedResponse`], not reported as an error.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::Transport`] if the request cannot be
+    /// completed (the header bound elapsing included) and
+    /// [`GatewayError::ReadBody`] if the response body cannot be read.
+    pub(crate) async fn forward(
+        &self,
+        method: reqwest::Method,
+        path_and_query: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<ForwardedResponse, GatewayError> {
+        let mut request = self.authorize(
+            self.http
+                .request(method, format!("{}{}", self.base_url, path_and_query)),
+        );
+        if let Some(bytes) = body {
+            request = request
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(bytes);
+        }
+        let response = self.send_bounded(request).await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = response
+            .bytes()
+            .await
+            .map_err(|source| GatewayError::ReadBody(Box::new(source)))?
+            .to_vec();
+        Ok(ForwardedResponse {
+            status,
+            content_type,
+            body,
+        })
     }
 
     /// Probes the gateway's liveness endpoint, `GET /health`.

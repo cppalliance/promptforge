@@ -36,6 +36,7 @@ export interface WindowMenuCommands {
   readonly paste: () => void;
   readonly selectAll: () => void;
   readonly toggleWorkshopPanel: () => void;
+  readonly openGatewayConfig: () => void;
   readonly minimizeWindow: () => void;
   readonly toggleWindowMaximize: () => void;
   readonly showAbout: () => void;
@@ -44,10 +45,12 @@ export interface WindowMenuCommands {
 /**
  * The workshop surface the Window menu dispatches through: the Workshop
  * Panel item toggles the tree, sharing the Ctrl+B command from
- * workshop/shortcuts.
+ * workshop/shortcuts, and Gateway Config opens (or focuses) the
+ * dockview panel hosting the gateway's config SPA.
  */
 export interface WorkshopMenuCommands {
   readonly toggleWorkshopPanel: () => void;
+  readonly openGatewayConfig: () => void;
 }
 
 /**
@@ -160,6 +163,7 @@ function buildMenuItems(
 ): Record<MenuId, readonly MenuItem[]> {
   const windowItems: MenuItem[] = [
     { kind: "command", label: "Workshop Panel", shortcut: "Ctrl+B", run: commands.toggleWorkshopPanel },
+    { kind: "command", label: "Gateway Config", run: commands.openGatewayConfig },
     { kind: "separator" },
     { kind: "command", label: "Minimize", run: commands.minimizeWindow },
     { kind: "command", label: "Maximize/Restore", run: commands.toggleWindowMaximize },
@@ -252,6 +256,7 @@ export function setupWindowMenus(options: {
     paste: () => runEditCommand("paste"),
     selectAll: () => runEditCommand("selectAll"),
     toggleWorkshopPanel: () => options.workshop.toggleWorkshopPanel(),
+    openGatewayConfig: () => options.workshop.openGatewayConfig(),
     minimizeWindow,
     toggleWindowMaximize,
     showAbout: showAboutDialog,
