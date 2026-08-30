@@ -64,6 +64,10 @@
 		   keep --danger itself. */
 		--danger-text: #F28B93;
 		--success: #28A745;
+		/* --success as text on the dark surfaces fails AA the same way
+		   --danger does; this lightened companion passes on
+		   --bg-secondary (8.4:1). Fills keep --success itself. */
+		--success-text: #6FCF87;
 		--warning: #F09030;
 		--border: #2A2A2A;
 		--radius: 8px;

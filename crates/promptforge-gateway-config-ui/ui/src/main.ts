@@ -17,8 +17,11 @@ import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "./components/toast";
 import { startRouter } from "./router";
 import { ConfigStore } from "./services/config-store";
+import { DownloadStore } from "./services/download-store";
 import { GatewayApi } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
+import { HfApi } from "./services/hf-api";
+import { createDiscoverView } from "./views/discover-view";
 import { createModelsView } from "./views/models-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
@@ -66,7 +69,7 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   };
   const showShell = () => {
     dispose();
-    dispose = mountStandaloneShell(root, win, api);
+    dispose = mountStandaloneShell(root, win, api, fetchFn);
   };
   // Any 401 clears the stored key and returns to the prompt.
   api.onUnauthorized = showPrompt;
@@ -81,11 +84,17 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
  * Mounts the full standalone shell and starts its data flows. Returns
  * the teardown that stops the router and the progress subscription.
  */
-function mountStandaloneShell(root: HTMLElement, win: BootWindow, api: GatewayApi): () => void {
+function mountStandaloneShell(
+  root: HTMLElement,
+  win: BootWindow,
+  api: GatewayApi,
+  fetchFn: FetchLike,
+): () => void {
   const toasts = createToastStack();
   const overlay = createApplyOverlay(root);
   const switcher = createProfileSwitcher({ api, overlay, toasts });
   const store = new ConfigStore(api);
+  const downloadStore = new DownloadStore(api);
   let applying = false;
 
   const runApply = async (): Promise<void> => {
@@ -178,16 +187,40 @@ function mountStandaloneShell(root: HTMLElement, win: BootWindow, api: GatewayAp
   };
   const unsubscribe = store.subscribe(renderPendingState);
 
-  const main = mountChrome(root, tabBar.element, [toasts.element], banner);
+  // Top progress strip [Adapted: LocalAI]: a thin lava-gradient bar at
+  // the very top of the window while any download is active, fed by
+  // the global download store so it survives view navigation.
+  const strip = document.createElement("div");
+  strip.className = "progress-strip global-progress";
+  strip.hidden = true;
+  const stripBar = document.createElement("div");
+  stripBar.className = "progress-strip-bar";
+  strip.append(stripBar);
+  const renderStrip = (): void => {
+    const active = downloadStore.active();
+    strip.hidden = active.length === 0;
+    stripBar.style.setProperty("--progress", String(downloadStore.overallFraction()));
+  };
+  const unsubscribeDownloads = downloadStore.subscribe(renderStrip);
+
+  const main = mountChrome(root, tabBar.element, [toasts.element], banner, strip);
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
   const modelsView = createModelsView({ store, api, toasts });
+  const discoverView = createDiscoverView({
+    api,
+    hf: new HfApi(api),
+    downloads: downloadStore,
+    toasts,
+    fetchFn,
+  });
   const stopRouter = startRouter({
     win,
     main,
     onRoute: (view) => tabBar.setActiveView(view),
     views: {
       models: (target, match) => modelsView.mount(target, match.detail),
+      discover: (target) => discoverView.mount(target),
     },
   });
 
@@ -216,6 +249,7 @@ function mountStandaloneShell(root: HTMLElement, win: BootWindow, api: GatewayAp
     stopRouter();
     stopProgress();
     unsubscribe();
+    unsubscribeDownloads();
   };
 }
 
@@ -242,14 +276,16 @@ function mountPanelShell(root: HTMLElement, win: BootWindow): void {
 }
 
 /**
- * Mounts the shared chrome - skip link, tab bar header, an optional
- * banner, and the `<main>` region - and returns the main element.
+ * Mounts the shared chrome - skip link, an optional top progress
+ * strip, tab bar header, an optional banner, and the `<main>` region -
+ * and returns the main element.
  */
 function mountChrome(
   root: HTMLElement,
   header: HTMLElement,
   fixed: HTMLElement[],
   banner?: HTMLElement,
+  strip?: HTMLElement,
 ): HTMLElement {
   const main = document.createElement("main");
   main.id = "main";
@@ -268,7 +304,11 @@ function mountChrome(
     main.focus();
   });
 
-  const parts: HTMLElement[] = [skip, header];
+  const parts: HTMLElement[] = [skip];
+  if (strip) {
+    parts.push(strip);
+  }
+  parts.push(header);
   if (banner) {
     parts.push(banner);
   }
