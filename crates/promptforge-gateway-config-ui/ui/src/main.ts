@@ -13,6 +13,7 @@ import { createApplyOverlay } from "./components/apply-overlay";
 import { confirmDialog } from "./components/confirm-modal";
 import { mountKeyPrompt } from "./components/key-prompt";
 import { createProfileSwitcher } from "./components/profile-switcher";
+import { openReviewDiff } from "./components/review-diff";
 import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "./components/toast";
 import { startRouter } from "./router";
@@ -25,6 +26,7 @@ import { createDiscoverView } from "./views/discover-view";
 import { createDownloadsView } from "./views/downloads-view";
 import { createModelsView } from "./views/models-view";
 import { createProfilesView } from "./views/profiles-view";
+import { createSecretsView } from "./views/secrets-view";
 import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
@@ -189,6 +191,11 @@ function mountStandaloneShell(
     banner.hidden = false;
     const text = document.createElement("span");
     text.textContent = `You have ${count} pending change${count === 1 ? "" : "s"} from a previous session.`;
+    const review = document.createElement("button");
+    review.type = "button";
+    review.className = "button button-xs button-outline banner-review";
+    review.textContent = "Review";
+    review.addEventListener("click", () => openReviewDiff(root, store.pendingDiff()));
     const apply = document.createElement("button");
     apply.type = "button";
     apply.className = "button button-xs button-primary banner-apply";
@@ -199,7 +206,7 @@ function mountStandaloneShell(
     revert.className = "button button-xs button-outline banner-revert";
     revert.textContent = "Revert All";
     revert.addEventListener("click", () => void runRevertAll());
-    banner.replaceChildren(text, apply, revert);
+    banner.replaceChildren(text, review, apply, revert);
   };
   const unsubscribe = store.subscribe(renderPendingState);
 
@@ -237,6 +244,7 @@ function mountStandaloneShell(
     fetchFn,
   });
   const downloadsView = createDownloadsView({ api, downloads: downloadStore, toasts });
+  const secretsView = createSecretsView({ store, api, toasts });
   const profilesView = createProfilesView({
     store,
     api,
@@ -257,6 +265,7 @@ function mountStandaloneShell(
       discover: (target) => discoverView.mount(target),
       downloads: (target) => downloadsView.mount(target),
       profiles: (target, match) => profilesView.mount(target, match.detail),
+      secrets: (target) => secretsView.mount(target),
       settings: (target, match) => settingsView.mount(target, match.detail),
     },
   });

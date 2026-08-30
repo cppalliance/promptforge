@@ -190,3 +190,93 @@ test("deleting an orphan confirms first, then calls the cache delete", async () 
   );
   assert.equal(root.querySelector(".orphan-row"), null, "the refreshed list drops the orphan");
 });
+
+test("the allowlist chip opens a popover whose chips save the models array", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  const chip = root.querySelector(".allowlist-chip");
+  assert.equal(chip.textContent, "All models visible", "a null allowlist reads all-visible");
+
+  chip.click();
+  await settle();
+  const popover = root.querySelector(".allowlist-popover");
+  assert.equal(popover.hidden, false, "the chip opens the popover");
+  assert.equal(
+    popover.querySelector(".allowlist-filter"),
+    null,
+    "no filter toggle renders while no allowlist exists",
+  );
+
+  popover.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  assert.equal(popover.hidden, true, "Escape closes the popover");
+  assert.equal(
+    root.ownerDocument.activeElement,
+    chip,
+    "Escape returns focus to the chip",
+  );
+  chip.click();
+  await settle();
+
+  const entry = popover.querySelector("#allowlist-chips");
+  entry.value = "gpt-remote";
+  entry.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  assert.match(popover.textContent, /gpt-remote/, "the typed name becomes a chip");
+
+  popover.querySelector(".allowlist-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  assert.ok(put, "the popover Save uses the normal profile save path");
+  assert.deepEqual(
+    JSON.parse(put.init.body).models,
+    ["gpt-remote"],
+    "the payload carries the top-level models array",
+  );
+  assert.equal(
+    root.querySelector(".allowlist-chip").textContent,
+    "Allowlist (1)",
+    "the refreshed chip counts the saved allowlist",
+  );
+});
+
+test("removing every allowlist chip saves a payload without the models key", async () => {
+  const config = modelsFixture();
+  config.models = ["gpt-remote"];
+  const stub = gatewayStub({ key: "k", config, models: ["qwen-common"] });
+  const { root } = await bootApp({ key: "k", stub });
+
+  const chip = root.querySelector(".allowlist-chip");
+  assert.equal(chip.textContent, "Allowlist (1)");
+  chip.click();
+  await settle();
+  const popover = root.querySelector(".allowlist-popover");
+  assert.ok(
+    popover.querySelector(".allowlist-filter"),
+    "an existing allowlist offers the list filter toggle",
+  );
+
+  popover.querySelector(".chip-remove").click();
+  popover.querySelector(".allowlist-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  assert.equal(
+    "models" in JSON.parse(put.init.body),
+    false,
+    "no chips deletes the key - null means every model is exposed",
+  );
+  assert.equal(
+    root.querySelector(".allowlist-chip").textContent,
+    "All models visible",
+    "the refreshed chip reads all-visible again",
+  );
+});

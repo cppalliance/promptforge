@@ -223,23 +223,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       chips.append(chip);
     }
 
-    const allowlist = store.allowlist();
-    const allowChip = document.createElement("button");
-    allowChip.type = "button";
-    allowChip.className = "pill filter-chip allowlist-chip";
-    if (allowlist === null) {
-      allowChip.disabled = true;
-      allowChip.textContent = "All models visible";
-      allowChip.title = "This profile has no model allowlist.";
-    } else {
-      allowChip.textContent = `Allowlist (${allowlist.length})`;
-      allowChip.setAttribute("aria-pressed", String(allowlistOnly));
-      allowChip.title = "Restrict the list to the profile's allowlisted models.";
-      allowChip.addEventListener("click", () => {
-        allowlistOnly = !allowlistOnly;
-        renderList();
-      });
-    }
+    const allowWrap = buildAllowlistEditor();
 
     const sortLabel = document.createElement("label");
     sortLabel.className = "visually-hidden";
@@ -275,8 +259,129 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     addRemote.textContent = "Add Remote";
     addRemote.addEventListener("click", () => addModel("remote"));
 
-    toolbar.append(searchLabel, searchInput, chips, allowChip, sortLabel, sortSelect, addLocal, addRemote);
+    toolbar.append(searchLabel, searchInput, chips, allowWrap, sortLabel, sortSelect, addLocal, addRemote);
     return toolbar;
+  };
+
+  /**
+   * The allowlist popover editor (the plan's `models = [...]` chip
+   * editor): the toolbar chip opens a popover whose chip input edits
+   * the top-level `models` array through the normal profile save path.
+   * No chips on save deletes the key - null means every model is
+   * exposed, and the chip reads "All models visible".
+   */
+  const buildAllowlistEditor = (): HTMLElement => {
+    const wrap = document.createElement("div");
+    wrap.className = "allowlist-editor";
+    const allowlist = store.allowlist();
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "pill filter-chip allowlist-chip";
+    chip.setAttribute("aria-haspopup", "dialog");
+    chip.setAttribute("aria-expanded", "false");
+    chip.textContent =
+      allowlist === null ? "All models visible" : `Allowlist (${allowlist.length})`;
+    chip.title = "Restrict which models this profile exposes to callers.";
+
+    const popover = document.createElement("div");
+    popover.className = "menu allowlist-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "Edit model allowlist");
+    popover.hidden = true;
+
+    const onDocumentClick = (event: Event): void => {
+      if (!wrap.contains(event.target as Node)) {
+        close();
+      }
+    };
+    const close = (): void => {
+      popover.hidden = true;
+      chip.setAttribute("aria-expanded", "false");
+      document.removeEventListener("click", onDocumentClick);
+    };
+    // Escape closes the popover and returns focus to the chip, matching
+    // the tab bar's menus.
+    popover.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+        chip.focus();
+      }
+    });
+    const open = (): void => {
+      let names = [...(store.allowlist() ?? [])];
+
+      const label = document.createElement("label");
+      label.htmlFor = "allowlist-chips";
+      label.textContent = "Allowlisted model names";
+      const input = createChipInput({
+        id: "allowlist-chips",
+        values: names,
+        onChange: (values) => {
+          names = values;
+        },
+      });
+      const help = document.createElement("p");
+      help.className = "field-help";
+      help.textContent =
+        "Only these models are exposed to callers. Remove every name to expose all models.";
+
+      const parts: HTMLElement[] = [label, input.element, help];
+      if (store.allowlist() !== null) {
+        const filterLabel = document.createElement("label");
+        filterLabel.className = "allowlist-filter";
+        const filterBox = document.createElement("input");
+        filterBox.type = "checkbox";
+        filterBox.checked = allowlistOnly;
+        filterBox.addEventListener("change", () => {
+          allowlistOnly = filterBox.checked;
+          renderList();
+        });
+        filterLabel.append(filterBox, document.createTextNode(" Show only allowlisted models"));
+        parts.push(filterLabel);
+      }
+
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "button button-xs button-primary allowlist-save";
+      save.textContent = "Save";
+      save.addEventListener("click", () => {
+        const payload = store.buildConfigPayload();
+        if (names.length > 0) {
+          payload["models"] = [...names];
+        } else {
+          delete payload["models"];
+        }
+        save.disabled = true;
+        void store
+          .savePayload(payload)
+          .then(() => {
+            toasts.show("Saved to disk", "success");
+            close();
+          })
+          .catch((error: unknown) => {
+            save.disabled = false;
+            toasts.show(error instanceof Error ? error.message : "The save failed", "error");
+          });
+      });
+      parts.push(save);
+
+      popover.replaceChildren(...parts);
+      popover.hidden = false;
+      chip.setAttribute("aria-expanded", "true");
+      document.addEventListener("click", onDocumentClick);
+      popover.querySelector<HTMLInputElement>("#allowlist-chips")?.focus();
+    };
+    chip.addEventListener("click", () => {
+      if (popover.hidden) {
+        open();
+      } else {
+        close();
+      }
+    });
+
+    wrap.append(chip, popover);
+    return wrap;
   };
 
   const modelList = (entries: ModelEntry[]): HTMLElement => {

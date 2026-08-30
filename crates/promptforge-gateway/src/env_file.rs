@@ -5,20 +5,21 @@
 //! (`gateway.env`) and the active profile's (`<profile>.env`). `GET`
 //! returns both parsed, values included - the caller already presented the
 //! gateway's own bearer key, and these routes gain the loopback guard when
-//! the config-ui middleware lands. `PUT` writes the profile env's shadow
-//! (`<profile>.env.next`) atomically; the real file is untouched and the
-//! process environment does not change until an explicit apply and
-//! restart or profile switch.
+//! the config-ui middleware lands. `PUT` writes one env file's shadow
+//! atomically - the active profile's (`<profile>.env.next`) by default,
+//! the boot config's (`gateway.env.next`) with `?scope=boot`; the real
+//! file is untouched and the process environment does not change until an
+//! explicit apply and restart or profile switch.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use axum::Json;
-use axum::extract::State;
-use axum::extract::rejection::JsonRejection;
+use axum::extract::rejection::{JsonRejection, QueryRejection};
+use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use promptforge_gateway_config::write_shadow;
+use promptforge_gateway_config::{pending_var_references, write_shadow};
 
 use crate::config_write::{active_profile_path, config_write_error};
 use crate::error::GatewayError;
@@ -27,9 +28,15 @@ use crate::{AppState, check_auth};
 /// The `GET /admin/env` route: bearer-authed, parses the real boot and
 /// profile `.env` files and returns their variables with values included.
 ///
-/// The reply is `{"boot": section, "profile": section}` where a section is
-/// `{"path", "vars"}` or `null` when that side is not configured (no boot
-/// path, no profiles directory). A missing file is an empty `vars` map.
+/// The reply is `{"boot": section, "profile": section, "references": map}`
+/// where a section is `{"path", "vars"}` or `null` when that side is not
+/// configured (no boot path, no profiles directory), and `references`
+/// maps each `${VAR}` name the pending config chain references to labels
+/// of the referencing fields (`endpoint openai api_key`). The references
+/// come from the raw pre-interpolation chain because a loaded config
+/// interpolates every reference away and redacts secrets - the UI's
+/// "used by" annotations are computable only server-side. A missing file
+/// is an empty `vars` map.
 pub(crate) async fn admin_get_env(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -40,11 +47,22 @@ pub(crate) async fn admin_get_env(
         .config_path
         .as_ref()
         .map(|path| path.with_extension("env"));
-    let profile = profile_env_path(&state).await;
+    let leaf = active_profile_path(&state).await.ok();
+    let profile = leaf.as_ref().map(|leaf| leaf.with_extension("env"));
     let reply = tokio::task::spawn_blocking(move || {
+        // The reference scan parses the pending chain without validating
+        // or interpolating it, so a failure means an unreadable or
+        // unparsable config file - surfaced, never hidden.
+        let references = leaf
+            .as_deref()
+            .map(pending_var_references)
+            .transpose()
+            .map_err(|error| GatewayError::EnvFile(Box::new(error)))?
+            .unwrap_or_default();
         Ok::<_, GatewayError>(serde_json::json!({
             "boot": env_section(boot.as_deref())?,
             "profile": env_section(profile.as_deref())?,
+            "references": references,
         }))
     })
     .await
@@ -52,8 +70,17 @@ pub(crate) async fn admin_get_env(
     Ok(Json(reply))
 }
 
+/// The `PUT /admin/env` query: which env file's shadow the body targets.
+#[derive(serde::Deserialize)]
+pub(crate) struct EnvPutQuery {
+    /// `"profile"` (the default when absent) or `"boot"`.
+    scope: Option<String>,
+}
+
 /// The `PUT /admin/env` route: bearer-authed, writes the body's key-value
-/// pairs as the active profile's env shadow (`<profile>.env.next`).
+/// pairs as one env file's shadow - the active profile's
+/// (`<profile>.env.next`) by default, the boot config's
+/// (`gateway.env.next`) with `?scope=boot`.
 ///
 /// The body is a flat JSON object of variable names to values. Names must
 /// be `[A-Za-z_][A-Za-z0-9_]*`; values are rendered bare, single-quoted,
@@ -64,18 +91,34 @@ pub(crate) async fn admin_get_env(
 pub(crate) async fn admin_put_env(
     State(state): State<AppState>,
     headers: HeaderMap,
+    scope: Result<Query<EnvPutQuery>, QueryRejection>,
     vars: Result<Json<BTreeMap<String, String>>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
-    // Deferring the extractor keeps auth first and puts the rejection in
+    // Deferring the extractors keeps auth first and puts rejections in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
+    let Query(scope) =
+        scope.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let Json(vars) =
         vars.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     // Saves take the apply lock; see `admin_put_config` for the why.
     let _guard = state.apply.lock().await;
-    let env = profile_env_path(&state)
-        .await
-        .ok_or(GatewayError::ProfilesUnavailable)?;
+    let env = match scope.scope.as_deref() {
+        None | Some("profile") => profile_env_path(&state)
+            .await
+            .ok_or(GatewayError::ProfilesUnavailable)?,
+        Some("boot") => state
+            .boot
+            .config_path
+            .as_ref()
+            .map(|path| path.with_extension("env"))
+            .ok_or(GatewayError::BootConfigUnavailable)?,
+        Some(other) => {
+            return Err(GatewayError::ConfigWriteRejected(format!(
+                "unknown env scope {other:?}: use \"profile\" or \"boot\""
+            )));
+        }
+    };
     let contents = render_env(&vars)?;
     let shadow = tokio::task::spawn_blocking(move || write_shadow(&env, &contents))
         .await
@@ -224,6 +267,21 @@ api_key = "test-token"
     #[tokio::test]
     async fn get_env_returns_both_files_parsed_with_values() {
         let (_temp, config, paths) = fixture();
+        // A staged leaf shadow carries a raw `${VAR}` reference: the scan
+        // reads the pre-interpolation pending chain, the only place a
+        // reference survives (a loaded config interpolates it away).
+        promptforge_gateway_config::write_shadow(
+            &paths.profiles_dir.join("main.toml"),
+            concat!(
+                "include = [\"../gateway.toml\"]\n",
+                "[[endpoint]]\n",
+                "id = \"openai\"\n",
+                "protocol = \"openai\"\n",
+                "base_url = \"https://api.openai.example/v1\"\n",
+                "api_key = \"${OPENAI_API_KEY}\"\n",
+            ),
+        )
+        .expect("stage the leaf shadow");
         let addr = serve_with_paths(config, paths).await;
 
         let body: serde_json::Value = reqwest::Client::new()
@@ -255,6 +313,11 @@ api_key = "test-token"
                 .as_str()
                 .expect("a profile path")
                 .ends_with("main.env")
+        );
+        assert_eq!(
+            body["references"],
+            serde_json::json!({ "OPENAI_API_KEY": ["endpoint openai api_key"] }),
+            "the pending chain's ${{VAR}} references label their fields by entry identity"
         );
     }
 
@@ -332,6 +395,91 @@ api_key = "test-token"
                 !body.contains("INJECTED")
             },
             "a refused value never reaches the shadow"
+        );
+    }
+
+    #[tokio::test]
+    async fn put_env_with_boot_scope_writes_the_boot_env_shadow() {
+        let (temp, config, paths) = fixture();
+        let boot_env = temp.path().join("gateway.env");
+        let profile_env = paths.profiles_dir.join("main.env");
+        let addr = serve_with_paths(config, paths).await;
+
+        let mut sent = BTreeMap::new();
+        sent.insert("BOOT_ONLY".to_owned(), "staged".to_owned());
+        let response = reqwest::Client::new()
+            .put(format!("http://{addr}/admin/env?scope=boot"))
+            .bearer_auth("test-token")
+            .json(&sent)
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        let shadow = shadow_path(&boot_env);
+        assert!(
+            shadow.ends_with("gateway.env.next"),
+            "got: {}",
+            shadow.display()
+        );
+        let parsed: BTreeMap<String, String> = dotenvy::from_path_iter(&shadow)
+            .expect("the boot shadow parses as dotenv")
+            .collect::<Result<_, _>>()
+            .expect("every line parses");
+        assert_eq!(parsed, sent, "the boot shadow carries the staged variables");
+        assert_eq!(
+            std::fs::read_to_string(&boot_env).expect("re-read the real boot env"),
+            "BOOT_ONLY=from-boot\n",
+            "the real boot .env file is byte-identical after the PUT"
+        );
+        assert!(
+            !shadow_path(&profile_env).exists(),
+            "a boot-scoped PUT never touches the profile side"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_env_surfaces_an_unparsable_chain_file_instead_of_hiding_it() {
+        // `write_shadow` stages arbitrary bytes, so a tampered shadow is
+        // the one way an unparsable chain file can exist; the reference
+        // scan must surface it, never silently return no references.
+        let (_temp, config, paths) = fixture();
+        promptforge_gateway_config::write_shadow(
+            &paths.profiles_dir.join("main.toml"),
+            "not toml [[[",
+        )
+        .expect("stage a corrupt shadow");
+        let addr = serve_with_paths(config, paths).await;
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/admin/env"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "a corrupt chain file fails the read loudly"
+        );
+    }
+
+    #[tokio::test]
+    async fn put_env_refuses_an_unknown_scope() {
+        let (_temp, config, paths) = fixture();
+        let addr = serve_with_paths(config, paths).await;
+
+        let response = reqwest::Client::new()
+            .put(format!("http://{addr}/admin/env?scope=global"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "X": "y" }))
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            "an unknown scope is refused before any write"
         );
     }
 

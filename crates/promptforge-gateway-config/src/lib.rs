@@ -61,6 +61,7 @@ pub use crate::config::{
 };
 pub use crate::profile::{
     PendingReport, ProfileName, ProfileNameError, list_profiles, load_boot_sections,
-    load_pending_profile, load_server, load_workshop, pending_report, promote_shadow,
-    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
+    load_pending_profile, load_server, load_workshop, pending_report, pending_var_references,
+    promote_shadow, save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path,
+    write_shadow,
 };

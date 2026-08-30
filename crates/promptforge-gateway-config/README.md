@@ -51,11 +51,14 @@ What it provides:
   stages arbitrary sibling content such as `.env` files, and `shadow_path`
   names the shadow for any managed file. No save ever touches a real file.
   Reading the pending state back, `load_pending_profile` loads the chain
-  with shadows preferred (provenance names the `.next` files), and
+  with shadows preferred (provenance names the `.next` files),
   `pending_report` lists which real files carry shadows and which
   top-level sections differ between the real and pending views (an absent
   section equals a vacant one, so serialized empty defaults report no
-  phantom change). `promote_shadow` is the explicit apply step: one atomic
+  phantom change), and `pending_var_references` maps each `${VAR}` name
+  the pending chain references to labels of the referencing fields,
+  scanned before interpolation so references a loaded config consumes
+  stay visible. `promote_shadow` is the explicit apply step: one atomic
   rename makes the shadow the real file, so the shadow disappears and a
   reader observes either the old or the new content, never a mix.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;

@@ -28,6 +28,7 @@
 //! sever the chain by accident; only a candidate that spells out
 //! `include` (even an empty array) changes it.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -443,6 +444,135 @@ fn load_pending_profile_repr(leaf: &Path) -> Result<Config, Repr> {
     Ok(config)
 }
 
+/// The `${VAR}` references the pending config chain carries, mapped to
+/// space-joined labels of the referencing fields, keyed-array entries by
+/// identity (`endpoint openai api_key`, `local_model llama source`).
+///
+/// The chain resolves from `leaf` with shadows preferred - the same
+/// pending truth [`load_pending_profile`] renders - but the merged
+/// document is walked before interpolation and without secret redaction,
+/// because a loaded [`Config`] interpolates every `${VAR}` away and
+/// serializes secrets as `"***"`: the references are visible only here.
+/// Values never enter the result - only variable names and field labels -
+/// so the reply carries no credential material. A file the chain never
+/// reaches (a boot file no include names) contributes nothing.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) when a chain file or
+/// shadow cannot be read or parsed, or an include cycles or exceeds depth.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::pending_var_references;
+/// use std::path::Path;
+///
+/// let refs = pending_var_references(Path::new("profiles/default.toml"))?;
+/// if let Some(labels) = refs.get("OPENAI_API_KEY") {
+///     assert!(labels.iter().any(|label| label.ends_with("api_key")));
+/// }
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn pending_var_references(
+    leaf: &Path,
+) -> Result<BTreeMap<String, Vec<String>>, crate::ConfigError> {
+    let read = shadow_reader(None);
+    let merged = collect_config_chain_with(leaf, &read)
+        .map_err(crate::ConfigError::from)?
+        .value;
+    let mut refs = BTreeMap::new();
+    collect_var_references(&merged, &mut Vec::new(), &mut refs);
+    Ok(refs)
+}
+
+/// The identity key of one keyed config array, when `array` names one.
+fn keyed_entry_key(array: &str) -> Option<&'static str> {
+    match array {
+        "model" | "local_model" => Some("name"),
+        "endpoint" | "dominion" => Some("id"),
+        _ => None,
+    }
+}
+
+/// Walks one TOML value recording `${VAR}` hits in its string leaves,
+/// labeling each hit with the space-joined key path (keyed-array entries
+/// by their identity value).
+fn collect_var_references(
+    value: &Value,
+    label: &mut Vec<String>,
+    refs: &mut BTreeMap<String, Vec<String>>,
+) {
+    match value {
+        Value::String(text) => {
+            for name in referenced_var_names(text) {
+                let labels = refs.entry(name).or_default();
+                let joined = label.join(" ");
+                if !labels.contains(&joined) {
+                    labels.push(joined);
+                }
+            }
+        }
+        Value::Array(items) => {
+            let id_key = label.last().and_then(|array| keyed_entry_key(array));
+            for item in items {
+                if let (Some(id_key), Value::Table(table)) = (id_key, item) {
+                    let id = table
+                        .get(id_key)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    label.push(id.to_owned());
+                    collect_var_references(item, label, refs);
+                    label.pop();
+                } else {
+                    collect_var_references(item, label, refs);
+                }
+            }
+        }
+        Value::Table(table) => {
+            for (key, child) in table {
+                label.push(key.clone());
+                collect_var_references(child, label, refs);
+                label.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The `${VAR}` names one string references, mirroring the interpolation
+/// grammar: `$$` is a literal dollar and an unclosed `${...}` references
+/// nothing.
+fn referenced_var_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            continue;
+        }
+        match chars.peek() {
+            Some('$') => {
+                chars.next();
+            }
+            Some('{') => {
+                chars.next();
+                let mut name = String::new();
+                let mut closed = false;
+                for nc in chars.by_ref() {
+                    if nc == '}' {
+                        closed = true;
+                        break;
+                    }
+                    name.push(nc);
+                }
+                if closed && !name.is_empty() {
+                    names.push(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
 /// The pending state of the include chain rooted at one file: which real
 /// files carry shadows and which top-level sections the shadows change.
 ///
@@ -777,6 +907,49 @@ endpoints = ["e"]
         write_shadow(&leaf, LEAF).unwrap();
         let names = crate::profile::list_profiles(temp.path()).unwrap();
         assert_eq!(names, ["default"]);
+    }
+
+    #[test]
+    fn pending_var_references_labels_reference_sites_by_entry_identity() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let leaf = write(
+            temp.path(),
+            "default.toml",
+            &LEAF.replace(
+                "api_key = \"disk-secret\"",
+                "api_key = \"${PFG_REFS_ENDPOINT_KEY}\"",
+            ),
+        );
+
+        let refs = pending_var_references(&leaf).unwrap();
+        assert_eq!(
+            refs.get("PFG_REFS_ENDPOINT_KEY").map(Vec::as_slice),
+            Some(&["endpoint e api_key".to_owned()][..]),
+            "a secret's raw ${{VAR}} reference is visible pre-interpolation"
+        );
+
+        // A staged shadow replaces the real file in the scanned chain.
+        let shadowed = LEAF
+            .replace(
+                "api_key = \"boot-key\"",
+                "api_key = \"${PFG_REFS_SERVER_KEY}\"",
+            )
+            .replace("api_key = \"disk-secret\"", "api_key = \"$${NOT_A_REF}\"");
+        write_shadow(&leaf, &shadowed).unwrap();
+        let refs = pending_var_references(&leaf).unwrap();
+        assert_eq!(
+            refs.get("PFG_REFS_SERVER_KEY").map(Vec::as_slice),
+            Some(&["server api_key".to_owned()][..]),
+            "the shadow-preferred chain feeds the scan"
+        );
+        assert!(
+            !refs.contains_key("PFG_REFS_ENDPOINT_KEY"),
+            "the replaced real-file reference is gone"
+        );
+        assert!(
+            !refs.contains_key("NOT_A_REF"),
+            "a $$-escaped dollar references nothing"
+        );
     }
 
     #[test]

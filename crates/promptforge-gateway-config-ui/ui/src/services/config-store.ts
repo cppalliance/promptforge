@@ -94,6 +94,16 @@ function baseName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** One changed path in the pending-vs-running Review diff. */
+export interface DiffRow {
+  /** The dotted path, keyed-array entries by identity (`endpoint[openai].base_url`). */
+  path: string;
+  /** The running (applied) value; undefined when the path is new. */
+  running: unknown;
+  /** The pending (shadow) value; undefined when the path was removed. */
+  pending: unknown;
+}
+
 /** One include-chain file from the pending view's `include` array. */
 export interface ChainFile {
   /** The include entry verbatim as written in the leaf file (`common.toml`, `../gateway.toml`). */
@@ -629,6 +639,66 @@ export class ConfigStore {
     await this.api.revertConfig();
     await this.refreshAll();
     this.notify();
+  }
+
+  /**
+   * The pending-vs-running diff [INVENTED] behind the banner's Review
+   * action: every path whose pending value differs from the running one,
+   * as rows of `path | running | pending`. Keyed-array entries match by
+   * identity (`endpoint[openai].base_url`); other arrays diff wholesale
+   * as one row. Both views arrive with secrets redacted to `"***"`, so
+   * no row ever carries credential material.
+   */
+  pendingDiff(): DiffRow[] {
+    const keyed = new Map<string, string>(KEYED_ARRAYS);
+    const rows: DiffRow[] = [];
+    const isRecord = (value: unknown): value is EntryData =>
+      value !== null && typeof value === "object" && !Array.isArray(value);
+    const compare = (running: unknown, pending: unknown, path: string[]): void => {
+      if (sameValue(running, pending)) {
+        return;
+      }
+      const runningSide = isRecord(running) ? running : undefined;
+      const pendingSide = isRecord(pending) ? pending : undefined;
+      if (
+        (runningSide || pendingSide) &&
+        (running === undefined || runningSide) &&
+        (pending === undefined || pendingSide)
+      ) {
+        const keys = new Set([
+          ...Object.keys(runningSide ?? {}),
+          ...Object.keys(pendingSide ?? {}),
+        ]);
+        keys.delete("source_file");
+        keys.delete("source_files");
+        for (const key of keys) {
+          compare(runningSide?.[key], pendingSide?.[key], [...path, key]);
+        }
+        return;
+      }
+      const array = path[path.length - 1] ?? "";
+      const idKey = keyed.get(array);
+      if (idKey && Array.isArray(running ?? []) && Array.isArray(pending ?? [])) {
+        const byId = (side: unknown): Map<string, EntryData> =>
+          new Map(
+            (Array.isArray(side) ? side : [])
+              .filter(isRecord)
+              .map((item) => [String(item[idKey] ?? ""), item]),
+          );
+        const runningById = byId(running);
+        const pendingById = byId(pending);
+        for (const id of new Set([...runningById.keys(), ...pendingById.keys()])) {
+          compare(runningById.get(id), pendingById.get(id), [
+            ...path.slice(0, -1),
+            `${array}[${id}]`,
+          ]);
+        }
+        return;
+      }
+      rows.push({ path: path.join("."), running, pending });
+    };
+    compare(this.running, this.pending, []);
+    return rows;
   }
 
   /** One keyed array of a config JSON, as mutable objects. */

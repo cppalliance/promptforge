@@ -192,6 +192,27 @@ export function modelsFixture() {
   };
 }
 
+/**
+ * A `GET /admin/env` reply: both env files parsed, values included, plus
+ * the server-computed `${VAR}` references (the gateway scans the raw
+ * pre-interpolation chain; the client never sees references). The profile
+ * side carries an HF token and the referenced `OPENAI_KEY`; the boot side
+ * holds one unreferenced variable.
+ */
+export function envFixture() {
+  return {
+    boot: {
+      path: "C:/pf/gateway.env",
+      vars: { GATEWAY_KEY: "boot-master-key" },
+    },
+    profile: {
+      path: "C:/pf/profiles/default.env",
+      vars: { HF_TOKEN: "hf-fixture-token", OPENAI_KEY: "sk-fixture" },
+    },
+    references: { OPENAI_KEY: ["endpoint openai api_key"] },
+  };
+}
+
 /** A GiB, for HF fixture sizes. */
 export const GIB = 1024 ** 3;
 
@@ -330,7 +351,10 @@ function redactSecrets(view) {
  * /v1/cache` (an immediately-completing SSE unless `onCache` supplies
  * the response), and the `GET /v1/cache` listing (`cache`; a DELETE
  * removes the matching entry; `onCacheList` overrides the listing
- * response, for failure staging). When `key` is set, gateway requests without that
+ * response, for failure staging). The env surface: `GET /admin/env`
+ * returns `env` (both sides null when unstubbed) and `PUT /admin/env`
+ * records `{ scope, vars }` in `state.envPuts` and marks the dirty
+ * report. When `key` is set, gateway requests without that
  * bearer answer 401; absolute (hub) URLs are exempt. Every call is
  * recorded in `calls`; the mutable config state is exposed as `state`.
  */
@@ -357,6 +381,7 @@ export function gatewayStub({
   applyOutcome,
   onPutConfig,
   onPutInclude,
+  env,
 } = {}) {
   const calls = [];
   const state = {
@@ -368,6 +393,10 @@ export function gatewayStub({
     cache: cache ?? [],
     /** The last PUT /admin/boot-config body, null until one arrives. */
     boot: null,
+    /** The GET /admin/env reply (both sides null when unstubbed). */
+    env: env ?? { boot: null, profile: null, references: {} },
+    /** Every PUT /admin/env, as `{ scope, vars }` in arrival order. */
+    envPuts: [],
     /** The profile listing; creates append, deletes remove. */
     profiles: [...profiles],
     /** Include shadows by decoded path: the last PUT /admin/include body. */
@@ -497,6 +526,23 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/progress")) {
       return sseChannel().response;
+    }
+    // The env surface: GET returns the real files; PUT stages a shadow
+    // (recorded, never merged back - the real file is untouched) and
+    // flips the dirty report the way a staged env shadow does.
+    if (url.includes("/admin/env")) {
+      if (init.method === "PUT") {
+        const scope = url.includes("scope=boot") ? "boot" : "profile";
+        state.envPuts.push({ scope, vars: JSON.parse(init.body) });
+        const file = scope === "boot" ? "gateway.env" : "profiles/default.env";
+        state.dirty = {
+          dirty: true,
+          pending_files: [...new Set([...state.dirty.pending_files, file])],
+          changed_sections: state.dirty.changed_sections,
+        };
+        return jsonResponse({ shadow: `${file}.next` });
+      }
+      return jsonResponse(state.env);
     }
     if (url.endsWith("/admin/config-pending")) {
       return jsonResponse({
