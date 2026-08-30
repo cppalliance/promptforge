@@ -50,6 +50,17 @@ async fn serve_with(
     hf: Option<crate::hf::HfProxy>,
     paths: Option<AdminPaths>,
 ) -> SocketAddr {
+    let mut state = app_state(config, paths);
+    if let Some(hf) = hf {
+        state.hf = Arc::new(hf);
+    }
+    serve_state(state).await
+}
+
+/// Builds the state the harness serves, so a test can override an
+/// injected collaborator (the HF proxy, the reveal launcher) or drive a
+/// handler directly.
+pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
     let key = config.server_key();
     let server = config.server().clone();
     let routing = Routing::from_config(&config).expect("routing builds");
@@ -65,7 +76,7 @@ async fn serve_with(
         ),
         None => (None, ProfileSelection::default(), None),
     };
-    let mut state = AppState::from_parts(
+    AppState::from_parts(
         Arc::new(routing),
         key,
         Arc::clone(&config),
@@ -81,16 +92,23 @@ async fn serve_with(
             config_path: boot_path,
         },
         Arc::new(ProgressHub::new()),
-    );
-    if let Some(hf) = hf {
-        state.hf = Arc::new(hf);
-    }
+    )
+}
+
+/// Binds an ephemeral loopback listener and serves `state` on it,
+/// returning the bound address. Connect info is wired exactly as in the
+/// production serve path, so loopback-only routes see a peer address.
+pub(crate) async fn serve_state(state: AppState) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("the test listener binds");
     let addr = listener.local_addr().expect("the bound address");
     tokio::spawn(async move {
-        let _ignored = axum::serve(listener, build_router(state)).await;
+        let _ignored = axum::serve(
+            listener,
+            build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     addr
 }

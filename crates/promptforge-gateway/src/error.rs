@@ -153,6 +153,23 @@ pub(crate) enum GatewayError {
     #[error("system metrics sampling failed")]
     SystemMetrics(#[source] Box<dyn std::error::Error + Send + Sync>),
 
+    /// `POST /admin/reveal` was reached from a non-loopback address (or
+    /// the peer address was unknown). The endpoint launches a process, so
+    /// it is loopback-only even with a valid bearer key.
+    #[error("reveal is loopback-only")]
+    RevealNotLoopback,
+
+    /// `POST /admin/reveal` named a path that does not exist.
+    #[non_exhaustive]
+    #[error("reveal path not found: {0}")]
+    RevealPathNotFound(String),
+
+    /// The reveal's file manager could not be resolved or spawned after
+    /// every refusal check passed.
+    #[non_exhaustive]
+    #[error("reveal failed")]
+    RevealFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// A `/v1/cache` route failed at the storage or transport layer before its
     /// response was committed (mid-stream failures are SSE error events, not
     /// this variant).
@@ -368,6 +385,21 @@ impl GatewayError {
                 "server_error",
                 "system_metrics_error",
             ),
+            GatewayError::RevealNotLoopback => (
+                StatusCode::FORBIDDEN,
+                "invalid_request_error",
+                "loopback_only",
+            ),
+            GatewayError::RevealPathNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+                "reveal_path_not_found",
+            ),
+            GatewayError::RevealFailed(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "reveal_error",
+            ),
             #[cfg(feature = "local")]
             GatewayError::Cache(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -572,6 +604,39 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "profile_file_error",
+                ),
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.classify(), expected);
+        }
+    }
+
+    #[test]
+    fn reveal_errors_classify_is_table_driven() {
+        let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
+            (
+                GatewayError::RevealNotLoopback,
+                (
+                    StatusCode::FORBIDDEN,
+                    "invalid_request_error",
+                    "loopback_only",
+                ),
+            ),
+            (
+                GatewayError::RevealPathNotFound("C:/ghost.gguf".to_owned()),
+                (
+                    StatusCode::NOT_FOUND,
+                    "invalid_request_error",
+                    "reveal_path_not_found",
+                ),
+            ),
+            (
+                GatewayError::RevealFailed(Box::new(std::io::Error::other("spawn"))),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "reveal_error",
                 ),
             ),
         ];

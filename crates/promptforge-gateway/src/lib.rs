@@ -47,7 +47,9 @@
 //! `POST /admin/profiles/{name}` creating a real profile file (empty, a
 //! verbatim copy of another profile, or an include leaf) and
 //! `DELETE /admin/profiles/{name}` deleting one (refusing the active
-//! profile, removing any shadow alongside) - and
+//! profile, removing any shadow alongside) - a loopback-only,
+//! bearer-authed `POST /admin/reveal` opening the host OS file manager at
+//! a path confined to the artifact cache or the profiles directory - and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
@@ -67,6 +69,7 @@ mod model_info;
 mod orphans;
 mod profile_files;
 mod render;
+mod reveal;
 mod routing;
 mod runner;
 mod system;
@@ -200,6 +203,9 @@ pub(crate) struct AppState {
     /// Shared Hugging Face hub client for the `GET /admin/hf/*` proxy
     /// routes: one reqwest client plus the boot-time `HF_TOKEN`.
     hf: Arc<hf::HfProxy>,
+    /// Launches the OS file manager for `POST /admin/reveal`; injectable
+    /// so tests assert the constructed command without spawning anything.
+    reveal: Arc<dyn reveal::RevealLauncher>,
 }
 
 impl AppState {
@@ -239,6 +245,7 @@ impl AppState {
             hub,
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
+            reveal: Arc::new(reveal::SpawnLauncher),
         }
     }
 
@@ -303,6 +310,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(env_file::admin_get_env).put(env_file::admin_put_env),
         )
         .route("/admin/progress", get(admin_progress))
+        .route("/admin/reveal", post(reveal::admin_reveal))
         .route("/admin/switch-profile", post(admin_switch_profile))
         .route("/admin/hf/search", get(hf::admin_hf_search))
         .route("/admin/hf/model/{*repo}", get(hf::admin_hf_model));
