@@ -43,7 +43,11 @@
 //! shadow to its real file, then reload the active profile, or report
 //! restart-required for a promoted boot shadow) and
 //! `POST /admin/config-revert` (delete every shadow, touching nothing
-//! else), and
+//! else), bearer-authed profile file management -
+//! `POST /admin/profiles/{name}` creating a real profile file (empty, a
+//! verbatim copy of another profile, or an include leaf) and
+//! `DELETE /admin/profiles/{name}` deleting one (refusing the active
+//! profile, removing any shadow alongside) - and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
@@ -61,6 +65,7 @@ mod hf;
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
+mod profile_files;
 mod render;
 mod routing;
 mod runner;
@@ -259,6 +264,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/models", get(list_models))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
+        .route(
+            "/admin/profiles/{name}",
+            post(profile_files::admin_create_profile).delete(profile_files::admin_delete_profile),
+        )
         .route("/admin/status", get(admin_status))
         .route("/admin/system", get(system::admin_system))
         .route(

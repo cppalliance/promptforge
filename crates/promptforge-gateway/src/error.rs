@@ -131,6 +131,23 @@ pub(crate) enum GatewayError {
     #[error("env file unreadable")]
     EnvFile(#[source] Box<dyn std::error::Error + Send + Sync>),
 
+    /// `POST /admin/profiles/{name}` named a profile that already exists.
+    #[non_exhaustive]
+    #[error("profile already exists: {0}")]
+    ProfileExists(String),
+
+    /// `DELETE /admin/profiles/{name}` named the active profile, which
+    /// cannot be deleted while the gateway is running it.
+    #[non_exhaustive]
+    #[error("profile is active: {0}")]
+    ProfileActive(String),
+
+    /// A profile file could not be created or deleted on disk after every
+    /// refusal check passed.
+    #[non_exhaustive]
+    #[error("profile file operation failed")]
+    ProfileFileIo(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// The `GET /admin/system` sampling task did not run to completion.
     #[non_exhaustive]
     #[error("system metrics sampling failed")]
@@ -331,6 +348,21 @@ impl GatewayError {
                 "server_error",
                 "env_file_error",
             ),
+            GatewayError::ProfileExists(_) => (
+                StatusCode::CONFLICT,
+                "invalid_request_error",
+                "profile_exists",
+            ),
+            GatewayError::ProfileActive(_) => (
+                StatusCode::CONFLICT,
+                "invalid_request_error",
+                "profile_active",
+            ),
+            GatewayError::ProfileFileIo(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "profile_file_error",
+            ),
             GatewayError::SystemMetrics(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
@@ -507,6 +539,39 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "apply_reload_failed",
+                ),
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.classify(), expected);
+        }
+    }
+
+    #[test]
+    fn profile_file_errors_classify_is_table_driven() {
+        let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
+            (
+                GatewayError::ProfileExists("main".to_owned()),
+                (
+                    StatusCode::CONFLICT,
+                    "invalid_request_error",
+                    "profile_exists",
+                ),
+            ),
+            (
+                GatewayError::ProfileActive("main".to_owned()),
+                (
+                    StatusCode::CONFLICT,
+                    "invalid_request_error",
+                    "profile_active",
+                ),
+            ),
+            (
+                GatewayError::ProfileFileIo(Box::new(std::io::Error::other("disk"))),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "profile_file_error",
                 ),
             ),
         ];
