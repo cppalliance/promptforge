@@ -166,6 +166,11 @@ pub struct Config {
     /// resolution. Empty when the config was built without it (for example
     /// [`Config::from_toml_str`]).
     provenance: crate::profile::Provenance,
+    /// The loaded root file's own `include` array, verbatim and ordered as
+    /// written (the shadow's when a pending load preferred one). Empty when
+    /// the root declares no includes or the config was built without include
+    /// resolution (for example [`Config::from_toml_str`]).
+    include: Vec<String>,
 }
 
 /// Private DTO for [`Config`]. Holds the raw TOML shape before validation and
@@ -209,6 +214,7 @@ impl From<RawConfig> for Config {
             tools: raw.tools,
             workshop: raw.workshop,
             provenance: crate::profile::Provenance::default(),
+            include: Vec::new(),
         }
     }
 }

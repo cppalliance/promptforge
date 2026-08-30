@@ -88,12 +88,14 @@ function cleanDirty() {
  * `common.toml`, so provenance and inheritance render. One remote model
  * and one endpoint live in the leaf; one local model and the dominion
  * are inherited from the common file; a second local model lives in the
- * leaf with flash attention off.
+ * leaf with flash attention off. The top-level `include` array is the
+ * leaf's own line, verbatim, as the gateway emits it.
  */
 export function modelsFixture() {
   const common = "C:/pf/profiles/common.toml";
   const leaf = "C:/pf/profiles/default.toml";
   return {
+    include: ["common.toml"],
     server: { bind: "127.0.0.1:8081", api_key: "***" },
     local: { cache_dir: "~/.promptforge" },
     dominion: [

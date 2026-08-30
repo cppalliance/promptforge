@@ -655,8 +655,10 @@ async fn admin_status(
 }
 
 /// The `GET /admin/config` route: bearer-authed, renders the running
-/// configuration as JSON in the TOML shape, with secrets redacted and each
-/// keyed-array entry annotated with the file its definition came from.
+/// configuration as JSON in the TOML shape, with secrets redacted, each
+/// keyed-array entry annotated with the file its definition came from, and
+/// the active profile leaf's own `include` array carried verbatim (see
+/// [`promptforge_gateway_config::Config::to_json`]).
 async fn admin_config(
     State(state): State<AppState>,
     headers: HeaderMap,

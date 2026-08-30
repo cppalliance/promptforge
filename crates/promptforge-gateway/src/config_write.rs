@@ -407,6 +407,48 @@ api_key = "common-endpoint-secret"
     }
 
     #[tokio::test]
+    async fn a_get_put_round_trip_keeps_the_include_line() {
+        // The end-to-end contract behind the UI's chain editor: the GET
+        // payload spells out the leaf's include array, an unedited PUT of
+        // that payload hands it back explicitly, and the written shadow
+        // keeps the line - order intact, no member dropped.
+        let (_temp, config, paths) = fixture();
+        let leaf = paths.profiles_dir.join("main.toml");
+        let addr = serve_with_paths(config, paths).await;
+
+        let body = get_config(addr).await;
+        assert_eq!(
+            body["include"],
+            serde_json::json!(["../gateway.toml", "common.toml"]),
+            "GET /admin/config carries the leaf's include array verbatim and ordered"
+        );
+
+        let response = reqwest::Client::new()
+            .put(format!("http://{addr}/admin/config"))
+            .bearer_auth("test-token")
+            .json(&body)
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+        let written: toml::Value =
+            toml::from_str(&std::fs::read_to_string(shadow_path(&leaf)).expect("read shadow"))
+                .expect("the shadow parses as TOML");
+        let include: Vec<&str> = written["include"]
+            .as_array()
+            .expect("an include array in the shadow")
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .collect();
+        assert_eq!(
+            include,
+            ["../gateway.toml", "common.toml"],
+            "the round-tripped shadow keeps the include line verbatim"
+        );
+    }
+
+    #[tokio::test]
     async fn put_config_rejects_an_invalid_merge_and_leaves_no_shadow() {
         let (_temp, config, paths) = fixture();
         let leaf = paths.profiles_dir.join("main.toml");

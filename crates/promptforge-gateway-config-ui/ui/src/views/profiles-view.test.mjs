@@ -2,13 +2,14 @@
 // Active runs the switch flow through the stage overlay, delete
 // confirms and the active profile's 409 surfaces, the New Profile
 // dialog posts each mode's body and blocks bad names client-side, the
-// include chain editor derives its rows from provenance, flags a
+// include chain editor reads its rows from the payload's `include`
+// array (payload order, a fully-overridden parent included), flags a
 // missing file, and saves an explicit include array, the drill-in
 // edits one include file's provenance-derived content through
-// PUT /admin/include/{path}, and the drill-in route parses. A
-// boot-file source renders as an outside ../ row (first, no Edit, no
-// remove), the kebab menu honors the role="menu" keyboard contract,
-// and the New Profile dialog traps Tab and restores focus on Escape.
+// PUT /admin/include/{path}, and the drill-in route parses. An
+// outside ../ include renders with no Edit and no remove, the kebab
+// menu honors the role="menu" keyboard contract, and the New Profile
+// dialog traps Tab and restores focus on Escape.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -33,10 +34,10 @@ function fixtureStub(extra = {}) {
   });
 }
 
-/** The fixture plus provenance naming a file that is not on disk. */
+/** The fixture with an include entry naming a file that is not on disk. */
 function ghostFixture() {
   const config = modelsFixture();
-  config.source_files["local.cache_dir"] = "C:/pf/profiles/ghost.toml";
+  config.include = ["common.toml", "ghost.toml"];
   return config;
 }
 
@@ -257,7 +258,7 @@ test("the dialog blocks an invalid name client-side and surfaces a server 409", 
   assert.ok(doc.querySelector(".new-profile-dialog"), "the dialog survives the refusal");
 });
 
-test("the chain editor derives rows from provenance and flags a missing file", async () => {
+test("the chain editor lists the payload's include array and flags a missing file", async () => {
   const stub = gatewayStub({
     profile: "default",
     profiles: ["default", "common"],
@@ -271,7 +272,7 @@ test("the chain editor derives rows from provenance and flags a missing file", a
   assert.deepEqual(
     rows.map((row) => row.querySelector(".chain-path").textContent),
     ["common.toml", "ghost.toml"],
-    "the chain lists the visited parents, leaf excluded",
+    "the chain lists the payload's include entries verbatim",
   );
   const ghost = rows[1];
   assert.ok(ghost.classList.contains("is-missing"), "the unlisted file is flagged");
@@ -282,16 +283,84 @@ test("the chain editor derives rows from provenance and flags a missing file", a
     "#/profiles/include/common.toml",
     "an existing file's Edit links to the drill-in route",
   );
-  assert.match(
-    root.querySelector(".chain-derived-note").textContent,
-    /derived/,
-    "the derived-order limitation is stated",
+});
+
+test("chain rows follow the payload's include order, not alphabetical", async () => {
+  // The gateway serves the leaf's include line verbatim; re-sorting the
+  // rows (the old provenance approximation) would flip zeta/alpha here
+  // and mislead the operator about override precedence.
+  const config = modelsFixture();
+  config.include = ["zeta.toml", "alpha.toml"];
+  const stub = gatewayStub({
+    profile: "default",
+    profiles: ["alpha", "default", "zeta"],
+    config,
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/profiles");
+  await settle();
+
+  const rows = [...root.querySelectorAll(".chain-row")];
+  assert.deepEqual(
+    rows.map((row) => row.querySelector(".chain-path").textContent),
+    ["zeta.toml", "alpha.toml"],
+    "rows keep the on-disk include order",
+  );
+  assert.equal(
+    root.querySelector(".chain-derived-note"),
+    null,
+    "the order is authoritative, so no approximation note renders",
   );
 });
 
-test("a boot-file source renders as an outside ../ row: sorted first, no Edit, no remove", async () => {
+test("a fully-overridden parent appears in the chain and survives a save", async () => {
+  // `overridden.toml` supplies no winning value, so it has no provenance
+  // anywhere in the fixture; membership must come from the include array
+  // or the file would be invisible and silently dropped on a chain save.
   const config = modelsFixture();
-  config.source_files["server.bind"] = "C:/pf/gateway.toml";
+  config.include = ["overridden.toml", "common.toml"];
+  const stub = gatewayStub({
+    profile: "default",
+    profiles: ["common", "default", "overridden"],
+    config,
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/profiles");
+  await settle();
+
+  const rows = [...root.querySelectorAll(".chain-row")];
+  assert.deepEqual(
+    rows.map((row) => row.querySelector(".chain-path").textContent),
+    ["overridden.toml", "common.toml"],
+    "the provenance-free parent renders as a chain row",
+  );
+  const overridden = rows[0];
+  assert.equal(overridden.classList.contains("is-missing"), false, "it exists on disk");
+  assert.equal(
+    overridden.querySelector(".chain-edit").getAttribute("href"),
+    "#/profiles/include/overridden.toml",
+    "the row still offers the drill-in link",
+  );
+
+  // Reorder and save: the invisible-parent bug dropped such a file from
+  // the explicit array the editor writes.
+  overridden.querySelector(".chain-down").click();
+  await settle();
+  root.querySelector(".chain-save").click();
+  await settle();
+  const save = stub.calls.find(
+    (call) => call.init.method === "PUT" && call.url.endsWith("/admin/config"),
+  );
+  assert.deepEqual(
+    JSON.parse(save.init.body).include,
+    ["common.toml", "overridden.toml"],
+    "the saved array keeps the provenance-free parent",
+  );
+});
+
+test("a boot-file include renders as an outside ../ row: no Edit, no remove", async () => {
+  const config = modelsFixture();
+  config.include = ["../gateway.toml", "common.toml"];
   const stub = gatewayStub({
     profile: "default",
     profiles: ["default", "common"],
@@ -305,7 +374,7 @@ test("a boot-file source renders as an outside ../ row: sorted first, no Edit, n
   assert.deepEqual(
     rows.map((row) => row.querySelector(".chain-path").textContent),
     ["../gateway.toml", "common.toml"],
-    "the boot file renders as its ../-relative path and sorts first",
+    "the boot file renders by its verbatim ../ include entry, in payload order",
   );
   const boot = rows[0];
   assert.equal(boot.classList.contains("is-missing"), false, "an outside file is never Missing");
