@@ -239,8 +239,14 @@ impl ToolPicker {
     }
 
     /// Whether this picker shares its model allocation with `other`.
-    #[cfg(test)]
-    pub(crate) fn shares_model(&self, other: &ToolPicker) -> bool {
+    ///
+    /// A test seam, public only under the `test-fixtures` feature so a
+    /// consumer's test binary can assert that building over a shared model
+    /// did not reload it.
+    #[cfg(feature = "test-fixtures")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn shares_model(&self, other: &ToolPicker) -> bool {
         self.model.shares_encoder(&other.model)
     }
 

@@ -8,6 +8,7 @@
 //! actually ships.
 
 mod catalog_refusal;
+mod fixture;
 mod progress;
 mod shipped;
 mod stdio;

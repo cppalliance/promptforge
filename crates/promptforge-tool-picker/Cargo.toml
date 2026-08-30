@@ -35,6 +35,15 @@ default = ["serde"]
 # JSON Schema value type in a descriptor is core input data and is present with
 # or without this feature; only the serde trait implementations are gated.
 serde = ["dep:serde"]
+# Compiles the crate-internal test seams (the shared-encoder assertions) as
+# public re-exports for consumers' test binaries; enabled for every test build
+# by the self dev-dependency below, never by production consumers.
+test-fixtures = []
+
+[dev-dependencies]
+# The crate dev-depends on itself so every test target builds the library
+# with test-fixtures enabled, without gate commands needing a --features flag.
+promptforge-tool-picker = { path = ".", features = ["test-fixtures"] }
 
 [package.metadata.docs.rs]
 all-features = true

@@ -79,8 +79,14 @@ impl Model {
     }
 
     /// Whether two handles share the same loaded encoder allocation.
-    #[cfg(test)]
-    pub(crate) fn shares_encoder(&self, other: &Model) -> bool {
+    ///
+    /// A test seam, public only under the `test-fixtures` feature so a
+    /// consumer's test binary can assert that a shared model was not
+    /// reloaded.
+    #[cfg(feature = "test-fixtures")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn shares_encoder(&self, other: &Model) -> bool {
         Arc::ptr_eq(&self.encoder, &other.encoder)
     }
 }

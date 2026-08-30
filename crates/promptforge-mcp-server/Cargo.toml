@@ -58,6 +58,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# The same dependency with its test-fixtures feature, so this crate's test
+# builds can reach the shared-encoder assertion seam; production builds are
+# unaffected because features from dev-dependencies never leak into them.
+promptforge-tool-picker = { workspace = true, features = ["test-fixtures"] }
 # The client half of `rmcp`, so the progress tests drive the handler over a
 # real session and assert the notifications a client actually receives.
 rmcp = { workspace = true, features = ["client"] }

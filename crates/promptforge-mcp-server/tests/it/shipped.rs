@@ -108,7 +108,7 @@ async fn shipped_client() -> RunningService<RoleClient, ()> {
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::new(catalog));
     let tools = Arc::new(
-        PreparedTools::load(&config)
+        PreparedTools::load(&config, crate::fixture::model())
             .await
             .expect("prepare the shipped live tools"),
     );

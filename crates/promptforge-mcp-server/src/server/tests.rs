@@ -47,8 +47,13 @@ fn fixture_model_catalog() -> ModelCatalog {
 fn prepared(config: &Config) -> Arc<PreparedTools> {
     static SEED: OnceLock<PreparedTools> = OnceLock::new();
     let seed = SEED.get_or_init(|| {
-        PreparedTools::new(&config.gateway, &config.tools, fixture_model_catalog())
-            .expect("prepare fixture tool model")
+        PreparedTools::new(
+            &config.gateway,
+            &config.tools,
+            fixture_model_catalog(),
+            crate::fixture::model(),
+        )
+        .expect("prepare fixture tool model")
     });
     Arc::new(
         seed.rebuild(&config.gateway, &config.tools)

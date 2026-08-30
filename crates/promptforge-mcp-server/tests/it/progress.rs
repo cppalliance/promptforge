@@ -80,7 +80,7 @@ async fn trio_server() -> (TempDir, PromptForgeServer) {
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(
-        PreparedTools::load(&config)
+        PreparedTools::load(&config, crate::fixture::model())
             .await
             .expect("prepare fixture live tools"),
     );

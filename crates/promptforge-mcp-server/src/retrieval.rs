@@ -27,12 +27,13 @@
 //!
 //! Retrieval is optional twice over, and neither absence stops the server. The
 //! `picker` feature compiles the ranking engine and its embedded weights in, and
-//! a build without it publishes no `need_prompt` at all. With the feature, the
-//! model is loaded once at boot; a load that fails is logged and the process
-//! serves on, because every prompt is still callable and refusing to start over
-//! a tool that only shortens a search would be the worse trade. `need_prompt`
-//! then answers that retrieval is unavailable, which is information the calling
-//! model can act on.
+//! a build without it publishes no `need_prompt` at all. With the feature, boot
+//! loads the embedding model once and shares it with the execution picker, so a
+//! model that will not load refuses the boot; an index that will not build over
+//! the resolved catalog is logged and the process serves on, because every
+//! prompt is still callable and refusing to start over a tool that only
+//! shortens a search would be the worse trade. `need_prompt` then answers that
+//! retrieval is unavailable, which is information the calling model can act on.
 
 // Two `cfg` attributes rather than one `all(..)`, because the lint policy reads
 // a bare `cfg(test)` to know that a fixture may `expect` on its own setup.
@@ -135,18 +136,18 @@ impl Retrieval {
         }
     }
 
-    /// Builds the index over `catalog`, loading the embedding model once.
+    /// Builds the index over `catalog` with the embedding model boot loaded.
     ///
-    /// This is the slow call in the server's boot: it parses tens of megabytes
-    /// of compiled-in weights and embeds every runnable prompt. It cannot fail.
-    /// A model that will not load is reported at error level and the result is
-    /// an idle index, because the rest of the server - every
+    /// This is the slow call in the server's boot: it embeds every runnable
+    /// prompt with the shared model. It cannot fail the boot. An index that
+    /// will not build is reported at error level and the result is an idle
+    /// index, because the rest of the server - every
     /// prompt, both listing tools, the runner - is unaffected, and a harness
     /// that cannot start its MCP server is worse off than one whose retrieval
     /// tool says it is unavailable.
     #[must_use]
-    pub(crate) fn start(catalog: &Catalog) -> Retrieval {
-        Retrieval::built(catalog)
+    pub(crate) fn start(model: &promptforge_tool_picker::Model, catalog: &Catalog) -> Retrieval {
+        Retrieval::built(model, catalog)
     }
 
     /// The prompts closest to `capability`, best first.
@@ -212,8 +213,8 @@ impl Retrieval {
 
     /// Builds the index over `catalog`, or reports why it could not.
     #[cfg(feature = "picker")]
-    fn built(catalog: &Catalog) -> Retrieval {
-        match index::Index::build(catalog) {
+    fn built(model: &promptforge_tool_picker::Model, catalog: &Catalog) -> Retrieval {
+        match index::Index::build_with(model, catalog) {
             Some(index) => {
                 tracing::info!("need_prompt ranks {} prompt(s)", index.len());
                 Retrieval {
@@ -226,7 +227,7 @@ impl Retrieval {
 
     /// Without the ranking engine there is nothing to build.
     #[cfg(not(feature = "picker"))]
-    fn built(_catalog: &Catalog) -> Retrieval {
+    fn built(_model: &promptforge_tool_picker::Model, _catalog: &Catalog) -> Retrieval {
         tracing::info!("this build has no picker feature: need_prompt is not published");
         Retrieval::idle()
     }
@@ -283,19 +284,14 @@ impl Retrieval {
         false
     }
 
-    /// Indexes `catalog` with an already-loaded model, so the test binary pays
-    /// for the weights once however many indexes it builds.
+    /// Whether the held index ranks with the same loaded model as `picker`,
+    /// which is what the boot-sharing test asserts: one model, loaded once,
+    /// behind both the retrieval index and the execution picker.
     #[cfg(all(test, feature = "picker"))]
-    pub(crate) fn indexed_with(
-        model: &promptforge_tool_picker::Model,
-        catalog: &Catalog,
-    ) -> Retrieval {
-        match index::Index::build_with(model, catalog) {
-            Some(index) => Retrieval {
-                index: Some(Arc::new(index)),
-            },
-            None => Retrieval::idle(),
-        }
+    pub(crate) fn shares_model_with(&self, picker: &promptforge_tool_picker::ToolPicker) -> bool {
+        self.index
+            .as_ref()
+            .is_some_and(|index| index.shares_model_with(picker))
     }
 
     /// Whether two retrievals share the very same built index, which is what a

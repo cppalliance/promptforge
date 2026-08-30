@@ -30,6 +30,8 @@
 mod catalog;
 mod config;
 mod error;
+#[cfg(test)]
+mod fixture;
 mod generation;
 #[cfg(test)]
 mod levels;
@@ -56,6 +58,8 @@ pub use crate::watch::Watcher;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use promptforge_tool_picker::Model;
 
 /// One parsed command line: which transport to serve and which file to read.
 ///
@@ -141,12 +145,18 @@ pub fn run(args: &ServerArgs) -> Result<(), RunError> {
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
     let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
+    // The embedding model is parsed once and lent to both of its consumers:
+    // the retrieval index below and the execution picker in `PreparedTools`.
+    // Loading it twice would pay the tens-of-megabytes weights parse twice; a
+    // load failure refuses the boot as a picker failure, since neither
+    // consumer can be built without it.
+    let model = Model::load().map_err(PreparedToolsError::picker)?;
     // Prepare the optional prompt-retrieval index before the runtime for the
     // same blocking-CPU reason. Unlike the required execution picker below, a
     // failed retrieval index costs `need_prompt` and nothing else. The catalog
     // and the index over it are bound into one live generation, so the watcher
     // replaces both together and no reader sees a torn pair.
-    let retrieval = Retrieval::start(&catalog);
+    let retrieval = Retrieval::start(&model, &catalog);
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::with_retrieval(catalog, retrieval));
 
@@ -157,7 +167,7 @@ pub fn run(args: &ServerArgs) -> Result<(), RunError> {
     // Tool/model capability binding is synchronous and model-backed. Prepare
     // the live tool catalog, picker, and gateway model catalog once, then share
     // the immutable result across every run.
-    let tools = Arc::new(runtime.block_on(PreparedTools::load(&config))?);
+    let tools = Arc::new(runtime.block_on(PreparedTools::load(&config, &model))?);
     let stdio = args.stdio;
     runtime.block_on(async move {
         // Started inside the runtime, because the debounce window is a task, and

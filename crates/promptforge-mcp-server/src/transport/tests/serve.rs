@@ -31,6 +31,7 @@ async fn serving_over_http_without_an_api_key_is_refused_by_name() {
             &config.gateway,
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
+            crate::fixture::model(),
         )
         .expect("prepare fixture live tools"),
     );
@@ -127,6 +128,7 @@ async fn http_serves_and_then_shuts_down_cleanly() {
             &config.gateway,
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
+            crate::fixture::model(),
         )
         .expect("prepare fixture live tools"),
     );

@@ -4191,6 +4191,7 @@ dependencies = [
  "half",
  "hf-hub",
  "promptforge-progress",
+ "promptforge-tool-picker",
  "safetensors",
  "serde",
  "serde_json",

@@ -62,8 +62,13 @@ fn fixture_server_parts() -> (Arc<Config>, Arc<PreparedTools>) {
     )
     .expect("the fixture configuration parses");
     let tools = Arc::new(
-        PreparedTools::new(&config.gateway, &config.tools, ModelCatalog::empty())
-            .expect("prepare fixture tools"),
+        PreparedTools::new(
+            &config.gateway,
+            &config.tools,
+            ModelCatalog::empty(),
+            crate::fixture::model(),
+        )
+        .expect("prepare fixture tools"),
     );
     (Arc::new(config), tools)
 }
