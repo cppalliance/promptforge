@@ -203,6 +203,7 @@ export function systemFixture() {
   return {
     cpu: { frequency_mhz: 2500, logical_cores: 16, physical_cores: 8, utilization_percent: 5 },
     ram: { used_bytes: 32 * GIB, total_bytes: 64 * GIB },
+    disk: { cache_dir: "C:/pf/cache", used_bytes: 700 * GIB, total_bytes: 4096 * GIB },
     gpu: { name: "NVIDIA GeForce RTX 4090", vram_used_bytes: 4 * GIB, vram_total_bytes: 24 * GIB },
   };
 }
@@ -264,11 +265,36 @@ export function readmeFixture() {
 }
 
 /**
+ * Mirrors the gateway's pending-view secret redaction: every secret
+ * field serializes as "***" no matter what a PUT staged, so a typed key
+ * can never echo back into the UI from the stub either.
+ */
+function redactSecrets(view) {
+  if (view.server && typeof view.server === "object" && typeof view.server.api_key === "string") {
+    view.server.api_key = "***";
+  }
+  for (const entry of Array.isArray(view.endpoint) ? view.endpoint : []) {
+    if (typeof entry.api_key === "string") {
+      entry.api_key = "***";
+    }
+  }
+  const webSearch =
+    view.tools && typeof view.tools === "object" ? view.tools.web_search : undefined;
+  if (webSearch && typeof webSearch.api_key === "string") {
+    webSearch.api_key = "***";
+  }
+}
+
+/**
  * A canned gateway behind the fetch signature: status, profiles, an
  * idle progress stream, switch-profile (overridable through `onSwitch`),
  * and the config surface - running/pending/dirty views, shadow saves
- * (PUT re-points the pending view and flips the dirty report), apply,
- * revert, orphans, model-info, reveal, and cache deletes. The Discover
+ * (PUT re-points the pending view, redacting secrets to "***" the way
+ * the gateway's pending view does, and flips the dirty report), the
+ * boot-config shadow save (PUT /admin/boot-config merges the body's boot
+ * sections into the pending view and records `state.boot`), apply
+ * (outcome overridable through `applyOutcome`), revert, orphans,
+ * model-info, reveal, and cache deletes. The Discover
  * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
  * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
  * pass-through 401), hub README fetches (`readme`), and `POST
@@ -295,6 +321,7 @@ export function gatewayStub({
   hfAuth401 = false,
   readme,
   onCache,
+  applyOutcome,
 } = {}) {
   const calls = [];
   const state = {
@@ -302,6 +329,8 @@ export function gatewayStub({
     pending: pending ?? structuredClone(config ?? {}),
     dirty: dirty ?? cleanDirty(),
     orphans: orphans ?? [],
+    /** The last PUT /admin/boot-config body, null until one arrives. */
+    boot: null,
   };
   const hubDenied = () =>
     jsonResponse(
@@ -373,19 +402,45 @@ export function gatewayStub({
       return sseChannel().response;
     }
     if (url.endsWith("/admin/config-pending")) {
-      return jsonResponse({ profile: state.pending, boot: null });
+      return jsonResponse({
+        profile: state.pending,
+        boot:
+          state.boot === null
+            ? null
+            : { shadow: "gateway.toml.next", changed_sections: Object.keys(state.boot) },
+      });
     }
     if (url.endsWith("/admin/config-dirty")) {
       return jsonResponse(state.dirty);
     }
+    if (url.endsWith("/admin/boot-config") && init.method === "PUT") {
+      state.boot = JSON.parse(init.body);
+      // The pending profile view resolves boot shadows too, so the boot
+      // sections it renders track the staged edit.
+      for (const section of ["server", "workshop"]) {
+        if (section in state.boot) {
+          state.pending[section] = structuredClone(state.boot[section]);
+        }
+      }
+      redactSecrets(state.pending);
+      state.dirty = {
+        dirty: true,
+        pending_files: ["gateway.toml"],
+        changed_sections: Object.keys(state.boot),
+      };
+      return jsonResponse({ shadow: "gateway.toml.next" });
+    }
     if (url.endsWith("/admin/config-apply")) {
       state.config = structuredClone(state.pending);
       state.dirty = cleanDirty();
-      return jsonResponse({
-        applied: ["profiles/default.toml"],
-        reloaded: true,
-        restart_required: false,
-      });
+      state.boot = null;
+      return jsonResponse(
+        applyOutcome ?? {
+          applied: ["profiles/default.toml"],
+          reloaded: true,
+          restart_required: false,
+        },
+      );
     }
     if (url.endsWith("/admin/config-revert")) {
       state.pending = structuredClone(state.config);
@@ -395,6 +450,7 @@ export function gatewayStub({
     if (url.endsWith("/admin/config")) {
       if ((init.method ?? "GET") === "PUT") {
         state.pending = JSON.parse(init.body);
+        redactSecrets(state.pending);
         state.dirty = dirtyAfterSave ?? {
           dirty: true,
           pending_files: ["profiles/default.toml"],

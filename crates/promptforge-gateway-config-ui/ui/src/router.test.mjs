@@ -6,30 +6,36 @@ import test from "node:test";
 
 import { bootApp, gatewayStub, navigate, settle } from "./harness.mjs";
 
-/** The tab that must carry aria-current after navigating, per hash. */
+/**
+ * The tab that must carry aria-current after navigating, per hash, and
+ * whether the destination is still a stub view (stubs render the shared
+ * empty state; live views own their content).
+ */
 const ROUTES = [
-  ["#/models", "Models"],
-  ["#/models/qwen3-8b", "Models"],
-  ["#/discover", "Discover"],
-  ["#/downloads", "Downloads"],
-  ["#/profiles", "Profiles"],
-  ["#/secrets", "Secrets"],
-  ["#/settings", "Settings"],
-  ["#/settings/gateway", "Settings"],
+  ["#/models", "Models", false],
+  ["#/models/qwen3-8b", "Models", false],
+  ["#/discover", "Discover", false],
+  ["#/downloads", "Downloads", true],
+  ["#/profiles", "Profiles", true],
+  ["#/secrets", "Secrets", true],
+  ["#/settings", "Settings", false],
+  ["#/settings/gateway", "Settings", false],
 ];
 
-test("each route hash mounts its stub view and moves aria-current with it", async () => {
+test("each route hash mounts its view and moves aria-current with it", async () => {
   const stub = gatewayStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  for (const [hash, title] of ROUTES) {
+  for (const [hash, title, isStub] of ROUTES) {
     navigate(dom, hash);
     await settle(2);
     const heading = root.querySelector("main h1.view-title");
-    assert.equal(heading?.textContent, title, `${hash} mounts the ${title} stub`);
-    assert.ok(
-      root.querySelector("main .view-empty"),
-      `${hash} renders the stub's empty state`,
-    );
+    assert.equal(heading?.textContent, title, `${hash} mounts the ${title} view`);
+    if (isStub) {
+      assert.ok(
+        root.querySelector("main .view-empty"),
+        `${hash} renders the stub's empty state`,
+      );
+    }
     const current = root.querySelectorAll(".tab[aria-current='page']");
     assert.equal(current.length, 1, `${hash} marks exactly one tab current`);
     assert.equal(current[0].textContent, title, `${hash} underlines the ${title} tab`);

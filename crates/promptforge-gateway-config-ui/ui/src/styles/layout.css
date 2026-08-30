@@ -876,3 +876,148 @@
 		color: var(--text-secondary, #888888);
 	}
 }
+
+/* Settings view: the secondary nav column, section panels and cards,
+   the System panel's live extras (segmented VRAM bar, vendor chip, GPU
+   devices), and the Change-reveal secret field. */
+@layer components {
+	.banner-stack {
+		display: flex;
+		flex-direction: column;
+	}
+	.banner-warning {
+		border-left-color: var(--warning, #F09030);
+	}
+
+	/* Nav column [Unsloth] settings category list: stacked pill links. */
+	.settings-split {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	@media (min-width: 720px) {
+		.settings-split {
+			flex-direction: row;
+			align-items: flex-start;
+		}
+	}
+	.settings-nav ul {
+		display: flex;
+		flex-direction: row;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	@media (min-width: 720px) {
+		.settings-nav {
+			flex: 0 0 12rem;
+		}
+		.settings-nav ul {
+			flex-direction: column;
+		}
+	}
+	.settings-nav-link {
+		display: block;
+		padding: 0.375rem 0.75rem;
+		border-radius: 9999px;
+		color: var(--text-secondary, #888888);
+		font-size: 0.875rem;
+		font-weight: 500;
+		text-decoration: none;
+	}
+	.settings-nav-link:hover {
+		background: rgb(255 255 255 / 0.06);
+		color: var(--text-primary, #E8E8E8);
+	}
+	.settings-nav-link[aria-current="true"] {
+		background: var(--accent-subtle, rgb(224 90 43 / 0.15));
+		color: var(--accent, #E05A2B);
+	}
+	.settings-panel {
+		flex: 1;
+		min-inline-size: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.settings-card {
+		padding: 1rem;
+		border: 1px solid var(--border, #2A2A2A);
+		border-radius: 0.75rem;
+		background: var(--bg-secondary, #1A1A1A);
+	}
+	.settings-card .section-heading {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	/* System live extras. */
+	.metric-sub {
+		margin: 0;
+		color: var(--text-secondary, #888888);
+		font-size: 0.75rem;
+	}
+	.metric-label svg {
+		vertical-align: -0.125rem;
+	}
+	.metric-bar-segmented {
+		position: relative;
+	}
+	.metric-seg-divider {
+		position: absolute;
+		inset-block: -0.1875rem;
+		inset-inline-start: calc(var(--progress, 0) * 100%);
+		width: 1px;
+		background: var(--border, #2A2A2A);
+	}
+	.vendor-chip {
+		font-weight: 600;
+	}
+	.gpu-devices {
+		padding: 1rem;
+		border: 1px solid var(--border, #2A2A2A);
+		border-radius: 0.75rem;
+		background: var(--bg-secondary, #1A1A1A);
+	}
+	.gpu-device-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding-block: 0.75rem;
+	}
+	.gpu-name {
+		font-size: 0.875rem;
+		font-weight: 500;
+	}
+
+	/* Change-reveal secret field. */
+	.secret-field {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.secret-mask {
+		color: var(--text-secondary, #888888);
+		letter-spacing: 0.2em;
+	}
+	.secret-field .input {
+		flex: 1;
+	}
+
+	/* About. */
+	.about-medallion {
+		display: block;
+	}
+	.about-name {
+		margin: 0;
+		font-size: 1rem;
+		font-weight: 600;
+	}
+	.about-license {
+		color: var(--accent, #E05A2B);
+	}
+}

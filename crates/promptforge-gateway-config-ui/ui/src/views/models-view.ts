@@ -76,13 +76,18 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   let inheritNoteFor: string | null = null;
 
   let main: HTMLElement | null = null;
+  /** The last-rendered split root; a re-render is legal only while it owns `main`. */
+  let viewRoot: HTMLElement | null = null;
   let selected: string | undefined;
   let listBox: HTMLElement | null = null;
   let detailBox: HTMLElement | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   store.subscribe(() => {
-    if (main?.isConnected) {
+    // Guard on this view's own root, not just `main`: `main` is shared
+    // with every other view, so a store notification arriving while
+    // another view owns it must not let this one repaint the pane.
+    if (main?.isConnected && viewRoot?.isConnected) {
       render();
     }
   });
@@ -115,6 +120,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
     renderList();
     renderDetail();
+    viewRoot = split;
     main.replaceChildren(title, split);
   };
 

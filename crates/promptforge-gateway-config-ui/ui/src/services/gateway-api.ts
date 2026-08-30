@@ -54,10 +54,19 @@ export interface GgufInfo {
   parameter_count: number | null;
 }
 
-/** The slice of `GET /admin/system` the fit heuristic consumes. */
+/** The `GET /admin/system` snapshot the Settings and Discover views consume. */
 export interface SystemSnapshot {
+  /** Processor identity and load; null when the reply omits it. */
+  cpu: {
+    frequency_mhz: number;
+    logical_cores: number;
+    physical_cores: number | null;
+    utilization_percent: number;
+  } | null;
   /** Physical memory usage in bytes. */
   ram: { used_bytes: number; total_bytes: number };
+  /** Usage of the drive holding the artifact cache; null when unresolved. */
+  disk: { cache_dir: string; used_bytes: number; total_bytes: number } | null;
   /** The first NVIDIA GPU; null on machines without an NVML driver. */
   gpu: { name: string; vram_used_bytes: number; vram_total_bytes: number } | null;
 }
@@ -234,6 +243,23 @@ export class GatewayApi {
     }
   }
 
+  /**
+   * Stages `body` (the boot config's TOML shape as JSON: `[server]` plus
+   * an optional `[workshop]`) as the boot shadow via
+   * `PUT /admin/boot-config`. Untouched secrets stay `"***"`; the gateway
+   * restores their real values from the boot file.
+   */
+  async putBootConfig(body: unknown): Promise<void> {
+    const response = await this.send("/admin/boot-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
   /** Promotes every shadow via `POST /admin/config-apply`. */
   async applyConfig(): Promise<ApplyOutcome> {
     const response = await this.send("/admin/config-apply", { method: "POST" });
@@ -371,17 +397,39 @@ export class GatewayApi {
     return () => controller.abort();
   }
 
-  /** Fetches the host-metrics snapshot slice the fit heuristic needs. */
+  /** Fetches the host-metrics snapshot. */
   async getSystem(): Promise<SystemSnapshot> {
     const data = (await this.getJson("/admin/system")) as {
+      cpu?: {
+        frequency_mhz?: number;
+        logical_cores?: number;
+        physical_cores?: number | null;
+        utilization_percent?: number;
+      } | null;
       ram?: Partial<SystemSnapshot["ram"]>;
+      disk?: { cache_dir?: string; used_bytes?: number; total_bytes?: number } | null;
       gpu?: { name?: string; vram_used_bytes?: number; vram_total_bytes?: number } | null;
     };
     return {
+      cpu: data.cpu
+        ? {
+            frequency_mhz: data.cpu.frequency_mhz ?? 0,
+            logical_cores: data.cpu.logical_cores ?? 0,
+            physical_cores: data.cpu.physical_cores ?? null,
+            utilization_percent: data.cpu.utilization_percent ?? 0,
+          }
+        : null,
       ram: {
         used_bytes: data.ram?.used_bytes ?? 0,
         total_bytes: data.ram?.total_bytes ?? 0,
       },
+      disk: data.disk
+        ? {
+            cache_dir: data.disk.cache_dir ?? "",
+            used_bytes: data.disk.used_bytes ?? 0,
+            total_bytes: data.disk.total_bytes ?? 0,
+          }
+        : null,
       gpu: data.gpu
         ? {
             name: data.gpu.name ?? "",
