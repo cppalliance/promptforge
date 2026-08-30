@@ -153,12 +153,6 @@ pub(crate) enum GatewayError {
     #[error("system metrics sampling failed")]
     SystemMetrics(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// `POST /admin/reveal` was reached from a non-loopback address (or
-    /// the peer address was unknown). The endpoint launches a process, so
-    /// it is loopback-only even with a valid bearer key.
-    #[error("reveal is loopback-only")]
-    RevealNotLoopback,
-
     /// `POST /admin/reveal` named a path that does not exist.
     #[non_exhaustive]
     #[error("reveal path not found: {0}")]
@@ -385,11 +379,6 @@ impl GatewayError {
                 "server_error",
                 "system_metrics_error",
             ),
-            GatewayError::RevealNotLoopback => (
-                StatusCode::FORBIDDEN,
-                "invalid_request_error",
-                "loopback_only",
-            ),
             GatewayError::RevealPathNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
@@ -615,14 +604,6 @@ mod tests {
     #[test]
     fn reveal_errors_classify_is_table_driven() {
         let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
-            (
-                GatewayError::RevealNotLoopback,
-                (
-                    StatusCode::FORBIDDEN,
-                    "invalid_request_error",
-                    "loopback_only",
-                ),
-            ),
             (
                 GatewayError::RevealPathNotFound("C:/ghost.gguf".to_owned()),
                 (

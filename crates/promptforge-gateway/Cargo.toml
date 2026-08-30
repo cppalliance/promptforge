@@ -29,9 +29,16 @@ nvml-wrapper.workspace = true
 open = { workspace = true, optional = true }
 promptforge-core.workspace = true
 promptforge-gateway-config.workspace = true
+# Optional: the embedded config UI SPA served at /config/ behind the
+# `config-ui` feature; headless builds never pull rust-embed or the Node
+# esbuild pipeline.
+promptforge-gateway-config-ui = { workspace = true, optional = true }
 # Optional: gateway-owned local inference (GGUF provisioning, managed
 # `llama-server` children, blob cache store). Headless builds disable it.
 promptforge-gateway-local = { workspace = true, optional = true }
+# The shared loopback wall for the admin config endpoints; always on,
+# because those endpoints hold secrets in every build.
+promptforge-gateway-loopback.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
@@ -60,6 +67,10 @@ default = ["local", "web-search"]
 local = ["dep:promptforge-gateway-local"]
 # The Brave-powered `POST /v1/tools/web_search` tool service.
 web-search = ["dep:promptforge-web-search-service"]
+# Serve the embedded config UI SPA at /config/ on the gateway's own port,
+# loopback-only. The default stays empty so headless builds never compile
+# the SPA crate, its embedded assets, or its Node build pipeline.
+config-ui = ["dep:promptforge-gateway-config-ui"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull whisper, CUDA, or the
 # Node UI build into the graph.
@@ -77,6 +88,9 @@ png.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 promptforge-gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
+# Drives build_router in-process with forged peer addresses, so the
+# loopback-wall tests can present a LAN peer no real TCP connection could.
+tower.workspace = true
 
 [lints]
 workspace = true

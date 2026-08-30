@@ -50,7 +50,12 @@
 //! profile, removing any shadow alongside) - a loopback-only,
 //! bearer-authed `POST /admin/reveal` opening the host OS file manager at
 //! a path confined to the artifact cache or the profiles directory - and
-//! `GET /health`. In-process
+//! `GET /health`. The whole admin config surface (config read/write, env,
+//! pending state, apply/revert, orphans, system, model-info, the HF
+//! proxy, profile create/delete, reveal) sits behind the shared loopback
+//! wall from `promptforge-gateway-loopback` in every build; with the
+//! `config-ui` feature the embedded config SPA is served at `/config/`
+//! behind the same wall. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
@@ -271,11 +276,29 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/models", get(list_models))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
+        .route("/admin/status", get(admin_status))
+        .route("/admin/progress", get(admin_progress))
+        .route("/admin/switch-profile", post(admin_switch_profile));
+    // The web-search tool route delegates to the service crate, so it exists
+    // only in builds with the `web-search` feature.
+    #[cfg(feature = "web-search")]
+    let router = router.route("/v1/tools/web_search", post(web_search));
+    // The blob-cache routes serve the local artifact store, so they exist
+    // only in builds with local inference.
+    #[cfg(feature = "local")]
+    let router = router
+        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
+        .route("/v1/cache/{sha256}", delete(cache::delete_cache));
+
+    // The admin config surface reads secrets in plaintext, writes files,
+    // and launches processes, so every route below sits behind the shared
+    // loopback wall in every build: a non-loopback peer is refused with
+    // 403 before bearer auth even runs.
+    let walled = Router::new()
         .route(
             "/admin/profiles/{name}",
             post(profile_files::admin_create_profile).delete(profile_files::admin_delete_profile),
         )
-        .route("/admin/status", get(admin_status))
         .route("/admin/system", get(system::admin_system))
         .route(
             "/admin/config",
@@ -309,24 +332,36 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/admin/env",
             get(env_file::admin_get_env).put(env_file::admin_put_env),
         )
-        .route("/admin/progress", get(admin_progress))
         .route("/admin/reveal", post(reveal::admin_reveal))
-        .route("/admin/switch-profile", post(admin_switch_profile))
         .route("/admin/hf/search", get(hf::admin_hf_search))
         .route("/admin/hf/model/{*repo}", get(hf::admin_hf_model));
-    // The web-search tool route delegates to the service crate, so it exists
-    // only in builds with the `web-search` feature.
-    #[cfg(feature = "web-search")]
-    let router = router.route("/v1/tools/web_search", post(web_search));
-    // The blob-cache and orphan routes serve the local artifact store, so
+    // The orphan and model-info routes read the local artifact store, so
     // they exist only in builds with local inference.
     #[cfg(feature = "local")]
-    let router = router
+    let walled = walled
         .route("/admin/orphans", get(orphans::admin_orphans))
-        .route("/admin/model-info", get(model_info::admin_model_info))
-        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
-        .route("/v1/cache/{sha256}", delete(cache::delete_cache));
+        .route("/admin/model-info", get(model_info::admin_model_info));
+    // `GET /config` (no trailing slash) redirects to `/config/` so the
+    // SPA's relative asset references resolve against the mount point;
+    // it is walled like the assets it fronts.
+    #[cfg(feature = "config-ui")]
+    let walled = walled.route("/config", get(config_ui_redirect));
+    let router = router.merge(walled.route_layer(axum::middleware::from_fn(
+        promptforge_gateway_loopback::require_loopback,
+    )));
+    // The SPA asset router arrives with the same loopback wall already
+    // applied inside `routes()`; `nest_service` because the asset router
+    // carries no gateway state.
+    #[cfg(feature = "config-ui")]
+    let router = router.nest_service("/config/", promptforge_gateway_config_ui::routes());
     router.with_state(state)
+}
+
+/// Redirects `GET /config` to `/config/`, where the SPA index is served
+/// and its relative asset references resolve.
+#[cfg(feature = "config-ui")]
+async fn config_ui_redirect() -> axum::response::Redirect {
+    axum::response::Redirect::permanent("/config/")
 }
 
 /// The `POST /v1/tools/web_search` route: bearer-authed, delegates to the
@@ -1442,5 +1477,269 @@ mod switch_tests {
             text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
             "the terminal event comes from the join result: {text}"
         );
+    }
+}
+
+#[cfg(test)]
+mod loopback_wall_tests {
+    //! The shared loopback wall over the admin config surface: every
+    //! walled path refuses a LAN peer with 403 even when it presents the
+    //! valid bearer key, admits a loopback peer past the wall, and fails
+    //! closed when no peer address exists; the bearer-only routes stay
+    //! reachable from any source. The `config-ui` feature's `/config`
+    //! mount and redirect are pinned here too, in both feature states.
+
+    use std::net::SocketAddr;
+
+    use axum::body::Body;
+    use axum::extract::ConnectInfo;
+    use axum::http::header::AUTHORIZATION;
+    use axum::http::{Method, Request, Response, StatusCode};
+    use promptforge_gateway_config::Config;
+    use tower::ServiceExt;
+
+    use crate::test_support::{AdminPaths, app_state};
+    use crate::{AppState, build_router};
+
+    /// A tempdir-backed state with real profiles and boot files, so every
+    /// walled handler has something to answer with once past the wall.
+    fn fixture() -> (tempfile::TempDir, AppState) {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let models = temp.path().join("cache").join("models");
+        std::fs::create_dir_all(&models).expect("mkdir cache models");
+        let profiles = temp.path().join("profiles");
+        std::fs::create_dir(&profiles).expect("mkdir profiles");
+        std::fs::write(profiles.join("main.toml"), "").expect("write profile");
+        let boot = temp.path().join("gateway.toml");
+        std::fs::write(&boot, "").expect("write boot");
+        let config = Config::from_toml_str(&format!(
+            r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[local]
+cache_dir = '{cache}'
+"#,
+            cache = temp.path().join("cache").display(),
+        ))
+        .expect("the fixture profile parses");
+        let state = app_state(
+            config,
+            Some(AdminPaths {
+                profiles_dir: profiles,
+                active: "main".to_owned(),
+                boot_config: boot,
+            }),
+        );
+        (temp, state)
+    }
+
+    /// Every admin config path behind the shared wall, with the method
+    /// exercised against it. The HF requests are deliberately malformed
+    /// (a duplicate query key, a slashless repo) so a loopback sweep is
+    /// refused at validation and never reaches the real hub; every other
+    /// empty-bodied write fails its own extractor the same way. All of
+    /// that happens past the wall, so any non-403 status proves
+    /// admission.
+    fn walled_requests() -> Vec<(Method, &'static str)> {
+        let mut requests = vec![
+            (Method::GET, "/admin/config"),
+            (Method::PUT, "/admin/config"),
+            (Method::PUT, "/admin/boot-config"),
+            (Method::PUT, "/admin/include/common.toml"),
+            (Method::GET, "/admin/env"),
+            (Method::PUT, "/admin/env"),
+            (Method::GET, "/admin/config-pending"),
+            (Method::GET, "/admin/config-dirty"),
+            (Method::POST, "/admin/config-apply"),
+            (Method::POST, "/admin/config-revert"),
+            (Method::GET, "/admin/system"),
+            (Method::GET, "/admin/hf/search?q=a&q=b"),
+            (Method::GET, "/admin/hf/model/noslash"),
+            (Method::POST, "/admin/profiles/zz-brand-new"),
+            (Method::DELETE, "/admin/profiles/zz-brand-new"),
+            (Method::POST, "/admin/reveal"),
+        ];
+        #[cfg(feature = "local")]
+        requests.extend([
+            (Method::GET, "/admin/orphans"),
+            (Method::GET, "/admin/model-info"),
+        ]);
+        requests
+    }
+
+    /// Sends one empty-bodied request through `build_router` with the
+    /// valid bearer key and the given peer address planted as the
+    /// `ConnectInfo` extension (or none at all).
+    async fn send_with_peer(
+        state: AppState,
+        method: Method,
+        path: &str,
+        peer: Option<&str>,
+    ) -> Response<Body> {
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(AUTHORIZATION, "Bearer test-token")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        if let Some(peer) = peer {
+            let peer: SocketAddr = peer.parse().expect("a socket address");
+            request.extensions_mut().insert(ConnectInfo(peer));
+        }
+        build_router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible")
+    }
+
+    #[tokio::test]
+    async fn every_walled_path_refuses_a_lan_peer_with_403() {
+        let (_temp, state) = fixture();
+        for (method, path) in walled_requests() {
+            let status = send_with_peer(
+                state.clone(),
+                method.clone(),
+                path,
+                Some("198.51.100.7:44821"),
+            )
+            .await
+            .status();
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{method} {path} must refuse a LAN peer even with the valid bearer key"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_walled_path_admits_a_loopback_peer_past_the_wall() {
+        let (_temp, state) = fixture();
+        for (method, path) in walled_requests() {
+            let status =
+                send_with_peer(state.clone(), method.clone(), path, Some("127.0.0.1:50000"))
+                    .await
+                    .status();
+            assert_ne!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{method} {path} must pass the wall for a loopback peer"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_walled_path_fails_closed_without_a_peer_address() {
+        let (_temp, state) = fixture();
+        for (method, path) in walled_requests() {
+            let status = send_with_peer(state.clone(), method.clone(), path, None)
+                .await
+                .status();
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "{method} {path} must fail closed when the peer address is unknown"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_bearer_only_routes_stay_reachable_from_the_lan() {
+        let (_temp, state) = fixture();
+        for path in [
+            "/admin/status",
+            "/admin/profiles",
+            "/admin/progress",
+            "/v1/models",
+        ] {
+            let status =
+                send_with_peer(state.clone(), Method::GET, path, Some("198.51.100.7:44821"))
+                    .await
+                    .status();
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "GET {path} keeps its bearer-only, any-source behavior"
+            );
+        }
+        // The switch route stays any-source too; the empty body fails its
+        // own extractor past auth, so any non-403 status proves the wall
+        // is absent (the same trick as the loopback-admission sweep).
+        let status = send_with_peer(
+            state,
+            Method::POST,
+            "/admin/switch-profile",
+            Some("198.51.100.7:44821"),
+        )
+        .await
+        .status();
+        assert_ne!(
+            status,
+            StatusCode::FORBIDDEN,
+            "POST /admin/switch-profile keeps its bearer-only, any-source behavior"
+        );
+    }
+
+    #[cfg(feature = "config-ui")]
+    #[tokio::test]
+    async fn config_without_a_trailing_slash_redirects_to_the_mount() {
+        let (_temp, state) = fixture();
+        let response = send_with_peer(state, Method::GET, "/config", Some("127.0.0.1:50000")).await;
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .expect("a redirect carries a Location header"),
+            "/config/",
+            "the redirect lands on the trailing-slash mount so relative asset paths resolve"
+        );
+    }
+
+    #[cfg(feature = "config-ui")]
+    #[tokio::test]
+    async fn the_config_ui_is_served_at_the_trailing_slash_mount() {
+        let (_temp, state) = fixture();
+        for path in ["/config/", "/config/app.js"] {
+            let status = send_with_peer(state.clone(), Method::GET, path, Some("127.0.0.1:50000"))
+                .await
+                .status();
+            assert_eq!(status, StatusCode::OK, "GET {path} serves the SPA asset");
+        }
+    }
+
+    #[cfg(feature = "config-ui")]
+    #[tokio::test]
+    async fn the_config_surface_refuses_a_lan_peer() {
+        let (_temp, state) = fixture();
+        for path in ["/config", "/config/", "/config/app.js"] {
+            let status =
+                send_with_peer(state.clone(), Method::GET, path, Some("198.51.100.7:44821"))
+                    .await
+                    .status();
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "GET {path} must refuse a LAN peer"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "config-ui"))]
+    #[tokio::test]
+    async fn without_the_feature_no_config_routes_exist() {
+        let (_temp, state) = fixture();
+        for path in ["/config", "/config/", "/config/app.js"] {
+            let status = send_with_peer(state.clone(), Method::GET, path, Some("127.0.0.1:50000"))
+                .await
+                .status();
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "GET {path} must not exist in a build without the config-ui feature"
+            );
+        }
     }
 }

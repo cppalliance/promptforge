@@ -19,6 +19,7 @@ promptforge-gateway-client = { path = "crates/promptforge-gateway-client", versi
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.1.0" }
 promptforge-gateway-config-ui = { path = "crates/promptforge-gateway-config-ui", version = "0.1.0" }
 promptforge-gateway-local = { path = "crates/promptforge-gateway-local", version = "0.1.0" }
+promptforge-gateway-loopback = { path = "crates/promptforge-gateway-loopback", version = "0.1.0" }
 promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.1.0" }
 promptforge-gateway-routing = { path = "crates/promptforge-gateway-routing", version = "0.1.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.1.0" }

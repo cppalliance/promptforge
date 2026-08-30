@@ -4027,7 +4027,9 @@ dependencies = [
  "png",
  "promptforge-core",
  "promptforge-gateway-config",
+ "promptforge-gateway-config-ui",
  "promptforge-gateway-local",
+ "promptforge-gateway-loopback",
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
  "promptforge-progress",
@@ -4043,6 +4045,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "toml",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -4092,6 +4095,7 @@ name = "promptforge-gateway-config-ui"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "promptforge-gateway-loopback",
  "rust-embed",
  "serde_json",
  "sha2 0.11.0",
@@ -4123,6 +4127,15 @@ dependencies = [
  "tracing",
  "url",
  "zip",
+]
+
+[[package]]
+name = "promptforge-gateway-loopback"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

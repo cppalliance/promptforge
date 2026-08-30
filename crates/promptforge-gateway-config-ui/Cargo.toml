@@ -11,6 +11,9 @@ description = "PromptForge gateway config UI: embedded SPA assets and the shared
 
 [dependencies]
 axum.workspace = true
+# The shared loopback wall; defined in its own always-on crate so headless
+# gateway builds carry the same check without this crate's asset machinery.
+promptforge-gateway-loopback.workspace = true
 rust-embed.workspace = true
 
 [dev-dependencies]
