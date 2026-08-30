@@ -315,7 +315,13 @@ function redactSecrets(view) {
  * boot-config shadow save (PUT /admin/boot-config merges the body's boot
  * sections into the pending view and records `state.boot`), apply
  * (outcome overridable through `applyOutcome`), revert, orphans,
- * model-info, reveal, and cache deletes. The Discover
+ * model-info, reveal, and cache deletes. Profile files:
+ * `POST`/`DELETE /admin/profiles/{name}` against the mutable listing
+ * (`state.profiles`; create answers 409 for an existing name, delete
+ * 409 for the active profile), `PUT /admin/include/{path}` recorded in
+ * `state.includes` (`onPutInclude` overrides the response), and
+ * `onPutConfig` optionally staging a refusal for the profile shadow
+ * save before the stub's own handling. The Discover
  * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
  * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
  * pass-through 401), hub README fetches (`readme`), `POST
@@ -347,6 +353,8 @@ export function gatewayStub({
   cache,
   onCacheList,
   applyOutcome,
+  onPutConfig,
+  onPutInclude,
 } = {}) {
   const calls = [];
   const state = {
@@ -358,6 +366,12 @@ export function gatewayStub({
     cache: cache ?? [],
     /** The last PUT /admin/boot-config body, null until one arrives. */
     boot: null,
+    /** The profile listing; creates append, deletes remove. */
+    profiles: [...profiles],
+    /** Include shadows by decoded path: the last PUT /admin/include body. */
+    includes: {},
+    /** The active profile; the default switch handler re-points it. */
+    active: profile,
   };
   const hubDenied = () =>
     jsonResponse(
@@ -426,10 +440,58 @@ export function gatewayStub({
       return channel.response;
     }
     if (url.endsWith("/admin/status")) {
-      return jsonResponse({ profile, models });
+      return jsonResponse({ profile: state.active, models });
+    }
+    // Profile files: POST creates (409 for an existing name, mirroring
+    // the gateway), DELETE removes (409 for the active profile, 404 for
+    // a missing one). The listing tracks both.
+    if (url.includes("/admin/profiles/")) {
+      const name = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
+      if (init.method === "POST") {
+        if (state.profiles.includes(name)) {
+          return jsonResponse(
+            { error: { code: "profile_exists", message: `profile ${name} already exists` } },
+            409,
+          );
+        }
+        state.profiles.push(name);
+        return jsonResponse({ created: `profiles/${name}.toml` });
+      }
+      if (init.method === "DELETE") {
+        if (name === state.active) {
+          return jsonResponse(
+            {
+              error: {
+                code: "profile_active",
+                message: `profile ${name} is active and cannot be deleted`,
+              },
+            },
+            409,
+          );
+        }
+        if (!state.profiles.includes(name)) {
+          return jsonResponse(
+            { error: { code: "profile_not_found", message: `no profile ${name}` } },
+            404,
+          );
+        }
+        state.profiles = state.profiles.filter((entry) => entry !== name);
+        return jsonResponse({ deleted: `profiles/${name}.toml`, shadow_removed: false });
+      }
     }
     if (url.endsWith("/admin/profiles")) {
-      return jsonResponse({ profiles });
+      return jsonResponse({ profiles: state.profiles });
+    }
+    // The include-file shadow save; `onPutInclude` stages refusals.
+    if (url.includes("/admin/include/") && init.method === "PUT") {
+      const path = decodeURIComponent(
+        url.slice(url.indexOf("/admin/include/") + "/admin/include/".length),
+      );
+      if (onPutInclude) {
+        return onPutInclude(init, path);
+      }
+      state.includes[path] = JSON.parse(init.body);
+      return jsonResponse({ shadow: `profiles/${path}.next` });
     }
     if (url.endsWith("/admin/progress")) {
       return sseChannel().response;
@@ -482,6 +544,12 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/config")) {
       if ((init.method ?? "GET") === "PUT") {
+        if (onPutConfig) {
+          const staged = onPutConfig(init);
+          if (staged) {
+            return staged;
+          }
+        }
         const body = JSON.parse(init.body);
         // The gateway grafts the leaf's include line onto a candidate
         // that lacks one, so the chain keeps visiting the boot file:
@@ -525,7 +593,8 @@ export function gatewayStub({
         return onSwitch(init);
       }
       const channel = sseChannel();
-      channel.push({ status: "ready", profile: JSON.parse(init.body).name });
+      state.active = JSON.parse(init.body).name;
+      channel.push({ status: "ready", profile: state.active });
       channel.end();
       return channel.response;
     }

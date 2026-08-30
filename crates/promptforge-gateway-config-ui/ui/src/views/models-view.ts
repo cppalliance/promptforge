@@ -593,13 +593,18 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     header.append(nameLabel, nameInput, meta);
 
     // Provenance annotation [INVENTED]: no researched UI has
-    // include-chain inheritance; flagged per the plan.
+    // include-chain inheritance; flagged per the plan. The file name is
+    // the "Edit in <file>" link into the include drill-in editor.
     if (entry.inherited && entry.sourceFile) {
       const from = document.createElement("p");
       from.className = "field-from";
-      from.textContent = `from ${entry.sourceFile}`;
-      // The include-file drill-in lands with the include editor; until
-      // then the breadcrumb names the chain.
+      from.append("from ");
+      const edit = document.createElement("a");
+      edit.className = "field-from-edit";
+      edit.href = `#/profiles/include/${encodeURIComponent(entry.sourceFile)}`;
+      edit.textContent = entry.sourceFile;
+      edit.setAttribute("aria-label", `Edit in ${entry.sourceFile}`);
+      from.append(edit);
       from.title = `${store.activeProfile}.toml > ${entry.sourceFile}`;
       header.append(from);
     }
