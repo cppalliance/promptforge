@@ -10,7 +10,7 @@
 
 use std::num::NonZeroU32;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{LocalModelConfig, is_sha256_hex, validate::validate_http_url};
 use crate::error::ConfigError;
@@ -75,6 +75,15 @@ impl<'de> Deserialize<'de> for DraftTokenMax {
     }
 }
 
+impl Serialize for DraftTokenMax {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u32(self.get())
+    }
+}
+
 /// A draft-token maximum outside the supported range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
@@ -99,7 +108,7 @@ impl DraftTokenMaxError {
 /// Only `draft-mtp` (multi-token prediction) is supported initially. The
 /// serialized spelling matches the server's `--spec-type` vocabulary, so an
 /// unknown type fails at parse time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum SpeculationType {
@@ -144,7 +153,7 @@ pub enum SpeculationType {
 /// assert_eq!(speculative.sha256(), Some(digest));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct SpeculativeConfig {
@@ -232,7 +241,7 @@ impl SpeculativeConfig {
 /// assert_eq!(projector.sha256(), Some(digest));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct MultimodalProjectorConfig {
@@ -630,5 +639,14 @@ sha256 = "{DIGEST}"
         assert_eq!(DraftTokenMax::new(DraftTokenMax::MAX).unwrap().get(), 16);
         assert_eq!(DraftTokenMax::new(0).unwrap_err().value(), 0);
         assert_eq!(DraftTokenMax::new(17).unwrap_err().value(), 17);
+    }
+
+    #[test]
+    fn draft_token_max_serializes_as_a_plain_integer() {
+        let max = DraftTokenMax::new(7).unwrap();
+        let json = serde_json::to_value(max).unwrap();
+        assert_eq!(json, 7);
+        let back: DraftTokenMax = serde_json::from_value(json).unwrap();
+        assert_eq!(back, max);
     }
 }

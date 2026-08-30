@@ -464,4 +464,5 @@ fn unclosed_interpolation_is_an_error() {
     ));
 }
 
+mod serialize;
 mod validation;

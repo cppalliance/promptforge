@@ -12,7 +12,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Default sliding-window length for interim transcription, in seconds.
 /// Mirrors the workshop server's own default.
@@ -32,7 +32,7 @@ fn default_workshop_bind() -> SocketAddr {
 
 /// The `[workshop]` section: settings for the workshop UI server hosted by
 /// the gateway.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WorkshopConfig {
@@ -194,7 +194,7 @@ impl WorkshopConfig {
 /// The `[workshop.voice]` section: whisper model paths and the interim
 /// loop's window and cadence, mirroring the workshop server's own voice
 /// settings.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WorkshopVoiceConfig {
@@ -405,7 +405,7 @@ impl WorkshopVoiceConfig {
 
 /// The `[workshop.tape]` section: session tape settings, mirroring the
 /// workshop server's own tape settings.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WorkshopTapeConfig {
@@ -455,6 +455,7 @@ impl WorkshopTapeConfig {
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use super::WorkshopConfig;
     use crate::config::Config;
 
     /// A minimal valid `[server]` to prefix workshop fixtures with.
@@ -601,5 +602,28 @@ path = "session.jsonl"
                 .tape_path(Path::new("boot-dir")),
             PathBuf::from(&absolute)
         );
+    }
+
+    #[test]
+    fn workshop_config_round_trips_through_json() {
+        let config = parse(
+            r#"
+[workshop]
+bind = "127.0.0.1:7999"
+open_browser = true
+
+[workshop.voice]
+interim_model = "models/tiny.bin"
+window_seconds = 8
+vocabulary = ["MCP", "GGUF"]
+
+[workshop.tape]
+path = "session.jsonl"
+"#,
+        );
+        let workshop = config.workshop().expect("workshop section present");
+        let json = serde_json::to_value(workshop).expect("serializes");
+        let back: WorkshopConfig = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(workshop, &back);
     }
 }

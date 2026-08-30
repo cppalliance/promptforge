@@ -4054,6 +4054,7 @@ name = "promptforge-gateway-config"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.19",
  "toml",
