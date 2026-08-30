@@ -98,6 +98,14 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("cache entry not found: {0}")]
     CacheEntryNotFound(String),
+
+    /// `GET /admin/model-info` could not read or parse the named GGUF file.
+    /// Maps to 422 so the UI's fallback (plain layer readout) triggers
+    /// without looking like a server fault.
+    #[cfg(feature = "local")]
+    #[non_exhaustive]
+    #[error("model info unavailable")]
+    ModelInfo(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<crate::queue::AdmitError> for GatewayError {
@@ -161,6 +169,15 @@ impl GatewayError {
     #[must_use]
     pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> GatewayError {
         GatewayError::Cache(Box::new(source))
+    }
+
+    /// Wrap a model-info read or parse failure, preserving the cause.
+    #[cfg(feature = "local")]
+    #[must_use]
+    pub(crate) fn model_info(
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> GatewayError {
+        GatewayError::ModelInfo(Box::new(source))
     }
 
     /// Wrap a system-metrics sampling failure, preserving the cause.
@@ -240,6 +257,12 @@ impl GatewayError {
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
                 "cache_entry_not_found",
+            ),
+            #[cfg(feature = "local")]
+            GatewayError::ModelInfo(_) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_request_error",
+                "model_info_error",
             ),
         }
     }

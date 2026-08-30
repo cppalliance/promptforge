@@ -8,7 +8,7 @@
 //! [`Model`](promptforge_gateway_routing::Model). Dropping the runtime kills
 //! the children. The blob cache store behind the gateway's `/v1/cache` routes
 //! lives in [`cache`]; the artifact store and download machinery in
-//! [`artifacts`].
+//! [`artifacts`]; bounded GGUF header inspection in [`gguf`].
 //!
 //! Failures are reported as [`LocalError`]; an explicit teardown failure is
 //! reported as [`ShutdownError`](promptforge_gateway_protocol::ShutdownError).
@@ -19,6 +19,7 @@ pub mod artifacts;
 pub mod cache;
 mod dialect;
 mod error;
+pub mod gguf;
 #[cfg(llama_cuda_embedded)]
 mod llama_cuda_bundle;
 mod runtime;

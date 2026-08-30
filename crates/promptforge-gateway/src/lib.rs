@@ -25,6 +25,8 @@
 //! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, a
 //! bearer-authed `GET /admin/orphans` listing of cache files no loaded
 //! `[[local_model]]` entry references (local builds), a bearer-authed
+//! `GET /admin/model-info` GGUF-header readout of a cache file's layer and
+//! parameter counts (local builds), a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
 //! metrics, and
 //! `GET /health`. In-process
@@ -36,11 +38,15 @@ mod cache;
 mod dialect;
 mod error;
 #[cfg(feature = "local")]
+mod model_info;
+#[cfg(feature = "local")]
 mod orphans;
 mod render;
 mod routing;
 mod runner;
 mod system;
+#[cfg(test)]
+mod test_support;
 mod workshop;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
@@ -233,6 +239,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
     #[cfg(feature = "local")]
     let router = router
         .route("/admin/orphans", get(orphans::admin_orphans))
+        .route("/admin/model-info", get(model_info::admin_model_info))
         .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
         .route("/v1/cache/{sha256}", delete(cache::delete_cache));
     router.with_state(state)
