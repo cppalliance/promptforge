@@ -128,6 +128,15 @@ pub enum LocalError {
         path: PathBuf,
     },
 
+    /// A GGUF file's header could not be parsed.
+    #[error("malformed GGUF `{path}`: {reason}")]
+    MalformedGguf {
+        /// The offending file.
+        path: PathBuf,
+        /// Why the header was rejected.
+        reason: String,
+    },
+
     /// The cache root could not be made owner-private (ART-006).
     ///
     /// Enforced on every platform: a Unix filesystem mode (`0700`) or a Windows
