@@ -106,5 +106,7 @@
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its
-# request/response shapes, and the revoke unit and route tests.
-"workspace.rs" = 1238
+# request/response shapes, and the revoke unit and route tests. Grew
+# again by the `exists` flag on `TreeEntry` (a granted root deleted from
+# disk lists as missing) and its listing tests.
+"workspace.rs" = 1272

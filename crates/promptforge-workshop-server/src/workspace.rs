@@ -151,6 +151,11 @@ pub(crate) struct TreeEntry {
     size: u64,
     /// Modification time in milliseconds since the Unix epoch.
     modified_ms: u64,
+    /// Whether the entry is currently on disk. Directory listings only
+    /// enumerate what exists, so their entries are always `true`; a
+    /// granted root deleted from disk lists as `false` so the panel can
+    /// flag it for cleanup.
+    exists: bool,
 }
 
 /// One level of a workspace directory tree.
@@ -380,6 +385,7 @@ impl Workspace {
                     kind: EntryKind::Directory,
                     size: 0,
                     modified_ms: metadata.as_ref().map_or(0, modified_ms),
+                    exists: metadata.is_some(),
                 }
             })
             .collect();
@@ -420,6 +426,7 @@ impl Workspace {
                     0
                 },
                 modified_ms: modified_ms(&metadata),
+                exists: true,
             });
         }
         entries.sort_by(|a, b| {
@@ -1006,6 +1013,10 @@ mod tests {
         assert_eq!(names, ["alpha", "zeta", "a.txt", "b.txt"]);
         assert_eq!(listing.entries[0].kind, EntryKind::Directory);
         assert_eq!(listing.entries[3].kind, EntryKind::File);
+        assert!(
+            listing.entries.iter().all(|entry| entry.exists),
+            "an enumerated directory entry is on disk by construction"
+        );
     }
 
     #[test]
@@ -1022,6 +1033,29 @@ mod tests {
             root.file_name().expect("leaf").to_string_lossy()
         );
         assert_eq!(listing.entries[0].kind, EntryKind::Directory);
+        assert!(listing.entries[0].exists, "a live root lists as existing");
+    }
+
+    #[test]
+    fn the_roots_listing_flags_a_deleted_root_as_missing() {
+        let workspace = Workspace::new();
+        let kept = tempfile::TempDir::new().expect("tempdir");
+        let doomed = tempfile::TempDir::new().expect("tempdir");
+        let kept_root = workspace.grant(kept.path()).expect("grant the kept root");
+        let doomed_root = workspace
+            .grant(doomed.path())
+            .expect("grant the doomed root");
+        doomed.close().expect("delete the doomed directory");
+        let listing = workspace.tree(None).expect("roots listing");
+        assert_eq!(listing.entries.len(), 2);
+        for entry in &listing.entries {
+            if entry.path == doomed_root {
+                assert!(!entry.exists, "the deleted root must list as missing");
+            } else {
+                assert_eq!(entry.path, kept_root);
+                assert!(entry.exists, "the live root must list as existing");
+            }
+        }
     }
 
     #[test]

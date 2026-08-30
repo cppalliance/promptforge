@@ -13,6 +13,8 @@ export interface TreeEntry {
   readonly size: number;
   /** Modification time in milliseconds since the Unix epoch. */
   readonly modifiedMs: number;
+  /** False only for a granted root that no longer exists on disk. */
+  readonly exists: boolean;
 }
 
 /** One level of a workspace directory tree. */
@@ -53,7 +55,7 @@ function parseEntry(value: unknown): TreeEntry | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { name, path, kind, size, modified_ms } = value;
+  const { name, path, kind, size, modified_ms, exists } = value;
   if (typeof name !== "string" || typeof path !== "string") {
     return null;
   }
@@ -63,7 +65,10 @@ function parseEntry(value: unknown): TreeEntry | null {
   if (typeof size !== "number" || typeof modified_ms !== "number") {
     return null;
   }
-  return { name, path, kind, size, modifiedMs: modified_ms };
+  if (typeof exists !== "boolean") {
+    return null;
+  }
+  return { name, path, kind, size, modifiedMs: modified_ms, exists };
 }
 
 function parseListing(body: unknown): TreeListing | null {
@@ -113,6 +118,24 @@ export async function fetchTree(path: string | null): Promise<TreeListing> {
     throw new Error(`GET ${route} returned an unexpected shape`);
   }
   return listing;
+}
+
+/**
+ * Removes a granted root by its listed path. The server refuses unknown
+ * roots with a 404; a root deleted from disk stays revocable. Throws on
+ * transport and HTTP failures.
+ */
+export async function revokeRoot(path: string): Promise<void> {
+  const route = "/workspace/revoke";
+  const response = await fetch(route, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  const body: unknown = await response.json();
+  if (!response.ok) {
+    throw new Error(errorMessage(body, response.status, `POST ${route}`));
+  }
 }
 
 function parseFile(body: unknown): WorkspaceFile | null {

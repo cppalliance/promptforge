@@ -24,6 +24,9 @@ source comes from the git repository rather than the tarball.
   constants are now serialized from the `lucide` package at module load.
   The exported names and string-valued API are unchanged; every other
   vendored file is untouched.
+- `utils/icons.ts` extended (2026-08-30): two additive exports,
+  `ICON_TRASH_2` and `ICON_FOLDER_PLUS`, for the workshop tree's
+  workspace context menu. The upstream exports are untouched.
 - No other import or code changes: relative imports are extensionless,
   which esbuild resolves natively, and the runtime dependencies `marked`
   and `lucide` are workspace npm dependencies.

@@ -10,8 +10,17 @@ import { Disposable } from "../../base/lifecycle";
 import { ChatPanel } from "./chat-panel";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
-import { WorkshopTreePanel } from "./workshop-panel";
+import { WorkshopTreePanel, type TreeStatusSink } from "./workshop-panel";
 import type { ZoneName } from "./zones";
+
+/**
+ * The composition-root services a panel factory may consume. main.ts
+ * passes them through Dockview's createComponent seam, since panel
+ * params hold only serializable identity.
+ */
+export interface PanelServices {
+  readonly statusBar: TreeStatusSink;
+}
 
 /** One panel kind's static registration. */
 export interface PanelTypeEntry {
@@ -21,7 +30,7 @@ export interface PanelTypeEntry {
   readonly title: string;
   /** The named tab renderer, or undefined for Dockview's default tab. */
   readonly tabComponent: string | undefined;
-  readonly factory: () => IContentRenderer;
+  readonly factory: (services?: PanelServices) => IContentRenderer;
 }
 
 /** The registered name of the close-button-free tab renderer. */
@@ -35,7 +44,8 @@ export const PANEL_TYPES = {
     // The Workshop tree anchors the workbench; its tab has no close
     // button, so the panel cannot be dismissed from the tab strip.
     tabComponent: PERMANENT_TAB,
-    factory: (): IContentRenderer => new WorkshopTreePanel(),
+    factory: (services?: PanelServices): IContentRenderer =>
+      new WorkshopTreePanel(services?.statusBar ?? null),
   },
   editor: {
     type: "editor",
@@ -73,9 +83,12 @@ export function isPanelType(name: string): name is PanelType {
  * through openInZone with a registered type - but an unknown name must not
  * break the dock, so it renders a labelled placeholder instead of throwing.
  */
-export function createPanelComponent(options: CreateComponentOptions): IContentRenderer {
+export function createPanelComponent(
+  options: CreateComponentOptions,
+  services?: PanelServices,
+): IContentRenderer {
   if (isPanelType(options.name)) {
-    return PANEL_TYPES[options.name].factory();
+    return PANEL_TYPES[options.name].factory(services);
   }
   const element = document.createElement("div");
   element.className = "panel-unknown";
