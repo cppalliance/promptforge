@@ -306,13 +306,18 @@ export class ConfigStore {
 
   /**
    * The full `PUT /admin/config` payload base: the pending view stripped
-   * of provenance. Callers mutate it and pass it to `savePayload`.
-   * Untouched secrets are still the `"***"` the gateway sent, so the
-   * gateway preserves them.
+   * of provenance and of the boot-owned sections. Callers mutate it and
+   * pass it to `savePayload`. Untouched secrets are still the `"***"`
+   * the gateway sent, so the gateway preserves them.
    */
   buildConfigPayload(): EntryData {
     const payload = structuredClone(this.pending);
     delete payload["source_files"];
+    // The boot-owned sections live in gateway.toml, which the profile
+    // reaches through its include chain; baking them into the leaf
+    // shadow would freeze stale copies the runner later rejects.
+    delete payload["server"];
+    delete payload["workshop"];
     for (const [array] of KEYED_ARRAYS) {
       for (const item of this.entriesOf(payload, array)) {
         delete item["source_file"];

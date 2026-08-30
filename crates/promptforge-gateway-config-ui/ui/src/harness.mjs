@@ -449,7 +449,17 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/config")) {
       if ((init.method ?? "GET") === "PUT") {
-        state.pending = JSON.parse(init.body);
+        const body = JSON.parse(init.body);
+        // The gateway grafts the leaf's include line onto a candidate
+        // that lacks one, so the chain keeps visiting the boot file:
+        // boot-owned sections the body omits survive in the pending
+        // view (staged boot edits included).
+        for (const section of ["server", "workshop"]) {
+          if (!(section in body) && section in state.pending) {
+            body[section] = structuredClone(state.pending[section]);
+          }
+        }
+        state.pending = body;
         redactSecrets(state.pending);
         state.dirty = dirtyAfterSave ?? {
           dirty: true,

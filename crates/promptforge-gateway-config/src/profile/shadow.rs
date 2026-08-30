@@ -18,6 +18,13 @@
 //! leaf equal to `"***"` (the redaction marker `Config::to_json` emits)
 //! is replaced with the existing value from the current pending state
 //! before validation and write.
+//!
+//! The include chain round-trips the same way: `Config::to_json` never
+//! emits the `include` array, so a candidate that carries no `include`
+//! key inherits the target file's current one (existing shadow first,
+//! then the real file) before validation and write. A save can therefore
+//! never sever the chain by accident; only a candidate that spells out
+//! `include` (even an empty array) changes it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -184,11 +191,15 @@ fn promote_shadow_repr(target: &Path) -> Result<(), Repr> {
 /// `GET /admin/config` returns, secrets as `"***"`). Redacted secrets are
 /// restored from the current pending state - the include chain resolved
 /// with existing shadows preferred - so the winning definition's secret is
-/// preserved wherever in the chain it lives. The candidate then passes the
-/// same merge-and-validate pass as a real profile load (its own `include`
-/// array drives the resolution), and only a valid result is written to
-/// `<leaf>.toml.next`. The real files are never touched and nothing is
-/// reloaded.
+/// preserved wherever in the chain it lives. A candidate without an
+/// `include` key inherits the leaf's current one (existing shadow first,
+/// then the real file), so a round-tripped `GET /admin/config` body -
+/// which never carries `include` - can not sever the include chain; a
+/// candidate that spells out `include` (even an empty array) keeps it.
+/// The candidate then passes the same merge-and-validate pass as a real
+/// profile load (its `include` array drives the resolution), and only a
+/// valid result is written to `<leaf>.toml.next`. The real files are
+/// never touched and nothing is reloaded.
 ///
 /// # Errors
 /// Returns a [`ConfigError`](crate::ConfigError) when a redacted secret has
@@ -220,6 +231,8 @@ pub fn save_profile_shadow(leaf: &Path, document: Value) -> Result<PathBuf, crat
 
 /// The crate-internal form of [`save_profile_shadow`].
 fn save_profile_shadow_repr(leaf: &Path, mut document: Value) -> Result<PathBuf, Repr> {
+    let current_leaf = current_file_doc(leaf)?;
+    graft_include(&mut document, current_leaf.as_ref());
     // The restore source is the merged pending view: the body is the merged
     // config, so an inherited entry's secret lives in whichever chain file
     // (or shadow) currently defines it.
@@ -236,6 +249,10 @@ fn save_profile_shadow_repr(leaf: &Path, mut document: Value) -> Result<PathBuf,
 /// Unlike [`save_profile_shadow`], the candidate is that single file's
 /// content, so redacted secrets are restored from the target's own current
 /// state (its existing shadow when one exists, otherwise the real file).
+/// A candidate without an `include` key inherits the target's current one
+/// from the same source, so a round-tripped body can not sever the
+/// target's own include chain; a candidate that spells out `include`
+/// (even an empty array) keeps it.
 /// Validation still covers the whole pending configuration: the chain is
 /// resolved from `leaf` with shadows preferred and the candidate standing
 /// in for `target`, and the merged result must validate before
@@ -289,6 +306,7 @@ fn save_include_shadow_repr(
     mut document: Value,
 ) -> Result<PathBuf, Repr> {
     let current = current_file_doc(target)?;
+    graft_include(&mut document, current.as_ref());
     restore_secrets(&mut document, current.as_ref())?;
     let read = shadow_reader(Some((target, &document)));
     let (merged, chain, _provenance) = collect_config_chain_with(leaf, &read)?;
@@ -308,7 +326,10 @@ fn save_include_shadow_repr(
 /// (`gateway.toml.next`).
 ///
 /// Redacted secrets are restored from the boot file's own current state
-/// (existing shadow first, then the real file). The candidate must carry
+/// (existing shadow first, then the real file), and a candidate without
+/// an `include` key inherits the boot file's current one from the same
+/// source, so a boot-sections-only body can not sever the boot file's
+/// own include chain. The candidate must carry
 /// the boot-owned sections: after resolving its own includes (shadows
 /// preferred) and interpolating, a `[server]` section must be present and
 /// well-formed and any `[workshop]` section must deserialize. When `leaf`
@@ -358,6 +379,7 @@ fn save_boot_shadow_repr(
     mut document: Value,
 ) -> Result<PathBuf, Repr> {
     let current = current_file_doc(boot)?;
+    graft_include(&mut document, current.as_ref());
     restore_secrets(&mut document, current.as_ref())?;
     // The boot file is the catalog and may legitimately fail full profile
     // validation, so the gate on the candidate itself is the boot-owned
@@ -531,6 +553,24 @@ fn current_file_doc(target: &Path) -> Result<Option<Value>, Repr> {
         return read_doc_from_disk(target).map(Some);
     }
     Ok(None)
+}
+
+/// Grafts `current`'s `include` array onto a candidate that carries no
+/// `include` key of its own. `Config::to_json` never emits `include`, so
+/// a round-tripped save body would otherwise replace the target file with
+/// a chainless copy - severing inheritance and baking inherited entries
+/// flat into the shadow. A candidate that spells out `include` (even an
+/// empty array) keeps it: removing the chain must be deliberate.
+fn graft_include(candidate: &mut Value, current: Option<&Value>) {
+    let Value::Table(table) = candidate else {
+        return;
+    };
+    if table.contains_key("include") {
+        return;
+    }
+    if let Some(include) = current.and_then(|value| value.get("include")) {
+        table.insert("include".to_owned(), include.clone());
+    }
 }
 
 /// Resolves the chain from `leaf` with shadows preferred and `candidate`
@@ -947,6 +987,177 @@ endpoints = ["e"]
         assert!(
             error.to_string().contains("old"),
             "the real file's endpoint is shadowed out: {error}"
+        );
+    }
+
+    #[test]
+    fn a_candidate_without_include_grafts_the_current_include_chain() {
+        // A round-tripped GET /admin/config body never carries `include`,
+        // so without the graft this save would replace the leaf with a
+        // chainless copy: validation would lose common.toml's endpoint
+        // and inherited entries would bake flat into the leaf shadow.
+        let temp = tempfile::TempDir::new().unwrap();
+        write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let chainless = CHAIN_LEAF.replace("include = ['common.toml']\n", "");
+        let shadow = save_profile_shadow(&leaf, parse(&chainless))
+            .expect("the graft keeps common.toml in the chain, so the merge validates");
+
+        let written = parse(&fs::read_to_string(&shadow).unwrap());
+        assert_eq!(
+            written["include"],
+            parse("include = ['common.toml']")["include"],
+            "the shadow still carries the leaf's include line"
+        );
+        let json = load_pending_profile(&leaf).unwrap().to_json();
+        let endpoint_source = json["endpoint"][0]["source_file"]
+            .as_str()
+            .expect("a source_file annotation");
+        assert!(
+            endpoint_source.ends_with("common.toml"),
+            "the inherited endpoint stays in the parent, not baked into the leaf: {endpoint_source}"
+        );
+    }
+
+    #[test]
+    fn a_candidate_with_an_explicit_include_keeps_it() {
+        // The include editor sends `include` deliberately; the graft must
+        // never override an explicit value, an empty array included.
+        let temp = tempfile::TempDir::new().unwrap();
+        write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        write(
+            temp.path(),
+            "common2.toml",
+            &common_body("http://127.0.0.1:10"),
+        );
+        let leaf = write(temp.path(), "main.toml", CHAIN_LEAF);
+
+        let repointed = CHAIN_LEAF.replace("'common.toml'", "'common2.toml'");
+        let shadow = save_profile_shadow(&leaf, parse(&repointed)).unwrap();
+        let written = parse(&fs::read_to_string(&shadow).unwrap());
+        assert_eq!(
+            written["include"],
+            parse("include = ['common2.toml']")["include"],
+            "an explicit include repoints the chain"
+        );
+
+        let severed = format!("include = []\n{LEAF}");
+        let shadow = save_profile_shadow(&leaf, parse(&severed)).unwrap();
+        let written = parse(&fs::read_to_string(&shadow).unwrap());
+        assert_eq!(
+            written["include"],
+            parse("include = []")["include"],
+            "an explicit empty include severs the chain deliberately"
+        );
+    }
+
+    #[test]
+    fn a_profile_save_keeps_a_staged_boot_edit_in_the_pending_view() {
+        // The step-18 scenario: a [server] edit staged in gateway.toml.next
+        // must survive a round-tripped profile save. Without the graft the
+        // leaf shadow drops its include line, the chain stops visiting the
+        // boot file, and the staged edit vanishes from the pending view.
+        let temp = tempfile::TempDir::new().unwrap();
+        let boot = write(
+            temp.path(),
+            "gateway.toml",
+            "[server]\nbind = '127.0.0.1:0'\napi_key = 'boot-key'\n",
+        );
+        let leaf_body = "include = ['gateway.toml']\n\n\
+             [[endpoint]]\nid = 'e'\nprotocol = 'openai'\n\
+             base_url = 'http://127.0.0.1:9'\napi_key = ''\n\n\
+             [[model]]\nname = 'm'\ndescription = 'p'\ncontext = 1\n\
+             upstream = 'u'\nendpoints = ['e']\n";
+        let leaf = write(temp.path(), "default.toml", leaf_body);
+
+        save_boot_shadow(
+            &boot,
+            Some(&leaf),
+            parse("[server]\nbind = '127.0.0.1:1'\napi_key = 'boot-key'\n"),
+        )
+        .unwrap();
+
+        // What the UI sends after its fix: the merged view minus the
+        // boot-owned sections, with no include line.
+        let candidate = parse(
+            "[[endpoint]]\nid = 'e'\nprotocol = 'openai'\n\
+             base_url = 'http://127.0.0.1:9'\napi_key = ''\n\n\
+             [[model]]\nname = 'm'\ndescription = 'p'\ncontext = 1\n\
+             upstream = 'u'\nendpoints = ['e']\n",
+        );
+        save_profile_shadow(&leaf, candidate).unwrap();
+
+        let json = load_pending_profile(&leaf).unwrap().to_json();
+        assert_eq!(
+            json["server"]["bind"], "127.0.0.1:1",
+            "the staged boot edit still reaches the pending profile view"
+        );
+    }
+
+    #[test]
+    fn an_include_candidate_without_include_keeps_its_own_chain() {
+        // An include file can itself include; a round-tripped save of that
+        // file must not sever its chain either.
+        let temp = tempfile::TempDir::new().unwrap();
+        write(
+            temp.path(),
+            "common.toml",
+            &common_body("http://127.0.0.1:9"),
+        );
+        let mid = write(
+            temp.path(),
+            "mid.toml",
+            "include = ['common.toml']\n\n[local]\ncache_dir = 'a'\n",
+        );
+        let leaf_body = CHAIN_LEAF.replace("'common.toml'", "'mid.toml'");
+        let leaf = write(temp.path(), "main.toml", &leaf_body);
+
+        let candidate = parse("[local]\ncache_dir = 'b'\n");
+        let shadow = save_include_shadow(&leaf, &mid, candidate)
+            .expect("the graft keeps common.toml reachable, so the merge validates");
+        let written = parse(&fs::read_to_string(&shadow).unwrap());
+        assert_eq!(
+            written["include"],
+            parse("include = ['common.toml']")["include"],
+            "the include file's own chain survives the round-trip"
+        );
+        assert_eq!(written["local"]["cache_dir"].as_str(), Some("b"));
+    }
+
+    #[test]
+    fn a_boot_candidate_without_include_keeps_the_boot_include_line() {
+        // buildBootPayload carries only the boot-owned sections; a boot
+        // file with its own includes must not lose them to that save.
+        let temp = tempfile::TempDir::new().unwrap();
+        write(temp.path(), "extra.toml", "[local]\ncache_dir = 'x'\n");
+        let boot = write(
+            temp.path(),
+            "gateway.toml",
+            "include = ['extra.toml']\n\n\
+             [server]\nbind = '127.0.0.1:0'\napi_key = 'boot-key'\n",
+        );
+
+        let candidate = parse("[server]\nbind = '127.0.0.1:1'\napi_key = '***'\n");
+        let shadow = save_boot_shadow(&boot, None, candidate).unwrap();
+        let written = parse(&fs::read_to_string(&shadow).unwrap());
+        assert_eq!(
+            written["include"],
+            parse("include = ['extra.toml']")["include"],
+            "the boot file's include line survives a boot-sections-only save"
+        );
+        assert_eq!(
+            written["server"]["api_key"].as_str(),
+            Some("boot-key"),
+            "secret restoration still works alongside the graft"
         );
     }
 

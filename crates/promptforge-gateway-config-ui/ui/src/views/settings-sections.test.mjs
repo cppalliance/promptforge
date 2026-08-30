@@ -5,8 +5,10 @@
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
 // focused draft), endpoint cards (Change-reveal secret, remote-only
 // dominion options), the Storage save, the Tools Enable flow, the
-// restart banner after a boot-scoped apply, and that a store
-// notification on another route cannot hand the pane back to Settings.
+// restart banner after a boot-scoped apply, that a store notification
+// on another route cannot hand the pane back to Settings, and that a
+// profile save carries no boot-owned sections and never erases a
+// staged boot edit.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -268,6 +270,74 @@ test("a Storage save PUTs the profile shadow with the new cache_dir", async () =
   assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
   assert.equal(bodies[0].local.cache_dir, "D:/pf-cache");
   assert.equal(bodies[0].dominion.length, 1, "the keyed arrays ride through the payload");
+});
+
+test("a profile save payload carries no boot-owned sections", async () => {
+  // [server] and [workshop] are boot-scoped: baked into a profile leaf
+  // they sever the include chain's boot sections and the runner later
+  // rejects the profile against the real boot file.
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/system");
+  await settle();
+  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/pf-cache");
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+
+  const bodies = putBodies(stub, "/admin/config");
+  assert.equal(bodies.length, 1);
+  assert.ok(!("server" in bodies[0]), "the profile payload never carries [server]");
+  assert.ok(!("workshop" in bodies[0]), "the profile payload never carries [workshop]");
+});
+
+test("a profile save does not erase a staged boot edit from the pending view", async () => {
+  // The step-18 scenario: stage a [server] edit, then save a profile
+  // section; the pending view must keep the staged bind, and a later
+  // boot-scoped save must carry it instead of a stale copy.
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  changeValue(dom, root.querySelector(".field-row[data-key='bind'] input"), "0.0.0.0:9999");
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+
+  navigate(dom, "#/settings/system");
+  await settle();
+  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/pf-cache");
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+
+  assert.equal(
+    stub.state.pending.server.bind,
+    "0.0.0.0:9999",
+    "the staged boot edit survives the profile save in the pending view",
+  );
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  assert.equal(
+    root.querySelector(".field-row[data-key='bind'] input").value,
+    "0.0.0.0:9999",
+    "the Gateway card still renders the staged bind",
+  );
+
+  navigate(dom, "#/settings/workshop");
+  await settle();
+  root.querySelector(".workshop-enable").click();
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+  const bootBodies = putBodies(stub, "/admin/boot-config");
+  assert.equal(
+    bootBodies[bootBodies.length - 1].server.bind,
+    "0.0.0.0:9999",
+    "a Workshop-only save carries the staged [server] edit, not a stale copy",
+  );
 });
 
 test("an endpoint's api_key stays *** through a save and Change reveals the input", async () => {
