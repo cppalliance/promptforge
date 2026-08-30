@@ -17,8 +17,9 @@ use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::{FileStore, StoreRef};
-use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
+use promptforge_tool_picker::{Config as PickerConfig, Model, ToolPicker};
 
+use crate::progress::SetupProgress;
 use crate::tools::{self, Gateway, Remote};
 
 /// The `promptforge` command-line interface.
@@ -151,9 +152,8 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
         .with_context(|| format!("parse prompt file {}", file.display()))?;
 
     let available = tools::available_tools(&gateway).context("assemble the CLI tool set")?;
-    let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
-        .context("build the tool picker")?;
 
+    let progress = SetupProgress::new();
     let models = match &gateway {
         Gateway::Remote(remote) => fetch_model_catalog(remote.endpoint(), remote.token())
             .await
@@ -162,6 +162,14 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
         #[cfg(test)]
         Gateway::Disabled => ModelCatalog::empty(),
     };
+    progress.catalog.complete();
+
+    let model = Model::load_with_progress(Some(&progress.model))
+        .context("load the tool embedding model")?;
+    let picker = build_picker(available.catalog().clone(), &model, &progress)?;
+    // Setup is done: detach the tree and stop the renderer before the run's
+    // own output begins.
+    drop(progress);
 
     let store = match store_dir {
         Some(dir) => {
@@ -185,6 +193,22 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
     )
     .await?;
     Ok(output)
+}
+
+/// Builds the semantic picker over `catalog` with an already loaded `model`,
+/// reporting one tool-count step per embedded tool through `progress`.
+fn build_picker(
+    catalog: promptforge_tool_picker::Catalog,
+    model: &Model,
+    progress: &SetupProgress,
+) -> Result<ToolPicker> {
+    ToolPicker::build_with_model(
+        model,
+        catalog,
+        PickerConfig::default(),
+        Some(&progress.tools),
+    )
+    .context("build the tool picker")
 }
 
 /// Installs a disabled gateway client for the test-only [`Gateway::Disabled`]
@@ -212,7 +236,10 @@ mod tests {
     use promptforge_core::CancelHandle;
     use promptforge_core::observe::{Observation, Observer};
 
-    use super::{Cli, Command, Gateway, RunRequest, gateway_from_parts, run_with_gateway};
+    use super::{
+        Cli, Command, Gateway, RunRequest, build_picker, gateway_from_parts, run_with_gateway,
+    };
+    use crate::progress::SetupProgress;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
@@ -425,6 +452,27 @@ mod tests {
         assert!(
             format!("{error:?}").contains("read prompt file"),
             "error must carry read context for a non-UTF-8 path: {error:?}",
+        );
+    }
+
+    #[test]
+    #[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+    fn setup_progress_reaches_completion_after_a_real_build() {
+        let available =
+            super::tools::available_tools(&Gateway::LocalOnly).expect("local tools build");
+        let progress = SetupProgress::new();
+        let model = promptforge_tool_picker::Model::load_with_progress(Some(&progress.model))
+            .expect("the compiled-in model loads");
+        build_picker(available.catalog().clone(), &model, &progress)
+            .expect("the picker builds over the local catalog");
+        progress.catalog.complete();
+
+        assert_eq!(progress.model.fraction(), 1.0, "the model leaf must finish");
+        assert_eq!(progress.tools.fraction(), 1.0, "the tools leaf must finish");
+        assert_eq!(
+            progress.fraction(),
+            1.0,
+            "every setup leaf must report completion"
         );
     }
 

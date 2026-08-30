@@ -20,7 +20,10 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }
 fastrand.workspace = true
+# TTY progress bars drawn while the tool set and model catalog load.
+indicatif.workspace = true
 promptforge-core.workspace = true
+promptforge-progress.workspace = true
 promptforge-tools.workspace = true
 promptforge-web-search.workspace = true
 promptforge-webfetch.workspace = true
