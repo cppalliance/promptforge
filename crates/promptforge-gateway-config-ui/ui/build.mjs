@@ -4,7 +4,7 @@
 // fast iteration workflow (`npm run watch` rebuilds on save without a Rust
 // recompile) and for packaging: `node build.mjs --package` builds minified
 // and writes the dist/manifest.json that release builds verify and embed.
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -13,6 +13,20 @@ import { writeManifest } from "./manifest.mjs";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
 const srcDir = path.join(uiDir, "src");
+
+// The crate version (workspace [workspace.package] version), baked into the
+// bundle as __APP_VERSION__ for the Settings > About panel. A missing or
+// unparsable workspace manifest falls back to the source's "dev" default.
+async function crateVersion() {
+  try {
+    const manifest = await readFile(path.join(uiDir, "..", "..", "..", "Cargo.toml"), "utf8");
+    return /^version\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const version = await crateVersion();
 
 // Mirrored in ../build/manifest.rs.
 const STATIC_FILES = ["index.html", "icons/promptforge-icon-1.png"];
@@ -28,6 +42,7 @@ const options = {
   minify: packaging || process.argv.includes("--minify"),
   outfile: path.join(distDir, "app.js"),
   logLevel: "info",
+  ...(version !== null && { define: { __APP_VERSION__: JSON.stringify(version) } }),
 };
 
 // dist/ is rebuilt from scratch so removed assets never linger into the

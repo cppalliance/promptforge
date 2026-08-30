@@ -23,6 +23,7 @@ import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { createDiscoverView } from "./views/discover-view";
 import { createModelsView } from "./views/models-view";
+import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
 export { matchRoute } from "./router";
@@ -97,6 +98,16 @@ function mountStandaloneShell(
   const downloadStore = new DownloadStore(api);
   let applying = false;
 
+  // Restart banner [INVENTED]: raised when a boot-scoped apply promoted
+  // the boot shadow. The gateway cannot hot-reload its bind, so the
+  // banner persists for the rest of the session; a fresh load after the
+  // restart starts with no pending boot shadow and no banner. (The
+  // plan's /health boot-generation detection is simplified away.)
+  const restartBanner = document.createElement("div");
+  restartBanner.className = "banner banner-warning banner-restart";
+  restartBanner.hidden = true;
+  restartBanner.textContent = "Restart the gateway to apply these changes.";
+
   const runApply = async (): Promise<void> => {
     if (applying) {
       return;
@@ -106,6 +117,9 @@ function mountStandaloneShell(
     try {
       const outcome = await store.apply();
       overlay.finish();
+      if (outcome.restart_required) {
+        restartBanner.hidden = false;
+      }
       toasts.show(
         outcome.restart_required
           ? "Configuration applied - restart the gateway to finish"
@@ -203,10 +217,14 @@ function mountStandaloneShell(
   };
   const unsubscribeDownloads = downloadStore.subscribe(renderStrip);
 
-  const main = mountChrome(root, tabBar.element, [toasts.element], banner, strip);
+  const bannerBox = document.createElement("div");
+  bannerBox.className = "banner-stack";
+  bannerBox.append(restartBanner, banner);
+  const main = mountChrome(root, tabBar.element, [toasts.element], bannerBox, strip);
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
   const modelsView = createModelsView({ store, api, toasts });
+  const settingsView = createSettingsView({ store, api, toasts });
   const discoverView = createDiscoverView({
     api,
     hf: new HfApi(api),
@@ -221,6 +239,7 @@ function mountStandaloneShell(
     views: {
       models: (target, match) => modelsView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
+      settings: (target, match) => settingsView.mount(target, match.detail),
     },
   });
 

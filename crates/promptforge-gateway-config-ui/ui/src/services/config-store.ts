@@ -42,6 +42,20 @@ const KEYED_ARRAYS: ReadonlyArray<readonly [array: string, key: string]> = [
   ["local_model", "name"],
 ];
 
+/** One `[[dominion]]` or `[[endpoint]]` entry, with provenance and pending state. */
+export interface SectionEntry {
+  /** The entry's `id` key. */
+  id: string;
+  /** The pending view's values, provenance stripped. */
+  data: EntryData;
+  /** Base name of the file whose definition won the merge, when known. */
+  sourceFile: string | null;
+  /** Whether the winning definition came from an included parent file. */
+  inherited: boolean;
+  /** Field keys whose pending value differs from the running value. */
+  pendingFields: ReadonlySet<string>;
+}
+
 /** Reads a dot-path (`speculative.draft_max`) out of a JSON object. */
 export function readPath(data: EntryData, key: string): unknown {
   let value: unknown = data;
@@ -55,7 +69,7 @@ export function readPath(data: EntryData, key: string): unknown {
 }
 
 /** Writes a dot-path into a JSON object, creating intermediate objects. */
-function writePath(data: EntryData, key: string, value: unknown): void {
+export function writePath(data: EntryData, key: string, value: unknown): void {
   const parts = key.split(".");
   let target = data;
   for (const part of parts.slice(0, -1)) {
@@ -246,6 +260,99 @@ export class ConfigStore {
     }));
   }
 
+  /** A dot-path read of the pending view (`server.bind`, `tools.web_search`). */
+  sectionValue(path: string): unknown {
+    return readPath(this.pending, path);
+  }
+
+  /** A dot-path read of the running (applied) view. */
+  runningSectionValue(path: string): unknown {
+    return readPath(this.running, path);
+  }
+
+  /** The id-keyed entries of one Settings array, with provenance and pending state. */
+  keyedEntries(array: "dominion" | "endpoint"): SectionEntry[] {
+    const leaf = this.activeProfile ? `${this.activeProfile}.toml` : null;
+    const runningById = new Map(
+      this.entriesOf(this.running, array).map((entry) => [String(entry["id"] ?? ""), entry]),
+    );
+    return this.entriesOf(this.pending, array).map((raw) => {
+      const data = { ...raw };
+      const source = typeof data["source_file"] === "string" ? data["source_file"] : null;
+      delete data["source_file"];
+      const id = String(data["id"] ?? "");
+      const sourceFile = source ? baseName(source) : null;
+      const sourceReal = sourceFile?.replace(/\.next$/, "") ?? null;
+      return {
+        id,
+        data,
+        sourceFile: sourceReal,
+        inherited: sourceReal !== null && leaf !== null && sourceReal !== leaf,
+        pendingFields: this.diffFields(data, runningById.get(id)),
+      };
+    });
+  }
+
+  /** The `[[model]]` and `[[local_model]]` entries of the pending view (raw). */
+  modelEntriesRaw(): { array: "model" | "local_model"; data: EntryData }[] {
+    const rows: { array: "model" | "local_model"; data: EntryData }[] = [];
+    for (const array of ["model", "local_model"] as const) {
+      for (const data of this.entriesOf(this.pending, array)) {
+        rows.push({ array, data });
+      }
+    }
+    return rows;
+  }
+
+  /**
+   * The full `PUT /admin/config` payload base: the pending view stripped
+   * of provenance. Callers mutate it and pass it to `savePayload`.
+   * Untouched secrets are still the `"***"` the gateway sent, so the
+   * gateway preserves them.
+   */
+  buildConfigPayload(): EntryData {
+    const payload = structuredClone(this.pending);
+    delete payload["source_files"];
+    for (const [array] of KEYED_ARRAYS) {
+      for (const item of this.entriesOf(payload, array)) {
+        delete item["source_file"];
+      }
+    }
+    return payload;
+  }
+
+  /**
+   * The `PUT /admin/boot-config` payload base: the boot-owned sections
+   * (`[server]`, plus `[workshop]` when present) from the pending view,
+   * provenance stripped.
+   */
+  buildBootPayload(): EntryData {
+    const payload: EntryData = {};
+    const server = this.pending["server"];
+    if (server !== null && typeof server === "object") {
+      payload["server"] = structuredClone(server);
+    }
+    const workshop = this.pending["workshop"];
+    if (workshop !== null && typeof workshop === "object") {
+      payload["workshop"] = structuredClone(workshop);
+    }
+    return payload;
+  }
+
+  /** Stages a profile payload as the leaf shadow and refreshes. */
+  async savePayload(payload: EntryData): Promise<void> {
+    await this.api.putConfig(payload);
+    await this.refreshPending();
+    this.notify();
+  }
+
+  /** Stages a boot payload as the boot shadow and refreshes. */
+  async saveBootPayload(payload: EntryData): Promise<void> {
+    await this.api.putBootConfig(payload);
+    await this.refreshPending();
+    this.notify();
+  }
+
   /** The `[[endpoint]]` ids of the pending view. */
   endpointIds(): string[] {
     return this.entriesOf(this.pending, "endpoint").map((entry) => String(entry["id"] ?? ""));
@@ -362,13 +469,7 @@ export class ConfigStore {
    * still the `"***"` the gateway sent, so the gateway preserves them.
    */
   buildSavePayload(entry: ModelEntry, remove = false): EntryData {
-    const payload = structuredClone(this.pending);
-    delete payload["source_files"];
-    for (const [array] of KEYED_ARRAYS) {
-      for (const item of this.entriesOf(payload, array)) {
-        delete item["source_file"];
-      }
-    }
+    const payload = this.buildConfigPayload();
     const array = entry.kind === "local" ? "local_model" : "model";
     let items = this.entriesOf(payload, array);
     if (entry.draft) {
