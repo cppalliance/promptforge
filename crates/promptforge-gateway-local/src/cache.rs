@@ -10,17 +10,19 @@
 //! local model files - are not cache entries: they are neither listed nor
 //! treated as hits.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use promptforge_gateway_config::LocalModelConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::artifacts::{
     DownloadProgress, download_client, download_with_progress, enforce_private_cache_root,
-    ensure_cache_directory, filename_from_url, lock_artifact, parse_expected_digest, part_path,
-    remove_cache_entry, rename_confined, safe_relative_path, source_cache_key, validate_cache_path,
-    write_synced,
+    ensure_cache_directory, expand_tilde, filename_from_url, lock_artifact, looks_like_url,
+    parse_expected_digest, part_path, remove_cache_entry, rename_confined, safe_relative_path,
+    source_cache_key, validate_cache_path, write_synced,
 };
 use crate::error::LocalError;
 
@@ -365,6 +367,180 @@ impl BlobCache {
     }
 }
 
+/// A file under the cache's `models/` tree that no loaded `[[local_model]]`
+/// entry references.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OrphanEntry {
+    /// Path relative to the cache root, `/`-separated on every platform.
+    pub path: String,
+    /// File length in bytes.
+    pub size_bytes: u64,
+    /// Lowercase hex SHA-256 recorded by the blob's cache sidecar, when one
+    /// exists. `None` for files the cache API never downloaded: blobs are
+    /// multi-gigabyte, so their bytes are never re-hashed to fill the field
+    /// (Amendment C).
+    pub sha256: Option<String>,
+}
+
+/// Store bookkeeping suffixes that are never orphans: cache sidecars,
+/// model-card sidecars, and staging files.
+const BOOKKEEPING_SUFFIXES: [&str; 3] = [META_SUFFIX, ".md", ".part"];
+
+/// The absolute path a `[[local_model]]` source occupies on disk: the
+/// provisioning cache slot (`models/<key>/<filename>`) for a URL source, the
+/// tilde-expanded path itself for a path source. `None` when the source
+/// cannot resolve (no home directory, no URL filename segment); such a
+/// source cannot name an on-disk file.
+fn configured_path(root: &Path, source: &str) -> Option<PathBuf> {
+    if looks_like_url(source) {
+        let name = filename_from_url(source).ok()?;
+        let key = source_cache_key(source);
+        Some(root.join("models").join(key).join(name))
+    } else {
+        expand_tilde(source).ok()
+    }
+}
+
+/// Lists files under `<root>/models/` that no entry of `models` references.
+///
+/// A model references its `source` plus the sources of its speculative and
+/// multimodal-projector companions; each resolves to the same on-disk path
+/// provisioning uses (a URL source to its cache slot, a path source to the
+/// tilde-expanded path). Comparison falls back to canonicalized paths, so a
+/// path source spelled with different case or separators still matches its
+/// file. Store bookkeeping (`.meta.json` cache sidecars, `.md` model-card
+/// sidecars, `.part` staging files) is never reported, and symlinked entries
+/// are skipped as in [`BlobCache::list`]. A missing `models/` directory
+/// yields an empty list. Entries sort by path for a stable response.
+///
+/// # Errors
+/// Returns [`LocalError::Io`] when the tree cannot be walked or a file
+/// cannot be inspected.
+pub fn orphans(root: &Path, models: &[LocalModelConfig]) -> Result<Vec<OrphanEntry>, LocalError> {
+    let mut configured = HashSet::new();
+    for model in models {
+        let mut sources = vec![model.source()];
+        if let Some(speculative) = model.speculative() {
+            sources.push(speculative.source());
+        }
+        if let Some(projector) = model.multimodal_projector() {
+            sources.push(projector.source());
+        }
+        for source in sources {
+            let Some(path) = configured_path(root, source) else {
+                continue;
+            };
+            if let Ok(canonical) = fs::canonicalize(&path) {
+                configured.insert(canonical);
+            }
+            configured.insert(path);
+        }
+    }
+
+    let models_dir = root.join("models");
+    let top = match fs::read_dir(&models_dir) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(LocalError::Io {
+                operation: "read cache models directory",
+                path: models_dir,
+                source,
+            });
+        }
+    };
+    let mut found = Vec::new();
+    let mut directories = Vec::new();
+    collect_orphans(
+        root,
+        &models_dir,
+        top,
+        &configured,
+        &mut directories,
+        &mut found,
+    )?;
+    while let Some(directory) = directories.pop() {
+        let entries = fs::read_dir(&directory).map_err(|source| LocalError::Io {
+            operation: "read cache models directory",
+            path: directory.clone(),
+            source,
+        })?;
+        collect_orphans(
+            root,
+            &directory,
+            entries,
+            &configured,
+            &mut directories,
+            &mut found,
+        )?;
+    }
+    found.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(found)
+}
+
+/// Feeds one directory's entries into the orphan scan: unreferenced files
+/// become entries of `found`, subdirectories queue on `directories` for a
+/// later pass, and symlinks are skipped.
+fn collect_orphans(
+    root: &Path,
+    directory: &Path,
+    entries: fs::ReadDir,
+    configured: &HashSet<PathBuf>,
+    directories: &mut Vec<PathBuf>,
+    found: &mut Vec<OrphanEntry>,
+) -> Result<(), LocalError> {
+    for entry in entries {
+        let entry = entry.map_err(|source| LocalError::Io {
+            operation: "read cache models entry",
+            path: directory.to_owned(),
+            source,
+        })?;
+        // `file_type` does not follow links, so a planted symlinked directory
+        // or blob is skipped rather than read through.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            directories.push(path);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if BOOKKEEPING_SUFFIXES
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
+        {
+            continue;
+        }
+        if configured.contains(&path)
+            || fs::canonicalize(&path).is_ok_and(|canonical| configured.contains(&canonical))
+        {
+            continue;
+        }
+        let size_bytes = entry
+            .metadata()
+            .map_err(|source| LocalError::Io {
+                operation: "stat cache models entry",
+                path: path.clone(),
+                source,
+            })?
+            .len();
+        let sha256 = read_meta(&path)?.map(|meta| meta.sha256);
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        found.push(OrphanEntry {
+            path: relative.to_string_lossy().replace('\\', "/"),
+            size_bytes,
+            sha256,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -687,5 +863,130 @@ mod tests {
             .expect_err("pin mismatch");
         assert!(matches!(error, LocalError::DigestMismatch { .. }));
         assert_eq!(server.requests(), 2, "the miss re-downloads");
+    }
+
+    #[test]
+    fn orphans_reports_only_unreferenced_files() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path();
+        let models = root.join("models");
+        fs::create_dir_all(&models).expect("mkdir models");
+
+        // Configured coverage: a URL source in its provisioning cache slot,
+        // a path source, and companion (speculative + projector) path
+        // sources. None of these may appear as orphans.
+        let url = "https://example.test/repo/pinned.gguf";
+        let slot = models.join(source_cache_key(url));
+        fs::create_dir_all(&slot).expect("mkdir slot");
+        fs::write(slot.join("pinned.gguf"), b"pinned-bytes").expect("write pinned");
+        let local = models.join("local.gguf");
+        let draft = models.join("draft.gguf");
+        let projector = models.join("mmproj.gguf");
+        fs::write(&local, b"local-bytes").expect("write local");
+        fs::write(&draft, b"draft-bytes").expect("write draft");
+        fs::write(&projector, b"mmproj-bytes").expect("write projector");
+        // A path source spelled through a redundant `..` component never
+        // equals the walked path component-wise, so only the canonicalize
+        // fallback can match it; this file turning up as an orphan means
+        // that fallback broke.
+        let variant = models.join("variant.gguf");
+        fs::write(&variant, b"variant-bytes").expect("write variant");
+        let variant_spelling = models.join("..").join("models").join("variant.gguf");
+
+        // Orphans: a bare top-level file, a slot-nested file with a cache
+        // sidecar (its digest is reused, never re-hashed), and a file whose
+        // corrupt sidecar downgrades to no digest.
+        fs::write(models.join("stray.gguf"), b"stray-bytes").expect("write stray");
+        let cached_body: &[u8] = b"cached-bytes";
+        let cached_slot = models.join("0123456789abcdef");
+        fs::create_dir_all(&cached_slot).expect("mkdir cached slot");
+        fs::write(cached_slot.join("cached.gguf"), cached_body).expect("write cached");
+        let cached_digest = hex_sha256(cached_body);
+        fs::write(
+            cached_slot.join("cached.gguf.meta.json"),
+            serde_json::json!({
+                "source": "http://seeded.example/cached.gguf",
+                "sha256": cached_digest,
+                "size_bytes": cached_body.len(),
+            })
+            .to_string(),
+        )
+        .expect("write cached sidecar");
+        fs::write(models.join("corrupt.gguf"), b"corrupt-body").expect("write corrupt");
+        fs::write(models.join("corrupt.gguf.meta.json"), b"not json").expect("corrupt sidecar");
+
+        // Bookkeeping noise that must never be listed: a model-card sidecar
+        // and a staging file.
+        fs::write(models.join("local.md"), b"card").expect("write card");
+        fs::write(models.join("stray.gguf.part"), b"partial").expect("write staging");
+
+        let config = promptforge_gateway_config::Config::from_toml_str(&format!(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "pinned"
+description = "a url-sourced model"
+source = "{url}"
+sha256 = "{pin}"
+context = 4096
+
+[[local_model]]
+name = "local"
+description = "a path-sourced model with companions"
+source = '{local}'
+context = 4096
+
+[local_model.speculative]
+type = "draft-mtp"
+source = '{draft}'
+draft_max = 2
+
+[local_model.multimodal_projector]
+source = '{projector}'
+
+[[local_model]]
+name = "variant"
+description = "a path-sourced model spelled through a redundant component"
+source = '{variant_spelling}'
+context = 4096
+"#,
+            pin = hex_sha256(b"pinned-bytes"),
+            local = local.display(),
+            draft = draft.display(),
+            projector = projector.display(),
+            variant_spelling = variant_spelling.display(),
+        ))
+        .expect("config");
+
+        let entries = orphans(root, config.local_models()).expect("orphans");
+        assert_eq!(
+            entries,
+            vec![
+                OrphanEntry {
+                    path: "models/0123456789abcdef/cached.gguf".to_owned(),
+                    size_bytes: cached_body.len() as u64,
+                    sha256: Some(cached_digest),
+                },
+                OrphanEntry {
+                    path: "models/corrupt.gguf".to_owned(),
+                    size_bytes: b"corrupt-body".len() as u64,
+                    sha256: None,
+                },
+                OrphanEntry {
+                    path: "models/stray.gguf".to_owned(),
+                    size_bytes: b"stray-bytes".len() as u64,
+                    sha256: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn orphans_without_a_models_directory_is_empty() {
+        let temp = TempDir::new().expect("tempdir");
+        assert_eq!(orphans(temp.path(), &[]).expect("orphans"), Vec::new());
     }
 }

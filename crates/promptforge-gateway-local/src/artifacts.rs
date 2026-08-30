@@ -532,7 +532,8 @@ pub(crate) fn lock_artifact(cache: &Path, artifact: &Path) -> Result<File> {
     Ok(lock)
 }
 
-fn looks_like_url(source: &str) -> bool {
+/// Whether a `[[local_model]]` source names a download rather than a path.
+pub(crate) fn looks_like_url(source: &str) -> bool {
     source.starts_with("https://") || source.starts_with("http://")
 }
 
@@ -570,7 +571,12 @@ pub fn filename_from_url(url: &str) -> Result<String> {
     Ok(name.to_owned())
 }
 
-fn expand_tilde(source: &str) -> Result<PathBuf> {
+/// Expands a leading `~` in a path source against the operator home.
+///
+/// # Errors
+/// Returns [`LocalError::MissingHome`] when the source needs a home directory
+/// and none is available.
+pub(crate) fn expand_tilde(source: &str) -> Result<PathBuf> {
     if let Some(rest) = source.strip_prefix("~/") {
         return Ok(default_home_checked()?.join(rest));
     }
