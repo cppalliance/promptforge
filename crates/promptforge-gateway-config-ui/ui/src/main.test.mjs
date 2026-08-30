@@ -1,7 +1,9 @@
 // Boots the bundled config UI (dist/index.html + dist/app.js) in jsdom
-// and asserts the placeholder shell renders - the same bundle-level
-// harness the workshop UI tests use. Run after `npm run build` (a debug
-// `cargo build` also produces dist/).
+// and asserts the live shell's first paint: standalone with no stored
+// key, the auto-boot on #app must land on the key prompt - medallion,
+// title, labeled password input, and submit button - without touching
+// the network. Run after `npm run build` (a debug `cargo build` also
+// produces dist/).
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,7 +13,7 @@ import { JSDOM } from "jsdom";
 
 const distDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
 
-test("booting the bundle renders the shell: tab bar, primary nav, title", async () => {
+test("booting the bundle without a stored key renders the key prompt", async () => {
   const html = await readFile(path.join(distDir, "index.html"), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:8081/config/" });
   // The bundle reads the globals, not window properties.
@@ -19,31 +21,29 @@ test("booting the bundle renders the shell: tab bar, primary nav, title", async 
   globalThis.document = dom.window.document;
   await import(pathToFileURL(path.join(distDir, "app.js")).href);
 
-  const title = dom.window.document.querySelector("#app main .shell-title");
-  assert.ok(title, "the shell title mounted inside <main> under #app");
-  assert.equal(title.textContent, "PromptForge Gateway Config");
+  const doc = dom.window.document;
+  const title = doc.querySelector("#app .key-prompt h1");
+  assert.ok(title, "the key prompt title mounted under #app");
+  assert.equal(title.textContent, "PromptForge Gateway");
 
-  const tabs = dom.window.document.querySelectorAll(
-    "#app header.tab-bar nav[aria-label='Primary'] a.tab",
-  );
-  assert.equal(tabs.length, 6, "the tab bar holds the six destinations");
-  const active = dom.window.document.querySelectorAll("#app .tab[aria-current='page']");
-  assert.equal(active.length, 1, "exactly one tab is marked current");
-  assert.equal(active[0].textContent, "Models");
+  const medallion = doc.querySelector("#app .key-prompt img");
+  assert.ok(medallion, "the medallion is on the card");
+  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon-1.png");
+  assert.equal(medallion.getAttribute("alt"), "", "the medallion is decorative");
+  assert.ok(medallion.getAttribute("width"), "the medallion reserves its width");
+  assert.ok(medallion.getAttribute("height"), "the medallion reserves its height");
 
-  const skip = dom.window.document.querySelector("#app > a.skip-link:first-child");
-  assert.ok(skip, "the skip link is the first element in the shell");
-  const main = dom.window.document.querySelector("#app > main#main");
-  assert.ok(main, "the main region carries the skip target id");
-  skip.click();
+  const label = doc.querySelector("#app label[for='gateway-api-key']");
+  assert.equal(label?.textContent, "API key", "the input has a real label");
+  const input = doc.querySelector("#app #gateway-api-key");
+  assert.equal(input?.getAttribute("type"), "password");
+
+  const submit = doc.querySelector("#app button[type='submit']");
+  assert.ok(submit, "the submit button is present");
+
   assert.equal(
-    dom.window.document.activeElement,
-    main,
-    "activating the skip link focuses the main region",
-  );
-  assert.equal(
-    dom.window.location.hash,
-    "",
-    "the skip jump never rewrites the route hash",
+    doc.querySelector("#app header.tab-bar"),
+    null,
+    "the shell stays unmounted until a key verifies",
   );
 });
