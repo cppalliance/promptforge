@@ -105,6 +105,16 @@ async fn speech_produces_generation_tagged_interim_and_final_frames() {
         ..VoiceConfig::default()
     };
     let server = TestServer::spawn_with_voice(NO_GATEWAY, voice);
+    // The engine load is deferred to the provisioning task, and a /voice
+    // session captures the engine at upgrade time, so the take must wait
+    // for the load's completion frame.
+    let mut status = JsonSocket::connect(&server.ws_url("/ws")).await;
+    status
+        .recv_until(Duration::from_secs(90), |frame| {
+            frame["type"] == "status" && frame["label"] == "Voice ready"
+        })
+        .await;
+    status.close().await;
     let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
     socket.send_text("start").await;
     assert_eq!(

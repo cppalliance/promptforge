@@ -25,11 +25,10 @@
 # the ceiling downward in the same commit to bank the gain.
 
 [modules]
-# Grew by the startup engine load's progress wiring: `startup_engine` and
-# `degrade` load through `load_engine`, which registers a one-leaf
-# operation tree on the hub for `VoiceEngine::new_with_progress`, plus the
-# tree-detach regression test.
-"app.rs" = 611
+# Shrank by the startup engine load's move to provision.rs: `AppState::new`
+# no longer loads whisper models, and `startup_engine`, `load_engine`, and
+# `degrade` are absorbed by the provisioning task.
+"app.rs" = 387
 "assets.rs" = 69
 "atomic.rs" = 230
 "backoff.rs" = 232
@@ -71,8 +70,13 @@
 # scripted-stream test pins the leaf fraction mid-download. Grew again by
 # the failure terminals (a failed attempt fails every leaf still open,
 # `cache_fetch` fails its leaf on its own error paths) and the null-total
-# hold, download-error, and tree-detach tests.
-"provision.rs" = 1082
+# hold, download-error, and tree-detach tests. Grew again by absorbing the
+# startup engine load: the first attempt fires immediately for local
+# models (`needs_fetch`), a never-resolvable config degrades through
+# `degrade_unresolvable`, and the startup degradation tests moved here.
+# Grew again by the garbage-local-model test pinning the no-wait gate and
+# the load-failure label.
+"provision.rs" = 1396
 "push.rs" = 274
 "relay.rs" = 537
 "routes.rs" = 8
