@@ -29,6 +29,8 @@
 //! state back, [`load_pending_profile`] loads the chain with shadows
 //! preferred (provenance names the `.next` files), and [`pending_report`]
 //! summarizes which files carry shadows and which sections they change.
+//! [`promote_shadow`] is the explicit apply step: one atomic rename makes
+//! the shadow the real file.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -59,6 +61,6 @@ pub use crate::config::{
 };
 pub use crate::profile::{
     PendingReport, ProfileName, ProfileNameError, list_profiles, load_boot_sections,
-    load_pending_profile, load_server, load_workshop, pending_report, save_boot_shadow,
-    save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
+    load_pending_profile, load_server, load_workshop, pending_report, promote_shadow,
+    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
 };

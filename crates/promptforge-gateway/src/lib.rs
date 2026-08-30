@@ -39,13 +39,18 @@
 //! merged real-plus-shadow view in the `GET /admin/config` shape, with a
 //! distinct boot side for the restart-required banner) and
 //! `GET /admin/config-dirty` (shadow existence, pending files, changed
-//! sections) - and
+//! sections) - bearer-authed `POST /admin/config-apply` (promote every
+//! shadow to its real file, then reload the active profile, or report
+//! restart-required for a promoted boot shadow) and
+//! `POST /admin/config-revert` (delete every shadow, touching nothing
+//! else), and
 //! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
 #[cfg(feature = "local")]
 mod cache;
+mod config_apply;
 mod config_pending;
 mod config_write;
 mod dialect;
@@ -175,6 +180,11 @@ pub(crate) struct AppState {
     /// Serializes profile switches so two concurrent switches cannot interleave
     /// their reads and writes of the live state.
     switch: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes `POST /admin/config-apply`, `POST /admin/config-revert`,
+    /// and every shadow-writing `PUT` save, so a second apply cannot race
+    /// the first through enumeration, promotion, and reload, and apply only
+    /// promotes shadow combinations the latest save validated whole.
+    apply: Arc<tokio::sync::Mutex<()>>,
     /// The process-lifetime progress broker: operations attach trees for
     /// their own lifetimes, and `GET /admin/progress` streams its events.
     hub: Arc<ProgressHub>,
@@ -220,6 +230,7 @@ impl AppState {
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
             boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
+            apply: Arc::new(tokio::sync::Mutex::new(())),
             hub,
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
@@ -261,6 +272,14 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route(
             "/admin/config-dirty",
             get(config_pending::admin_config_dirty),
+        )
+        .route(
+            "/admin/config-apply",
+            post(config_apply::admin_config_apply),
+        )
+        .route(
+            "/admin/config-revert",
+            post(config_apply::admin_config_revert),
         )
         .route(
             "/admin/boot-config",

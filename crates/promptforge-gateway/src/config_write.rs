@@ -41,6 +41,11 @@ pub(crate) async fn admin_put_config(
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(body) =
         body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    // Saves take the apply lock: apply promotes shadows without
+    // re-validating, so the combination it promotes must be one the latest
+    // save validated whole - saves serialize with apply, revert, and each
+    // other.
+    let _guard = state.apply.lock().await;
     let leaf = active_profile_path(&state).await?;
     let document = toml_document(body)?;
     let shadow = run_blocking(move || save_profile_shadow(&leaf, document)).await?;
@@ -64,6 +69,8 @@ pub(crate) async fn admin_put_boot_config(
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(body) =
         body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    // Saves take the apply lock; see `admin_put_config` for the why.
+    let _guard = state.apply.lock().await;
     let boot = state
         .boot
         .config_path
@@ -99,6 +106,8 @@ pub(crate) async fn admin_put_include(
         raw.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let Json(body) =
         body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    // Saves take the apply lock; see `admin_put_config` for the why.
+    let _guard = state.apply.lock().await;
     let leaf = active_profile_path(&state).await?;
     let target = include_target(crate::profiles_dir(&state)?, &raw)?;
     let document = toml_document(body)?;

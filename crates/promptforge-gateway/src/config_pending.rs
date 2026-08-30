@@ -107,20 +107,35 @@ fn boot_pending(boot: Option<&Path>) -> Result<serde_json::Value, GatewayError> 
     }))
 }
 
-/// Assembles the `GET /admin/config-dirty` body: shadowed files from the
-/// profile and boot chains plus the `.env` siblings, section diffs from
-/// both chain comparisons.
-fn dirty_reply(leaf: &Path, boot: Option<&Path>) -> Result<serde_json::Value, GatewayError> {
+/// Every shadow on disk for one gateway: the real files that carry one
+/// (profile chain, boot chain, `.env` siblings) and the top-level sections
+/// the shadows change. The dirty report renders it, and the apply and
+/// revert routes enumerate from it.
+pub(crate) struct ShadowCensus {
+    /// Real files whose shadows exist, in canonical form, without
+    /// duplicates.
+    pub(crate) files: Vec<PathBuf>,
+    /// Top-level sections whose merged value the shadows change, sorted
+    /// and deduplicated.
+    pub(crate) sections: Vec<String>,
+}
+
+/// Collects the [`ShadowCensus`]: the profile chain's report, the boot
+/// chain's report when a boot path is known, and the `.env` siblings.
+pub(crate) fn shadow_census(
+    leaf: &Path,
+    boot: Option<&Path>,
+) -> Result<ShadowCensus, GatewayError> {
     let profile = pending_report(leaf).map_err(|error| pending_read_error(&error))?;
-    let mut shadowed: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<PathBuf> = Vec::new();
     for file in &profile.shadowed_files {
-        push_unique(&mut shadowed, file);
+        push_unique(&mut files, file);
     }
     let mut sections = profile.changed_sections;
     if let Some(boot) = boot {
         let report = pending_report(boot).map_err(|error| pending_read_error(&error))?;
         for file in &report.shadowed_files {
-            push_unique(&mut shadowed, file);
+            push_unique(&mut files, file);
         }
         sections.extend(report.changed_sections);
     }
@@ -132,15 +147,30 @@ fn dirty_reply(leaf: &Path, boot: Option<&Path>) -> Result<serde_json::Value, Ga
     }
     for env in env_files {
         if shadow_path(&env).is_file() {
-            push_unique(&mut shadowed, &env);
+            push_unique(&mut files, &env);
         }
     }
     sections.sort_unstable();
     sections.dedup();
-    let root = boot
-        .and_then(Path::parent)
-        .or_else(|| leaf.parent().and_then(Path::parent));
-    let mut pending_files: Vec<String> = shadowed
+    Ok(ShadowCensus { files, sections })
+}
+
+/// The directory config files render relative to: the boot config's
+/// parent, falling back to the profiles directory's parent when no boot
+/// path is known.
+pub(crate) fn config_root<'a>(leaf: &'a Path, boot: Option<&'a Path>) -> Option<&'a Path> {
+    boot.and_then(Path::parent)
+        .or_else(|| leaf.parent().and_then(Path::parent))
+}
+
+/// Assembles the `GET /admin/config-dirty` body: shadowed files from the
+/// profile and boot chains plus the `.env` siblings, section diffs from
+/// both chain comparisons.
+fn dirty_reply(leaf: &Path, boot: Option<&Path>) -> Result<serde_json::Value, GatewayError> {
+    let census = shadow_census(leaf, boot)?;
+    let root = config_root(leaf, boot);
+    let mut pending_files: Vec<String> = census
+        .files
         .iter()
         .map(|file| relative_name(file, root))
         .collect();
@@ -148,7 +178,7 @@ fn dirty_reply(leaf: &Path, boot: Option<&Path>) -> Result<serde_json::Value, Ga
     Ok(serde_json::json!({
         "dirty": !pending_files.is_empty(),
         "pending_files": pending_files,
-        "changed_sections": sections,
+        "changed_sections": census.sections,
     }))
 }
 
@@ -166,7 +196,7 @@ fn push_unique(shadowed: &mut Vec<PathBuf>, file: &Path) {
 /// A comparable form of `path`: canonicalized when it exists, otherwise
 /// its canonicalized parent plus its own name (a real `.env` may not
 /// exist while its shadow does), otherwise the path as given.
-fn canonical_form(path: &Path) -> PathBuf {
+pub(crate) fn canonical_form(path: &Path) -> PathBuf {
     if let Ok(canonical) = path.canonicalize() {
         return canonical;
     }
@@ -181,7 +211,7 @@ fn canonical_form(path: &Path) -> PathBuf {
 /// Renders one shadowed real file for the wire: relative to `root` when
 /// it sits beneath it, the full path otherwise, always with forward
 /// slashes for a stable shape across platforms.
-fn relative_name(file: &Path, root: Option<&Path>) -> String {
+pub(crate) fn relative_name(file: &Path, root: Option<&Path>) -> String {
     let relative = root
         .map(canonical_form)
         .and_then(|root| file.strip_prefix(&root).ok().map(Path::to_path_buf))

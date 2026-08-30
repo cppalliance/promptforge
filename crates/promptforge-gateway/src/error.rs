@@ -104,6 +104,19 @@ pub(crate) enum GatewayError {
     #[error("include file not found: {0}")]
     IncludeNotFound(String),
 
+    /// `POST /admin/config-apply` promoted every shadow but the profile
+    /// reload failed: the gateway keeps running the previous configuration
+    /// while the real files already carry the new one, which loads on the
+    /// next restart. The message carries the reload failure's full cause
+    /// chain.
+    #[non_exhaustive]
+    #[error(
+        "config promoted to disk but the reload failed ({0}); the gateway keeps \
+         running the previous configuration and the new config loads on the \
+         next restart"
+    )]
+    ApplyReloadFailed(String),
+
     /// A pending-state read could not resolve the shadow-overlaid
     /// configuration: a chain file or shadow is unreadable, unparsable, or
     /// the merged pending result fails validation. Saves validate before
@@ -303,6 +316,11 @@ impl GatewayError {
                 "invalid_request_error",
                 "include_not_found",
             ),
+            GatewayError::ApplyReloadFailed(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "apply_reload_failed",
+            ),
             GatewayError::PendingConfig(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
@@ -481,6 +499,14 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "pending_config_error",
+                ),
+            ),
+            (
+                GatewayError::ApplyReloadFailed("ghost endpoint".to_owned()),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "apply_reload_failed",
                 ),
             ),
         ];
