@@ -333,11 +333,12 @@ impl ArtifactStore {
         Ok(tree_digest(install)? == recorded_tree)
     }
 
+    #[cfg(not(llama_cuda_embedded))]
     fn ensure_blob(&self, asset: FileAsset<'_>, destination: &Path) -> Result<()> {
         self.ensure_blob_with_progress(asset, destination, None, None)
     }
 
-    /// [`ensure_blob`] variant that reports the download and verify stages
+    /// `ensure_blob` variant that reports the download and verify stages
     /// into the given leaves. Both leaves reach their terminal event on every
     /// exit path: a cache hit completes the download leaf without work, and
     /// the pin check after a download completes the verify leaf whether the
