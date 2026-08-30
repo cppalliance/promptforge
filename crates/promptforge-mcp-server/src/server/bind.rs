@@ -11,6 +11,7 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{
     CompletionError, CompletionErrorKind, ModelCatalog, fetch_model_catalog,
 };
+use promptforge_progress::ProgressHandle;
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, Model, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -87,6 +88,17 @@ impl PreparedTools {
     /// failure is not an error here: it is logged and the catalog is left empty,
     /// so prompts without `models.bind` keep working.
     pub async fn load(config: &Config, model: &Model) -> Result<Self, PreparedToolsError> {
+        Self::load_with_progress(config, model, None).await
+    }
+
+    /// Loads as [`load`](PreparedTools::load) does, reporting the tool-picker
+    /// build to `progress`: one tool-count step per embedded tool, completed
+    /// when indexing finishes. Boot's operation tree is the only caller.
+    pub(crate) async fn load_with_progress(
+        config: &Config,
+        model: &Model,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<Self, PreparedToolsError> {
         let gateway = &config.gateway;
         let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await
         {
@@ -117,10 +129,13 @@ impl PreparedTools {
                 return Err(PreparedToolsError::tools(error));
             }
         };
-        Self::new(gateway, &config.tools, models, model)
+        Self::new(gateway, &config.tools, models, model, progress)
     }
 
     /// Builds the live catalog and picker over an already-fetched model catalog.
+    ///
+    /// A `progress` leaf advances one tool-count step per embedded tool and
+    /// completes when indexing finishes; `None` builds without reporting.
     ///
     /// # Errors
     /// Returns [`PreparedToolsError`] when the live catalog cannot be assembled
@@ -130,6 +145,7 @@ impl PreparedTools {
         tools_config: &ToolsConfig,
         models: ModelCatalog,
         model: &Model,
+        progress: Option<&ProgressHandle>,
     ) -> Result<Self, PreparedToolsError> {
         let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
         let tools = ToolCatalog::new(&live).map_err(PreparedToolsError::tools)?;
@@ -137,7 +153,7 @@ impl PreparedTools {
             model,
             catalog(tools.tools()),
             PickerConfig::default(),
-            None,
+            progress,
         )
         .map_err(PreparedToolsError::picker)?;
         Ok(Self {
@@ -295,6 +311,7 @@ mod tests {
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture tools");
         let catalog_ids = tools
@@ -323,6 +340,7 @@ mod tests {
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture tools");
         let outcome = tools
@@ -347,6 +365,7 @@ mod tests {
             &config.tools,
             models,
             crate::fixture::model(),
+            None,
         )
         .expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");

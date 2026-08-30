@@ -52,6 +52,7 @@ fn prepared(config: &Config) -> Arc<PreparedTools> {
             &config.tools,
             fixture_model_catalog(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture tool model")
     });

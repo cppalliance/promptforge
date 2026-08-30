@@ -59,7 +59,9 @@ pub use crate::watch::Watcher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use promptforge_progress::{EventState, ProgressEvent, ProgressHub};
 use promptforge_tool_picker::Model;
+use tokio::sync::broadcast;
 
 /// One parsed command line: which transport to serve and which file to read.
 ///
@@ -139,12 +141,67 @@ impl ServerArgs {
 /// catalog, preparing the tools, starting the watcher, building the runtime, or
 /// serving.
 pub fn run(args: &ServerArgs) -> Result<(), RunError> {
-    let source = args.config.as_path();
-    let config = Config::load(source)?;
+    let hub = Arc::new(ProgressHub::new());
+    let boot = boot(args, &hub)?;
+    // The boot tree detached when `boot` returned; dropping the hub closes the
+    // event stream, so the renderer task drains what is buffered and exits.
+    drop(hub);
+    let Boot {
+        runtime,
+        config,
+        catalog,
+        tools,
+    } = boot;
+    let stdio = args.stdio;
+    let source = args.config.clone();
+    runtime.block_on(async move {
+        // Started inside the runtime, because the debounce window is a task, and
+        // held for as long as the transport serves: dropping the guard stops the
+        // watches.
+        let _watcher = Watcher::start(&source, Arc::clone(&config), Arc::clone(&catalog))?;
+        if stdio {
+            serve_stdio(config, catalog, tools, shutdown_signal()).await?;
+        } else {
+            serve_http(config, catalog, tools, shutdown_signal()).await?;
+        }
+        Ok::<(), RunError>(())
+    })?;
+    Ok(())
+}
+
+/// Everything boot assembles before a transport serves: the runtime the
+/// server runs on and the shared state every run borrows.
+#[derive(Debug)]
+pub(crate) struct Boot {
+    runtime: tokio::runtime::Runtime,
+    config: Arc<Config>,
+    catalog: Arc<CatalogHandle>,
+    tools: Arc<PreparedTools>,
+}
+
+/// Loads the configuration, resolves the catalog, loads the shared embedding
+/// model, builds the retrieval index, and prepares the tools - every boot
+/// step short of serving, reported as leaves of one operation tree on `hub`.
+///
+/// The leaves are weighted by expected duration: the retrieval index embeds
+/// every prompt and dwarfs the file reads of catalog resolution and the
+/// handful of tool embeddings. A server has no TTY, so the tree's events are
+/// rendered by a subscriber task that logs each transition rather than by a
+/// progress bar.
+pub(crate) fn boot(args: &ServerArgs, hub: &Arc<ProgressHub>) -> Result<Boot, RunError> {
+    // Subscribed before the tree registers, the receiver buffers every event
+    // emitted before the runtime exists to spawn the renderer on.
+    let events = hub.subscribe();
+    let tree = hub.operation();
+    let catalog_leaf = tree.register("catalog resolve", 1.0);
+    let retrieval_leaf = tree.register("retrieval index", 8.0);
+    let tools_leaf = tree.register("tool build", 1.0);
+
+    let config = Config::load(args.config())?;
     // Boot refuses an incomplete catalog: a service that starts with nine of
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
-    let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
+    let catalog = Catalog::resolve_with_progress(&config, OnBroken::Reject, Some(&catalog_leaf))?;
     // The embedding model is parsed once and lent to both of its consumers:
     // the retrieval index below and the execution picker in `PreparedTools`.
     // Loading it twice would pay the tens-of-megabytes weights parse twice; a
@@ -156,7 +213,7 @@ pub fn run(args: &ServerArgs) -> Result<(), RunError> {
     // failed retrieval index costs `need_prompt` and nothing else. The catalog
     // and the index over it are bound into one live generation, so the watcher
     // replaces both together and no reader sees a torn pair.
-    let retrieval = Retrieval::start(&model, &catalog);
+    let retrieval = Retrieval::start(&model, &catalog, Some(&retrieval_leaf));
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::with_retrieval(catalog, retrieval));
 
@@ -164,24 +221,52 @@ pub fn run(args: &ServerArgs) -> Result<(), RunError> {
         .enable_all()
         .build()
         .map_err(RunError::runtime)?;
+    runtime.spawn(log_leaf_events(events));
     // Tool/model capability binding is synchronous and model-backed. Prepare
     // the live tool catalog, picker, and gateway model catalog once, then share
     // the immutable result across every run.
-    let tools = Arc::new(runtime.block_on(PreparedTools::load(&config, &model))?);
-    let stdio = args.stdio;
-    runtime.block_on(async move {
-        // Started inside the runtime, because the debounce window is a task, and
-        // held for as long as the transport serves: dropping the guard stops the
-        // watches.
-        let _watcher = Watcher::start(source, Arc::clone(&config), Arc::clone(&catalog))?;
-        if stdio {
-            serve_stdio(config, catalog, tools, shutdown_signal()).await?;
-        } else {
-            serve_http(config, catalog, tools, shutdown_signal()).await?;
+    let tools = Arc::new(runtime.block_on(PreparedTools::load_with_progress(
+        &config,
+        &model,
+        Some(&tools_leaf),
+    ))?);
+    Ok(Boot {
+        runtime,
+        config,
+        catalog,
+        tools,
+    })
+}
+
+/// Renders one operation tree's event stream to the log: the server has no
+/// TTY, so leaf transitions are tracing records rather than a drawn bar. The
+/// task exits when the hub closes the stream, which a boot-scoped hub does
+/// once the boot tree has detached.
+async fn log_leaf_events(mut events: broadcast::Receiver<ProgressEvent>) {
+    loop {
+        match events.recv().await {
+            Ok(event) => match event.state {
+                EventState::Begun { .. } => {
+                    tracing::debug!(path = %event.path, label = %event.label, "boot step began");
+                }
+                EventState::Updated { fraction } => {
+                    tracing::debug!(path = %event.path, fraction, "boot step advanced");
+                }
+                EventState::Finished { ok } => {
+                    tracing::info!(path = %event.path, label = %event.label, ok, "boot step finished");
+                }
+                // `EventState` is non-exhaustive; a future variant is logged
+                // at the same posture as a sample.
+                _ => {
+                    tracing::debug!(path = %event.path, label = %event.label, "boot step reported");
+                }
+            },
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                tracing::debug!(skipped, "boot progress events dropped under lag");
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
         }
-        Ok::<(), RunError>(())
-    })?;
-    Ok(())
+    }
 }
 
 /// Resolves when the process is asked to stop, which both transports take as
@@ -203,8 +288,11 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::sync::Arc;
 
-    use super::ServerArgs;
+    use promptforge_progress::{EventState, ProgressHub};
+
+    use super::{ServerArgs, boot};
 
     /// `ServerArgs::parse` over borrowed string arguments, which is how a test
     /// spells a command line.
@@ -247,5 +335,72 @@ mod tests {
         assert!(parse(&["serve", "--stdio"]).is_none());
         assert!(parse(&["run", "prompts.toml"]).is_none());
         assert!(parse(&["--stdio", "prompts.toml"]).is_none());
+    }
+
+    #[test]
+    fn boot_drives_every_leaf_to_completion() {
+        // Two prompts, so a leaf that never reports its units is told apart
+        // from one that does: the file count and the prompt count both have a
+        // halfway sample to emit.
+        let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+        for (name, description) in [("alpha", "The alpha prompt"), ("beta", "The beta prompt")] {
+            std::fs::write(
+                dir.path().join(format!("{name}.md")),
+                format!(
+                    "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
+                     # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
+                ),
+            )
+            .expect("write the fixture prompt");
+        }
+        let prompts = toml::Value::String(dir.path().display().to_string()).to_string();
+        let config_path = dir.path().join("prompts.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "[server]\napi_key = \"t\"\n\n\
+                 [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
+                 [paths]\nprompts = {prompts}\n\n\
+                 [catalog]\ninclude = [\"*.md\"]\n\n\
+                 [tools]\nweb_fetch = true\nweb_search = true\n"
+            ),
+        )
+        .expect("write the fixture configuration");
+        let args = ServerArgs::parse([OsString::from("serve"), config_path.into_os_string()])
+            .expect("serve <config> is accepted");
+
+        let hub = Arc::new(ProgressHub::new());
+        let mut events = hub.subscribe();
+        // The fixture gateway is unreachable, so the model-catalog fetch
+        // degrades to an empty catalog, which is all a boot-progress test
+        // needs.
+        let boot = boot(&args, &hub).expect("boot over the fixture catalog");
+        drop(boot);
+        drop(hub);
+
+        let mut advanced = std::collections::HashSet::new();
+        let mut finished = std::collections::HashMap::new();
+        while let Ok(event) = events.try_recv() {
+            match event.state {
+                EventState::Updated { .. } => {
+                    advanced.insert(event.path);
+                }
+                EventState::Finished { ok } => {
+                    finished.insert(event.path, ok);
+                }
+                _ => {}
+            }
+        }
+        for leaf in ["catalog resolve", "retrieval index", "tool build"] {
+            assert!(
+                advanced.contains(leaf),
+                "the {leaf} leaf must report its unit count, not only complete"
+            );
+            assert_eq!(
+                finished.get(leaf),
+                Some(&true),
+                "the {leaf} leaf must finish ok"
+            );
+        }
     }
 }

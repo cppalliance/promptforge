@@ -47,6 +47,7 @@ fn live_server(fixture: &Fixture) -> PromptForgeServer {
                 &fixture.config.tools,
                 promptforge_core::model::ModelCatalog::empty(),
                 crate::fixture::model(),
+                None,
             )
             .expect("prepare fixture live tools"),
         ),
@@ -341,7 +342,9 @@ mod retrieval {
     /// A fixture whose live generation carries an index over its own catalog,
     /// built from the test binary's shared model.
     fn indexed() -> Fixture {
-        Fixture::with_retrieval(|catalog| Retrieval::start(retrieval_fixture::model(), catalog))
+        Fixture::with_retrieval(|catalog| {
+            Retrieval::start(retrieval_fixture::model(), catalog, None)
+        })
     }
 
     #[test]

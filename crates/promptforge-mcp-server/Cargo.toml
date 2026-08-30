@@ -33,6 +33,9 @@ humantime.workspace = true
 humantime-serde.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
+# The boot operation tree: catalog resolve, the retrieval index, and the tool
+# build report into leaves whose events a subscriber task logs.
+promptforge-progress.workspace = true
 promptforge-tool-picker.workspace = true
 promptforge-tools.workspace = true
 promptforge-web-search.workspace = true

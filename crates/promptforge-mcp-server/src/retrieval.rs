@@ -49,6 +49,7 @@ mod tests;
 #[cfg(feature = "picker")]
 use std::sync::Arc;
 
+use promptforge_progress::ProgressHandle;
 #[cfg(feature = "picker")]
 use serde::Serialize;
 
@@ -145,9 +146,16 @@ impl Retrieval {
     /// prompt, both listing tools, the runner - is unaffected, and a harness
     /// that cannot start its MCP server is worse off than one whose retrieval
     /// tool says it is unavailable.
+    ///
+    /// A `progress` leaf advances one prompt-count step per embedded prompt
+    /// and completes when indexing finishes; `None` builds without reporting.
     #[must_use]
-    pub(crate) fn start(model: &promptforge_tool_picker::Model, catalog: &Catalog) -> Retrieval {
-        Retrieval::built(model, catalog)
+    pub(crate) fn start(
+        model: &promptforge_tool_picker::Model,
+        catalog: &Catalog,
+        progress: Option<&ProgressHandle>,
+    ) -> Retrieval {
+        Retrieval::built(model, catalog, progress)
     }
 
     /// The prompts closest to `capability`, best first.
@@ -213,8 +221,12 @@ impl Retrieval {
 
     /// Builds the index over `catalog`, or reports why it could not.
     #[cfg(feature = "picker")]
-    fn built(model: &promptforge_tool_picker::Model, catalog: &Catalog) -> Retrieval {
-        match index::Index::build_with(model, catalog) {
+    fn built(
+        model: &promptforge_tool_picker::Model,
+        catalog: &Catalog,
+        progress: Option<&ProgressHandle>,
+    ) -> Retrieval {
+        match index::Index::build_with(model, catalog, progress) {
             Some(index) => {
                 tracing::info!("need_prompt ranks {} prompt(s)", index.len());
                 Retrieval {
@@ -227,7 +239,16 @@ impl Retrieval {
 
     /// Without the ranking engine there is nothing to build.
     #[cfg(not(feature = "picker"))]
-    fn built(_model: &promptforge_tool_picker::Model, _catalog: &Catalog) -> Retrieval {
+    fn built(
+        _model: &promptforge_tool_picker::Model,
+        _catalog: &Catalog,
+        progress: Option<&ProgressHandle>,
+    ) -> Retrieval {
+        // The step is vacuously done: there is no index to build, so the leaf
+        // completes rather than hanging unfinished under a boot that succeeds.
+        if let Some(handle) = progress {
+            handle.complete();
+        }
         tracing::info!("this build has no picker feature: need_prompt is not published");
         Retrieval::idle()
     }

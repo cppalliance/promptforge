@@ -50,6 +50,7 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
                 &prompts.config.tools,
                 promptforge_core::model::ModelCatalog::empty(),
                 fixture::model(),
+                None,
             )
             .expect("prepare fixture live tools"),
         ),
@@ -63,12 +64,13 @@ fn boot_indexes_both_consumers_over_one_loaded_encoder() {
     // load its own copy would double the weights parse at every boot.
     let prompts = fixture::catalog(PROMPTS);
     let model = fixture::model();
-    let retrieval = Retrieval::start(model, &prompts.catalog);
+    let retrieval = Retrieval::start(model, &prompts.catalog, None);
     let prepared = PreparedTools::new(
         &prompts.config.gateway,
         &prompts.config.tools,
         promptforge_core::model::ModelCatalog::empty(),
         model,
+        None,
     )
     .expect("prepare fixture live tools");
 

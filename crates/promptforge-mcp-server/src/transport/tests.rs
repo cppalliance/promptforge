@@ -50,6 +50,7 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture live tools"),
     );
@@ -83,6 +84,7 @@ fn server_fixture(server_lines: &str) -> (TempDir, Arc<Config>, PromptForgeServe
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture live tools"),
     );
@@ -153,6 +155,7 @@ fn router_hosts(allowed_hosts: Vec<String>) -> (TempDir, axum::Router) {
             &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
             crate::fixture::model(),
+            None,
         )
         .expect("prepare fixture live tools"),
     );

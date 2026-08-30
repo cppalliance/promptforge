@@ -16,6 +16,7 @@ use glob::{MatchOptions, Pattern};
 use promptforge_core::observe::NullObserver;
 use promptforge_core::parser::Prompt;
 use promptforge_core::promptforge_version;
+use promptforge_progress::ProgressHandle;
 
 use crate::catalog::{Catalog, Entry, OnBroken};
 use crate::config::Config;
@@ -47,12 +48,25 @@ const MAX_PROMPT_BYTES: u64 = 2 * 1024 * 1024;
 // another is worse than a name that is never legal.
 
 /// Resolves the catalog. See [`Catalog::resolve`] for the contract.
-pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, CatalogError> {
+///
+/// A `progress` leaf advances one file-count step per globbed file as the pass
+/// reaches it and completes when the pass succeeds; a failed pass leaves the
+/// leaf unfinished, since the boot it reports into is being refused.
+pub(crate) fn resolve(
+    config: &Config,
+    on_broken: OnBroken,
+    progress: Option<&ProgressHandle>,
+) -> Result<Catalog, CatalogError> {
     let root = config.paths.prompts.as_path();
     let mut faults: Vec<Fault> = Vec::new();
     let mut entries: Vec<Entry> = Vec::new();
 
-    for path in globbed_files(config, root, &mut faults) {
+    let files = globbed_files(config, root, &mut faults);
+    let total = files.len() as u64;
+    for (reached, path) in files.into_iter().enumerate() {
+        if let Some(handle) = progress {
+            handle.set_units(reached as u64 + 1, total);
+        }
         let source = match read(&path) {
             Ok(source) => source,
             Err(detail) => {
@@ -115,6 +129,9 @@ pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, C
     }
 
     if faults.is_empty() {
+        if let Some(handle) = progress {
+            handle.complete();
+        }
         Ok(Catalog::new(entries))
     } else {
         Err(CatalogError::new(faults))

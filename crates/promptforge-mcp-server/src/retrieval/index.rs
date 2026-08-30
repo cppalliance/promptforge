@@ -9,6 +9,7 @@
 //! The configuration departs from the engine's defaults in exactly one place,
 //! the similarity floor, and [`crate::retrieval`] says why.
 
+use promptforge_progress::ProgressHandle;
 use promptforge_tool_picker::{Catalog as Descriptors, Config, ToolDescriptor, ToolId, ToolPicker};
 use serde_json::json;
 
@@ -45,13 +46,15 @@ impl Index {
     ///
     /// `None` means the catalog could not be indexed; the reason is reported
     /// here because this is the only place that knows it, and the caller's
-    /// answer is to serve without retrieval.
+    /// answer is to serve without retrieval. A `progress` leaf is handed to
+    /// the engine, advancing one prompt-count step per embedded prompt.
     pub(super) fn build_with(
         model: &promptforge_tool_picker::Model,
         catalog: &Catalog,
+        progress: Option<&ProgressHandle>,
     ) -> Option<Index> {
         let config = compiled_config()?;
-        match ToolPicker::build_with_model(model, descriptors(catalog), config, None) {
+        match ToolPicker::build_with_model(model, descriptors(catalog), config, progress) {
             Ok(picker) => Some(Index { picker }),
             Err(error) => {
                 tracing::error!("the shared retrieval model could not index the catalog: {error}");
