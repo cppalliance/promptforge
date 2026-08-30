@@ -100,6 +100,16 @@ where
     Ok(Secret::new(raw))
 }
 
+/// Serialize a [`Secret`] field as `"***"`: a serialized configuration never
+/// carries credential material, and a reader treats the marker as "keep the
+/// existing value" on write.
+pub(crate) fn ser_redacted<S>(_: &Secret, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str("***")
+}
+
 impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Secret(redacted)")
@@ -114,7 +124,7 @@ impl fmt::Display for Secret {
 
 /// The wire protocol an endpoint speaks. v0 supports only the OpenAI shape;
 /// the Anthropic translation shim is deferred.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Protocol {
@@ -154,9 +164,11 @@ pub struct Config {
     workshop: Option<WorkshopConfig>,
 }
 
-/// Private deserialization DTO for [`Config`]. Holds the raw TOML shape before
-/// validation; never exposed publicly, so no serde impl reaches the API.
-#[derive(Debug, Deserialize)]
+/// Private DTO for [`Config`]. Holds the raw TOML shape before validation and
+/// is never exposed publicly, so no serde impl reaches the API. `Serialize`
+/// lets the gateway render the running config as JSON through this shape,
+/// with `Secret` fields redacted.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     server: ServerConfig,
@@ -198,7 +210,7 @@ impl From<RawConfig> for Config {
 
 /// Whether a dominion pools remote providers or local GPUs managed by the
 /// gateway.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum DominionKind {
@@ -209,7 +221,7 @@ pub enum DominionKind {
 }
 
 /// What a dominion's admission queue does when it is full.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum QueuePolicy {
@@ -225,7 +237,7 @@ pub enum QueuePolicy {
 /// A dominion carries a concurrency limit and a bounded waiting queue that
 /// every bound endpoint or local model shares. An endpoint or local model
 /// without a `dominion` is unlimited, as when no cap is set at all.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct DominionConfig {
@@ -253,7 +265,7 @@ pub struct DominionConfig {
 }
 
 /// Settings under `[local]` for artifact cache paths.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct LocalConfig {
@@ -267,7 +279,7 @@ pub struct LocalConfig {
 }
 
 /// One local generative model declared as `[[local_model]]`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct LocalModelConfig {
@@ -334,19 +346,19 @@ pub struct LocalModelConfig {
 }
 
 /// Server-level settings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ServerConfig {
     /// The socket address to bind.
     bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
-    #[serde(deserialize_with = "de_secret")]
+    #[serde(deserialize_with = "de_secret", serialize_with = "ser_redacted")]
     api_key: Secret,
 }
 
 /// One backend the gateway can forward to.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct EndpointConfig {
@@ -358,7 +370,7 @@ pub struct EndpointConfig {
     /// The backend base URL (a trailing slash is trimmed).
     base_url: String,
     /// The credential sent to this backend.
-    #[serde(deserialize_with = "de_secret")]
+    #[serde(deserialize_with = "de_secret", serialize_with = "ser_redacted")]
     api_key: Secret,
     /// Optional remote dominion id (`[[dominion]]`) whose shared limit and
     /// queue govern this endpoint. Absent means unlimited pass-through.
@@ -484,7 +496,7 @@ pub struct Capabilities {
 }
 
 /// One model name and the backend it resolves to.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ModelConfig {
@@ -516,7 +528,7 @@ pub struct ModelConfig {
 }
 
 /// Built-in tool configuration under the `[tools]` section.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ToolsConfig {
@@ -527,14 +539,14 @@ pub struct ToolsConfig {
 }
 
 /// Configuration for the web-search tool.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct WebSearchConfig {
     /// The search provider backing the tool.
     provider: SearchProvider,
     /// The credential sent to the search provider.
-    #[serde(deserialize_with = "de_secret")]
+    #[serde(deserialize_with = "de_secret", serialize_with = "ser_redacted")]
     api_key: Secret,
     /// The search API base URL. Defaults to the Brave Search endpoint;
     /// override to point at a proxy or a test server.
@@ -578,7 +590,7 @@ fn default_web_search_max_per_host() -> u8 {
 }
 
 /// A web-search provider. v0 supports only Brave.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum SearchProvider {
