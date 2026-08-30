@@ -38,7 +38,9 @@
 "config.rs" = 634
 "cross_site.rs" = 338
 "deadline.rs" = 112
-"error.rs" = 484
+# Grew by the revoke seam: the `NotGranted` variant's wire mapping (404,
+# `not_granted`) and its case in the seam test.
+"error.rs" = 517
 # Grew by the config-panel proxy seam: the `base_url` accessor,
 # `ForwardedResponse`, and the `forward` relay the /gateway/api route
 # calls - one more request shape on the same gateway HTTP client.
@@ -90,7 +92,7 @@
 "routes/gateway_config.rs" = 334
 "routes/health.rs" = 50
 "routes/voice.rs" = 75
-"routes/workspace.rs" = 19
+"routes/workspace.rs" = 20
 "serve.rs" = 566
 "session.rs" = 341
 "session/gateway_chat.rs" = 417
@@ -101,4 +103,8 @@
 "status.rs" = 200
 "tape.rs" = 275
 "voice.rs" = 1315
-"workspace.rs" = 1018
+# Grew by grant revocation: `Workspace::revoke` (exact canonical match,
+# with a literal-key fallback so a deleted root stays revocable; nested
+# grants independent), the `POST /workspace/revoke` handler with its
+# request/response shapes, and the revoke unit and route tests.
+"workspace.rs" = 1238

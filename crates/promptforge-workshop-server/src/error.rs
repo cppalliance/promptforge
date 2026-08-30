@@ -131,6 +131,10 @@ pub(crate) enum AppError {
     #[error("path does not exist")]
     NotFound,
 
+    /// A revoke named a path that is not a granted workspace root.
+    #[error("path is not a granted root")]
+    NotGranted,
+
     /// A tree listing was requested for something that is not a directory.
     #[error("path is not a directory")]
     NotADirectory,
@@ -176,7 +180,7 @@ impl AppError {
             | Self::ForbiddenComponent
             | Self::CrossSite
             | Self::ForwardDenied => StatusCode::FORBIDDEN,
-            Self::NotFound | Self::AssetMissing(_) => StatusCode::NOT_FOUND,
+            Self::NotFound | Self::NotGranted | Self::AssetMissing(_) => StatusCode::NOT_FOUND,
             Self::BinaryFile | Self::NotUtf8 | Self::NotJson => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::FileTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::ModifiedConflict => StatusCode::CONFLICT,
@@ -208,6 +212,7 @@ impl AppError {
             Self::OutsideGrants => Some("outside_grants"),
             Self::ForbiddenComponent => Some("forbidden_component"),
             Self::NotFound => Some("not_found"),
+            Self::NotGranted => Some("not_granted"),
             Self::NotADirectory => Some("not_a_directory"),
             Self::NotAFile => Some("not_a_file"),
             Self::BinaryFile => Some("binary_file"),
@@ -233,6 +238,7 @@ impl From<WorkspaceError> for AppError {
             WorkspaceError::OutsideGrants => Self::OutsideGrants,
             WorkspaceError::ForbiddenComponent => Self::ForbiddenComponent,
             WorkspaceError::NotFound => Self::NotFound,
+            WorkspaceError::NotGranted => Self::NotGranted,
             WorkspaceError::NotADirectory => Self::NotADirectory,
             WorkspaceError::NotAFile => Self::NotAFile,
             WorkspaceError::BinaryFile => Self::BinaryFile,
@@ -389,6 +395,11 @@ mod tests {
                 "forbidden_component",
             ),
             (WorkspaceError::NotFound, StatusCode::NOT_FOUND, "not_found"),
+            (
+                WorkspaceError::NotGranted,
+                StatusCode::NOT_FOUND,
+                "not_granted",
+            ),
             (
                 WorkspaceError::NotADirectory,
                 StatusCode::BAD_REQUEST,

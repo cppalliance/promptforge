@@ -15,5 +15,6 @@ pub(crate) fn routes(state: Workspace) -> Router {
             get(workspace::read_file).put(workspace::write_file),
         )
         .route("/workspace/grant", post(workspace::grant))
+        .route("/workspace/revoke", post(workspace::revoke))
         .with_state(state)
 }
