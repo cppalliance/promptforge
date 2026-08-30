@@ -20,6 +20,10 @@ source comes from the git repository rather than the tarball.
 
 - Test files excluded: every `*.test.ts` and `tsconfig.test.json` (they
   need the upstream tsx/jsdom harness, which is not vendored).
-- No import or code changes yet: relative imports are extensionless, which
-  esbuild resolves natively, and the lone runtime dependency `marked` is a
-  workspace npm dependency.
+- `utils/icons.ts` rewritten (2026-08-30): the hand-inlined SVG string
+  constants are now serialized from the `lucide` package at module load.
+  The exported names and string-valued API are unchanged; every other
+  vendored file is untouched.
+- No other import or code changes: relative imports are extensionless,
+  which esbuild resolves natively, and the runtime dependencies `marked`
+  and `lucide` are workspace npm dependencies.

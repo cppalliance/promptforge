@@ -29,6 +29,7 @@
     "@lezer/highlight": "^1.2.3",
     "codemirror": "^6.0.2",
     "dockview": "^8.2.0",
+    "lucide": "^1.37.0",
     "marked": "^18.0.10"
   },
   "devDependencies": {
