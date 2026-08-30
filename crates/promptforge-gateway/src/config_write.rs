@@ -174,7 +174,7 @@ pub(crate) fn config_write_error(error: promptforge_gateway_config::ConfigError)
 }
 
 /// Renders an error and every source beneath it as one `; `-joined line.
-fn error_chain(error: &dyn std::error::Error) -> String {
+pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
     let mut text = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
