@@ -522,6 +522,7 @@ mod tests {
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
             voice: VoiceSlot::default(),
             status: StatusBus::new(),
+            progress: Arc::new(promptforge_progress::ProgressHub::new()),
             health: GatewayHealth::new(),
             backoff: crate::backoff::ReconnectBackoff::new(),
             menu: crate::menu::MenuBus::new(catalog.clone(), None),

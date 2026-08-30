@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::Router;
 
+use promptforge_progress::ProgressHub;
 use promptforge_transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 
 use crate::backoff::ReconnectBackoff;
@@ -25,15 +26,16 @@ use crate::workspace::Workspace;
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
-/// tape, the status, catalog, and menu buses, and the voice transcription
-/// engine slot, filled at startup from local model files or later by the
-/// provisioning task.
+/// tape, the status, catalog, and menu buses, the process progress hub,
+/// and the voice transcription engine slot, filled at startup from local
+/// model files or later by the provisioning task.
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub(crate) gateway: GatewayClient,
     pub(crate) tape: Arc<Tape>,
     pub(crate) voice: VoiceSlot,
     pub(crate) status: StatusBus,
+    pub(crate) progress: Arc<ProgressHub>,
     pub(crate) health: GatewayHealth,
     pub(crate) backoff: ReconnectBackoff,
     pub(crate) catalog: CatalogBus,
@@ -102,6 +104,7 @@ impl AppState {
             tape: Arc::new(tape),
             voice,
             status,
+            progress: Arc::new(ProgressHub::new()),
             health: GatewayHealth::new(),
             backoff: ReconnectBackoff::new(),
             catalog,
@@ -126,6 +129,14 @@ impl AppState {
     #[must_use]
     pub fn status(&self) -> StatusBus {
         self.status.clone()
+    }
+
+    /// The process progress hub: operations with bounded lifetimes attach
+    /// trees to it as they run, and the renderer task (spawned with the
+    /// server) turns its snapshots into the status bar's progress
+    /// indicator.
+    pub(crate) fn progress(&self) -> &Arc<ProgressHub> {
+        &self.progress
     }
 
     /// The push facade over the status, catalog, and menu buses, held by

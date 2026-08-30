@@ -18,6 +18,7 @@ mod error;
 mod gateway;
 mod heartbeat;
 mod menu;
+mod progress;
 mod protocol;
 mod provision;
 mod push;
