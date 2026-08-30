@@ -1,7 +1,10 @@
-//! Catalog transport: fetching and decoding gateway `GET /v1/models`.
+//! Catalog transport: fetching and decoding gateway `GET /v1/models`, plus
+//! the `GET /admin/progress` event-stream subscription.
 
 use std::num::NonZeroU32;
 
+use futures_util::Stream;
+use promptforge_progress::ProgressEvent;
 use serde::Deserialize;
 
 use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
@@ -111,6 +114,41 @@ fn catalog_client() -> reqwest::Client {
     CATALOG_CLIENT.get_or_init(reqwest::Client::new).clone()
 }
 
+/// Sends a bearer-authed GET through the shared client (MODEL-018) and
+/// returns the success response, classifying every failure the same way for
+/// each gateway endpoint: `Transport` when the send fails, `Backend` with a
+/// bounded, control-escaped body on a non-success status (MODEL-010: no
+/// unbounded buffering), and `BackendBodyRead` when that error body cannot be
+/// read, keeping the [`reqwest::Error`] as a typed source.
+async fn get_authed(
+    url: String,
+    token: &str,
+) -> std::result::Result<reqwest::Response, CompletionError> {
+    let response = catalog_client()
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(Error::http)?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = match read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await {
+        Ok(body) => body,
+        Err(source) => {
+            return Err(CompletionError::from(Error::BackendBodyRead {
+                status: status.as_u16(),
+                source: Box::new(source),
+            }));
+        }
+    };
+    Err(CompletionError::from(Error::Backend {
+        status: status.as_u16(),
+        body,
+    }))
+}
+
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
 ///
 /// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
@@ -136,35 +174,7 @@ pub async fn fetch_model_catalog(
     token: &str,
 ) -> std::result::Result<ModelCatalog, CompletionError> {
     let base = base_url.trim_end_matches('/');
-    // MODEL-018: reuse one process-wide catalog client so its connection pool
-    // and TLS/transport state are shared across fetches, instead of building a
-    // fresh `reqwest::Client` (and a fresh pool) on every call.
-    let http = catalog_client();
-    let response = http
-        .get(format!("{base}/models"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(Error::http)?;
-    let status = response.status();
-    if !status.is_success() {
-        // The error body is external, so bound the read (MODEL-010: no unbounded
-        // buffering) and preserve a read failure as a typed source rather than
-        // flattening it into display text.
-        let body = match read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await {
-            Ok(body) => body,
-            Err(source) => {
-                return Err(CompletionError::from(Error::BackendBodyRead {
-                    status: status.as_u16(),
-                    source: Box::new(source),
-                }));
-            }
-        };
-        return Err(CompletionError::from(Error::Backend {
-            status: status.as_u16(),
-            body,
-        }));
-    }
+    let response = get_authed(format!("{base}/models"), token).await?;
     // Bound the success body BEFORE decoding so an oversized (or unbounded)
     // model list cannot exhaust memory, matching the bound the error path applies.
     let body = read_catalog_body_capped(response, MAX_CATALOG_BODY).await?;
@@ -204,6 +214,146 @@ pub async fn fetch_model_catalog(
             "gateway returned an inconsistent model catalog: {error}"
         )))
     })
+}
+
+/// The largest single SSE event block buffered before the stream refuses it,
+/// in bytes. A peer that never sends a blank-line terminator would otherwise
+/// grow the reassembly buffer unbounded (MODEL-010); sized well above any
+/// realistic progress event.
+const MAX_EVENT_BLOCK: usize = 1024 * 1024;
+
+/// One decoded item of a [`subscribe_progress`] stream.
+type ProgressStreamItem = std::result::Result<ProgressEvent, CompletionError>;
+
+/// Subscribes to a bearer-authed gateway `GET /admin/progress` event stream.
+///
+/// `base_url` is the gateway root (for example `http://127.0.0.1:8081`), not
+/// the OpenAI-shaped `/v1` API root [`fetch_model_catalog`] takes.
+///
+/// The returned stream yields every [`ProgressEvent`] the gateway sends,
+/// beginning with the snapshot replay of the operations live at connect time.
+/// Heartbeat comment lines and other non-`data:` lines are skipped.
+/// Intermediate events are lossy at the source, so the stream promises no
+/// completeness; detect completion only from `Finished` events, never from a
+/// fraction reaching 1.0. A `data:` line that does not decode is yielded as
+/// one `Err` item without ending the stream; a read failure or an event block
+/// oversized beyond one MiB is yielded as one `Err` item that ends the
+/// stream. The stream ends when the gateway closes the body; whether to
+/// resubscribe is the caller's decision.
+///
+/// # Errors
+/// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
+/// `Transport` on transport failure and `Backend` on a non-success status
+/// (for example 401 on a rejected token). Decode failures surface as per-item
+/// `Err` values instead.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
+/// use futures_util::StreamExt;
+/// use promptforge_gateway_client::model::subscribe_progress;
+///
+/// let events = subscribe_progress("http://127.0.0.1:8081", "secret-token").await?;
+/// futures_util::pin_mut!(events);
+/// while let Some(item) = events.next().await {
+///     let event = item?;
+///     println!("{}: {}", event.path, event.label);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub async fn subscribe_progress(
+    base_url: &str,
+    token: &str,
+) -> std::result::Result<impl Stream<Item = ProgressStreamItem> + Send, CompletionError> {
+    let base = base_url.trim_end_matches('/');
+    let response = get_authed(format!("{base}/admin/progress"), token).await?;
+    Ok(progress_event_stream(response))
+}
+
+/// Decodes an SSE body into an event stream: chunks are buffered until a
+/// blank line terminates an event block, comment-only blocks (heartbeats) are
+/// skipped, and an undecodable block becomes one `Err` item rather than
+/// killing the stream. A mid-stream read failure likewise surfaces as one
+/// `Err` item, after which the stream ends. A block that grows past
+/// [`MAX_EVENT_BLOCK`] without a terminator is refused as one `Err` item,
+/// after which the stream ends, so a peer cannot buffer the client unbounded.
+fn progress_event_stream(
+    response: reqwest::Response,
+) -> impl Stream<Item = ProgressStreamItem> + Send {
+    futures_util::stream::unfold(
+        (response, Vec::new(), false),
+        |(mut response, mut buffer, mut failed)| async move {
+            loop {
+                if let Some(item) = next_buffered_event(&mut buffer) {
+                    return Some((item, (response, buffer, failed)));
+                }
+                if failed {
+                    return None;
+                }
+                match response.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if buffer.len() + chunk.len() > MAX_EVENT_BLOCK {
+                            failed = true;
+                            let item =
+                                Err(CompletionError::from(Error::MalformedResponse(format!(
+                                    "progress event block exceeds the {MAX_EVENT_BLOCK}-byte limit"
+                                ))));
+                            return Some((item, (response, buffer, failed)));
+                        }
+                        buffer.extend_from_slice(&chunk);
+                    }
+                    // An incomplete trailing block is discarded, matching the
+                    // SSE rule that only blank-line-terminated blocks dispatch.
+                    Ok(None) => return None,
+                    Err(source) => {
+                        failed = true;
+                        let item = Err(CompletionError::from(Error::http(source)));
+                        return Some((item, (response, buffer, failed)));
+                    }
+                }
+            }
+        },
+    )
+}
+
+/// Pops the next decodable event out of `buffer`, or `None` when no complete
+/// block is buffered yet. Comment-only blocks (heartbeats) are consumed and
+/// skipped.
+fn next_buffered_event(buffer: &mut Vec<u8>) -> Option<ProgressStreamItem> {
+    loop {
+        let end = buffer.windows(2).position(|pair| pair == b"\n\n")?;
+        let block: Vec<u8> = buffer.drain(..end + 2).collect();
+        if let Some(item) = parse_event_block(&block) {
+            return Some(item);
+        }
+    }
+}
+
+/// Decodes one SSE event block: `data:` lines join into the payload, comment
+/// lines and unrecognized fields are ignored, and a block with no payload
+/// (a heartbeat) yields `None`.
+fn parse_event_block(block: &[u8]) -> Option<ProgressStreamItem> {
+    let mut data: Vec<u8> = Vec::new();
+    for line in block.split(|byte| *byte == b'\n') {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if let Some(rest) = line.strip_prefix(b"data:") {
+            if !data.is_empty() {
+                data.push(b'\n');
+            }
+            data.extend_from_slice(rest.strip_prefix(b" ").unwrap_or(rest));
+        }
+    }
+    if data.is_empty() {
+        return None;
+    }
+    Some(serde_json::from_slice(&data).map_err(|source| {
+        CompletionError::from(Error::MalformedResponseSource {
+            message: "progress event was not valid JSON".to_owned(),
+            source: Box::new(source),
+        })
+    }))
 }
 
 #[cfg(test)]
@@ -329,6 +479,217 @@ mod tests {
         assert!(
             source.downcast_ref::<reqwest::Error>().is_some(),
             "the preserved source must be the reqwest read error, got {source}"
+        );
+    }
+
+    use promptforge_progress::EventState;
+
+    /// Serializes a wire-format progress event by hand, so the tests pin the
+    /// JSON shape rather than the progress crate's constructors.
+    fn event_json(state: &serde_json::Value) -> String {
+        serde_json::json!({
+            "operation": 7,
+            "path": "local-models/ggml/download",
+            "label": "Download",
+            "state": state,
+        })
+        .to_string()
+    }
+
+    /// A mock `GET /admin/progress` that requires the bearer token and
+    /// answers with `body` as the verbatim SSE payload.
+    fn mock_progress(body: String) -> axum::Router {
+        use axum::Router;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+
+        Router::new().route(
+            "/admin/progress",
+            get(move |headers: axum::http::HeaderMap| {
+                let body = body.clone();
+                async move {
+                    let auth = headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok());
+                    if auth != Some("Bearer tok") {
+                        return (axum::http::StatusCode::UNAUTHORIZED, "bad token").into_response();
+                    }
+                    (
+                        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                        body,
+                    )
+                        .into_response()
+                }
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_decodes_events_and_skips_heartbeat_comments() {
+        use futures_util::StreamExt;
+
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 2.0}}));
+        let updated = event_json(&serde_json::json!({"Updated": {"fraction": 0.5}}));
+        let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+        let body = format!(
+            ": heartbeat\n\ndata: {begun}\n\ndata: {updated}\n\n: heartbeat\n\ndata: {finished}\n\n"
+        );
+        let addr = spawn_models(mock_progress(body)).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        let states: Vec<EventState> = events
+            .iter()
+            .map(|item| item.as_ref().expect("every item decodes").state)
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                EventState::Begun { weight: 2.0 },
+                EventState::Updated { fraction: 0.5 },
+                EventState::Finished { ok: true },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_classifies_a_non_success_status() {
+        let addr = spawn_models(mock_progress(String::new())).await;
+
+        let Err(err) = subscribe_progress(&format!("http://{addr}"), "wrong-token").await else {
+            panic!("a 401 response must surface as an error");
+        };
+        assert_eq!(err.kind(), CompletionErrorKind::Backend);
+        assert_eq!(err.status(), Some(401));
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_yields_one_error_per_bad_event_and_continues() {
+        use futures_util::StreamExt;
+
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+        let finished = event_json(&serde_json::json!({"Finished": {"ok": true}}));
+        let body = format!("data: {begun}\n\ndata: {{not json\n\ndata: {finished}\n\n");
+        let addr = spawn_models(mock_progress(body)).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        assert_eq!(events.len(), 3, "one item per data block");
+        assert!(events[0].is_ok(), "the leading event decodes");
+        let err = events[1]
+            .as_ref()
+            .expect_err("the undecodable line is one error item");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            events[2].is_ok(),
+            "a bad line must not end the stream: the trailing event still arrives"
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_reassembles_an_event_split_across_chunks() {
+        use futures_util::StreamExt;
+
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+        let wire = format!("data: {begun}\n\n");
+        let (head, tail) = wire.split_at(wire.len() / 2);
+        let (head, tail) = (head.to_owned(), tail.to_owned());
+        let app = axum::Router::new().route(
+            "/admin/progress",
+            axum::routing::get(move || {
+                let chunks = vec![
+                    Ok::<_, std::convert::Infallible>(head.clone()),
+                    Ok::<_, std::convert::Infallible>(tail.clone()),
+                ];
+                async move {
+                    (
+                        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                        axum::body::Body::from_stream(futures_util::stream::iter(chunks)),
+                    )
+                }
+            }),
+        );
+        let addr = spawn_models(app).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        assert_eq!(events.len(), 1, "the split block decodes as one event");
+        assert!(events[0].is_ok(), "the reassembled event decodes");
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_yields_one_error_on_a_mid_stream_read_failure_then_ends() {
+        use futures_util::StreamExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // The server promises a large body, delivers one complete event, then
+        // drops the connection: the read failure must surface as one `Err`
+        // item that ends the stream, not as a hang or a silent close.
+        let begun = event_json(&serde_json::json!({"Begun": {"weight": 1.0}}));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let header = "HTTP/1.1 200 OK\r\n\
+                     Content-Type: text/event-stream\r\n\
+                     Content-Length: 1000000\r\n\r\n";
+                let _ = sock.write_all(header.as_bytes()).await;
+                let _ = sock
+                    .write_all(format!("data: {begun}\n\n").as_bytes())
+                    .await;
+                // Socket drops here: the promised body never completes.
+            }
+        });
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        assert_eq!(events.len(), 2, "the decoded event, then one error item");
+        assert!(events[0].is_ok(), "the leading event decodes");
+        let err = events[1]
+            .as_ref()
+            .expect_err("the truncated body is one error item");
+        assert_eq!(err.kind(), CompletionErrorKind::Transport);
+    }
+
+    #[tokio::test]
+    async fn subscribe_progress_bounds_an_event_block_that_never_terminates() {
+        use futures_util::StreamExt;
+
+        let body = "x".repeat(MAX_EVENT_BLOCK + 1);
+        let addr = spawn_models(mock_progress(body)).await;
+
+        let events: Vec<_> = subscribe_progress(&format!("http://{addr}"), "tok")
+            .await
+            .expect("a well-formed stream subscribes")
+            .collect()
+            .await;
+
+        assert_eq!(events.len(), 1, "the oversized block is one error item");
+        let err = events[0]
+            .as_ref()
+            .expect_err("an unterminated oversized block must be refused");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            err.to_string().contains("exceeds"),
+            "the bound must report the size limit, got {err}"
         );
     }
 }

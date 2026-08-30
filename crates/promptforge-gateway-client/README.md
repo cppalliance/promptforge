@@ -8,4 +8,5 @@ prompt-local binding vocabulary (`ModelBinding`, `ModelSet`, `ModelView`,
 
 The client holds only the gateway's URL and the shared key; the vendor
 credential lives in the gateway, so a caller never sees it. Streaming is not
-supported.
+supported for completions. `subscribe_progress` consumes the gateway's
+`GET /admin/progress` SSE stream as decoded `promptforge-progress` events.
