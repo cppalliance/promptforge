@@ -5,15 +5,52 @@
 // through the validated workspace-api boundary. Expansion state and
 // fetched listings are kept for the running session, so closing and
 // reopening the Workshop panel restores the tree as the user left it.
+// The panel also manages the grants themselves: a root row's context
+// menu revokes it, and a header "+" button (or the empty-space context
+// menu) adds a folder - through the desktop shell's native picker when
+// its bridge is present, through a typed-path dialog in a plain browser.
 
 import type { IContentRenderer } from "dockview";
 
-import { fetchTree, type TreeEntry, type TreeListing } from "../../services/workspace-api";
-import { WORKSPACE_CHANGED_EVENT } from "../workspace-drops";
+import { showDropdown } from "../../chat/components/dropdown";
+import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../../chat/utils/icons";
+import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
+import { grantPath, WORKSPACE_CHANGED_EVENT } from "../workspace-drops";
+import { showPanelDialog } from "./editor-dialog";
 import { openInZone } from "./zones";
+
+/** The status-bar surface the panel paints action outcomes onto. */
+export interface TreeStatusSink {
+  showLocal(label: string, severity: "info" | "error"): void;
+}
 
 // Cache key for the synthetic granted-roots listing, which has no path.
 const ROOTS_KEY = "";
+
+// The web message asking the desktop shell for its native folder picker.
+// The shell answers a chosen folder with the FOLDER_PICKED_EVENT below; a
+// cancelled pick answers nothing, so the picked-path listener is a single
+// persistent one for the panel's lifetime, never a leaked one-shot.
+const PICK_FOLDER_MESSAGE = "workspace-pick-folder";
+
+/** The native event the shell dispatches with the picked folder's path. */
+const FOLDER_PICKED_EVENT = "promptforge:folder-picked";
+
+/**
+ * Reads the picked path out of the native event. The detail arrives as
+ * `unknown` and is validated field by field, like a drop's paths.
+ */
+function readPickedPath(event: Event): string | null {
+  if (!(event instanceof CustomEvent)) {
+    return null;
+  }
+  const detail: unknown = event.detail;
+  if (typeof detail !== "object" || detail === null || !("path" in detail)) {
+    return null;
+  }
+  const { path } = detail;
+  return typeof path === "string" && path.length > 0 ? path : null;
+}
 
 // Session state: expanded directory paths and the listings already
 // fetched. Module-level so a reopened Workshop panel restores both.
@@ -26,14 +63,29 @@ const CHEVRON_SVG =
 export class WorkshopTreePanel implements IContentRenderer {
   readonly element = document.createElement("div");
   private readonly list = document.createElement("ul");
+  // The current menu's 0x0 fixed-position anchor under the cursor, so
+  // the shared dropdown helper can anchor a context menu at the pointer.
+  private pointerAnchor: HTMLElement | null = null;
+  // The open Add Folder dialog, dismissed with the panel.
+  private dialog: { dispose(): void } | null = null;
   // A dropped folder grants a new root after this panel rendered; the
   // change event refetches the roots so the drop is visible immediately.
   private readonly onWorkspaceChanged = (): void => {
     listingCache.delete(ROOTS_KEY);
     this.reload();
   };
+  // The shell's answer to PICK_FOLDER_MESSAGE. Persistent for the panel's
+  // lifetime because a cancelled pick dispatches no event - a one-shot
+  // listener would leak on every cancel.
+  private readonly onFolderPicked = (event: Event): void => {
+    const path = readPickedPath(event);
+    if (path === null) {
+      return;
+    }
+    void this.grantFolder(path);
+  };
 
-  constructor() {
+  constructor(private readonly statusBar: TreeStatusSink | null = null) {
     this.element.className = "workshop-tree";
     // Focusable so Ctrl+Shift+F can land on the tree even while it is empty.
     this.element.tabIndex = -1;
@@ -41,8 +93,29 @@ export class WorkshopTreePanel implements IContentRenderer {
   }
 
   init(): void {
+    this.element.appendChild(this.buildHeader());
     this.element.appendChild(this.list);
+    // Right-clicking the panel's empty space offers Add Folder; root rows
+    // stop propagation, and other rows fall through to the browser menu.
+    this.element.addEventListener("contextmenu", (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".workshop-tree__row") !== null) {
+        return;
+      }
+      event.preventDefault();
+      showDropdown(this.menuAnchor(event, this.element), [
+        {
+          id: "workspace-add",
+          label: "Add Folder to Workspace...",
+          iconHtml: ICON_FOLDER_PLUS,
+          onClick: () => {
+            this.addFolder();
+          },
+        },
+      ]);
+    });
     window.addEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
+    window.addEventListener(FOLDER_PICKED_EVENT, this.onFolderPicked);
     void this.loadRoots().catch((error: unknown) => {
       this.showError(this.list, error);
     });
@@ -50,6 +123,28 @@ export class WorkshopTreePanel implements IContentRenderer {
 
   dispose(): void {
     window.removeEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
+    window.removeEventListener(FOLDER_PICKED_EVENT, this.onFolderPicked);
+    this.dialog?.dispose();
+    this.dialog = null;
+    this.pointerAnchor?.remove();
+    this.pointerAnchor = null;
+  }
+
+  /** The panel header: an icon button that starts the Add Folder flow. */
+  private buildHeader(): HTMLElement {
+    const header = document.createElement("div");
+    header.className = "workshop-tree__header";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "workshop-tree__add";
+    add.title = "Add Folder to Workspace...";
+    add.setAttribute("aria-label", "Add Folder to Workspace");
+    add.innerHTML = ICON_FOLDER_PLUS;
+    add.addEventListener("click", () => {
+      this.addFolder();
+    });
+    header.appendChild(add);
+    return header;
   }
 
   /** Clears the rendered roots (and the empty hint) and renders afresh. */
@@ -74,7 +169,7 @@ export class WorkshopTreePanel implements IContentRenderer {
       listing = await fetchTree(null);
       listingCache.set(ROOTS_KEY, listing);
     }
-    this.renderListing(this.list, listing);
+    this.renderListing(this.list, listing, true);
     if (listing.entries.length === 0) {
       const empty = document.createElement("p");
       empty.className = "workshop-tree__empty";
@@ -84,13 +179,13 @@ export class WorkshopTreePanel implements IContentRenderer {
   }
 
   /** Appends one row per entry; the server orders directories first. */
-  private renderListing(list: HTMLUListElement, listing: TreeListing): void {
+  private renderListing(list: HTMLUListElement, listing: TreeListing, roots = false): void {
     for (const entry of listing.entries) {
-      list.appendChild(this.renderEntry(entry));
+      list.appendChild(this.renderEntry(entry, roots));
     }
   }
 
-  private renderEntry(entry: TreeEntry): HTMLLIElement {
+  private renderEntry(entry: TreeEntry, isRoot = false): HTMLLIElement {
     const item = document.createElement("li");
     item.className = "workshop-tree__item";
     const row = document.createElement("button");
@@ -100,9 +195,35 @@ export class WorkshopTreePanel implements IContentRenderer {
     const name = document.createElement("span");
     name.className = "workshop-tree__name";
     name.textContent = entry.name;
+    if (isRoot) {
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showDropdown(this.menuAnchor(event, row), [
+          {
+            id: "workspace-remove",
+            label: "Remove from Workspace",
+            iconHtml: ICON_TRASH_2,
+            danger: true,
+            onClick: () => {
+              void this.removeRoot(entry.path);
+            },
+          },
+        ]);
+      });
+    }
     if (entry.kind === "directory") {
       row.insertAdjacentHTML("afterbegin", CHEVRON_SVG);
       row.appendChild(name);
+      if (isRoot && !entry.exists) {
+        // Not color alone: strikethrough (CSS), the danger color (CSS),
+        // and this text label together mark a root deleted from disk.
+        row.classList.add("workshop-tree__row--missing");
+        const missing = document.createElement("span");
+        missing.className = "workshop-tree__missing";
+        missing.textContent = "missing";
+        row.appendChild(missing);
+      }
       const expanded = expandedPaths.has(entry.path);
       row.setAttribute("aria-expanded", String(expanded));
       const children = document.createElement("ul");
@@ -178,5 +299,83 @@ export class WorkshopTreePanel implements IContentRenderer {
     row.setAttribute("role", "alert");
     row.textContent = message;
     list.appendChild(row);
+  }
+
+  /**
+   * The dropdown anchor for a context menu: the pointer position for a
+   * mouse invocation, the row (or panel) itself for a keyboard one,
+   * whose contextmenu event carries no coordinates.
+   */
+  private menuAnchor(event: MouseEvent, fallback: HTMLElement): HTMLElement {
+    if (event.clientX === 0 && event.clientY === 0) {
+      return fallback;
+    }
+    // A fresh anchor per menu: reusing one element would make the shared
+    // dropdown helper read the next right-click as a same-trigger toggle
+    // and close the menu it should be opening.
+    this.pointerAnchor?.remove();
+    const anchor = document.createElement("span");
+    anchor.style.cssText =
+      `position: fixed; width: 0; height: 0; pointer-events: none; ` +
+      `left: ${event.clientX}px; top: ${event.clientY}px;`;
+    document.body.appendChild(anchor);
+    this.pointerAnchor = anchor;
+    return anchor;
+  }
+
+  /**
+   * Starts the Add Folder flow. Inside the desktop shell the native
+   * folder picker answers through the persistent picked-path listener (a
+   * cancel answers nothing); in a plain browser, where no picker and no
+   * OS paths exist, a dialog asks for the path as text.
+   */
+  private addFolder(): void {
+    if (window.__PROMPTFORGE_DESKTOP__ === true) {
+      window.ipc?.postMessage(PICK_FOLDER_MESSAGE);
+      return;
+    }
+    this.dialog?.dispose();
+    this.dialog = showPanelDialog({
+      host: this.element,
+      classPrefix: "workspace-add",
+      titleId: "workspace-add-title",
+      title: "Add Folder to Workspace",
+      message: "Enter the full path of a folder to browse in the Workshop.",
+      field: { id: "workspace-add-path", label: "Folder path" },
+      buttons: [
+        {
+          label: "Add",
+          requiresValue: true,
+          run: (value) => {
+            void this.grantFolder(value);
+          },
+        },
+        { label: "Cancel", run: () => undefined },
+      ],
+    });
+  }
+
+  /** Grants one folder and announces the outcome, like the drop flow. */
+  private async grantFolder(path: string): Promise<void> {
+    try {
+      await grantPath(path);
+    } catch (error) {
+      this.statusBar?.showLocal(`Could not add ${path}: ${(error as Error).message}`, "error");
+      return;
+    }
+    this.statusBar?.showLocal(`Added ${path} to the Workshop`, "info");
+    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
+  }
+
+  /** Revokes one granted root and announces the outcome. */
+  private async removeRoot(path: string): Promise<void> {
+    try {
+      await revokeRoot(path);
+    } catch (error) {
+      this.statusBar?.showLocal(`Could not remove ${path}: ${(error as Error).message}`, "error");
+      return;
+    }
+    this.statusBar?.showLocal(`Removed ${path} from the Workshop`, "info");
+    window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT));
   }
 }

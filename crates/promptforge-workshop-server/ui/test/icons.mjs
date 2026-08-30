@@ -49,10 +49,12 @@ const expectedSizes = {
   ICON_PIN: 15,
   ICON_PIN_OFF: 15,
   ICON_TRASH: 15,
+  ICON_TRASH_2: 15,
+  ICON_FOLDER_PLUS: 15,
 };
 
 check(
-  "the module exports exactly the twelve icon names the consumers import",
+  "the module exports exactly the icon names the consumers import",
   Object.keys(icons).sort().join(",") === Object.keys(expectedSizes).sort().join(","),
 );
 

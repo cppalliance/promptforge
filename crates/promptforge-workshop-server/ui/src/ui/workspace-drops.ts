@@ -82,8 +82,12 @@ function grantErrorMessage(body: unknown, status: number): string {
   return `POST /workspace/grant answered ${status}`;
 }
 
-/** Grants one dropped path through the workspace API. */
-async function grantPath(path: string): Promise<void> {
+/**
+ * Grants one path through the workspace API. Shared with the Workshop
+ * tree's Add Folder flow, which grants picked and typed paths the same
+ * way a drop does.
+ */
+export async function grantPath(path: string): Promise<void> {
   const response = await fetch("/workspace/grant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

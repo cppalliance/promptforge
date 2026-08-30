@@ -157,7 +157,9 @@ function createVoicePlugin(): ChatPlugin {
 // tab comes from the close-button-free renderer.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
-  createComponent: createPanelComponent,
+  // The status bar rides along so the Workshop tree's workspace actions
+  // (add and remove folders) can announce their outcomes.
+  createComponent: (options) => createPanelComponent(options, { statusBar }),
   createTabComponent: createPanelTabComponent,
   theme: themeDark,
   disableFloatingGroups: true,

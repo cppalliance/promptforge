@@ -108,16 +108,16 @@ const ROOT = "C:\\project";
 const LISTINGS = new Map([
   [
     null,
-    { path: null, entries: [{ name: "project", path: ROOT, kind: "directory", size: 0, modified_ms: 100 }] },
+    { path: null, entries: [{ name: "project", path: ROOT, kind: "directory", size: 0, modified_ms: 100, exists: true }] },
   ],
   [
     ROOT,
     {
       path: ROOT,
       entries: [
-        { name: "src", path: `${ROOT}\\src`, kind: "directory", size: 0, modified_ms: 100 },
-        { name: "a.txt", path: `${ROOT}\\a.txt`, kind: "file", size: 3, modified_ms: 100 },
-        { name: "b.txt", path: `${ROOT}\\b.txt`, kind: "file", size: 3, modified_ms: 100 },
+        { name: "src", path: `${ROOT}\\src`, kind: "directory", size: 0, modified_ms: 100, exists: true },
+        { name: "a.txt", path: `${ROOT}\\a.txt`, kind: "file", size: 3, modified_ms: 100, exists: true },
+        { name: "b.txt", path: `${ROOT}\\b.txt`, kind: "file", size: 3, modified_ms: 100, exists: true },
       ],
     },
   ],
@@ -127,7 +127,7 @@ const LISTINGS = new Map([
     {
       path: `${ROOT}\\src`,
       entries: [
-        { name: "broken", path: `${ROOT}\\src\\broken`, kind: "directory", size: 0, modified_ms: 100 },
+        { name: "broken", path: `${ROOT}\\src\\broken`, kind: "directory", size: 0, modified_ms: 100, exists: true },
       ],
     },
   ],

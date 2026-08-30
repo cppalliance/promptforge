@@ -4,6 +4,7 @@ import {
 	Copy,
 	Ellipsis,
 	EllipsisVertical,
+	FolderPlus,
 	GitBranch,
 	Paperclip,
 	Pencil,
@@ -11,6 +12,7 @@ import {
 	PinOff,
 	Settings,
 	Trash,
+	Trash2,
 	createElement,
 } from "lucide";
 import type { IconNode } from "lucide";
@@ -32,3 +34,5 @@ export const ICON_MORE_VERTICAL = svg(EllipsisVertical, 16);
 export const ICON_PIN = svg(Pin, 15);
 export const ICON_PIN_OFF = svg(PinOff, 15);
 export const ICON_TRASH = svg(Trash, 15);
+export const ICON_TRASH_2 = svg(Trash2, 15);
+export const ICON_FOLDER_PLUS = svg(FolderPlus, 15);

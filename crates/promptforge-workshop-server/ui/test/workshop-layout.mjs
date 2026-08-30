@@ -148,7 +148,7 @@ globalThis.fetch = async (url, options) => {
       status: 200,
       json: async () => ({
         path: null,
-        entries: [{ name: "project", path: ROOT, kind: "directory", size: 0, modified_ms: 100 }],
+        entries: [{ name: "project", path: ROOT, kind: "directory", size: 0, modified_ms: 100, exists: true }],
       }),
     };
   }
