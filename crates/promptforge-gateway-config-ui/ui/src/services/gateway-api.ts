@@ -54,6 +54,27 @@ export interface GgufInfo {
   parameter_count: number | null;
 }
 
+/** The slice of `GET /admin/system` the fit heuristic consumes. */
+export interface SystemSnapshot {
+  /** Physical memory usage in bytes. */
+  ram: { used_bytes: number; total_bytes: number };
+  /** The first NVIDIA GPU; null on machines without an NVML driver. */
+  gpu: { name: string; vram_used_bytes: number; vram_total_bytes: number } | null;
+}
+
+/** One progress sample from a `POST /v1/cache` download stream. */
+export interface CacheProgressSample {
+  /** Bytes downloaded so far. */
+  bytes: number;
+  /** Total bytes, or null when the server sent no Content-Length. */
+  total: number | null;
+}
+
+/** The terminal outcome of a cache download. */
+export type CacheDownloadResult =
+  | { readonly status: "ready"; readonly path: string }
+  | { readonly status: "error"; readonly message: string };
+
 /** The shape of `POST /admin/config-apply`'s reply. */
 export interface ApplyOutcome {
   /** The promoted real files, relative to the config root. */
@@ -72,6 +93,19 @@ export class UnauthorizedError extends Error {
   constructor() {
     super("the gateway rejected the API key");
     this.name = "UnauthorizedError";
+  }
+}
+
+/**
+ * Thrown when the Hugging Face hub refused a proxied call with 401: no
+ * HF_TOKEN is configured (or the configured one is invalid). Distinct
+ * from {@link UnauthorizedError}, which is the gateway refusing the
+ * SPA's own bearer key.
+ */
+export class HfAuthError extends Error {
+  constructor() {
+    super("the Hugging Face hub rejected the request; set HF_TOKEN");
+    this.name = "HfAuthError";
   }
 }
 
@@ -335,6 +369,136 @@ export class GatewayApi {
       }
     })();
     return () => controller.abort();
+  }
+
+  /** Fetches the host-metrics snapshot slice the fit heuristic needs. */
+  async getSystem(): Promise<SystemSnapshot> {
+    const data = (await this.getJson("/admin/system")) as {
+      ram?: Partial<SystemSnapshot["ram"]>;
+      gpu?: { name?: string; vram_used_bytes?: number; vram_total_bytes?: number } | null;
+    };
+    return {
+      ram: {
+        used_bytes: data.ram?.used_bytes ?? 0,
+        total_bytes: data.ram?.total_bytes ?? 0,
+      },
+      gpu: data.gpu
+        ? {
+            name: data.gpu.name ?? "",
+            vram_used_bytes: data.gpu.vram_used_bytes ?? 0,
+            vram_total_bytes: data.gpu.vram_total_bytes ?? 0,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Proxied hub search via `GET /admin/hf/search`. `params` are the
+   * hub's own query parameters (`q`, `sort`, `direction`, `filter`,
+   * `limit`); the JSON body comes back verbatim.
+   */
+  async hfSearch(params: Record<string, string>): Promise<unknown> {
+    const query = new URLSearchParams(params).toString();
+    const response = await this.sendHf(`/admin/hf/search?${query}`);
+    return response.json();
+  }
+
+  /**
+   * Proxied hub model detail via `GET /admin/hf/model/{repo}`; the
+   * gateway adds `blobs=true`, so siblings carry exact file sizes.
+   */
+  async hfModel(repo: string): Promise<unknown> {
+    const response = await this.sendHf(`/admin/hf/model/${repo}`);
+    return response.json();
+  }
+
+  /**
+   * Sends one HF-proxy request. A 401 here is ambiguous: the hub's own
+   * refusal (no HF_TOKEN) passes through the proxy with the
+   * `upstream_client_error` code and becomes {@link HfAuthError}, while
+   * the gateway refusing the SPA's bearer key follows the shared
+   * unauthorized path.
+   */
+  private async sendHf(path: string): Promise<Response> {
+    const key = this.storage.getItem(API_KEY_STORAGE_KEY) ?? "";
+    const response = await this.transport(this.base + path, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (response.status === 401) {
+      let code = "";
+      try {
+        const body = (await response.json()) as { error?: { code?: string } };
+        code = body.error?.code ?? "";
+      } catch {
+        // A bodyless 401 is treated as the gateway's own refusal.
+      }
+      if (code === "upstream_client_error") {
+        throw new HfAuthError();
+      }
+      this.clearKey();
+      this.onUnauthorized?.();
+      throw new UnauthorizedError();
+    }
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+    return response;
+  }
+
+  /**
+   * Runs `POST /v1/cache` for `source` and consumes its stream. A cache
+   * hit answers buffered JSON and resolves ready immediately; a miss
+   * streams `downloading` samples into `onProgress` until the terminal
+   * `ready`/`error` event. The gateway offers no cancel: a dropped
+   * stream leaves the server-side download running to completion.
+   */
+  async cacheDownload(
+    source: string,
+    sha256: string | null,
+    onProgress: (sample: CacheProgressSample) => void,
+  ): Promise<CacheDownloadResult> {
+    const body: Record<string, string> = { source };
+    if (sha256 !== null) {
+      body["sha256"] = sha256;
+    }
+    const response = await this.send("/v1/cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      return { status: "error", message: await refusalMessage(response) };
+    }
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/event-stream") || response.body === null) {
+      // A cache hit answers with buffered `{"path", "status": "ready"}`.
+      const data = (await response.json()) as Record<string, unknown>;
+      return typeof data["path"] === "string"
+        ? { status: "ready", path: data["path"] }
+        : { status: "error", message: "the cache answered without a path" };
+    }
+    for await (const payload of ssePayloads(response.body)) {
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(payload) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (event["status"] === "downloading") {
+        onProgress({
+          bytes: typeof event["bytes"] === "number" ? event["bytes"] : 0,
+          total: typeof event["total"] === "number" ? event["total"] : null,
+        });
+      } else if (event["status"] === "ready") {
+        const path = typeof event["path"] === "string" ? event["path"] : "";
+        return { status: "ready", path };
+      } else if (event["status"] === "error") {
+        const message =
+          typeof event["message"] === "string" ? event["message"] : "the download failed";
+        return { status: "error", message };
+      }
+    }
+    return { status: "error", message: "the download stream ended without a terminal event" };
   }
 
   /** GETs a JSON endpoint, throwing on any non-success status. */

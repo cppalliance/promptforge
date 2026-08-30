@@ -190,14 +190,92 @@ export function modelsFixture() {
   };
 }
 
+/** A GiB, for HF fixture sizes. */
+export const GIB = 1024 ** 3;
+
+/**
+ * A system snapshot for the fit heuristic: 20 GiB free VRAM of 24,
+ * 32 GiB free RAM of 64. With the plan's 1.2 margin: 10 GiB fits the
+ * GPU, 18 GiB partially offloads, 25 GiB is CPU only, 50 GiB is too
+ * large.
+ */
+export function systemFixture() {
+  return {
+    cpu: { frequency_mhz: 2500, logical_cores: 16, physical_cores: 8, utilization_percent: 5 },
+    ram: { used_bytes: 32 * GIB, total_bytes: 64 * GIB },
+    gpu: { name: "NVIDIA GeForce RTX 4090", vram_used_bytes: 4 * GIB, vram_total_bytes: 24 * GIB },
+  };
+}
+
+/** Hub search results: two GGUF repos as the hub's /api/models emits them. */
+export function hfSearchFixture() {
+  return [
+    {
+      id: "unsloth/Qwen3-Test-8B-GGUF",
+      downloads: 1_234_567,
+      likes: 890,
+      lastModified: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      tags: ["gguf", "qwen3"],
+    },
+    {
+      id: "bartowski/Llama-X-GGUF",
+      downloads: 45_000,
+      likes: 12,
+      lastModified: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+      tags: ["gguf"],
+    },
+  ];
+}
+
+/**
+ * Hub model detail with blobs=true sizes chosen to hit every fit band
+ * against `systemFixture`, plus non-GGUF siblings the picker must skip.
+ */
+export function hfModelFixture() {
+  return {
+    id: "unsloth/Qwen3-Test-8B-GGUF",
+    author: "unsloth",
+    downloads: 1_234_567,
+    likes: 890,
+    lastModified: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    tags: ["gguf", "qwen3", "text-generation"],
+    siblings: [
+      { rfilename: "README.md", size: 1234 },
+      { rfilename: "config.json", size: 99 },
+      { rfilename: "Qwen3-Test-8B-Q4_K_M.gguf", size: 10 * GIB },
+      { rfilename: "Qwen3-Test-8B-Q6_K.gguf", size: 18 * GIB },
+      { rfilename: "Qwen3-Test-8B-Q8_0.gguf", size: 25 * GIB },
+      { rfilename: "Qwen3-Test-8B-F16.gguf", size: 50 * GIB },
+    ],
+  };
+}
+
+/** A README carrying the XSS vectors the sanitizer must neutralize. */
+export function readmeFixture() {
+  return [
+    "# Qwen3 Test",
+    "",
+    "<script>window.__pwned = true;</script>",
+    "",
+    "Safe **body** text.",
+    "",
+    "[bad link](javascript:alert(1))",
+  ].join("\n");
+}
+
 /**
  * A canned gateway behind the fetch signature: status, profiles, an
  * idle progress stream, switch-profile (overridable through `onSwitch`),
  * and the config surface - running/pending/dirty views, shadow saves
  * (PUT re-points the pending view and flips the dirty report), apply,
- * revert, orphans, model-info, reveal, and cache deletes. When `key` is
- * set, requests without that bearer answer 401. Every call is recorded
- * in `calls`; the mutable config state is exposed as `state`.
+ * revert, orphans, model-info, reveal, and cache deletes. The Discover
+ * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
+ * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
+ * pass-through 401), hub README fetches (`readme`), and `POST
+ * /v1/cache` (an immediately-completing SSE unless `onCache` supplies
+ * the response). When `key` is set, gateway requests without that
+ * bearer answer 401; absolute (hub) URLs are exempt. Every call is
+ * recorded in `calls`; the mutable config state is exposed as `state`.
  */
 export function gatewayStub({
   profile = "default",
@@ -211,6 +289,12 @@ export function gatewayStub({
   orphans,
   modelInfo,
   dirtyAfterSave,
+  system,
+  hfSearch,
+  hfModels,
+  hfAuth401 = false,
+  readme,
+  onCache,
 } = {}) {
   const calls = [];
   const state = {
@@ -219,15 +303,65 @@ export function gatewayStub({
     dirty: dirty ?? cleanDirty(),
     orphans: orphans ?? [],
   };
+  const hubDenied = () =>
+    jsonResponse(
+      {
+        error: {
+          message: "upstream returned 401",
+          type: "invalid_request_error",
+          code: "upstream_client_error",
+        },
+      },
+      401,
+    );
   const fetchFn = async (input, init = {}) => {
     const url = String(input);
     calls.push({ url, init });
+    // Hub-served files (README, avatars) carry no gateway bearer.
+    if (/^https?:\/\//.test(url)) {
+      if (url.endsWith("README.md")) {
+        return new Response(readme ?? "# hello", {
+          status: 200,
+          headers: { "content-type": "text/markdown" },
+        });
+      }
+      return jsonResponse({ error: `unstubbed hub route: ${url}` }, 404);
+    }
     if (key !== undefined) {
       const headers = init.headers ?? {};
       const auth = headers.Authorization ?? headers.authorization;
       if (auth !== `Bearer ${key}`) {
         return jsonResponse({ error: "unauthorized" }, 401);
       }
+    }
+    if (url.includes("/admin/hf/search")) {
+      if (hfAuth401) {
+        return hubDenied();
+      }
+      return jsonResponse(hfSearch ?? []);
+    }
+    if (url.includes("/admin/hf/model/")) {
+      if (hfAuth401) {
+        return hubDenied();
+      }
+      const repo = url.slice(url.indexOf("/admin/hf/model/") + "/admin/hf/model/".length);
+      const detail = (hfModels ?? {})[repo];
+      return detail
+        ? jsonResponse(detail)
+        : jsonResponse({ error: { code: "upstream_client_error" } }, 404);
+    }
+    if (url.endsWith("/admin/system")) {
+      return jsonResponse(system ?? systemFixture());
+    }
+    if (url.endsWith("/v1/cache") && init.method === "POST") {
+      if (onCache) {
+        return onCache(init);
+      }
+      const channel = sseChannel();
+      channel.push({ status: "downloading", bytes: 10, total: 100 });
+      channel.push({ status: "ready", path: "C:/pf/models/file.gguf" });
+      channel.end();
+      return channel.response;
     }
     if (url.endsWith("/admin/status")) {
       return jsonResponse({ profile, models });
