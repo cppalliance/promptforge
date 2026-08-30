@@ -150,3 +150,7 @@ the mouse rollover handler was never written; pointerenter switches the open men
 
 user rule stated directly - "if app loses focus, menu should unpop"; the menu previously closed only on click-outside, Escape, or selection, so a blur listener was the missing fourth dismissal path. (user said)
 
+## 2026-08-29 Add gateway architecture and market positioning report
+
+the report was produced during the architecture-rollout run but deliberately excluded from every plan commit as unrelated; at the end the user said "git add commit" so the analysis is preserved in the repo rather than lost as scratch. (user said)
+
