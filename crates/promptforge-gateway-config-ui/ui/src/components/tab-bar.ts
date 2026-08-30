@@ -33,6 +33,10 @@ export interface TabBarOptions {
   showMedallion: boolean;
   /** The profile switcher element (or its panel-mode placeholder). */
   switcher: HTMLElement;
+  /** Fired when the Apply (N) button is pressed. */
+  onApply?: () => void;
+  /** Fired when the Revert All button is pressed. */
+  onRevertAll?: () => void;
 }
 
 /** The mounted tab bar and its live-update handles. */
@@ -43,6 +47,12 @@ export interface TabBar {
   setActiveView(view: ViewId | null): void;
   /** Recolors the connection dot from the latest API outcome. */
   setConnected(ok: boolean): void;
+  /**
+   * Shows Apply (N) + Revert All when `count` is positive, hides the
+   * pair at zero. `count` is the pending-file count from the dirty
+   * report.
+   */
+  setPendingCount(count: number): void;
 }
 
 /** Builds the tab bar. */
@@ -87,8 +97,8 @@ export function createTabBar(options: TabBarOptions): TabBar {
   dotText.className = "visually-hidden";
   dotText.textContent = "Gateway status unknown";
   dot.append(dotText);
-  // The Apply/Revert pair renders in here once shadow writes exist;
-  // until then the container keeps the right cluster's layout stable.
+  // The Apply/Revert pair [INVENTED] renders in here whenever the dirty
+  // report says shadow files exist.
   const pending = document.createElement("div");
   pending.className = "apply-actions";
   actions.append(dot, pending);
@@ -96,6 +106,23 @@ export function createTabBar(options: TabBarOptions): TabBar {
 
   return {
     element,
+    setPendingCount(count: number): void {
+      if (count <= 0) {
+        pending.replaceChildren();
+        return;
+      }
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "button button-sm button-primary apply-button";
+      apply.textContent = `Apply (${count})`;
+      apply.addEventListener("click", () => options.onApply?.());
+      const revert = document.createElement("button");
+      revert.type = "button";
+      revert.className = "button button-sm button-outline revert-button";
+      revert.textContent = "Revert All";
+      revert.addEventListener("click", () => options.onRevertAll?.());
+      pending.replaceChildren(apply, revert);
+    },
     setActiveView(view: ViewId | null): void {
       for (const [tabView, tab] of tabByView) {
         if (tabView === view) {

@@ -24,6 +24,46 @@ export type SwitchResult =
   | { readonly status: "ready"; readonly profile: string }
   | { readonly status: "error"; readonly message: string };
 
+/** The shape of `GET /admin/config-dirty`: the pending-shadow report. */
+export interface DirtyReport {
+  /** Whether any shadow file exists. */
+  dirty: boolean;
+  /** Real files whose shadows are present, relative to the config root. */
+  pending_files: string[];
+  /** Top-level TOML sections the pending view changes. */
+  changed_sections: string[];
+}
+
+/** One unconfigured file from `GET /admin/orphans`. */
+export interface OrphanFile {
+  /** Cache-relative path, `/`-separated. */
+  path: string;
+  /** File size in bytes. */
+  size_bytes: number;
+  /** Cache sidecar digest; null for files the cache never downloaded. */
+  sha256: string | null;
+}
+
+/** The shape of `GET /admin/model-info`: a GGUF header summary. */
+export interface GgufInfo {
+  /** The model architecture named by the header, when present. */
+  architecture: string | null;
+  /** Transformer block count, feeding the gpu_layers readout. */
+  layer_count: number | null;
+  /** Total parameter count, when present. */
+  parameter_count: number | null;
+}
+
+/** The shape of `POST /admin/config-apply`'s reply. */
+export interface ApplyOutcome {
+  /** The promoted real files, relative to the config root. */
+  applied: string[];
+  /** Whether the active profile reloaded. */
+  reloaded: boolean;
+  /** Whether a promoted boot shadow needs a gateway restart. */
+  restart_required: boolean;
+}
+
 /** The injectable fetch signature; tests substitute a canned gateway. */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -119,6 +159,108 @@ export class GatewayApi {
   async getProfiles(): Promise<string[]> {
     const data = (await this.getJson("/admin/profiles")) as { profiles?: string[] };
     return data.profiles ?? [];
+  }
+
+  /** Fetches the running config JSON (secrets `"***"`, provenance annotated). */
+  async getConfig(): Promise<Record<string, unknown>> {
+    return (await this.getJson("/admin/config")) as Record<string, unknown>;
+  }
+
+  /** Fetches the pending (shadow-overlaid) config view. */
+  async getConfigPending(): Promise<Record<string, unknown>> {
+    const data = (await this.getJson("/admin/config-pending")) as {
+      profile?: Record<string, unknown>;
+    };
+    return data.profile ?? {};
+  }
+
+  /** Fetches the pending-shadow dirty report. */
+  async getConfigDirty(): Promise<DirtyReport> {
+    const data = (await this.getJson("/admin/config-dirty")) as Partial<DirtyReport>;
+    return {
+      dirty: data.dirty ?? false,
+      pending_files: data.pending_files ?? [],
+      changed_sections: data.changed_sections ?? [],
+    };
+  }
+
+  /**
+   * Stages `body` (the `GET /admin/config` JSON shape) as the active
+   * profile's shadow via `PUT /admin/config`. Untouched secrets stay
+   * `"***"`; the gateway restores their real values.
+   */
+  async putConfig(body: unknown): Promise<void> {
+    const response = await this.send("/admin/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /** Promotes every shadow via `POST /admin/config-apply`. */
+  async applyConfig(): Promise<ApplyOutcome> {
+    const response = await this.send("/admin/config-apply", { method: "POST" });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+    const data = (await response.json()) as Partial<ApplyOutcome>;
+    return {
+      applied: data.applied ?? [],
+      reloaded: data.reloaded ?? false,
+      restart_required: data.restart_required ?? false,
+    };
+  }
+
+  /** Deletes every shadow via `POST /admin/config-revert`. */
+  async revertConfig(): Promise<void> {
+    const response = await this.send("/admin/config-revert", { method: "POST" });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /** Lists unconfigured cache files via `GET /admin/orphans`. */
+  async getOrphans(): Promise<OrphanFile[]> {
+    const data = (await this.getJson("/admin/orphans")) as { orphans?: OrphanFile[] };
+    return data.orphans ?? [];
+  }
+
+  /**
+   * Reads a GGUF header summary via `GET /admin/model-info`. Throws for
+   * any failure; the caller falls back to a plain readout.
+   */
+  async getModelInfo(path: string): Promise<GgufInfo> {
+    const data = (await this.getJson(
+      `/admin/model-info?path=${encodeURIComponent(path)}`,
+    )) as Partial<GgufInfo>;
+    return {
+      architecture: data.architecture ?? null,
+      layer_count: data.layer_count ?? null,
+      parameter_count: data.parameter_count ?? null,
+    };
+  }
+
+  /** Opens the OS file manager at `path` via `POST /admin/reveal`. */
+  async reveal(path: string): Promise<void> {
+    const response = await this.send("/admin/reveal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /** Deletes a cached artifact via `DELETE /v1/cache/{sha256}`. */
+  async deleteCached(sha256: string): Promise<void> {
+    const response = await this.send(`/v1/cache/${sha256}`, { method: "DELETE" });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
   }
 
   /**
