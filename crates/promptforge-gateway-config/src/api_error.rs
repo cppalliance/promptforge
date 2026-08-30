@@ -42,6 +42,8 @@ pub enum ConfigErrorKind {
     IncludeCycle,
     /// An `include` chain exceeded the maximum nesting depth.
     IncludeDepth,
+    /// A shadow file could not be written.
+    Write,
 }
 
 impl ConfigError {
@@ -56,6 +58,7 @@ impl ConfigError {
             ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
             ConfigErrorRepr::IncludeCycle { .. } => ConfigErrorKind::IncludeCycle,
             ConfigErrorRepr::IncludeDepth { .. } => ConfigErrorKind::IncludeDepth,
+            ConfigErrorRepr::Write { .. } => ConfigErrorKind::Write,
         }
     }
 
@@ -147,6 +150,13 @@ mod tests {
                     max: 16,
                 },
                 ConfigErrorKind::IncludeDepth,
+            ),
+            (
+                ConfigErrorRepr::Write {
+                    path: PathBuf::from("a.toml.next"),
+                    source: std::io::Error::other("x"),
+                },
+                ConfigErrorKind::Write,
             ),
         ];
         for (repr, kind) in cases {

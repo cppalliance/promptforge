@@ -64,6 +64,17 @@ pub(crate) enum ConfigError {
         /// The configured maximum depth.
         max: usize,
     },
+
+    /// A shadow file could not be written.
+    #[non_exhaustive]
+    #[error("write shadow {}", path.display())]
+    Write {
+        /// The path that could not be written.
+        path: std::path::PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Renders the optional parse-failure path as a ` (path)` suffix or empty.

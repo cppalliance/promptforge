@@ -35,10 +35,14 @@ pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
 mod merge;
 mod name;
 mod provenance;
+mod shadow;
 
 use merge::merge_docs;
 pub use name::{ProfileName, ProfileNameError};
 pub(crate) use provenance::Provenance;
+pub use shadow::{
+    save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path, write_shadow,
+};
 
 #[cfg(test)]
 mod tests;
@@ -304,6 +308,20 @@ pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
 pub(crate) fn collect_config_chain(
     path: &Path,
 ) -> Result<(Value, Vec<PathBuf>, Provenance), ConfigError> {
+    collect_config_chain_with(path, &read_doc_from_disk)
+}
+
+/// [`collect_config_chain`] over a caller-chosen document reader.
+///
+/// The reader maps each chain path to its parsed TOML document; the disk
+/// reader is the normal case, and the shadow module substitutes pending
+/// shadow files (and an in-memory candidate) without the chain walker
+/// knowing. Include resolution, cycle detection, and provenance always use
+/// the real paths.
+pub(crate) fn collect_config_chain_with(
+    path: &Path,
+    read_doc: &dyn Fn(&Path) -> Result<Value, ConfigError>,
+) -> Result<(Value, Vec<PathBuf>, Provenance), ConfigError> {
     let mut stack = Vec::new();
     let mut visiting = HashSet::new();
     let mut config_chain = Vec::new();
@@ -315,8 +333,21 @@ pub(crate) fn collect_config_chain(
         &mut visiting,
         &mut config_chain,
         &mut provenance,
+        read_doc,
     )?;
     Ok((value, config_chain, provenance))
+}
+
+/// Reads and parses one TOML document from disk: the default chain reader.
+pub(crate) fn read_doc_from_disk(path: &Path) -> Result<Value, ConfigError> {
+    let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        path: path.to_owned(),
+        source,
+    })?;
+    toml::from_str(&raw).map_err(|source| ConfigError::Parse {
+        path: Some(path.to_owned()),
+        source: Box::new(source),
+    })
 }
 
 fn load_value(
@@ -326,6 +357,7 @@ fn load_value(
     visiting: &mut HashSet<PathBuf>,
     config_chain: &mut Vec<PathBuf>,
     provenance: &mut Provenance,
+    read_doc: &dyn Fn(&Path) -> Result<Value, ConfigError>,
 ) -> Result<Value, ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth {
@@ -344,14 +376,7 @@ fn load_value(
     stack.push(canonical.clone());
     config_chain.push(path.to_path_buf());
 
-    let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
-        path: path.to_owned(),
-        source,
-    })?;
-    let mut doc: Value = toml::from_str(&raw).map_err(|source| ConfigError::Parse {
-        path: Some(path.to_owned()),
-        source: Box::new(source),
-    })?;
+    let mut doc = read_doc(path)?;
 
     let includes = take_includes(&mut doc)?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -366,6 +391,7 @@ fn load_value(
             visiting,
             config_chain,
             provenance,
+            read_doc,
         )?;
         merge_docs(&mut merged, parent_doc, &include_path, provenance)?;
     }

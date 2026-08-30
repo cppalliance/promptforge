@@ -37,6 +37,17 @@ What it provides:
   artifact-source rules - `https` with a mandatory `sha256` pin, or an
   operator-controlled local path - and are validated before values leave the
   crate.
+- Shadow files ([`shadow.rs`](src/profile/shadow.rs)): pending edits stage
+  beside the real files (`default.toml` gains `default.toml.next`, never
+  `.next.toml`, so the profile listing cannot see a phantom profile).
+  `save_profile_shadow`, `save_include_shadow`, and `save_boot_shadow`
+  restore `"***"`-redacted secrets from the current state, resolve the
+  include chain preferring existing shadows, validate the merged result like
+  a real load, and only then write atomically (temp + rename);
+  `save_include_shadow` refuses a target the pending chain never reaches
+  (it could not be validated); `write_shadow`
+  stages arbitrary sibling content such as `.env` files, and `shadow_path`
+  names the shadow for any managed file. No save ever touches a real file.
 - [`ConfigError`](src/api_error.rs): an opaque, source-preserving error type;
   classify failures with `ConfigError::kind` and `ConfigErrorKind`.
 

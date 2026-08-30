@@ -44,6 +44,9 @@ sha2.workspace = true
 # Host CPU/RAM/disk metrics for GET /admin/system.
 sysinfo.workspace = true
 subtle.workspace = true
+# JSON-to-TOML conversion for the shadow-write admin routes; already in the
+# tree via promptforge-gateway-config.
+toml.workspace = true
 url.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 thiserror.workspace = true

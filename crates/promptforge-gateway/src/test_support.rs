@@ -2,6 +2,7 @@
 //! assembled from one fixture profile.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use promptforge_gateway_config::Config;
@@ -10,26 +11,60 @@ use promptforge_progress::ProgressHub;
 use crate::routing::Routing;
 use crate::{AppState, BootOwned, ProfileSelection, build_router};
 
+/// Filesystem context for the shadow-write and env admin routes: the
+/// profiles directory, the active profile name, and the boot config path.
+pub(crate) struct AdminPaths {
+    /// Directory of named profiles.
+    pub(crate) profiles_dir: PathBuf,
+    /// The active profile name (its `<name>.toml` lives in `profiles_dir`).
+    pub(crate) active: String,
+    /// The boot config path (its `.env` sibling serves the env routes).
+    pub(crate) boot_config: PathBuf,
+}
+
 /// Serves `build_router` over a state assembled from `config` with no
 /// running children: the retained config still carries everything the
 /// admin routes read (the cache root, the `[[local_model]]` entries).
 pub(crate) async fn serve(config: Config) -> SocketAddr {
-    serve_with(config, None).await
+    serve_with(config, None, None).await
 }
 
 /// Serves like [`serve`], but with the Hugging Face proxy replaced, so a
 /// test can aim the `/admin/hf/*` routes at a local stub hub with an
 /// explicit token instead of the process env.
 pub(crate) async fn serve_with_hf(config: Config, hf: crate::hf::HfProxy) -> SocketAddr {
-    serve_with(config, Some(hf)).await
+    serve_with(config, Some(hf), None).await
 }
 
-/// The shared harness body behind [`serve`] and [`serve_with_hf`].
-async fn serve_with(config: Config, hf: Option<crate::hf::HfProxy>) -> SocketAddr {
+/// Serves like [`serve`], but with the profiles directory, active profile,
+/// and boot config path wired in, so the shadow-write and env routes have
+/// real files to stage against.
+pub(crate) async fn serve_with_paths(config: Config, paths: AdminPaths) -> SocketAddr {
+    serve_with(config, None, Some(paths)).await
+}
+
+/// The shared harness body behind [`serve`], [`serve_with_hf`], and
+/// [`serve_with_paths`].
+async fn serve_with(
+    config: Config,
+    hf: Option<crate::hf::HfProxy>,
+    paths: Option<AdminPaths>,
+) -> SocketAddr {
     let key = config.server_key();
     let server = config.server().clone();
     let routing = Routing::from_config(&config).expect("routing builds");
     let config = Arc::new(config);
+    let (profiles_dir, selection, boot_path) = match paths {
+        Some(paths) => (
+            Some(paths.profiles_dir),
+            ProfileSelection {
+                name: Some(paths.active),
+                model_allowlist: None,
+            },
+            Some(paths.boot_config),
+        ),
+        None => (None, ProfileSelection::default(), None),
+    };
     let mut state = AppState::from_parts(
         Arc::new(routing),
         key,
@@ -38,11 +73,12 @@ async fn serve_with(config: Config, hf: Option<crate::hf::HfProxy>) -> SocketAdd
         crate::local::LocalRuntime::empty(),
         #[cfg(feature = "web-search")]
         config.web_search_config(),
-        None,
-        ProfileSelection::default(),
+        profiles_dir,
+        selection,
         BootOwned {
             server,
             workshop: None,
+            config_path: boot_path,
         },
         Arc::new(ProgressHub::new()),
     );

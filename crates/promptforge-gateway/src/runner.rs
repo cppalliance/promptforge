@@ -55,13 +55,38 @@ pub struct ProfilesContext {
     pub dir: Option<PathBuf>,
     /// The active profile name, reported by `GET /admin/status`.
     pub active: Option<ProfileName>,
+    /// The boot config path, enabling the boot-config and env shadow-write
+    /// routes (`PUT /admin/boot-config`, `GET`/`PUT /admin/env`).
+    pub boot_config: Option<PathBuf>,
 }
 
 impl ProfilesContext {
     /// Build a profiles context from an optional directory and active name.
     #[must_use]
     pub fn new(dir: Option<PathBuf>, active: Option<ProfileName>) -> ProfilesContext {
-        ProfilesContext { dir, active }
+        ProfilesContext {
+            dir,
+            active,
+            boot_config: None,
+        }
+    }
+
+    /// Attach the boot config path, enabling the boot-config and env
+    /// shadow-write routes.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway::ProfilesContext;
+    /// use std::path::PathBuf;
+    ///
+    /// let context = ProfilesContext::default()
+    ///     .with_boot_config(PathBuf::from("gateway.toml"));
+    /// assert!(context.boot_config.is_some());
+    /// ```
+    #[must_use]
+    pub fn with_boot_config(mut self, path: PathBuf) -> ProfilesContext {
+        self.boot_config = Some(path);
+        self
     }
 }
 
@@ -178,6 +203,7 @@ impl Gateway {
             crate::BootOwned {
                 server: config.server().clone(),
                 workshop: config.workshop().cloned(),
+                config_path: profiles.boot_config,
             },
             hub,
         );
@@ -787,7 +813,8 @@ fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), Sta
 
     Ok((
         config,
-        ProfilesContext::new(Some(profiles_dir), Some(options.profile.clone())),
+        ProfilesContext::new(Some(profiles_dir), Some(options.profile.clone()))
+            .with_boot_config(options.config_path.clone()),
     ))
 }
 
