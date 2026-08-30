@@ -28,6 +28,7 @@ mod embeddings;
 #[cfg(feature = "local")]
 mod local;
 mod profiles;
+mod progress;
 mod queue;
 mod rerank;
 mod web_search;

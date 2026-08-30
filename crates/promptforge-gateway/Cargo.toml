@@ -29,6 +29,8 @@ promptforge-gateway-config.workspace = true
 promptforge-gateway-local = { workspace = true, optional = true }
 promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true
+# The serde feature wires the progress event stream onto HTTP.
+promptforge-progress = { workspace = true, features = ["serde"] }
 promptforge-web-search-service = { workspace = true, optional = true }
 promptforge-workshop-server = { workspace = true, optional = true }
 serde.workspace = true
@@ -61,6 +63,8 @@ workshop-cuda = ["workshop", "llama-cuda", "promptforge-workshop-server/voice-cu
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.
 png.workspace = true
+# test-util pauses time so the progress heartbeat test runs instantly.
+tokio = { workspace = true, features = ["test-util"] }
 promptforge-gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
 

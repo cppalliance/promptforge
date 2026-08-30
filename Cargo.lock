@@ -4001,6 +4001,7 @@ dependencies = [
  "promptforge-gateway-local",
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
+ "promptforge-progress",
  "promptforge-web-search-service",
  "promptforge-workshop-server",
  "reqwest 0.12.28",

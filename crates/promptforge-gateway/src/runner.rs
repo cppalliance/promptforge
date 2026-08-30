@@ -119,8 +119,21 @@ impl Gateway {
         config: &Config,
         profiles: ProfilesContext,
     ) -> Result<Gateway, StartupError> {
+        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        // Startup provisioning is the hub's first operation tree: it lives
+        // for the provisioning call and detaches when the tree drops.
         #[cfg(feature = "local")]
-        let local = LocalRuntime::start(config, None).map_err(StartupError::provisioning)?;
+        let local = {
+            let tree = hub.operation();
+            let progress = tree.register("startup", 1.0);
+            let started =
+                LocalRuntime::start(config, Some(&progress)).map_err(StartupError::provisioning);
+            if started.is_ok() {
+                progress.complete();
+            }
+            drop(tree);
+            started?
+        };
         // A headless build cannot honor a config declaring local models;
         // refuse at assembly rather than silently dropping them.
         #[cfg(not(feature = "local"))]
@@ -150,6 +163,7 @@ impl Gateway {
                 server: config.server().clone(),
                 workshop: config.workshop().cloned(),
             },
+            hub,
         );
         Ok(Gateway { state })
     }
