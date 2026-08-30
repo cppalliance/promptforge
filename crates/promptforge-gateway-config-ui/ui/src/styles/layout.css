@@ -1,0 +1,257 @@
+/* Shell layout: tab bar, master-detail split, banners, toasts, the
+   gradient progress strip, modal scaffolding, and metric tiles. Written
+   mobile-first; min-width queries widen the split and the tile grid. */
+
+@layer components {
+	/* Skip link: the shell's first focusable element, parked above the
+	   viewport until keyboard focus reveals it as a pill over the tab
+	   bar. Near-black label on the accent, same 5.2:1 pair as
+	   .button-primary. */
+	.skip-link {
+		position: absolute;
+		inset-block-start: 0.5rem;
+		inset-inline-start: 0.5rem;
+		z-index: 70;
+		display: inline-flex;
+		align-items: center;
+		height: 2.25rem;
+		padding-inline: 0.875rem;
+		border-radius: 9999px;
+		background: var(--accent, #E05A2B);
+		color: #0F0F0F;
+		font-weight: 500;
+		text-decoration: none;
+		transform: translateY(-200%);
+	}
+	.skip-link:focus-visible {
+		transform: translateY(0);
+	}
+
+	/* Tab bar: h-10 px-4 gap-2 tabs on the secondary surface; the
+	   active tab is a 2px accent underline, never a pill. Accent text
+	   on --bg-secondary is 4.7:1. */
+	.tab-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding-inline: 0.75rem;
+		background: var(--bg-secondary, #1A1A1A);
+		border-bottom: 1px solid var(--border, #2A2A2A);
+	}
+	.tab-list {
+		display: flex;
+		align-items: center;
+	}
+	.tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		height: 2.5rem;
+		padding-inline: 1rem;
+		border: 0;
+		border-bottom: 2px solid transparent;
+		border-radius: 0;
+		background: none;
+		color: var(--text-secondary, #888888);
+		font-size: 0.8125rem;
+		font-weight: 500;
+		text-decoration: none;
+		cursor: pointer;
+	}
+	.tab:hover {
+		color: var(--text-primary, #E8E8E8);
+	}
+	.tab.is-active,
+	.tab[aria-current="page"] {
+		border-bottom-color: var(--accent, #E05A2B);
+		color: var(--accent, #E05A2B);
+	}
+
+	/* View content below the tab bar. */
+	.shell {
+		padding: 1rem;
+	}
+
+	/* Master-detail split (the Unsloth hub proportions): stacked on
+	   small screens; side by side from 768px, the list at
+	   clamp(460px, 32%, 620px) capped at 44%. */
+	.split {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-height: 0;
+	}
+	.split-list {
+		min-width: 0;
+		overflow-y: auto;
+	}
+	.split-detail {
+		flex: 1;
+		min-width: 0;
+		overflow-y: auto;
+	}
+	@media (min-width: 768px) {
+		.split {
+			flex-direction: row;
+		}
+		.split-list {
+			flex: 0 1 clamp(460px, 32%, 620px);
+			max-width: 44%;
+			border-right: 1px solid var(--border, #2A2A2A);
+		}
+	}
+
+	/* Persistent banners (pending changes, restart required). */
+	.banner {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.5rem 1rem;
+		border-left: 3px solid var(--accent, #E05A2B);
+		background: var(--bg-secondary, #1A1A1A);
+		color: var(--text-primary, #E8E8E8);
+	}
+	.banner-pending {
+		border-left-color: var(--accent, #E05A2B);
+	}
+	.banner-restart {
+		border-left-color: var(--warning, #F09030);
+	}
+	.banner-danger {
+		border-left-color: var(--danger, #DC3545);
+	}
+
+	/* Toast stack, bottom-right. */
+	.toast-stack {
+		position: fixed;
+		inset-block-end: 1rem;
+		inset-inline-end: 1rem;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.toast {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 240px;
+		max-width: 360px;
+		padding: 0.625rem 0.875rem;
+		border: 1px solid var(--border, #2A2A2A);
+		border-left-width: 3px;
+		border-radius: var(--radius, 8px);
+		background: var(--bg-secondary, #1A1A1A);
+		box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+	}
+	.toast-success {
+		border-left-color: var(--success, #28A745);
+	}
+	.toast-error {
+		border-left-color: var(--danger, #DC3545);
+	}
+	.toast-info {
+		border-left-color: var(--accent, #E05A2B);
+	}
+
+	/* Thin lava-gradient progress strip (tab bar top edge, download
+	   progress); the owner sets --progress (0 to 1) inline and the
+	   full-width bar scales, so the animation is compositor-only -
+	   transitioning width would relayout on every frame. */
+	.progress-strip {
+		height: 3px;
+		overflow: hidden;
+	}
+	.progress-strip-bar {
+		height: 100%;
+		border-radius: 9999px;
+		background: var(
+			--accent-gradient,
+			linear-gradient(90deg, #8B2500, #E05A2B, #F09030, #FFD080)
+		);
+		transform-origin: 0 50%;
+		transform: scaleX(var(--progress, 0));
+		transition: transform 200ms ease-out;
+	}
+
+	/* Modal scaffolding: dimmed full-screen overlay centering a card. */
+	.overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: center;
+		background: rgb(0 0 0 / 0.6);
+	}
+	.modal {
+		width: min(28rem, calc(100vw - 2rem));
+		padding: 1.25rem;
+		border: 1px solid var(--border, #2A2A2A);
+		border-radius: 0.75rem;
+		background: var(--bg-secondary, #1A1A1A);
+		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+	}
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		margin-block-start: 1rem;
+	}
+
+	/* Metric tiles (Settings > System): rounded-xl p-4 cards in a grid
+	   that becomes 2-col from 640px; thin bars recolor by load via the
+	   is-warning (70-89%) and is-danger (>=90%) modifiers. The fill
+	   scales by --progress like the progress strip, for the same
+	   compositor-only reason. */
+	.metric-grid {
+		display: grid;
+		gap: 0.5rem;
+		padding-block: 0.75rem;
+	}
+	@media (min-width: 640px) {
+		.metric-grid {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+	.metric-tile {
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		padding: 1rem;
+		border: 1px solid var(--border, #2A2A2A);
+		border-radius: 0.75rem;
+		background: rgb(255 255 255 / 0.06);
+	}
+	.metric-label {
+		color: var(--text-secondary, #888888);
+		font-size: 0.6875rem;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+	.metric-value {
+		font-family: var(--font-mono, ui-monospace, monospace);
+		font-size: 0.875rem;
+		font-variant-numeric: tabular-nums;
+	}
+	.metric-bar {
+		height: 0.375rem;
+		border-radius: 9999px;
+		background: rgb(0 0 0 / 0.4);
+		overflow: hidden;
+	}
+	.metric-bar-fill {
+		height: 100%;
+		border-radius: 9999px;
+		background: var(--accent, #E05A2B);
+		transform-origin: 0 50%;
+		transform: scaleX(var(--progress, 0));
+		transition: transform 300ms ease-out;
+	}
+	.metric-bar-fill.is-warning {
+		background: var(--warning, #F09030);
+	}
+	.metric-bar-fill.is-danger {
+		background: var(--danger, #DC3545);
+	}
+}

@@ -6,15 +6,16 @@ use axum::routing::get;
 
 use crate::{assets, require_loopback};
 
-/// The config UI asset routes - the index page, the bundled script, and
-/// the program icon - with [`require_loopback`] already applied, so
-/// every asset answers 403 to a non-loopback peer. The gateway nests
-/// this router at `/config`; the index references its assets by relative
-/// path, so the mount point needs no configuration.
+/// The config UI asset routes - the index page, the bundled script and
+/// stylesheet, and the program icon - with [`require_loopback`] already
+/// applied, so every asset answers 403 to a non-loopback peer. The
+/// gateway nests this router at `/config`; the index references its
+/// assets by relative path, so the mount point needs no configuration.
 pub fn routes() -> Router {
     Router::new()
         .route("/", get(ui_index))
         .route("/app.js", get(ui_app_js))
+        .route("/app.css", get(ui_app_css))
         .route("/icons/promptforge-icon-1.png", get(ui_program_icon))
         .layer(axum::middleware::from_fn(require_loopback))
 }
@@ -27,6 +28,12 @@ async fn ui_index() -> Response {
 /// Serves the config UI's bundled application script.
 async fn ui_app_js() -> Response {
     assets::ui_asset("app.js", "text/javascript; charset=utf-8")
+}
+
+/// Serves the config UI's bundled stylesheet, which esbuild emits next
+/// to the script from the CSS imports in `main.ts`.
+async fn ui_app_css() -> Response {
+    assets::ui_asset("app.css", "text/css; charset=utf-8")
 }
 
 /// Serves the program icon (the cold medallion frame).
@@ -88,13 +95,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn app_css_is_served_as_css() {
+        assert_ui_asset("/app.css", "text/css; charset=utf-8").await;
+    }
+
+    #[tokio::test]
     async fn program_icon_is_served_as_png() {
         assert_ui_asset("/icons/promptforge-icon-1.png", "image/png").await;
     }
 
     #[tokio::test]
     async fn a_lan_peer_is_refused_by_every_asset_route() {
-        for uri in ["/", "/app.js", "/icons/promptforge-icon-1.png"] {
+        for uri in ["/", "/app.js", "/app.css", "/icons/promptforge-icon-1.png"] {
             let mut request = Request::builder()
                 .uri(uri)
                 .body(Body::empty())
