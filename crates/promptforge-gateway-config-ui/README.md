@@ -2,12 +2,12 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](../../LICENSE)
 
-The PromptForge gateway config UI: the embedded SPA assets, the esbuild build pipeline, and the shared loopback wall. The gateway pulls this crate as an optional dependency behind its `config-ui` feature and nests the exported router at `/config`, so the SPA is served on the gateway's own port with no second listener.
+The PromptForge gateway config UI: the embedded SPA assets and the esbuild build pipeline, with the asset routes behind the shared loopback wall. The gateway pulls this crate as an optional dependency behind its `config-ui` feature and nests the exported router at `/config`, so the SPA is served on the gateway's own port with no second listener.
 
 ## Public surface
 
 - `routes()` - an axum `Router` serving the SPA assets (`/`, `/app.js`, `/icons/promptforge-icon-1.png`) with the loopback wall already applied. The asset routes carry no bearer auth - the SPA shell holds no secrets - and every route answers `403 Forbidden` to a peer that is not loopback.
-- `require_loopback` - the loopback middleware itself, exported so the gateway applies the same single check to its admin config endpoints. It reads the peer address from the `ConnectInfo<SocketAddr>` request extension (present when the server is started with `into_make_service_with_connect_info::<SocketAddr>()`) and fails closed: a request with no peer address is refused as non-loopback.
+- `require_loopback` - the loopback middleware, re-exported from the always-on `promptforge-gateway-loopback` crate, which the gateway depends on directly so its admin config endpoints carry the same single check even in headless builds that never compile this crate. It reads the peer address from the `ConnectInfo<SocketAddr>` request extension (present when the server is started with `into_make_service_with_connect_info::<SocketAddr>()`) and fails closed: a request with no peer address is refused as non-loopback.
 
 ## UI development
 

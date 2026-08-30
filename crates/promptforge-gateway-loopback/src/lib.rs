@@ -1,4 +1,13 @@
-//! The shared loopback wall for the config surface.
+//! The shared loopback wall for the PromptForge gateway's config surface.
+//!
+//! One middleware, [`require_loopback`], refuses any request whose peer
+//! address is not loopback. The config-ui crate wraps its SPA asset
+//! routes with it (re-exporting it as its own public surface), and the
+//! gateway applies the same function to its admin config endpoints, so
+//! the check exists in exactly one place. The crate is deliberately tiny -
+//! axum is its only dependency - because the gateway needs the wall in
+//! every build, including headless builds that never compile the
+//! config-ui crate and its embedded-asset machinery.
 
 use std::net::SocketAddr;
 
@@ -11,13 +20,13 @@ use axum::response::{IntoResponse, Response};
 /// `403 Forbidden`, applied through [`axum::middleware::from_fn`].
 ///
 /// This is the single shared loopback check for the whole config
-/// surface: [`crate::routes`] wraps the SPA asset routes with it, and the
-/// gateway applies the same function to its admin config endpoints (the
-/// config read and write paths, env, orphans, system, model-info, the HF
-/// proxy, profile create and delete, and reveal), so the check exists in
-/// exactly one place. Those endpoints hold secrets in plaintext and write
-/// files, so they must never be reachable from the LAN even with the
-/// bearer key; the wall comes before auth.
+/// surface: the config-ui crate's asset router wraps the SPA routes with
+/// it, and the gateway applies the same function to its admin config
+/// endpoints (the config read and write paths, env, orphans, system,
+/// model-info, the HF proxy, profile create and delete, and reveal), so
+/// the check exists in exactly one place. Those endpoints hold secrets in
+/// plaintext and write files, so they must never be reachable from the
+/// LAN even with the bearer key; the wall comes before auth.
 ///
 /// The peer address is read from the [`ConnectInfo`] request extension,
 /// which exists only when the server is started with
@@ -42,7 +51,7 @@ mod tests {
     use super::*;
 
     /// A one-route router with the loopback wall applied, mirroring how
-    /// [`crate::routes`] and the gateway layer it.
+    /// the config-ui asset router and the gateway layer it.
     fn guarded_router() -> Router {
         Router::new()
             .route("/", get(|| async { "ok" }))

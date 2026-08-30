@@ -3,10 +3,11 @@
 //! files and config files.
 //!
 //! The endpoint launches a process, so it is guarded three ways. The
-//! caller must be on the loopback interface (403 otherwise; the check is
-//! local to this handler until the config-ui crate's shared loopback
-//! middleware lands and replaces it, so the route is loopback-only from
-//! day one). The caller must present the bearer key (401). And the named
+//! caller must be on the loopback interface: `build_router` places the
+//! route behind the shared loopback wall from
+//! `promptforge-gateway-loopback`, which refuses any non-loopback or
+//! unknown peer with a bare 403 before this handler ever runs (and
+//! before auth). The caller must present the bearer key (401). And the named
 //! path must canonicalize to strictly inside one of the known-safe roots -
 //! the artifact cache and the profiles directory (a root itself is
 //! refused, so the non-Windows parent-directory reveal can never name a
@@ -18,13 +19,12 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::rejection::{ExtensionRejection, JsonRejection};
-use axum::extract::{ConnectInfo, State};
+use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::http::{HeaderMap, StatusCode};
 use serde::Deserialize;
 
@@ -80,11 +80,13 @@ impl RevealLauncher for SpawnLauncher {
 
 /// The `POST /admin/reveal` route: loopback-only and bearer-authed, opens
 /// the OS file manager at the request's path and replies 204 without
-/// waiting for the spawned process.
+/// waiting for the spawned process. The loopback wall is not this
+/// handler's: `build_router` layers the shared `require_loopback`
+/// middleware over the route, so a non-loopback or unknown peer is
+/// refused with a bare 403 before auth and before this body runs.
 ///
 /// # Errors
-/// Returns [`GatewayError::RevealNotLoopback`] when the peer address is
-/// not loopback (or is unknown), [`GatewayError::Unauthorized`] on a
+/// Returns [`GatewayError::Unauthorized`] on a
 /// missing or wrong bearer key, [`GatewayError::MalformedRequest`] when
 /// the body does not parse or the path resolves outside every safe root
 /// (or is a root itself),
@@ -92,17 +94,9 @@ impl RevealLauncher for SpawnLauncher {
 /// [`GatewayError::RevealFailed`] when the file manager cannot spawn.
 pub(crate) async fn admin_reveal(
     State(state): State<AppState>,
-    connect: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
     headers: HeaderMap,
     body: Result<Json<RevealRequest>, JsonRejection>,
 ) -> Result<StatusCode, GatewayError> {
-    // The loopback wall comes first, before auth: a LAN caller holding the
-    // bearer key is still refused. An unknown peer address fails closed as
-    // non-loopback rather than surfacing a wiring fault to the caller.
-    let ConnectInfo(peer) = connect.map_err(|_| GatewayError::RevealNotLoopback)?;
-    if !peer.ip().is_loopback() {
-        return Err(GatewayError::RevealNotLoopback);
-    }
     check_auth(&state, &headers).await?;
     // Deferring the extractor keeps the guards first and puts the rejection
     // in the gateway's JSON error envelope instead of axum's plain-text 400.
@@ -239,14 +233,14 @@ mod tests {
     use std::path::Path;
     use std::sync::{Arc, Mutex};
 
-    use axum::Json;
-    use axum::extract::{ConnectInfo, State};
-    use axum::http::HeaderMap;
-    use axum::http::header::AUTHORIZATION;
+    use axum::body::Body;
+    use axum::extract::ConnectInfo;
+    use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+    use axum::http::{Request, StatusCode};
     use promptforge_gateway_config::Config;
+    use tower::ServiceExt;
 
-    use super::{RevealCommand, RevealLauncher, RevealRequest};
-    use crate::error::GatewayError;
+    use super::{RevealCommand, RevealLauncher};
     use crate::test_support::{AdminPaths, app_state, serve_state};
 
     /// A launcher that records every command instead of spawning.
@@ -478,8 +472,8 @@ cache_dir = '{cache}'
         state.reveal = Arc::clone(&launcher) as Arc<dyn RevealLauncher>;
 
         // Served WITHOUT connect info, as a misassembled embedding host
-        // would: the peer-address extension is absent, and the wall must
-        // fail closed rather than admit the caller.
+        // would: the peer-address extension is absent, and the shared wall
+        // must fail closed with its bare 403 rather than admit the caller.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("the test listener binds");
@@ -490,8 +484,6 @@ cache_dir = '{cache}'
 
         let response = post_reveal(addr, Some("test-token"), &target.display().to_string()).await;
         assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
-        let body: serde_json::Value = response.json().await.expect("a JSON error envelope");
-        assert_eq!(body["error"]["code"], "loopback_only");
         assert!(
             launcher.commands().is_empty(),
             "the launcher must never run when the peer address is unknown"
@@ -542,30 +534,28 @@ cache_dir = '{cache}'
         let mut state = app_state(config, Some(paths));
         state.reveal = Arc::clone(&launcher) as Arc<dyn RevealLauncher>;
 
-        // A LAN peer presenting the valid bearer key: the loopback wall
-        // must refuse before auth even matters. A real TCP connection to
-        // the test listener is always loopback, so the handler is driven
-        // directly with a forged peer address.
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            "Bearer test-token".parse().expect("a valid header value"),
-        );
+        // A LAN peer presenting the valid bearer key: the shared loopback
+        // wall layered in `build_router` must refuse before auth even
+        // matters. A real TCP connection to the test listener is always
+        // loopback, so the router is driven in-process with a forged peer
+        // address planted in the ConnectInfo extension.
+        let body = serde_json::json!({ "path": target.display().to_string() }).to_string();
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/admin/reveal")
+            .header(AUTHORIZATION, "Bearer test-token")
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .expect("static request parts are valid");
         let peer: SocketAddr = "198.51.100.7:44821".parse().expect("a socket address");
-        let result = super::admin_reveal(
-            State(state),
-            Ok(ConnectInfo(peer)),
-            headers,
-            Ok(Json(RevealRequest {
-                path: target.display().to_string(),
-            })),
-        )
-        .await;
+        request.extensions_mut().insert(ConnectInfo(peer));
 
-        assert!(
-            matches!(result, Err(GatewayError::RevealNotLoopback)),
-            "a non-loopback caller is refused with the loopback error: {result:?}"
-        );
+        let response = crate::build_router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert!(
             launcher.commands().is_empty(),
             "the launcher must never run for a non-loopback caller"

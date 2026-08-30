@@ -4,19 +4,19 @@ use axum::Router;
 use axum::response::Response;
 use axum::routing::get;
 
-use crate::{assets, loopback};
+use crate::{assets, require_loopback};
 
 /// The config UI asset routes - the index page, the bundled script, and
-/// the program icon - with [`loopback::require_loopback`] already
-/// applied, so every asset answers 403 to a non-loopback peer. The
-/// gateway nests this router at `/config`; the index references its
-/// assets by relative path, so the mount point needs no configuration.
+/// the program icon - with [`require_loopback`] already applied, so
+/// every asset answers 403 to a non-loopback peer. The gateway nests
+/// this router at `/config`; the index references its assets by relative
+/// path, so the mount point needs no configuration.
 pub fn routes() -> Router {
     Router::new()
         .route("/", get(ui_index))
         .route("/app.js", get(ui_app_js))
         .route("/icons/promptforge-icon-1.png", get(ui_program_icon))
-        .layer(axum::middleware::from_fn(loopback::require_loopback))
+        .layer(axum::middleware::from_fn(require_loopback))
 }
 
 /// Serves the config UI's `index.html`.
