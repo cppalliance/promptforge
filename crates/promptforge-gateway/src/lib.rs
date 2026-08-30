@@ -16,7 +16,8 @@
 //! subprocess (`[[local_model]]`), named profiles with recursive `include`
 //! and immediate `POST /admin/switch-profile` streaming its stages over
 //! SSE, a bearer-authed
-//! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
+//! `GET /v1/models` catalog, a bearer-authed `GET /admin/progress` SSE
+//! stream of the process progress hub, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, an on-demand blob cache
 //! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
 //! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, and
@@ -77,6 +78,7 @@ use crate::wire::{
 #[cfg(feature = "web-search")]
 use promptforge_gateway_config::WebSearchConfig;
 use promptforge_gateway_config::{ModelKind, ServerConfig, WorkshopConfig};
+use promptforge_progress::{EventState, ProgressEvent, ProgressHub};
 #[cfg(feature = "web-search")]
 use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSearchState};
 
@@ -135,11 +137,18 @@ pub(crate) struct AppState {
     /// Serializes profile switches so two concurrent switches cannot interleave
     /// their reads and writes of the live state.
     switch: Arc<tokio::sync::Mutex<()>>,
+    /// The process-lifetime progress broker: operations attach trees for
+    /// their own lifetimes, and `GET /admin/progress` streams its events.
+    hub: Arc<ProgressHub>,
 }
 
 impl AppState {
     /// Build full runtime state for `Gateway` and integration tests.
     #[must_use]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the single caller assembles process state; a parameter struct would invent a grouping with no domain meaning"
+    )]
     pub(crate) fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
@@ -148,6 +157,7 @@ impl AppState {
         profiles_dir: Option<PathBuf>,
         selection: ProfileSelection,
         boot: BootOwned,
+        hub: Arc<ProgressHub>,
     ) -> AppState {
         AppState {
             live: Arc::new(RwLock::new(LiveState {
@@ -163,6 +173,7 @@ impl AppState {
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
             boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
+            hub,
         }
     }
 
@@ -189,6 +200,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
+        .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile));
     // The web-search tool route delegates to the service crate, so it exists
     // only in builds with the `web-search` feature.
@@ -493,6 +505,115 @@ async fn admin_status(
     })))
 }
 
+/// Heartbeat cadence for the progress stream: SSE comment lines keep an
+/// idle connection alive through NAT and firewall timeouts.
+const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The `GET /admin/progress` route: bearer-authed, streams the process
+/// progress hub as SSE.
+///
+/// The reply is `text/event-stream` and never terminates on its own: a
+/// freshly connected subscriber first receives the live operations replayed
+/// as synthetic `Begun`/`Updated` events, so it can render current state
+/// without waiting for the next event, and then every broadcast
+/// [`ProgressEvent`], with heartbeat comment lines every
+/// [`PROGRESS_HEARTBEAT`] while the hub is idle. Intermediate events are
+/// lossy - a lagging subscriber drops them - and terminal events are never
+/// coalesced at the source. Client disconnect is Drop all the way down, as
+/// with the switch stream: the response body owns the receiver.
+async fn admin_progress(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, &headers).await?;
+    Ok(progress_sse_response(&state.hub))
+}
+
+/// Builds the progress SSE response over `hub`: a snapshot of the live
+/// operations first, then the broadcast stream, heartbeats in the gaps.
+fn progress_sse_response(hub: &ProgressHub) -> Response {
+    // Subscribe before snapshotting so no event between the two is lost; a
+    // `Begun` replayed from the snapshot is idempotent for remote import.
+    let rx = hub.subscribe();
+    let mut pending = std::collections::VecDeque::new();
+    for operation in hub.snapshot() {
+        for node in &operation.nodes {
+            pending.extend(event_line(&ProgressEvent::new(
+                operation.operation,
+                node.path.clone(),
+                node.label.clone(),
+                EventState::Begun {
+                    weight: node.weight,
+                },
+            )));
+            if node.fraction > 0.0 {
+                pending.extend(event_line(&ProgressEvent::new(
+                    operation.operation,
+                    node.path.clone(),
+                    node.label.clone(),
+                    EventState::Updated {
+                        fraction: node.fraction,
+                    },
+                )));
+            }
+        }
+    }
+    let heartbeat_at = tokio::time::Instant::now() + PROGRESS_HEARTBEAT;
+    let stream = futures_util::stream::unfold(
+        (
+            pending,
+            rx,
+            tokio::time::interval_at(heartbeat_at, PROGRESS_HEARTBEAT),
+        ),
+        |(mut pending, mut rx, mut heartbeat)| async move {
+            if let Some(line) = pending.pop_front() {
+                return Some((
+                    Ok::<_, std::convert::Infallible>(line),
+                    (pending, rx, heartbeat),
+                ));
+            }
+            loop {
+                tokio::select! {
+                    _ = heartbeat.tick() => {
+                        return Some((Ok(": heartbeat\n\n".to_owned()), (pending, rx, heartbeat)));
+                    }
+                    received = rx.recv() => match received {
+                        Ok(event) => {
+                            if let Some(line) = event_line(&event) {
+                                return Some((Ok(line), (pending, rx, heartbeat)));
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::debug!(skipped, "progress subscriber lagged; events dropped");
+                        }
+                        // The hub lives in `AppState` for the process
+                        // lifetime, so its sender never closes first.
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                    },
+                }
+            }
+        },
+    );
+    let mut response = Response::new(Body::from_stream(stream));
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+}
+
+/// Serializes one event as an SSE `data:` line, or `None` (logged) when
+/// serialization fails: the wire types are plain data, so a failure is a
+/// schema bug, and one bad event must not kill the stream.
+fn event_line(event: &ProgressEvent) -> Option<String> {
+    match serde_json::to_string(event) {
+        Ok(json) => Some(format!("data: {json}\n\n")),
+        Err(error) => {
+            tracing::warn!(%error, "progress event failed to serialize; dropping it");
+            None
+        }
+    }
+}
+
 /// Immediately switches to another named profile, streaming its progress.
 ///
 /// The reply is `text/event-stream`: a `{"stage": ...}` event opens each
@@ -781,5 +902,132 @@ mod auth_tests {
     #[test]
     fn empty_matches_empty() {
         assert!(secret_eq(b"", b""));
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    // Fractions are fixed-point millionths, so equality comparisons are exact.
+    #![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures_util::StreamExt as _;
+    use promptforge_progress::{EventState, ProgressEvent, ProgressHub};
+
+    use super::{PROGRESS_HEARTBEAT, progress_sse_response};
+
+    const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Reads `data:` payloads from the body until `count` events arrive,
+    /// skipping heartbeat comments. Frames may split or coalesce SSE events,
+    /// so the text accumulates across reads.
+    async fn read_events<S>(frames: &mut S, count: usize) -> Vec<ProgressEvent>
+    where
+        S: futures_util::Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin,
+    {
+        let mut text = String::new();
+        let mut events = Vec::new();
+        while events.len() < count {
+            let frame = tokio::time::timeout(FRAME_TIMEOUT, frames.next())
+                .await
+                .expect("the progress stream stalled")
+                .expect("the progress stream ended early")
+                .expect("the progress stream errored");
+            let chunk = std::str::from_utf8(&frame).expect("SSE frames are UTF-8");
+            text.push_str(chunk);
+            while let Some(end) = text.find("\n\n") {
+                let block: String = text.drain(..end + 2).collect();
+                if let Some(data) = block.trim().strip_prefix("data: ") {
+                    events
+                        .push(serde_json::from_str(data).expect("a data line is a ProgressEvent"));
+                }
+            }
+        }
+        events
+    }
+
+    #[tokio::test]
+    async fn the_stream_carries_begun_updated_finished_in_order() {
+        let hub = Arc::new(ProgressHub::new());
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+
+        let tree = hub.operation();
+        let leaf = tree.register("download", 1.0);
+        leaf.set_fraction(0.5);
+        leaf.complete();
+
+        let events = read_events(&mut frames, 3).await;
+        assert!(matches!(events[0].state, EventState::Begun { weight } if weight == 1.0));
+        assert!(
+            matches!(events[1].state, EventState::Updated { fraction } if fraction == 0.5),
+            "the intermediate sample follows Begun: {:?}",
+            events[1]
+        );
+        assert!(matches!(events[2].state, EventState::Finished { ok: true }));
+        assert!(events.iter().all(|event| event.path == "download"));
+    }
+
+    #[tokio::test]
+    async fn a_fresh_subscriber_first_receives_a_snapshot_of_live_operations() {
+        let hub = Arc::new(ProgressHub::new());
+        let tree = hub.operation();
+        let leaf = tree.register("download", 1.0);
+        leaf.set_fraction(0.5);
+
+        // The subscriber connects after the work began, so the broadcast
+        // alone would show nothing until the next report: the snapshot must
+        // carry the current state.
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+        let events = read_events(&mut frames, 2).await;
+        assert!(matches!(events[0].state, EventState::Begun { weight } if weight == 1.0));
+        assert!(matches!(events[1].state, EventState::Updated { fraction } if fraction == 0.5));
+        assert_eq!(events[0].operation, tree.operation());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_hub_emits_heartbeat_comments_on_cadence() {
+        let hub = Arc::new(ProgressHub::new());
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+
+        // No operations are live, so heartbeat comments are the only
+        // traffic; two ticks pin the cadence, not just the first deadline.
+        for _ in 0..2 {
+            let frame = tokio::time::timeout(PROGRESS_HEARTBEAT + FRAME_TIMEOUT, frames.next())
+                .await
+                .expect("the progress stream stalled")
+                .expect("the progress stream ended early")
+                .expect("the progress stream errored");
+            assert_eq!(
+                std::str::from_utf8(&frame).expect("SSE frames are UTF-8"),
+                ": heartbeat\n\n"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_stream_goes_quiet_when_the_tree_drops() {
+        let hub = Arc::new(ProgressHub::new());
+        let response = progress_sse_response(&hub);
+        let mut frames = response.into_body().into_data_stream();
+
+        let tree = hub.operation();
+        let _leaf = tree.register("download", 1.0);
+        let events = read_events(&mut frames, 1).await;
+        assert!(matches!(events[0].state, EventState::Begun { .. }));
+
+        drop(tree);
+        // The first heartbeat is 15 s out, so nothing may arrive inside this
+        // window: a detached tree emits no events and an idle hub is silent.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), frames.next())
+                .await
+                .is_err(),
+            "a dropped tree must leave the stream quiet until the next heartbeat"
+        );
     }
 }
