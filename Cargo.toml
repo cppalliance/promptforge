@@ -111,7 +111,7 @@ socket2 = { version = "0.6", features = ["all"] }
 # Host metrics for `GET /admin/system`. default-features off keeps only the
 # CPU/RAM (`system`) and disk probes; the component, network, and user
 # probes and the rayon-backed `multithread` refresh are never used.
-sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system", "disk"] }
 # GPU name and VRAM for `GET /admin/system`. Loads NVML dynamically at
 # runtime via libloading, so machines without an NVIDIA driver degrade to an
 # absent GPU field rather than a link failure.
