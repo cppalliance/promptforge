@@ -108,6 +108,14 @@ whisper-rs = "0.16"
 # promptforge-transcribe's test-fixtures feature.
 hound = "3.5"
 socket2 = { version = "0.6", features = ["all"] }
+# Host metrics for `GET /admin/system`. default-features off keeps only the
+# CPU/RAM (`system`) and disk probes; the component, network, and user
+# probes and the rayon-backed `multithread` refresh are never used.
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+# GPU name and VRAM for `GET /admin/system`. Loads NVML dynamically at
+# runtime via libloading, so machines without an NVIDIA driver degrade to an
+# absent GPU field rather than a link failure.
+nvml-wrapper = "0.12"
 # wry 0.56 pairs with tao 0.36 (wry's own dev-dependency constraint); tao 0.37
 # is newer but untested against this wry.
 wry = "0.56"

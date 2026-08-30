@@ -80,6 +80,11 @@ pub(crate) enum GatewayError {
     #[error("profiles directory not configured")]
     ProfilesUnavailable,
 
+    /// The `GET /admin/system` sampling task did not run to completion.
+    #[non_exhaustive]
+    #[error("system metrics sampling failed")]
+    SystemMetrics(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// A `/v1/cache` route failed at the storage or transport layer before its
     /// response was committed (mid-stream failures are SSE error events, not
     /// this variant).
@@ -158,6 +163,14 @@ impl GatewayError {
         GatewayError::Cache(Box::new(source))
     }
 
+    /// Wrap a system-metrics sampling failure, preserving the cause.
+    #[must_use]
+    pub(crate) fn system_metrics(
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> GatewayError {
+        GatewayError::SystemMetrics(Box::new(source))
+    }
+
     /// The `(status, type, code)` triple for the OpenAI error envelope.
     fn classify(&self) -> (StatusCode, &'static str, &'static str) {
         match self {
@@ -210,6 +223,11 @@ impl GatewayError {
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "profiles_unavailable",
+            ),
+            GatewayError::SystemMetrics(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "system_metrics_error",
             ),
             #[cfg(feature = "local")]
             GatewayError::Cache(_) => (
@@ -303,6 +321,14 @@ mod tests {
                     StatusCode::BAD_REQUEST,
                     "invalid_request_error",
                     "switch_failed",
+                ),
+            ),
+            (
+                GatewayError::system_metrics(std::io::Error::other("x")),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "system_metrics_error",
                 ),
             ),
         ];
