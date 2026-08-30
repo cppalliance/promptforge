@@ -1,5 +1,6 @@
 /.model-cache/
 /target
+/target-msrv/
 /vibe-review.md
 /conformance-audit.md
 /local/

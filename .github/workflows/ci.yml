@@ -30,6 +30,10 @@ jobs:
         working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -93,6 +97,13 @@ jobs:
         working-directory: crates/promptforge-workshop-server/ui
         run: npm ci
 
+      # promptforge-workshop pins the gateway's config-ui feature, so its
+      # build script needs the config UI's node_modules even with
+      # --no-default-features.
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
       # --no-default-features: the desktop crate defaults to the cuda
       # feature, and windows-latest has no CUDA toolkit; CI builds the
       # CPU-only whisper path instead.
@@ -141,6 +152,32 @@ jobs:
           name: promptforge-workshop-ui-dist
           path: crates/promptforge-workshop-server/ui/dist/
 
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
+      - name: Typecheck config UI
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm run typecheck
+
+      - name: Build config UI
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm run build
+
+      - name: Test config UI
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm test
+
+      - name: Package the config UI artifact
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm run package
+
+      - name: Upload the config UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptforge-gateway-config-ui-dist
+          path: crates/promptforge-gateway-config-ui/ui/dist/
+
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -159,6 +196,10 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: crates/promptforge-workshop-server/ui
+        run: npm ci
+
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
         run: npm ci
 
       - name: Build and test on MSRV
