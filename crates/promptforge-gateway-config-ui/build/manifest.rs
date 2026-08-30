@@ -31,7 +31,12 @@ const BUILD_INPUTS: &[&str] = &[
 
 /// The dist-relative names `crate::routes` serves; a packaged artifact
 /// that lacks one would 404 in release only.
-const REQUIRED_SERVED: &[&str] = &["app.js", "icons/promptforge-icon-1.png", "index.html"];
+const REQUIRED_SERVED: &[&str] = &[
+    "app.css",
+    "app.js",
+    "icons/promptforge-icon-1.png",
+    "index.html",
+];
 
 const INSTRUCTIONS: &str = "\
 Release builds embed the verified UI artifact in ui/dist/. The build already
