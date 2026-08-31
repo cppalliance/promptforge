@@ -24,6 +24,8 @@ export interface ChipInput {
   element: HTMLElement;
   /** Replaces the chips without firing onChange. */
   setValues(values: string[]): void;
+  /** Commits any pending text in the input as a chip. */
+  flush(): void;
 }
 
 /** Builds the chip input. */
@@ -98,6 +100,10 @@ export function createChipInput(options: ChipInputOptions): ChipInput {
     }
   });
 
+  entry.addEventListener("blur", () => {
+    add(entry.value);
+  });
+
   element.append(entry);
   render();
 
@@ -106,6 +112,9 @@ export function createChipInput(options: ChipInputOptions): ChipInput {
     setValues(next: string[]): void {
       values = [...next];
       render();
+    },
+    flush(): void {
+      add(entry.value);
     },
   };
 }

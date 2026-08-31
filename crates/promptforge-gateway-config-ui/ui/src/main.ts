@@ -81,7 +81,7 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   };
   const showShell = () => {
     dispose();
-    dispose = mountLiveShell(root, win, api, fetchFn, null);
+    dispose = mountLiveShell(root, win, api, null);
   };
   // Any 401 clears the stored key and returns to the prompt.
   api.onUnauthorized = showPrompt;
@@ -136,10 +136,7 @@ function mountPanelMode(
       win.location.hash = context.route;
     }
     const api = new GatewayApi({ fetchFn: bridge.fetchLike, storage: memoryStorage(), base: "" });
-    // Hub-served bytes (the Discover README) carry no gateway key and
-    // load straight from the hub; everything else rides the bridge.
-    const hubFetch = options.fetchFn ?? ((input, init) => fetch(input, init));
-    mountLiveShell(root, win, api, hubFetch, bridge);
+    mountLiveShell(root, win, api, bridge);
   };
   bridge.start();
 }
@@ -171,15 +168,13 @@ function memoryStorage(): Storage {
  * standalone (`bridge` null - medallion, progress subscription) or
  * workshop panel (`bridge` set - no medallion, no progress subscription
  * because the workshop owns progress display, and apply/revert are
- * announced to the parent). `hubFetch` carries only
- * hub-served bytes (the Discover README); gateway calls go through
- * `api`. Returns the teardown that stops the router and subscriptions.
+ * announced to the parent). Returns the teardown that stops the router
+ * and subscriptions.
  */
 function mountLiveShell(
   root: HTMLElement,
   win: BootWindow,
   api: GatewayApi,
-  hubFetch: FetchLike,
   bridge: PanelBridge | null,
 ): () => void {
   const toasts = createToastStack();
@@ -342,7 +337,6 @@ function mountLiveShell(
     hf: new HfApi(api),
     store,
     toasts,
-    fetchFn: hubFetch,
   });
   const secretsView = createSecretsView({ store, api, toasts });
   const profilesView = createProfilesView({

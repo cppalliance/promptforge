@@ -190,7 +190,7 @@ fn sample(sampler: &Mutex<SystemSampler>, cache_root: Option<&Path>) -> SystemSn
             .cpus()
             .first()
             .map_or(0, sysinfo::Cpu::frequency),
-        logical_cores: guard.system.cpus().len(),
+        logical_cores: all_logical_cores(),
         physical_cores: System::physical_core_count(),
         utilization_percent: guard.system.global_cpu_usage(),
     };
@@ -268,6 +268,17 @@ fn gpu_metrics(nvml: &Nvml) -> Option<GpuMetrics> {
         vram_used_bytes: memory.used,
         vram_total_bytes: memory.total,
     })
+}
+
+/// Logical processor count from a dedicated full-refresh `sysinfo::System`.
+/// The sampler's retained system may have a stale CPU list; a fresh system
+/// with `refresh_cpu_list` enumerates all processor groups on Windows
+/// (where each group caps at 64 logical cores).
+fn all_logical_cores() -> usize {
+    let mut system = System::new();
+    system.refresh_cpu_list(CpuRefreshKind::nothing());
+    let count = system.cpus().len();
+    if count > 0 { count } else { 1 }
 }
 
 #[cfg(test)]

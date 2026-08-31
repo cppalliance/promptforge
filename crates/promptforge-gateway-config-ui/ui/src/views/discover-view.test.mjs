@@ -39,9 +39,11 @@ function searchCalls(stub) {
   return stub.calls.filter((call) => call.url.includes("/admin/hf/search"));
 }
 
-/** The recorded calls that hit the HF model proxy. */
+/** The recorded calls that hit the HF model detail proxy (not readme). */
 function modelCalls(stub) {
-  return stub.calls.filter((call) => call.url.includes("/admin/hf/model/"));
+  return stub.calls.filter(
+    (call) => call.url.includes("/admin/hf/model/") && !call.url.endsWith("/readme"),
+  );
 }
 
 /** Boots to #/discover and lets the initial browse search finish. */
@@ -494,6 +496,23 @@ test("an STT-filtered Download stages a first-class stt_model entry", async () =
       .models.includes(staged.name),
     "Apply will provision the newly chosen STT artifact",
   );
+});
+
+test("the README is fetched through the gateway proxy, not directly from the hub", async () => {
+  const stub = discoverStub();
+  const { root } = await openDiscover(stub);
+  root.querySelector(".result-row").click();
+  await settle();
+
+  const readmeCalls = stub.calls.filter(
+    (call) => call.url.includes("/admin/hf/model/") && call.url.endsWith("/readme"),
+  );
+  assert.equal(readmeCalls.length, 1, "one readme call goes through the proxy");
+  const hubReadmeCalls = stub.calls.filter(
+    (call) => /^https?:\/\//.test(call.url) && call.url.includes("README.md"),
+  );
+  assert.equal(hubReadmeCalls.length, 0, "no direct hub URL calls for the README");
+  assert.ok(root.querySelector(".readme .markdown"), "the README still renders");
 });
 
 test("an STT toggle does not misclassify another workload result", async () => {

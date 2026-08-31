@@ -13,6 +13,8 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 
+use promptforge_gateway_config::SttModelConfig;
+
 use crate::error::GatewayError;
 use crate::local::{cache::orphans, resolve_cache_root};
 use crate::{AppState, check_auth};
@@ -40,7 +42,12 @@ pub(crate) async fn admin_orphans(
     };
     let entries = tokio::task::spawn_blocking(move || {
         let root = resolve_cache_root(config.local().cache_dir())?;
-        orphans(&root, config.local_models())
+        let stt_sources: Vec<&str> = config
+            .stt_models()
+            .iter()
+            .map(SttModelConfig::source)
+            .collect();
+        orphans(&root, config.local_models(), &stt_sources)
     })
     .await
     .map_err(GatewayError::cache)?

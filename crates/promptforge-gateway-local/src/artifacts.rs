@@ -164,7 +164,7 @@ impl ArtifactStore {
         self.ensure_model_with_progress(source, sha256, None)
     }
 
-    /// [`ensure_model`] variant that reports the download and verify stages
+    /// [`Self::ensure_model`] variant that reports the download and verify stages
     /// into child leaves of `progress`, when given. A path source completes
     /// the download leaf immediately. An unpinned URL hashes once when an
     /// older cache hit lacks listing metadata, then reuses that metadata.

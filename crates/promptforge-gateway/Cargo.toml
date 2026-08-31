@@ -60,7 +60,7 @@ reqwest = { workspace = true, features = ["stream"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [features]
 default = ["local", "web-search", "config-ui"]

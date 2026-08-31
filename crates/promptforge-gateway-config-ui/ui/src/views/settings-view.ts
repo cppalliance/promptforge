@@ -10,6 +10,8 @@
 
 import {
   Cpu,
+  Eye,
+  EyeOff,
   HardDrive,
   MemoryStick,
   Microchip,
@@ -793,13 +795,29 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     input.addEventListener("change", () => {
       const text = input.value;
       if (text === "" && masked) {
-        // Empty means "keep existing": drop any edit so "***" rides through.
         resetField(card, spec.path);
         return;
       }
       commit(card, spec.path, text);
     });
-    wrap.append(input);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "button button-xs button-outline secret-toggle";
+    let shown = false;
+    const paintToggle = (): void => {
+      toggle.setAttribute("aria-label", shown ? "Hide" : "Show");
+      toggle.setAttribute("aria-pressed", String(shown));
+      toggle.replaceChildren(
+        lucideElement(shown ? EyeOff : Eye, { "aria-hidden": "true", width: 14, height: 14 }),
+      );
+    };
+    toggle.addEventListener("click", () => {
+      shown = !shown;
+      input.type = shown ? "text" : "password";
+      paintToggle();
+    });
+    paintToggle();
+    wrap.append(input, toggle);
     return wrap;
   }
 

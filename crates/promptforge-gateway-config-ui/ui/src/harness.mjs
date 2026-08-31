@@ -494,6 +494,18 @@ export function gatewayStub({
       }
       return jsonResponse(hfSearch ?? []);
     }
+    if (url.includes("/admin/hf/model/") && url.endsWith("/readme")) {
+      if (hfAuth401) {
+        return hubDenied();
+      }
+      if (readme === null) {
+        return new Response("", { status: 404 });
+      }
+      return new Response(readme ?? "# hello", {
+        status: 200,
+        headers: { "content-type": "text/markdown; charset=utf-8" },
+      });
+    }
     if (url.includes("/admin/hf/model/")) {
       if (hfAuth401) {
         return hubDenied();

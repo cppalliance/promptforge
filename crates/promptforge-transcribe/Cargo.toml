@@ -14,7 +14,7 @@ promptforge-progress.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-whisper-rs.workspace = true
+whisper-rs = { workspace = true, features = ["tracing_backend"] }
 # Optional: only the test-fixtures feature decodes the WAV voice fixtures.
 hound = { workspace = true, optional = true }
 

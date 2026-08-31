@@ -16,7 +16,7 @@ import { renderMarkdown, setSanitizedHtml } from "../components/markdown";
 import type { ToastStack } from "../components/toast";
 import { formatBytes } from "../format";
 import type { ConfigStore } from "../services/config-store";
-import type { FetchLike, GatewayApi, SystemSnapshot } from "../services/gateway-api";
+import type { GatewayApi, SystemSnapshot } from "../services/gateway-api";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type {
   DiscoverType,
@@ -69,8 +69,6 @@ export interface DiscoverViewDeps {
   store: ConfigStore;
   /** Outcome surfacing. */
   toasts: ToastStack;
-  /** Transport for hub-served README files (same injection as the API). */
-  fetchFn: FetchLike;
 }
 
 /** The mounted view handle the router calls. */
@@ -124,7 +122,7 @@ function recommendedQuant(quants: HfQuant[], system: SystemSnapshot): string | n
 
 /** Builds the Discover view (state survives route re-mounts). */
 export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
-  const { api, hf, store, toasts, fetchFn } = deps;
+  const { api, hf, store, toasts } = deps;
 
   let query = "";
   let sort: HfSort = "downloads";
@@ -269,15 +267,8 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     readmeController = controller;
     void (async () => {
       try {
-        const response = await fetchFn(
-          `https://huggingface.co/${model.repo}/raw/main/README.md`,
-          { signal: controller.signal },
-        );
-        if (!response.ok || seq !== detailSeq) {
-          return;
-        }
-        const text = await response.text();
-        if (seq !== detailSeq) {
+        const text = await hf.readme(model.repo, controller.signal);
+        if (text === null || seq !== detailSeq) {
           return;
         }
         readmeHtml = renderMarkdown(text);
