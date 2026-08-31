@@ -49,7 +49,7 @@ use assets::FileAsset;
 #[cfg(not(llama_cuda_embedded))]
 use assets::{LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
-use digest::tree_digest;
+use digest::{file_digest_with_progress, tree_digest};
 use verified::{
     blob_marker_path, path_source_marker, verify_blob_with_progress, write_marker_best_effort,
 };
@@ -165,10 +165,10 @@ impl ArtifactStore {
 
     /// [`ensure_model`] variant that reports the download and verify stages
     /// into child leaves of `progress`, when given. A path source completes
-    /// the download leaf immediately, and an unpinned source completes the
-    /// verify leaf immediately: both stages exist in the subtree whether or
-    /// not they have work. An error exit fails any leaf that has not already
-    /// finished.
+    /// the download leaf immediately. An unpinned URL hashes once when an
+    /// older cache hit lacks listing metadata, then reuses that metadata.
+    /// Both stages exist in the subtree whether or not they have work. An
+    /// error exit fails any leaf that has not already finished.
     ///
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.
@@ -381,6 +381,10 @@ impl ArtifactStore {
                 if let Some(handle) = download {
                     handle.complete();
                 }
+                if !crate::cache::blob_meta_matches(destination, asset.url)? {
+                    let actual = file_digest_with_progress(destination, verify)?;
+                    crate::cache::write_blob_meta(&self.cache, destination, asset.url, &actual)?;
+                }
                 if let Some(handle) = verify {
                     handle.complete();
                 }
@@ -394,6 +398,7 @@ impl ArtifactStore {
                     if let Some(handle) = download {
                         handle.complete();
                     }
+                    crate::cache::write_blob_meta(&self.cache, destination, asset.url, expected)?;
                     return Ok(());
                 }
                 // A pin mismatch on a cached blob is repaired by
@@ -447,6 +452,12 @@ impl ArtifactStore {
             validate_cache_path(&self.cache, &marker)?;
             write_marker_best_effort(&marker, destination, expected);
         }
+        crate::cache::write_blob_meta(
+            &self.cache,
+            destination,
+            asset.url,
+            expected_digest.as_deref().unwrap_or(&actual),
+        )?;
         Ok(())
     }
 

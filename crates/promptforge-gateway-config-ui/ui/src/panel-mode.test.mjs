@@ -3,8 +3,8 @@
 // message, and mounts the live shell whose every gateway call rides
 // postMessage - no direct gateway fetch, no sessionStorage key, and no
 // progress SSE subscription exist in the frame (the workshop owns
-// progress display). Apply, Revert All, and a starting download are
-// announced to the parent; theme and initial-route context apply; a
+// progress display). Apply and Revert All are announced to the parent;
+// theme and initial-route context apply; a
 // parent that never answers produces an error toast, not a hang; and a
 // context message from a foreign origin is ignored.
 import assert from "node:assert/strict";
@@ -160,13 +160,13 @@ test("the workshop's theme and initial route context apply", async () => {
   const stub = gatewayStub({ config: modelsFixture(), pending: modelsFixture() });
   const { dom, root } = await bootPanel({
     stub,
-    parentOpts: { context: { theme: "dark", route: "#/downloads" } },
+    parentOpts: { context: { theme: "dark", route: "#/profiles" } },
   });
   assert.equal(root.getAttribute("data-theme"), "dark", "the theme context lands on the root");
-  assert.equal(dom.window.location.hash, "#/downloads", "the initial route follows the context");
+  assert.equal(dom.window.location.hash, "#/profiles", "the initial route follows the context");
   assert.equal(
     root.querySelector("main h1.view-title")?.textContent,
-    "Downloads",
+    "Profiles",
     "the routed view mounted",
   );
 });
@@ -263,7 +263,7 @@ test("a bridge timeout surfaces an error toast, not a hang", async () => {
   assert.match(toast.textContent, /timed out/i, "the toast names the timeout");
 });
 
-test("a starting download is announced to the workshop", async () => {
+test("staging a Discover model uses config only and sends no download action", async () => {
   const stub = gatewayStub({
     config: modelsFixture(),
     pending: modelsFixture(),
@@ -283,7 +283,8 @@ test("a starting download is announced to the workshop", async () => {
   root.querySelector(".quant-download").click();
   await settle();
   assert.ok(
-    parent.actions().includes("download-started"),
-    "starting a download notifies the parent",
+    parent.apiPaths().includes("/admin/config"),
+    "the pending model write rides the authenticated bridge",
   );
+  assert.deepEqual(parent.actions(), [], "no separate download lifecycle is announced");
 });

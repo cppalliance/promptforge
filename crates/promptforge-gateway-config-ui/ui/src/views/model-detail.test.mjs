@@ -20,6 +20,13 @@ function typeInto(dom, input, value) {
   input.dispatchEvent(new dom.window.Event("change"));
 }
 
+/** Opens one disclosure and returns its option values. */
+function dropdownValues(root, key) {
+  const row = root.querySelector(`.field-row[data-key='${key}']`);
+  row.querySelector(".select").click();
+  return [...row.querySelectorAll(".menu-item")].map((option) => option.dataset.value);
+}
+
 test("the local detail pane renders the registry sections with the model's values", async () => {
   const stub = fixtureStub({
     modelInfo: { architecture: "qwen3", layer_count: 32, parameter_count: 8_000_000_000 },
@@ -49,7 +56,7 @@ test("the local detail pane renders the registry sections with the model's value
 
   const flash = root.querySelector(".field-row[data-key='flash_attention'] .switch");
   assert.equal(flash.getAttribute("aria-checked"), "true");
-  const cacheV = root.querySelector(".field-row[data-key='cache_type_v'] select");
+  const cacheV = root.querySelector(".field-row[data-key='cache_type_v'] .select");
   assert.equal(cacheV.disabled, false, "cache_type_v is editable while flash attention is on");
   assert.ok(
     root.querySelector(".field-row[data-key='vram_gb']"),
@@ -60,9 +67,9 @@ test("the local detail pane renders the registry sections with the model's value
     "adaptive_thinking shows because thinking is not never",
   );
 
-  const kindSelect = root.querySelector(".field-row[data-key='kind'] select");
+  const kindSelect = root.querySelector(".field-row[data-key='kind'] .select");
   assert.deepEqual(
-    [...kindSelect.options].map((option) => option.value),
+    dropdownValues(root, "kind"),
     ["chat", "embedding", "classifier"],
     "the header kind dropdown offers the three model kinds",
   );
@@ -80,21 +87,30 @@ test("the local detail pane renders the registry sections with the model's value
 });
 
 test("the remote detail pane renders routing fields and effort levels feed default effort", async () => {
-  const stub = fixtureStub();
+  const config = modelsFixture();
+  config.model[0].images = true;
+  const stub = fixtureStub({ config });
   const { dom, root } = await bootApp({ key: "k", stub });
   navigate(dom, "#/models/gpt-remote");
   await settle();
 
   assert.equal(root.querySelector(".field-row[data-key='upstream'] input").value, "gpt-4.1");
+  assert.deepEqual(
+    [...root.querySelectorAll(".detail-header .capability-badge")].map(
+      (badge) => badge.textContent,
+    ),
+    ["images", "thinking"],
+    "the detail header repeats the model capabilities",
+  );
   assert.match(
     root.querySelector(".field-row[data-key='endpoints'] .pill").textContent,
     /openai/,
     "the endpoints multi-select shows the configured endpoint chip",
   );
 
-  const effortSelect = root.querySelector(".field-row[data-key='default_effort'] select");
+  const effortSelect = root.querySelector(".field-row[data-key='default_effort'] .select");
   assert.deepEqual(
-    [...effortSelect.options].map((option) => option.value),
+    dropdownValues(root, "default_effort"),
     ["", "low", "high"],
     "default_effort offers exactly the configured effort levels",
   );
@@ -106,8 +122,8 @@ test("the remote detail pane renders routing fields and effort levels feed defau
   await settle();
   assert.deepEqual(
     [
-      ...root.querySelectorAll(".field-row[data-key='default_effort'] select option"),
-    ].map((option) => option.value),
+      ...root.querySelectorAll(".field-row[data-key='default_effort'] .menu-item"),
+    ].map((option) => option.dataset.value),
     ["", "low", "high", "medium"],
     "a new effort level immediately feeds the default-effort options",
   );
@@ -120,7 +136,7 @@ test("cache_type_v is disabled until flash attention turns on", async () => {
   await settle();
 
   assert.equal(
-    root.querySelector(".field-row[data-key='cache_type_v'] select").disabled,
+    root.querySelector(".field-row[data-key='cache_type_v'] .select").disabled,
     true,
     "flash attention is off, so the V cache dropdown is disabled",
   );
@@ -128,9 +144,45 @@ test("cache_type_v is disabled until flash attention turns on", async () => {
   root.querySelector(".field-row[data-key='flash_attention'] .switch").click();
   await settle();
   assert.equal(
-    root.querySelector(".field-row[data-key='cache_type_v'] select").disabled,
+    root.querySelector(".field-row[data-key='cache_type_v'] .select").disabled,
     false,
     "turning flash attention on enables the V cache dropdown",
+  );
+});
+
+test("the custom dropdown follows listbox arrow and Enter keyboard behavior", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/models/gpt-remote");
+  await settle();
+
+  const trigger = root.querySelector(".field-row[data-key='default_effort'] .select");
+  trigger.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+  );
+  assert.equal(trigger.getAttribute("aria-expanded"), "true", "ArrowDown opens the listbox");
+  const listbox = root.querySelector(
+    ".field-row[data-key='default_effort'] [role='listbox']",
+  );
+  assert.ok(listbox, "the disclosure owns a listbox");
+  assert.ok(listbox.querySelector("[role='option']"), "its rows expose option semantics");
+  assert.equal(
+    dom.window.document.activeElement?.dataset.value,
+    "low",
+    "opening focuses the selected option",
+  );
+  dom.window.document.activeElement.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+  );
+  assert.equal(dom.window.document.activeElement?.dataset.value, "high", "ArrowDown moves focus");
+  dom.window.document.activeElement.dispatchEvent(
+    new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  await settle();
+  assert.equal(
+    root.querySelector(".field-row[data-key='default_effort'] .select").value,
+    "high",
+    "Enter commits the focused option",
   );
 });
 
@@ -225,6 +277,11 @@ test("the context slider maps log positions to token counts at both ends", async
   await settle();
 
   const range = root.querySelector(".field-row[data-key='context'] input[type='range']");
+  const initialProgress = Number(range.style.getPropertyValue("--slider-progress"));
+  assert.ok(
+    initialProgress > 0.32 && initialProgress < 0.35,
+    "4096 maps one third across the logarithmic 512-262144 range",
+  );
   range.value = range.max;
   range.dispatchEvent(new dom.window.Event("change"));
   await settle();
@@ -273,6 +330,12 @@ test("adding a multimodal projector implies the images toggle on and locks it", 
   const images = root.querySelector(".field-row[data-key='images'] .switch");
   assert.equal(images.getAttribute("aria-checked"), "true", "the toggle shows on");
   assert.equal(images.disabled, true, "the implied toggle is locked");
+  assert.ok(
+    [...root.querySelectorAll(".detail-header .capability-badge")].some(
+      (badge) => badge.textContent === "images",
+    ),
+    "the implied capability also appears in the detail header",
+  );
 });
 
 test("provenance renders from common.toml and the first inherited edit notes the copy once", async () => {

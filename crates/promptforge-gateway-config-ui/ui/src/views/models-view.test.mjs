@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, settle } from "../harness.mjs";
+import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../harness.mjs";
 
 const ORPHAN = {
   path: "models/stray-7B-Q5_K_S.gguf",
@@ -25,7 +25,9 @@ function fixtureStub(extra = {}) {
 }
 
 test("the model list renders rows, badges, and the orphan section from the config", async () => {
-  const stub = fixtureStub();
+  const config = modelsFixture();
+  config.model[0].images = true;
+  const stub = fixtureStub({ config });
   const { root } = await bootApp({ key: "k", stub });
 
   const rows = [...root.querySelectorAll(".model-row")];
@@ -42,6 +44,17 @@ test("the model list renders rows, badges, and the orphan section from the confi
     "the quant badge is parsed from the GGUF filename",
   );
   assert.equal(qwen.querySelector(".kind-badge").textContent, "chat");
+  const remote = rows.find((row) => row.textContent.includes("gpt-remote"));
+  assert.deepEqual(
+    [...remote.querySelectorAll(".capability-badge")].map((badge) => badge.textContent),
+    ["images", "thinking"],
+    "capability pills sit beside the kind badge",
+  );
+  assert.equal(
+    remote.querySelector(".source-icon").dataset.icon,
+    "globe",
+    "remote models use the globe icon",
+  );
   assert.ok(
     qwen.querySelector(".status-dot").classList.contains("is-ok"),
     "a model the running profile exposes shows the green dot",
@@ -59,7 +72,7 @@ test("the model list renders rows, badges, and the orphan section from the confi
   );
   const orphanRow = root.querySelector(".orphan-row");
   assert.match(orphanRow.textContent, /stray-7B-Q5_K_S\.gguf/);
-  assert.match(orphanRow.querySelector(".orphan-size").textContent, /4\.6 GiB/);
+  assert.match(orphanRow.querySelector(".orphan-size").textContent, /4\.6\u00a0GiB/);
   assert.ok(orphanRow.querySelector(".orphan-adopt"), "the orphan offers Adopt");
   assert.ok(orphanRow.querySelector(".orphan-delete"), "the orphan offers Delete");
 });
@@ -74,7 +87,7 @@ test("filter chips and the debounced search narrow the list", async () => {
     ["llama-leaf", "qwen-common"],
     "the Local chip keeps only local models",
   );
-  assert.equal(root.querySelector(".orphan-section"), null, "orphans hide under Local");
+  assert.ok(root.querySelector(".orphan-section"), "Local absorbs unconfigured cache files");
 
   root.querySelector(".filter-chip[data-filter='remote']").click();
   assert.deepEqual(
@@ -136,6 +149,11 @@ test("adopting an orphan pre-fills an unsaved local model whose save writes the 
   await settle();
 
   assert.equal(dom.window.location.hash, "#/models/stray-7B-Q5_K_S");
+  assert.equal(root.querySelector(".orphan-row"), null, "adopt refreshes and removes the orphan");
+  assert.ok(
+    stub.calls.filter((call) => call.url.endsWith("/admin/orphans")).length >= 2,
+    "adopt refreshes the gateway orphan listing",
+  );
   const title = root.querySelector(".detail-title");
   assert.equal(title.value, "stray-7B-Q5_K_S", "the name derives from the filename");
   const source = root.querySelector(".field-row[data-key='source'] input");
@@ -157,6 +175,71 @@ test("adopting an orphan pre-fills an unsaved local model whose save writes the 
   assert.equal(adopted?.source, ORPHAN.path, "the adopted entry lands in [[local_model]]");
 });
 
+test("verified markers are filtered and disabled deletion explains why", async () => {
+  const unverified = {
+    path: "models/manual.gguf",
+    size_bytes: 1024,
+    sha256: null,
+  };
+  const marker = {
+    path: "models/manual.gguf.verified",
+    size_bytes: 96,
+    sha256: null,
+  };
+  const stub = fixtureStub({ orphans: [unverified, marker] });
+  const { root } = await bootApp({ key: "k", stub });
+
+  assert.equal(root.querySelectorAll(".orphan-row").length, 1, ".verified never renders");
+  const tooltip = root.querySelector(".disabled-tooltip");
+  assert.match(tooltip.title, /no verified digest/i, "the disabled Delete has an explanation");
+  assert.equal(tooltip.querySelector(".orphan-delete").disabled, true);
+});
+
+test("a configured local model shows its absorbed cache file status", async () => {
+  const stub = fixtureStub({
+    cache: [
+      {
+        source: "models/Qwen3-8B-Q4_K_M.gguf",
+        path: "C:/pf/cache/models/Qwen3-8B-Q4_K_M.gguf",
+        sha256: "c".repeat(64),
+        size_bytes: 8 * 1024 ** 3,
+      },
+    ],
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/models/qwen-common");
+  await settle();
+
+  assert.match(
+    root.querySelector(".file-status").textContent,
+    /Downloaded 8\.0\u00a0GiB/,
+    "the former Downloads listing is attached to its Local model",
+  );
+  assert.ok(root.querySelector(".cached-delete"), "the cached file keeps its Delete action");
+});
+
+test("cache status never suffix-matches a different model file", async () => {
+  const config = modelsFixture();
+  config.local_model[0].source = "foo.gguf";
+  const stub = fixtureStub({
+    config,
+    cache: [
+      {
+        source: "https://example.test/myfoo.gguf",
+        path: "C:/pf/cache/models/myfoo.gguf",
+        sha256: "d".repeat(64),
+        size_bytes: 8 * 1024 ** 3,
+      },
+    ],
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/models/qwen-common");
+  await settle();
+
+  assert.match(root.querySelector(".file-status").textContent, /Not downloaded/);
+  assert.equal(root.querySelector(".cached-delete"), null, "Delete cannot target the other file");
+});
+
 test("deleting an orphan confirms first, then calls the cache delete", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
@@ -167,7 +250,7 @@ test("deleting an orphan confirms first, then calls the cache delete", async () 
   const dialog = doc.querySelector(".confirm-overlay");
   assert.ok(dialog, "a confirm dialog opens");
   assert.match(dialog.textContent, /stray-7B-Q5_K_S\.gguf/, "the dialog names the file");
-  assert.match(dialog.textContent, /4\.6 GiB/, "the dialog names the size");
+  assert.match(dialog.textContent, /4\.6\u00a0GiB/, "the dialog names the size");
 
   dialog.querySelector(".button-outline").click();
   await settle();

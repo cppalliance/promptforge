@@ -8,9 +8,9 @@
 // per-field dirty dots, reset buttons, and pending chips.
 
 import {
-  Cloud,
   Cpu,
   FolderOpen,
+  Globe,
   RotateCcw,
   X,
   createElement as lucideElement,
@@ -140,17 +140,33 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       return;
     }
     const entries = visibleEntries();
+    const orphans = visibleOrphans();
     const parts: HTMLElement[] = [buildToolbar()];
     const all = store.models();
-    if (all.length === 0 && store.orphans.length === 0) {
+    if (all.length === 0 && orphans.length === 0) {
       parts.push(emptyState());
     } else if (filter !== "unconfigured") {
       parts.push(modelList(entries));
     }
-    if ((filter === "all" || filter === "unconfigured") && store.orphans.length > 0) {
-      parts.push(orphanSection(store.orphans));
+    if (
+      (filter === "all" || filter === "local" || filter === "unconfigured") &&
+      orphans.length > 0
+    ) {
+      parts.push(orphanSection(orphans));
     }
     listBox.replaceChildren(...parts);
+  };
+
+  const visibleOrphans = (): OrphanFile[] => {
+    const configured = new Set(
+      store
+        .models()
+        .filter((entry) => entry.kind === "local")
+        .map((entry) => String(entry.data["source"] ?? "").replaceAll("\\", "/").toLowerCase()),
+    );
+    return store.orphans.filter(
+      (orphan) => !configured.has(orphan.path.replaceAll("\\", "/").toLowerCase()),
+    );
   };
 
   const visibleEntries = (): ModelEntry[] => {
@@ -229,24 +245,24 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     sortLabel.className = "visually-hidden";
     sortLabel.htmlFor = "models-sort";
     sortLabel.textContent = "Sort models";
-    const sortSelect = document.createElement("select");
-    sortSelect.id = "models-sort";
-    sortSelect.className = "select select-sm";
-    for (const [value, label] of [
+    const sortOptions = [
       ["name", "Name"],
       ["size", "Size"],
       ["kind", "Kind"],
-    ] as const) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      sortSelect.append(option);
-    }
-    sortSelect.value = sort;
-    sortSelect.addEventListener("change", () => {
-      sort = sortSelect.value as Sort;
-      renderList();
+    ] as const;
+    const sortSelect = createDropdownControl({
+      id: "models-sort",
+      options: sortOptions.map(([value, label]) => ({ value, label })),
+      value: sort,
+      onChange: (value) => {
+        const selected = sortOptions.find(([candidate]) => candidate === value)?.[0];
+        if (selected !== undefined) {
+          sort = selected;
+          renderList();
+        }
+      },
     });
+    sortSelect.trigger.classList.add("select-sm");
 
     const addLocal = document.createElement("button");
     addLocal.type = "button";
@@ -259,7 +275,16 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     addRemote.textContent = "Add Remote";
     addRemote.addEventListener("click", () => addModel("remote"));
 
-    toolbar.append(searchLabel, searchInput, chips, allowWrap, sortLabel, sortSelect, addLocal, addRemote);
+    toolbar.append(
+      searchLabel,
+      searchInput,
+      chips,
+      allowWrap,
+      sortLabel,
+      sortSelect.element,
+      addLocal,
+      addRemote,
+    );
     return toolbar;
   };
 
@@ -407,6 +432,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       kindBadge.className = "pill kind-badge";
       kindBadge.textContent = String(entry.data["kind"] ?? "chat");
       link.append(kindBadge);
+      link.append(...capabilityPills(entry));
 
       const quant = quantFromSource(entry);
       if (quant) {
@@ -454,7 +480,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       adopt.type = "button";
       adopt.className = "button button-xs button-outline orphan-adopt";
       adopt.textContent = "Adopt";
-      adopt.addEventListener("click", () => adoptOrphan(orphan));
+      adopt.addEventListener("click", () => void adoptOrphan(orphan));
 
       const remove = document.createElement("button");
       remove.type = "button";
@@ -462,19 +488,22 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       remove.textContent = "Delete";
       if (orphan.sha256 === null) {
         remove.disabled = true;
-        remove.title = "This file was not downloaded by the cache; delete it on disk.";
+        const tooltip = document.createElement("span");
+        tooltip.className = "disabled-tooltip";
+        tooltip.title = "This file has no verified digest, so it cannot be safely deleted here.";
+        tooltip.append(remove);
+        row.append(name, size, adopt, tooltip);
       } else {
         remove.addEventListener("click", () => void deleteOrphan(orphan));
+        row.append(name, size, adopt, remove);
       }
-
-      row.append(name, size, adopt, remove);
       list.append(row);
     }
     section.append(heading, list);
     return section;
   };
 
-  const adoptOrphan = (orphan: OrphanFile): void => {
+  const adoptOrphan = async (orphan: OrphanFile): Promise<void> => {
     const data: Record<string, unknown> = {
       name: fileName(orphan.path).replace(/\.gguf$/i, ""),
       kind: "chat",
@@ -486,6 +515,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       data["sha256"] = orphan.sha256;
     }
     const name = store.addDraft("local", data);
+    await store.refreshOrphans();
     navigate(`#/models/${encodeURIComponent(name)}`);
   };
 
@@ -685,6 +715,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     kindBadge.className = "pill kind-badge";
     kindBadge.textContent = String(store.value(entry, "kind") ?? "chat");
     meta.append(kindBadge);
+    meta.append(...capabilityPills(entry));
 
     const quant = quantFromSource(entry);
     if (quant) {
@@ -736,6 +767,10 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
         sourceRow.append(reveal);
       }
       header.append(sourceRow);
+    }
+
+    if (entry.kind === "local" && !entry.draft) {
+      header.append(fileStatus(entry));
     }
 
     header.append(
@@ -1096,6 +1131,71 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
   // ----- shared bits -------------------------------------------------------
 
+  const capabilityPills = (entry: ModelEntry): HTMLElement[] => {
+    const pills: HTMLElement[] = [];
+    const acceptsImages =
+      store.value(entry, "images") === true ||
+      (entry.kind === "local" && store.value(entry, "multimodal_projector") != null);
+    if (acceptsImages) {
+      const images = document.createElement("span");
+      images.className = "pill capability-badge";
+      images.textContent = "images";
+      pills.push(images);
+    }
+    const thinking = store.value(entry, "thinking");
+    if (typeof thinking === "string" && thinking !== "never" && thinking !== "") {
+      const badge = document.createElement("span");
+      badge.className = "pill capability-badge";
+      badge.textContent = "thinking";
+      badge.title = `Thinking mode: ${thinking}`;
+      pills.push(badge);
+    }
+    return pills;
+  };
+
+  const fileStatus = (entry: ModelEntry): HTMLElement => {
+    const row = document.createElement("div");
+    row.className = "model-file-status";
+    const cached = store.cachedFile(entry);
+    const status = document.createElement("span");
+    status.className = "pill file-status";
+    if (cached === null) {
+      status.dataset["status"] = "missing";
+      status.textContent = "Not downloaded";
+      row.append(status);
+      return row;
+    }
+    status.dataset["status"] = "downloaded";
+    status.textContent = `Downloaded ${formatBytes(cached.size_bytes)}`;
+    status.title = cached.path;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button button-xs button-danger cached-delete";
+    remove.textContent = "Delete file";
+    remove.addEventListener("click", () => {
+      void (async () => {
+        const yes = await confirmDialog(document.body, {
+          title: "Delete cached file?",
+          body: `Delete ${fileName(cached.path)} (${formatBytes(cached.size_bytes)}) from the cache.`,
+          confirmLabel: "Delete",
+          danger: true,
+        });
+        if (!yes) {
+          return;
+        }
+        try {
+          await api.deleteCached(cached.sha256);
+          await store.refreshOrphans();
+          toasts.show(`Deleted ${fileName(cached.path)}`, "success");
+        } catch (error) {
+          toasts.show(error instanceof Error ? error.message : "The delete failed", "error");
+        }
+      })();
+    });
+    row.append(status, remove);
+    return row;
+  };
+
   const statusDot = (name: string): HTMLElement => {
     const dot = document.createElement("span");
     dot.className = "status-dot";
@@ -1111,8 +1211,9 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   const sourceIcon = (kind: "local" | "remote"): HTMLElement => {
     const icon = document.createElement("span");
     icon.className = "source-icon";
+    icon.dataset["icon"] = kind === "local" ? "cpu" : "globe";
     icon.append(
-      lucideElement(kind === "local" ? Cpu : Cloud, {
+      lucideElement(kind === "local" ? Cpu : Globe, {
         "aria-hidden": "true",
         width: 14,
         height: 14,

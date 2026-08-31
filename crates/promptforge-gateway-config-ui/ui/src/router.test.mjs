@@ -15,7 +15,6 @@ const ROUTES = [
   ["#/models", "Models", false],
   ["#/models/qwen3-8b", "Models", false],
   ["#/discover", "Discover", false],
-  ["#/downloads", "Downloads", true],
   ["#/profiles", "Profiles", true],
   ["#/secrets", "Secrets", true],
   ["#/settings", "Settings", false],
@@ -49,6 +48,19 @@ test("an unknown hash falls back to the models view", async () => {
   await settle(2);
   assert.equal(root.querySelector("main h1.view-title")?.textContent, "Models");
   assert.equal(dom.window.location.hash, "#/models", "the address bar is normalized");
+});
+
+test("the removed Downloads tab and route cannot be reached", async () => {
+  const stub = gatewayStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  assert.equal(
+    [...root.querySelectorAll(".tab")].some((tab) => tab.textContent === "Downloads"),
+    false,
+    "the tab bar has no Downloads destination",
+  );
+  navigate(dom, "#/downloads");
+  await settle(2);
+  assert.equal(dom.window.location.hash, "#/models", "the old route normalizes to Models");
 });
 
 test("a malformed percent-escape in the hash falls back instead of crashing", async () => {

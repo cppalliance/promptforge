@@ -35,6 +35,16 @@ function changeValue(dom, input, value) {
   input.dispatchEvent(new dom.window.Event("change"));
 }
 
+function chooseDropdown(scope, key, value) {
+  const row = scope.querySelector(`.field-row[data-key='${key}']`);
+  row.querySelector(".select").click();
+  const option = [...row.querySelectorAll(".menu-item")].find(
+    (item) => item.dataset.value === value,
+  );
+  assert.ok(option, `dropdown ${key} offers ${value}`);
+  option.click();
+}
+
 test("a Gateway save PUTs the boot shadow with the untouched api_key as ***", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
@@ -177,9 +187,7 @@ test("a local dominion shows vram_gb, and switching kind to remote hides it", as
     "a local-kind dominion reveals the vram_gb field",
   );
 
-  const kind = card.querySelector(".field-row[data-key='kind'] select");
-  kind.value = "remote";
-  kind.dispatchEvent(new dom.window.Event("change"));
+  chooseDropdown(card, "kind", "remote");
   await settle();
   const rerendered = root.querySelector(".entry-card[data-entry='dominion:gpu0']");
   assert.equal(
@@ -244,9 +252,11 @@ test("the endpoint dominion dropdown offers only remote-kind dominions", async (
   await settle();
   const card = root.querySelector(".entry-card[data-entry='endpoint:openai']");
   card.querySelector(".entry-toggle").click();
-  const options = [
-    ...card.querySelectorAll(".field-row[data-key='dominion'] select option"),
-  ].map((option) => option.textContent);
+  const trigger = card.querySelector(".field-row[data-key='dominion'] .select");
+  trigger.click();
+  const options = [...card.querySelectorAll(".field-row[data-key='dominion'] .menu-item")].map(
+    (option) => option.textContent,
+  );
   assert.deepEqual(
     options,
     ["None", "pool-r"],
@@ -350,7 +360,7 @@ test("an endpoint's api_key stays *** through a save and Change reveals the inpu
   assert.match(card.querySelector(".used-by-chip").title, /model 'gpt-remote'/);
   card.querySelector(".entry-toggle").click();
 
-  const protocol = card.querySelector(".field-row[data-key='protocol'] select");
+  const protocol = card.querySelector(".field-row[data-key='protocol'] .select");
   assert.equal(protocol.value, "openai");
   assert.ok(protocol.disabled, "the protocol dropdown is locked");
   assert.equal(
@@ -394,7 +404,7 @@ test("Tools Enable renders the web_search card with the spec's fields", async ()
   root.querySelector(".tools-enable").click();
   await settle();
 
-  const provider = root.querySelector(".field-row[data-key='provider'] select");
+  const provider = root.querySelector(".field-row[data-key='provider'] .select");
   assert.equal(provider.value, "brave");
   assert.ok(provider.disabled, "the provider dropdown is locked to Brave");
   assert.equal(
@@ -438,7 +448,7 @@ test("a store notification on the Models route cannot hand the pane back to Sett
   assert.equal(root.querySelector(".settings-panel"), null, "the Settings panel stays unmounted");
 });
 
-test("a boot-scoped apply raises the persistent restart banner", async () => {
+test("the restart banner clears when config generation advances", async () => {
   const stub = fixtureStub({
     dirty: { dirty: true, pending_files: ["gateway.toml"], changed_sections: ["server"] },
     applyOutcome: { applied: ["gateway.toml"], reloaded: false, restart_required: true },
@@ -451,4 +461,8 @@ test("a boot-scoped apply raises the persistent restart banner", async () => {
   await settle();
   assert.ok(!banner.hidden, "a restart-required apply reveals the banner");
   assert.match(banner.textContent, /Restart the gateway/);
+  stub.state.configGeneration = "generation-2";
+  await new Promise((resolve) => setTimeout(resolve, 1_050));
+  await settle();
+  assert.ok(banner.hidden, "a new gateway generation dismisses the stale restart banner");
 });

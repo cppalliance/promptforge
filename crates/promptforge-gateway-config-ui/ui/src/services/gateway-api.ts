@@ -17,6 +17,8 @@ export interface GatewayStatus {
   profile: string;
   /** Names of the models the running profile exposes. */
   models: string[];
+  /** Process-lifetime config generation, changed by a gateway restart. */
+  config_generation: string;
 }
 
 /** The terminal outcome of a profile switch stream. */
@@ -85,19 +87,6 @@ export interface CacheListEntry {
   /** Blob length in bytes. */
   size_bytes: number;
 }
-
-/** One progress sample from a `POST /v1/cache` download stream. */
-export interface CacheProgressSample {
-  /** Bytes downloaded so far. */
-  bytes: number;
-  /** Total bytes, or null when the server sent no Content-Length. */
-  total: number | null;
-}
-
-/** The terminal outcome of a cache download. */
-export type CacheDownloadResult =
-  | { readonly status: "ready"; readonly path: string }
-  | { readonly status: "error"; readonly message: string };
 
 /** The shape of `POST /admin/config-apply`'s reply. */
 export interface ApplyOutcome {
@@ -242,8 +231,16 @@ export class GatewayApi {
 
   /** Fetches the running profile name and model list. */
   async getStatus(): Promise<GatewayStatus> {
-    const data = (await this.getJson("/admin/status")) as Partial<GatewayStatus>;
-    return { profile: data.profile ?? "", models: data.models ?? [] };
+    const raw = await this.getJson("/admin/status");
+    const data = isRecord(raw) ? raw : {};
+    return {
+      profile: typeof data["profile"] === "string" ? data["profile"] : "",
+      models: Array.isArray(data["models"])
+        ? data["models"].filter((model): model is string => typeof model === "string")
+        : [],
+      config_generation:
+        typeof data["config_generation"] === "string" ? data["config_generation"] : "",
+    };
   }
 
   /** Lists the profile names the gateway can switch to. */
@@ -417,8 +414,27 @@ export class GatewayApi {
 
   /** Lists unconfigured cache files via `GET /admin/orphans`. */
   async getOrphans(): Promise<OrphanFile[]> {
-    const data = (await this.getJson("/admin/orphans")) as { orphans?: OrphanFile[] };
-    return data.orphans ?? [];
+    const raw = await this.getJson("/admin/orphans");
+    if (!isRecord(raw) || !Array.isArray(raw["orphans"])) {
+      return [];
+    }
+    return raw["orphans"].flatMap((item) => {
+      if (
+        !isRecord(item) ||
+        typeof item["path"] !== "string" ||
+        typeof item["size_bytes"] !== "number"
+      ) {
+        return [];
+      }
+      const sha256 = item["sha256"];
+      return [
+        {
+          path: item["path"],
+          size_bytes: item["size_bytes"],
+          sha256: typeof sha256 === "string" ? sha256 : null,
+        },
+      ];
+    });
   }
 
   /**
@@ -451,7 +467,29 @@ export class GatewayApi {
   /** Lists the cached blobs via `GET /v1/cache`. */
   async listCache(): Promise<CacheListEntry[]> {
     const data = await this.getJson("/v1/cache");
-    return Array.isArray(data) ? (data as CacheListEntry[]) : [];
+    if (!Array.isArray(data)) {
+      return [];
+    }
+    return data.flatMap((item) => {
+      if (
+        !isRecord(item) ||
+        typeof item["source"] !== "string" ||
+        typeof item["path"] !== "string" ||
+        typeof item["sha256"] !== "string" ||
+        !/^[0-9a-f]{64}$/i.test(item["sha256"]) ||
+        typeof item["size_bytes"] !== "number"
+      ) {
+        return [];
+      }
+      return [
+        {
+          source: item["source"],
+          path: item["path"],
+          sha256: item["sha256"].toLowerCase(),
+          size_bytes: item["size_bytes"],
+        },
+      ];
+    });
   }
 
   /** Deletes a cached artifact via `DELETE /v1/cache/{sha256}`. */
@@ -632,62 +670,6 @@ export class GatewayApi {
     return response;
   }
 
-  /**
-   * Runs `POST /v1/cache` for `source` and consumes its stream. A cache
-   * hit answers buffered JSON and resolves ready immediately; a miss
-   * streams `downloading` samples into `onProgress` until the terminal
-   * `ready`/`error` event. The gateway offers no cancel: a dropped
-   * stream leaves the server-side download running to completion.
-   */
-  async cacheDownload(
-    source: string,
-    sha256: string | null,
-    onProgress: (sample: CacheProgressSample) => void,
-  ): Promise<CacheDownloadResult> {
-    const body: Record<string, string> = { source };
-    if (sha256 !== null) {
-      body["sha256"] = sha256;
-    }
-    const response = await this.send("/v1/cache", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      return { status: "error", message: await refusalMessage(response) };
-    }
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/event-stream") || response.body === null) {
-      // A cache hit answers with buffered `{"path", "status": "ready"}`.
-      const data = (await response.json()) as Record<string, unknown>;
-      return typeof data["path"] === "string"
-        ? { status: "ready", path: data["path"] }
-        : { status: "error", message: "the cache answered without a path" };
-    }
-    for await (const payload of ssePayloads(response.body)) {
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(payload) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (event["status"] === "downloading") {
-        onProgress({
-          bytes: typeof event["bytes"] === "number" ? event["bytes"] : 0,
-          total: typeof event["total"] === "number" ? event["total"] : null,
-        });
-      } else if (event["status"] === "ready") {
-        const path = typeof event["path"] === "string" ? event["path"] : "";
-        return { status: "ready", path };
-      } else if (event["status"] === "error") {
-        const message =
-          typeof event["message"] === "string" ? event["message"] : "the download failed";
-        return { status: "error", message };
-      }
-    }
-    return { status: "error", message: "the download stream ended without a terminal event" };
-  }
-
   /** GETs a JSON endpoint, throwing on any non-success status. */
   private async getJson(path: string): Promise<unknown> {
     const response = await this.send(path);
@@ -748,6 +730,11 @@ async function refusalMessage(response: Response): Promise<string> {
     // Fall through to the status line.
   }
   return `the gateway refused the switch (${response.status})`;
+}
+
+/** Whether untrusted JSON is a non-array object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**

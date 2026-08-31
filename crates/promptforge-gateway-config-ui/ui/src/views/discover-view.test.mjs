@@ -1,9 +1,9 @@
 // Pins the Discover view: the 300ms-debounced search (keywords hit the
 // search proxy once; user/repo and pasted URLs hit the model endpoint),
 // the sort-to-hub-parameter mapping, the quant table with exact sizes
-// and heuristic fit badges plus the starred Recommended row, README
-// sanitization through marked, the no-HF_TOKEN banner, and the
-// download path through the global store into the top progress strip.
+// and heuristic fit badges plus the starred Recommended row, sanitized
+// inline-HTML README rendering, the no-HF_TOKEN banner, and
+// download-on-apply staging through the config store.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -13,10 +13,10 @@ import {
   gatewayStub,
   hfModelFixture,
   hfSearchFixture,
+  modelsFixture,
   navigate,
   readmeFixture,
   settle,
-  sseChannel,
   systemFixture,
 } from "../harness.mjs";
 
@@ -118,17 +118,13 @@ test("the sort options map to the hub's sort parameters", async () => {
   assert.match(searchCalls(stub)[0].url, /sort=downloads/, "the default sort is downloads");
   assert.match(searchCalls(stub)[0].url, /direction=-1/, "descending direction is pinned");
 
-  const sort = root.querySelector("#discover-sort");
-  const change = () => sort.dispatchEvent(new sort.ownerDocument.defaultView.Event("change"));
-  sort.value = "trending";
-  change();
+  root.querySelector("#discover-sort").click();
+  root.querySelector(".discover-toolbar .menu-item[data-value='trending']").click();
   await settle();
   assert.match(searchCalls(stub).at(-1).url, /sort=trendingScore/, "trending maps to trendingScore");
 
-  root.querySelector("#discover-sort").value = "newest";
-  root
-    .querySelector("#discover-sort")
-    .dispatchEvent(new sort.ownerDocument.defaultView.Event("change"));
+  root.querySelector("#discover-sort").click();
+  root.querySelector(".discover-toolbar .menu-item[data-value='newest']").click();
   await settle();
   assert.match(searchCalls(stub).at(-1).url, /sort=lastModified/, "newest maps to lastModified");
 });
@@ -147,7 +143,7 @@ test("the quant table renders exact sizes, heuristic fit badges, and one Recomme
   );
   assert.deepEqual(
     rows.map((row) => row.querySelector(".quant-size").textContent),
-    ["10 GiB", "18 GiB", "25 GiB", "50 GiB"],
+    ["10\u00a0GiB", "18\u00a0GiB", "25\u00a0GiB", "50\u00a0GiB"],
     "sizes come from the blobs=true sibling list",
   );
   // 20 GiB free VRAM / 24 total / 32 GiB free RAM, sizes weighted 1.2:
@@ -173,9 +169,13 @@ test("the quant table renders exact sizes, heuristic fit badges, and one Recomme
   assert.match(recommended[0].textContent, /Recommended/);
 });
 
-test("the README renders through marked with raw HTML and unsafe URLs neutralized", async () => {
+test("the README keeps safe inline HTML and sanitizes XSS after rendering", async () => {
   const stub = discoverStub();
   const { dom, root } = await openDiscover(stub);
+  dom.window.HTMLElement.prototype.setHTML = function setHTML(html) {
+    this.dataset.nativeSanitizer = "used";
+    this.innerHTML = html;
+  };
   root.querySelector(".result-row").click();
   await settle();
 
@@ -183,17 +183,43 @@ test("the README renders through marked with raw HTML and unsafe URLs neutralize
   assert.ok(markdown, "the README renders below the detail card");
   assert.equal(markdown.querySelector("script"), null, "a script tag never becomes an element");
   assert.equal(dom.window.__pwned, undefined, "the script payload never ran");
-  assert.match(
-    markdown.textContent,
-    /window\.__pwned/,
-    "the raw HTML is escaped into visible text",
-  );
+  assert.doesNotMatch(markdown.textContent, /window\.__pwned/, "script content is removed");
   assert.ok(markdown.querySelector("strong"), "ordinary markdown still renders");
+  assert.ok(markdown.querySelector(".safe-inline em"), "safe inline HTML survives");
+  assert.equal(
+    markdown.querySelector("img")?.hasAttribute("onerror"),
+    false,
+    "event-handler attributes are removed",
+  );
+  assert.equal(markdown.dataset.nativeSanitizer, "used", "the native Sanitizer sink is detected");
+  assert.doesNotMatch(markdown.textContent, /apache-2\.0/, "frontmatter is stripped");
   const badAnchor = [...markdown.querySelectorAll("a")].find((anchor) =>
     (anchor.getAttribute("href") ?? "").startsWith("javascript:"),
   );
   assert.equal(badAnchor, undefined, "a javascript: link loses its href");
   assert.match(markdown.textContent, /bad link/, "the unsafe link's text survives");
+});
+
+test("README frontmatter cannot select gray-matter's JavaScript engine", async () => {
+  const marker = "__promptforgeFrontmatterExecuted";
+  delete globalThis[marker];
+  const stub = discoverStub({
+    readme: [
+      "---javascript",
+      `({ value: (globalThis.${marker} = true) })`,
+      "---",
+      "# Safe model card",
+    ].join("\n"),
+  });
+  try {
+    const { root } = await openDiscover(stub);
+    root.querySelector(".result-row").click();
+    await settle();
+    assert.equal(globalThis[marker], undefined, "frontmatter is stripped without evaluation");
+    assert.match(root.querySelector(".markdown")?.textContent ?? "", /Safe model card/);
+  } finally {
+    delete globalThis[marker];
+  }
 });
 
 test("a javascript: scheme hidden behind HTML entities is still stripped", async () => {
@@ -261,14 +287,8 @@ test("a hub 401 (no HF_TOKEN) shows the Secrets banner instead of the key prompt
   );
 });
 
-test("Download starts the cache SSE, the store feeds the strip, and completion clears it", async () => {
-  let channel;
-  const stub = discoverStub({
-    onCache: () => {
-      channel = sseChannel();
-      return channel.response;
-    },
-  });
+test("Download stages a pending model without touching the cache", async () => {
+  const stub = discoverStub();
   const { dom, root } = await openDiscover(stub);
   root.querySelector(".result-row").click();
   await settle();
@@ -276,43 +296,75 @@ test("Download starts the cache SSE, the store feeds the strip, and completion c
   root.querySelector(".quant-download").click();
   await settle();
 
-  const post = stub.calls.find(
-    (call) => call.url.endsWith("/v1/cache") && call.init.method === "POST",
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
   );
-  assert.ok(post, "the click POSTs /v1/cache");
+  assert.ok(put, "the click stages the config shadow");
+  const entry = JSON.parse(put.init.body).local_model[0];
   assert.equal(
-    JSON.parse(post.init.body).source,
+    entry.source,
     `https://huggingface.co/${REPO}/resolve/main/Qwen3-Test-8B-Q4_K_M.gguf`,
-    "the source is the quant file's hub resolve URL",
+    "the pending entry carries the hub resolve URL",
   );
+  assert.equal(entry.sha256, "1".repeat(64), "the pending entry carries the LFS digest");
+  assert.equal(entry.vram_gb, 10, "the pending entry carries the listing size as VRAM");
+  assert.equal(entry.kind, "chat");
   assert.match(
     dom.window.document.querySelector(".toast")?.textContent ?? "",
-    /Download started/,
-    "a toast confirms the start",
+    /Apply to download/,
+    "the toast explains that Apply owns the transfer",
   );
-
-  const strip = root.querySelector(".global-progress");
-  assert.ok(strip, "the shell mounts the top progress strip");
-  assert.equal(strip.hidden, false, "an active download reveals the strip");
-  const button = root.querySelector(".quant-download");
-  assert.equal(button.disabled, true, "the active quant's button disables");
-  assert.match(button.textContent, /Downloading/);
-
-  channel.push({ status: "downloading", bytes: 5 * GIB, total: 10 * GIB });
-  await settle();
   assert.equal(
-    strip.querySelector(".progress-strip-bar").style.getPropertyValue("--progress"),
-    "0.5",
-    "the strip tracks the store's fraction",
-  );
-
-  channel.push({ status: "ready", path: "C:/pf/models/Qwen3-Test-8B-Q4_K_M.gguf" });
-  channel.end();
-  await settle();
-  assert.equal(strip.hidden, true, "completion clears the strip");
-  assert.equal(
-    root.querySelector(".quant-download").disabled,
+    stub.calls.some((call) => call.url.endsWith("/v1/cache") && call.init.method === "POST"),
     false,
-    "the button re-enables after completion",
+    "staging touches no artifact endpoint",
+  );
+  assert.equal(
+    root.querySelector(".global-progress"),
+    null,
+    "the removed client download strip cannot get stuck",
+  );
+  assert.match(root.querySelector(".apply-button")?.textContent ?? "", /Apply \(1\)/);
+  assert.equal(root.querySelector(".quant-download").textContent, "Added");
+});
+
+test("concurrent Download staging preserves every model and extends the allowlist", async () => {
+  const config = modelsFixture();
+  config.models = ["gpt-remote"];
+  const stub = discoverStub({ config, pending: structuredClone(config) });
+  const fetch = stub.fetchFn;
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let configPuts = 0;
+  stub.fetchFn = async (input, init = {}) => {
+    if (String(input).endsWith("/admin/config") && init.method === "PUT") {
+      configPuts += 1;
+      if (configPuts === 1) {
+        await firstGate;
+      }
+    }
+    return fetch(input, init);
+  };
+
+  const { root } = await openDiscover(stub);
+  root.querySelector(".result-row").click();
+  await settle();
+  root.querySelectorAll(".quant-download")[0].click();
+  await settle();
+  root.querySelectorAll(".quant-download")[1].click();
+  await settle();
+  assert.equal(configPuts, 1, "the second full-config write waits for the first refresh");
+
+  releaseFirst();
+  await settle(6);
+  const staged = stub.state.pending.local_model.filter((entry) =>
+    String(entry.source).startsWith("https://huggingface.co/"),
+  );
+  assert.equal(staged.length, 2, "both selected quants survive in the pending catalog");
+  assert.ok(
+    staged.every((entry) => stub.state.pending.models.includes(entry.name)),
+    "the active allowlist selects each staged model so Apply provisions it",
   );
 });

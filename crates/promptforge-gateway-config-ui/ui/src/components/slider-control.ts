@@ -100,7 +100,9 @@ export function createSliderControl(options: SliderControlOptions): SliderContro
 
   const setValue = (value: number): void => {
     current = value;
-    range.value = String(toPosition(value));
+    const position = toPosition(value);
+    range.value = String(position);
+    range.style.setProperty("--slider-progress", String(position / positionMax()));
     renderEntry();
   };
 
@@ -108,10 +110,18 @@ export function createSliderControl(options: SliderControlOptions): SliderContro
   // ("change"), so owners re-rendering on commit never interrupt a drag.
   range.addEventListener("input", () => {
     current = fromPosition(Number(range.value));
+    range.style.setProperty(
+      "--slider-progress",
+      String(Number(range.value) / positionMax()),
+    );
     renderEntry();
   });
   range.addEventListener("change", () => {
     current = fromPosition(Number(range.value));
+    range.style.setProperty(
+      "--slider-progress",
+      String(Number(range.value) / positionMax()),
+    );
     renderEntry();
     options.onChange(current);
   });

@@ -22,6 +22,16 @@ test("the bundled stylesheet defines the design tokens and layer order", async (
     /@layer reset,\s*base,\s*components,\s*utilities/,
     "the cascade layer order is declared",
   );
+  assert.match(
+    css,
+    /textarea\.input\s*\{[^}]*height:\s*auto[^}]*border-radius:\s*0\.75rem/,
+    "multiline inputs keep the rounded rectangle radius and natural height",
+  );
+  assert.match(
+    css,
+    /\.split-list :focus-visible[^}]*outline-offset:\s*-2px/,
+    "focus rings stay inset inside scrollable panes",
+  );
 });
 
 test("the shell page links the bundled stylesheet", async () => {

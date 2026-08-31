@@ -201,13 +201,23 @@ test("the New Profile dialog posts each mode's body", async () => {
     const radio = dialog.querySelector("#start-from-copy");
     radio.checked = true;
     radio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    dialog.querySelector("#new-profile-copy-from").value = "common";
+    const trigger = dialog.querySelector("#new-profile-copy-from");
+    trigger.click();
+    trigger
+      .closest(".dropdown-control")
+      .querySelector(".menu-item[data-value='common']")
+      .click();
   });
   await create("leaf", (dialog) => {
     const radio = dialog.querySelector("#start-from-include");
     radio.checked = true;
     radio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    dialog.querySelector("#new-profile-include-from").value = "common";
+    const trigger = dialog.querySelector("#new-profile-include-from");
+    trigger.click();
+    trigger
+      .closest(".dropdown-control")
+      .querySelector(".menu-item[data-value='common']")
+      .click();
   });
 
   const bodies = stub.calls

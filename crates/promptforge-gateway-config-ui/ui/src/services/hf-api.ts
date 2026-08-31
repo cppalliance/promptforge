@@ -42,6 +42,8 @@ export interface HfQuant {
   files: string[];
   /** Exact summed byte size, or null when the hub omitted a size. */
   sizeBytes: number | null;
+  /** LFS SHA-256 for a single-file quant, when the hub supplied it. */
+  sha256: string | null;
 }
 
 /** The model detail feeding the Discover detail card. */
@@ -216,7 +218,24 @@ export class HfApi {
         continue;
       }
       const size = typeof record["size"] === "number" ? record["size"] : null;
-      const group = groups.get(quant) ?? { quant, files: [], sizeBytes: 0 };
+      const group = groups.get(quant) ?? {
+        quant,
+        files: [],
+        sizeBytes: 0,
+        sha256: null,
+      };
+      const lfs = record["lfs"];
+      const rawDigest =
+        lfs !== null &&
+        typeof lfs === "object" &&
+        typeof (lfs as Record<string, unknown>)["sha256"] === "string"
+          ? String((lfs as Record<string, unknown>)["sha256"])
+          : null;
+      const digest =
+        rawDigest !== null && /^[0-9a-f]{64}$/i.test(rawDigest)
+          ? rawDigest.toLowerCase()
+          : null;
+      group.sha256 = group.files.length === 0 ? digest : null;
       group.files.push(filename);
       // One missing part size makes the whole quant's size unknown.
       group.sizeBytes = group.sizeBytes === null || size === null ? null : group.sizeBytes + size;

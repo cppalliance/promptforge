@@ -30,6 +30,7 @@ import {
 
 import type { ApplyOverlay } from "../components/apply-overlay";
 import { confirmDialog } from "../components/confirm-modal";
+import { createDropdownControl } from "../components/dropdown-control";
 import type { ToastStack } from "../components/toast";
 import type { ChainFile, ConfigStore, EntryData } from "../services/config-store";
 import { GatewayHttpError, UnauthorizedError } from "../services/gateway-api";
@@ -946,23 +947,30 @@ function newProfileDialog(
   legend.textContent = "Start from";
   modes.append(legend);
 
-  const fromSelect = (id: string): HTMLSelectElement => {
-    const select = document.createElement("select");
-    select.id = id;
-    select.className = "select select-sm";
-    select.disabled = true;
-    for (const profile of profiles) {
-      const option = document.createElement("option");
-      option.value = profile;
-      option.textContent = profile;
-      select.append(option);
-    }
-    return select;
-  };
-  const copyFrom = fromSelect("new-profile-copy-from");
-  copyFrom.setAttribute("aria-label", "Profile to copy");
-  const includeFrom = fromSelect("new-profile-include-from");
-  includeFrom.setAttribute("aria-label", "Profile to include");
+  let copyValue = profiles[0] ?? "";
+  const copyFrom = createDropdownControl({
+    id: "new-profile-copy-from",
+    options: profiles.map((profile) => ({ value: profile, label: profile })),
+    value: copyValue,
+    onChange: (value) => {
+      copyValue = value;
+    },
+  });
+  copyFrom.trigger.classList.add("select-sm");
+  copyFrom.trigger.setAttribute("aria-label", "Profile to copy");
+  copyFrom.setDisabled(true);
+  let includeValue = profiles[0] ?? "";
+  const includeFrom = createDropdownControl({
+    id: "new-profile-include-from",
+    options: profiles.map((profile) => ({ value: profile, label: profile })),
+    value: includeValue,
+    onChange: (value) => {
+      includeValue = value;
+    },
+  });
+  includeFrom.trigger.classList.add("select-sm");
+  includeFrom.trigger.setAttribute("aria-label", "Profile to include");
+  includeFrom.setDisabled(true);
 
   const radioRow = (
     value: string,
@@ -989,15 +997,15 @@ function newProfileDialog(
   };
   modes.append(
     radioRow("empty", "Empty", true),
-    radioRow("copy", "Copy of", false, copyFrom),
-    radioRow("include", "Include", false, includeFrom),
+    radioRow("copy", "Copy of", false, copyFrom.element),
+    radioRow("include", "Include", false, includeFrom.element),
   );
   // The mode's dropdown enables with its radio, so a disabled select
   // never carries the submitted choice.
   modes.addEventListener("change", () => {
     const mode = modes.querySelector<HTMLInputElement>("input[name='start-from']:checked")?.value;
-    copyFrom.disabled = mode !== "copy";
-    includeFrom.disabled = mode !== "include";
+    copyFrom.setDisabled(mode !== "copy");
+    includeFrom.setDisabled(mode !== "include");
   });
 
   const actions = document.createElement("div");
@@ -1047,8 +1055,10 @@ function newProfileDialog(
     // form's control count: Tab at either edge wraps instead of
     // escaping the aria-modal dialog into the inert chrome.
     if (event.key === "Tab") {
-      const controls = [...card.querySelectorAll<HTMLElement>("input, select, button")].filter(
-        (entry) => !(entry as HTMLInputElement).disabled,
+      const controls = [...card.querySelectorAll<HTMLElement>("input, button")].filter(
+        (entry) =>
+          !(entry as HTMLInputElement).disabled &&
+          entry.closest<HTMLElement>("[hidden]") === null,
       );
       const first = controls[0];
       const last = controls[controls.length - 1];
@@ -1079,9 +1089,9 @@ function newProfileDialog(
       modes.querySelector<HTMLInputElement>("input[name='start-from']:checked")?.value ?? "empty";
     let body: CreateProfileBody;
     if (mode === "copy") {
-      body = { mode: "copy", from: copyFrom.value };
+      body = { mode: "copy", from: copyValue };
     } else if (mode === "include") {
-      body = { mode: "include", from: includeFrom.value };
+      body = { mode: "include", from: includeValue };
     } else {
       body = { mode: "empty" };
     }
