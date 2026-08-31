@@ -29,7 +29,8 @@ pub(crate) struct ModelInfoQuery {
 
 /// The `GET /admin/model-info?path=` route: bearer-authed, parses the GGUF
 /// header of the named cache file and reports
-/// `{"architecture", "layer_count", "parameter_count"}` (each nullable).
+/// `{"architecture", "layer_count", "parameter_count", "chat_template"}`
+/// (each nullable).
 ///
 /// `path` is caller input and is confined to the artifact cache: only a
 /// relative path that resolves under the resolved cache root without
@@ -154,6 +155,7 @@ cache_dir = '{cache_dir}'
                 "architecture": "llama",
                 "layer_count": 32,
                 "parameter_count": 8_030_000_000u64,
+                "chat_template": null,
             })
         );
     }
