@@ -79,6 +79,11 @@ test("the search debounces to one proxied call and renders result rows", async (
   assert.equal(calls.length, 2, "three keystrokes collapse into one search");
   assert.match(calls[1].url, /q=qwen/, "the settled text is the query");
   assert.match(calls[1].url, /filter=gguf/, "the GGUF filter is pinned");
+  assert.match(
+    calls[1].url,
+    /pipeline_tag=text-generation/,
+    "Chat is the default workload filter",
+  );
 
   const rows = [...root.querySelectorAll(".result-row")];
   assert.equal(rows.length, 2, "every fixture repo renders a row");
@@ -287,6 +292,12 @@ test("a hub 401 (no HF_TOKEN) shows the Secrets banner instead of the key prompt
   );
 });
 
+test("malformed hub search JSON is an error instead of an empty result", async () => {
+  const stub = discoverStub({ hfSearch: { unexpected: true } });
+  const { root } = await openDiscover(stub);
+  assert.match(root.querySelector(".banner-danger")?.textContent ?? "", /invalid search JSON/);
+});
+
 test("Download stages a pending model without touching the cache", async () => {
   const stub = discoverStub();
   const { dom, root } = await openDiscover(stub);
@@ -328,9 +339,8 @@ test("Download stages a pending model without touching the cache", async () => {
   assert.equal(root.querySelector(".quant-download").textContent, "Added");
 });
 
-test("concurrent Download staging preserves every model and extends the allowlist", async () => {
+test("concurrent Download staging preserves every model and profile choice", async () => {
   const config = modelsFixture();
-  config.models = ["gpt-remote"];
   const stub = discoverStub({ config, pending: structuredClone(config) });
   const fetch = stub.fetchFn;
   let releaseFirst;
@@ -364,7 +374,127 @@ test("concurrent Download staging preserves every model and extends the allowlis
   );
   assert.equal(staged.length, 2, "both selected quants survive in the pending catalog");
   assert.ok(
-    staged.every((entry) => stub.state.pending.models.includes(entry.name)),
-    "the active allowlist selects each staged model so Apply provisions it",
+    staged.every((entry) =>
+      stub.state.pending.profile
+        .find((profile) => profile.name === "default")
+        .models.includes(entry.name),
+    ),
+    "the pending active profile chooses each staged model so Apply provisions it",
+  );
+});
+
+test("workload toggles fan out pipeline tags and merge them as OR filters", async () => {
+  const stub = discoverStub();
+  const { root } = await openDiscover(stub);
+  root.querySelector(".discover-type[data-type='embedding']").click();
+  root.querySelector(".discover-type[data-type='stt']").click();
+  await settle();
+
+  const urls = searchCalls(stub)
+    .slice(-4)
+    .map((call) => new URL(call.url, "http://gateway.test"));
+  assert.ok(urls.every((url) => url.searchParams.get("filter") === "gguf"));
+  assert.deepEqual(
+    urls.map((url) => url.searchParams.getAll("pipeline_tag")),
+    [
+      ["text-generation"],
+      ["feature-extraction"],
+      ["sentence-similarity"],
+      ["automatic-speech-recognition"],
+    ],
+    "each upstream request carries one tag because Hugging Face intersects repeats",
+  );
+  assert.equal(
+    root.querySelectorAll(".result-row").length,
+    2,
+    "repos returned by more than one workload request are deduplicated",
+  );
+});
+
+test("leaving Discover aborts in-flight searches and cannot repaint the route", async () => {
+  const stub = discoverStub();
+  const fetch = stub.fetchFn;
+  let blockSearch = false;
+  let aborted = false;
+  stub.fetchFn = async (input, init = {}) => {
+    if (blockSearch && String(input).includes("/admin/hf/search")) {
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }
+    return fetch(input, init);
+  };
+  const { dom, root } = await openDiscover(stub);
+  blockSearch = true;
+  type(root, "pending");
+  await sleep(350);
+  navigate(dom, "#/settings");
+  await settle();
+
+  assert.equal(aborted, true);
+  assert.equal(root.querySelector("main h1.view-title")?.textContent, "Settings");
+});
+
+test("an STT-filtered Download stages a first-class stt_model entry", async () => {
+  const detail = hfModelFixture();
+  detail.tags = ["gguf"];
+  detail.pipeline_tag = "automatic-speech-recognition";
+  const config = modelsFixture();
+  const stub = discoverStub({
+    config,
+    pending: structuredClone(config),
+    hfModels: { [REPO]: detail },
+  });
+  const { root } = await openDiscover(stub);
+  root.querySelector(".discover-type[data-type='chat']").click();
+  root.querySelector(".discover-type[data-type='stt']").click();
+  await settle();
+  root.querySelector(".result-row").click();
+  await settle();
+  root.querySelector(".quant-download").click();
+  await settle();
+
+  const staged = stub.state.pending.stt_model.find((entry) =>
+    String(entry.source).includes("Q4_K_M"),
+  );
+  assert.equal(staged.role, "interim");
+  assert.equal(staged.kind, undefined, "STT kind comes from its catalog array");
+  assert.ok(
+    stub.state.pending.profile
+      .find((profile) => profile.name === "default")
+      .models.includes(staged.name),
+    "Apply will provision the newly chosen STT artifact",
+  );
+});
+
+test("an STT toggle does not misclassify another workload result", async () => {
+  const detail = hfModelFixture();
+  detail.tags = ["gguf", "automatic-speech-recognition"];
+  detail.pipeline_tag = "feature-extraction";
+  const config = modelsFixture();
+  const stub = discoverStub({
+    config,
+    pending: structuredClone(config),
+    hfModels: { [REPO]: detail },
+  });
+  const { root } = await openDiscover(stub);
+  root.querySelector(".discover-type[data-type='chat']").click();
+  root.querySelector(".discover-type[data-type='embedding']").click();
+  root.querySelector(".discover-type[data-type='stt']").click();
+  await settle();
+  root.querySelector(".result-row").click();
+  await settle();
+  root.querySelector(".quant-download").click();
+  await settle();
+
+  assert.ok(
+    stub.state.pending.local_model.some((entry) => String(entry.source).includes("Q4_K_M")),
+  );
+  assert.equal(
+    stub.state.pending.stt_model.some((entry) => String(entry.source).includes("Q4_K_M")),
+    false,
   );
 });

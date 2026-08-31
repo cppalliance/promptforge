@@ -13,7 +13,7 @@ import type { FetchLike } from "./gateway-api";
 export interface PanelContext {
   /** The workshop's theme name. */
   theme: string;
-  /** The initial route hash ("#/models"), or "" when the workshop sent none. */
+  /** The initial route hash ("#/local"), or "" when the workshop sent none. */
   route: string;
 }
 
@@ -45,18 +45,11 @@ export interface PanelBridgeOptions {
 /** Reply deadline for ordinary bridged calls. */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/**
- * Reply deadline for `POST /v1/cache`: the proxy buffers the download's
- * whole SSE stream and answers only at the end, so the deadline covers
- * a multi-gigabyte model download. (An explicit `timeoutMs` option
- * overrides both tiers, so tests can trip them quickly.)
- */
-const CACHE_TIMEOUT_MS = 30 * 60_000;
-
 interface PendingCall {
   resolve: (response: Response) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  removeAbort: () => void;
 }
 
 /**
@@ -111,7 +104,6 @@ export class PanelBridge {
   private readonly origin: string;
   private readonly post: (message: unknown) => void;
   private readonly timeoutMs: number;
-  private readonly cacheTimeoutMs: number;
   private readonly pending = new Map<string, PendingCall>();
   private nextId = 0;
 
@@ -121,7 +113,6 @@ export class PanelBridge {
     this.post =
       options.post ?? ((message) => this.win.parent.postMessage(message, this.origin));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.cacheTimeoutMs = options.timeoutMs ?? CACHE_TIMEOUT_MS;
     this.fetchLike = (input, init) => this.request(input, init);
   }
 
@@ -141,6 +132,7 @@ export class PanelBridge {
     this.win.removeEventListener("message", this.onMessage);
     for (const call of this.pending.values()) {
       clearTimeout(call.timer);
+      call.removeAbort();
       call.reject(new Error("the workshop bridge closed"));
     }
     this.pending.clear();
@@ -153,13 +145,32 @@ export class PanelBridge {
     this.nextId += 1;
     const id = `pf-${this.nextId}`;
     return new Promise<Response>((resolve, reject) => {
-      const limit =
-        method === "POST" && path.startsWith("/v1/cache") ? this.cacheTimeoutMs : this.timeoutMs;
-      const timer = setTimeout(() => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(new DOMException("the bridged request was aborted", "AbortError"));
+        return;
+      }
+      const onAbort = (): void => {
+        const call = this.pending.get(id);
+        if (call === undefined) {
+          return;
+        }
         this.pending.delete(id);
+        clearTimeout(call.timer);
+        call.removeAbort();
+        reject(new DOMException("the bridged request was aborted", "AbortError"));
+      };
+      const timer = setTimeout(() => {
+        const call = this.pending.get(id);
+        if (call !== undefined) {
+          this.pending.delete(id);
+          call.removeAbort();
+        }
         reject(new Error("the workshop bridge timed out"));
-      }, limit);
-      this.pending.set(id, { resolve, reject, timer });
+      }, this.timeoutMs);
+      const removeAbort = (): void => signal?.removeEventListener("abort", onAbort);
+      this.pending.set(id, { resolve, reject, timer, removeAbort });
+      signal?.addEventListener("abort", onAbort, { once: true });
       this.post({ type: "pf-api", id, method, path, body });
     });
   }
@@ -191,6 +202,7 @@ export class PanelBridge {
       }
       this.pending.delete(id);
       clearTimeout(call.timer);
+      call.removeAbort();
       const status = typeof data["status"] === "number" ? data["status"] : 0;
       if (status === 0) {
         // The workshop could not reach the gateway; mirror what fetch

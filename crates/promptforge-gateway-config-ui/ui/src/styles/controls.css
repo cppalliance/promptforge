@@ -358,4 +358,14 @@
 	.chip-remove:hover {
 		background: rgb(255 255 255 / 0.15);
 	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.button,
+		.switch,
+		.switch::before,
+		.slider::-webkit-slider-thumb,
+		.slider::-moz-range-thumb {
+			transition: none;
+		}
+	}
 }

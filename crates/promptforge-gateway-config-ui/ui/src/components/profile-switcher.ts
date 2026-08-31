@@ -1,24 +1,19 @@
 // The tab bar's profile switcher [Adapted: workshop]: a dropdown button
 // showing the active profile, opening a menu of every profile with the
-// active one checked - the workshop Model menu's Profiles section
-// pattern (radio rows, check on active, rows disabled while a switch is
-// in flight). Selecting another profile posts the switch and drives its
-// SSE stages into the full-screen apply overlay.
+// pending one checked. Selecting another profile stages
+// `active_profile`; Apply performs the runtime switch atomically with
+// every other configuration edit.
 
 import { Check, ChevronDown, createElement as lucideElement } from "lucide";
 
-import { UnauthorizedError } from "../services/gateway-api";
-import type { GatewayApi } from "../services/gateway-api";
-import type { ApplyOverlay } from "./apply-overlay";
+import type { ConfigStore } from "../services/config-store";
 import type { ToastStack } from "./toast";
 
 /** Construction dependencies for the switcher. */
 export interface ProfileSwitcherDeps {
-  /** The admin API client. */
-  api: GatewayApi;
-  /** The full-screen stage overlay shown while a switch runs. */
-  overlay: ApplyOverlay;
-  /** Error surfacing for failed switches and profile listings. */
+  /** Pending configuration state and write path. */
+  store: ConfigStore;
+  /** Error surfacing for failed staging. */
   toasts: ToastStack;
 }
 
@@ -33,7 +28,7 @@ export interface ProfileSwitcher {
 /** Builds the profile switcher. */
 export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitcher {
   let active = "";
-  let switching = false;
+  let staging = false;
 
   const element = document.createElement("div");
   element.className = "profile-switcher";
@@ -74,21 +69,20 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     document.removeEventListener("click", onDocumentClick);
   };
 
-  const openMenu = async () => {
+  const pendingName = (): string => deps.store.pendingActiveProfile() || active;
+
+  const paintLabel = (): void => {
+    const pending = pendingName();
+    label.textContent = pending;
+    label.classList.toggle("is-pending", pending !== active);
+    button.title = pending !== active ? `${pending} will become active on Apply` : "";
+  };
+
+  const openMenu = (): void => {
     button.setAttribute("aria-expanded", "true");
     menu.hidden = false;
     document.addEventListener("click", onDocumentClick);
-    let profiles: string[];
-    try {
-      profiles = await deps.api.getProfiles();
-    } catch (error) {
-      closeMenu();
-      if (!(error instanceof UnauthorizedError)) {
-        deps.toasts.show("Could not list profiles", "error");
-      }
-      return;
-    }
-    renderRows(profiles);
+    renderRows(deps.store.profiles().map((profile) => profile.name));
     // The menu pattern: focus lands on the active row so the arrow
     // keys work from the moment the menu opens.
     const landing =
@@ -103,11 +97,11 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
       row.type = "button";
       row.className = "menu-item";
       row.setAttribute("role", "menuitemradio");
-      row.setAttribute("aria-checked", name === active ? "true" : "false");
-      row.disabled = switching;
+      row.setAttribute("aria-checked", name === pendingName() ? "true" : "false");
+      row.disabled = staging;
       const mark = document.createElement("span");
       mark.className = "menu-check";
-      if (name === active) {
+      if (name === pendingName()) {
         mark.append(lucideElement(Check, { "aria-hidden": "true", width: 14, height: 14 }));
       }
       const text = document.createElement("span");
@@ -125,57 +119,41 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     }
   };
 
-  const select = async (name: string) => {
-    if (switching) {
+  const select = async (name: string): Promise<void> => {
+    if (staging) {
       return;
     }
-    if (name === active) {
+    if (name === pendingName()) {
       closeMenu();
       button.focus();
       return;
     }
-    switching = true;
+    staging = true;
     setRowsDisabled(true);
-    // The pending mark: the chosen row is announced busy while in flight.
     const target = [...menu.querySelectorAll<HTMLButtonElement>(".menu-item")].find(
       (row) => row.textContent === name,
     );
     target?.classList.add("is-pending");
     target?.setAttribute("aria-busy", "true");
-    deps.overlay.open(`Switching to ${name}`);
-
-    let result;
     try {
-      result = await deps.api.switchProfile(name, (stage) => deps.overlay.beginStage(stage));
+      await deps.store.stageActiveProfile(name);
     } catch (error) {
-      switching = false;
-      if (error instanceof UnauthorizedError) {
-        // The unauthorized path is tearing the shell down around us.
-        deps.overlay.finish();
-        return;
-      }
-      deps.overlay.fail("Gateway unreachable");
-      deps.toasts.show("Gateway unreachable", "error");
+      deps.toasts.show(error instanceof Error ? error.message : "The profile could not be staged", "error");
       closeMenu();
       button.focus();
+      staging = false;
       return;
     }
-    switching = false;
-    if (result.status === "ready") {
-      deps.overlay.finish();
-      active = result.profile;
-      label.textContent = active;
-    } else {
-      deps.overlay.fail(result.message);
-      deps.toasts.show(result.message, "error");
-    }
+    staging = false;
+    paintLabel();
+    deps.toasts.show(`${name} will become active on Apply`, "success");
     closeMenu();
     button.focus();
   };
 
   button.addEventListener("click", () => {
     if (menu.hidden) {
-      void openMenu();
+      openMenu();
     } else {
       closeMenu();
     }
@@ -206,11 +184,18 @@ export function createProfileSwitcher(deps: ProfileSwitcherDeps): ProfileSwitche
     rows[next]?.focus();
   });
 
+  deps.store.subscribe(() => {
+    if (deps.store.activeProfile !== "") {
+      active = deps.store.activeProfile;
+    }
+    paintLabel();
+  });
+
   return {
     element,
     setActiveProfile(name: string): void {
       active = name;
-      label.textContent = name;
+      paintLabel();
     },
   };
 }

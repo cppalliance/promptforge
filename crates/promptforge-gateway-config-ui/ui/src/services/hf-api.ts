@@ -9,6 +9,27 @@ import type { GatewayApi } from "./gateway-api";
 /** The Discover sort orders, in dropdown order. */
 export type HfSort = "downloads" | "trending" | "newest";
 
+/** Discover workload toggles, in display order. */
+export const DISCOVER_TYPES = [
+  "chat",
+  "embedding",
+  "reranker",
+  "stt",
+  "image",
+  "tts",
+] as const;
+export type DiscoverType = (typeof DISCOVER_TYPES)[number];
+
+/** Hugging Face pipeline tags contributed by each workload toggle. */
+export const PIPELINE_TAGS: Readonly<Record<DiscoverType, readonly string[]>> = {
+  chat: ["text-generation"],
+  embedding: ["feature-extraction", "sentence-similarity"],
+  reranker: ["text-classification"],
+  stt: ["automatic-speech-recognition"],
+  image: ["text-to-image"],
+  tts: ["text-to-speech"],
+};
+
 /** The hub `sort` parameter each Discover sort maps to. */
 export const HF_SORT_PARAMS: Readonly<Record<HfSort, string>> = {
   downloads: "downloads",
@@ -62,6 +83,8 @@ export interface HfModelDetail {
   updatedAt: string | null;
   /** The hub's tag list. */
   tags: string[];
+  /** The hub's primary workload classification. */
+  pipelineTag: string | null;
   /** Whether the hub marked the publisher verified (when it says). */
   verified: boolean;
   /** Parameter-count tag parsed from the name, when present. */
@@ -116,7 +139,21 @@ export function avatarUrl(owner: string): string {
 
 /** The hub download URL for one file of a repo. */
 export function resolveUrl(repo: string, filename: string): string {
-  return `https://huggingface.co/${repo}/resolve/main/${encodeURI(filename)}`;
+  const parsed = splitRepo(repo);
+  if (!isRepoSegment(parsed.owner) || !isRepoSegment(parsed.name)) {
+    throw new TypeError("the hub returned an invalid repository id");
+  }
+  const fileSegments = filename.split("/");
+  if (
+    fileSegments.some(
+      (segment) => segment === "" || segment === "." || segment === "..",
+    )
+  ) {
+    throw new TypeError("the hub returned an invalid model filename");
+  }
+  const encodedRepo = `${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}`;
+  const encodedFile = fileSegments.map(encodeURIComponent).join("/");
+  return `https://huggingface.co/${encodedRepo}/resolve/main/${encodedFile}`;
 }
 
 /** The parameter-count tag in a model name ("8B", "0.6B", "8x7B"). */
@@ -158,78 +195,90 @@ export class HfApi {
    * Searches the hub for GGUF models. An empty `query` browses by the
    * sort order alone (the view's initial state).
    */
-  async search(query: string, sort: HfSort): Promise<HfSearchRow[]> {
-    const params: Record<string, string> = {
-      filter: "gguf",
-      sort: HF_SORT_PARAMS[sort],
-      direction: "-1",
-      limit: "30",
-    };
+  async search(
+    query: string,
+    sort: HfSort,
+    types: ReadonlySet<DiscoverType>,
+    signal?: AbortSignal,
+  ): Promise<HfSearchRow[]> {
+    const common: Array<readonly [string, string]> = [
+      ["filter", "gguf"],
+      ["sort", HF_SORT_PARAMS[sort]],
+      ["direction", "-1"],
+      ["limit", "30"],
+    ];
+    const tags: string[] = [];
+    for (const type of DISCOVER_TYPES) {
+      if (types.has(type)) {
+        for (const tag of PIPELINE_TAGS[type]) {
+          tags.push(tag);
+        }
+      }
+    }
     if (query !== "") {
-      params["q"] = query;
+      common.push(["q", query]);
     }
-    const data = await this.api.hfSearch(params);
-    if (!Array.isArray(data)) {
-      return [];
-    }
-    const rows: HfSearchRow[] = [];
-    for (const item of data) {
-      if (item === null || typeof item !== "object") {
-        continue;
+    // Hugging Face intersects repeated pipeline_tag parameters. One
+    // request per tag plus a keyed merge provides the OR behavior the
+    // workload toggles promise.
+    const requests =
+      tags.length === 0
+        ? [this.api.hfSearch(common, signal)]
+        : tags.map((tag) => this.api.hfSearch([...common, ["pipeline_tag", tag]], signal));
+    const payloads = await Promise.all(requests);
+    const byRepo = new Map<string, SearchCandidate>();
+    for (const payload of payloads) {
+      for (const candidate of searchCandidates(payload)) {
+        const previous = byRepo.get(candidate.row.repo);
+        if (previous === undefined || candidate.trendingScore > previous.trendingScore) {
+          byRepo.set(candidate.row.repo, candidate);
+        }
       }
-      const record = item as Record<string, unknown>;
-      const repo = typeof record["id"] === "string" ? record["id"] : "";
-      if (repo === "") {
-        continue;
-      }
-      const { owner, name } = splitRepo(repo);
-      rows.push({
-        repo,
-        owner,
-        name,
-        downloads: typeof record["downloads"] === "number" ? record["downloads"] : 0,
-        likes: typeof record["likes"] === "number" ? record["likes"] : 0,
-        updatedAt:
-          typeof record["lastModified"] === "string" ? record["lastModified"] : null,
-        params: paramsFromName(name),
-      });
     }
-    return rows;
+    return [...byRepo.values()]
+      .sort((left, right) => compareCandidates(left, right, sort))
+      .slice(0, 30)
+      .map((candidate) => candidate.row);
   }
 
   /** Fetches one repo's detail and shapes its GGUF siblings into quants. */
-  async model(repo: string): Promise<HfModelDetail> {
-    const data = (await this.api.hfModel(repo)) as Record<string, unknown>;
-    const id = typeof data["id"] === "string" ? data["id"] : repo;
+  async model(repo: string, signal?: AbortSignal): Promise<HfModelDetail> {
+    const raw = await this.api.hfModel(repo, signal);
+    if (!isRecord(raw)) {
+      throw new TypeError("the hub returned invalid model JSON");
+    }
+    const data = raw;
+    const candidateId = typeof data["id"] === "string" ? data["id"] : repo;
+    const id = isRepoId(candidateId) ? candidateId : repo;
+    if (!isRepoId(id)) {
+      throw new TypeError("the hub returned an invalid repository id");
+    }
     const { owner, name } = splitRepo(id);
     const siblings = Array.isArray(data["siblings"]) ? data["siblings"] : [];
     const groups = new Map<string, HfQuant>();
     for (const sibling of siblings) {
-      if (sibling === null || typeof sibling !== "object") {
+      if (!isRecord(sibling)) {
         continue;
       }
-      const record = sibling as Record<string, unknown>;
-      const filename = typeof record["rfilename"] === "string" ? record["rfilename"] : "";
-      if (!/\.gguf$/i.test(filename)) {
+      const filename = typeof sibling["rfilename"] === "string" ? sibling["rfilename"] : "";
+      if (!/\.gguf$/i.test(filename) || !isSafeFilePath(filename)) {
         continue;
       }
       const quant = quantOf(filename);
       if (quant === null) {
         continue;
       }
-      const size = typeof record["size"] === "number" ? record["size"] : null;
+      const size = typeof sibling["size"] === "number" ? sibling["size"] : null;
       const group = groups.get(quant) ?? {
         quant,
         files: [],
         sizeBytes: 0,
         sha256: null,
       };
-      const lfs = record["lfs"];
+      const lfs = sibling["lfs"];
       const rawDigest =
-        lfs !== null &&
-        typeof lfs === "object" &&
-        typeof (lfs as Record<string, unknown>)["sha256"] === "string"
-          ? String((lfs as Record<string, unknown>)["sha256"])
+        isRecord(lfs) && typeof lfs["sha256"] === "string"
+          ? lfs["sha256"]
           : null;
       const digest =
         rawDigest !== null && /^[0-9a-f]{64}$/i.test(rawDigest)
@@ -245,10 +294,7 @@ export class HfApi {
       (a, b) => (a.sizeBytes ?? Number.MAX_SAFE_INTEGER) - (b.sizeBytes ?? Number.MAX_SAFE_INTEGER),
     );
     const authorData = data["authorData"];
-    const verified =
-      authorData !== null &&
-      typeof authorData === "object" &&
-      (authorData as Record<string, unknown>)["isVerified"] === true;
+    const verified = isRecord(authorData) && authorData["isVerified"] === true;
     return {
       repo: id,
       owner,
@@ -256,10 +302,100 @@ export class HfApi {
       downloads: typeof data["downloads"] === "number" ? data["downloads"] : 0,
       likes: typeof data["likes"] === "number" ? data["likes"] : 0,
       updatedAt: typeof data["lastModified"] === "string" ? data["lastModified"] : null,
-      tags: Array.isArray(data["tags"]) ? data["tags"].map(String) : [],
+      tags: stringArray(data["tags"]),
+      pipelineTag: typeof data["pipeline_tag"] === "string" ? data["pipeline_tag"] : null,
       verified,
       params: paramsFromName(name),
       quants,
     };
   }
+}
+
+interface SearchCandidate {
+  row: HfSearchRow;
+  trendingScore: number;
+}
+
+function searchCandidates(data: unknown): SearchCandidate[] {
+  if (!Array.isArray(data)) {
+    throw new TypeError("the hub returned invalid search JSON");
+  }
+  const candidates: SearchCandidate[] = [];
+  for (const item of data) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const repo = typeof item["id"] === "string" ? item["id"] : "";
+    if (!isRepoId(repo)) {
+      continue;
+    }
+    const { owner, name } = splitRepo(repo);
+    candidates.push({
+      row: {
+        repo,
+        owner,
+        name,
+        downloads: finiteNumber(item["downloads"]),
+        likes: finiteNumber(item["likes"]),
+        updatedAt:
+          typeof item["lastModified"] === "string" ? item["lastModified"] : null,
+        params: paramsFromName(name),
+      },
+      trendingScore: finiteNumber(item["trendingScore"]),
+    });
+  }
+  return candidates;
+}
+
+function compareCandidates(left: SearchCandidate, right: SearchCandidate, sort: HfSort): number {
+  let order = 0;
+  if (sort === "downloads") {
+    order = right.row.downloads - left.row.downloads;
+  } else if (sort === "trending") {
+    order = right.trendingScore - left.trendingScore;
+  } else {
+    order = timestamp(right.row.updatedAt) - timestamp(left.row.updatedAt);
+  }
+  return order || left.row.repo.localeCompare(right.row.repo);
+}
+
+function timestamp(value: string | null): number {
+  if (value === null) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function isRepoId(repo: string): boolean {
+  const { owner, name } = splitRepo(repo);
+  return isRepoSegment(owner) && isRepoSegment(name) && repo === `${owner}/${name}`;
+}
+
+function isRepoSegment(segment: string): boolean {
+  return (
+    segment !== "" &&
+    !/^\.+$/.test(segment) &&
+    /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(segment)
+  );
+}
+
+function isSafeFilePath(path: string): boolean {
+  return path
+    .split("/")
+    .every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

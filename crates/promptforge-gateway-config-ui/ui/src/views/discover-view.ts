@@ -18,8 +18,20 @@ import { formatBytes } from "../format";
 import type { ConfigStore } from "../services/config-store";
 import type { FetchLike, GatewayApi, SystemSnapshot } from "../services/gateway-api";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
-import type { HfApi, HfModelDetail, HfQuant, HfSearchRow, HfSort } from "../services/hf-api";
-import { avatarUrl, parseSearchInput, resolveUrl } from "../services/hf-api";
+import type {
+  DiscoverType,
+  HfApi,
+  HfModelDetail,
+  HfQuant,
+  HfSearchRow,
+  HfSort,
+} from "../services/hf-api";
+import {
+  DISCOVER_TYPES,
+  avatarUrl,
+  parseSearchInput,
+  resolveUrl,
+} from "../services/hf-api";
 
 /** How long the search input waits before querying the hub. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -64,7 +76,7 @@ export interface DiscoverViewDeps {
 /** The mounted view handle the router calls. */
 export interface DiscoverView {
   /** Renders the view into `main`. */
-  mount(main: HTMLElement): void;
+  mount(main: HTMLElement): () => void;
 }
 
 /** Applies the plan's fit heuristic to one quant size. */
@@ -116,6 +128,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
 
   let query = "";
   let sort: HfSort = "downloads";
+  const activeTypes = new Set<DiscoverType>(["chat"]);
   let rows: HfSearchRow[] = [];
   let searchedOnce = false;
   let searching = false;
@@ -131,13 +144,21 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   const staging = new Set<string>();
 
   let main: HTMLElement | null = null;
+  let viewRoot: HTMLElement | null = null;
   let listBox: HTMLElement | null = null;
   let detailBox: HTMLElement | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let searchSeq = 0;
   let detailSeq = 0;
+  let searchController: AbortController | null = null;
+  let detailController: AbortController | null = null;
+  let readmeController: AbortController | null = null;
+  let systemController: AbortController | null = null;
 
   const runSearch = async (): Promise<void> => {
+    searchController?.abort();
+    const controller = new AbortController();
+    searchController = controller;
     const seq = ++searchSeq;
     searching = true;
     renderList();
@@ -146,7 +167,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       if (parsed.kind === "repo") {
         // A user/repo or pasted-URL form goes straight to the model
         // endpoint [Adapted: LM Studio] paste-a-URL.
-        const model = await hf.model(parsed.repo);
+        const model = await hf.model(parsed.repo, controller.signal);
         if (seq !== searchSeq) {
           return;
         }
@@ -163,7 +184,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
         ];
         showDetail(model);
       } else {
-        const found = await hf.search(parsed.query, sort);
+        const found = await hf.search(parsed.query, sort, activeTypes, controller.signal);
         if (seq !== searchSeq) {
           return;
         }
@@ -173,6 +194,9 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       searchError = null;
     } catch (error) {
       if (seq !== searchSeq) {
+        return;
+      }
+      if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
       rows = [];
@@ -202,9 +226,12 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     detailLoading = true;
     renderList();
     renderDetail();
+    detailController?.abort();
+    const controller = new AbortController();
+    detailController = controller;
     const seq = ++detailSeq;
     void hf
-      .model(repo)
+      .model(repo, controller.signal)
       .then((model) => {
         if (seq !== detailSeq) {
           return;
@@ -214,6 +241,9 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       })
       .catch((error: unknown) => {
         if (seq !== detailSeq) {
+          return;
+        }
+        if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
         detailLoading = false;
@@ -234,10 +264,14 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     detailError = null;
     readmeHtml = null;
     const seq = ++detailSeq;
+    readmeController?.abort();
+    const controller = new AbortController();
+    readmeController = controller;
     void (async () => {
       try {
         const response = await fetchFn(
           `https://huggingface.co/${model.repo}/raw/main/README.md`,
+          { signal: controller.signal },
         );
         if (!response.ok || seq !== detailSeq) {
           return;
@@ -255,7 +289,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   };
 
   const render = (): void => {
-    if (!main) {
+    if (!main || (viewRoot !== null && !viewRoot.isConnected)) {
       return;
     }
     const title = document.createElement("h1");
@@ -278,6 +312,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
 
     renderList();
     renderDetail();
+    viewRoot = split;
     main.replaceChildren(...parts);
   };
 
@@ -352,7 +387,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     // The GGUF chip is locked on: the gateway serves GGUF inference,
     // so the hub filter is pinned, shown pressed and disabled.
     const chips = document.createElement("div");
-    chips.className = "filter-chips";
+    chips.className = "filter-chips discover-types";
     chips.setAttribute("role", "group");
     chips.setAttribute("aria-label", "Filter models");
     const gguf = document.createElement("button");
@@ -363,6 +398,31 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     gguf.setAttribute("aria-pressed", "true");
     gguf.title = "Only GGUF repositories run on the gateway.";
     chips.append(gguf);
+    const labels: Readonly<Record<DiscoverType, string>> = {
+      chat: "Chat",
+      embedding: "Embedding",
+      reranker: "Reranker",
+      stt: "STT",
+      image: "Image",
+      tts: "TTS",
+    };
+    for (const type of DISCOVER_TYPES) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "pill filter-chip discover-type";
+      toggle.dataset["type"] = type;
+      toggle.textContent = labels[type];
+      toggle.setAttribute("aria-pressed", String(activeTypes.has(type)));
+      toggle.addEventListener("click", () => {
+        if (activeTypes.has(type)) {
+          activeTypes.delete(type);
+        } else {
+          activeTypes.add(type);
+        }
+        void runSearch();
+      });
+      chips.append(toggle);
+    }
 
     const sortLabel = document.createElement("label");
     sortLabel.className = "visually-hidden";
@@ -650,7 +710,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
         source !== null &&
         store
           .models()
-          .some((entry) => entry.kind === "local" && entry.data["source"] === source);
+          .some((entry) => entry.kind !== "remote" && entry.data["source"] === source);
       const isStaging = source !== null && staging.has(source);
       button.textContent = isAdded ? "Added" : isStaging ? "Adding..." : "Download";
       button.disabled = source === null || isAdded || isStaging;
@@ -676,13 +736,23 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     const source = resolveUrl(model.repo, file);
     staging.add(source);
     renderDetail();
-    const data: Record<string, unknown> = {
-      name: `${model.name.replace(/-gguf$/i, "")}-${quant.quant}`,
-      kind: "chat",
-      description: `Hugging Face model ${model.repo}`,
-      source,
-      context: 4096,
-    };
+    const isStt =
+      model.pipelineTag === "automatic-speech-recognition";
+    const data: Record<string, unknown> = isStt
+      ? {
+          name: `${model.name.replace(/-gguf$/i, "")}-${quant.quant}`,
+          role: "interim",
+          source,
+          vram_gb: 1,
+          dominion: null,
+        }
+      : {
+          name: `${model.name.replace(/-gguf$/i, "")}-${quant.quant}`,
+          kind: "chat",
+          description: `Hugging Face model ${model.repo}`,
+          source,
+          context: 4096,
+        };
     if (quant.sha256 !== null) {
       data["sha256"] = quant.sha256;
     }
@@ -690,7 +760,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       data["vram_gb"] = Number((quant.sizeBytes / 1024 ** 3).toFixed(2));
     }
     try {
-      const name = await store.stageLocalModel(data);
+      const name = await store.stageDiscoveredModel(isStt ? "stt" : "local", data);
       toasts.show(`${name} added - Apply to download`, "success");
     } catch (error) {
       toasts.show(error instanceof Error ? error.message : "The model could not be added", "error");
@@ -723,12 +793,16 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   };
 
   return {
-    mount(target: HTMLElement): void {
+    mount(target: HTMLElement): () => void {
       main = target;
+      viewRoot = null;
       render();
       if (system === null) {
+        systemController?.abort();
+        const controller = new AbortController();
+        systemController = controller;
         void api
-          .getSystem()
+          .getSystem(controller.signal)
           .then((snapshot) => {
             system = snapshot;
             renderDetail();
@@ -742,6 +816,28 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
         // never opens empty (and a missing token surfaces immediately).
         void runSearch();
       }
+      return () => {
+        searchController?.abort();
+        detailController?.abort();
+        readmeController?.abort();
+        systemController?.abort();
+        searchController = null;
+        detailController = null;
+        readmeController = null;
+        systemController = null;
+        if (searchTimer !== null) {
+          clearTimeout(searchTimer);
+          searchTimer = null;
+        }
+        searchSeq += 1;
+        detailSeq += 1;
+        searching = false;
+        detailLoading = false;
+        main = null;
+        viewRoot = null;
+        listBox = null;
+        detailBox = null;
+      };
     },
   };
 }

@@ -5,7 +5,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, jsonResponse, loadApp, makeDom, settle } from "../harness.mjs";
+import {
+  bootApp,
+  gatewayStub,
+  jsonResponse,
+  loadApp,
+  makeDom,
+  modelsFixture,
+  settle,
+} from "../harness.mjs";
 
 /** Fills the key input and fires the form's submit handler. */
 function submitKey(dom, root, value) {
@@ -55,7 +63,7 @@ test("a rejected key shows the inline invalid-key error and stores nothing", asy
 
 test("a 401 from any later API call clears the key and returns to the prompt", async () => {
   const app = await loadApp();
-  const gateway = gatewayStub({ profiles: ["default", "fast"] });
+  const gateway = gatewayStub({ config: modelsFixture() });
   let authorized = true;
   const stub = {
     fetchFn: (url, init) =>
@@ -68,6 +76,10 @@ test("a 401 from any later API call clears the key and returns to the prompt", a
 
   authorized = false;
   root.querySelector(".profile-switcher button").click();
+  await settle();
+  [...root.querySelectorAll("[role='menuitemradio']")]
+    .find((row) => row.textContent === "travel")
+    .click();
   await settle();
 
   assert.ok(root.querySelector("#gateway-api-key"), "the key prompt is back");
@@ -82,7 +94,7 @@ test("a 401 from any later API call clears the key and returns to the prompt", a
 test("a 401 remount cycle tears down the old router and progress stream", async () => {
   const app = await loadApp();
   const dom = makeDom();
-  const gateway = gatewayStub();
+  const gateway = gatewayStub({ config: modelsFixture() });
   let authorized = true;
   const fetchFn = (url, init) =>
     authorized
@@ -118,6 +130,10 @@ test("a 401 remount cycle tears down the old router and progress stream", async 
 
   authorized = false;
   root.querySelector(".profile-switcher button").click();
+  await settle();
+  [...root.querySelectorAll("[role='menuitemradio']")]
+    .find((row) => row.textContent === "travel")
+    .click();
   await settle();
   assert.ok(root.querySelector("#gateway-api-key"), "the 401 returned to the key prompt");
 

@@ -28,7 +28,7 @@ const PANEL_URL = `http://127.0.0.1:8081/config/?mode=panel&bridge=${encodeURICo
 
 /** A dirty report so the Apply/Revert pair renders. */
 function dirtyReport() {
-  return { dirty: true, pending_files: ["profiles/default.toml"], changed_sections: [] };
+  return { dirty: true, pending_files: ["gateway.toml"], changed_sections: [] };
 }
 
 /**
@@ -39,7 +39,7 @@ function dirtyReport() {
  * staging). Messages sent before the jsdom window exists queue until
  * connect(dom).
  */
-function makeParent(stub, { context = { theme: "dark", route: "#/models" }, mute } = {}) {
+function makeParent(stub, { context = { theme: "dark", route: "#/local" }, mute } = {}) {
   const posted = [];
   const queued = [];
   let dispatchTo = null;
@@ -140,8 +140,8 @@ test("panel mode routes every gateway call through the bridge, with no fetch and
   assert.ok(parent.apiPaths().includes("/admin/config"), "the config load rode the bridge");
   assert.ok(parent.apiPaths().includes("/admin/status"), "the status probe rode the bridge");
   assert.ok(
-    root.textContent.includes("gpt-remote"),
-    "a bridged call resolved: the models list renders the fixture model",
+    root.textContent.includes("qwen-common"),
+    "a bridged call resolved: the local list renders the fixture model",
   );
 
   const gatewayDirect = direct.filter((url) => !/^https?:\/\//.test(url));
@@ -180,7 +180,7 @@ test("a context message from a foreign origin is ignored", async () => {
     stub: { fetchFn: () => Promise.reject(new TypeError("no direct fetch")) },
     options: { bridgePost: parent.bridgePost },
   });
-  parent.spoof(dom, { type: "pf-context", theme: "dark", route: "#/models" }, "https://evil.example");
+  parent.spoof(dom, { type: "pf-context", theme: "dark", route: "#/local" }, "https://evil.example");
   await settle();
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
@@ -261,6 +261,25 @@ test("a bridge timeout surfaces an error toast, not a hang", async () => {
   const toast = root.ownerDocument.querySelector(".toast-error");
   assert.ok(toast, "the timed-out apply raises an error toast");
   assert.match(toast.textContent, /timed out/i, "the toast names the timeout");
+});
+
+test("leaving Discover cancels its bridged search without marking the gateway down", async () => {
+  const stub = gatewayStub({
+    config: modelsFixture(),
+    pending: modelsFixture(),
+    hfSearch: hfSearchFixture(),
+  });
+  const { dom, root } = await bootPanel({
+    stub,
+    timeoutMs: 20,
+    parentOpts: { mute: (message) => message.path.startsWith("/admin/hf/search") },
+  });
+  navigate(dom, "#/discover");
+  navigate(dom, "#/local");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await settle();
+
+  assert.equal(root.querySelector(".status-dot.is-bad"), null);
 });
 
 test("staging a Discover model uses config only and sends no download action", async () => {

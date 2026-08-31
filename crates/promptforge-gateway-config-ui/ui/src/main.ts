@@ -118,7 +118,7 @@ function mountPanelMode(
     timeoutMs: options.bridgeTimeoutMs,
   });
   // Whether the iframe URL itself carried a route, read before the
-  // pending shell's router normalizes an empty hash to #/models: an
+  // pending shell's router normalizes an empty hash to #/local: an
   // explicit hash outranks the workshop's initial-route context.
   const hadInitialHash = win.location.hash !== "";
   const disposePending = mountPanelPending(root, win);
@@ -184,8 +184,8 @@ function mountLiveShell(
 ): () => void {
   const toasts = createToastStack();
   const overlay = createApplyOverlay(root);
-  const switcher = createProfileSwitcher({ api, overlay, toasts });
   const store = new ConfigStore(api);
+  const switcher = createProfileSwitcher({ store, toasts });
   let applying = false;
   let disposed = false;
   let observedConfigGeneration: string | null = null;
@@ -334,7 +334,8 @@ function mountLiveShell(
   const main = mountChrome(root, tabBar.element, [toasts.element], bannerBox);
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
-  const modelsView = createModelsView({ store, api, toasts });
+  const localView = createModelsView({ store, api, toasts, scope: "local" });
+  const remoteView = createModelsView({ store, api, toasts, scope: "remote" });
   const settingsView = createSettingsView({ store, api, toasts });
   const discoverView = createDiscoverView({
     api,
@@ -346,23 +347,17 @@ function mountLiveShell(
   const secretsView = createSecretsView({ store, api, toasts });
   const profilesView = createProfilesView({
     store,
-    api,
     toasts,
-    overlay,
-    onSwitched: (name) => {
-      switcher.setActiveProfile(name);
-      // The active profile changed, so the running/pending views did too.
-      void store.load();
-    },
   });
   const stopRouter = startRouter({
     win,
     main,
     onRoute: (view) => tabBar.setActiveView(view),
     views: {
-      models: (target, match) => modelsView.mount(target, match.detail),
+      local: (target, match) => localView.mount(target, match.detail),
+      remote: (target, match) => remoteView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
-      profiles: (target, match) => profilesView.mount(target, match.detail),
+      profiles: (target) => profilesView.mount(target),
       secrets: (target) => secretsView.mount(target),
       settings: (target, match) => settingsView.mount(target, match.detail),
     },

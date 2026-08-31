@@ -1,10 +1,8 @@
-// The Secrets view: .env file management. Two labeled sections render
-// the two env files the gateway loads - the active profile's first
-// (edited most often), the boot config's second, collapsed by default.
-// Each section lists its variables as masked password rows with
+// The Secrets view: single global .env file management. It lists
+// variables as masked password rows with
 // per-row reveal and delete, an Add Variable row, and a Save that
 // stages the section as its own `.env.next` shadow via PUT /admin/env.
-// The profile section carries the dedicated HF Token card [Adapted:
+// The global section carries the dedicated HF Token card [Adapted:
 // Unsloth] with show/hide and a Test Connection probe through the
 // gateway's HF proxy. `${VAR}` cross-references [INVENTED] annotate
 // rows the pending config chain points at - computed server-side and
@@ -34,7 +32,7 @@ export interface SecretsViewDeps {
 /** The mounted view. */
 export interface SecretsView {
   /** Renders the view into `main`. */
-  mount(main: HTMLElement): void;
+  mount(main: HTMLElement): () => void;
 }
 
 /** One editable variable row. */
@@ -60,6 +58,8 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
   let env: EnvFiles | null = null;
   let hfStatus = "";
   let main: HTMLElement | null = null;
+  let loadController: AbortController | null = null;
+  let probeController: AbortController | null = null;
 
   const scopeRows = (scope: EnvScope): EnvRow[] => {
     let list = rows.get(scope);
@@ -70,21 +70,18 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     return list;
   };
 
-  /** The HF token row of the profile scope, when present. */
+  /** The HF token row of the global scope, when present. */
   const hfRow = (): EnvRow | undefined =>
-    scopeRows("profile").find((row) => row.key === HF_KEY);
+    scopeRows("global").find((row) => row.key === HF_KEY);
 
-  const load = async (): Promise<void> => {
-    env = await api.getEnv();
+  const load = async (signal: AbortSignal): Promise<void> => {
+    env = await api.getEnv(signal);
     revealed.clear();
     hfStatus = "";
-    for (const scope of ["profile", "boot"] as const) {
-      const vars = env[scope]?.vars ?? {};
-      rows.set(
-        scope,
-        Object.entries(vars).map(([key, value]) => ({ key, value })),
-      );
-    }
+    rows.set(
+      "global",
+      Object.entries(env.global?.vars ?? {}).map(([key, value]) => ({ key, value })),
+    );
   };
 
   /** One masked value input with its reveal toggle. */
@@ -160,12 +157,12 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       // A placeholder row: typing into it creates the variable on save.
       tokenRow = { key: HF_KEY, value: "" };
     }
-    const field = valueField("profile", tokenRow);
+    const field = valueField("global", tokenRow);
     field.querySelector("input")?.addEventListener("input", () => {
       // The placeholder joins the working rows on first input, and the
       // just-created variable becomes deletable without a re-render.
-      if (tokenRow && !scopeRows("profile").includes(tokenRow)) {
-        scopeRows("profile").unshift(tokenRow);
+      if (tokenRow && !scopeRows("global").includes(tokenRow)) {
+        scopeRows("global").unshift(tokenRow);
       }
       remove.disabled = false;
     });
@@ -189,8 +186,14 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       // The probe rides the gateway's HF proxy (there is no whoami
       // route), so it tests the token the running gateway holds - a
       // staged edit counts only after apply plus restart or switch.
+      probeController?.abort();
+      const controller = new AbortController();
+      probeController = controller;
       void api
-        .hfSearch({ q: "gguf", limit: "1" })
+        .hfSearch([
+          ["q", "gguf"],
+          ["limit", "1"],
+        ], controller.signal)
         .then(() => {
           hfStatus = "Valid";
           status.textContent = hfStatus;
@@ -200,6 +203,13 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
             hfStatus = "Invalid";
           } else if (error instanceof UnauthorizedError) {
             hfStatus = "";
+          } else if (
+            error !== null &&
+            typeof error === "object" &&
+            "name" in error &&
+            error.name === "AbortError"
+          ) {
+            return;
           } else {
             hfStatus = "Connection failed";
             toasts.show(
@@ -208,6 +218,11 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
             );
           }
           status.textContent = hfStatus;
+        })
+        .finally(() => {
+          if (probeController === controller) {
+            probeController = null;
+          }
         });
     });
 
@@ -216,11 +231,11 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     remove.className = "button button-xs button-danger env-delete";
     remove.setAttribute("aria-label", `Delete ${HF_KEY}`);
     remove.append(lucideElement(Trash2, { "aria-hidden": "true", width: 14, height: 14 }));
-    remove.disabled = !scopeRows("profile").includes(tokenRow);
+    remove.disabled = !scopeRows("global").includes(tokenRow);
     remove.addEventListener("click", () => {
       rows.set(
-        "profile",
-        scopeRows("profile").filter((entry) => entry.key !== HF_KEY),
+        "global",
+        scopeRows("global").filter((entry) => entry.key !== HF_KEY),
       );
       renderSection();
     });
@@ -240,7 +255,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     body.className = "env-body";
     const references = env?.references ?? {};
 
-    if (scope === "profile") {
+    if (scope === "global") {
       body.append(hfCard(renderSection));
     }
 
@@ -252,7 +267,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     const list = document.createElement("ul");
     list.className = "env-list";
     const listed = scopeRows(scope).filter(
-      (row) => !(scope === "profile" && row.key === HF_KEY),
+      (row) => !(scope === "global" && row.key === HF_KEY),
     );
     for (const row of listed) {
       const item = document.createElement("li");
@@ -346,7 +361,7 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       }
       save.disabled = true;
       void api
-        .putEnv(payload, scope)
+        .putEnv(payload)
         .then(() => {
           toasts.show("Saved to disk", "success");
           // The env shadow raises the dirty count and the Apply button.
@@ -367,59 +382,28 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     const note = document.createElement("p");
     note.className = "field-help env-note";
     note.textContent =
-      scope === "profile"
-        ? "Saves a pending shadow; Apply promotes it. Applied on restart or profile switch - " +
-          "a variable already set in the gateway's process keeps its old value until a full restart."
-        : "Saves a pending shadow; Apply promotes it. The boot environment loads only at startup, " +
-          "so changes take effect after a gateway restart.";
+      "Saves a pending shadow; Apply promotes it. The global environment loads only at startup, so changes take effect after a gateway restart.";
     body.append(note);
     return body;
   };
 
-  /** The profile section: an open card, first on the page. */
-  const profileSection = (): HTMLElement => {
+  /** The single global environment section. */
+  const globalSection = (): HTMLElement => {
     const section = document.createElement("section");
     section.className = "settings-card env-section";
-    section.dataset["scope"] = "profile";
+    section.dataset["scope"] = "global";
     const render = (): void => {
       const heading = document.createElement("h2");
       heading.className = "section-heading";
-      const file = env?.profile ? ` (${fileName(env.profile.path)})` : "";
-      heading.textContent = `Profile environment${file}`;
-      if (env?.profile) {
-        section.replaceChildren(heading, sectionBody("profile", render));
+      const file = env?.global ? ` (${fileName(env.global.path)})` : "";
+      heading.textContent = `Global environment${file}`;
+      if (env?.global) {
+        section.replaceChildren(heading, sectionBody("global", render));
       } else {
         const empty = document.createElement("p");
         empty.className = "view-empty";
-        empty.textContent = "No active profile environment.";
+        empty.textContent = "No global environment file is configured.";
         section.replaceChildren(heading, empty);
-      }
-    };
-    render();
-    return section;
-  };
-
-  /** The boot section: collapsed by default (it holds the master key). */
-  const bootSection = (): HTMLElement => {
-    const section = document.createElement("details");
-    section.className = "settings-card env-section env-boot";
-    section.dataset["scope"] = "boot";
-    const summary = document.createElement("summary");
-    // The heading lives inside the summary so the collapsed section still
-    // appears in the document outline beside the profile section's h2.
-    const summaryHeading = document.createElement("h2");
-    summaryHeading.className = "section-heading env-boot-heading";
-    const file = env?.boot ? ` (${fileName(env.boot.path)})` : "";
-    summaryHeading.textContent = `Boot environment${file}`;
-    summary.append(summaryHeading);
-    const render = (): void => {
-      if (env?.boot) {
-        section.replaceChildren(summary, sectionBody("boot", render));
-      } else {
-        const empty = document.createElement("p");
-        empty.className = "view-empty";
-        empty.textContent = "No boot environment file is configured.";
-        section.replaceChildren(summary, empty);
       }
     };
     render();
@@ -433,12 +417,15 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
     const title = document.createElement("h1");
     title.className = "view-title";
     title.textContent = "Secrets";
-    main.replaceChildren(title, profileSection(), bootSection());
+    main.replaceChildren(title, globalSection());
   };
 
   return {
-    mount(target: HTMLElement): void {
+    mount(target: HTMLElement): () => void {
       main = target;
+      loadController?.abort();
+      const controller = new AbortController();
+      loadController = controller;
       const title = document.createElement("h1");
       title.className = "view-title";
       title.textContent = "Secrets";
@@ -446,10 +433,16 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
       loading.className = "view-empty";
       loading.textContent = "Loading\u2026";
       target.replaceChildren(title, loading);
-      void load()
+      void load(controller.signal)
         .then(render)
         .catch((error: unknown) => {
-          if (error instanceof UnauthorizedError) {
+          if (
+            error instanceof UnauthorizedError ||
+            (error !== null &&
+              typeof error === "object" &&
+              "name" in error &&
+              error.name === "AbortError")
+          ) {
             return;
           }
           const failed = document.createElement("p");
@@ -458,6 +451,15 @@ export function createSecretsView(deps: SecretsViewDeps): SecretsView {
             error instanceof Error ? error.message : "The env files could not be read.";
           target.replaceChildren(title, failed);
         });
+      return () => {
+        controller.abort();
+        probeController?.abort();
+        probeController = null;
+        if (loadController === controller) {
+          loadController = null;
+        }
+        main = null;
+      };
     },
   };
 }

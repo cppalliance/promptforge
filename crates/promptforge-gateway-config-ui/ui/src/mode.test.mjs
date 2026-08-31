@@ -19,15 +19,15 @@ test("?mode=panel skips the key prompt and the medallion", async () => {
   assert.equal(root.querySelector("img.tab-medallion"), null, "no medallion in panel mode");
   assert.equal(
     root.querySelectorAll("nav[aria-label='Primary'] a.tab").length,
-    5,
-    "all five tabs are present after Downloads removal",
+    6,
+    "all six tabs are present",
   );
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
     /bridge pending/i,
     "the shell notes the workshop bridge is pending",
   );
-  assert.equal(root.querySelector("main h1.view-title")?.textContent, "Models");
+  assert.equal(root.querySelector("main h1.view-title")?.textContent, "Local");
   assert.equal(stub.calls.length, 0, "panel mode calls no gateway API before the bridge");
 });
 
@@ -45,7 +45,7 @@ test("standalone mode shows the medallion and a working skip link", async () => 
   const main = root.querySelector("main#main");
   skip.click();
   assert.equal(dom.window.document.activeElement, main, "the skip link focuses main");
-  assert.equal(dom.window.location.hash, "#/models", "the skip jump never rewrites the route");
+  assert.equal(dom.window.location.hash, "#/local", "the skip jump never rewrites the route");
 });
 
 test("the connection dot goes green after a successful API call", async () => {

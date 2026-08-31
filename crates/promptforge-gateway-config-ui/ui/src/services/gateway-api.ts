@@ -21,11 +21,6 @@ export interface GatewayStatus {
   config_generation: string;
 }
 
-/** The terminal outcome of a profile switch stream. */
-export type SwitchResult =
-  | { readonly status: "ready"; readonly profile: string }
-  | { readonly status: "error"; readonly message: string };
-
 /** The shape of `GET /admin/config-dirty`: the pending-shadow report. */
 export interface DirtyReport {
   /** Whether any shadow file exists. */
@@ -106,12 +101,10 @@ export interface EnvSide {
   vars: Record<string, string>;
 }
 
-/** The `GET /admin/env` reply: both env files, null where unconfigured. */
+/** The environment data consumed by the single-file Secrets view. */
 export interface EnvFiles {
-  /** The boot config's sibling (`gateway.env`). */
-  boot: EnvSide | null;
-  /** The active profile's (`<profile>.env`). */
-  profile: EnvSide | null;
+  /** The config's sibling (`gateway.env`). */
+  global: EnvSide | null;
   /**
    * Each `${VAR}` name the pending config chain references, mapped to
    * labels of the referencing fields (`endpoint openai api_key`).
@@ -122,14 +115,8 @@ export interface EnvFiles {
   references: Record<string, string[]>;
 }
 
-/** Which env file a `PUT /admin/env` targets. */
-export type EnvScope = "profile" | "boot";
-
-/** The `POST /admin/profiles/{name}` body: the creation mode. */
-export type CreateProfileBody =
-  | { mode: "empty" }
-  | { mode: "copy"; from: string }
-  | { mode: "include"; from: string };
+/** The single environment-file write scope. */
+export type EnvScope = "global";
 
 /** The injectable fetch signature; tests substitute a canned gateway. */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -243,32 +230,26 @@ export class GatewayApi {
     };
   }
 
-  /** Lists the profile names the gateway can switch to. */
-  async getProfiles(): Promise<string[]> {
-    const data = (await this.getJson("/admin/profiles")) as { profiles?: string[] };
-    return data.profiles ?? [];
-  }
-
   /** Fetches the running config JSON (secrets `"***"`, provenance annotated). */
   async getConfig(): Promise<Record<string, unknown>> {
-    return (await this.getJson("/admin/config")) as Record<string, unknown>;
+    return requireRecord(await this.getJson("/admin/config"), "config");
   }
 
   /** Fetches the pending (shadow-overlaid) config view. */
   async getConfigPending(): Promise<Record<string, unknown>> {
-    const data = (await this.getJson("/admin/config-pending")) as {
-      profile?: Record<string, unknown>;
-    };
-    return data.profile ?? {};
+    const data = requireRecord(await this.getJson("/admin/config-pending"), "pending config");
+    return data["profile"] === undefined
+      ? {}
+      : requireRecord(data["profile"], "pending config profile");
   }
 
   /** Fetches the pending-shadow dirty report. */
   async getConfigDirty(): Promise<DirtyReport> {
-    const data = (await this.getJson("/admin/config-dirty")) as Partial<DirtyReport>;
+    const data = requireRecord(await this.getJson("/admin/config-dirty"), "dirty report");
     return {
-      dirty: data.dirty ?? false,
-      pending_files: data.pending_files ?? [],
-      changed_sections: data.changed_sections ?? [],
+      dirty: data["dirty"] === true,
+      pending_files: stringArray(data["pending_files"]),
+      changed_sections: stringArray(data["changed_sections"]),
     };
   }
 
@@ -288,34 +269,17 @@ export class GatewayApi {
     }
   }
 
-  /**
-   * Stages `body` (the boot config's TOML shape as JSON: `[server]` plus
-   * an optional `[workshop]`) as the boot shadow via
-   * `PUT /admin/boot-config`. Untouched secrets stay `"***"`; the gateway
-   * restores their real values from the boot file.
-   */
-  async putBootConfig(body: unknown): Promise<void> {
-    const response = await this.send("/admin/boot-config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
-    }
-  }
-
   /** Promotes every shadow via `POST /admin/config-apply`. */
   async applyConfig(): Promise<ApplyOutcome> {
     const response = await this.send("/admin/config-apply", { method: "POST" });
     if (!response.ok) {
       throw new GatewayHttpError(response.status, await refusalMessage(response));
     }
-    const data = (await response.json()) as Partial<ApplyOutcome>;
+    const data = requireRecord(await response.json(), "apply outcome");
     return {
-      applied: data.applied ?? [],
-      reloaded: data.reloaded ?? false,
-      restart_required: data.restart_required ?? false,
+      applied: stringArray(data["applied"]),
+      reloaded: data["reloaded"] === true,
+      restart_required: data["restart_required"] === true,
     };
   }
 
@@ -328,81 +292,41 @@ export class GatewayApi {
   }
 
   /**
-   * Creates `profiles/{name}.toml` via `POST /admin/profiles/{name}`.
-   * Throws {@link GatewayHttpError} for a refused name (400), a missing
-   * `from` (404), or an existing profile (409).
-   */
-  async createProfile(name: string, body: CreateProfileBody): Promise<void> {
-    const response = await this.send(`/admin/profiles/${encodeURIComponent(name)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
-    }
-  }
-
-  /**
-   * Deletes a profile file (and its shadow) via
-   * `DELETE /admin/profiles/{name}`. The gateway answers 409 for the
-   * active profile; that refusal surfaces as {@link GatewayHttpError}.
-   */
-  async deleteProfile(name: string): Promise<void> {
-    const response = await this.send(`/admin/profiles/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
-    }
-  }
-
-  /**
-   * Stages `body` (a config JSON shape) as the shadow of one included
-   * file via `PUT /admin/include/{path}`. `path` is relative to the
-   * profiles directory; untouched secrets stay `"***"` and restore from
-   * the include file's own current state.
-   */
-  async putInclude(path: string, body: unknown): Promise<void> {
-    const response = await this.send(`/admin/include/${encodeURIComponent(path)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
-    }
-  }
-
-  /**
-   * Reads both real `.env` files via `GET /admin/env`. Values arrive in
+   * Reads the global `.env` file via `GET /admin/env`. Values arrive in
    * plaintext (the route is loopback-and-bearer-guarded); the caller
    * masks them in the DOM and never logs them.
    */
-  async getEnv(): Promise<EnvFiles> {
-    const data = (await this.getJson("/admin/env")) as {
-      boot?: Partial<EnvSide> | null;
-      profile?: Partial<EnvSide> | null;
-      references?: Record<string, string[]>;
+  async getEnv(signal?: AbortSignal): Promise<EnvFiles> {
+    const data = requireRecord(await this.getJson("/admin/env", signal), "environment files");
+    const side = (raw: unknown): EnvSide | null => {
+      if (raw === null || raw === undefined) {
+        return null;
+      }
+      const value = requireRecord(raw, "environment file");
+      return {
+        path: typeof value["path"] === "string" ? value["path"] : "",
+        vars: stringRecord(value["vars"]),
+      };
     };
-    const side = (raw: Partial<EnvSide> | null | undefined): EnvSide | null =>
-      raw ? { path: raw.path ?? "", vars: raw.vars ?? {} } : null;
+    const references: Record<string, string[]> = {};
+    if (isRecord(data["references"])) {
+      for (const [key, value] of Object.entries(data["references"])) {
+        references[key] = stringArray(value);
+      }
+    }
     return {
-      boot: side(data.boot),
-      profile: side(data.profile),
-      references: data.references ?? {},
+      global: side(data["boot"]),
+      references,
     };
   }
 
   /**
-   * Stages `vars` as one env file's `.env.next` shadow via
-   * `PUT /admin/env` - the active profile's by default, the boot
-   * config's with `scope: "boot"`. The real file is untouched until an
-   * explicit apply plus a restart or profile switch.
+   * Stages `vars` as the global `.env.next` shadow via `PUT /admin/env`.
+   * The real file is untouched until Apply, and the process reads the
+   * promoted values after restart.
    */
-  async putEnv(vars: Record<string, string>, scope: EnvScope = "profile"): Promise<void> {
-    const query = scope === "boot" ? "?scope=boot" : "";
-    const response = await this.send(`/admin/env${query}`, {
+  async putEnv(vars: Record<string, string>): Promise<void> {
+    const response = await this.send("/admin/env", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(vars),
@@ -431,7 +355,10 @@ export class GatewayApi {
         {
           path: item["path"],
           size_bytes: item["size_bytes"],
-          sha256: typeof sha256 === "string" ? sha256 : null,
+          sha256:
+            typeof sha256 === "string" && /^[0-9a-f]{64}$/i.test(sha256)
+              ? sha256.toLowerCase()
+              : null,
         },
       ];
     });
@@ -442,13 +369,15 @@ export class GatewayApi {
    * any failure; the caller falls back to a plain readout.
    */
   async getModelInfo(path: string): Promise<GgufInfo> {
-    const data = (await this.getJson(
-      `/admin/model-info?path=${encodeURIComponent(path)}`,
-    )) as Partial<GgufInfo>;
+    const data = requireRecord(
+      await this.getJson(`/admin/model-info?path=${encodeURIComponent(path)}`),
+      "model info",
+    );
     return {
-      architecture: data.architecture ?? null,
-      layer_count: data.layer_count ?? null,
-      parameter_count: data.parameter_count ?? null,
+      architecture: typeof data["architecture"] === "string" ? data["architecture"] : null,
+      layer_count: typeof data["layer_count"] === "number" ? data["layer_count"] : null,
+      parameter_count:
+        typeof data["parameter_count"] === "number" ? data["parameter_count"] : null,
     };
   }
 
@@ -501,45 +430,6 @@ export class GatewayApi {
   }
 
   /**
-   * Runs `POST /admin/switch-profile` and consumes its SSE stream:
-   * `onStage` fires for each `{"stage": ...}` marker in execution
-   * order, and the returned promise settles on the terminal event -
-   * `ready`, a terminal `error`, a buffered (non-SSE) refusal, or a
-   * stream that ends without a terminal event, mirroring how the
-   * workshop consumes the same stream.
-   */
-  async switchProfile(name: string, onStage: (stage: string) => void): Promise<SwitchResult> {
-    const response = await this.send("/admin/switch-profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/event-stream") || response.body === null) {
-      return { status: "error", message: await refusalMessage(response) };
-    }
-    for await (const payload of ssePayloads(response.body)) {
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(payload) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (typeof event["stage"] === "string") {
-        onStage(event["stage"]);
-      } else if (event["status"] === "ready") {
-        const profile = typeof event["profile"] === "string" ? event["profile"] : name;
-        return { status: "ready", profile };
-      } else if (event["status"] === "error") {
-        const message =
-          typeof event["message"] === "string" ? event["message"] : "the switch failed";
-        return { status: "error", message };
-      }
-    }
-    return { status: "error", message: "the switch stream ended without a terminal event" };
-  }
-
-  /**
    * Subscribes to the `GET /admin/progress` SSE stream, invoking
    * `onEvent` with each parsed progress event. Returns the unsubscribe
    * function. A transport failure ends the subscription quietly; a 401
@@ -575,43 +465,38 @@ export class GatewayApi {
   }
 
   /** Fetches the host-metrics snapshot. */
-  async getSystem(): Promise<SystemSnapshot> {
-    const data = (await this.getJson("/admin/system")) as {
-      cpu?: {
-        frequency_mhz?: number;
-        logical_cores?: number;
-        physical_cores?: number | null;
-        utilization_percent?: number;
-      } | null;
-      ram?: Partial<SystemSnapshot["ram"]>;
-      disk?: { cache_dir?: string; used_bytes?: number; total_bytes?: number } | null;
-      gpu?: { name?: string; vram_used_bytes?: number; vram_total_bytes?: number } | null;
-    };
+  async getSystem(signal?: AbortSignal): Promise<SystemSnapshot> {
+    const data = requireRecord(await this.getJson("/admin/system", signal), "system snapshot");
+    const cpu = optionalRecord(data["cpu"]);
+    const ram = optionalRecord(data["ram"]);
+    const disk = optionalRecord(data["disk"]);
+    const gpu = optionalRecord(data["gpu"]);
     return {
-      cpu: data.cpu
+      cpu: cpu
         ? {
-            frequency_mhz: data.cpu.frequency_mhz ?? 0,
-            logical_cores: data.cpu.logical_cores ?? 0,
-            physical_cores: data.cpu.physical_cores ?? null,
-            utilization_percent: data.cpu.utilization_percent ?? 0,
+            frequency_mhz: numberOrZero(cpu["frequency_mhz"]),
+            logical_cores: numberOrZero(cpu["logical_cores"]),
+            physical_cores:
+              typeof cpu["physical_cores"] === "number" ? cpu["physical_cores"] : null,
+            utilization_percent: numberOrZero(cpu["utilization_percent"]),
           }
         : null,
       ram: {
-        used_bytes: data.ram?.used_bytes ?? 0,
-        total_bytes: data.ram?.total_bytes ?? 0,
+        used_bytes: numberOrZero(ram?.["used_bytes"]),
+        total_bytes: numberOrZero(ram?.["total_bytes"]),
       },
-      disk: data.disk
+      disk: disk
         ? {
-            cache_dir: data.disk.cache_dir ?? "",
-            used_bytes: data.disk.used_bytes ?? 0,
-            total_bytes: data.disk.total_bytes ?? 0,
+            cache_dir: typeof disk["cache_dir"] === "string" ? disk["cache_dir"] : "",
+            used_bytes: numberOrZero(disk["used_bytes"]),
+            total_bytes: numberOrZero(disk["total_bytes"]),
           }
         : null,
-      gpu: data.gpu
+      gpu: gpu
         ? {
-            name: data.gpu.name ?? "",
-            vram_used_bytes: data.gpu.vram_used_bytes ?? 0,
-            vram_total_bytes: data.gpu.vram_total_bytes ?? 0,
+            name: typeof gpu["name"] === "string" ? gpu["name"] : "",
+            vram_used_bytes: numberOrZero(gpu["vram_used_bytes"]),
+            vram_total_bytes: numberOrZero(gpu["vram_total_bytes"]),
           }
         : null,
     };
@@ -622,9 +507,16 @@ export class GatewayApi {
    * hub's own query parameters (`q`, `sort`, `direction`, `filter`,
    * `limit`); the JSON body comes back verbatim.
    */
-  async hfSearch(params: Record<string, string>): Promise<unknown> {
-    const query = new URLSearchParams(params).toString();
-    const response = await this.sendHf(`/admin/hf/search?${query}`);
+  async hfSearch(
+    params: ReadonlyArray<readonly [string, string]>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const search = new URLSearchParams();
+    for (const [key, value] of params) {
+      search.append(key, value);
+    }
+    const query = search.toString();
+    const response = await this.sendHf(`/admin/hf/search?${query}`, signal);
     return response.json();
   }
 
@@ -632,8 +524,9 @@ export class GatewayApi {
    * Proxied hub model detail via `GET /admin/hf/model/{repo}`; the
    * gateway adds `blobs=true`, so siblings carry exact file sizes.
    */
-  async hfModel(repo: string): Promise<unknown> {
-    const response = await this.sendHf(`/admin/hf/model/${repo}`);
+  async hfModel(repo: string, signal?: AbortSignal): Promise<unknown> {
+    const encoded = repo.split("/").map(encodeURIComponent).join("/");
+    const response = await this.sendHf(`/admin/hf/model/${encoded}`, signal);
     return response.json();
   }
 
@@ -644,16 +537,18 @@ export class GatewayApi {
    * the gateway refusing the SPA's bearer key follows the shared
    * unauthorized path.
    */
-  private async sendHf(path: string): Promise<Response> {
+  private async sendHf(path: string, signal?: AbortSignal): Promise<Response> {
     const key = this.storage.getItem(API_KEY_STORAGE_KEY) ?? "";
     const response = await this.transport(this.base + path, {
       headers: { Authorization: `Bearer ${key}` },
+      signal,
     });
     if (response.status === 401) {
       let code = "";
       try {
-        const body = (await response.json()) as { error?: { code?: string } };
-        code = body.error?.code ?? "";
+        const body = optionalRecord(await response.json());
+        const error = optionalRecord(body?.["error"]);
+        code = typeof error?.["code"] === "string" ? error["code"] : "";
       } catch {
         // A bodyless 401 is treated as the gateway's own refusal.
       }
@@ -671,8 +566,8 @@ export class GatewayApi {
   }
 
   /** GETs a JSON endpoint, throwing on any non-success status. */
-  private async getJson(path: string): Promise<unknown> {
-    const response = await this.send(path);
+  private async getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+    const response = await this.send(path, { signal });
     if (!response.ok) {
       throw new GatewayHttpError(response.status, `the gateway answered ${response.status}`);
     }
@@ -685,10 +580,8 @@ export class GatewayApi {
    */
   private async send(path: string, init: RequestInit = {}): Promise<Response> {
     const key = this.storage.getItem(API_KEY_STORAGE_KEY) ?? "";
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${key}`,
-      ...((init.headers as Record<string, string> | undefined) ?? {}),
-    };
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${key}`);
     const response = await this.transport(this.base + path, { ...init, headers });
     if (response.status === 401) {
       this.clearKey();
@@ -704,7 +597,9 @@ export class GatewayApi {
     try {
       response = await this.fetchFn(url, init);
     } catch (error) {
-      this.onHealth?.(false);
+      if (!init.signal?.aborted && !isAbortError(error)) {
+        this.onHealth?.(false);
+      }
       throw error;
     }
     this.onHealth?.(true);
@@ -712,16 +607,26 @@ export class GatewayApi {
   }
 }
 
+/** Whether an async failure is the expected result of caller cancellation. */
+function isAbortError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "name" in error &&
+    error.name === "AbortError"
+  );
+}
+
 /** Extracts a human-readable message from a buffered refusal response. */
 async function refusalMessage(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as Record<string, unknown>;
+    const body = requireRecord(await response.json(), "error response");
     const error = body["error"];
     if (typeof error === "string") {
       return error;
     }
-    if (error !== null && typeof error === "object") {
-      const message = (error as Record<string, unknown>)["message"];
+    if (isRecord(error)) {
+      const message = error["message"];
       if (typeof message === "string") {
         return message;
       }
@@ -735,6 +640,43 @@ async function refusalMessage(response: Response): Promise<string> {
 /** Whether untrusted JSON is a non-array object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Requires an object at an external JSON boundary. */
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new TypeError(`the gateway returned invalid ${label} JSON`);
+  }
+  return value;
+}
+
+/** Returns an object or null for an optional external object. */
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+/** Keeps only string members from an external array. */
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+/** Keeps only string values from an external object. */
+function stringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+/** Reads a finite external number, defaulting malformed values to zero. */
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 /**

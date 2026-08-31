@@ -26,7 +26,7 @@ function dirtyStub() {
     pending,
     dirty: {
       dirty: true,
-      pending_files: ["profiles/default.toml"],
+      pending_files: ["gateway.toml"],
       changed_sections: ["local_model", "endpoint"],
     },
   });
@@ -67,7 +67,7 @@ test("after Apply, a fresh same-session save raises the count but not the banner
   await settle();
   assert.equal(root.querySelector(".banner-pending").hidden, true, "the banner clears");
 
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
   const description = root.querySelector(".field-row[data-key='description'] textarea");
   description.value = "fresh edit";

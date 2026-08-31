@@ -32,7 +32,7 @@ test("the local detail pane renders the registry sections with the model's value
     modelInfo: { architecture: "qwen3", layer_count: 32, parameter_count: 8_000_000_000 },
   });
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/qwen-common");
+  navigate(dom, "#/local/qwen-common");
   await settle();
 
   for (const id of ["gpu", "generation", "source", "capabilities"]) {
@@ -91,7 +91,7 @@ test("the remote detail pane renders routing fields and effort levels feed defau
   config.model[0].images = true;
   const stub = fixtureStub({ config });
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/gpt-remote");
+  navigate(dom, "#/remote/gpt-remote");
   await settle();
 
   assert.equal(root.querySelector(".field-row[data-key='upstream'] input").value, "gpt-4.1");
@@ -132,7 +132,7 @@ test("the remote detail pane renders routing fields and effort levels feed defau
 test("cache_type_v is disabled until flash attention turns on", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   assert.equal(
@@ -153,7 +153,7 @@ test("cache_type_v is disabled until flash attention turns on", async () => {
 test("the custom dropdown follows listbox arrow and Enter keyboard behavior", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/gpt-remote");
+  navigate(dom, "#/remote/gpt-remote");
   await settle();
 
   const trigger = root.querySelector(".field-row[data-key='default_effort'] .select");
@@ -189,7 +189,7 @@ test("the custom dropdown follows listbox arrow and Enter keyboard behavior", as
 test("an edit raises the dirty dot and reset, and reset reverts the field", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   assert.equal(root.querySelector(".detail-save").disabled, true, "Save starts disabled");
@@ -214,7 +214,7 @@ test("an edit raises the dirty dot and reset, and reset reverts the field", asyn
 test("Save PUTs the edited payload with untouched secrets redacted, then the pending chip appears", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   typeInto(dom, root.querySelector(".field-row[data-key='description'] textarea"), "tuned");
@@ -250,7 +250,7 @@ test("Save PUTs the edited payload with untouched secrets redacted, then the pen
 test("deleting a model confirms, PUTs the config without it, and returns to the list", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   root.querySelector(".detail-delete").click();
@@ -267,13 +267,13 @@ test("deleting a model confirms, PUTs the config without it, and returns to the 
   assert.ok(put, "the confirmed delete PUTs the config shadow");
   const names = JSON.parse(put.init.body).local_model.map((entry) => entry.name);
   assert.deepEqual(names, ["qwen-common"], "the payload drops exactly the deleted entry");
-  assert.equal(dom.window.location.hash, "#/models", "the route returns to the list");
+  assert.equal(dom.window.location.hash, "#/local", "the route returns to Local");
 });
 
 test("the context slider maps log positions to token counts at both ends", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   const range = root.querySelector(".field-row[data-key='context'] input[type='range']");
@@ -305,7 +305,7 @@ test("the context slider maps log positions to token counts at both ends", async
 test("the reveal button posts the model's source path", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/qwen-common");
+  navigate(dom, "#/local/qwen-common");
   await settle();
 
   root.querySelector(".reveal-button").click();
@@ -322,7 +322,7 @@ test("the reveal button posts the model's source path", async () => {
 test("adding a multimodal projector implies the images toggle on and locks it", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/llama-leaf");
+  navigate(dom, "#/local/llama-leaf");
   await settle();
 
   root.querySelector(".detail-section[data-section='projector'] .section-add").click();
@@ -335,50 +335,5 @@ test("adding a multimodal projector implies the images toggle on and locks it", 
       (badge) => badge.textContent === "images",
     ),
     "the implied capability also appears in the detail header",
-  );
-});
-
-test("provenance renders from common.toml and the first inherited edit notes the copy once", async () => {
-  const stub = fixtureStub();
-  const { dom, root } = await bootApp({ key: "k", stub });
-  navigate(dom, "#/models/qwen-common");
-  await settle();
-
-  assert.equal(
-    root.querySelector(".detail-header .field-from")?.textContent,
-    "from common.toml",
-    "an inherited entry names its source file",
-  );
-  const editLink = root.querySelector(".detail-header .field-from .field-from-edit");
-  assert.equal(
-    editLink.getAttribute("href"),
-    "#/profiles/include/common.toml",
-    "the annotation links into the include drill-in editor",
-  );
-  assert.equal(
-    editLink.getAttribute("aria-label"),
-    "Edit in common.toml",
-    "the link announces itself as the edit affordance",
-  );
-  assert.equal(root.querySelector(".inherit-note"), null, "no note before any edit");
-
-  typeInto(dom, root.querySelector(".field-row[data-key='description'] textarea"), "override");
-  await settle();
-  let notes = root.querySelectorAll(".inherit-note");
-  assert.equal(notes.length, 1, "the first inherited edit raises the note");
-  assert.match(notes[0].textContent, /copies the full model definition into default\.toml/);
-  assert.match(notes[0].textContent, /edit common\.toml instead/);
-
-  typeInto(dom, root.querySelector(".field-row[data-key='sha256'] input"), "b".repeat(64));
-  await settle();
-  assert.equal(root.querySelectorAll(".inherit-note").length, 1, "a second edit adds no note");
-
-  root.querySelector(".inherit-note button").click();
-  typeInto(dom, root.querySelector(".field-row[data-key='source'] input"), "models/x.gguf");
-  await settle();
-  assert.equal(
-    root.querySelectorAll(".inherit-note").length,
-    0,
-    "once dismissed, the note stays away for the session",
   );
 });

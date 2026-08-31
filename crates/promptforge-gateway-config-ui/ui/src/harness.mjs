@@ -1,4 +1,4 @@
-// Shared jsdom harness for the live-shell tests. The bundle is imported
+﻿// Shared jsdom harness for the live-shell tests. The bundle is imported
 // once per test process (node --test runs each file in its own
 // process); it reads the DOM globals at call time, so every test swaps
 // in a fresh jsdom window and calls the exported `boot` with injected
@@ -84,18 +84,13 @@ function cleanDirty() {
 }
 
 /**
- * A config fixture: a leaf profile (`default.toml`) including
- * `common.toml`, so provenance and inheritance render. One remote model
- * and one endpoint live in the leaf; one local model and the dominion
- * are inherited from the common file; a second local model lives in the
- * leaf with flash attention off. The top-level `include` array is the
- * leaf's own line, verbatim, as the gateway emits it.
+ * A single-file config fixture with remote, local chat, STT, and two
+ * profile checklists.
  */
 export function modelsFixture() {
-  const common = "C:/pf/profiles/common.toml";
-  const leaf = "C:/pf/profiles/default.toml";
   return {
-    include: ["common.toml"],
+    "config-version": 2,
+    active_profile: "default",
     server: { bind: "127.0.0.1:8081", api_key: "***" },
     local: { cache_dir: "~/.promptforge" },
     dominion: [
@@ -105,7 +100,6 @@ export function modelsFixture() {
         max_queue: 100,
         policy: "queue",
         fair_scheduling: true,
-        source_file: common,
       },
     ],
     endpoint: [
@@ -114,7 +108,6 @@ export function modelsFixture() {
         protocol: "openai",
         base_url: "https://api.openai.com/v1",
         api_key: "***",
-        source_file: leaf,
       },
     ],
     model: [
@@ -133,7 +126,6 @@ export function modelsFixture() {
         effort_levels: ["low", "high"],
         default_effort: "low",
         adaptive_thinking: false,
-        source_file: leaf,
       },
     ],
     local_model: [
@@ -160,7 +152,6 @@ export function modelsFixture() {
         parallel_tool_calls: false,
         effort_levels: [],
         adaptive_thinking: false,
-        source_file: common,
       },
       {
         name: "llama-leaf",
@@ -185,29 +176,38 @@ export function modelsFixture() {
         parallel_tool_calls: false,
         effort_levels: [],
         adaptive_thinking: false,
-        source_file: leaf,
       },
     ],
-    source_files: { "server.bind": leaf },
+    stt_model: [
+      {
+        name: "whisper-base-en",
+        role: "interim",
+        source: "models/ggml-base.en.bin",
+        sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+        vram_gb: 1,
+        dominion: "gpu0",
+      },
+    ],
+    profile: [
+      { name: "default", models: ["gpt-remote", "qwen-common", "whisper-base-en"] },
+      { name: "travel", models: ["llama-leaf"] },
+    ],
   };
 }
 
 /**
- * A `GET /admin/env` reply: both env files parsed, values included, plus
- * the server-computed `${VAR}` references (the gateway scans the raw
- * pre-interpolation chain; the client never sees references). The profile
- * side carries an HF token and the referenced `OPENAI_KEY`; the boot side
- * holds one unreferenced variable.
+ * A `GET /admin/env` reply: the global env file with values, plus the
+ * server-computed `${VAR}` references from the pre-interpolation config.
  */
 export function envFixture() {
   return {
     boot: {
       path: "C:/pf/gateway.env",
-      vars: { GATEWAY_KEY: "boot-master-key" },
-    },
-    profile: {
-      path: "C:/pf/profiles/default.env",
-      vars: { HF_TOKEN: "hf-fixture-token", OPENAI_KEY: "sk-fixture" },
+      vars: {
+        GATEWAY_KEY: "boot-master-key",
+        HF_TOKEN: "hf-fixture-token",
+        OPENAI_KEY: "sk-fixture",
+      },
     },
     references: { OPENAI_KEY: ["endpoint openai api_key"] },
   };
@@ -263,6 +263,7 @@ export function hfModelFixture() {
     likes: 890,
     lastModified: new Date(Date.now() - 3 * 86_400_000).toISOString(),
     tags: ["gguf", "qwen3", "text-generation"],
+    pipeline_tag: "text-generation",
     siblings: [
       { rfilename: "README.md", size: 1234 },
       { rfilename: "config.json", size: 99 },
@@ -356,26 +357,17 @@ function redactSecrets(view) {
 }
 
 /**
- * A canned gateway behind the fetch signature: status, profiles, an
- * idle progress stream, switch-profile (overridable through `onSwitch`),
- * and the config surface - running/pending/dirty views, shadow saves
+ * A canned gateway behind the fetch signature: status, an idle progress
+ * stream, and the config surface - running/pending/dirty views, shadow saves
  * (PUT re-points the pending view, redacting secrets to "***" the way
- * the gateway's pending view does, and flips the dirty report), the
- * boot-config shadow save (PUT /admin/boot-config merges the body's boot
- * sections into the pending view and records `state.boot`), apply
+ * the gateway's pending view does, and flips the dirty report), apply
  * (outcome overridable through `applyOutcome`), revert, orphans,
- * model-info, reveal, and cache deletes. Profile files:
- * `POST`/`DELETE /admin/profiles/{name}` against the mutable listing
- * (`state.profiles`; create answers 409 for an existing name, delete
- * 409 for the active profile), `PUT /admin/include/{path}` recorded in
- * `state.includes` (`onPutInclude` overrides the response), and
- * `onPutConfig` optionally staging a refusal for the profile shadow
- * save before the stub's own handling. The Discover
+ * model-info, reveal, and cache deletes. `onPutConfig` optionally stages
+ * a refusal before the stub's own handling. The Discover
  * surface: `/admin/system` (`system`), the HF proxy (`hfSearch` rows
  * and `hfModels` by repo; `hfAuth401` makes both answer the hub's
- * pass-through 401), hub README fetches (`readme`), `POST
- * /v1/cache` (an immediately-completing SSE unless `onCache` supplies
- * the response), and the `GET /v1/cache` listing (`cache`; a DELETE
+ * pass-through 401), hub README fetches (`readme`), and the `GET
+ * /v1/cache` listing (`cache`; a DELETE
  * removes the matching entry; `onCacheList` overrides the listing
  * response, for failure staging). The env surface: `GET /admin/env`
  * returns `env` (both sides null when unstubbed) and `PUT /admin/env`
@@ -388,10 +380,8 @@ export function gatewayStub({
   profile = "default",
   configGeneration = "generation-1",
   configGenerationAfterApply,
-  profiles = ["default"],
   models = [],
   key,
-  onSwitch,
   config,
   pending,
   dirty,
@@ -403,12 +393,10 @@ export function gatewayStub({
   hfModels,
   hfAuth401 = false,
   readme,
-  onCache,
   cache,
   onCacheList,
   applyOutcome,
   onPutConfig,
-  onPutInclude,
   env,
 } = {}) {
   const calls = [];
@@ -419,16 +407,10 @@ export function gatewayStub({
     orphans: orphans ?? [],
     /** The GET /v1/cache listing; deletes remove matching entries. */
     cache: cache ?? [],
-    /** The last PUT /admin/boot-config body, null until one arrives. */
-    boot: null,
     /** The GET /admin/env reply (both sides null when unstubbed). */
-    env: env ?? { boot: null, profile: null, references: {} },
+    env: env ?? { boot: null, references: {} },
     /** Every PUT /admin/env, as `{ scope, vars }` in arrival order. */
     envPuts: [],
-    /** The profile listing; creates append, deletes remove. */
-    profiles: [...profiles],
-    /** Include shadows by decoded path: the last PUT /admin/include body. */
-    includes: {},
     /** The active profile; the default switch handler re-points it. */
     active: profile,
     /** Process-lifetime config generation returned by admin status. */
@@ -459,8 +441,8 @@ export function gatewayStub({
       return jsonResponse({ error: `unstubbed hub route: ${url}` }, 404);
     }
     if (key !== undefined) {
-      const headers = init.headers ?? {};
-      const auth = headers.Authorization ?? headers.authorization;
+      const headers = new Headers(init.headers);
+      const auth = headers.get("Authorization");
       if (auth !== `Bearer ${key}`) {
         return jsonResponse({ error: "unauthorized" }, 401);
       }
@@ -490,73 +472,12 @@ export function gatewayStub({
       }
       return jsonResponse(state.cache);
     }
-    if (url.endsWith("/v1/cache") && init.method === "POST") {
-      if (onCache) {
-        return onCache(init);
-      }
-      const channel = sseChannel();
-      channel.push({ status: "downloading", bytes: 10, total: 100 });
-      channel.push({ status: "ready", path: "C:/pf/models/file.gguf" });
-      channel.end();
-      return channel.response;
-    }
     if (url.endsWith("/admin/status")) {
       return jsonResponse({
         profile: state.active,
         models,
         config_generation: state.configGeneration,
       });
-    }
-    // Profile files: POST creates (409 for an existing name, mirroring
-    // the gateway), DELETE removes (409 for the active profile, 404 for
-    // a missing one). The listing tracks both.
-    if (url.includes("/admin/profiles/")) {
-      const name = decodeURIComponent(url.slice(url.lastIndexOf("/") + 1));
-      if (init.method === "POST") {
-        if (state.profiles.includes(name)) {
-          return jsonResponse(
-            { error: { code: "profile_exists", message: `profile ${name} already exists` } },
-            409,
-          );
-        }
-        state.profiles.push(name);
-        return jsonResponse({ created: `profiles/${name}.toml` });
-      }
-      if (init.method === "DELETE") {
-        if (name === state.active) {
-          return jsonResponse(
-            {
-              error: {
-                code: "profile_active",
-                message: `profile ${name} is active and cannot be deleted`,
-              },
-            },
-            409,
-          );
-        }
-        if (!state.profiles.includes(name)) {
-          return jsonResponse(
-            { error: { code: "profile_not_found", message: `no profile ${name}` } },
-            404,
-          );
-        }
-        state.profiles = state.profiles.filter((entry) => entry !== name);
-        return jsonResponse({ deleted: `profiles/${name}.toml`, shadow_removed: false });
-      }
-    }
-    if (url.endsWith("/admin/profiles")) {
-      return jsonResponse({ profiles: state.profiles });
-    }
-    // The include-file shadow save; `onPutInclude` stages refusals.
-    if (url.includes("/admin/include/") && init.method === "PUT") {
-      const path = decodeURIComponent(
-        url.slice(url.indexOf("/admin/include/") + "/admin/include/".length),
-      );
-      if (onPutInclude) {
-        return onPutInclude(init, path);
-      }
-      state.includes[path] = JSON.parse(init.body);
-      return jsonResponse({ shadow: `profiles/${path}.next` });
     }
     if (url.endsWith("/admin/progress")) {
       return sseChannel().response;
@@ -566,9 +487,9 @@ export function gatewayStub({
     // flips the dirty report the way a staged env shadow does.
     if (url.includes("/admin/env")) {
       if (init.method === "PUT") {
-        const scope = url.includes("scope=boot") ? "boot" : "profile";
+        const scope = "global";
         state.envPuts.push({ scope, vars: JSON.parse(init.body) });
-        const file = scope === "boot" ? "gateway.env" : "profiles/default.env";
+        const file = "gateway.env";
         state.dirty = {
           dirty: true,
           pending_files: [...new Set([...state.dirty.pending_files, file])],
@@ -581,42 +502,24 @@ export function gatewayStub({
     if (url.endsWith("/admin/config-pending")) {
       return jsonResponse({
         profile: state.pending,
-        boot:
-          state.boot === null
-            ? null
-            : { shadow: "gateway.toml.next", changed_sections: Object.keys(state.boot) },
+        boot: null,
       });
     }
     if (url.endsWith("/admin/config-dirty")) {
       return jsonResponse(state.dirty);
     }
-    if (url.endsWith("/admin/boot-config") && init.method === "PUT") {
-      state.boot = JSON.parse(init.body);
-      // The pending profile view resolves boot shadows too, so the boot
-      // sections it renders track the staged edit.
-      for (const section of ["server", "workshop"]) {
-        if (section in state.boot) {
-          state.pending[section] = structuredClone(state.boot[section]);
-        }
-      }
-      redactSecrets(state.pending);
-      state.dirty = {
-        dirty: true,
-        pending_files: ["gateway.toml"],
-        changed_sections: Object.keys(state.boot),
-      };
-      return jsonResponse({ shadow: "gateway.toml.next" });
-    }
     if (url.endsWith("/admin/config-apply")) {
       state.config = structuredClone(state.pending);
+      if (typeof state.pending.active_profile === "string") {
+        state.active = state.pending.active_profile;
+      }
       state.dirty = cleanDirty();
-      state.boot = null;
       if (configGenerationAfterApply !== undefined) {
         state.configGeneration = configGenerationAfterApply;
       }
       return jsonResponse(
         applyOutcome ?? {
-          applied: ["profiles/default.toml"],
+          applied: ["gateway.toml"],
           reloaded: true,
           restart_required: false,
         },
@@ -625,7 +528,7 @@ export function gatewayStub({
     if (url.endsWith("/admin/config-revert")) {
       state.pending = structuredClone(state.config);
       state.dirty = cleanDirty();
-      return jsonResponse({ reverted: ["profiles/default.toml.next"] });
+      return jsonResponse({ reverted: ["gateway.toml.next"] });
     }
     if (url.endsWith("/admin/config")) {
       if ((init.method ?? "GET") === "PUT") {
@@ -636,10 +539,7 @@ export function gatewayStub({
           }
         }
         const body = JSON.parse(init.body);
-        // The gateway grafts the leaf's include line onto a candidate
-        // that lacks one, so the chain keeps visiting the boot file:
-        // boot-owned sections the body omits survive in the pending
-        // view (staged boot edits included).
+        // Boot-owned sections the body omits survive in the pending view.
         for (const section of ["server", "workshop"]) {
           if (!(section in body) && section in state.pending) {
             body[section] = structuredClone(state.pending[section]);
@@ -649,10 +549,10 @@ export function gatewayStub({
         redactSecrets(state.pending);
         state.dirty = dirtyAfterSave ?? {
           dirty: true,
-          pending_files: ["profiles/default.toml"],
+          pending_files: ["gateway.toml"],
           changed_sections: [],
         };
-        return jsonResponse({ shadow: "profiles/default.toml.next" });
+        return jsonResponse({ shadow: "gateway.toml.next" });
       }
       return jsonResponse(state.config);
     }
@@ -672,16 +572,6 @@ export function gatewayStub({
       state.orphans = state.orphans.filter((orphan) => orphan.sha256 !== sha);
       state.cache = state.cache.filter((entry) => entry.sha256 !== sha);
       return jsonResponse({});
-    }
-    if (url.endsWith("/admin/switch-profile")) {
-      if (onSwitch) {
-        return onSwitch(init);
-      }
-      const channel = sseChannel();
-      state.active = JSON.parse(init.body).name;
-      channel.push({ status: "ready", profile: state.active });
-      channel.end();
-      return channel.response;
     }
     return jsonResponse({ error: `unstubbed route: ${url}` }, 404);
   };

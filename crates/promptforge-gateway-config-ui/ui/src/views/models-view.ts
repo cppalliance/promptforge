@@ -1,6 +1,6 @@
 // The Models view [Unsloth] Model Hub "On Device": a master-detail
-// split. The list side carries the toolbar (debounced search, filter
-// chips, allowlist chip, sort), the model rows with status dots and
+// split. The list side carries the toolbar (debounced search, Local
+// type filters, sort), the model rows with status dots and
 // badges, the unconfigured-orphans section, the empty state, and
 // loading skeletons. The detail side renders the selected model's
 // header (editable name, status, badges, source with reveal, the
@@ -11,8 +11,8 @@ import {
   Cpu,
   FolderOpen,
   Globe,
+  Mic,
   RotateCcw,
-  X,
   createElement as lucideElement,
 } from "lucide";
 
@@ -27,6 +27,8 @@ import {
   LOCAL_MODEL_SETTINGS,
   REMOTE_MODEL_SECTIONS,
   REMOTE_MODEL_SETTINGS,
+  STT_MODEL_SECTIONS,
+  STT_MODEL_SETTINGS,
   settingOptions,
 } from "../components/settings-registry";
 import type { SectionDef, SettingContext, SettingDef } from "../components/settings-registry";
@@ -38,8 +40,8 @@ import type { GatewayApi, OrphanFile } from "../services/gateway-api";
 /** How long the search input waits before filtering. */
 const SEARCH_DEBOUNCE_MS = 150;
 
-/** The list filters, in chip order. */
-const FILTERS = ["all", "local", "remote", "unconfigured"] as const;
+/** Secondary filters within the Local hardware tab. */
+const FILTERS = ["all", "chat", "stt"] as const;
 type Filter = (typeof FILTERS)[number];
 
 /** The sort orders the toolbar offers. */
@@ -53,6 +55,8 @@ export interface ModelsViewDeps {
   api: GatewayApi;
   /** Outcome surfacing. */
   toasts: ToastStack;
+  /** The router tab this instance owns. */
+  scope: "local" | "remote";
 }
 
 /** The mounted view handle the router calls. */
@@ -67,15 +71,11 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
   let search = "";
   let filter: Filter = "all";
-  let allowlistOnly = false;
   let sort: Sort = "name";
   /** Collapsed detail sections, keyed `name:section`. */
   const collapsed = new Set<string>();
   /** GGUF layer totals by model name; null = lookup failed (plain N). */
   const layerTotals = new Map<string, number | null>();
-  /** The entry whose inherited-edit note is currently visible. */
-  let inheritNoteFor: string | null = null;
-
   let main: HTMLElement | null = null;
   /** The last-rendered split root; a re-render is legal only while it owns `main`. */
   let viewRoot: HTMLElement | null = null;
@@ -109,7 +109,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     }
     const title = document.createElement("h1");
     title.className = "view-title";
-    title.textContent = "Models";
+    title.textContent = deps.scope === "local" ? "Local" : "Remote";
 
     const split = document.createElement("div");
     split.className = "split models-split";
@@ -145,13 +145,10 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     const all = store.models();
     if (all.length === 0 && orphans.length === 0) {
       parts.push(emptyState());
-    } else if (filter !== "unconfigured") {
+    } else {
       parts.push(modelList(entries));
     }
-    if (
-      (filter === "all" || filter === "local" || filter === "unconfigured") &&
-      orphans.length > 0
-    ) {
+    if (deps.scope === "local" && orphans.length > 0) {
       parts.push(orphanSection(orphans));
     }
     listBox.replaceChildren(...parts);
@@ -161,7 +158,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     const configured = new Set(
       store
         .models()
-        .filter((entry) => entry.kind === "local")
+        .filter((entry) => entry.kind !== "remote")
         .map((entry) => String(entry.data["source"] ?? "").replaceAll("\\", "/").toLowerCase()),
     );
     return store.orphans.filter(
@@ -170,17 +167,17 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   };
 
   const visibleEntries = (): ModelEntry[] => {
-    let entries = store.models();
-    if (filter === "local" || filter === "remote") {
-      entries = entries.filter((entry) => entry.kind === filter);
+    let entries = store
+      .models()
+      .filter((entry) =>
+        deps.scope === "remote" ? entry.kind === "remote" : entry.kind !== "remote",
+      );
+    if (deps.scope === "local" && filter !== "all") {
+      entries = entries.filter((entry) => (filter === "stt" ? entry.kind === "stt" : entry.kind === "local"));
     }
     const query = search.trim().toLowerCase();
     if (query !== "") {
       entries = entries.filter((entry) => entry.name.toLowerCase().includes(query));
-    }
-    const allowlist = store.allowlist();
-    if (allowlistOnly && allowlist) {
-      entries = entries.filter((entry) => allowlist.includes(entry.name));
     }
     const byName = (a: ModelEntry, b: ModelEntry): number => a.name.localeCompare(b.name);
     if (sort === "kind") {
@@ -225,7 +222,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     chips.className = "filter-chips";
     chips.setAttribute("role", "group");
     chips.setAttribute("aria-label", "Filter models");
-    for (const value of FILTERS) {
+    for (const value of deps.scope === "local" ? FILTERS : []) {
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "pill filter-chip";
@@ -238,8 +235,6 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       });
       chips.append(chip);
     }
-
-    const allowWrap = buildAllowlistEditor();
 
     const sortLabel = document.createElement("label");
     sortLabel.className = "visually-hidden";
@@ -269,6 +264,11 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     addLocal.className = "button button-xs button-outline toolbar-add-local";
     addLocal.textContent = "Add Local";
     addLocal.addEventListener("click", () => addModel("local"));
+    const addStt = document.createElement("button");
+    addStt.type = "button";
+    addStt.className = "button button-xs button-outline toolbar-add-stt";
+    addStt.textContent = "Add STT";
+    addStt.addEventListener("click", () => addModel("stt"));
     const addRemote = document.createElement("button");
     addRemote.type = "button";
     addRemote.className = "button button-xs button-outline toolbar-add-remote";
@@ -279,134 +279,11 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       searchLabel,
       searchInput,
       chips,
-      allowWrap,
       sortLabel,
       sortSelect.element,
-      addLocal,
-      addRemote,
+      ...(deps.scope === "local" ? [addLocal, addStt] : [addRemote]),
     );
     return toolbar;
-  };
-
-  /**
-   * The allowlist popover editor (the plan's `models = [...]` chip
-   * editor): the toolbar chip opens a popover whose chip input edits
-   * the top-level `models` array through the normal profile save path.
-   * No chips on save deletes the key - null means every model is
-   * exposed, and the chip reads "All models visible".
-   */
-  const buildAllowlistEditor = (): HTMLElement => {
-    const wrap = document.createElement("div");
-    wrap.className = "allowlist-editor";
-    const allowlist = store.allowlist();
-
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "pill filter-chip allowlist-chip";
-    chip.setAttribute("aria-haspopup", "dialog");
-    chip.setAttribute("aria-expanded", "false");
-    chip.textContent =
-      allowlist === null ? "All models visible" : `Allowlist (${allowlist.length})`;
-    chip.title = "Restrict which models this profile exposes to callers.";
-
-    const popover = document.createElement("div");
-    popover.className = "menu allowlist-popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Edit model allowlist");
-    popover.hidden = true;
-
-    const onDocumentClick = (event: Event): void => {
-      if (!wrap.contains(event.target as Node)) {
-        close();
-      }
-    };
-    const close = (): void => {
-      popover.hidden = true;
-      chip.setAttribute("aria-expanded", "false");
-      document.removeEventListener("click", onDocumentClick);
-    };
-    // Escape closes the popover and returns focus to the chip, matching
-    // the tab bar's menus.
-    popover.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        close();
-        chip.focus();
-      }
-    });
-    const open = (): void => {
-      let names = [...(store.allowlist() ?? [])];
-
-      const label = document.createElement("label");
-      label.htmlFor = "allowlist-chips";
-      label.textContent = "Allowlisted model names";
-      const input = createChipInput({
-        id: "allowlist-chips",
-        values: names,
-        onChange: (values) => {
-          names = values;
-        },
-      });
-      const help = document.createElement("p");
-      help.className = "field-help";
-      help.textContent =
-        "Only these models are exposed to callers. Remove every name to expose all models.";
-
-      const parts: HTMLElement[] = [label, input.element, help];
-      if (store.allowlist() !== null) {
-        const filterLabel = document.createElement("label");
-        filterLabel.className = "allowlist-filter";
-        const filterBox = document.createElement("input");
-        filterBox.type = "checkbox";
-        filterBox.checked = allowlistOnly;
-        filterBox.addEventListener("change", () => {
-          allowlistOnly = filterBox.checked;
-          renderList();
-        });
-        filterLabel.append(filterBox, document.createTextNode(" Show only allowlisted models"));
-        parts.push(filterLabel);
-      }
-
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "button button-xs button-primary allowlist-save";
-      save.textContent = "Save";
-      save.addEventListener("click", () => {
-        const payload = store.buildConfigPayload();
-        if (names.length > 0) {
-          payload["models"] = [...names];
-        } else {
-          delete payload["models"];
-        }
-        save.disabled = true;
-        void store
-          .savePayload(payload)
-          .then(() => {
-            toasts.show("Saved to disk", "success");
-            close();
-          })
-          .catch((error: unknown) => {
-            save.disabled = false;
-            toasts.show(error instanceof Error ? error.message : "The save failed", "error");
-          });
-      });
-      parts.push(save);
-
-      popover.replaceChildren(...parts);
-      popover.hidden = false;
-      chip.setAttribute("aria-expanded", "true");
-      document.addEventListener("click", onDocumentClick);
-      popover.querySelector<HTMLInputElement>("#allowlist-chips")?.focus();
-    };
-    chip.addEventListener("click", () => {
-      if (popover.hidden) {
-        open();
-      } else {
-        close();
-      }
-    });
-
-    wrap.append(chip, popover);
-    return wrap;
   };
 
   const modelList = (entries: ModelEntry[]): HTMLElement => {
@@ -416,7 +293,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       const row = document.createElement("li");
       const link = document.createElement("a");
       link.className = "model-row";
-      link.href = `#/models/${encodeURIComponent(entry.name)}`;
+      link.href = `#/${deps.scope}/${encodeURIComponent(entry.name)}`;
       if (entry.name === selected) {
         link.setAttribute("aria-current", "true");
       }
@@ -430,7 +307,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
       const kindBadge = document.createElement("span");
       kindBadge.className = "pill kind-badge";
-      kindBadge.textContent = String(entry.data["kind"] ?? "chat");
+      kindBadge.textContent =
+        entry.kind === "stt" ? "stt" : String(entry.data["kind"] ?? "chat");
       link.append(kindBadge);
       link.append(...capabilityPills(entry));
 
@@ -516,7 +394,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     }
     const name = store.addDraft("local", data);
     await store.refreshOrphans();
-    navigate(`#/models/${encodeURIComponent(name)}`);
+    navigate(`#/local/${encodeURIComponent(name)}`);
   };
 
   const deleteOrphan = async (orphan: OrphanFile): Promise<void> => {
@@ -543,7 +421,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     const empty = document.createElement("div");
     empty.className = "view-empty empty-state";
     const message = document.createElement("p");
-    message.textContent = "No models configured";
+    message.textContent =
+      deps.scope === "local" ? "No local models configured" : "No remote models configured";
 
     const actions = document.createElement("div");
     actions.className = "empty-actions";
@@ -562,15 +441,33 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     discover.href = "#/discover";
     discover.textContent = "Search Hugging Face";
 
-    actions.append(addLocal, addRemote, discover);
+    if (deps.scope === "local") {
+      const addStt = document.createElement("button");
+      addStt.type = "button";
+      addStt.className = "button button-outline";
+      addStt.textContent = "Add STT Model";
+      addStt.addEventListener("click", () => addModel("stt"));
+      actions.append(addLocal, addStt, discover);
+    } else {
+      actions.append(addRemote);
+    }
     empty.append(message, actions);
     return empty;
   };
 
-  const addModel = (kind: "local" | "remote"): void => {
+  const addModel = (kind: "local" | "remote" | "stt"): void => {
     const data: Record<string, unknown> =
       kind === "local"
         ? { name: "new-local-model", kind: "chat", description: "", source: "", context: 4096 }
+        : kind === "stt"
+          ? {
+              name: "new-stt-model",
+              role: "interim",
+              source: "",
+              sha256: null,
+              vram_gb: 1,
+              dominion: null,
+            }
         : {
             name: "new-remote-model",
             kind: "chat",
@@ -580,7 +477,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
             endpoints: [],
           };
     const name = store.addDraft(kind, data);
-    navigate(`#/models/${encodeURIComponent(name)}`);
+    navigate(`#/${deps.scope}/${encodeURIComponent(name)}`);
   };
 
   const skeletonList = (): HTMLElement => {
@@ -634,13 +531,19 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       detailBox.replaceChildren(missing);
       return;
     }
-    const parts: HTMLElement[] = [];
-    if (inheritNoteFor === entry.name) {
-      parts.push(inheritNote(entry));
-    }
-    parts.push(detailHeader(entry));
-    const sections = entry.kind === "local" ? LOCAL_MODEL_SECTIONS : REMOTE_MODEL_SECTIONS;
-    const settings = entry.kind === "local" ? LOCAL_MODEL_SETTINGS : REMOTE_MODEL_SETTINGS;
+    const parts: HTMLElement[] = [detailHeader(entry)];
+    const sections =
+      entry.kind === "local"
+        ? LOCAL_MODEL_SECTIONS
+        : entry.kind === "stt"
+          ? STT_MODEL_SECTIONS
+          : REMOTE_MODEL_SECTIONS;
+    const settings =
+      entry.kind === "local"
+        ? LOCAL_MODEL_SETTINGS
+        : entry.kind === "stt"
+          ? STT_MODEL_SETTINGS
+          : REMOTE_MODEL_SETTINGS;
     for (const section of sections) {
       parts.push(renderSection(entry, section, settings));
     }
@@ -654,34 +557,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   });
 
   const commit = (entry: ModelEntry, key: string, value: unknown): void => {
-    if (store.takeInheritNote(entry)) {
-      inheritNoteFor = entry.name;
-    }
     store.setEdit(entry, key, value);
-  };
-
-  // Inherited-edit override note [INVENTED]: part of the plan's
-  // inheritance UX; no researched UI has include-chain inheritance.
-  const inheritNote = (entry: ModelEntry): HTMLElement => {
-    const note = document.createElement("div");
-    note.className = "banner inherit-note";
-    const text = document.createElement("span");
-    const leaf = store.activeProfile ? `${store.activeProfile}.toml` : "the active profile";
-    text.textContent =
-      `This copies the full model definition into ${leaf} as an override. ` +
-      `To change it for every profile that includes ${entry.sourceFile ?? "the parent file"}, ` +
-      `edit ${entry.sourceFile ?? "the parent file"} instead.`;
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "button button-xs button-outline";
-    dismiss.setAttribute("aria-label", "Dismiss");
-    dismiss.append(lucideElement(X, { "aria-hidden": "true", width: 12, height: 12 }));
-    dismiss.addEventListener("click", () => {
-      inheritNoteFor = null;
-      note.remove();
-    });
-    note.append(text, dismiss);
-    return note;
   };
 
   const detailHeader = (entry: ModelEntry): HTMLElement => {
@@ -713,7 +589,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
     const kindBadge = document.createElement("span");
     kindBadge.className = "pill kind-badge";
-    kindBadge.textContent = String(store.value(entry, "kind") ?? "chat");
+    kindBadge.textContent =
+      entry.kind === "stt" ? "stt" : String(store.value(entry, "kind") ?? "chat");
     meta.append(kindBadge);
     meta.append(...capabilityPills(entry));
 
@@ -728,25 +605,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
     header.append(nameLabel, nameInput, meta);
 
-    // Provenance annotation [INVENTED]: no researched UI has
-    // include-chain inheritance; flagged per the plan. The file name is
-    // the "Edit in <file>" link into the include drill-in editor.
-    if (entry.inherited && entry.sourceFile) {
-      const from = document.createElement("p");
-      from.className = "field-from";
-      from.append("from ");
-      const edit = document.createElement("a");
-      edit.className = "field-from-edit";
-      edit.href = `#/profiles/include/${encodeURIComponent(entry.sourceFile)}`;
-      edit.textContent = entry.sourceFile;
-      edit.setAttribute("aria-label", `Edit in ${entry.sourceFile}`);
-      from.append(edit);
-      from.title = `${store.activeProfile}.toml > ${entry.sourceFile}`;
-      header.append(from);
-    }
-
     const source = typeof entry.data["source"] === "string" ? entry.data["source"] : null;
-    if (entry.kind === "local" && source) {
+    if (entry.kind !== "remote" && source) {
       const sourceRow = document.createElement("p");
       sourceRow.className = "detail-source";
       const path = document.createElement("span");
@@ -769,29 +629,33 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       header.append(sourceRow);
     }
 
-    if (entry.kind === "local" && !entry.draft) {
+    if (entry.kind !== "remote" && !entry.draft) {
       header.append(fileStatus(entry));
     }
 
-    header.append(
-      fieldRow(entry, {
-        key: "kind",
-        label: "Kind",
-        help: "The workload this model serves.",
-        section: "header",
-        type: "dropdown",
-        options: ["chat", "embedding", "classifier"],
-        default: "chat",
-      }),
-      fieldRow(entry, {
+    if (entry.kind !== "stt") {
+      header.append(
+        fieldRow(entry, {
+          key: "kind",
+          label: "Kind",
+          help: "The workload this model serves.",
+          section: "header",
+          type: "dropdown",
+          options: ["chat", "embedding", "classifier"],
+          default: "chat",
+        }),
+      );
+    }
+    if (entry.kind !== "stt") {
+      header.append(fieldRow(entry, {
         key: "description",
         label: "Description",
         help: "Prose describing the model for catalog consumers.",
         section: "header",
         type: "textarea",
         default: "",
-      }),
-    );
+      }));
+    }
 
     const actions = document.createElement("div");
     actions.className = "detail-actions";
@@ -814,7 +678,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
         }
         toasts.show("Saved to disk", "success");
         if (savedName !== selected) {
-          navigate(`#/models/${encodeURIComponent(savedName)}`);
+          navigate(`#/${deps.scope}/${encodeURIComponent(savedName)}`);
         }
       })();
     });
@@ -834,12 +698,19 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       void (async () => {
         if (entry.draft) {
           store.discardDraft(entry);
-          navigate("#/models");
+          navigate(`#/${deps.scope}`);
           return;
         }
+        const affected = store.affectedProfiles(entry.name);
+        const impact =
+          affected.length === 0
+            ? ""
+            : ` It will also be removed from ${affected.length} profile${
+                affected.length === 1 ? "" : "s"
+              }: ${affected.join(", ")}.`;
         const yes = await confirmDialog(document.body, {
           title: `Delete ${entry.name}?`,
-          body: `Remove the model ${entry.name} from the configuration. The change is staged until you apply it.`,
+          body: `Remove the model ${entry.name} from the configuration.${impact} The change is staged until you apply it.`,
           confirmLabel: "Delete",
           danger: true,
         });
@@ -853,7 +724,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
           return;
         }
         toasts.show(`Deleted ${entry.name}`, "success");
-        navigate("#/models");
+        navigate(`#/${deps.scope}`);
       })();
     });
 
@@ -1090,7 +961,12 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
 
   /** The serde default of a dependency key, for entries omitting it. */
   const defaultOf = (entry: ModelEntry, key: string): unknown => {
-    const settings = entry.kind === "local" ? LOCAL_MODEL_SETTINGS : REMOTE_MODEL_SETTINGS;
+    const settings =
+      entry.kind === "local"
+        ? LOCAL_MODEL_SETTINGS
+        : entry.kind === "stt"
+          ? STT_MODEL_SETTINGS
+          : REMOTE_MODEL_SETTINGS;
     return settings.find((def) => def.key === key)?.default;
   };
 
@@ -1167,7 +1043,9 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     }
     status.dataset["status"] = "downloaded";
     status.textContent = `Downloaded ${formatBytes(cached.size_bytes)}`;
-    status.title = cached.path;
+    const path = document.createElement("span");
+    path.className = "model-name file-cache-path";
+    path.textContent = cached.path;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "button button-xs button-danger cached-delete";
@@ -1192,7 +1070,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
         }
       })();
     });
-    row.append(status, remove);
+    row.append(status, path, remove);
     return row;
   };
 
@@ -1208,12 +1086,12 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     return dot;
   };
 
-  const sourceIcon = (kind: "local" | "remote"): HTMLElement => {
+  const sourceIcon = (kind: "local" | "remote" | "stt"): HTMLElement => {
     const icon = document.createElement("span");
     icon.className = "source-icon";
-    icon.dataset["icon"] = kind === "local" ? "cpu" : "globe";
+    icon.dataset["icon"] = kind === "local" ? "cpu" : kind === "stt" ? "mic" : "globe";
     icon.append(
-      lucideElement(kind === "local" ? Cpu : Globe, {
+      lucideElement(kind === "local" ? Cpu : kind === "stt" ? Mic : Globe, {
         "aria-hidden": "true",
         width: 14,
         height: 14,
@@ -1221,7 +1099,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
     );
     const hidden = document.createElement("span");
     hidden.className = "visually-hidden";
-    hidden.textContent = kind === "local" ? "local model" : "remote model";
+    hidden.textContent =
+      kind === "local" ? "local chat model" : kind === "stt" ? "speech-to-text model" : "remote model";
     icon.append(hidden);
     return icon;
   };

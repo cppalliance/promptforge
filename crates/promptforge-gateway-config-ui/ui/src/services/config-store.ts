@@ -10,24 +10,20 @@
 
 import type { CacheListEntry, DirtyReport, GatewayApi, OrphanFile } from "./gateway-api";
 
-/** Which TOML array a model entry lives in. */
-export type ModelSource = "local" | "remote";
+/** Which TOML catalog array a model entry lives in. */
+export type ModelSource = "local" | "remote" | "stt";
 
 /** A JSON object: one config entry's fields. */
 export type EntryData = Record<string, unknown>;
 
-/** One model from the merged catalog, with provenance and pending state. */
+/** One model from the global catalog, with pending state. */
 export interface ModelEntry {
-  /** `local` for `[[local_model]]`, `remote` for `[[model]]`. */
+  /** The catalog array kind. */
   kind: ModelSource;
   /** The entry's `name` key (the catalog identity). */
   name: string;
   /** The pending view's values for this entry, provenance stripped. */
   data: EntryData;
-  /** Base name of the file whose definition won the merge, when known. */
-  sourceFile: string | null;
-  /** Whether the winning definition came from an included parent file. */
-  inherited: boolean;
   /** Field keys whose pending value differs from the running value. */
   pendingFields: ReadonlySet<string>;
   /** True for a browser-created entry that has never been saved. */
@@ -40,20 +36,26 @@ const KEYED_ARRAYS: ReadonlyArray<readonly [array: string, key: string]> = [
   ["endpoint", "id"],
   ["model", "name"],
   ["local_model", "name"],
+  ["stt_model", "name"],
+  ["profile", "name"],
 ];
 
-/** One `[[dominion]]` or `[[endpoint]]` entry, with provenance and pending state. */
+/** One `[[dominion]]` or `[[endpoint]]` entry with pending state. */
 export interface SectionEntry {
   /** The entry's `id` key. */
   id: string;
   /** The pending view's values, provenance stripped. */
   data: EntryData;
-  /** Base name of the file whose definition won the merge, when known. */
-  sourceFile: string | null;
-  /** Whether the winning definition came from an included parent file. */
-  inherited: boolean;
   /** Field keys whose pending value differs from the running value. */
   pendingFields: ReadonlySet<string>;
+}
+
+/** One named profile checklist from the pending document. */
+export interface ProfileEntry {
+  /** Profile identifier. */
+  name: string;
+  /** Chosen catalog names in their stored order. */
+  models: string[];
 }
 
 /** Reads a dot-path (`speculative.draft_max`) out of a JSON object. */
@@ -88,12 +90,6 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** The file base name of a provenance path (either separator). */
-function baseName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
-
 /** One changed path in the pending-vs-running Review diff. */
 export interface DiffRow {
   /** The dotted path, keyed-array entries by identity (`endpoint[openai].base_url`). */
@@ -102,42 +98,6 @@ export interface DiffRow {
   running: unknown;
   /** The pending (shadow) value; undefined when the path was removed. */
   pending: unknown;
-}
-
-/** One include-chain file from the pending view's `include` array. */
-export interface ChainFile {
-  /** The include entry verbatim as written in the leaf file (`common.toml`, `../gateway.toml`). */
-  path: string;
-  /** The file's base name (`common.toml`, `gateway.toml`). */
-  base: string;
-  /** Whether the entry points outside the profiles directory. */
-  outside: boolean;
-}
-
-/**
- * The include chain read from a config payload's top-level `include`
- * array: the active profile leaf's own include line, verbatim and
- * ordered as written (the gateway serves the leaf shadow's array when
- * one is staged). Membership and order are authoritative, so a parent
- * whose every value a later file overrides still appears. An absent
- * array means the profile stands alone. The UI ships with its gateway,
- * so there is no fallback derivation for a payload without the field.
- */
-export function includeChainOf(pending: EntryData): ChainFile[] {
-  const include = pending["include"];
-  if (!Array.isArray(include)) {
-    return [];
-  }
-  return include
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => ({ path: entry, base: baseName(entry), outside: isOutside(entry) }));
-}
-
-/** Whether an include-style path leaves the profiles directory. */
-function isOutside(path: string): boolean {
-  return (
-    path.startsWith("../") || path.startsWith("..\\") || path.startsWith("/") || /^[A-Za-z]:/.test(path)
-  );
 }
 
 /**
@@ -167,8 +127,6 @@ export class ConfigStore {
   private readonly edits = new Map<string, Map<string, unknown>>();
   /** Browser-created entries not yet saved. */
   private drafts: { kind: ModelSource; data: EntryData }[] = [];
-  /** Whether the one-time inherited-edit note has been shown. */
-  private inheritNoteShown = false;
   /** Serializes full-config writes started by Discover. */
   private stageTail: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
@@ -198,8 +156,8 @@ export class ConfigStore {
         this.api.getConfigDirty(),
         // Headless builds lack /admin/orphans (local feature); the list
         // degrades to empty instead of failing the whole load.
-        this.api.getOrphans().catch(() => [] as OrphanFile[]),
-        this.api.listCache().catch(() => [] as CacheListEntry[]),
+        this.api.getOrphans().catch((): OrphanFile[] => []),
+        this.api.listCache().catch((): CacheListEntry[] => []),
         this.api.getStatus(),
       ]);
       this.running = running;
@@ -245,8 +203,8 @@ export class ConfigStore {
   /** Re-reads cache metadata and hides ArtifactStore bookkeeping. */
   private async refreshArtifacts(): Promise<void> {
     const [orphans, cache] = await Promise.all([
-      this.api.getOrphans().catch(() => [] as OrphanFile[]),
-      this.api.listCache().catch(() => [] as CacheListEntry[]),
+      this.api.getOrphans().catch((): OrphanFile[] => []),
+      this.api.listCache().catch((): CacheListEntry[] => []),
     ]);
     this.orphans = visibleOrphans(orphans);
     this.cache = cache;
@@ -254,11 +212,11 @@ export class ConfigStore {
 
   /** The merged model catalog: pending entries plus unsaved drafts. */
   models(): ModelEntry[] {
-    const leaf = this.activeProfile ? `${this.activeProfile}.toml` : null;
     const entries: ModelEntry[] = [];
     for (const [array, kind] of [
       ["model", "remote"],
       ["local_model", "local"],
+      ["stt_model", "stt"],
     ] as const) {
       const pendingEntries = this.entriesOf(this.pending, array);
       const runningByName = new Map(
@@ -266,19 +224,11 @@ export class ConfigStore {
       );
       for (const raw of pendingEntries) {
         const data = { ...raw };
-        const source = typeof data["source_file"] === "string" ? data["source_file"] : null;
-        delete data["source_file"];
         const name = String(data["name"] ?? "");
-        const sourceFile = source ? baseName(source) : null;
-        // A shadow's provenance names `<leaf>.toml.next`; strip the
-        // suffix so the leaf's own shadow never reads as inherited.
-        const sourceReal = sourceFile?.replace(/\.next$/, "") ?? null;
         entries.push({
           kind,
           name,
           data,
-          sourceFile: sourceReal,
-          inherited: sourceReal !== null && leaf !== null && sourceReal !== leaf,
           pendingFields: this.diffFields(data, runningByName.get(name)),
           draft: false,
         });
@@ -289,8 +239,6 @@ export class ConfigStore {
         kind: draft.kind,
         name: String(draft.data["name"] ?? ""),
         data: draft.data,
-        sourceFile: null,
-        inherited: false,
         pendingFields: new Set(),
         draft: true,
       });
@@ -303,14 +251,14 @@ export class ConfigStore {
     return this.models().find((entry) => entry.kind === kind && entry.name === name) ?? null;
   }
 
-  /** Finds one entry by name alone, for the `#/models/{name}` route. */
+  /** Finds one entry by name alone for Local and Remote detail routes. */
   findByName(name: string): ModelEntry | null {
     return this.models().find((entry) => entry.name === name) ?? null;
   }
 
-  /** Cache metadata for a local model's source, when downloaded. */
+  /** Cache metadata for a local or STT model's source, when downloaded. */
   cachedFile(entry: ModelEntry): CacheListEntry | null {
-    if (entry.kind !== "local") {
+    if (entry.kind === "remote") {
       return null;
     }
     const source = entry.data["source"];
@@ -333,17 +281,33 @@ export class ConfigStore {
     );
   }
 
-  /** The profile's model allowlist, or null when every model is exposed. */
-  allowlist(): string[] | null {
-    const list = this.pending["models"];
-    return Array.isArray(list) ? list.map(String) : null;
+  /** Every pending profile checklist in declaration order. */
+  profiles(): ProfileEntry[] {
+    return this.entriesOf(this.pending, "profile").map((entry) => ({
+      name: String(entry["name"] ?? ""),
+      models: Array.isArray(entry["models"]) ? entry["models"].map(String) : [],
+    }));
+  }
+
+  /** The active profile staged for Apply, falling back to the running one. */
+  pendingActiveProfile(): string {
+    const pending = this.pending["active_profile"];
+    return typeof pending === "string" ? pending : this.activeProfile;
+  }
+
+  /** Profiles whose checklists contain `modelName`. */
+  affectedProfiles(modelName: string): string[] {
+    return this.profiles()
+      .filter((profile) => profile.models.includes(modelName))
+      .map((profile) => profile.name);
   }
 
   /** The `[[dominion]]` entries of the pending view. */
-  dominions(): { id: string; kind: string }[] {
+  dominions(): { id: string; kind: string; vramGb: number | null }[] {
     return this.entriesOf(this.pending, "dominion").map((entry) => ({
       id: String(entry["id"] ?? ""),
       kind: String(entry["kind"] ?? "remote"),
+      vramGb: typeof entry["vram_gb"] === "number" ? entry["vram_gb"] : null,
     }));
   }
 
@@ -357,33 +321,26 @@ export class ConfigStore {
     return readPath(this.running, path);
   }
 
-  /** The id-keyed entries of one Settings array, with provenance and pending state. */
+  /** The id-keyed entries of one Settings array with pending state. */
   keyedEntries(array: "dominion" | "endpoint"): SectionEntry[] {
-    const leaf = this.activeProfile ? `${this.activeProfile}.toml` : null;
     const runningById = new Map(
       this.entriesOf(this.running, array).map((entry) => [String(entry["id"] ?? ""), entry]),
     );
     return this.entriesOf(this.pending, array).map((raw) => {
       const data = { ...raw };
-      const source = typeof data["source_file"] === "string" ? data["source_file"] : null;
-      delete data["source_file"];
       const id = String(data["id"] ?? "");
-      const sourceFile = source ? baseName(source) : null;
-      const sourceReal = sourceFile?.replace(/\.next$/, "") ?? null;
       return {
         id,
         data,
-        sourceFile: sourceReal,
-        inherited: sourceReal !== null && leaf !== null && sourceReal !== leaf,
         pendingFields: this.diffFields(data, runningById.get(id)),
       };
     });
   }
 
-  /** The `[[model]]` and `[[local_model]]` entries of the pending view (raw). */
-  modelEntriesRaw(): { array: "model" | "local_model"; data: EntryData }[] {
-    const rows: { array: "model" | "local_model"; data: EntryData }[] = [];
-    for (const array of ["model", "local_model"] as const) {
+  /** The model catalog entries of the pending view (raw). */
+  modelEntriesRaw(): { array: "model" | "local_model" | "stt_model"; data: EntryData }[] {
+    const rows: { array: "model" | "local_model" | "stt_model"; data: EntryData }[] = [];
+    for (const array of ["model", "local_model", "stt_model"] as const) {
       for (const data of this.entriesOf(this.pending, array)) {
         rows.push({ array, data });
       }
@@ -392,117 +349,88 @@ export class ConfigStore {
   }
 
   /**
-   * The full `PUT /admin/config` payload base: the pending view stripped
-   * of provenance and of the boot-owned sections. Callers mutate it and
-   * pass it to `savePayload`. Untouched secrets are still the `"***"`
-   * the gateway sent, so the gateway preserves them, and the pending
-   * view's `include` array rides along untouched, so a save keeps the
-   * chain explicit - order and membership included.
+   * The full `PUT /admin/config` payload base. Untouched secrets remain
+   * `"***"` so the gateway can restore them before validation.
    */
   buildConfigPayload(): EntryData {
-    const payload = structuredClone(this.pending);
-    delete payload["source_files"];
-    // The boot-owned sections live in gateway.toml, which the profile
-    // reaches through its include chain; baking them into the leaf
-    // shadow would freeze stale copies the runner later rejects.
-    delete payload["server"];
-    delete payload["workshop"];
-    for (const [array] of KEYED_ARRAYS) {
-      for (const item of this.entriesOf(payload, array)) {
-        delete item["source_file"];
-      }
-    }
-    return payload;
+    return structuredClone(this.pending);
   }
 
-  /**
-   * The `PUT /admin/boot-config` payload base: the boot-owned sections
-   * (`[server]`, plus `[workshop]` when present) from the pending view,
-   * provenance stripped.
-   */
-  buildBootPayload(): EntryData {
-    const payload: EntryData = {};
-    const server = this.pending["server"];
-    if (server !== null && typeof server === "object") {
-      payload["server"] = structuredClone(server);
-    }
-    const workshop = this.pending["workshop"];
-    if (workshop !== null && typeof workshop === "object") {
-      payload["workshop"] = structuredClone(workshop);
-    }
-    return payload;
-  }
-
-  /** Stages a profile payload as the leaf shadow and refreshes. */
+  /** Stages the global config and optional active-profile shadow. */
   async savePayload(payload: EntryData): Promise<void> {
     await this.api.putConfig(payload);
     await this.refreshPending();
     this.notify();
   }
 
-  /** Stages a boot payload as the boot shadow and refreshes. */
-  async saveBootPayload(payload: EntryData): Promise<void> {
-    await this.api.putBootConfig(payload);
-    await this.refreshPending();
-    this.notify();
+  /** Saves one profile checklist in catalog order. */
+  async saveProfile(name: string, chosen: readonly string[]): Promise<void> {
+    const payload = this.buildConfigPayload();
+    const catalogOrder = new Map(this.models().map((entry, index) => [entry.name, index]));
+    const ordered = [...new Set(chosen)].sort(
+      (left, right) =>
+        (catalogOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (catalogOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+    const profile = this.entriesOf(payload, "profile").find((entry) => entry["name"] === name);
+    if (!profile) {
+      throw new Error(`profile ${name} is not available`);
+    }
+    profile["models"] = ordered;
+    await this.savePayload(payload);
   }
 
-  /** The active profile's include chain (see {@link includeChainOf}). */
-  includeChain(): ChainFile[] {
-    return includeChainOf(this.pending);
+  /** Creates an empty profile or a copy of another pending checklist. */
+  async createProfile(name: string, copyFrom: string | null): Promise<void> {
+    const payload = this.buildConfigPayload();
+    const profiles = this.entriesOf(payload, "profile");
+    const source = copyFrom === null ? null : profiles.find((entry) => entry["name"] === copyFrom);
+    const models =
+      source && Array.isArray(source["models"]) ? source["models"].map(String) : [];
+    profiles.push({ name, models });
+    payload["profile"] = profiles;
+    await this.savePayload(payload);
   }
 
-  /**
-   * The pending content attributable to one chain file (by base name):
-   * the keyed-array entries whose winning definition it supplied, plus
-   * the dotted-path values it last wrote. This is the drill-in editor's
-   * base and the `PUT /admin/include/{path}` payload shape. Values the
-   * file defines but a later file overrode leave no provenance and are
-   * absent, so a drill-in save drops them from the file's shadow.
-   */
-  includeFileBody(base: string): EntryData {
-    const body: EntryData = {};
-    for (const [array] of KEYED_ARRAYS) {
-      const owned = this.entriesOf(this.pending, array)
-        .filter((entry) => {
-          const source = entry["source_file"];
-          return (
-            typeof source === "string" && baseName(source).replace(/\.next$/, "") === base
-          );
-        })
-        .map((entry) => {
-          const data = structuredClone(entry);
-          delete data["source_file"];
-          return data;
-        });
-      if (owned.length > 0) {
-        body[array] = owned;
+  /** Deletes a non-active profile from the pending document. */
+  async deleteProfile(name: string): Promise<void> {
+    const payload = this.buildConfigPayload();
+    payload["profile"] = this.entriesOf(payload, "profile").filter(
+      (entry) => entry["name"] !== name,
+    );
+    await this.savePayload(payload);
+  }
+
+  /** Stages the active-profile pointer without switching the live runtime. */
+  async stageActiveProfile(name: string): Promise<void> {
+    const payload = this.buildConfigPayload();
+    payload["active_profile"] = name;
+    await this.savePayload(payload);
+  }
+
+  /** Creates or resets the digest-pinned recommended STT catalog pair. */
+  async restoreSttModels(recommended: readonly EntryData[]): Promise<void> {
+    const payload = this.buildConfigPayload();
+    const current = this.entriesOf(payload, "stt_model");
+    const replacements = new Map(
+      recommended.map((entry) => [String(entry["name"] ?? ""), structuredClone(entry)]),
+    );
+    const merged = current.map((entry) => {
+      const replacement = replacements.get(String(entry["name"] ?? ""));
+      if (!replacement) {
+        return entry;
       }
-    }
-    const map = this.pending["source_files"];
-    if (map !== null && typeof map === "object" && !Array.isArray(map)) {
-      const paths = Object.entries(map as EntryData)
-        .filter(
-          ([, source]) =>
-            typeof source === "string" && baseName(source).replace(/\.next$/, "") === base,
-        )
-        .map(([path]) => path)
-        .sort();
-      // Sorted, an ancestor path precedes its children; writing the
-      // ancestor copies the whole subtree, so children are skipped.
-      let written: string | null = null;
-      for (const path of paths) {
-        if (written !== null && path.startsWith(`${written}.`)) {
-          continue;
-        }
-        const value = readPath(this.pending, path);
-        if (value !== undefined) {
-          writePath(body, path, structuredClone(value));
-          written = path;
-        }
-      }
-    }
-    return body;
+      replacements.delete(String(entry["name"] ?? ""));
+      return {
+        ...entry,
+        source: replacement["source"],
+        sha256: replacement["sha256"],
+        vram_gb: replacement["vram_gb"],
+      };
+    });
+    merged.push(...replacements.values());
+    payload["stt_model"] = merged;
+    await this.savePayload(payload);
   }
 
   /** The `[[endpoint]]` ids of the pending view. */
@@ -517,7 +445,7 @@ export class ConfigStore {
 
   /** The RUNNING (applied) value of a field, or undefined when the entry is new. */
   runningValue(entry: ModelEntry, key: string): unknown {
-    const array = entry.kind === "local" ? "local_model" : "model";
+    const array = modelArray(entry.kind);
     const running = this.entriesOf(this.running, array).find(
       (item) => item["name"] === entry.name,
     );
@@ -580,18 +508,6 @@ export class ConfigStore {
     this.notify();
   }
 
-  /**
-   * Whether the one-time inherited-edit note is due, and marks it shown:
-   * the first edit of an inherited entry per session raises it once.
-   */
-  takeInheritNote(entry: ModelEntry): boolean {
-    if (!entry.inherited || this.inheritNoteShown) {
-      return false;
-    }
-    this.inheritNoteShown = true;
-    return true;
-  }
-
   /** Creates an unsaved draft entry and returns its unique name. */
   addDraft(kind: ModelSource, data: EntryData): string {
     let name = String(data["name"] ?? "new-model");
@@ -608,13 +524,17 @@ export class ConfigStore {
     return name;
   }
 
-  /** Stages a new local model directly into the pending config shadow. */
-  async stageLocalModel(data: EntryData): Promise<string> {
+  /**
+   * Stages a discovered local or STT model and chooses it in the pending
+   * active profile, so Apply provisions the artifact.
+   */
+  async stageDiscoveredModel(kind: "local" | "stt", data: EntryData): Promise<string> {
     const operation = this.stageTail.then(async (): Promise<string> => {
       const payload = this.buildConfigPayload();
-      const items = this.entriesOf(payload, "local_model");
+      const array = modelArray(kind);
+      const items = this.entriesOf(payload, array);
       const taken = new Set(this.models().map((entry) => entry.name));
-      const base = String(data["name"] ?? "new-local-model");
+      const base = String(data["name"] ?? (kind === "stt" ? "new-stt-model" : "new-local-model"));
       let name = base;
       let counter = 2;
       while (taken.has(name)) {
@@ -622,10 +542,14 @@ export class ConfigStore {
         counter += 1;
       }
       items.push({ ...structuredClone(data), name });
-      payload["local_model"] = items;
-      const allowlist = payload["models"];
-      if (Array.isArray(allowlist)) {
-        allowlist.push(name);
+      payload[array] = items;
+      const active = this.pendingActiveProfile();
+      for (const profile of this.entriesOf(payload, "profile")) {
+        if (profile["name"] !== active) {
+          continue;
+        }
+        const chosen = Array.isArray(profile["models"]) ? profile["models"].map(String) : [];
+        profile["models"] = [...chosen, name];
       }
       await this.api.putConfig(payload);
       await this.refreshPending();
@@ -653,7 +577,7 @@ export class ConfigStore {
    */
   buildSavePayload(entry: ModelEntry, remove = false): EntryData {
     const payload = this.buildConfigPayload();
-    const array = entry.kind === "local" ? "local_model" : "model";
+    const array = modelArray(entry.kind);
     let items = this.entriesOf(payload, array);
     if (entry.draft) {
       items.push(structuredClone(entry.data));
@@ -662,6 +586,10 @@ export class ConfigStore {
     }
     if (remove) {
       payload[array] = items.filter((item) => item["name"] !== entry.name);
+      for (const profile of this.entriesOf(payload, "profile")) {
+        const names = Array.isArray(profile["models"]) ? profile["models"].map(String) : [];
+        profile["models"] = names.filter((name) => name !== entry.name);
+      }
       return payload;
     }
     const target = items.find((item) => item["name"] === entry.name);
@@ -669,6 +597,13 @@ export class ConfigStore {
       const edits = this.edits.get(entryKey(entry));
       for (const [key, value] of edits ?? []) {
         writePath(target, key, value);
+      }
+      const renamed = String(target["name"] ?? entry.name);
+      if (renamed !== entry.name) {
+        for (const profile of this.entriesOf(payload, "profile")) {
+          const names = Array.isArray(profile["models"]) ? profile["models"].map(String) : [];
+          profile["models"] = names.map((name) => (name === entry.name ? renamed : name));
+        }
       }
     }
     return payload;
@@ -741,8 +676,6 @@ export class ConfigStore {
           ...Object.keys(runningSide ?? {}),
           ...Object.keys(pendingSide ?? {}),
         ]);
-        keys.delete("source_file");
-        keys.delete("source_files");
         for (const key of keys) {
           compare(runningSide?.[key], pendingSide?.[key], [...path, key]);
         }
@@ -795,7 +728,6 @@ export class ConfigStore {
       return diff;
     }
     const keys = new Set([...Object.keys(pending), ...Object.keys(running)]);
-    keys.delete("source_file");
     for (const key of keys) {
       if (!sameValue(pending[key], running[key])) {
         diff.add(key);
@@ -808,6 +740,14 @@ export class ConfigStore {
 /** The edit-map key for one entry. */
 function entryKey(entry: ModelEntry): string {
   return `${entry.kind}:${entry.name}`;
+}
+
+/** The JSON array key for one catalog source. */
+function modelArray(kind: ModelSource): "model" | "local_model" | "stt_model" {
+  if (kind === "remote") {
+    return "model";
+  }
+  return kind === "local" ? "local_model" : "stt_model";
 }
 
 /** Removes ArtifactStore marker files from a gateway response defensively. */

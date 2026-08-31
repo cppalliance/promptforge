@@ -35,52 +35,47 @@ pub(crate) fn routes(state: AppState) -> Router {
     .with_state(state)
 }
 
-/// Exact gateway paths the proxy forwards: the admin config surface the
-/// config UI uses, plus the model catalog and the artifact cache.
-const FORWARD_EXACT: &[&str] = &[
-    "/admin/boot-config",
-    "/admin/config",
-    "/admin/config-apply",
-    "/admin/config-dirty",
-    "/admin/config-pending",
-    "/admin/config-revert",
-    "/admin/env",
-    "/admin/model-info",
-    "/admin/orphans",
-    "/admin/profiles",
-    "/admin/reveal",
-    "/admin/status",
-    "/admin/switch-profile",
-    "/admin/system",
-    "/v1/cache",
-    "/v1/models",
-];
-
-/// Path prefixes the proxy forwards: per-name profile files,
-/// include-file shadows, the HF proxy, and per-digest cache deletes.
-const FORWARD_PREFIX: &[&str] = &[
-    "/admin/hf/",
-    "/admin/include/",
-    "/admin/profiles/",
-    "/v1/cache/",
-];
-
-/// Whether the proxy forwards `path`. Everything outside the allowlist
+/// Whether the proxy forwards `method` and `path`. Everything outside the allowlist
 /// is refused: chat completions, `/admin/progress` (the workshop owns
 /// progress display, so the panel must never subscribe), `/health`, and
 /// the config UI assets. Dot segments are refused outright, because the
 /// forwarding URL parse would normalize them and a `..` inside an
 /// allowlisted prefix could otherwise escape onto a refused path;
 /// backslashes are refused for the same reason (the WHATWG parse folds
-/// them into slashes).
-fn forward_allowed(path: &str) -> bool {
+/// them into slashes). Methods are part of the allowlist, so the removed
+/// direct-download flow cannot reach `POST /v1/cache` through the panel.
+fn forward_allowed(method: &Method, path: &str) -> bool {
     if path
         .split('/')
         .any(|segment| segment == "." || segment == ".." || segment.contains('\\'))
     {
         return false;
     }
-    FORWARD_EXACT.contains(&path) || FORWARD_PREFIX.iter().any(|prefix| path.starts_with(prefix))
+    match *method {
+        Method::GET => {
+            matches!(
+                path,
+                "/admin/config"
+                    | "/admin/config-dirty"
+                    | "/admin/config-pending"
+                    | "/admin/env"
+                    | "/admin/model-info"
+                    | "/admin/orphans"
+                    | "/admin/status"
+                    | "/admin/system"
+                    | "/v1/cache"
+            ) || path.starts_with("/admin/hf/")
+        }
+        Method::PUT => matches!(path, "/admin/config" | "/admin/env"),
+        Method::POST => matches!(
+            path,
+            "/admin/config-apply" | "/admin/config-revert" | "/admin/reveal"
+        ),
+        Method::DELETE => path.strip_prefix("/v1/cache/").is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }),
+        _ => false,
+    }
 }
 
 /// Answers the gateway's base URL, so the workshop UI can point the
@@ -105,7 +100,7 @@ async fn gateway_forward(
     body: Bytes,
 ) -> Result<Response, AppError> {
     let path = format!("/{path}");
-    if !forward_allowed(&path) {
+    if !forward_allowed(&method, &path) {
         return Err(AppError::ForwardDenied);
     }
     let path_and_query = match query {
@@ -146,7 +141,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use axum::response::IntoResponse;
-    use axum::routing::{get as axum_get, post as axum_post};
+    use axum::routing::{get as axum_get, put as axum_put};
     use tower::ServiceExt;
 
     use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
@@ -154,32 +149,44 @@ mod tests {
 
     #[test]
     fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
-        for path in [
-            "/admin/config",
-            "/admin/config-apply",
-            "/admin/status",
-            "/admin/profiles",
-            "/admin/profiles/beta",
-            "/admin/include/common.toml",
-            "/admin/hf/search",
-            "/admin/switch-profile",
-            "/v1/models",
-            "/v1/cache",
-            "/v1/cache/abc123",
+        for (method, path) in [
+            (Method::GET, "/admin/config"),
+            (Method::PUT, "/admin/config"),
+            (Method::POST, "/admin/config-apply"),
+            (Method::GET, "/admin/status"),
+            (Method::GET, "/admin/hf/search"),
+            (Method::GET, "/v1/cache"),
+            (
+                Method::DELETE,
+                "/v1/cache/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
         ] {
-            assert!(forward_allowed(path), "{path} must be forwardable");
+            assert!(
+                forward_allowed(&method, path),
+                "{method} {path} must be forwardable"
+            );
         }
-        for path in [
-            "/v1/chat/completions",
-            "/admin/progress",
-            "/health",
-            "/config/",
-            "/admin/hf/../../v1/chat/completions",
-            "/admin/hf/..\\..\\v1\\chat\\completions",
-            "/admin/hf/./search",
-            "/admin",
+        for (method, path) in [
+            (Method::POST, "/v1/cache"),
+            (Method::GET, "/v1/models"),
+            (Method::POST, "/v1/chat/completions"),
+            (Method::GET, "/admin/progress"),
+            (Method::PUT, "/admin/boot-config"),
+            (Method::PUT, "/admin/include/common.toml"),
+            (Method::POST, "/admin/profiles/beta"),
+            (Method::POST, "/admin/switch-profile"),
+            (Method::GET, "/health"),
+            (Method::GET, "/config/"),
+            (Method::GET, "/admin/hf/../../v1/chat/completions"),
+            (Method::GET, "/admin/hf/..\\..\\v1\\chat\\completions"),
+            (Method::GET, "/admin/hf/./search"),
+            (Method::GET, "/admin"),
+            (Method::DELETE, "/v1/cache/abc123"),
         ] {
-            assert!(!forward_allowed(path), "{path} must be refused");
+            assert!(
+                !forward_allowed(&method, path),
+                "{method} {path} must be refused"
+            );
         }
     }
 
@@ -246,8 +253,8 @@ mod tests {
     #[tokio::test]
     async fn the_proxy_forwards_the_query_string_and_a_json_body() {
         let gateway = axum::Router::new().route(
-            "/admin/switch-profile",
-            axum_post(
+            "/admin/config",
+            axum_put(
                 |headers: axum::http::HeaderMap, request: axum::extract::Request| async move {
                     let declared_json = headers
                         .get(header::CONTENT_TYPE)
@@ -270,10 +277,10 @@ mod tests {
         let base_url = spawn_gateway(gateway).await;
         let (state, _tape_dir) = state_for(&base_url);
         let request = Request::builder()
-            .method("POST")
-            .uri("/gateway/api/admin/switch-profile")
+            .method("PUT")
+            .uri("/gateway/api/admin/config?source=panel")
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"name":"beta"}"#))
+            .body(Body::from(r#"{"active_profile":"beta"}"#))
             .expect("static request parts are valid");
         let response = router(state)
             .oneshot(request)
@@ -283,7 +290,10 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&body_bytes(response).await).expect("the body is JSON");
         assert_eq!(json["declared_json"], true, "the body forwards as JSON");
-        assert_eq!(json["echo"]["name"], "beta", "the body forwards verbatim");
+        assert_eq!(
+            json["echo"]["active_profile"], "beta",
+            "the body forwards verbatim"
+        );
     }
 
     #[tokio::test]
