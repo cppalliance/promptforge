@@ -488,6 +488,38 @@ impl ArtifactStore {
     }
 }
 
+/// Resolves an already-present model artifact without downloading or writing.
+///
+/// URL sources use the same source-keyed cache slot as [`ArtifactStore`].
+/// Filesystem sources expand `~` with the same rules as provisioning.
+///
+/// # Errors
+/// Returns [`LocalError`] when the source URL, home directory, or an existing
+/// cache path is invalid.
+pub fn existing_model_path(cache_root: &Path, source: &str) -> Result<Option<PathBuf>> {
+    let path = if looks_like_url(source) {
+        let name = filename_from_url(source)?;
+        let relative = Path::new("models")
+            .join(source_cache_key(source))
+            .join(name);
+        if !safe_relative_path(&relative) {
+            return Err(LocalError::UnsafeCachePath {
+                path: cache_root.join(relative),
+            });
+        }
+        cache_root.join(relative)
+    } else {
+        expand_tilde(source)?
+    };
+    if !path.is_file() {
+        return Ok(None);
+    }
+    if path.starts_with(cache_root) {
+        validate_cache_path(cache_root, &path)?;
+    }
+    Ok(Some(path))
+}
+
 /// The blocking HTTP client shared by artifact provisioning and the blob
 /// cache: gateway user agent, bounded connect, and a generous whole-request
 /// ceiling (ART-003) in place of a per-read idle timeout.

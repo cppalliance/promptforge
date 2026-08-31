@@ -38,6 +38,25 @@ impl Family {
         }
     }
 
+    /// Returns the operator-facing catalog label.
+    #[must_use]
+    pub const fn display_label(self) -> &'static str {
+        match self {
+            Self::Chatml => "ChatML",
+            Self::Llama3 => "Llama 3",
+            Self::Llama31 => "Llama 3.1",
+            Self::Qwen25 => "Qwen 2.5",
+            Self::Qwen3 => "Qwen 3",
+            Self::Gemma3 => "Gemma 3",
+            Self::Gemma4 => "Gemma 4",
+            Self::Mistral => "Mistral",
+            Self::Phi3 => "Phi 3",
+            Self::Phi4 => "Phi 4",
+            Self::GptOss => "GPT OSS",
+            Self::Zephyr => "Zephyr",
+        }
+    }
+
     /// Parses a canonical name or documented alias.
     ///
     /// Matching is ASCII-case-insensitive after trimming surrounding

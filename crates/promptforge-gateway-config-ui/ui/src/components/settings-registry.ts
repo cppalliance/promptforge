@@ -5,7 +5,14 @@
 // mirror the plan's `[[model]]` and `[[local_model]]` specifications.
 
 /** The control kinds the renderer knows how to build. */
-export type SettingType = "slider" | "toggle" | "dropdown" | "input" | "textarea" | "chips";
+export type SettingType =
+  | "slider"
+  | "toggle"
+  | "dropdown"
+  | "input"
+  | "textarea"
+  | "chips"
+  | "chat-template";
 
 /** What a setting definition can read to resolve options and visibility. */
 export interface SettingContext {
@@ -355,12 +362,12 @@ export const LOCAL_MODEL_SETTINGS: readonly SettingDef[] = [
   thinkingSetting(),
   {
     key: "chat_template_file",
-    label: "Chat template file",
-    help: "Override the GGUF's embedded chat template.",
+    label: "Chat template",
+    help: "Auto uses a known repair when required, then the GGUF's embedded template.",
     section: "generation",
-    type: "input",
+    type: "chat-template",
     default: null,
-    placeholder: "None (use the GGUF's template)",
+    visibleWhen: (ctx) => ctx.value("kind") === "chat" || ctx.value("kind") == null,
   },
   {
     key: "source",

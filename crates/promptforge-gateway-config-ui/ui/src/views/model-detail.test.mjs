@@ -86,6 +86,165 @@ test("the local detail pane renders the registry sections with the model's value
   );
 });
 
+test("the chat-template dropdown lists the Rust catalog and writes a built-in family", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/qwen-common");
+  await settle();
+
+  assert.deepEqual(
+    dropdownValues(root, "chat_template_file"),
+    [
+      "",
+      "builtin:chatml",
+      "builtin:llama-3",
+      "builtin:llama-3.1",
+      "builtin:qwen-2.5",
+      "builtin:qwen-3",
+      "builtin:gemma-3",
+      "builtin:gemma-4",
+      "builtin:mistral",
+      "builtin:phi-3",
+      "builtin:phi-4",
+      "builtin:gpt-oss",
+      "builtin:zephyr",
+      "__custom_path__",
+    ],
+  );
+  root
+    .querySelector(".field-row[data-key='chat_template_file'] [data-value='builtin:qwen-3']")
+    .click();
+  await settle();
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  const model = JSON.parse(put.init.body).local_model.find(
+    (entry) => entry.name === "qwen-common",
+  );
+  assert.equal(model.chat_template_file, "builtin:qwen-3");
+});
+
+test("Custom path reveals a labeled text field and writes its path", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+
+  dropdownValues(root, "chat_template_file");
+  root
+    .querySelector(".field-row[data-key='chat_template_file'] [data-value='__custom_path__']")
+    .click();
+  const custom = root.querySelector(".chat-template-custom");
+  assert.equal(custom.hidden, false);
+  assert.equal(custom.querySelector("label").htmlFor, "field-chat_template_file-custom");
+  typeInto(dom, custom.querySelector("input"), "templates/llama.jinja");
+  await settle();
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  const model = JSON.parse(put.init.body).local_model.find(
+    (entry) => entry.name === "llama-leaf",
+  );
+  assert.equal(model.chat_template_file, "templates/llama.jinja");
+});
+
+test("a headless gateway without the catalog route degrades to Auto and Custom path", async () => {
+  const stub = fixtureStub({ chatTemplates: null });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/qwen-common");
+  await settle();
+
+  assert.deepEqual(
+    dropdownValues(root, "chat_template_file"),
+    ["", "__custom_path__"],
+    "a 404 catalog leaves the automatic and custom choices",
+  );
+  assert.match(
+    root.querySelector(".chat-template-resolution").textContent,
+    /Effective sourceAuto/,
+  );
+});
+
+test("effective template source, detected family, and known-broken reason render", async () => {
+  const catalog = {
+    families: [
+      { slug: "qwen-3", label: "Qwen 3" },
+      { slug: "gemma-4", label: "Gemma 4" },
+    ],
+    mappings: [],
+    models: [
+      {
+        name: "qwen-common",
+        effective_source: "known-override",
+        effective_family: "gemma-4",
+        detected_family: "qwen-3",
+        reason: "Known-broken embedded template matched by content hash.",
+      },
+    ],
+  };
+  const stub = fixtureStub({ chatTemplates: catalog });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/qwen-common");
+  await settle();
+
+  const details = root.querySelector(".chat-template-resolution");
+  assert.match(details.textContent, /Effective sourceKnown override - Gemma 4/);
+  assert.match(details.textContent, /Detected familyQwen 3/);
+  assert.match(details.textContent, /Known-broken embedded template matched by content hash/);
+});
+
+test("Auto clears an explicit path and shows automatic resolution", async () => {
+  const config = modelsFixture();
+  config.local_model[1].chat_template_file = "templates/llama.jinja";
+  const catalog = {
+    families: [{ slug: "llama-3", label: "Llama 3" }],
+    mappings: [],
+    models: [
+      {
+        name: "llama-leaf",
+        effective_source: "custom",
+        effective_family: null,
+        detected_family: "llama-3",
+        reason: "Custom template path `templates/llama.jinja` is selected.",
+      },
+    ],
+  };
+  const stub = fixtureStub({
+    config,
+    pending: structuredClone(config),
+    chatTemplates: catalog,
+  });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+
+  dropdownValues(root, "chat_template_file");
+  root
+    .querySelector(".field-row[data-key='chat_template_file'] [data-value='']")
+    .click();
+  await settle();
+  assert.match(
+    root.querySelector(".chat-template-resolution").textContent,
+    /Effective sourceAuto/,
+  );
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  const model = JSON.parse(put.init.body).local_model.find(
+    (entry) => entry.name === "llama-leaf",
+  );
+  assert.equal(model.chat_template_file, null);
+});
+
 test("the remote detail pane renders routing fields and effort levels feed default effort", async () => {
   const config = modelsFixture();
   config.model[0].images = true;

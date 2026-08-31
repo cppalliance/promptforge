@@ -34,4 +34,7 @@ mod upstream;
 
 pub use crate::dialect::DialectResolveError;
 pub use crate::error::LocalError;
+pub use crate::launch_templates::{
+    ChatTemplateResolution, ChatTemplateSource, inspect_chat_template,
+};
 pub use crate::runtime::{LocalRuntime, LocalStartFailure, LocalStartOutcome, resolve_cache_root};

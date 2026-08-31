@@ -312,6 +312,46 @@ export function cacheListFixture() {
   ];
 }
 
+/** The server-owned chat-template catalog and effective model decisions. */
+export function chatTemplateCatalogFixture() {
+  return {
+    families: [
+      { slug: "chatml", label: "ChatML" },
+      { slug: "llama-3", label: "Llama 3" },
+      { slug: "llama-3.1", label: "Llama 3.1" },
+      { slug: "qwen-2.5", label: "Qwen 2.5" },
+      { slug: "qwen-3", label: "Qwen 3" },
+      { slug: "gemma-3", label: "Gemma 3" },
+      { slug: "gemma-4", label: "Gemma 4" },
+      { slug: "mistral", label: "Mistral" },
+      { slug: "phi-3", label: "Phi 3" },
+      { slug: "phi-4", label: "Phi 4" },
+      { slug: "gpt-oss", label: "GPT OSS" },
+      { slug: "zephyr", label: "Zephyr" },
+    ],
+    mappings: [
+      { model_id: "qwen/qwen3-8b", family: "qwen-3" },
+      { model_id: "meta-llama/meta-llama-3-8b-instruct", family: "llama-3" },
+    ],
+    models: [
+      {
+        name: "qwen-common",
+        effective_source: "embedded",
+        effective_family: null,
+        detected_family: "qwen-3",
+        reason: "Auto uses the GGUF embedded template.",
+      },
+      {
+        name: "llama-leaf",
+        effective_source: "embedded",
+        effective_family: null,
+        detected_family: "llama-3",
+        reason: "Auto uses the GGUF embedded template.",
+      },
+    ],
+  };
+}
+
 /** A README carrying the XSS vectors the sanitizer must neutralize. */
 export function readmeFixture() {
   return [
@@ -387,6 +427,7 @@ export function gatewayStub({
   dirty,
   orphans,
   modelInfo,
+  chatTemplates,
   dirtyAfterSave,
   system,
   hfSearch,
@@ -465,6 +506,13 @@ export function gatewayStub({
     }
     if (url.endsWith("/admin/system")) {
       return jsonResponse(system ?? systemFixture());
+    }
+    if (url.endsWith("/admin/chat-templates")) {
+      // An explicit null simulates a headless gateway without the route.
+      if (chatTemplates === null) {
+        return jsonResponse({ error: "not found" }, 404);
+      }
+      return jsonResponse(chatTemplates ?? chatTemplateCatalogFixture());
     }
     if (url.endsWith("/v1/cache") && (init.method ?? "GET") === "GET") {
       if (onCacheList) {

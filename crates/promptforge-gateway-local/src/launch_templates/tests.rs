@@ -112,6 +112,32 @@ fn clean_embedded_chat_template_needs_no_file_override() {
 }
 
 #[test]
+fn inspection_reports_auto_and_known_broken_reasons_without_staging() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let clean_path = temp.path().join("clean.gguf");
+    write_test_gguf(&clean_path, Some("{{ messages }} clean"));
+    let clean = chat_model_config("clean-model", None);
+    let automatic = inspect_chat_template(&clean.local_models()[0], Some(&clean_path))
+        .expect("clean template inspects");
+    assert_eq!(automatic.source(), ChatTemplateSource::Embedded);
+    assert_eq!(automatic.reason(), "Auto uses the GGUF embedded template.");
+
+    let broken_path = temp.path().join("broken.gguf");
+    write_test_gguf(
+        &broken_path,
+        Some(include_str!(
+            "../chat_templates/fixtures/broken-gemma-4-edge.jinja"
+        )),
+    );
+    let known = inspect_chat_template(&clean.local_models()[0], Some(&broken_path))
+        .expect("broken template inspects");
+    assert_eq!(known.source(), ChatTemplateSource::KnownOverride);
+    assert_eq!(known.family(), Some(Family::Gemma4));
+    assert!(known.reason().contains("Known-broken"));
+    assert!(!temp.path().join("chat-templates").exists());
+}
+
+#[test]
 fn blank_configured_path_does_not_hide_a_valid_embedded_template() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path().join("cache")).expect("store");

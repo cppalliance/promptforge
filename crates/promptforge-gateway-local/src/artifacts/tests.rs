@@ -50,6 +50,30 @@ fn source_cache_key_is_stable_and_distinguishes_urls() {
 }
 
 #[test]
+fn existing_model_path_uses_the_provisioning_slot_without_writing() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir");
+    let source = "https://host.example/repo/model.gguf";
+    assert_eq!(
+        existing_model_path(&root, source).expect("missing lookup"),
+        None
+    );
+
+    let cached = root
+        .join("models")
+        .join(source_cache_key(source))
+        .join("model.gguf");
+    std::fs::create_dir_all(cached.parent().expect("cached parent")).expect("mkdir model slot");
+    std::fs::write(&cached, b"model").expect("write model");
+
+    assert_eq!(
+        existing_model_path(&root, source).expect("cached lookup"),
+        Some(cached)
+    );
+}
+
+#[test]
 fn validate_cache_path_rejects_escape() {
     // ART-006/007: a path outside the cache root is refused.
     let dir = TempDir::new().expect("tempdir");

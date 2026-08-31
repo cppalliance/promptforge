@@ -51,6 +51,49 @@ export interface GgufInfo {
   parameter_count: number | null;
 }
 
+/** One bundled chat-template family exposed by the gateway catalog. */
+export interface ChatTemplateFamily {
+  /** Stable value written after `builtin:`. */
+  slug: string;
+  /** Operator-facing dropdown label. */
+  label: string;
+}
+
+/** The effective source categories shared with launch-time resolution. */
+export type ChatTemplateSource = "embedded" | "known-override" | "builtin" | "custom";
+
+/** One local chat model's launch-time template decision. */
+export interface ChatTemplateModelResolution {
+  /** Configured local model name. */
+  name: string;
+  /** Effective source selected by launch precedence. */
+  effective_source: ChatTemplateSource;
+  /** Bundled family selected by an override or explicit choice. */
+  effective_family: string | null;
+  /** Family detected by the exact server-side model mapper. */
+  detected_family: string | null;
+  /** Operator-facing reason for the decision. */
+  reason: string;
+}
+
+/** One exact Hugging Face model ID mapping used by Discover. */
+export interface ChatTemplateMapping {
+  /** Exact lowercase repository identifier. */
+  model_id: string;
+  /** Bundled family slug. */
+  family: string;
+}
+
+/** The validated `GET /admin/chat-templates` response. */
+export interface ChatTemplateCatalog {
+  /** Bundled families in dropdown order. */
+  families: ChatTemplateFamily[];
+  /** Exact model mappings from the Rust catalog. */
+  mappings: ChatTemplateMapping[];
+  /** Effective decisions for configured local chat models. */
+  models: ChatTemplateModelResolution[];
+}
+
 /** The `GET /admin/system` snapshot the Settings and Discover views consume. */
 export interface SystemSnapshot {
   /** Processor identity and load; null when the reply omits it. */
@@ -381,6 +424,63 @@ export class GatewayApi {
     };
   }
 
+  /** Fetches and validates the local chat-template catalog. */
+  async getChatTemplates(signal?: AbortSignal): Promise<ChatTemplateCatalog> {
+    const data = requireRecord(
+      await this.getJson("/admin/chat-templates", signal),
+      "chat-template catalog",
+    );
+    const families = requireArray(data["families"], "chat-template families").map((raw) => {
+      const family = requireRecord(raw, "chat-template family");
+      return {
+        slug: requireString(family["slug"], "chat-template family slug"),
+        label: requireString(family["label"], "chat-template family label"),
+      };
+    });
+    const slugs = new Set(families.map((family) => family.slug));
+    const mappings = requireArray(data["mappings"], "chat-template mappings").map((raw) => {
+      const mapping = requireRecord(raw, "chat-template mapping");
+      const family = requireString(mapping["family"], "chat-template mapping family");
+      if (!slugs.has(family)) {
+        throw new TypeError(`the gateway returned unknown mapped chat-template family ${family}`);
+      }
+      return {
+        model_id: requireString(mapping["model_id"], "chat-template model ID"),
+        family,
+      };
+    });
+    const models = requireArray(data["models"], "chat-template resolutions").map((raw) => {
+      const model = requireRecord(raw, "chat-template resolution");
+      const source = requireChatTemplateSource(model["effective_source"]);
+      const effectiveFamily = nullableString(
+        model["effective_family"],
+        "effective chat-template family",
+      );
+      const detectedFamily = nullableString(
+        model["detected_family"],
+        "detected chat-template family",
+      );
+      if (effectiveFamily !== null && !slugs.has(effectiveFamily)) {
+        throw new TypeError(
+          `the gateway returned unknown effective chat-template family ${effectiveFamily}`,
+        );
+      }
+      if (detectedFamily !== null && !slugs.has(detectedFamily)) {
+        throw new TypeError(
+          `the gateway returned unknown detected chat-template family ${detectedFamily}`,
+        );
+      }
+      return {
+        name: requireString(model["name"], "chat-template model name"),
+        effective_source: source,
+        effective_family: effectiveFamily,
+        detected_family: detectedFamily,
+        reason: requireString(model["reason"], "chat-template resolution reason"),
+      };
+    });
+    return { families, mappings, models };
+  }
+
   /** Opens the OS file manager at `path` via `POST /admin/reveal`. */
   async reveal(path: string): Promise<void> {
     const response = await this.send("/admin/reveal", {
@@ -648,6 +748,43 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
     throw new TypeError(`the gateway returned invalid ${label} JSON`);
   }
   return value;
+}
+
+/** Requires an external JSON array. */
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`the gateway returned invalid ${label} JSON`);
+  }
+  return value;
+}
+
+/** Requires an external JSON string. */
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`the gateway returned invalid ${label} JSON`);
+  }
+  return value;
+}
+
+/** Requires a string-or-null external field. */
+function nullableString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requireString(value, label);
+}
+
+/** Requires a launch-template source category. */
+function requireChatTemplateSource(value: unknown): ChatTemplateSource {
+  if (
+    value === "embedded" ||
+    value === "known-override" ||
+    value === "builtin" ||
+    value === "custom"
+  ) {
+    return value;
+  }
+  throw new TypeError("the gateway returned invalid effective chat-template source JSON");
 }
 
 /** Returns an object or null for an optional external object. */

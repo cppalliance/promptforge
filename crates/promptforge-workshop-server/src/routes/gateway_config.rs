@@ -56,6 +56,7 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
             matches!(
                 path,
                 "/admin/config"
+                    | "/admin/chat-templates"
                     | "/admin/config-dirty"
                     | "/admin/config-pending"
                     | "/admin/env"
@@ -151,6 +152,7 @@ mod tests {
     fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
         for (method, path) in [
             (Method::GET, "/admin/config"),
+            (Method::GET, "/admin/chat-templates"),
             (Method::PUT, "/admin/config"),
             (Method::POST, "/admin/config-apply"),
             (Method::GET, "/admin/status"),

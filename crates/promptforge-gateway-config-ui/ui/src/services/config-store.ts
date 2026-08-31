@@ -7,8 +7,16 @@
 // from the pending view plus one model's edits - untouched secrets ride
 // through as the "***" the gateway sent, so no real secret ever leaves
 // or re-enters the browser.
-
-import type { CacheListEntry, DirtyReport, GatewayApi, OrphanFile } from "./gateway-api";
+import { GatewayHttpError } from "./gateway-api";
+import type {
+  CacheListEntry,
+  ChatTemplateCatalog,
+  ChatTemplateFamily,
+  ChatTemplateModelResolution,
+  DirtyReport,
+  GatewayApi,
+  OrphanFile,
+} from "./gateway-api";
 
 /** Which TOML catalog array a model entry lives in. */
 export type ModelSource = "local" | "remote" | "stt";
@@ -117,6 +125,8 @@ export class ConfigStore {
   cache: CacheListEntry[] = [];
   /** The active profile's name, from `GET /admin/status`. */
   activeProfile = "";
+  /** Server-owned template families, mapper, and effective decisions. */
+  private chatTemplates: ChatTemplateCatalog = { families: [], mappings: [], models: [] };
 
   private readonly api: GatewayApi;
   private running: EntryData = {};
@@ -150,7 +160,7 @@ export class ConfigStore {
   /** Loads everything the models view needs; failures land in `loadError`. */
   async load(): Promise<void> {
     try {
-      const [running, pending, dirty, orphans, cache, status] = await Promise.all([
+      const [running, pending, dirty, orphans, cache, status, chatTemplates] = await Promise.all([
         this.api.getConfig(),
         this.api.getConfigPending(),
         this.api.getConfigDirty(),
@@ -159,6 +169,7 @@ export class ConfigStore {
         this.api.getOrphans().catch((): OrphanFile[] => []),
         this.api.listCache().catch((): CacheListEntry[] => []),
         this.api.getStatus(),
+        this.loadChatTemplates(),
       ]);
       this.running = running;
       this.pending = pending;
@@ -167,6 +178,7 @@ export class ConfigStore {
       this.cache = cache;
       this.activeProfile = status.profile;
       this.runningModels = status.models;
+      this.chatTemplates = chatTemplates;
       this.loadError = null;
     } catch (error) {
       this.loadError = error instanceof Error ? error.message : String(error);
@@ -177,12 +189,26 @@ export class ConfigStore {
 
   /** Re-reads the pending view and the dirty report after a write. */
   private async refreshPending(): Promise<void> {
-    const [pending, dirty] = await Promise.all([
+    const [pending, dirty, chatTemplates] = await Promise.all([
       this.api.getConfigPending(),
       this.api.getConfigDirty(),
+      this.loadChatTemplates(),
     ]);
     this.pending = pending;
     this.dirty = dirty;
+    this.chatTemplates = chatTemplates;
+  }
+
+  /** Reads the local-only catalog while preserving remote-only headless builds. */
+  private async loadChatTemplates(): Promise<ChatTemplateCatalog> {
+    try {
+      return await this.api.getChatTemplates();
+    } catch (error) {
+      if (error instanceof GatewayHttpError && error.status === 404) {
+        return { families: [], mappings: [], models: [] };
+      }
+      throw error;
+    }
   }
 
   /** Re-reads the running view too (after apply/revert). */
@@ -244,6 +270,24 @@ export class ConfigStore {
       });
     }
     return entries;
+  }
+
+  /** Bundled chat-template families in server catalog order. */
+  chatTemplateFamilies(): readonly ChatTemplateFamily[] {
+    return this.chatTemplates.families;
+  }
+
+  /** Effective server-side template resolution for one configured model. */
+  chatTemplateResolution(name: string): ChatTemplateModelResolution | null {
+    return this.chatTemplates.models.find((model) => model.name === name) ?? null;
+  }
+
+  /** Exact server-side family mapping for a Hugging Face repository ID. */
+  mappedChatTemplateFamily(modelId: string): string | null {
+    const normalized = modelId.trim().toLowerCase();
+    return (
+      this.chatTemplates.mappings.find((mapping) => mapping.model_id === normalized)?.family ?? null
+    );
   }
 
   /** Finds one entry by kind and name (drafts included). */

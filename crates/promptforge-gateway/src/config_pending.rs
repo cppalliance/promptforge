@@ -18,7 +18,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use promptforge_gateway_config::{
-    ProfileSelection, load_pending_config, pending_report, profile_state_path, shadow_path,
+    Config, ProfileSelection, load_pending_config, pending_report, profile_state_path, shadow_path,
 };
 
 /// The `GET /admin/config-pending` route: bearer-authed, renders the
@@ -35,16 +35,7 @@ pub(crate) async fn admin_config_pending(
     let config_path = crate::config_path(&state)?.to_path_buf();
     let running_profile = state.live.read().await.profile_name.clone();
     let reply = tokio::task::spawn_blocking(move || {
-        // A pending state shadow is an explicit edit and wins. Otherwise use
-        // the running selection, which may have come from a command-line or
-        // environment override and therefore differ from persisted state.
-        let selection = if shadow_path(&profile_state_path(&config_path)).is_file() {
-            ProfileSelection::default()
-        } else {
-            ProfileSelection::new(running_profile.as_deref(), None)
-        };
-        let config = load_pending_config(&config_path, &selection)
-            .map_err(|error| pending_read_error(&error))?;
+        let config = load_pending_for_running(&config_path, running_profile.as_deref())?;
         let mut profile = config.to_json();
         if let Some(table) = profile.as_object_mut()
             && let Some(active) = config.active_profile()
@@ -62,6 +53,23 @@ pub(crate) async fn admin_config_pending(
     .await
     .map_err(|join| GatewayError::PendingConfig(join.to_string()))??;
     Ok(Json(reply))
+}
+
+/// Loads the shadow-preferred config with the same active-selection rule as
+/// `GET /admin/config-pending`.
+pub(crate) fn load_pending_for_running(
+    config_path: &Path,
+    running_profile: Option<&str>,
+) -> Result<Config, GatewayError> {
+    // A pending state shadow is an explicit edit and wins. Otherwise use
+    // the running selection, which may have come from a command-line or
+    // environment override and therefore differ from persisted state.
+    let selection = if shadow_path(&profile_state_path(config_path)).is_file() {
+        ProfileSelection::default()
+    } else {
+        ProfileSelection::new(running_profile, None)
+    };
+    load_pending_config(config_path, &selection).map_err(|error| pending_read_error(&error))
 }
 
 /// The `GET /admin/config-dirty` route: bearer-authed, reports the

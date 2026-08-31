@@ -27,6 +27,8 @@
 //! `[[local_model]]` entry references (local builds), a bearer-authed
 //! `GET /admin/model-info` GGUF-header readout of a cache file's layer and
 //! parameter counts (local builds), a bearer-authed
+//! `GET /admin/chat-templates` family catalog and per-model effective
+//! resolution view (local builds), a bearer-authed
 //! `POST /v1/audio/transcriptions` OpenAI-compatible multipart STT endpoint
 //! (workshop builds), a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
@@ -57,6 +59,8 @@
 mod api_error;
 #[cfg(feature = "local")]
 mod cache;
+#[cfg(feature = "local")]
+mod chat_templates;
 mod config_apply;
 mod config_pending;
 mod config_write;
@@ -345,10 +349,14 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/reveal", post(reveal::admin_reveal))
         .route("/admin/hf/search", get(hf::admin_hf_search))
         .route("/admin/hf/model/{*repo}", get(hf::admin_hf_model));
-    // The orphan and model-info routes read the local artifact store, so
-    // they exist only in builds with local inference.
+    // The template, orphan, and model-info routes read local-inference
+    // facilities, so they exist only in builds with local inference.
     #[cfg(feature = "local")]
     let walled = walled
+        .route(
+            "/admin/chat-templates",
+            get(chat_templates::admin_chat_templates),
+        )
         .route("/admin/orphans", get(orphans::admin_orphans))
         .route("/admin/model-info", get(model_info::admin_model_info));
     // `GET /config` (no trailing slash) redirects to `/config/` so the
@@ -1965,6 +1973,7 @@ cache_dir = '{cache}'
         ];
         #[cfg(feature = "local")]
         requests.extend([
+            (Method::GET, "/admin/chat-templates"),
             (Method::GET, "/admin/orphans"),
             (Method::GET, "/admin/model-info"),
         ]);
