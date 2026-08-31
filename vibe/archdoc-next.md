@@ -105,3 +105,4 @@
 - [2026-08-31-2-rebuild-mdbook-from-includes] explicit fence semantics: Included operator examples declare their fence language so documentation tests do not interpret them as Rust.
 - [2026-08-31-4-core-support-api-refinements] nonce observability: Guard nonces are correlatable identifiers, not secrets; construction remains controlled.
 - [2026-08-31-5-desktop-shell-review-followup] transition-only window signals: Window state events should emit only when their semantic value changes.
+- [2026-08-31-6-tauri-migration-for-workshop] desktop lifecycle ownership: The shell creates the gateway and window together and shuts the gateway down exactly once on app exit.

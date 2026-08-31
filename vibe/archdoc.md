@@ -27,7 +27,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
 - A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
-- A89. Native code compiles only during build or packaging; runtime only verifies, stages, and launches its artifacts.
 - A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
 - A91. Human boot config, machine state, view layout, and append-only tape remain separate stores.
 - A92. Workshop sessions own transport and multiplexing; chat execution stays behind a replaceable adapter.
@@ -39,6 +38,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A98. Publishable crates have registry-resolvable dependency closure and release in dependency order.
 - A99. Cancellation flows to descendants; child cancellation never affects ancestors or siblings.
 - A100. Embedded pages navigate in place only within their exact boot origin.
+- A101. Desktop capabilities are granted per window and origin, with least privilege.
 
 ## Principles
 
