@@ -3,9 +3,9 @@
 //!
 //! This crate owns the tao event loop, the wry webview pointed at the
 //! hosted workshop UI, the custom-title-bar IPC commands, the navigation
-//! policy (loopback loads in place, everything else opens in the system
-//! browser), the microphone permission grant, Explorer file drops, and
-//! the program icon. On Windows it also owns the WebView2 web-message
+//! policy (same-origin loads in place, everything else opens in the
+//! system browser), the microphone permission grant, Explorer file drops,
+//! and the program icon. On Windows it also owns the WebView2 web-message
 //! bridge that recovers real OS paths from dropped files - the
 //! workspace's only unsafe code.
 //!

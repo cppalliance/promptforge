@@ -32,26 +32,26 @@ pub(crate) enum Navigation {
     OpenExternally,
 }
 
-/// Classifies a navigation target: loopback http(s) URLs (the in-process
-/// server) load in the webview, while any other absolute http(s) URL opens
-/// in the system browser so a clicked link never navigates the app away
-/// from itself. Other schemes (`about:blank`, `data:`) and unparseable
+/// Classifies a navigation target against the server's origin: a
+/// same-origin http(s) URL (the in-process server) loads in the webview,
+/// while any other absolute http(s) URL opens in the system browser. A
+/// clicked link never navigates the app away from itself, and no other
+/// loopback server - same machine, different port, or a different
+/// loopback spelling - gets the shell's IPC bridge, folder picker, or
+/// desktop flag. Other schemes (`about:blank`, `data:`) and unparseable
 /// values are left to the webview.
 #[must_use]
-pub(crate) fn classify_navigation(target: &str) -> Navigation {
+pub(crate) fn classify_navigation(server: &url::Origin, target: &str) -> Navigation {
     let Ok(url) = url::Url::parse(target) else {
         return Navigation::Allow;
     };
     if !matches!(url.scheme(), "http" | "https") {
         return Navigation::Allow;
     }
-    match url.host() {
-        Some(url::Host::Ipv4(address)) if address.is_loopback() => Navigation::Allow,
-        Some(url::Host::Ipv6(address)) if address.is_loopback() => Navigation::Allow,
-        Some(url::Host::Domain(domain)) if domain.eq_ignore_ascii_case("localhost") => {
-            Navigation::Allow
-        }
-        _ => Navigation::OpenExternally,
+    if url.origin() == *server {
+        Navigation::Allow
+    } else {
+        Navigation::OpenExternally
     }
 }
 
@@ -339,8 +339,14 @@ fn handle_shell_event(
 /// wait) and everything after it closes (shutdown).
 ///
 /// # Errors
-/// Returns an error if the window or the webview cannot be created.
+/// Returns an error if `url` is not a valid URL, or if the window or the
+/// webview cannot be created.
 pub fn run(url: &str) -> anyhow::Result<()> {
+    // The one origin the webview may navigate to in place; every other
+    // http(s) target opens in the system browser (classify_navigation).
+    let server_origin = url::Url::parse(url)
+        .context("parse the workshop URL")?
+        .origin();
     let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let builder = WindowBuilder::new()
         .with_title("PromptForge")
@@ -353,8 +359,12 @@ pub fn run(url: &str) -> anyhow::Result<()> {
         .build(&event_loop)
         .context("create the workshop window")?;
 
+    // One channel into the loop; each handler gets its own clonable
+    // sender. The clones are made up front because the IPC handler moves
+    // the original.
     let proxy = event_loop.create_proxy();
-    let navigation_proxy = event_loop.create_proxy();
+    let navigation_proxy = proxy.clone();
+    let drop_proxy = proxy.clone();
     let webview_builder = WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script("window.__PROMPTFORGE_DESKTOP__ = true;")
@@ -375,7 +385,7 @@ pub fn run(url: &str) -> anyhow::Result<()> {
             _ => PermissionResponse::Default,
         })
         .with_navigation_handler(move |target| {
-            let classification = classify_navigation(&target);
+            let classification = classify_navigation(&server_origin, &target);
             if let Some(effect) = navigation_effect(classification, target)
                 && let Err(error) = navigation_proxy.send_event(effect)
             {
@@ -392,7 +402,6 @@ pub fn run(url: &str) -> anyhow::Result<()> {
     // file_drop.rs), attached right after the webview is built.
     #[cfg(not(target_os = "windows"))]
     let webview_builder = {
-        let drop_proxy = event_loop.create_proxy();
         webview_builder.with_drag_drop_handler(move |event| {
             // Only the drop is consumed. Returning true tells wry to skip
             // the platform's default handling, and on macOS wry suppresses
@@ -425,7 +434,6 @@ pub fn run(url: &str) -> anyhow::Result<()> {
     // only degrades Explorer path drops, never the app.
     #[cfg(target_os = "windows")]
     {
-        let drop_proxy = event_loop.create_proxy();
         if let Err(error) = crate::file_drop::attach(&webview, move |paths| {
             if let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths)) {
                 eprintln!("could not forward the dropped paths to the event loop: {error}");
@@ -438,6 +446,11 @@ pub fn run(url: &str) -> anyhow::Result<()> {
     }
 
     let mut event_loop = event_loop;
+    // Resize events stream in during a drag-resize while the maximized
+    // flag almost never changes, so the title bar hears only about
+    // transitions. The first resize dispatches too, giving the page the
+    // initial state.
+    let mut last_maximized: Option<bool> = None;
     event_loop.run_return(|event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -450,7 +463,13 @@ pub fn run(url: &str) -> anyhow::Result<()> {
             Event::WindowEvent {
                 event: WindowEvent::Resized(..),
                 ..
-            } => dispatch_maximized(&webview, window.is_maximized()),
+            } => {
+                let maximized = window.is_maximized();
+                if last_maximized != Some(maximized) {
+                    last_maximized = Some(maximized);
+                    dispatch_maximized(&webview, maximized);
+                }
+            }
             Event::UserEvent(shell_event) => {
                 handle_shell_event(shell_event, &window, &webview, control_flow);
             }
@@ -586,29 +605,68 @@ mod tests {
         assert!(script.contains(r#""C:\\Users\\Vinnie\\proj""#), "{script}");
     }
 
+    /// The origin of the in-process server the test window was opened on.
+    fn server_origin(url: &str) -> url::Origin {
+        match url::Url::parse(url) {
+            Ok(parsed) => parsed.origin(),
+            Err(error) => panic!("the test server URL must parse: {error}"),
+        }
+    }
+
     #[test]
-    fn loopback_urls_load_in_the_webview() {
+    fn same_origin_urls_load_in_the_webview() {
+        let server = server_origin("http://127.0.0.1:7910/");
         for url in [
             "http://127.0.0.1:7910/",
             "http://127.0.0.1:7910/ws",
-            "https://127.0.0.1/",
+            "http://127.0.0.1:7910/settings?tab=keys#top",
+        ] {
+            assert_eq!(
+                classify_navigation(&server, url),
+                Navigation::Allow,
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_default_port_normalizes_into_the_origin() {
+        let server = server_origin("https://127.0.0.1/");
+        assert_eq!(
+            classify_navigation(&server, "https://127.0.0.1:443/"),
+            Navigation::Allow
+        );
+    }
+
+    #[test]
+    fn other_loopback_origins_open_in_the_system_browser() {
+        let server = server_origin("http://127.0.0.1:7910/");
+        for url in [
+            // Another loopback server is not the workshop, whatever the
+            // port, scheme, or loopback spelling.
+            "http://127.0.0.1:4000/",
+            "https://127.0.0.1:7910/",
             "http://localhost:7910/",
-            "http://LOCALHOST/",
             "http://[::1]:7910/",
         ] {
-            assert_eq!(classify_navigation(url), Navigation::Allow, "{url}");
+            assert_eq!(
+                classify_navigation(&server, url),
+                Navigation::OpenExternally,
+                "{url}"
+            );
         }
     }
 
     #[test]
     fn external_urls_open_in_the_system_browser() {
+        let server = server_origin("http://127.0.0.1:7910/");
         for url in [
             "https://example.com/",
             "http://192.168.1.10/",
             "https://localhost.evil.example/",
         ] {
             assert_eq!(
-                classify_navigation(url),
+                classify_navigation(&server, url),
                 Navigation::OpenExternally,
                 "{url}"
             );
@@ -634,13 +692,18 @@ mod tests {
 
     #[test]
     fn non_http_and_unparseable_targets_are_left_to_the_webview() {
+        let server = server_origin("http://127.0.0.1:7910/");
         for url in [
             "about:blank",
             "data:text/html,<p>hi</p>",
             "not a url",
             "/relative/path",
         ] {
-            assert_eq!(classify_navigation(url), Navigation::Allow, "{url}");
+            assert_eq!(
+                classify_navigation(&server, url),
+                Navigation::Allow,
+                "{url}"
+            );
         }
     }
 
