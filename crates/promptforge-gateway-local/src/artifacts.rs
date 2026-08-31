@@ -62,6 +62,10 @@ pub(crate) use confine::{
     enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
     rename_confined, safe_relative_path, validate_cache_path, write_synced,
 };
+// Test builds only: the resume tests in this module and cache.rs build the
+// marker path; the download path itself imports it from confine directly.
+#[cfg(test)]
+pub(crate) use confine::source_marker_path;
 pub(crate) use digest::hex_digest;
 pub use digest::parse_expected_digest;
 pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};
@@ -366,8 +370,10 @@ impl ArtifactStore {
     ) -> Result<()> {
         let _lock = self.lock_artifact(destination)?;
         validate_cache_path(&self.cache, destination)?;
+        // No pre-download cleanup: a staged `.part` with a provenance
+        // marker naming this source resumes where it stopped; any other
+        // partial is truncated by the fresh transfer.
         let staging = part_path(destination);
-        remove_cache_entry(&self.cache, &staging)?;
 
         // Validate/canonicalize the pin once, at the boundary, so both the
         // cache-hit and post-download comparisons are case-insensitive and a
@@ -421,13 +427,13 @@ impl ArtifactStore {
         };
         ensure_cache_directory(&self.cache, parent)?;
         validate_cache_path(&self.cache, &staging)?;
+        // A failed transfer keeps the staged partial for resume.
         let actual = match download::download(&self.client, asset.url, &staging, download) {
             Ok(actual) => actual,
             Err(error) => {
                 if !verify_finished && let Some(handle) = verify {
                     handle.complete();
                 }
-                let _ignored = fs::remove_file(&staging);
                 return Err(error);
             }
         };
@@ -439,7 +445,6 @@ impl ArtifactStore {
         if let Some(expected) = expected_digest.as_deref()
             && actual != expected
         {
-            remove_cache_entry(&self.cache, &staging)?;
             return Err(LocalError::DigestMismatch {
                 name: asset.name.to_owned(),
                 expected: expected.to_owned(),
@@ -621,16 +626,25 @@ pub fn filename_from_url(url: &str) -> Result<String> {
 /// Returns [`LocalError::MissingHome`] when the source needs a home directory
 /// and none is available.
 pub(crate) fn expand_tilde(source: &str) -> Result<PathBuf> {
-    if let Some(rest) = source.strip_prefix("~/") {
-        return Ok(default_home_checked()?.join(rest));
-    }
-    if let Some(rest) = source.strip_prefix("~\\") {
-        return Ok(default_home_checked()?.join(rest));
-    }
-    if source == "~" {
-        return default_home_checked();
+    if source == "~" || source.starts_with("~/") || source.starts_with("~\\") {
+        return Ok(expand_tilde_against(source, &default_home_checked()?));
     }
     Ok(PathBuf::from(source))
+}
+
+/// The pure core of [`expand_tilde`]: a leading `~`, `~/`, or `~\` resolves
+/// against `home`; every other spelling passes through untouched.
+pub(crate) fn expand_tilde_against(source: &str, home: &Path) -> PathBuf {
+    if let Some(rest) = source.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    if let Some(rest) = source.strip_prefix("~\\") {
+        return home.join(rest);
+    }
+    if source == "~" {
+        return home.to_path_buf();
+    }
+    PathBuf::from(source)
 }
 
 /// Resolves the operator home for artifact provisioning, or a typed error.

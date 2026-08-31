@@ -1,87 +1,66 @@
-// Custom window title bar. The bar is always shown, in the desktop shell
+// Custom window title bar. The bar is always shown, in the desktop app
 // and in a plain browser, because it carries the application menus; only
 // the native window controls (drag region, minimize/maximize/close) are
-// desktop-only, since they need the wry IPC bridge. Every control sends a
-// narrow, typed command through that bridge - the shell parses and
-// validates the payload before any native window operation runs.
+// desktop-only, since they need the Tauri window API. Every control calls
+// the current window through @tauri-apps/api, which esbuild bundles the
+// same way as the rest of the UI.
 
 import "./window-chrome.css";
+
+import { getCurrentWindow, type Window as TauriWindow } from "@tauri-apps/api/window";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 
 declare global {
   interface Window {
-    // Set by the wry initialization script in the desktop shell; absent in
-    // a plain browser, where the native window controls stay hidden.
-    __PROMPTFORGE_DESKTOP__?: boolean;
-    // The wry IPC bridge; only present in the desktop shell.
-    ipc?: { postMessage(message: string): void };
+    // Injected by the Tauri runtime in the desktop app; absent in a plain
+    // browser, where the native window controls stay hidden.
+    __TAURI_INTERNALS__?: unknown;
   }
 }
 
-/** The only messages the title bar may send to the native shell. */
-const WindowCommand = {
-  Drag: "drag",
-  Minimize: "minimize",
-  ToggleMaximize: "toggle-maximize",
-  Close: "close",
-} as const;
-type WindowCommand = (typeof WindowCommand)[keyof typeof WindowCommand];
-
-/** The IPC envelope: one JSON object naming one window command. */
-interface WindowCommandEnvelope {
-  readonly command: WindowCommand;
+/** The native window, or null in a plain browser where no window exists. */
+function currentWindow(): TauriWindow | null {
+  return window.__TAURI_INTERNALS__ === undefined ? null : getCurrentWindow();
 }
 
-/** The native event the shell dispatches when the maximized state changes. */
-const MAXIMIZED_EVENT = "promptforge:maximized";
-
-function postWindowCommand(command: WindowCommand): void {
-  const ipc = window.ipc;
-  // Reached in a plain browser, where the Window menu's native commands
-  // have no bridge to carry them; dropping the command beats throwing
-  // from a click. In the desktop shell wry always installs the bridge
-  // alongside the flag.
-  if (!ipc) {
+/**
+ * Runs one native window command. In a plain browser the command has no
+ * window to act on; dropping it beats throwing from a click. A rejected
+ * call in the desktop app is a packaging defect (a missing capability), so
+ * it is logged rather than swallowed.
+ */
+function runWindowCommand(run: (window: TauriWindow) => Promise<void>): void {
+  const win = currentWindow();
+  if (win === null) {
     return;
   }
-  const envelope: WindowCommandEnvelope = { command };
-  ipc.postMessage(JSON.stringify(envelope));
+  void run(win).catch((error: unknown) => {
+    console.error("a native window command failed:", error);
+  });
 }
 
 /** Minimizes the window. Shared by the visible control and the Window menu. */
 export function minimizeWindow(): void {
-  postWindowCommand(WindowCommand.Minimize);
+  runWindowCommand((win) => win.minimize());
 }
 
 /** Toggles between maximized and restored. Shared by the visible control, the drag region double-click, and the Window menu. */
 export function toggleWindowMaximize(): void {
-  postWindowCommand(WindowCommand.ToggleMaximize);
+  runWindowCommand((win) => win.toggleMaximize());
 }
 
 /** Closes the window. Shared by the visible control and the File menu. */
 export function closeWindow(): void {
-  postWindowCommand(WindowCommand.Close);
-}
-
-/** Reads the maximized flag out of the native event, validating the detail. */
-function readMaximized(event: Event): boolean | null {
-  if (!(event instanceof CustomEvent)) {
-    return null;
-  }
-  const detail: unknown = event.detail;
-  if (typeof detail !== "object" || detail === null || !("maximized" in detail)) {
-    return null;
-  }
-  return typeof detail.maximized === "boolean" ? detail.maximized : null;
+  runWindowCommand((win) => win.close());
 }
 
 /**
  * Reveals the custom title bar in every mode: the bar carries the
  * application menus, so it must show in a plain browser too. The drag
- * region, the window controls, and the maximized-event listener are wired
- * only inside the desktop shell; in a browser the control cluster is
- * hidden instead, since the commands would have no IPC bridge to reach.
+ * region, the window controls, and the maximized-state sync are wired
+ * only inside the desktop app; in a browser the control cluster is
+ * hidden instead, since the commands would have no window to reach.
  * The menu buttons are wired to their popovers by `setupWindowMenus` in
  * window-menu.ts. Returns the disposable owning every listener wired here.
  */
@@ -98,7 +77,8 @@ export function setupWindowChrome(): IDisposable {
 
   bar.hidden = false;
 
-  if (window.__PROMPTFORGE_DESKTOP__ !== true) {
+  const win = currentWindow();
+  if (win === null) {
     // No native window exists for the buttons to act on; showing them
     // would present dead controls.
     controls.hidden = true;
@@ -130,25 +110,38 @@ export function setupWindowChrome(): IDisposable {
   // Only the empty center drags; the buttons handle their own presses.
   const onDragPointerDown = (event: PointerEvent): void => {
     if (event.button === 0 && event.target === drag) {
-      postWindowCommand(WindowCommand.Drag);
+      runWindowCommand((win) => win.startDragging());
     }
   };
   drag.addEventListener("pointerdown", onDragPointerDown);
   store.add(toDisposable(() => drag.removeEventListener("pointerdown", onDragPointerDown)));
-  const onDragDoubleClick = (): void => postWindowCommand(WindowCommand.ToggleMaximize);
-  drag.addEventListener("dblclick", onDragDoubleClick);
-  store.add(toDisposable(() => drag.removeEventListener("dblclick", onDragDoubleClick)));
+  drag.addEventListener("dblclick", toggleWindowMaximize);
+  store.add(toDisposable(() => drag.removeEventListener("dblclick", toggleWindowMaximize)));
 
-  const onMaximized = (event: Event): void => {
-    const maximized = readMaximized(event);
-    if (maximized === null) {
+  // The maximize/restore glyph follows the window's maximized state, read
+  // back after every resize (every maximize path - button, double-click,
+  // Windows Snap, restore - surfaces as a resize). The DOM is touched only
+  // on transitions: a drag-resize streams resize events while the flag
+  // almost never changes.
+  let lastMaximized: boolean | null = null;
+  const syncMaximized = async (): Promise<void> => {
+    const maximized = await win.isMaximized();
+    if (maximized === lastMaximized) {
       return;
     }
+    lastMaximized = maximized;
     maximize.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
     maximizeGlyph.toggleAttribute("hidden", maximized);
     restoreGlyph.toggleAttribute("hidden", !maximized);
   };
-  window.addEventListener(MAXIMIZED_EVENT, onMaximized);
-  store.add(toDisposable(() => window.removeEventListener(MAXIMIZED_EVENT, onMaximized)));
+  void syncMaximized();
+  const unlisten = win.onResized(() => {
+    void syncMaximized();
+  });
+  store.add(
+    toDisposable(() => {
+      void unlisten.then((off) => off());
+    }),
+  );
   return store;
 }

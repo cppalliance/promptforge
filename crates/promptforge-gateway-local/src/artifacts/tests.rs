@@ -255,9 +255,11 @@ fn find_executable_rejects_duplicates_and_reports_missing() {
 }
 
 #[test]
-fn failed_download_leaves_no_staging_part_file() {
-    // ART-007: a failed publication (digest mismatch) removes the `.part`
-    // staging file, so no partial download is left behind.
+fn failed_publication_keeps_the_partial_without_its_marker() {
+    // ART-007: a failed publication (digest mismatch) keeps the `.part`
+    // staging file, but its resume provenance marker is gone - the bytes
+    // failed the digest gate whole, so the next attempt restarts from zero
+    // instead of resuming poison.
     let body = b"partial-or-wrong-bytes";
     let server = FakeServer::new(body);
     let temp = TempDir::new().expect("tempdir");
@@ -269,13 +271,20 @@ fn failed_download_leaves_no_staging_part_file() {
     assert!(matches!(err, LocalError::DigestMismatch { .. }));
     let key = source_cache_key(&url);
     let staging = temp.path().join("models").join(&key).join("m.gguf.part");
-    assert!(!staging.exists(), "stale .part left behind: {staging:?}");
+    assert!(staging.is_file(), "the failed publication keeps its .part");
+    let mut marker = staging.as_os_str().to_owned();
+    marker.push(".source");
+    assert!(
+        !PathBuf::from(marker).exists(),
+        "a transfer that completed keeps no resume marker"
+    );
 }
 
 #[test]
 fn stale_staging_part_is_cleaned_before_publish() {
     // ART-007: a pre-existing `.part` from an interrupted prior run at the
-    // destination slot is removed before the new download publishes.
+    // destination slot carries no provenance marker, so the new download
+    // truncates and replaces it before publishing.
     let body = b"good-artifact-bytes";
     let digest = hex_sha256(body);
     let server = FakeServer::new(body);
@@ -577,6 +586,184 @@ fn download_with_progress_reports_content_length_and_bytes() {
     assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
 }
 
+/// Seeds an interrupted download: `partial` bytes at `dest` plus the
+/// provenance marker naming `source`.
+fn seed_partial(dest: &std::path::Path, partial: &[u8], source: &str) {
+    std::fs::write(dest, partial).expect("write partial");
+    std::fs::write(source_marker_path(dest), source).expect("write provenance marker");
+}
+
+#[test]
+fn an_interrupted_download_resumes_from_the_partials_offset() {
+    let body = b"resume-fixture: a body long enough to have a middle";
+    let server = FakeServer::new_range_aware(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("resumed.gguf");
+    let dest = temp.path().join("resumed.gguf.part");
+    let offset = 20_u64;
+    seed_partial(&dest, &body[..usize::try_from(offset).expect("fixture offset")], &url);
+    let progress = RecordingProgress::new();
+
+    let digest = store
+        .download_with_progress(&url, &dest, &progress)
+        .expect("resume completes");
+
+    assert_eq!(digest, hex_sha256(body));
+    assert_eq!(std::fs::read(&dest).expect("read partial"), body);
+    assert_eq!(
+        server.ranges().as_slice(),
+        &[Some(offset)],
+        "the retry continues at the partial's offset"
+    );
+    assert_eq!(
+        *progress.total.lock().expect("total"),
+        Some(body.len() as u64),
+        "the declared total covers the whole blob"
+    );
+    assert_eq!(
+        progress.bytes.load(Ordering::Relaxed),
+        body.len() as u64,
+        "the resumed bytes count toward the total"
+    );
+    assert!(
+        !source_marker_path(&dest).exists(),
+        "a completed transfer removes the marker"
+    );
+}
+
+#[test]
+fn a_200_answer_to_a_range_request_restarts_from_zero() {
+    // A server that ignores the Range header answers 200 with the whole
+    // body; the partial is truncated and the transfer starts over.
+    let body = b"restart-fixture-body";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("restart.gguf");
+    let dest = temp.path().join("restart.gguf.part");
+    seed_partial(&dest, &body[..10], &url);
+
+    let digest = store
+        .download_with_progress(&url, &dest, &RecordingProgress::new())
+        .expect("restart completes");
+
+    assert_eq!(digest, hex_sha256(body));
+    assert_eq!(std::fs::read(&dest).expect("read partial"), body);
+    assert_eq!(
+        server.ranges().as_slice(),
+        &[Some(10), None],
+        "the Range attempt is followed by a plain GET"
+    );
+}
+
+#[test]
+fn a_partial_larger_than_the_declared_size_restarts() {
+    // The partial cannot belong to a blob smaller than itself: the Range
+    // request is unsatisfiable (416) and the transfer restarts from zero.
+    let body = b"declared-size-fixture";
+    let server = FakeServer::new_range_aware(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("oversized.gguf");
+    let dest = temp.path().join("oversized.gguf.part");
+    let oversized = body.len() as u64 + 9;
+    seed_partial(
+        &dest,
+        &vec![b'x'; usize::try_from(oversized).expect("fixture size")],
+        &url,
+    );
+
+    let digest = store
+        .download_with_progress(&url, &dest, &RecordingProgress::new())
+        .expect("restart completes");
+
+    assert_eq!(digest, hex_sha256(body));
+    assert_eq!(std::fs::read(&dest).expect("read partial"), body);
+    assert_eq!(
+        server.ranges().as_slice(),
+        &[Some(oversized), None],
+        "the unsatisfiable Range is followed by a plain GET"
+    );
+}
+
+#[test]
+fn a_partial_with_a_mismatched_marker_is_discarded() {
+    // Provenance is the resume gate: a partial recorded against another
+    // source is never appended to.
+    let body = b"provenance-fixture-body";
+    let server = FakeServer::new_range_aware(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("provenance.gguf");
+    let dest = temp.path().join("provenance.gguf.part");
+    seed_partial(&dest, b"foreign-bytes", "http://other.example/foreign.gguf");
+
+    let digest = store
+        .download_with_progress(&url, &dest, &RecordingProgress::new())
+        .expect("fresh download completes");
+
+    assert_eq!(digest, hex_sha256(body));
+    assert_eq!(std::fs::read(&dest).expect("read partial"), body);
+    assert_eq!(
+        server.ranges().as_slice(),
+        &[None],
+        "no Range is sent for a foreign partial"
+    );
+}
+
+#[test]
+fn a_short_transfer_keeps_the_partial_and_marker_for_resume() {
+    // A body that ends early against its declared length is a failed
+    // transfer: the partial and its provenance marker stay on disk so the
+    // next attempt resumes from the offset.
+    let body = b"short-transfer-fixture-body";
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind short server");
+    let addr = listener.local_addr().expect("addr");
+    let handle = thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = [0_u8; 1024];
+        let _ = stream.read(&mut buf); // consume the request head
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(&body[..8]); // part of the body, then close
+        let _ = stream.flush();
+    });
+
+    let client = Client::builder().build().expect("client");
+    let temp = TempDir::new().expect("tempdir");
+    let dest = temp.path().join("short.bin");
+    let url = format!("http://{addr}/short.bin");
+    let err =
+        super::download::download_with_progress(&client, &url, &dest, &RecordingProgress::new())
+            .expect_err("a short body must fail");
+    assert!(
+        matches!(
+            err,
+            LocalError::DownloadRead { .. } | LocalError::Download { .. }
+        ),
+        "unexpected error {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&dest).expect("partial kept"),
+        &body[..8],
+        "the transferred prefix stays on disk"
+    );
+    assert_eq!(
+        std::fs::read_to_string(source_marker_path(&dest)).expect("marker kept"),
+        url,
+        "the provenance marker survives the failure"
+    );
+    // Unblock the server's pending state so the thread can exit.
+    let _ = TcpStream::connect(addr);
+    let _ = handle.join();
+}
+
 #[test]
 fn hub_bearer_token_prefers_hf_token() {
     let token = hub_bearer_token(|key| match key {
@@ -609,6 +796,36 @@ fn hub_bearer_token_ignores_empty_and_missing() {
         })
         .as_deref(),
         Some("hf_ok")
+    );
+}
+
+#[test]
+fn tilde_sources_resolve_against_the_operator_home() {
+    // STT and local-model path sources share this resolution: `~/...` and
+    // `~\...` expand, a bare `~` is the home itself, and every other
+    // spelling passes through untouched.
+    let home = PathBuf::from("C:\\Users\\op");
+    assert_eq!(
+        expand_tilde_against("~/models/whisper.bin", &home),
+        home.join("models/whisper.bin")
+    );
+    assert_eq!(
+        expand_tilde_against("~\\models\\whisper.bin", &home),
+        home.join("models\\whisper.bin")
+    );
+    assert_eq!(expand_tilde_against("~", &home), home);
+    assert_eq!(
+        expand_tilde_against("C:\\absolute\\model.gguf", &home),
+        PathBuf::from("C:\\absolute\\model.gguf")
+    );
+    assert_eq!(
+        expand_tilde_against("relative/model.gguf", &home),
+        PathBuf::from("relative/model.gguf")
+    );
+    // `~other` is not the operator home spelling and stays literal.
+    assert_eq!(
+        expand_tilde_against("~other/model.gguf", &home),
+        PathBuf::from("~other/model.gguf")
     );
 }
 

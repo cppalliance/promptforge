@@ -1,8 +1,9 @@
 // Custom window title bar in browser mode: the bar carries the application
-// menus, so it must be visible after boot even without the
-// __PROMPTFORGE_DESKTOP__ flag; only the native window-control cluster
-// hides, and the module never touches window.ipc - the whole test runs with
-// no ipc bridge defined, so a passing run proves the menu path is ipc-free.
+// menus, so it must be visible after boot even without the Tauri runtime;
+// only the native window-control cluster hides, and the module never calls
+// into the Tauri window API - the whole test runs with no
+// __TAURI_INTERNALS__ defined, so a passing run proves the menu path needs
+// no desktop bridge.
 // Covers the <header> landmark, the program icon's attributes, the five
 // menus and their popovers (File opens and announces aria-expanded), the
 // drag region, and the window-control cluster's buttons and glyphs.
@@ -17,8 +18,8 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
     if (titlebar.tagName !== "HEADER") {
       failures.push("the window title bar is not a <header> landmark");
     }
-    if (window.__PROMPTFORGE_DESKTOP__ !== undefined) {
-      failures.push("this test must run without the desktop flag set");
+    if (window.__TAURI_INTERNALS__ !== undefined) {
+      failures.push("this test must run without the Tauri runtime present");
     }
     if (titlebar.hidden) {
       failures.push("the title bar must be visible after boot in browser mode");
@@ -87,7 +88,7 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
       }
     }
   }
-  if ("ipc" in window) {
-    failures.push("browser mode must not require window.ipc");
+  if ("__TAURI_INTERNALS__" in window) {
+    failures.push("browser mode must not require the Tauri internals");
   }
 });

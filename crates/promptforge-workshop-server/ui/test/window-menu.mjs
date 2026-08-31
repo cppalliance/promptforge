@@ -1,7 +1,9 @@
 // Unit test for the application menus (src/ui/window-menu.ts) and the About
-// dialog (src/ui/about-dialog.ts). Bundles the TS modules with esbuild,
-// imports them via data URLs, and drives them against jsdom built from the
-// real index.html with the desktop flag set. Covers: menu opening,
+// dialog (src/ui/about-dialog.ts). Bundles the TS modules with esbuild -
+// with "@tauri-apps/api/window" aliased to the recording stub in
+// test/helpers - imports them via data URLs, and drives them against jsdom
+// built from the real index.html with the Tauri internals present. Covers:
+// menu opening,
 // one-menu-at-a-time, keyboard navigation and dismissal, New Agent
 // dispatch through the agent surface (the only new-conversation
 // command), the Window menu's Workshop Panel toggle and its sharing of
@@ -34,6 +36,9 @@ async function bundle(entry) {
     // The modules under test import their colocated CSS; strip it - the
     // test drives only the JS, and jsdom applies no stylesheets anyway.
     loader: { ".css": "empty" },
+    alias: {
+      "@tauri-apps/api/window": path.join(uiDir, "helpers", "tauri-window-stub.mjs"),
+    },
   });
   const code = result.outputFiles[0].text;
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
@@ -50,15 +55,15 @@ function check(name, condition) {
 
 // Each scenario gets a fresh jsdom: the modules read the globals and
 // attach listeners to the DOM they find at call time. Pass desktop: false
-// to exercise the plain-browser path (no flag, no ipc bridge).
+// to exercise the plain-browser path (no Tauri internals, no native calls).
 function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
-  const posted = [];
   if (desktop) {
-    window.__PROMPTFORGE_DESKTOP__ = true;
-    window.ipc = { postMessage: (message) => posted.push(JSON.parse(message)) };
+    window.__TAURI_INTERNALS__ = {};
   }
+  // The native window commands the window stub recorded, in order.
+  const nativeCalls = () => window.__TAURI_STUB__?.calls ?? [];
   const execCalls = [];
   window.document.execCommand = (command) => {
     execCalls.push(command);
@@ -102,7 +107,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const keydown = (key) =>
     window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
   const stats = () => ({ agentsOpened, workshopToggles, gatewayConfigOpens, execCalls: [...execCalls] });
-  return { window, commands, menus, posted, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
+  return { window, commands, menus, nativeCalls, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
 }
 
 // --- Opening and one-menu-at-a-time -----------------------------------------
@@ -198,7 +203,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
 // --- File menu commands -------------------------------------------------------
 
 {
-  const { menus, itemByLabel, isOpen, posted, stats } = scenario();
+  const { menus, itemByLabel, isOpen, nativeCalls, stats } = scenario();
   menus.file.click();
   check("New Chat is gone from the File menu", itemByLabel("file", "New Chat") === undefined);
   itemByLabel("file", "New Agent").click();
@@ -207,15 +212,15 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   menus.file.click();
   itemByLabel("file", "Close Window").click();
   check(
-    "Close Window posts the typed close envelope",
-    posted.map((message) => message.command).join(",") === "close",
+    "Close Window calls the window's close",
+    nativeCalls().join(",") === "close",
   );
 }
 
 // --- Window menu: Workshop Panel toggle and the shared command path ----------
 
 {
-  const { window, menus, itemByLabel, isOpen, posted, stats } = scenario();
+  const { window, menus, itemByLabel, isOpen, nativeCalls, stats } = scenario();
   setupWindowChrome();
   menus.window.click();
   const workshopItem = itemByLabel("window", "Workshop Panel");
@@ -234,16 +239,9 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   visible("toggle-maximize").click();
   menus.window.click();
   itemByLabel("window", "Maximize/Restore").click();
-  const sent = posted.map((message) => JSON.stringify(message));
   check(
-    "menu and visible controls post identical envelopes",
-    sent.join("|") ===
-      [
-        JSON.stringify({ command: "minimize" }),
-        JSON.stringify({ command: "minimize" }),
-        JSON.stringify({ command: "toggle-maximize" }),
-        JSON.stringify({ command: "toggle-maximize" }),
-      ].join("|"),
+    "menu and visible controls call identical window methods",
+    nativeCalls().join("|") === "minimize|minimize|toggle-maximize|toggle-maximize",
   );
 }
 
@@ -689,7 +687,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
 // --- Browser mode: popovers wired, native window commands inert --------------
 
 {
-  const { window, commands, menus, itemByLabel, isOpen, posted, stats } = scenario({ desktop: false });
+  const { window, commands, menus, itemByLabel, isOpen, nativeCalls, stats } = scenario({ desktop: false });
   check(
     "browser mode builds every popover",
     window.document.querySelectorAll(".window-titlebar__popover").length === 5,
@@ -704,8 +702,8 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   menus.file.click();
   itemByLabel("file", "Close Window").click();
   check(
-    "native window commands no-op without the IPC bridge",
-    posted.length === 0 && !("ipc" in window),
+    "native window commands no-op without the Tauri runtime",
+    nativeCalls().length === 0 && !("__TAURI_INTERNALS__" in window),
   );
   commands.newAgent();
   check("browser mode still returns a working command set", stats().agentsOpened === 2);

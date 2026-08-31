@@ -12,7 +12,6 @@ repository = "https://github.com/cppalliance/promptforge"
 [workspace.dependencies]
 promptforge-core = { path = "crates/promptforge-core", version = "0.2.0" }
 promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.2.0" }
-promptforge-desktop-shell = { path = "crates/promptforge-desktop-shell", version = "0.2.0" }
 promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.2.0" }
 promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.2.0" }
 promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.2.0" }
@@ -120,18 +119,19 @@ sysinfo = { version = "0.38", default-features = false, features = ["system", "d
 # runtime via libloading, so machines without an NVIDIA driver degrade to an
 # absent GPU field rather than a link failure.
 nvml-wrapper = "0.12"
-# wry 0.56 pairs with tao 0.36 (wry's own dev-dependency constraint); tao 0.37
-# is newer but untested against this wry.
-wry = "0.56"
-tao = "0.36"
 # Opens a URL in the system browser for the windowless server frame.
 open = "5"
-# Native folder picker for the desktop shell's workspace-pick-folder bridge.
-# default-features off drops the Linux xdg-portal/wayland backends; the
-# Windows IFileDialog backend is unconditional.
-rfd = { version = "0.17", default-features = false }
-# Decodes the bundled program-icon PNG into RGBA for the tao window icon.
+# Encodes PNG fixtures in the gateway's integration tests.
 png = "0.18"
+# Tauri v2 desktop framework for promptforge-workshop. tauri is pinned to the
+# minor because `with_webview` exposes webview2-com/webkit2gtk types that may
+# shift in a Tauri minor release (the docs.rs guidance for `with_webview`).
+tauri = "~2.11"
+tauri-build = "2.6.3"
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-opener = "2.5.5"
+tauri-plugin-window-state = "2.4.1"
+tauri-plugin-single-instance = "2.4.4"
 # Test-only Jinja2 compatibility oracle for bundled chat templates. Members
 # inherit these only from their dev-dependency tables.
 minijinja = { version = "2.24", default-features = false, features = [

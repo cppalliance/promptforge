@@ -230,10 +230,13 @@ impl BlobCache {
     /// fails, and returns the published blob.
     ///
     /// The download is staged to `<file>.part` and renamed into place only
-    /// after the digest verifies against `expected_sha256` (when named); any
-    /// failure removes the staging file and leaves no sidecar. Concurrent
-    /// publishers of the same source serialize on the artifact lock, and the
-    /// hit test is repeated under the lock so exactly one of them downloads.
+    /// after the digest verifies against `expected_sha256` (when named). A
+    /// failed transfer keeps the staged partial and its provenance marker so
+    /// the next attempt resumes from the offset; a digest mismatch keeps the
+    /// partial too, but its marker is gone, so the next attempt restarts
+    /// from zero. Concurrent publishers of the same source serialize on the
+    /// artifact lock, and the hit test is repeated under the lock so exactly
+    /// one of them downloads.
     ///
     /// # Errors
     /// Returns [`LocalError`] on transport, digest, confinement, or filesystem
@@ -251,7 +254,6 @@ impl BlobCache {
             return Ok(blob);
         }
         let staging = part_path(&destination);
-        remove_cache_entry(&self.root, &staging)?;
         let Some(parent) = destination.parent() else {
             return Err(LocalError::InvalidPath {
                 path: destination.clone(),
@@ -259,11 +261,11 @@ impl BlobCache {
         };
         ensure_cache_directory(&self.root, parent)?;
         validate_cache_path(&self.root, &staging)?;
+        // A failed transfer keeps the staged partial for resume.
         let actual = match download_with_progress(&self.client, source, &staging, progress) {
             Ok(actual) => actual,
             Err(error) => {
                 progress.abandon();
-                let _ignored = fs::remove_file(&staging);
                 return Err(error);
             }
         };
@@ -271,7 +273,6 @@ impl BlobCache {
             && actual != expected
         {
             progress.abandon();
-            remove_cache_entry(&self.root, &staging)?;
             return Err(LocalError::DigestMismatch {
                 name: filename_from_url(source)?,
                 expected: expected.to_owned(),
@@ -432,8 +433,9 @@ pub struct OrphanEntry {
 }
 
 /// Store bookkeeping suffixes that are never orphans: cache sidecars,
-/// model-card sidecars, verified markers, and staging files.
-const BOOKKEEPING_SUFFIXES: [&str; 4] = [META_SUFFIX, ".md", ".verified", ".part"];
+/// model-card sidecars, verified markers, staging files, and the staging
+/// files' resume provenance markers.
+const BOOKKEEPING_SUFFIXES: [&str; 5] = [META_SUFFIX, ".md", ".verified", ".part", ".part.source"];
 
 /// The absolute path a `[[local_model]]` source occupies on disk: the
 /// provisioning cache slot (`models/<key>/<filename>`) for a URL source, the
@@ -611,6 +613,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::artifacts::source_marker_path;
     use crate::testsupport::{FakeServer, hex_sha256};
 
     /// Test double recording the progress callbacks a download drives.
@@ -684,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn download_to_cache_rejects_digest_mismatch_and_cleans_up() {
+    fn download_to_cache_rejects_digest_mismatch_and_keeps_the_partial() {
         let body = b"wrong-bytes-for-the-pin";
         let server = FakeServer::new(body);
         let temp = TempDir::new().expect("tempdir");
@@ -700,10 +703,59 @@ mod tests {
 
         let destination = cache.destination(&url).expect("destination");
         assert!(!destination.exists(), "mismatched blob must not publish");
-        assert!(!part_path(&destination).exists(), "stale .part left behind");
+        // The failed publication keeps its `.part`, but the completed
+        // transfer removed the provenance marker, so the next attempt
+        // restarts from zero rather than resuming poison bytes.
+        assert!(
+            part_path(&destination).is_file(),
+            "the failed publication keeps its .part"
+        );
+        assert!(
+            !source_marker_path(&part_path(&destination)).exists(),
+            "a transfer that completed keeps no resume marker"
+        );
         assert!(
             !meta_path(&destination).exists(),
             "sidecar must not be written"
+        );
+    }
+
+    #[test]
+    fn download_to_cache_resumes_an_interrupted_partial() {
+        // A staged partial with a provenance marker resumes from its
+        // offset: the server sees the Range request, the digest gates
+        // publication, and the published blob is whole.
+        let body = b"cache-resume-fixture-bytes-for-an-interrupted-download";
+        let digest = hex_sha256(body);
+        let server = FakeServer::new_range_aware(body);
+        let temp = TempDir::new().expect("tempdir");
+        let cache = BlobCache::new(temp.path()).expect("cache");
+        let url = server.url("resume.gguf");
+        let destination = cache.destination(&url).expect("destination");
+        let staging = part_path(&destination);
+        fs::create_dir_all(staging.parent().expect("parent")).expect("mkdir slot");
+        let offset = 17_u64;
+        fs::write(
+            &staging,
+            &body[..usize::try_from(offset).expect("fixture offset")],
+        )
+        .expect("seed partial");
+        fs::write(source_marker_path(&staging), &url).expect("seed marker");
+
+        let blob = cache
+            .download_to_cache(&url, Some(&digest), &RecordingProgress::new())
+            .expect("resume completes");
+        assert_eq!(blob.sha256, digest);
+        assert_eq!(fs::read(&blob.path).expect("read blob"), body);
+        assert_eq!(
+            server.ranges().as_slice(),
+            &[Some(offset)],
+            "the retry resumes at the partial's offset"
+        );
+        assert!(!staging.exists(), "the published blob moved out of staging");
+        assert!(
+            !source_marker_path(&staging).exists(),
+            "the marker is gone after publication"
         );
     }
 

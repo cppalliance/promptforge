@@ -1,12 +1,13 @@
-// Native file drops in the desktop shell. The page cannot read real OS
-// paths from an HTML5 drop, so on drop it posts the DOM File objects over
-// the WebView2 web-message channel (postMessageWithAdditionalObjects);
-// the shell reads each file's real path and answers with a
-// `promptforge:file-drop` event, which this module validates and grants
-// through the workspace HTTP API. Desktop mode never reads file bytes
-// merely because a file was dragged onto the window. In a plain browser
-// neither the bridge nor the event exists and normal HTML drag/drop of
-// file contents keeps working untouched.
+// Native file drops in the desktop app. The page cannot read real OS
+// paths from an HTML5 drop (Chromium hides them), so on Windows the page
+// posts the DOM File objects over the WebView2 web-message channel
+// (postMessageWithAdditionalObjects) and the app reads each file's real
+// path; off Windows the app's own drag-drop event supplies the paths.
+// Both paths answer with a `promptforge:file-drop` event, which this
+// module validates and grants through the workspace HTTP API. Desktop
+// mode never reads file bytes merely because a file was dragged onto the
+// window. In a plain browser neither the bridge nor the event exists and
+// normal HTML drag/drop of file contents keeps working untouched.
 //
 // The shell never touches the OS drop itself (WebView2's own drop target
 // is what keeps HTML5 drag-and-drop alive for Dockview), so the page must
@@ -17,25 +18,26 @@
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import type { StatusBar } from "./status-bar";
 
-/** The native event the shell dispatches when files land on the window. */
+/** The native event the app dispatches when files land on the window. */
 const FILE_DROP_EVENT = "promptforge:file-drop";
 
 /** Fired on window after grants change, so open panels can refresh. */
 export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
 
-/** The web message the shell's file-drop bridge listens for. */
+/** The web message the app's file-drop bridge listens for. */
 const DROP_MESSAGE = "workspace-drop";
 
-/** The WebView2 script bridge, present only inside the desktop shell. */
+/** The WebView2 script bridge, present only in the Windows desktop app. */
 interface WebView2Bridge {
   readonly postMessageWithAdditionalObjects?: (message: string, objects: readonly File[]) => void;
 }
 
 /**
- * Posts a drop's File objects to the shell, which reads their real OS
+ * Posts a drop's File objects to the app, which reads their real OS
  * paths (something the page itself is never allowed to see) and answers
- * with the `promptforge:file-drop` event. Outside the desktop shell the
- * bridge does not exist and the drop ends here.
+ * with the `promptforge:file-drop` event. Where the bridge does not exist
+ * (a plain browser, or the non-Windows platforms whose drops arrive as
+ * the app's own drag-drop event) the drop ends here.
  */
 function postDroppedFiles(event: DragEvent): void {
   const files = event.dataTransfer?.files;
@@ -131,8 +133,8 @@ function isFileDrag(event: DragEvent): boolean {
 }
 
 /**
- * Listens for the shell's native drop event and grants each dropped path
- * through the workspace API. Active only in the desktop shell; in a plain
+ * Listens for the app's native drop event and grants each dropped path
+ * through the workspace API. Active only in the desktop app; in a plain
  * browser there is no native drop source and the grant listener is never
  * installed. The file-drag default suppression is installed everywhere:
  * dropping a file must never navigate the page away, desktop or browser.
@@ -153,7 +155,7 @@ export function setupWorkspaceDrops(statusBar: StatusBar): IDisposable {
   };
   window.addEventListener("drop", onDrop);
   store.add(toDisposable(() => window.removeEventListener("drop", onDrop)));
-  if (window.__PROMPTFORGE_DESKTOP__ !== true) {
+  if (window.__TAURI_INTERNALS__ === undefined) {
     return store;
   }
   const onFileDrop = (event: Event): void => {

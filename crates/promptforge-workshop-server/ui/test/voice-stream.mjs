@@ -148,7 +148,7 @@ await assertNoLeaks(lifecycle, async () => {
   const mic = window.document.createElement("button");
   const input = window.document.createElement("textarea");
   window.document.body.append(mic, input);
-  const handle = setupVoice({ mic, input }, statusBar);
+  const handle = setupVoice({ mic, input }, statusBar, () => null);
 
   // --- The stream frame sets the generation; matching frames apply -------
 
@@ -197,6 +197,31 @@ await assertNoLeaks(lifecycle, async () => {
   );
 
   handle.dispose();
+
+  // --- A blocked click names the reason and opens no socket ---------------
+
+  const blockedMic = window.document.createElement("button");
+  const blockedInput = window.document.createElement("textarea");
+  window.document.body.append(blockedMic, blockedInput);
+  const local = [];
+  const blockedHandle = setupVoice(
+    { mic: blockedMic, input: blockedInput },
+    { showLocal: (label, severity) => local.push({ label, severity }), setRecording() {} },
+    () => "Voice dictation needs a GPU this server doesn't have.",
+  );
+  blockedMic.click();
+  await waitFor(() => local.length > 0);
+  check(
+    "a blocked click names the reason on the status bar",
+    local.length === 1 &&
+      local[0].label.includes("needs a GPU") &&
+      local[0].severity === "info",
+  );
+  check(
+    "a blocked click opens no /voice socket",
+    sockets.length === 2,
+  );
+  blockedHandle.dispose();
 });
 
 if (failures.length > 0) {

@@ -188,6 +188,16 @@ pub(crate) fn part_path(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// The provenance marker for a `.part` staging file: the source URL the
+/// partial is being downloaded from. A partial without a marker naming the
+/// same source is never resumed - appending bytes of unknown provenance
+/// would poison the digest.
+pub(crate) fn source_marker_path(part: &Path) -> PathBuf {
+    let mut name = part.as_os_str().to_owned();
+    name.push(".source");
+    PathBuf::from(name)
+}
+
 /// Creates `directory` under `root`, refusing any symlink/reparse component.
 ///
 /// # Errors

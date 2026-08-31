@@ -37,7 +37,7 @@ Long-running work reports progress through `promptforge-progress`: attach an ope
 Every platform or external-bug workaround carries its upstream issue URL inline, in the comment that explains it. When the workaround dies, the URL says when it can be buried.
 
 ```rust
-// wry's drag-drop handler suppresses HTML5 drag events on Windows
+// Tauri's drag-drop handler suppresses HTML5 drag events on Windows
 // (https://github.com/tauri-apps/tauri/issues/15138), so ...
 ```
 

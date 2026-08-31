@@ -1,19 +1,19 @@
 // Unit test for the Workshop tree's workspace management
 // (src/ui/workshop/workshop-panel.ts): the root-row context menu, the
 // missing-root rendering, and the Add Folder flows. Bundles the panel
-// with esbuild and drives it against jsdom. Covers: a missing root
-// renders with the strikethrough/danger class and a "missing" text
+// with esbuild - with "@tauri-apps/plugin-dialog" aliased to the scripted
+// stub in test/helpers - and drives it against jsdom. Covers: a missing
+// root renders with the strikethrough/danger class and a "missing" text
 // label; right-clicking a root opens the shared dropdown with a danger
 // Remove item that revokes the root, announces the change, and confirms
 // on the status bar; a failed revoke paints a status-bar error and
 // announces nothing; the header "+" button is a keyboard-focusable
-// button; in the desktop shell it posts the workspace-pick-folder web
-// message and the persistent folder-picked listener grants the picked
-// path (and stops granting after dispose, so a cancelled pick leaks no
-// one-shot listener); in a plain browser it opens a dialog whose labeled
-// path input gates the Add button until text is typed, Enter submits the
-// typed path (and is inert while the field is empty), and a grant the
-// server refuses paints a status-bar error.
+// button; in the desktop app it opens the native folder picker and the
+// picked path is granted (a cancelled pick grants nothing); in a plain
+// browser it opens a dialog whose labeled path input gates the Add button
+// until text is typed, Enter submits the typed path (and is inert while
+// the field is empty), and a grant the server refuses paints a status-bar
+// error.
 // Run: node test/workshop-panel-menu.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,9 @@ const bundle = await esbuild.build({
   // The panel's import graph pulls colocated CSS; the test drives only
   // the JS, and jsdom applies no stylesheets anyway.
   loader: { ".css": "empty" },
+  alias: {
+    "@tauri-apps/plugin-dialog": path.join(uiDir, "helpers", "tauri-dialog-stub.mjs"),
+  },
 });
 const { WorkshopTreePanel } = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
@@ -215,31 +218,33 @@ await flush();
 
 panelA.dispose();
 
-// --- Desktop shell: the "+" posts the pick message; the event grants --------
+// --- Desktop app: the "+" opens the native picker; the picked path grants ---
 
 {
-  window.__PROMPTFORGE_DESKTOP__ = true;
-  const posted = [];
-  window.ipc = { postMessage: (message) => posted.push(message) };
+  window.__TAURI_INTERNALS__ = {};
+  window.__TAURI_DIALOG__ = { calls: [], answer: null };
   const panelB = new WorkshopTreePanel(statusBar);
   panelB.init();
   window.document.body.appendChild(panelB.element);
   await flush();
 
   panelB.element.querySelector(".workshop-tree__add").click();
-  check("the desktop add posts the workspace-pick-folder message", posted.join(",") === "workspace-pick-folder");
-  check("the desktop add opens no dialog", panelB.element.querySelector(".workspace-add-overlay") === null);
-
-  // A cancelled pick dispatches no event: nothing arrives, nothing grants.
   await flush();
-  check("with no folder-picked event nothing is granted", grants.length === 0);
+  check(
+    "the desktop add opens the native directory picker",
+    window.__TAURI_DIALOG__.calls.length === 1 &&
+      window.__TAURI_DIALOG__.calls[0].directory === true,
+  );
+  check("the desktop add opens no typed-path dialog", panelB.element.querySelector(".workspace-add-overlay") === null);
+
+  // A cancelled pick resolves null: nothing grants.
+  check("a cancelled pick grants nothing", grants.length === 0);
 
   const changesBefore = workspaceChanges;
-  window.dispatchEvent(
-    new window.CustomEvent("promptforge:folder-picked", { detail: { path: "C:\\picked" } }),
-  );
+  window.__TAURI_DIALOG__.answer = "C:\\picked";
+  panelB.element.querySelector(".workshop-tree__add").click();
   await flush();
-  check("a folder-picked event grants the picked path", grants.join(",") === "C:\\picked");
+  check("a picked path is granted", grants.join(",") === "C:\\picked");
   check("a picked-path grant announces one workspace change", workspaceChanges === changesBefore + 1);
   check(
     "a picked-path grant confirms on the status bar as info",
@@ -247,26 +252,13 @@ panelA.dispose();
       (entry) => entry.severity === "info" && entry.label.includes("Added") && entry.label.includes("C:\\picked"),
     ),
   );
-
-  window.dispatchEvent(new window.CustomEvent("promptforge:folder-picked", { detail: {} }));
-  await flush();
-  check("a malformed folder-picked detail grants nothing", grants.length === 1);
-
-  // The persistent listener dies with the panel: a folder-picked event
-  // after dispose grants nothing, so cancelled picks can never pile up
-  // leaked listeners.
   panelB.dispose();
-  window.dispatchEvent(
-    new window.CustomEvent("promptforge:folder-picked", { detail: { path: "C:\\late" } }),
-  );
-  await flush();
-  check("after dispose the folder-picked listener is gone", grants.length === 1);
 }
 
 // --- Plain browser: empty-space menu opens the dialog; input gates Add ------
 
 {
-  window.__PROMPTFORGE_DESKTOP__ = false;
+  delete window.__TAURI_INTERNALS__;
   const panelC = new WorkshopTreePanel(statusBar);
   panelC.init();
   window.document.body.appendChild(panelC.element);

@@ -1,12 +1,13 @@
 // Unit test for the custom window title bar (src/ui/window-chrome.ts). Bundles
-// the TS module with esbuild, imports it via a data URL, and drives it
-// against jsdom built from the real index.html. Covers: without the desktop
-// flag the bar is revealed but the control cluster hides and ipc stays
-// untouched; a missing bar throws; under the flag the bar is revealed and
-// each control posts its typed command envelope; the drag region only drags
-// on the primary button; double-click toggles maximize; and the
-// promptforge:maximized event switches the glyph and aria-label while
-// malformed details are ignored.
+// the TS module with esbuild - with "@tauri-apps/api/window" aliased to the
+// recording stub in test/helpers - imports it via a data URL, and drives it
+// against jsdom built from the real index.html. Covers: without
+// __TAURI_INTERNALS__ the bar is revealed but the control cluster hides and
+// no native call is made; a missing bar throws; in the desktop app each
+// control calls its window method; the drag region only drags on the
+// primary button; double-click toggles maximize; and the maximized state
+// read back on resize switches the glyph and aria-label on transitions
+// only, with the listener dying at dispose.
 // Run: node test/window-chrome.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -28,6 +29,9 @@ const bundle = await esbuild.build({
   // The module under test imports its colocated CSS; strip it - the test
   // drives only the JS, and jsdom applies no stylesheets anyway.
   loader: { ".css": "empty" },
+  alias: {
+    "@tauri-apps/api/window": path.join(uiDir, "helpers", "tauri-window-stub.mjs"),
+  },
 });
 const code = bundle.outputFiles[0].text;
 const { setupWindowChrome } = await import(
@@ -39,21 +43,31 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
+// Lets the async maximized sync (a stubbed promise) run to completion.
+async function flush() {
+  for (let i = 0; i < 5; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 // Each scenario gets a fresh jsdom: setupWindowChrome reads the globals and
 // attaches listeners to the DOM it finds at call time.
 function scenario({ desktop }) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
-  const posted = [];
   if (desktop) {
-    window.__PROMPTFORGE_DESKTOP__ = true;
-    window.ipc = { postMessage: (message) => posted.push(JSON.parse(message)) };
+    window.__TAURI_INTERNALS__ = {};
   }
   globalThis.window = window;
   globalThis.document = window.document;
   globalThis.CustomEvent = window.CustomEvent;
-  setupWindowChrome();
-  return { window, bar: window.document.querySelector(".window-titlebar"), posted };
+  const chrome = setupWindowChrome();
+  return {
+    window,
+    chrome,
+    bar: window.document.querySelector(".window-titlebar"),
+    stub: () => window.__TAURI_STUB__,
+  };
 }
 
 // --- Browser mode: bar visible for the menus, native controls hidden --------
@@ -63,7 +77,8 @@ function scenario({ desktop }) {
   check("browser mode reveals the bar", bar.hidden === false);
   const controls = bar.querySelector(".window-titlebar__controls");
   check("browser mode hides the window-control cluster", controls.hidden === true);
-  check("browser mode never installs window.ipc", !("ipc" in window));
+  check("browser mode never installs the Tauri internals", !("__TAURI_INTERNALS__" in window));
+  check("browser mode makes no native call", window.__TAURI_STUB__ === undefined);
 }
 
 // --- Missing markup: the module guards the DOM contract ---------------------
@@ -81,44 +96,38 @@ function scenario({ desktop }) {
   check("a page without the title bar throws", threw);
 }
 
-// --- Desktop mode: reveal and typed commands --------------------------------
+// --- Desktop mode: reveal and native window commands ------------------------
 
 {
-  const { window, bar, posted } = scenario({ desktop: true });
+  const { window, bar, chrome, stub } = scenario({ desktop: true });
   check("desktop mode reveals the bar", bar.hidden === false);
   check(
     "desktop mode keeps the window-control cluster visible",
     bar.querySelector(".window-titlebar__controls").hidden === false,
   );
 
-  const commandsAfterClick = (command) => {
-    posted.length = 0;
+  const callsAfterClick = (command) => {
+    stub().calls.length = 0;
     bar.querySelector(`[data-command="${command}"]`).click();
-    return posted.map((message) => message.command).join(",");
+    return stub().calls.join(",");
   };
-  check("minimize posts its command", commandsAfterClick("minimize") === "minimize");
+  check("minimize calls the window method", callsAfterClick("minimize") === "minimize");
   check(
-    "maximize posts its command",
-    commandsAfterClick("toggle-maximize") === "toggle-maximize",
+    "maximize calls the window method",
+    callsAfterClick("toggle-maximize") === "toggle-maximize",
   );
-  check("close posts its command", commandsAfterClick("close") === "close");
+  check("close calls the window method", callsAfterClick("close") === "close");
 
   const drag = bar.querySelector(".window-titlebar__drag");
-  posted.length = 0;
+  stub().calls.length = 0;
   drag.dispatchEvent(new window.MouseEvent("pointerdown", { button: 0, bubbles: true }));
-  check(
-    "primary pointerdown in the empty center starts the drag",
-    posted.map((message) => message.command).join(",") === "drag",
-  );
-  posted.length = 0;
+  check("primary pointerdown in the empty center starts the drag", stub().calls.join(",") === "drag");
+  stub().calls.length = 0;
   drag.dispatchEvent(new window.MouseEvent("pointerdown", { button: 2, bubbles: true }));
-  check("non-primary pointerdown does not drag", posted.length === 0);
-  posted.length = 0;
+  check("non-primary pointerdown does not drag", stub().calls.length === 0);
+  stub().calls.length = 0;
   drag.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
-  check(
-    "double-click toggles maximize",
-    posted.map((message) => message.command).join(",") === "toggle-maximize",
-  );
+  check("double-click toggles maximize", stub().calls.join(",") === "toggle-maximize");
 
   // The glyphs are SVG, so visibility is the hidden *attribute* - an
   // SVGSVGElement has no `hidden` IDL property, and assigning one would
@@ -127,46 +136,47 @@ function scenario({ desktop }) {
   const maximizeGlyph = maximize.querySelector(".window-titlebar__glyph--maximize");
   const restoreGlyph = maximize.querySelector(".window-titlebar__glyph--restore");
 
+  await flush();
   check(
-    "boot shows the maximize glyph and hides the restore glyph",
-    !maximizeGlyph.hasAttribute("hidden") && restoreGlyph.hasAttribute("hidden"),
+    "boot syncs the maximize glyph from the window state",
+    maximize.getAttribute("aria-label") === "Maximize" &&
+      !maximizeGlyph.hasAttribute("hidden") &&
+      restoreGlyph.hasAttribute("hidden"),
   );
 
-  window.dispatchEvent(
-    new window.CustomEvent("promptforge:maximized", { detail: { maximized: true } }),
-  );
+  stub().maximized = true;
+  stub().resizeHandlers.forEach((handler) => handler({}));
+  await flush();
   check(
-    "maximized event switches the label to Restore",
+    "a resize into maximized switches the label to Restore",
     maximize.getAttribute("aria-label") === "Restore",
   );
   check(
-    "maximized event hides the maximize glyph via the hidden attribute",
-    maximizeGlyph.hasAttribute("hidden"),
-  );
-  check(
-    "maximized event shows the restore glyph by removing the hidden attribute",
-    !restoreGlyph.hasAttribute("hidden"),
+    "a resize into maximized swaps the glyphs",
+    maximizeGlyph.hasAttribute("hidden") && !restoreGlyph.hasAttribute("hidden"),
   );
 
-  window.dispatchEvent(
-    new window.CustomEvent("promptforge:maximized", { detail: { maximized: false } }),
-  );
+  stub().maximized = false;
+  stub().resizeHandlers.forEach((handler) => handler({}));
+  await flush();
   check(
-    "restore event switches the label back to Maximize",
+    "a resize into restored switches the label back to Maximize",
     maximize.getAttribute("aria-label") === "Maximize",
   );
   check(
-    "restore event restores the glyphs",
+    "a resize into restored restores the glyphs",
     !maximizeGlyph.hasAttribute("hidden") && restoreGlyph.hasAttribute("hidden"),
   );
 
-  window.dispatchEvent(
-    new window.CustomEvent("promptforge:maximized", { detail: { maximized: "yes" } }),
-  );
-  window.dispatchEvent(new window.CustomEvent("promptforge:maximized", { detail: null }));
-  window.dispatchEvent(new window.Event("promptforge:maximized"));
+  // The resize listener dies with the chrome: a later resize leaves the
+  // control alone.
+  chrome.dispose();
+  await flush();
+  stub().maximized = true;
+  stub().resizeHandlers.forEach((handler) => handler({}));
+  await flush();
   check(
-    "malformed maximized events leave the control alone",
+    "after dispose a resize leaves the control alone",
     maximize.getAttribute("aria-label") === "Maximize" &&
       !maximizeGlyph.hasAttribute("hidden") &&
       restoreGlyph.hasAttribute("hidden"),

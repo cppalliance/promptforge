@@ -23,29 +23,49 @@ export interface VoiceElements {
   input: HTMLTextAreaElement;
 }
 
+/**
+ * What blocks starting a take right now, as a user-readable reason, or
+ * null when a take may start. Consulted on every mic click: the mic stays
+ * visible and clickable even when blocked, so the click can name the
+ * blocker on the status bar instead of the control silently disappearing.
+ */
+export type VoiceBlocker = () => string | null;
+
 /** The per-tab voice control; dispose() unwires the mic and discards a live take. */
 export interface VoiceHandle extends IDisposable {
   discardIfRecording(): void;
 }
 
+/** The server's voice capability answer: what dictation can do here. */
+export interface VoiceCapability {
+  /** Whether transcription can run on the GPU. */
+  gpu: boolean;
+  /** Whether an STT engine is provisioned and loaded in the active profile. */
+  engine: boolean;
+}
+
 /**
- * Asks the server whether transcription can run on the GPU. CPU whisper is
- * slow enough that the mic stays hidden instead. Any failure answers false:
- * a take that stalls for half a minute reads as broken, not as available.
+ * Asks the server what voice can do here. Any failure - transport, status,
+ * or a malformed body - answers null, which the caller treats as blocked.
  */
-export async function voiceGpuAvailable(): Promise<boolean> {
+export async function voiceCapability(): Promise<VoiceCapability | null> {
   try {
     const response = await fetch("/voice/capability");
     if (!response.ok) {
-      return false;
+      return null;
     }
     const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null || !("gpu" in body)) {
-      return false;
+    if (typeof body !== "object" || body === null) {
+      return null;
     }
-    return Reflect.get(body, "gpu") === true;
+    const gpu = Reflect.get(body, "gpu");
+    const engine = Reflect.get(body, "engine");
+    if (typeof gpu !== "boolean" || typeof engine !== "boolean") {
+      return null;
+    }
+    return { gpu, engine };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -70,7 +90,11 @@ interface StreamTracker {
   current: number | null;
 }
 
-export function setupVoice(elements: VoiceElements, statusBar: StatusBar): VoiceHandle {
+export function setupVoice(
+  elements: VoiceElements,
+  statusBar: StatusBar,
+  blocked: VoiceBlocker,
+): VoiceHandle {
   const { mic, input } = elements;
   let voice: VoiceSession | null = null;
   let suppressReplies = false;
@@ -347,9 +371,14 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): Voice
   const onMicClick = (): void => {
     if (voice) {
       stopVoice();
-    } else {
-      void startVoice();
+      return;
     }
+    const reason = blocked();
+    if (reason !== null) {
+      statusBar.showLocal(reason, "info");
+      return;
+    }
+    void startVoice();
   };
   mic.addEventListener("click", onMicClick);
 

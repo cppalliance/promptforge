@@ -7,10 +7,11 @@
 // reopening the Workshop panel restores the tree as the user left it.
 // The panel also manages the grants themselves: a root row's context
 // menu revokes it, and a header "+" button (or the empty-space context
-// menu) adds a folder - through the desktop shell's native picker when
-// its bridge is present, through a typed-path dialog in a plain browser.
+// menu) adds a folder - through the native folder picker in the desktop
+// app, through a typed-path dialog in a plain browser.
 
 import type { IContentRenderer } from "dockview";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import { showDropdown } from "../../chat/components/dropdown";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../../chat/utils/icons";
@@ -26,31 +27,6 @@ export interface TreeStatusSink {
 
 // Cache key for the synthetic granted-roots listing, which has no path.
 const ROOTS_KEY = "";
-
-// The web message asking the desktop shell for its native folder picker.
-// The shell answers a chosen folder with the FOLDER_PICKED_EVENT below; a
-// cancelled pick answers nothing, so the picked-path listener is a single
-// persistent one for the panel's lifetime, never a leaked one-shot.
-const PICK_FOLDER_MESSAGE = "workspace-pick-folder";
-
-/** The native event the shell dispatches with the picked folder's path. */
-const FOLDER_PICKED_EVENT = "promptforge:folder-picked";
-
-/**
- * Reads the picked path out of the native event. The detail arrives as
- * `unknown` and is validated field by field, like a drop's paths.
- */
-function readPickedPath(event: Event): string | null {
-  if (!(event instanceof CustomEvent)) {
-    return null;
-  }
-  const detail: unknown = event.detail;
-  if (typeof detail !== "object" || detail === null || !("path" in detail)) {
-    return null;
-  }
-  const { path } = detail;
-  return typeof path === "string" && path.length > 0 ? path : null;
-}
 
 // Session state: expanded directory paths and the listings already
 // fetched. Module-level so a reopened Workshop panel restores both.
@@ -73,16 +49,6 @@ export class WorkshopTreePanel implements IContentRenderer {
   private readonly onWorkspaceChanged = (): void => {
     listingCache.delete(ROOTS_KEY);
     this.reload();
-  };
-  // The shell's answer to PICK_FOLDER_MESSAGE. Persistent for the panel's
-  // lifetime because a cancelled pick dispatches no event - a one-shot
-  // listener would leak on every cancel.
-  private readonly onFolderPicked = (event: Event): void => {
-    const path = readPickedPath(event);
-    if (path === null) {
-      return;
-    }
-    void this.grantFolder(path);
   };
 
   constructor(private readonly statusBar: TreeStatusSink | null = null) {
@@ -115,7 +81,6 @@ export class WorkshopTreePanel implements IContentRenderer {
       ]);
     });
     window.addEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
-    window.addEventListener(FOLDER_PICKED_EVENT, this.onFolderPicked);
     void this.loadRoots().catch((error: unknown) => {
       this.showError(this.list, error);
     });
@@ -123,7 +88,6 @@ export class WorkshopTreePanel implements IContentRenderer {
 
   dispose(): void {
     window.removeEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
-    window.removeEventListener(FOLDER_PICKED_EVENT, this.onFolderPicked);
     this.dialog?.dispose();
     this.dialog = null;
     this.pointerAnchor?.remove();
@@ -324,14 +288,14 @@ export class WorkshopTreePanel implements IContentRenderer {
   }
 
   /**
-   * Starts the Add Folder flow. Inside the desktop shell the native
-   * folder picker answers through the persistent picked-path listener (a
-   * cancel answers nothing); in a plain browser, where no picker and no
-   * OS paths exist, a dialog asks for the path as text.
+   * Starts the Add Folder flow. In the desktop app the native folder
+   * picker answers with the chosen path (a cancel answers nothing); in a
+   * plain browser, where no picker and no OS paths exist, a dialog asks
+   * for the path as text.
    */
   private addFolder(): void {
-    if (window.__PROMPTFORGE_DESKTOP__ === true) {
-      window.ipc?.postMessage(PICK_FOLDER_MESSAGE);
+    if (window.__TAURI_INTERNALS__ !== undefined) {
+      void this.pickFolder();
       return;
     }
     this.dialog?.dispose();
@@ -353,6 +317,15 @@ export class WorkshopTreePanel implements IContentRenderer {
         { label: "Cancel", run: () => undefined },
       ],
     });
+  }
+
+  /** The desktop pick: the native dialog; a cancel resolves null. */
+  private async pickFolder(): Promise<void> {
+    const picked = await open({ directory: true, title: "Add Folder to Workspace" });
+    if (picked === null) {
+      return;
+    }
+    await this.grantFolder(picked);
   }
 
   /** Grants one folder and announces the outcome, like the drop flow. */

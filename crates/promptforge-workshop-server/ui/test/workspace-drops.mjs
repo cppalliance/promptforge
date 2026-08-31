@@ -47,7 +47,7 @@ function scenario({ desktop, responder }) {
   const dom = new JSDOM("", { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
   if (desktop) {
-    window.__PROMPTFORGE_DESKTOP__ = true;
+    window.__TAURI_INTERNALS__ = {};
   }
   const calls = [];
   const local = [];

@@ -1,32 +1,34 @@
-// Chat gating on the mic: a workbench snapshot with chat_ready: false
-// disables the mic button, and one arriving during a live take discards
-// it - the REC badge clears, the voice socket closes, and the composer's
-// readOnly lock lifts, because a take that cannot be sent is a trap.
-// chat_ready: true re-enables the mic. Closing the Agent tab disposes the
-// plugin's workbench subscription: a snapshot pushed after the close no
-// longer drives the closed tab's mic.
+// Chat gating on the mic: the mic stays visible and clickable whether or
+// not chat is ready - a click with chat_ready: false starts no take and
+// names the blocker on the status bar instead of the control disappearing.
+// A snapshot arriving during a live take still discards it - the REC badge
+// clears, the voice socket closes, and the composer's readOnly lock lifts,
+// because a take that cannot be sent is a trap. Closing the Agent tab
+// disposes the plugin: a click on the detached mic starts nothing.
 // Run: node test/chat-gating-mic.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
-await bootWorkbench("chat_ready gates the mic and the gate dies with the tab", async (ctx) => {
-  const { document, mic, input, recEl, FakeWebSocket, emitWorkbench, startTake, sleep, failures } = ctx;
+await bootWorkbench("chat_ready gates the mic's click and the wiring dies with the tab", async (ctx) => {
+  const { document, mic, input, recEl, statusText, FakeWebSocket, emitWorkbench, startTake, sleep, failures } = ctx;
 
   if (mic.disabled) {
-    failures.push("the mic starts disabled while chat_ready is true");
+    failures.push("the mic starts enabled while chat_ready is true");
   }
 
+  // A gated click starts no take and explains itself on the status bar.
   emitWorkbench({ chat_ready: false });
-  if (!mic.disabled) {
-    failures.push("the mic did not disable when chat_ready flipped false");
+  const gated = await startTake();
+  if (gated) {
+    failures.push("a mic click with chat_ready false opened a /voice socket");
   }
-  emitWorkbench({ chat_ready: true });
-  if (mic.disabled) {
-    failures.push("the mic did not re-enable when chat_ready returned true");
+  if (!statusText.textContent.includes("Chat isn't ready")) {
+    failures.push(`a gated click named no blocker on the status bar (got "${statusText.textContent}")`);
   }
 
+  emitWorkbench({ chat_ready: true });
   const voiceSocket = await startTake();
   if (!voiceSocket) {
-    failures.push("the mic click did not open a /voice socket");
+    failures.push("the mic click did not open a /voice socket once chat_ready returned");
     return;
   }
   voiceSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "hello", tentative: "" }) });
@@ -35,9 +37,6 @@ await bootWorkbench("chat_ready gates the mic and the gate dies with the tab", a
   }
 
   emitWorkbench({ chat_ready: false });
-  if (!mic.disabled) {
-    failures.push("the mic did not disable during the live take");
-  }
   if (recEl.classList.contains("status-bar__rec--active")) {
     failures.push("REC badge not cleared when chat_ready gated the live take");
   }
@@ -48,10 +47,15 @@ await bootWorkbench("chat_ready gates the mic and the gate dies with the tab", a
     failures.push("readOnly not lifted after the gated take was discarded");
   }
 
+  // The mic is never disabled, so there is nothing to re-enable: with the
+  // gate open again a click starts a fresh take.
   emitWorkbench({ chat_ready: true });
-  if (mic.disabled) {
-    failures.push("the mic did not recover after the gate reopened");
+  const reopened = await startTake();
+  if (!reopened) {
+    failures.push("the mic click did not start a fresh take after the gate reopened");
+    return;
   }
+  reopened.close();
 
   // Close the Agent tab from its tab chip: the boot layout's only
   // closable default tab (the Workshop tree's permanent tab renders no
@@ -63,7 +67,7 @@ await bootWorkbench("chat_ready gates the mic and the gate dies with the tab", a
   }
   closeAction.click();
   // ChatUI.destroy is async; wait for the composer to unmount before
-  // probing what a post-close snapshot still reaches.
+  // probing what a click on the detached mic still reaches.
   const closeDeadline = Date.now() + 2000;
   while (document.contains(mic) && Date.now() < closeDeadline) {
     await sleep(20);
@@ -73,23 +77,10 @@ await bootWorkbench("chat_ready gates the mic and the gate dies with the tab", a
     return;
   }
 
-  // ChatUI.destroy finishes (and disposes the subscription) a few ticks
-  // after the composer unmounts, so probe until the deadline: emit a
-  // gating snapshot and see whether it still drives the detached mic,
-  // resetting between probes. A disposed subscription leaves the mic
-  // untouched; a leaked one keeps flipping it until the deadline.
-  const disposeDeadline = Date.now() + 2000;
-  let leaked = true;
-  while (Date.now() < disposeDeadline) {
-    emitWorkbench({ chat_ready: false });
-    if (!mic.disabled) {
-      leaked = false;
-      break;
-    }
-    emitWorkbench({ chat_ready: true });
-    await sleep(20);
-  }
-  if (leaked) {
-    failures.push("a snapshot after the tab closed still drove its mic: the subscription leaked");
+  // The disposed voice handle answers nothing: clicking the detached mic
+  // starts no take.
+  const afterClose = await startTake();
+  if (afterClose) {
+    failures.push("a click on the closed tab's detached mic started a take");
   }
 });
