@@ -4,4 +4,4 @@
 //! re-exported here unchanged, so existing `promptforge_core::untrusted::*`
 //! paths keep working.
 
-pub(crate) use promptforge_core_support::untrusted::{GuardNonce, wrap};
+pub(crate) use promptforge_core_support::untrusted::GuardNonce;

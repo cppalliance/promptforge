@@ -51,6 +51,9 @@ percent-encoding = "2"
 ipnet = "2"
 dunce = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
+# default-features off: the `sync` module (CancellationToken) is ungated in
+# tokio-util 0.7, so no features are required for it.
+tokio-util = { version = "0.7", default-features = false }
 thiserror = "2"
 anyhow = "1"
 axum = { version = "0.8", features = ["multipart", "ws"] }

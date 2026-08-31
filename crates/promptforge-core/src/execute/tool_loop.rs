@@ -10,7 +10,7 @@ use crate::lua::ToolCallCounts;
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::tools::{ToolId, ToolOutput};
-use crate::untrusted::{self, GuardNonce};
+use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 
 use super::scope::DispatchTarget;
@@ -260,7 +260,7 @@ pub(crate) async fn run_prose_inference(
                         // `OutputTrust` is `#[non_exhaustive]` in the contract
                         // crate: an unknown future variant takes the safe path
                         // and is nonce-wrapped as untrusted.
-                        _ => untrusted::wrap(nonce, output.text()),
+                        _ => nonce.wrap(output.text()),
                     };
                     results.push((call.id.clone(), result));
                 }

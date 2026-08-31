@@ -15,6 +15,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 rand.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

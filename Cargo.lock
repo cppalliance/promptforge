@@ -4007,6 +4007,7 @@ version = "0.2.0"
 dependencies = [
  "rand 0.9.5",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
