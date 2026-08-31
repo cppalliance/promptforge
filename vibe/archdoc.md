@@ -35,7 +35,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A82. Chat replies are ordered durable per-request traffic; status, catalog, and interim transcription are complete ephemeral snapshots.
 
 
 - A84. Gateway and Workshop may share a process but retain their loopback protocol boundary; headless builds omit Workshop.
@@ -58,6 +57,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A93. Operation-scoped progress trees attach to a process hub; owners schedule, producers report, renderers format.
 
 - A94. Config writes enter validated persistent shadows; only Apply promotes them and Revert removes them.
+
+- A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
 
 ## Principles
 
