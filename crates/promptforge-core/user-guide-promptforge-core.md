@@ -8,7 +8,7 @@ You write a prompt as a single markdown file. The file has three parts: YAML fro
 
 Here is the smallest complete prompt:
 
-````
+````markdown
 ---
 name: greeter
 description: says hi
@@ -37,7 +37,7 @@ The run walks the top-level H2 sections in file order. Each section runs once, i
 
 Here is a minimal two-section run:
 
-````
+````markdown
 ---
 name: two-step
 description: ask, then report
@@ -70,7 +70,7 @@ The fall-through rules:
 
 A typical frontmatter declares `name`, `description`, and `promptforge: 1`. You can add `max_tool_iterations` to cap a section's tool loop:
 
-````
+````markdown
 ---
 name: researcher
 description: research a topic with tools
@@ -92,7 +92,7 @@ Within the H1 content and within each section, content alternates between exact 
 
 The classic section shape is Lua, then prose, then Lua:
 
-````
+````markdown
 ## Summarize
 
 ```lua
@@ -123,7 +123,7 @@ Each section's Lua runs in a fresh, sandboxed VM. You have the `string`, `table`
 
 Inside a block you can read and write a set of host globals:
 
-````
+````markdown
 ## Inspect
 
 ```lua
@@ -145,7 +145,7 @@ Host calls that fail raise ordinary Lua errors at the call site, so `pcall` can 
 
 Prose in a section is sent to the model as a user message. Before the send, the runtime resolves `{{ }}` placeholders in the prose. Lua source is never substituted.
 
-````
+````markdown
 ## Greet
 
 ```lua
@@ -177,7 +177,7 @@ The rules:
 
 A section with non-empty prose must have a bound model, or the run fails with "model binding required for section X". You bind models in the `lua shared` block. The simplest form declares a prompt-wide default:
 
-````
+````markdown
 ---
 name: greeter
 description: says hi
@@ -208,7 +208,7 @@ The constraints: call `models.default` at most once per prompt, and only from th
 
 You can also call a model directly from Lua, without prose:
 
-````
+````markdown
 ```lua
 local tag = models.infer('Classify: ' .. args)
 ```
@@ -223,7 +223,7 @@ Use direct inference for cheap auxiliary work: classification, extraction, rewri
 
 You declare tools by capability in the shared block:
 
-````
+````markdown
 ```lua shared
 tools.bind('search', 'web search')
 ```
@@ -239,7 +239,7 @@ A bound tool is withheld from the model until you scope it:
 
 Here is a complete prompt with a scoped tool:
 
-````
+````markdown
 ---
 name: researcher
 description: answer with web search
@@ -271,7 +271,7 @@ The model calls the tool by the alias you bound. The section runs a multi-round 
 
 You can also define a Lua-backed local tool inside a section:
 
-````
+````markdown
 ```lua
 tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)
   return 'got ' .. args.value
@@ -294,7 +294,7 @@ Three functions move control between sections.
 
 `jump('## Heading')` transfers control to another section by heading:
 
-````
+````markdown
 ```lua
 jump('## Help')
 ```
@@ -304,7 +304,7 @@ The jump ends the current block immediately and skips the section's remaining bl
 
 `execute('## Heading')` runs a contained sub-chain and returns its final reply:
 
-````
+````markdown
 ```lua
 local findings = execute('## Research')
 ```
@@ -316,7 +316,7 @@ Off-walk sections act as shared subroutines. The walk skips them, but `execute` 
 
 `list_from_section('### Items')` reads a list section's bullet or numbered items into Lua as an array of strings, with markers stripped:
 
-````
+````markdown
 ## Gather
 
 ```lua
@@ -340,7 +340,7 @@ Addressing rules apply to all three functions. Headings must match level and nam
 
 `fanout(worker, collection)` maps a worker section over a collection, running the worker once per member, concurrently:
 
-````
+````markdown
 ---
 name: batch
 description: reply about each item
@@ -395,7 +395,7 @@ The constraints:
 
 The store is a run-scoped virtual filesystem. You read and write virtual files addressed by logical string paths. One store is shared across all sections of a run, and it survives the context-clearing transitions that wipe each section's conversation.
 
-````
+````markdown
 ## Writer
 
 ```lua

@@ -26,7 +26,7 @@ This call fetches the page and returns its content as text in the tool output. T
 
 Every successful result opens with a provenance header. The header gives the final URL, a truncated flag, and the extraction mode. The content body follows the header.
 
-````
+````text
 url: https://example.com/
 truncated: false
 extraction: readability

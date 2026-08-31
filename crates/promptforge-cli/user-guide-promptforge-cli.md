@@ -16,7 +16,7 @@ Install the tool from crates.io. The install produces an executable named `promp
 
 Run a prompt file with the `run` subcommand:
 
-````
+````console
 promptforge run prompts/hello.md
 ````
 
@@ -24,7 +24,7 @@ The tool reads the file from your local filesystem, executes it, and prints the 
 
 You can pass a raw input string to the prompt as an optional positional argument after the file path:
 
-````
+````console
 promptforge run prompts/staker.md "Bloomberg"
 ````
 
@@ -34,7 +34,7 @@ Inside the prompt, the input is exposed as `args`. It defaults to empty. The too
 
 You connect to a remote PromptForge gateway by setting two environment variables together:
 
-````
+````console
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
 export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 ````
@@ -90,7 +90,7 @@ By default, each run uses a fresh in-memory store. A prompt's state lives exactl
 
 You can persist the prompt's store across runs with the `--store DIR` option:
 
-````
+````console
 promptforge run prompts/staker.md "Bloomberg" --store ./state
 ````
 
@@ -102,7 +102,7 @@ During the run itself, the tool produces no progress output. Long runs are silen
 
 ## Errors and Invocation Edge Cases
 
-Error messages name the failing stage. Examples include "read prompt file <path>", "parse prompt file <path>", "fetch the model catalog", and "load the tool embedding model". Each error goes to stderr as an error chain, so you see the full context of the failure.
+Error messages name the failing stage. Examples include `"read prompt file <path>"`, `"parse prompt file <path>"`, `"fetch the model catalog"`, and `"load the tool embedding model"`. Each error goes to stderr as an error chain, so you see the full context of the failure.
 
 The invocation parser is strict. A missing file argument is an error. An unknown subcommand is an error. Extra trailing arguments are an error. None of these are silently ignored.
 

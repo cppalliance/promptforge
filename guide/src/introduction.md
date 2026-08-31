@@ -4,22 +4,21 @@ PromptForge turns Markdown files into executable AI prompt pipelines. You write 
 
 A PromptForge prompt is a single file. Sections run top to bottom. Lua blocks control flow, bind models, declare tools, and write to a virtual filesystem. The model sees the prose. The tool loop dispatches calls and feeds results back. Fanout maps a worker section over a list in parallel. The result is a string.
 
-## Components
+## Chapters
 
-PromptForge is a workspace of cooperating crates:
+Each chapter is the user guide for one component of the workspace:
 
-| Crate | What it does |
-|-------|-------------|
-| **promptforge-cli** | Command-line tool. Point it at a prompt file and run it. |
-| **promptforge-gateway** | Model backend server. Routes chat completions to configured LLM endpoints, manages credentials, serves a model catalog, and optionally runs local GGUF models. |
-| **promptforge-core** | The library. Parser, execution engine, Lua sandbox, model resolution, tool dispatch, fanout, virtual store. Everything above depends on this. |
-| **promptforge-mcp-server** | Serves prompts as MCP tools for agentic harnesses like Cursor and Claude Code. |
-| **promptforge-tool-picker** | Semantic tool resolution. Matches capability descriptions to concrete tools using an embedded embedding model. |
-| **promptforge-webfetch** | Built-in web fetch tool. Retrieves pages, extracts readable content, guards against SSRF. |
-| **promptforge-dev** | Interactive development runner. Watch mode, store dump inspection, raw trace capture. |
+- [Running Prompts](cli.md) - the `promptforge-cli` command-line tool: point it at a prompt file and run it.
+- [Gateway Configuration](gateway-config.md) - configuring the gateway: endpoints, credentials, and model routing.
+- [Local Models](local-models.md) - running local GGUF models through the gateway.
+- [Speech-to-Text](stt.md) - the `promptforge-stt` speech-to-text component.
+- [Gateway](gateway.md) - the model backend server: chat completion routing, credentials, and the model catalog.
+- [Writing Prompts](prompts.md) - the `promptforge-core` library: prompt file format, Lua scripting, models, tools, fanout, store, and errors.
+- [MCP Server](mcp-server.md) - serving prompts as MCP tools for agentic harnesses like Cursor and Claude Code.
+- [Tool Picker](tool-picker.md) - semantic tool resolution using an embedded embedding model.
+- [Web Fetch](webfetch.md) - the built-in web fetch tool: page retrieval, readable-content extraction, SSRF guards.
+- [Development Runner](dev-runner.md) - the interactive development runner: watch mode, store dump inspection, raw trace capture.
 
 ## How to read this guide
 
-This guide follows the user journey. Start with [Getting Started](getting-started.md) to run your first prompt. Then read [Prompt Files](prompt-files.md) and [Lua Scripting](lua.md) to understand the format. The remaining chapters cover each subsystem in depth.
-
-If you are integrating PromptForge as a library, the [Execution](execution.md) chapter explains the programmatic API. If you are deploying a model backend, start with [Gateway](gateway.md).
+Start with [Running Prompts](cli.md) to run your first prompt, then [Writing Prompts](prompts.md) for the prompt file format. If you are deploying a model backend, read [Gateway Configuration](gateway-config.md) and [Gateway](gateway.md). The remaining chapters cover each subsystem in depth.
