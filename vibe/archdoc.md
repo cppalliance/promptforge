@@ -24,44 +24,21 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
-
-
-
-
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
-
-
-
-
-
-
-
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
-
-
 - A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
-
 - A88. Cached artifacts skip hashing only when digest, size, and mtime match in an operator-trusted cache.
-
 - A89. Native code compiles only during build or packaging; runtime only verifies, stages, and launches its artifacts.
-
 - A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
-
 - A91. Human boot config, machine state, view layout, and append-only tape remain separate stores.
-
 - A92. Workshop sessions own transport and multiplexing; chat execution stays behind a replaceable adapter.
-
 - A93. Operation-scoped progress trees attach to a process hub; owners schedule, producers report, renderers format.
-
 - A94. Config writes enter validated persistent shadows; only Apply promotes them and Revert removes them.
-
 - A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
-
 - A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
-
 - A97. Per-crate guides are source truth; mdBook and flat guides assemble them without duplicate narratives.
-
 - A98. Publishable crates have registry-resolvable dependency closure and release in dependency order.
+- A99. Cancellation flows to descendants; child cancellation never affects ancestors or siblings.
 
 ## Principles
 
