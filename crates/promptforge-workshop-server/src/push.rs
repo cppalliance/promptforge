@@ -41,9 +41,7 @@ impl Push {
     }
 
     /// Pushes a user-visible status update: a `{"type":"status",...}`
-    /// [`crate::protocol::StatusFrame`] at
-    /// [`Severity::Info`](crate::protocol::Severity::Info) with no
-    /// progress.
+    /// `StatusFrame` at info severity with no progress.
     pub fn push_status_update(
         &self,
         label: impl Into<String>,
@@ -54,8 +52,7 @@ impl Push {
     }
 
     /// Pushes a failure the user should see: a `{"type":"status",...}`
-    /// [`crate::protocol::StatusFrame`] at
-    /// [`Severity::Error`](crate::protocol::Severity::Error).
+    /// `StatusFrame` at error severity.
     pub fn push_failure(
         &self,
         label: impl Into<String>,
@@ -66,8 +63,7 @@ impl Push {
     }
 
     /// Pushes an activity pulse the UI does not display as text: a
-    /// `{"type":"status",...}` [`crate::protocol::StatusFrame`] at
-    /// [`Severity::Debug`](crate::protocol::Severity::Debug), whose
+    /// `{"type":"status",...}` `StatusFrame` at debug severity, whose
     /// `activity` field drives the status bar's LED.
     pub fn push_activity(
         &self,
@@ -95,7 +91,7 @@ impl Push {
     }
 
     /// Pushes the status bar back to its resting state: the `Ready`/`idle`
-    /// `{"type":"status",...}` [`crate::protocol::StatusFrame`].
+    /// `{"type":"status",...}` `StatusFrame`.
     pub fn push_idle(&self) {
         self.status.idle();
     }

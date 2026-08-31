@@ -465,7 +465,11 @@ fn configured_path(root: &Path, source: &str) -> Option<PathBuf> {
 /// # Errors
 /// Returns [`LocalError::Io`] when the tree cannot be walked or a file
 /// cannot be inspected.
-pub fn orphans(root: &Path, models: &[LocalModelConfig]) -> Result<Vec<OrphanEntry>, LocalError> {
+pub fn orphans(
+    root: &Path,
+    models: &[LocalModelConfig],
+    extra_sources: &[&str],
+) -> Result<Vec<OrphanEntry>, LocalError> {
     let mut configured = HashSet::new();
     for model in models {
         let mut sources = vec![model.source()];
@@ -484,6 +488,15 @@ pub fn orphans(root: &Path, models: &[LocalModelConfig]) -> Result<Vec<OrphanEnt
             }
             configured.insert(path);
         }
+    }
+    for source in extra_sources {
+        let Some(path) = configured_path(root, source) else {
+            continue;
+        };
+        if let Ok(canonical) = fs::canonicalize(&path) {
+            configured.insert(canonical);
+        }
+        configured.insert(path);
     }
 
     let models_dir = root.join("models");
@@ -1088,7 +1101,7 @@ context = 4096
         ))
         .expect("config");
 
-        let entries = orphans(root, config.local_models()).expect("orphans");
+        let entries = orphans(root, config.local_models(), &[]).expect("orphans");
         assert_eq!(
             entries,
             vec![
@@ -1114,6 +1127,6 @@ context = 4096
     #[test]
     fn orphans_without_a_models_directory_is_empty() {
         let temp = TempDir::new().expect("tempdir");
-        assert_eq!(orphans(temp.path(), &[]).expect("orphans"), Vec::new());
+        assert_eq!(orphans(temp.path(), &[], &[]).expect("orphans"), Vec::new());
     }
 }

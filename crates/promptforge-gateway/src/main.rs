@@ -16,7 +16,15 @@ const USAGE: &str = concat!(
 );
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    "whisper_rs::whisper_logging_hook=warn,whisper_rs::ggml_logging_hook=warn",
+                )
+            }),
+        )
+        .init();
 
     let options = match parse_args(std::env::args_os()) {
         Ok(options) => options,

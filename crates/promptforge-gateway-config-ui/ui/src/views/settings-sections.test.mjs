@@ -461,6 +461,76 @@ test("the restart banner clears when config generation advances", async () => {
   assert.ok(banner.hidden, "a new gateway generation dismisses the stale restart banner");
 });
 
+test("blurring a chip input commits the pending text as a chip", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/workshop");
+  await settle();
+  root.querySelector(".workshop-enable").click();
+  await settle();
+  root.querySelector(".add-stt").click();
+  await settle();
+
+  const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");
+  assert.ok(chipInput, "the vocabulary chip input renders");
+  chipInput.value = "GGUF";
+  chipInput.dispatchEvent(new dom.window.Event("blur"));
+  await settle();
+
+  const chips = [...root.querySelectorAll(".field-row[data-key='stt.vocabulary'] .pill")];
+  assert.ok(
+    chips.some((chip) => chip.textContent.includes("GGUF")),
+    "blurring commits the typed value as a chip",
+  );
+});
+
+test("blurring a chip input with an empty value does not add a chip", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/workshop");
+  await settle();
+  root.querySelector(".workshop-enable").click();
+  await settle();
+  root.querySelector(".add-stt").click();
+  await settle();
+
+  const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");
+  chipInput.value = "";
+  chipInput.dispatchEvent(new dom.window.Event("blur"));
+  await settle();
+
+  const chips = [...root.querySelectorAll(".field-row[data-key='stt.vocabulary'] .pill")];
+  assert.equal(chips.length, 0, "blurring an empty input adds no chip");
+});
+
+test("the secret field toggle switches the password input type", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  root.querySelector(".secret-change").click();
+  await settle();
+
+  const input = root.querySelector(".secret-input");
+  assert.equal(input.type, "password", "the input starts as a password field");
+  const toggle = root.querySelector(".secret-toggle");
+  assert.ok(toggle, "the Eye/EyeOff toggle button renders");
+  assert.equal(toggle.getAttribute("aria-label"), "Show");
+
+  toggle.click();
+  assert.equal(input.type, "text", "clicking the toggle reveals the secret");
+  assert.equal(toggle.getAttribute("aria-label"), "Hide");
+  assert.equal(toggle.getAttribute("aria-pressed"), "true");
+
+  toggle.click();
+  assert.equal(input.type, "password", "clicking again re-hides the secret");
+  assert.equal(toggle.getAttribute("aria-label"), "Show");
+  assert.equal(toggle.getAttribute("aria-pressed"), "false");
+});
+
 test("Restore recommended models creates or resets the pinned STT pair", async () => {
   const config = modelsFixture();
   config.stt_model[0].source = "models/stale.bin";

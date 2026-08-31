@@ -26,6 +26,10 @@ use crate::{AppState, check_auth};
 /// per-request timeout replaces the bounded client's wider default.
 const HF_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Cap response body at 1 MiB: large model-card READMEs with embedded
+/// base64 images can exceed 10 MiB, and the gateway only shows the text.
+const MAX_README_BODY: usize = 1024 * 1024;
+
 /// Shared Hugging Face hub client: one reqwest client, the hub base URL,
 /// and the boot-time `HF_TOKEN` (absent for anonymous access).
 #[derive(Debug)]
@@ -93,6 +97,41 @@ impl HfProxy {
             .status(status)
             .header(CONTENT_TYPE, content_type)
             .body(Body::from_stream(response.bytes_stream()))
+            .map_err(GatewayError::upstream_protocol)
+    }
+
+    /// GETs `{base_url}{path}`, returning the body as `text/markdown` on
+    /// success, a plain 404 for a missing README, and the error envelope
+    /// for other failures. The body is capped at [`MAX_README_BODY`].
+    async fn forward_readme(&self, path: &str) -> Result<Response, GatewayError> {
+        let mut request = self
+            .client
+            .get(format!("{}{path}", self.base_url))
+            .timeout(HF_TIMEOUT);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token.expose());
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(ProtocolError::upstream_transport)?;
+        let status = response.status();
+        if status.as_u16() == 404 {
+            return Response::builder()
+                .status(404)
+                .body(Body::empty())
+                .map_err(GatewayError::upstream_protocol);
+        }
+        if !status.is_success() {
+            let body = read_body_capped(response, MAX_ERROR_BODY).await;
+            let body: String = body.chars().take(2000).collect();
+            return Err(ProtocolError::upstream_status(status.as_u16(), body).into());
+        }
+        let body = read_body_capped(response, MAX_README_BODY).await;
+        Response::builder()
+            .status(200)
+            .header(CONTENT_TYPE, "text/markdown; charset=utf-8")
+            .body(Body::from(body))
             .map_err(GatewayError::upstream_protocol)
     }
 }
@@ -224,28 +263,41 @@ fn validate_search_value(
     Ok(())
 }
 
-/// The `GET /admin/hf/model/{repo}` route: bearer-authed, proxies the hub's
-/// model detail for an `owner/name` repo with `blobs=true`, so the sibling
-/// list carries the exact file sizes the quant picker needs.
-///
-/// `repo` is caller input holding a slash, matched by a wildcard segment:
-/// it must be exactly two non-empty hub-legal segments, so a caller can
-/// never steer the upstream path (traversal, encoded slashes, empty
-/// segments all map to 400 before any request leaves the gateway).
+/// The `GET /admin/hf/model/{owner}/{name}` route: bearer-authed, proxies
+/// the hub's model detail for an `owner/name` repo with `blobs=true`, so
+/// the sibling list carries the exact file sizes the quant picker needs.
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
-    repo: Result<Path<String>, PathRejection>,
+    repo: Result<Path<(String, String)>, PathRejection>,
     headers: HeaderMap,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &headers).await?;
-    // Deferring the extractor keeps auth first and puts the rejection in
-    // the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Path(repo) =
+    let Path((owner, name)) =
         repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    let repo = format!("{owner}/{name}");
     validate_repo(&repo)?;
     state
         .hf
         .forward(&format!("/api/models/{repo}"), &[("blobs", "true")])
+        .await
+}
+
+/// The `GET /admin/hf/model/{owner}/{name}/readme` route: bearer-authed,
+/// proxies the hub's raw README.md for the repo and returns it as
+/// `text/markdown; charset=utf-8`. A missing README maps to 404.
+pub(crate) async fn admin_hf_readme(
+    State(state): State<AppState>,
+    repo: Result<Path<(String, String)>, PathRejection>,
+    headers: HeaderMap,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let Path((owner, name)) =
+        repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    let repo = format!("{owner}/{name}");
+    validate_repo(&repo)?;
+    state
+        .hf
+        .forward_readme(&format!("/{repo}/raw/main/README.md"))
         .await
 }
 
@@ -543,7 +595,9 @@ api_key = "test-token"
     #[tokio::test]
     async fn admin_hf_model_rejects_malformed_repos_without_calling_upstream() {
         let (addr, seen) = serve_against_stub(StatusCode::OK, "{}", None).await;
-        for repo in ["noslash", "owner/name/extra", "owner/", "owner/na%20me"] {
+        // With `{owner}/{name}` segments, repos with spaces or control
+        // characters match the route but fail `validate_repo`.
+        for repo in ["owner/na%20me", ".../name", "owner/..."] {
             let response = get(addr, &format!("/admin/hf/model/{repo}"), "test-token").await;
             assert_eq!(
                 response.status(),
@@ -553,8 +607,7 @@ api_key = "test-token"
             let body: serde_json::Value = response.json().await.expect("a JSON error envelope");
             assert_eq!(body["error"]["code"], "malformed_request");
         }
-        // A hostile client can put encoded dot-segments on the wire even
-        // though a well-behaved URL parser collapses them client-side.
+        // Encoded dot-segments match the route; validate_repo rejects them.
         for repo in ["%2E%2E/name", "owner/%2E%2E"] {
             let (status, response) =
                 raw_get(addr, &format!("/admin/hf/model/{repo}"), "test-token").await;
@@ -573,7 +626,11 @@ api_key = "test-token"
     #[tokio::test]
     async fn admin_hf_routes_require_bearer_auth() {
         let (addr, seen) = serve_against_stub(StatusCode::OK, "[]", None).await;
-        for path in ["/admin/hf/search?q=x", "/admin/hf/model/owner/name"] {
+        for path in [
+            "/admin/hf/search?q=x",
+            "/admin/hf/model/owner/name",
+            "/admin/hf/model/owner/name/readme",
+        ] {
             let unauthenticated = reqwest::Client::new()
                 .get(format!("http://{addr}{path}"))
                 .send()
@@ -595,6 +652,151 @@ api_key = "test-token"
         assert!(
             seen.lock().expect("the stub log lock").is_empty(),
             "an unauthenticated caller must never reach the hub"
+        );
+    }
+
+    /// Spawns a stub hub that serves README and model-detail paths
+    /// differently, recording each request it sees.
+    async fn spawn_readme_stub(
+        readme_status: StatusCode,
+        readme_body: &'static str,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&seen);
+        let app = axum::Router::new().fallback(move |uri: Uri, headers: HeaderMap| {
+            let recorded = Arc::clone(&recorded);
+            async move {
+                recorded.lock().expect("the stub log lock").push(Seen {
+                    path: uri.path().to_owned(),
+                    query: uri.query().unwrap_or("").to_owned(),
+                    authorization: headers
+                        .get(AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_owned),
+                });
+                if uri.path().ends_with("/README.md") {
+                    (
+                        readme_status,
+                        [(CONTENT_TYPE, "text/markdown")],
+                        readme_body,
+                    )
+                } else {
+                    (StatusCode::OK, [(CONTENT_TYPE, "application/json")], "{}")
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the stub listener binds");
+        let addr = listener.local_addr().expect("the stub bound address");
+        tokio::spawn(async move {
+            let _ignored = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    async fn serve_readme_stub(
+        readme_status: StatusCode,
+        readme_body: &'static str,
+        token: Option<&str>,
+    ) -> (SocketAddr, Arc<Mutex<Vec<Seen>>>) {
+        let (base_url, seen) = spawn_readme_stub(readme_status, readme_body).await;
+        let proxy = HfProxy::new(base_url, token.map(|t| Secret::new(t.to_owned())));
+        let addr = serve_with_hf(hf_config(), proxy).await;
+        (addr, seen)
+    }
+
+    #[tokio::test]
+    async fn admin_hf_readme_proxies_to_the_raw_readme_path() {
+        let (addr, seen) = serve_readme_stub(StatusCode::OK, "# Model Card\nHello", None).await;
+        let response = get(
+            addr,
+            "/admin/hf/model/unsloth/Qwen3-8B-GGUF/readme",
+            "test-token",
+        )
+        .await;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/markdown; charset=utf-8"),
+        );
+        assert_eq!(
+            response.text().await.expect("a body"),
+            "# Model Card\nHello"
+        );
+
+        let seen = seen.lock().expect("the stub log lock");
+        let [request] = seen.as_slice() else {
+            panic!("expected one upstream request, saw {seen:?}");
+        };
+        assert_eq!(
+            request.path, "/unsloth/Qwen3-8B-GGUF/raw/main/README.md",
+            "the proxy must hit the hub's raw README path"
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_hf_readme_returns_404_for_a_missing_readme() {
+        let (addr, _seen) = serve_readme_stub(StatusCode::NOT_FOUND, "", None).await;
+        let response = get(addr, "/admin/hf/model/owner/name/readme", "test-token").await;
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn admin_hf_readme_validates_the_repo() {
+        let (addr, seen) = serve_readme_stub(StatusCode::OK, "# hello", None).await;
+        let response = get(addr, "/admin/hf/model/.../name/readme", "test-token").await;
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::BAD_REQUEST,
+            "a dot-only owner must be refused"
+        );
+        let body: serde_json::Value = response.json().await.expect("a JSON error envelope");
+        assert_eq!(body["error"]["code"], "malformed_request");
+        assert!(
+            seen.lock().expect("the stub log lock").is_empty(),
+            "a rejected repo must never produce an upstream request"
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_hf_readme_caps_the_body_at_one_mib() {
+        let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
+        let recorded = Arc::clone(&seen);
+        let app = axum::Router::new().fallback(move |uri: Uri, headers: HeaderMap| {
+            let recorded = Arc::clone(&recorded);
+            async move {
+                recorded.lock().expect("the stub log lock").push(Seen {
+                    path: uri.path().to_owned(),
+                    query: uri.query().unwrap_or("").to_owned(),
+                    authorization: headers
+                        .get(AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_owned),
+                });
+                let big = "x".repeat(2 * 1024 * 1024);
+                (StatusCode::OK, [(CONTENT_TYPE, "text/markdown")], big)
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the stub listener binds");
+        let addr = listener.local_addr().expect("the stub bound address");
+        tokio::spawn(async move {
+            let _ignored = axum::serve(listener, app).await;
+        });
+        let proxy = HfProxy::new(format!("http://{addr}"), None);
+        let gw = serve_with_hf(hf_config(), proxy).await;
+        let response = get(gw, "/admin/hf/model/owner/name/readme", "test-token").await;
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body = response.bytes().await.expect("a body");
+        assert!(
+            body.len() <= 1024 * 1024,
+            "the body must be capped at 1 MiB, got {} bytes",
+            body.len()
         );
     }
 }

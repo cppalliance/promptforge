@@ -621,8 +621,44 @@ export class GatewayApi {
   }
 
   /**
-   * Proxied hub model detail via `GET /admin/hf/model/{repo}`; the
-   * gateway adds `blobs=true`, so siblings carry exact file sizes.
+   * Proxied hub README via `GET /admin/hf/model/{owner}/{name}/readme`.
+   * Returns the markdown text on 200, `null` on 404 (no README).
+   */
+  async hfReadme(repo: string, signal?: AbortSignal): Promise<string | null> {
+    const encoded = repo.split("/").map(encodeURIComponent).join("/");
+    const key = this.storage.getItem(API_KEY_STORAGE_KEY) ?? "";
+    const response = await this.transport(
+      this.base + `/admin/hf/model/${encoded}/readme`,
+      { headers: { Authorization: `Bearer ${key}` }, signal },
+    );
+    if (response.status === 404) {
+      return null;
+    }
+    if (response.status === 401) {
+      let code = "";
+      try {
+        const body = optionalRecord(await response.json());
+        const error = optionalRecord(body?.["error"]);
+        code = typeof error?.["code"] === "string" ? error["code"] : "";
+      } catch {
+        // A bodyless 401 is treated as the gateway's own refusal.
+      }
+      if (code === "upstream_client_error") {
+        throw new HfAuthError();
+      }
+      this.clearKey();
+      this.onUnauthorized?.();
+      throw new UnauthorizedError();
+    }
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+    return response.text();
+  }
+
+  /**
+   * Proxied hub model detail via `GET /admin/hf/model/{owner}/{name}`;
+   * the gateway adds `blobs=true`, so siblings carry exact file sizes.
    */
   async hfModel(repo: string, signal?: AbortSignal): Promise<unknown> {
     const encoded = repo.split("/").map(encodeURIComponent).join("/");

@@ -3,7 +3,6 @@
 // HTML enabled and DOMPurify sanitizes the final rendered string.
 
 import DOMPurify from "dompurify";
-import matter from "gray-matter";
 import MarkdownIt from "markdown-it";
 
 const parser = new MarkdownIt({
@@ -22,39 +21,54 @@ const SANITIZE_OPTIONS = {
   },
 } as const;
 
-const FRONTMATTER_OPTIONS = {
-  // The model-card metadata is discarded. A no-op parser prevents
-  // gray-matter from interpreting attacker-controlled YAML values.
-  engines: {
-    yaml: (): object => ({}),
-  },
-};
-
 /** An element on browsers that implement the native Sanitizer API sink. */
 interface SanitizingElement extends HTMLElement {
   setHTML?(html: string): void;
 }
 
 /**
- * Removes a leading frontmatter document without allowing its language
- * suffix to select gray-matter's JavaScript eval engine.
+ * Removes a leading YAML frontmatter document (the `---` fenced block
+ * at the start of HF model cards). Pure string operations with no YAML
+ * parsing: the frontmatter content is discarded, not interpreted.
  */
 function stripFrontmatter(markdown: string): string {
   const source = markdown.startsWith("\uFEFF") ? markdown.slice(1) : markdown;
-  const lineEnd = source.indexOf("\n");
-  if (lineEnd < 0 || !source.startsWith("---") || source.startsWith("----")) {
+  if (!source.startsWith("---") || source.startsWith("----")) {
     return source;
   }
-  const canonical = `---\n${source.slice(lineEnd + 1)}`;
-  return matter(canonical, FRONTMATTER_OPTIONS).content;
+  const afterOpener = source.indexOf("\n");
+  if (afterOpener < 0) {
+    return source;
+  }
+  const closerStart = source.indexOf("\n---", afterOpener);
+  if (closerStart < 0) {
+    return source;
+  }
+  const afterCloser = source.indexOf("\n", closerStart + 4);
+  if (afterCloser < 0) {
+    return source.slice(closerStart + 4).trimStart();
+  }
+  return source.slice(afterCloser + 1);
 }
 
 /**
- * Renders untrusted Markdown to sanitized HTML. gray-matter removes a
- * leading model-card frontmatter document without a regular expression.
+ * Strips a leading "Model card" or "Model Card" H1 that HF's chrome
+ * prepends to many model cards, duplicating the detail header.
+ */
+function stripChromeHeading(markdown: string): string {
+  const trimmed = markdown.trimStart();
+  if (/^#\s+model\s+card\s*$/im.test(trimmed.split("\n", 1)[0] ?? "")) {
+    return trimmed.slice(trimmed.indexOf("\n") + 1);
+  }
+  return markdown;
+}
+
+/**
+ * Renders untrusted Markdown to sanitized HTML. Frontmatter is stripped
+ * and the redundant "Model card" heading HF prepends is removed.
  */
 export function renderMarkdown(markdown: string): string {
-  const rendered = parser.render(stripFrontmatter(markdown));
+  const rendered = parser.render(stripChromeHeading(stripFrontmatter(markdown)));
   return DOMPurify.sanitize(rendered, SANITIZE_OPTIONS);
 }
 

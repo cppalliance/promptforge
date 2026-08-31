@@ -348,7 +348,11 @@ pub(crate) fn build_router(state: AppState) -> Router {
         )
         .route("/admin/reveal", post(reveal::admin_reveal))
         .route("/admin/hf/search", get(hf::admin_hf_search))
-        .route("/admin/hf/model/{*repo}", get(hf::admin_hf_model));
+        .route("/admin/hf/model/{owner}/{name}", get(hf::admin_hf_model))
+        .route(
+            "/admin/hf/model/{owner}/{name}/readme",
+            get(hf::admin_hf_readme),
+        );
     // The template, orphan, and model-info routes read local-inference
     // facilities, so they exist only in builds with local inference.
     #[cfg(feature = "local")]
@@ -1968,7 +1972,7 @@ cache_dir = '{cache}'
             (Method::POST, "/admin/config-revert"),
             (Method::GET, "/admin/system"),
             (Method::GET, "/admin/hf/search?q=a&q=b"),
-            (Method::GET, "/admin/hf/model/noslash"),
+            (Method::GET, "/admin/hf/model/owner/na%20me"),
             (Method::POST, "/admin/reveal"),
         ];
         #[cfg(feature = "local")]

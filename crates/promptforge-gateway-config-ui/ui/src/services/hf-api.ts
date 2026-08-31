@@ -241,6 +241,11 @@ export class HfApi {
       .map((candidate) => candidate.row);
   }
 
+  /** Fetches a repo's raw README through the gateway proxy. */
+  async readme(repo: string, signal?: AbortSignal): Promise<string | null> {
+    return this.api.hfReadme(repo, signal);
+  }
+
   /** Fetches one repo's detail and shapes its GGUF siblings into quants. */
   async model(repo: string, signal?: AbortSignal): Promise<HfModelDetail> {
     const raw = await this.api.hfModel(repo, signal);

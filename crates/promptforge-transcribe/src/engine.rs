@@ -74,6 +74,7 @@ impl SttEngine {
         config: &EngineConfig,
         progress: Option<ProgressHandle>,
     ) -> Result<Self, TranscribeError> {
+        whisper_rs::install_logging_hooks();
         if config.window_seconds == 0 {
             return Err(TranscribeError::InvalidConfig(
                 "stt.window_seconds must be at least 1".to_string(),
