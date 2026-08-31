@@ -99,9 +99,7 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
 pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
     let nonce = nonce.clone();
     let untrusted = lua
-        .create_function(move |_, s: String| {
-            Ok(promptforge_core_support::untrusted::wrap(&nonce, &s))
-        })
+        .create_function(move |_, s: String| Ok(nonce.wrap(&s)))
         .map_err(Error::lua)?;
     lua.globals()
         .raw_set("untrusted", untrusted)

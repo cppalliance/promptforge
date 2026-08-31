@@ -8,10 +8,8 @@
 //! model turns poll [`wait_cancelled`].
 
 use std::future::Future;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 tokio::task_local! {
     static CURRENT: CancelHandle;
@@ -56,8 +54,7 @@ tokio::task_local! {
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct CancelHandle {
-    cancelled: Arc<AtomicBool>,
-    notify: Arc<Notify>,
+    token: CancellationToken,
 }
 
 impl CancelHandle {
@@ -70,13 +67,29 @@ impl CancelHandle {
         Self::default()
     }
 
+    /// Returns a fresh handle cancelled when this handle (or any ancestor) is
+    /// cancelled. Cancelling the child never affects the parent or siblings.
+    ///
+    /// This is the orchestrator/subagent pattern: the orchestrator holds the
+    /// run handle, and each subagent task installs `run_handle.child()` via
+    /// [`scope`], so Ctrl-C at the run level cancels every subagent while the
+    /// orchestrator can cancel one subagent without touching the rest.
+    /// Children nest to any depth - a child's own [`child`](Self::child) is a
+    /// grandchild cancelled along with it - with no registry and no reference
+    /// cycles.
+    #[must_use]
+    pub fn child(&self) -> CancelHandle {
+        CancelHandle {
+            token: self.token.child_token(),
+        }
+    }
+
     /// Marks this handle (and every clone) cancelled and wakes every waiter.
     ///
     /// Idempotent and irreversible: calling it again after the first time is a
     /// no-op, and a cancelled handle never becomes uncancelled.
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.notify.notify_waiters();
+        self.token.cancel();
     }
 
     /// Returns whether [`Self::cancel`] has been called on this handle or any
@@ -85,36 +98,20 @@ impl CancelHandle {
     /// Monotonic: once it returns `true` it never again returns `false`.
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
+        self.token.is_cancelled()
     }
 
     /// Completes when this handle (or any clone) is cancelled.
     ///
-    /// Registers this waiter (via tokio's `Notified::enable`) *before* re-reading
-    /// the flag, so a [`Self::cancel`] that stores `true` and calls
-    /// `notify_waiters()` between the check and the await cannot be lost: the
-    /// waiter is already queued and the broadcast wakes it. Any number of waiters
-    /// may await concurrently; all are woken. Dropping the returned future before
-    /// it resolves is safe and affects no other waiter. After cancellation this
-    /// resolves immediately every time it is called.
+    /// A cancel that lands between a caller's
+    /// [`is_cancelled`](Self::is_cancelled) check and the await is never lost:
+    /// the returned future observes the cancellation state however the two
+    /// were sequenced. Any number of waiters may await concurrently; all are
+    /// woken. Dropping the returned future before it resolves is safe and
+    /// affects no other waiter. After cancellation this resolves immediately
+    /// every time it is called.
     pub async fn cancelled(&self) {
-        if self.is_cancelled() {
-            return;
-        }
-        loop {
-            let notified = self.notify.notified();
-            tokio::pin!(notified);
-            // Enqueue as a waiter now; any notify_waiters() after this point
-            // wakes us, closing the check-then-wait race window.
-            notified.as_mut().enable();
-            if self.is_cancelled() {
-                return;
-            }
-            notified.await;
-            if self.is_cancelled() {
-                return;
-            }
-        }
+        self.token.cancelled().await;
     }
 }
 
@@ -226,8 +223,8 @@ mod tests {
     #[tokio::test]
     async fn cancel_wakes_waiter() {
         // No sleep: the waiter signals it is about to await via a oneshot, and
-        // the lost-wakeup fix (`Notified::enable`) guarantees a cancel racing the
-        // await is still delivered.
+        // the no-lost-wakeup contract guarantees a cancel racing the await is
+        // still delivered.
         let handle = CancelHandle::new();
         let waiter = handle.clone();
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -351,22 +348,129 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_between_check_and_wait_is_not_lost() {
-        // Reproduces the exact wait/notify sequence `cancelled()` uses. A
-        // waiter that has passed its flag check and holds a `Notified` future
-        // must still observe a cancel that fires before it awaits.
-        //
-        // Under the OLD sequence (create `notified`, then cancel, then await
-        // WITHOUT `enable()`), `notify_waiters()` finds no registered waiter,
-        // the permit is dropped, and the final `await` below hangs until the
-        // timeout fails. `enable()` registers first, so the wakeup is kept.
+        // The no-lost-wakeup contract through the public API: a waiter that has
+        // been polled once (and so is registered) but has not yet parked must
+        // still observe a cancel that fires in between.
         let handle = CancelHandle::new();
-        let notified = handle.notify.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
+        let wait = handle.cancelled();
+        tokio::pin!(wait);
+        // Poll once: the waiter registers and reports pending.
+        std::future::poll_fn(|cx| {
+            assert!(
+                wait.as_mut().poll(cx).is_pending(),
+                "the waiter is pending before any cancel"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
         handle.cancel();
-        tokio::time::timeout(Duration::from_secs(1), notified)
+        tokio::time::timeout(Duration::from_secs(1), wait)
             .await
-            .expect("an enabled waiter must observe a cancel signaled before it awaited");
+            .expect("a registered waiter must observe a cancel signaled before it awaited");
+    }
+
+    #[test]
+    fn child_is_independent_until_the_parent_cancels() {
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        assert!(!parent.is_cancelled() && !child.is_cancelled());
+        // Cloning a child shares the child's state, not the parent's.
+        let child_clone = child.clone();
+        child.cancel();
+        assert!(child_clone.is_cancelled());
+        assert!(!parent.is_cancelled(), "child cancel never reaches up");
+    }
+
+    #[tokio::test]
+    async fn parent_cancel_propagates_to_child() {
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        parent.cancel();
+        assert!(child.is_cancelled(), "parent cancel reaches the child");
+        // ... and a waiter on the child resolves.
+        tokio::time::timeout(Duration::from_secs(1), child.cancelled())
+            .await
+            .expect("a child waiter resolves after the parent cancels");
+    }
+
+    #[tokio::test]
+    async fn child_cancel_leaves_parent_and_sibling_unaffected() {
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        let sibling = parent.child();
+        child.cancel();
+        assert!(child.is_cancelled());
+        assert!(!parent.is_cancelled(), "child cancel must not reach up");
+        assert!(
+            !sibling.is_cancelled(),
+            "child cancel must not reach siblings"
+        );
+        // The sibling still tracks the parent.
+        parent.cancel();
+        assert!(sibling.is_cancelled());
+    }
+
+    #[test]
+    fn grandchild_chain_propagates() {
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        let grandchild = child.child();
+        parent.cancel();
+        assert!(
+            child.is_cancelled() && grandchild.is_cancelled(),
+            "cancel propagates down the whole chain"
+        );
+    }
+
+    #[test]
+    fn child_of_pre_cancelled_parent_is_born_cancelled() {
+        let parent = CancelHandle::new();
+        parent.cancel();
+        let child = parent.child();
+        assert!(
+            child.is_cancelled(),
+            "a child minted after the parent's cancel starts cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn child_waiters_wake_on_parent_cancel() {
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let join = tokio::spawn(async move {
+            let _ = ready_tx.send(());
+            child.cancelled().await;
+        });
+        ready_rx.await.expect("waiter signals readiness");
+        parent.cancel();
+        tokio::time::timeout(Duration::from_secs(1), join)
+            .await
+            .expect("a waiter on the child must wake when the parent is cancelled")
+            .expect("join ok");
+    }
+
+    #[tokio::test]
+    async fn scope_installs_a_child_observed_through_wait_cancelled() {
+        // The orchestrator/subagent pattern from `child()`'s docs: the child is
+        // installed with `scope`, and the run-level cancel lands through
+        // `wait_cancelled()`.
+        let parent = CancelHandle::new();
+        let child = parent.child();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let done = tokio::spawn(async move {
+            scope(child, async {
+                let _ = ready_tx.send(());
+                wait_cancelled().await;
+            })
+            .await;
+        });
+        ready_rx.await.expect("scoped task signals readiness");
+        parent.cancel();
+        tokio::time::timeout(Duration::from_secs(1), done)
+            .await
+            .expect("the scoped child must observe the parent's cancel")
+            .expect("join ok");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

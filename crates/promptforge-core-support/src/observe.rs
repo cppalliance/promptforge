@@ -204,6 +204,8 @@ pub enum Observation {
 impl Observation {
     /// Returns the fixed trace label for a fixed variant, or `None` for the
     /// message-carrying [`Observation::Lua`] / [`Observation::Other`].
+    /// [`Display`](fmt::Display) is the human trace line for any variant;
+    /// `label` is the stable machine key for fixed variants only.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
         let label = match self {
@@ -319,6 +321,12 @@ pub mod detail {
     pub const TOOL_SCOPE_VALIDATION_SUCCEEDED: Observation =
         Observation::ToolScopeValidationSucceeded;
     pub const TOOL_SCOPE_VALIDATION_FAILED: Observation = Observation::ToolScopeValidationFailed;
+    pub const MODEL_CATALOG_VALIDATION_STARTED: Observation =
+        Observation::ModelCatalogValidationStarted;
+    pub const MODEL_CATALOG_VALIDATION_SUCCEEDED: Observation =
+        Observation::ModelCatalogValidationSucceeded;
+    pub const MODEL_CATALOG_VALIDATION_FAILED: Observation =
+        Observation::ModelCatalogValidationFailed;
     pub const STORE_WRITE_SUCCEEDED: Observation = Observation::StoreWriteSucceeded;
     pub const STORE_WRITE_FAILED: Observation = Observation::StoreWriteFailed;
     pub const STORE_APPEND_SUCCEEDED: Observation = Observation::StoreAppendSucceeded;
@@ -439,6 +447,22 @@ mod tests {
         observer.observe("example-run", "Gather", Observation::SectionStarted);
         observer.observe("example-run", "Gather", Observation::SectionFinished);
         observer.observe("example-run", "Prompt", Observation::RunSucceeded);
+    }
+
+    #[test]
+    fn model_catalog_detail_consts_match_their_variants() {
+        assert_eq!(
+            detail::MODEL_CATALOG_VALIDATION_STARTED,
+            Observation::ModelCatalogValidationStarted
+        );
+        assert_eq!(
+            detail::MODEL_CATALOG_VALIDATION_SUCCEEDED,
+            Observation::ModelCatalogValidationSucceeded
+        );
+        assert_eq!(
+            detail::MODEL_CATALOG_VALIDATION_FAILED,
+            Observation::ModelCatalogValidationFailed
+        );
     }
 
     #[test]
