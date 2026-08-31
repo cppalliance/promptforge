@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="window-titlebar" hidden>
+  <img class="window-titlebar__icon" src="/icons/promptforge-icon-1.png" alt="" width="20" height="20">
+  <nav class="window-titlebar__menus" aria-label="Application menus">
+    <button type="button" class="window-titlebar__menu" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
+    <button type="button" class="window-titlebar__menu" data-menu="edit" aria-haspopup="menu" aria-expanded="false">Edit</button>
+    <button type="button" class="window-titlebar__menu" data-menu="model" aria-haspopup="menu" aria-expanded="false">Model</button>
+    <button type="button" class="window-titlebar__menu" data-menu="window" aria-haspopup="menu" aria-expanded="false">Window</button>
+    <button type="button" class="window-titlebar__menu" data-menu="help" aria-haspopup="menu" aria-expanded="false">Help</button>
+  </nav>
+  <div class="window-titlebar__drag" aria-hidden="true"></div>
+  <div class="window-titlebar__controls">
+    <button type="button" class="window-titlebar__control window-titlebar__control--minimize" data-command="minimize" aria-label="Minimize">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+        <path d="M2 6h8" />
+      </svg>
+    </button>
+    <button type="button" class="window-titlebar__control window-titlebar__control--maximize" data-command="toggle-maximize" aria-label="Maximize">
+      <svg class="window-titlebar__glyph--maximize" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="7" height="7" />
+      </svg>
+      <svg class="window-titlebar__glyph--restore" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true" hidden>
+        <path d="M4.5 4.5v-2h6v6h-2" />
+        <rect x="1.5" y="4.5" width="6" height="6" />
+      </svg>
+    </button>
+    <button type="button" class="window-titlebar__control window-titlebar__control--close" data-command="close" aria-label="Close">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+        <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
+      </svg>
+    </button>
+  </div>
+</header>
+<div class="shell">
+  <div class="dock-column">
+    <div id="dock" class="dock"></div>
+  </div>
+</div>
+<footer class="status-bar" role="status" aria-live="polite">
+  <span class="status-bar__text">Ready</span>
+  <span class="status-bar__right">
+    <span class="status-bar__slot">
+      <progress class="status-bar__progress" value="0" max="100" aria-label="Task progress" hidden></progress>
+      <span class="status-bar__indicators">
+        <span class="status-bar__rec">REC</span>
+        <span class="status-bar__led" aria-hidden="true"></span>
+      </span>
+    </span>
+  </span>
+</footer>
+<template id="chat-panel">
+  <div class="mur-app mur-app-embedded" data-theme="dark">
+    <main class="mur-main-area">
+      <header class="mur-main-header"></header>
+      <div class="mur-chat-layout-wrapper">
+        <div class="mur-chat-scroll-area">
+          <div class="mur-chat-history" role="log" aria-live="polite" aria-atomic="false"></div>
+        </div>
+        <div class="mur-chat-form-container">
+          <form class="mur-chat-form">
+            <textarea class="mur-chat-input" rows="1" placeholder="Message&hellip;" aria-label="Message"></textarea>
+            <div class="mur-form-footer-right">
+              <button type="submit" class="mur-send-btn mur-form-icon-btn mur-action-btn">
+                <svg class="mur-send-icon" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+                <svg class="mur-stop-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+</template>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

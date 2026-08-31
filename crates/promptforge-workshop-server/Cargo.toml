@@ -1,11 +1,10 @@
 [package]
 name = "promptforge-workshop-server"
-version = "1.0.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
 
 description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop shell"
 

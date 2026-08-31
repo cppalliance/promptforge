@@ -11,7 +11,7 @@ The PromptForge gateway config UI: the embedded SPA assets and the esbuild build
 
 ## UI development
 
-The UI is TypeScript under `ui/src/`, bundled by esbuild into `ui/dist/app.js`. Node.js >= 22 is required: run `npm ci` in `ui/` once per checkout. After that, debug `cargo build` runs the UI build itself (the crate's `build.rs` prefers `ui/node_modules/.bin/esbuild` and falls back to `npx esbuild`, which may download esbuild on first use). `ui/node_modules/` and `ui/dist/` are gitignored.
+The UI is TypeScript under `ui/src/`, bundled by esbuild into `ui/dist/app.js`. The bundled `ui/dist/` artifact is checked into the repository, so building the crate needs no Node.js - only changing the UI does. To work on the UI, Node.js >= 22 is required: run `npm ci` in `ui/` once per checkout. After that, debug `cargo build` runs the UI build itself (the crate's `build.rs` prefers `ui/node_modules/.bin/esbuild` and falls back to `npx esbuild`, which may download esbuild on first use). Without a local `ui/node_modules`, builds serve the checked-in artifact verbatim. `ui/node_modules/` is gitignored.
 
 Two workflows:
 
@@ -22,7 +22,7 @@ Two workflows:
 
 ## Release artifact verification
 
-Release builds embed a verified, minified artifact: `build.rs` checks `ui/dist/manifest.json` (schema version, minified flag, a sha256 over every build input, and the dist file list) and, when the manifest is absent or stale against the current sources, produces the artifact itself by running `node build.mjs --package` in `ui/` (the same command as `npm run package`) before verifying and embedding. A single `cargo build --release` is sufficient, including after UI edits and after a debug build wiped `ui/dist/`; the build fails with instructions only when the artifact cannot be produced (for example Node.js or `ui/node_modules` missing) or still does not verify.
+Release builds embed a verified, minified artifact: `build.rs` checks `ui/dist/manifest.json` (schema version, minified flag, a sha256 over every build input, and the dist file list) and, when the manifest is absent or stale against the current sources, produces the artifact itself by running `node build.mjs --package` in `ui/` (the same command as `npm run package`) before verifying and embedding. A single `cargo build --release` is sufficient, including after UI edits and after a debug build wiped `ui/dist/`; the build fails with instructions only when the artifact cannot be produced (for example Node.js or `ui/node_modules` missing) or still does not verify. Because the artifact is checked in, crates.io consumers and fresh checkouts skip esbuild entirely in both profiles.
 
 The verifier lives in `build/manifest.rs`, shared with the test build through `#[path]`; its input-hash algorithm is mirrored exactly in `ui/manifest.mjs`, and the two files must change together.
 

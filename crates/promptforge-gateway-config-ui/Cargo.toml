@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
 
 description = "PromptForge gateway config UI: embedded SPA assets and the shared loopback middleware, mounted by the gateway at /config"
 

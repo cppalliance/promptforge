@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "minified": true,
+  "inputHash": "d847a230fb5136180f568134683e398499ef2f23a73e7f8264859acb525bf2c0",
+  "files": [
+    "app.css",
+    "app.js",
+    "icons/promptforge-icon-1.png",
+    "index.html",
+    "pcm-worklet.js",
+    "style.css"
+  ]
+}
