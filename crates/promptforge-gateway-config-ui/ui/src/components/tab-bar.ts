@@ -5,9 +5,10 @@
 // into when the write path lands.
 
 import {
+  Cpu,
   Folder,
+  Globe,
   Key,
-  Layers,
   Search,
   Settings,
   createElement as lucideElement,
@@ -18,11 +19,12 @@ import type { ViewId } from "../router";
 
 /** One tab: destination view, label, lucide icon, and hash target. */
 const TABS: ReadonlyArray<readonly [view: ViewId, label: string, icon: IconNode, href: string]> = [
-  ["models", "Models", Layers, "#/models"],
+  ["settings", "Settings", Settings, "#/settings"],
   ["discover", "Discover", Search, "#/discover"],
+  ["local", "Local", Cpu, "#/local"],
+  ["remote", "Remote", Globe, "#/remote"],
   ["profiles", "Profiles", Folder, "#/profiles"],
   ["secrets", "Secrets", Key, "#/secrets"],
-  ["settings", "Settings", Settings, "#/settings"],
 ];
 
 /** Construction options for the tab bar. */

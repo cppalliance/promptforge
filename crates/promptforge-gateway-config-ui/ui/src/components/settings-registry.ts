@@ -214,6 +214,64 @@ export const REMOTE_MODEL_SECTIONS: readonly SectionDef[] = [
   { id: "capabilities", label: "Capabilities" },
 ];
 
+/** Sections of the speech-to-text detail pane. */
+export const STT_MODEL_SECTIONS: readonly SectionDef[] = [
+  { id: "stt", label: "Speech-to-Text" },
+  { id: "source", label: "Source & Verification" },
+];
+
+/** The `[[stt_model]]` field registry. */
+export const STT_MODEL_SETTINGS: readonly SettingDef[] = [
+  {
+    key: "role",
+    label: "Role",
+    help: "Interim models stream partial text; final models crystallize completed audio.",
+    section: "stt",
+    type: "dropdown",
+    options: ["interim", "final"],
+    default: "interim",
+  },
+  {
+    key: "vram_gb",
+    label: "VRAM (GiB)",
+    help: "Estimated resident VRAM counted against profile budgets.",
+    section: "stt",
+    type: "input",
+    numeric: true,
+    default: 1,
+  },
+  {
+    key: "source",
+    label: "Source",
+    help: "Whisper model download URL or local path.",
+    section: "source",
+    type: "input",
+    default: "",
+  },
+  {
+    key: "sha256",
+    label: "SHA-256",
+    help: "Optional lowercase SHA-256 pin verified after download.",
+    section: "source",
+    type: "input",
+    default: null,
+    placeholder: "None (no pin)",
+  },
+  {
+    key: "dominion",
+    label: "Dominion",
+    help: "Optional local compute pool that accounts for this model's VRAM.",
+    section: "source",
+    type: "dropdown",
+    default: null,
+    options: (ctx) =>
+      ctx
+        .dominions()
+        .filter((dominion) => dominion.kind === "local")
+        .map((dominion) => dominion.id),
+  },
+];
+
 /** The `[[local_model]]` field registry. */
 export const LOCAL_MODEL_SETTINGS: readonly SettingDef[] = [
   {

@@ -150,7 +150,7 @@ test("the system poll runs every 5s while mounted and stops after unmount", asyn
   await settle();
   assert.equal(systemCalls(stub), 2, "the interval refreshes the snapshot after 5s");
 
-  navigate(dom, "#/models");
+  navigate(dom, "#/local");
   await settle();
   t.mock.timers.tick(5000);
   await settle();

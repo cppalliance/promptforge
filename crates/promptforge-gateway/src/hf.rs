@@ -10,15 +10,14 @@
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::rejection::{PathRejection, QueryRejection};
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::PathRejection;
+use axum::extract::{Path, RawQuery, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use promptforge_gateway_config::Secret;
 use promptforge_gateway_protocol::ProtocolError;
 use promptforge_gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
-use serde::Deserialize;
 
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
@@ -101,7 +100,7 @@ impl HfProxy {
 /// Query parameters accepted by `GET /admin/hf/search`; each present field
 /// is forwarded to the hub's model-search API, and everything else is
 /// dropped at this boundary.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default)]
 pub(crate) struct HfSearchQuery {
     /// Free-text search, forwarded as the hub's `search` parameter.
     q: Option<String>,
@@ -115,20 +114,19 @@ pub(crate) struct HfSearchQuery {
     limit: Option<String>,
     /// `full=true` asks the hub to include each result's sibling file list.
     full: Option<String>,
+    /// One workload tag. The UI fans out requests to implement OR filters.
+    pipeline_tag: Option<String>,
 }
 
 /// The `GET /admin/hf/search` route: bearer-authed, proxies the hub's
 /// `GET /api/models` search and returns its JSON body verbatim.
 pub(crate) async fn admin_hf_search(
     State(state): State<AppState>,
-    query: Result<Query<HfSearchQuery>, QueryRejection>,
+    RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &headers).await?;
-    // Deferring the extractor keeps auth first and puts the rejection in
-    // the gateway's JSON error envelope instead of axum's plain-text 400.
-    let Query(query) =
-        query.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    let query = parse_search_query(query.as_deref())?;
     let renames = [("search", &query.q)];
     let passthrough = [
         ("filter", &query.filter),
@@ -137,12 +135,93 @@ pub(crate) async fn admin_hf_search(
         ("limit", &query.limit),
         ("full", &query.full),
     ];
-    let params: Vec<(&str, &str)> = renames
+    let mut params: Vec<(&str, &str)> = renames
         .iter()
         .chain(passthrough.iter())
         .filter_map(|(name, value)| Some((*name, value.as_deref()?)))
         .collect();
+    if let Some(tag) = query.pipeline_tag.as_deref() {
+        params.push(("pipeline_tag", tag));
+    }
     state.hf.forward("/api/models", &params).await
+}
+
+/// Parses the small search query allowlist. Every field is singular and
+/// closed-set values are validated before any upstream request.
+fn parse_search_query(raw: Option<&str>) -> Result<HfSearchQuery, GatewayError> {
+    let mut query = HfSearchQuery::default();
+    for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
+        let slot = match key.as_ref() {
+            "q" => &mut query.q,
+            "filter" => &mut query.filter,
+            "sort" => &mut query.sort,
+            "direction" => &mut query.direction,
+            "limit" => &mut query.limit,
+            "full" => &mut query.full,
+            "pipeline_tag" => {
+                if !matches!(
+                    value.as_ref(),
+                    "text-generation"
+                        | "feature-extraction"
+                        | "sentence-similarity"
+                        | "text-classification"
+                        | "automatic-speech-recognition"
+                        | "text-to-image"
+                        | "text-to-speech"
+                ) {
+                    return Err(GatewayError::MalformedRequest(format!(
+                        "unsupported pipeline_tag {value:?}"
+                    )));
+                }
+                if query.pipeline_tag.replace(value.into_owned()).is_some() {
+                    return Err(GatewayError::MalformedRequest(
+                        "pipeline_tag must appear at most once".to_owned(),
+                    ));
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        if slot.replace(value.into_owned()).is_some() {
+            return Err(GatewayError::MalformedRequest(format!(
+                "duplicate query field {key}"
+            )));
+        }
+    }
+    validate_search_value("filter", query.filter.as_deref(), &["gguf"])?;
+    validate_search_value(
+        "sort",
+        query.sort.as_deref(),
+        &["downloads", "trendingScore", "lastModified"],
+    )?;
+    validate_search_value("direction", query.direction.as_deref(), &["-1"])?;
+    validate_search_value("full", query.full.as_deref(), &["true"])?;
+    if let Some(limit) = query.limit.as_deref()
+        && !limit
+            .parse::<u16>()
+            .is_ok_and(|parsed| (1..=100).contains(&parsed))
+    {
+        return Err(GatewayError::MalformedRequest(
+            "limit must be an integer from 1 through 100".to_owned(),
+        ));
+    }
+    Ok(query)
+}
+
+/// Validates one optional search field against its closed value set.
+fn validate_search_value(
+    name: &str,
+    value: Option<&str>,
+    accepted: &[&str],
+) -> Result<(), GatewayError> {
+    if let Some(value) = value
+        && !accepted.contains(&value)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "unsupported {name} value {value:?}"
+        )));
+    }
+    Ok(())
 }
 
 /// The `GET /admin/hf/model/{repo}` route: bearer-authed, proxies the hub's
@@ -288,7 +367,8 @@ api_key = "test-token"
 
         let response = get(
             addr,
-            "/admin/hf/search?q=qwen&filter=gguf&sort=downloads&direction=-1&limit=30&full=true",
+            "/admin/hf/search?q=qwen&filter=gguf&pipeline_tag=text-generation\
+             &sort=downloads&direction=-1&limit=30&full=true",
             "test-token",
         )
         .await;
@@ -303,6 +383,7 @@ api_key = "test-token"
         for pair in [
             "search=qwen",
             "filter=gguf",
+            "pipeline_tag=text-generation",
             "sort=downloads",
             "direction=-1",
             "limit=30",
@@ -410,12 +491,23 @@ api_key = "test-token"
     #[tokio::test]
     async fn admin_hf_search_maps_a_rejected_query_into_the_error_envelope() {
         let (addr, seen) = serve_against_stub(StatusCode::OK, "[]", None).await;
-        // A duplicate key fails `HfSearchQuery` deserialization, which must
-        // surface in the JSON envelope, not axum's plain-text 400.
-        let response = get(addr, "/admin/hf/search?q=a&q=b", "test-token").await;
-        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-        let body: serde_json::Value = response.json().await.expect("a JSON error envelope");
-        assert_eq!(body["error"]["code"], "malformed_request");
+        for query in [
+            "q=a&q=b",
+            "pipeline_tag=not-a-workload",
+            "pipeline_tag=text-generation&pipeline_tag=automatic-speech-recognition",
+            "filter=safetensors",
+            "sort=created",
+            "direction=1",
+            "full=false",
+            "limit=0",
+            "limit=101",
+            "limit=many",
+        ] {
+            let response = get(addr, &format!("/admin/hf/search?{query}"), "test-token").await;
+            assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+            let body: serde_json::Value = response.json().await.expect("a JSON error envelope");
+            assert_eq!(body["error"]["code"], "malformed_request");
+        }
         assert!(
             seen.lock().expect("the stub log lock").is_empty(),
             "a rejected query must never produce an upstream request"

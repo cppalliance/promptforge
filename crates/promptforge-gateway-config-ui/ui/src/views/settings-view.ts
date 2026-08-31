@@ -4,11 +4,9 @@
 // metric-tile grid and GPU devices from GET /admin/system, polled every
 // 5s only while that panel is mounted; the Storage card lives there too,
 // beside the disk data it cites. Gateway and Workshop edit the
-// boot-owned sections and save through PUT /admin/boot-config; Storage,
-// Dominions, Endpoints, and Tools edit profile sections and save through
-// PUT /admin/config. Every field reuses the step-16 grammar: dirty dot
-// with per-field reset, pending chip against the running value, and
-// "from <file>" provenance on inherited entries.
+// global sections and save through PUT /admin/config. Every field
+// reuses the established grammar: dirty dot with per-field reset and a
+// pending chip against the running value.
 
 import {
   Cpu,
@@ -74,7 +72,7 @@ export interface SettingsViewDeps {
 /** The mounted view handle the router calls. */
 export interface SettingsView {
   /** Renders the view into `main`, opening `section` (default system). */
-  mount(main: HTMLElement, section?: string): void;
+  mount(main: HTMLElement, section?: string): () => void;
 }
 
 /** One editable card: a section table, a keyed-array entry, or a draft. */
@@ -157,21 +155,35 @@ function configUiUrl(bind: string): string {
 
 /** The `[workshop]` defaults the Enable button seeds. */
 function workshopDefaults(): EntryData {
-  return { bind: "127.0.0.1:7910", open_browser: false, voice: null, tape: null };
+  return { bind: "127.0.0.1:7910", open_browser: false, stt: null, tape: null };
 }
 
-/** The `[workshop.voice]` defaults, mirroring the config crate. */
-function voiceDefaults(): EntryData {
+/** The `[workshop.stt]` capture defaults, mirroring the config crate. */
+function sttDefaults(): EntryData {
   return {
-    interim_model: "",
-    final_model: "",
-    interim_source: "",
-    final_source: "",
     window_seconds: 15,
     interval_ms: 500,
     vocabulary: [],
   };
 }
+
+/** Digest-pinned catalog entries supplied by the config crate. */
+const RECOMMENDED_STT_MODELS: readonly EntryData[] = [
+  {
+    name: "whisper-base-en",
+    role: "interim",
+    source: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+    sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+    vram_gb: 1,
+  },
+  {
+    name: "whisper-small-en",
+    role: "final",
+    source: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+    sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+    vram_gb: 2,
+  },
+];
 
 /** The `[tools.web_search]` seed the Enable button creates. */
 function webSearchDefaults(): EntryData {
@@ -202,6 +214,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
 
   let system: SystemSnapshot | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollController: AbortController | null = null;
   /** The System panel's live region; polling stops once it disconnects. */
   let liveBox: HTMLElement | null = null;
 
@@ -351,8 +364,9 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   };
 
   return {
-    mount(target: HTMLElement, sectionId?: string): void {
+    mount(target: HTMLElement, sectionId?: string): () => void {
       main = target;
+      viewRoot = null;
       section = (SECTIONS.some((item) => item.id === sectionId)
         ? sectionId
         : "system") as SectionId;
@@ -362,6 +376,12 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       } else {
         stopPolling();
       }
+      return () => {
+        stopPolling();
+        main = null;
+        viewRoot = null;
+        liveBox = null;
+      };
     },
   };
 
@@ -377,11 +397,26 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         return;
       }
       let snapshot: SystemSnapshot;
+      pollController?.abort();
+      const controller = new AbortController();
+      pollController = controller;
       try {
-        snapshot = await api.getSystem();
-      } catch {
+        snapshot = await api.getSystem(controller.signal);
+      } catch (error) {
+        if (
+          error !== null &&
+          typeof error === "object" &&
+          "name" in error &&
+          error.name === "AbortError"
+        ) {
+          return;
+        }
         // A failed poll keeps the last snapshot; the next tick retries.
         return;
+      } finally {
+        if (pollController === controller) {
+          pollController = null;
+        }
       }
       system = snapshot;
       if (liveBox?.isConnected) {
@@ -395,6 +430,8 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   }
 
   function stopPolling(): void {
+    pollController?.abort();
+    pollController = null;
     if (pollTimer !== null) {
       clearInterval(pollTimer);
       pollTimer = null;
@@ -805,26 +842,15 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     return actions;
   }
 
-  /** "from <file>" provenance annotation for an inherited definition. */
-  function provenanceNote(sourceFile: string): HTMLElement {
-    const from = document.createElement("p");
-    from.className = "field-from";
-    from.textContent = `from ${sourceFile}`;
-    return from;
-  }
-
-  // ----- boot-scoped saves (Gateway, Workshop) -------------------------------
+  // ----- global configuration saves -----------------------------------------
 
   /**
-   * Saves one boot section's edits through PUT /admin/boot-config. The
-   * payload always carries both boot-owned sections from the pending view
-   * so a Gateway save never drops `[workshop]` (and vice versa); only the
-   * saved card's edits are applied.
+   * Saves one global section through the single configuration shadow.
    */
-  async function saveBootCard(card: Card, sectionKey: "server" | "workshop"): Promise<void> {
-    const payload = store.buildBootPayload();
+  async function saveGlobalCard(card: Card, sectionKey: "server" | "workshop"): Promise<void> {
+    const payload = store.buildConfigPayload();
     payload[sectionKey] = effective(card);
-    await store.saveBootPayload(payload);
+    await store.savePayload(payload);
     // The store already notified (and re-rendered) while these edits were
     // still held, so clear them and render again: otherwise a just-saved
     // secret stays in a live password input instead of the masked readout.
@@ -875,7 +901,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       warning.textContent = "After restart, you will need to enter the new API key.";
       body.append(warning);
     }
-    body.append(restartNote(), saveButton(card, () => saveBootCard(card, "server")));
+    body.append(restartNote(), saveButton(card, () => saveGlobalCard(card, "server")));
     panel.append(box, configUiCard(card));
   }
 
@@ -959,37 +985,9 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         type: "toggle",
         fallback: false,
       }),
-      workshopSubsection(card, "voice", "Voice", voiceDefaults, [
+      workshopSubsection(card, "stt", "STT capture tuning", sttDefaults, [
         {
-          path: "voice.interim_model",
-          label: "Interim model",
-          help: "Whisper model path for interim (streaming) transcription. Empty disables it.",
-          type: "input",
-          fallback: "",
-        },
-        {
-          path: "voice.final_model",
-          label: "Final model",
-          help: "Whisper model path for the pipelined final pass. Empty disables it.",
-          type: "input",
-          fallback: "",
-        },
-        {
-          path: "voice.interim_source",
-          label: "Interim source",
-          help: "URL the interim model can be downloaded from.",
-          type: "input",
-          fallback: "",
-        },
-        {
-          path: "voice.final_source",
-          label: "Final source",
-          help: "URL the final-pass model can be downloaded from.",
-          type: "input",
-          fallback: "",
-        },
-        {
-          path: "voice.window_seconds",
+          path: "stt.window_seconds",
           label: "Window seconds",
           help: "Seconds of trailing audio each interim pass transcribes.",
           type: "input",
@@ -997,7 +995,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
           placeholder: "15",
         },
         {
-          path: "voice.interval_ms",
+          path: "stt.interval_ms",
           label: "Interval (ms)",
           help: "Milliseconds between interim passes while a take is recording.",
           type: "input",
@@ -1005,12 +1003,13 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
           placeholder: "500",
         },
         {
-          path: "voice.vocabulary",
+          path: "stt.vocabulary",
           label: "Vocabulary",
           help: "Domain terms whisper is biased toward.",
           type: "chips",
         },
       ]),
+      restoreRecommendedButton(),
       workshopSubsection(card, "tape", "Tape", () => ({ path: "tape.jsonl" }), [
         {
           path: "tape.path",
@@ -1021,12 +1020,12 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         },
       ]),
       restartNote(),
-      saveButton(card, () => saveBootCard(card, "workshop")),
+      saveButton(card, () => saveGlobalCard(card, "workshop")),
     );
     panel.append(box);
   }
 
-  /** A collapsible `[workshop.voice]`/`[workshop.tape]` subsection. */
+  /** A collapsible `[workshop.stt]` or `[workshop.tape]` subsection. */
   function workshopSubsection(
     card: Card,
     key: string,
@@ -1076,7 +1075,32 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     return wrap;
   }
 
-  // ----- Storage ([local], profile-scoped) -----------------------------------
+  function restoreRecommendedButton(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "restore-stt";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-outline restore-recommended";
+    button.textContent = "Restore recommended models";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      void store
+        .restoreSttModels(RECOMMENDED_STT_MODELS)
+        .then(() => toasts.show("Recommended STT models restored", "success"))
+        .catch((error: unknown) => {
+          button.disabled = false;
+          toasts.show(error instanceof Error ? error.message : "The models could not be restored", "error");
+        });
+    });
+    const help = document.createElement("p");
+    help.className = "field-help";
+    help.textContent =
+      "Creates or resets the digest-pinned interim and final speech models in the global catalog.";
+    wrap.append(button, help);
+    return wrap;
+  }
+
+  // ----- Storage ([local]) ---------------------------------------------------
 
   function storageCard(): HTMLElement {
     const local = store.sectionValue("local");
@@ -1131,8 +1155,13 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       }
     }
     for (const row of store.modelEntriesRaw()) {
-      if (row.array === "local_model" && row.data["dominion"] === id) {
-        dependents.push(`local model '${String(row.data["name"] ?? "")}'`);
+      if (
+        (row.array === "local_model" || row.array === "stt_model") &&
+        row.data["dominion"] === id
+      ) {
+        dependents.push(
+          `${row.array === "stt_model" ? "STT" : "local"} model '${String(row.data["name"] ?? "")}'`,
+        );
       }
     }
     return dependents;
@@ -1154,8 +1183,6 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   function entryCard(options: {
     card: Card;
     title: string;
-    sourceFile: string | null;
-    inherited: boolean;
     dependents: string[];
     fields: () => HTMLElement[];
     onSave: () => Promise<void>;
@@ -1188,10 +1215,6 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       heading.append(draftBadge);
     }
     box.append(heading);
-    if (options.inherited && options.sourceFile) {
-      box.append(provenanceNote(options.sourceFile));
-    }
-
     const body = document.createElement("div");
     body.className = "section-body";
     body.hidden = !expanded.has(card.key);
@@ -1229,7 +1252,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         draft: false,
         pendingFields: entry.pendingFields,
       };
-      panel.append(dominionCard(card, entry.id, entry.sourceFile, entry.inherited));
+      panel.append(dominionCard(card, entry.id));
     }
     arrayDrafts.dominion.forEach((data, index) => {
       const card: Card = {
@@ -1238,7 +1261,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         draft: true,
         pendingFields: new Set(),
       };
-      panel.append(dominionCard(card, String(data["id"] ?? ""), null, false));
+      panel.append(dominionCard(card, String(data["id"] ?? "")));
     });
     panel.append(
       addEntryButton("Add Dominion", () => {
@@ -1258,18 +1281,11 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     );
   }
 
-  function dominionCard(
-    card: Card,
-    id: string,
-    sourceFile: string | null,
-    inherited: boolean,
-  ): HTMLElement {
+  function dominionCard(card: Card, id: string): HTMLElement {
     const dependents = card.draft ? [] : dominionDependents(id);
     return entryCard({
       card,
       title: id || "(new dominion)",
-      sourceFile,
-      inherited,
       dependents,
       fields: () => {
         const rows = [
@@ -1352,7 +1368,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         draft: false,
         pendingFields: entry.pendingFields,
       };
-      panel.append(endpointCard(card, entry.id, entry.sourceFile, entry.inherited));
+      panel.append(endpointCard(card, entry.id));
     }
     arrayDrafts.endpoint.forEach((data, index) => {
       const card: Card = {
@@ -1361,7 +1377,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         draft: true,
         pendingFields: new Set(),
       };
-      panel.append(endpointCard(card, String(data["id"] ?? ""), null, false));
+      panel.append(endpointCard(card, String(data["id"] ?? "")));
     });
     panel.append(
       addEntryButton("Add Endpoint", () => {
@@ -1374,18 +1390,11 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
     );
   }
 
-  function endpointCard(
-    card: Card,
-    id: string,
-    sourceFile: string | null,
-    inherited: boolean,
-  ): HTMLElement {
+  function endpointCard(card: Card, id: string): HTMLElement {
     const dependents = card.draft ? [] : endpointDependents(id);
     return entryCard({
       card,
       title: id || "(new endpoint)",
-      sourceFile,
-      inherited,
       dependents,
       fields: () => [
         fieldRow(card, {

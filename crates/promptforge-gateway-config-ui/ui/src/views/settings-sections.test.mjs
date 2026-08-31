@@ -1,14 +1,13 @@
 // Pins the Settings view's editable panels: the Gateway card's
-// boot-config save (untouched secrets ride through as "***", a typed
+// single-config save (untouched secrets ride through as "***", a typed
 // key leaves the DOM after the save, the restart and new-key notes),
-// the Workshop Enable flow with voice/tape subsections, dominion cards
+// the Workshop Enable flow with STT/tape subsections, dominion cards
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
 // focused draft), endpoint cards (Change-reveal secret, remote-only
 // dominion options), the Storage save, the Tools Enable flow, the
-// restart banner after a boot-scoped apply, that a store notification
+// restart banner after apply, that a store notification
 // on another route cannot hand the pane back to Settings, and that a
-// profile save carries no boot-owned sections and never erases a
-// staged boot edit.
+// profile save preserves every staged global section.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -45,7 +44,7 @@ function chooseDropdown(scope, key, value) {
   option.click();
 }
 
-test("a Gateway save PUTs the boot shadow with the untouched api_key as ***", async () => {
+test("a Gateway save PUTs the global shadow with the untouched api_key as ***", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -54,7 +53,7 @@ test("a Gateway save PUTs the boot shadow with the untouched api_key as ***", as
   assert.match(
     root.querySelector(".restart-note").textContent,
     /Restart required/,
-    "the boot-scoped card carries the restart note",
+    "the restart-bound card carries the restart note",
   );
   assert.match(
     root.querySelector(".configui-url").textContent,
@@ -72,8 +71,8 @@ test("a Gateway save PUTs the boot shadow with the untouched api_key as ***", as
   root.querySelector(".card-save").click();
   await settle();
 
-  const bodies = putBodies(stub, "/admin/boot-config");
-  assert.equal(bodies.length, 1, "the save PUTs /admin/boot-config once");
+  const bodies = putBodies(stub, "/admin/config");
+  assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
   assert.equal(bodies[0].server.bind, "0.0.0.0:9999");
   assert.equal(bodies[0].server.api_key, "***", "the untouched secret rides through redacted");
 });
@@ -97,7 +96,7 @@ test("changing the gateway api_key warns about the new key and saves it", async 
   );
   root.querySelector(".card-save").click();
   await settle();
-  const bodies = putBodies(stub, "/admin/boot-config");
+  const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies[0].server.api_key, "new-master-key");
 });
 
@@ -122,7 +121,7 @@ test("a saved new api_key leaves the DOM and the masked readout returns", async 
   );
 });
 
-test("Enable Workshop seeds the boot draft and the voice/tape subsections render", async () => {
+test("Workshop exposes STT capture tuning without legacy model paths", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -138,14 +137,17 @@ test("Enable Workshop seeds the boot draft and the voice/tape subsections render
     "open_browser renders as a toggle",
   );
 
-  root.querySelector(".add-voice").click();
+  root.querySelector(".add-stt").click();
   await settle();
+  assert.match(root.querySelector(".workshop-stt").textContent, /STT capture tuning/);
   assert.equal(
-    root.querySelector(".field-row[data-key='voice.window_seconds'] input").value,
+    root.querySelector(".field-row[data-key='stt.window_seconds'] input").value,
     "15",
-    "the voice defaults mirror the config crate",
+    "the STT capture defaults mirror the config crate",
   );
-  assert.ok(root.querySelector(".field-row[data-key='voice.vocabulary'] .chip-input, .field-row[data-key='voice.vocabulary'] input"));
+  assert.ok(root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input, .field-row[data-key='stt.vocabulary'] input"));
+  assert.equal(root.querySelector("[data-key='stt.interim_model']"), null);
+  assert.equal(root.querySelector("[data-key='stt.final_source']"), null);
 
   root.querySelector(".add-tape").click();
   await settle();
@@ -156,15 +158,15 @@ test("Enable Workshop seeds the boot draft and the voice/tape subsections render
 
   root.querySelector(".card-save").click();
   await settle();
-  const bodies = putBodies(stub, "/admin/boot-config");
+  const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].workshop.bind, "127.0.0.1:7910");
-  assert.equal(bodies[0].workshop.voice.window_seconds, 15);
+  assert.equal(bodies[0].workshop.stt.window_seconds, 15);
   assert.equal(bodies[0].workshop.tape.path, "tape.jsonl");
   assert.equal(
     bodies[0].server.bind,
     "127.0.0.1:8081",
-    "a Workshop save still carries [server], so the boot shadow never drops it",
+    "a Workshop save still carries the global [server] section",
   );
 });
 
@@ -176,11 +178,6 @@ test("a local dominion shows vram_gb, and switching kind to remote hides it", as
   await settle();
   const card = root.querySelector(".entry-card[data-entry='dominion:gpu0']");
   assert.ok(card, "the fixture dominion renders as a card");
-  assert.match(
-    card.querySelector(".field-from").textContent,
-    /from common\.toml/,
-    "the inherited entry names its source file",
-  );
   card.querySelector(".entry-toggle").click();
   assert.ok(
     card.querySelector(".field-row[data-key='vram_gb']"),
@@ -204,8 +201,9 @@ test("used-by chips count dependents and a delete warns naming them", async () =
   navigate(dom, "#/settings/dominions");
   await settle();
   const chip = root.querySelector(".entry-card[data-entry='dominion:gpu0'] .used-by-chip");
-  assert.equal(chip.textContent, "used by 1", "gpu0 is used by one local model");
+  assert.equal(chip.textContent, "used by 2", "gpu0 is used by chat and STT models");
   assert.match(chip.title, /local model 'qwen-common'/);
+  assert.match(chip.title, /STT model 'whisper-base-en'/);
 
   root.querySelector(".entry-card[data-entry='dominion:gpu0'] .entry-delete").click();
   await settle();
@@ -264,7 +262,7 @@ test("the endpoint dominion dropdown offers only remote-kind dominions", async (
   );
 });
 
-test("a Storage save PUTs the profile shadow with the new cache_dir", async () => {
+test("a Storage save PUTs the global shadow with the new cache_dir", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -282,10 +280,7 @@ test("a Storage save PUTs the profile shadow with the new cache_dir", async () =
   assert.equal(bodies[0].dominion.length, 1, "the keyed arrays ride through the payload");
 });
 
-test("a profile save payload carries no boot-owned sections", async () => {
-  // [server] and [workshop] are boot-scoped: baked into a profile leaf
-  // they sever the include chain's boot sections and the runner later
-  // rejects the profile against the real boot file.
+test("every settings save carries the complete single-file configuration", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -298,14 +293,13 @@ test("a profile save payload carries no boot-owned sections", async () => {
 
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
-  assert.ok(!("server" in bodies[0]), "the profile payload never carries [server]");
-  assert.ok(!("workshop" in bodies[0]), "the profile payload never carries [workshop]");
+  assert.equal(bodies[0].server.bind, "127.0.0.1:8081");
+  assert.equal(bodies[0].profile.length, 2);
 });
 
-test("a profile save does not erase a staged boot edit from the pending view", async () => {
-  // The step-18 scenario: stage a [server] edit, then save a profile
-  // section; the pending view must keep the staged bind, and a later
-  // boot-scoped save must carry it instead of a stale copy.
+test("one global section save does not erase another staged section", async () => {
+  // Stage a [server] edit, then save [local]. The pending view must
+  // keep both edits, and a later Workshop save must carry them.
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
 
@@ -326,7 +320,7 @@ test("a profile save does not erase a staged boot edit from the pending view", a
   assert.equal(
     stub.state.pending.server.bind,
     "0.0.0.0:9999",
-    "the staged boot edit survives the profile save in the pending view",
+    "the staged [server] edit survives the [local] save",
   );
   navigate(dom, "#/settings/gateway");
   await settle();
@@ -342,9 +336,9 @@ test("a profile save does not erase a staged boot edit from the pending view", a
   await settle();
   root.querySelector(".card-save").click();
   await settle();
-  const bootBodies = putBodies(stub, "/admin/boot-config");
+  const globalBodies = putBodies(stub, "/admin/config");
   assert.equal(
-    bootBodies[bootBodies.length - 1].server.bind,
+    globalBodies[globalBodies.length - 1].server.bind,
     "0.0.0.0:9999",
     "a Workshop-only save carries the staged [server] edit, not a stale copy",
   );
@@ -430,13 +424,13 @@ test("Tools Enable renders the web_search card with the spec's fields", async ()
 
 test("a store notification on the Models route cannot hand the pane back to Settings", async () => {
   const stub = fixtureStub({
-    dirty: { dirty: true, pending_files: ["profiles/default.toml"], changed_sections: [] },
+    dirty: { dirty: true, pending_files: ["gateway.toml"], changed_sections: [] },
   });
   const { dom, root } = await bootApp({ key: "k", stub });
 
   navigate(dom, "#/settings/gateway");
   await settle();
-  navigate(dom, "#/models");
+  navigate(dom, "#/local");
   await settle();
   // Apply refreshes the store and notifies every view; the settings view
   // subscribed after the models view, so an unguarded re-render would
@@ -465,4 +459,23 @@ test("the restart banner clears when config generation advances", async () => {
   await new Promise((resolve) => setTimeout(resolve, 1_050));
   await settle();
   assert.ok(banner.hidden, "a new gateway generation dismisses the stale restart banner");
+});
+
+test("Restore recommended models creates or resets the pinned STT pair", async () => {
+  const config = modelsFixture();
+  config.stt_model[0].source = "models/stale.bin";
+  const stub = fixtureStub({ config });
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/settings/workshop");
+  await settle();
+  root.querySelector(".workshop-enable").click();
+  await settle();
+
+  root.querySelector(".restore-recommended").click();
+  await settle();
+  const names = stub.state.pending.stt_model.map((model) => model.name);
+  assert.deepEqual(names, ["whisper-base-en", "whisper-small-en"]);
+  assert.match(stub.state.pending.stt_model[0].source, /ggml-base\.en\.bin$/);
+  assert.equal(stub.state.pending.stt_model[0].sha256.length, 64);
+  assert.equal(stub.state.pending.stt_model[1].role, "final");
 });

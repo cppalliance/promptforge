@@ -1,12 +1,7 @@
-// Hash router [Adapted: llama.cpp] for both shell modes. Routes:
-// #/models, #/models/{name}, #/discover, #/profiles, #/secrets,
-// #/settings/{section}; anything else falls back to
-// #/models. Each route mounts its view into <main>; until the real
-// views land, the mounts are stubs rendering the view name and an
-// empty state.
+// Hash router [Adapted: llama.cpp] for both shell modes.
 
-/** The five top-level destinations. */
-export type ViewId = "models" | "discover" | "profiles" | "secrets" | "settings";
+/** The six top-level destinations. */
+export type ViewId = "settings" | "discover" | "local" | "remote" | "profiles" | "secrets";
 
 /** A parsed route: the view plus its optional detail segment. */
 export interface RouteMatch {
@@ -18,11 +13,12 @@ export interface RouteMatch {
 
 /** Display titles for the stub views. */
 const VIEW_TITLES: Readonly<Record<ViewId, string>> = {
-  models: "Models",
+  settings: "Settings",
   discover: "Discover",
+  local: "Local",
+  remote: "Remote",
   profiles: "Profiles",
   secrets: "Secrets",
-  settings: "Settings",
 };
 
 /**
@@ -36,28 +32,21 @@ export function matchRoute(hash: string): RouteMatch | null {
   const segments = hash.slice(2).split("/");
   const [head, detail] = segments;
   switch (head) {
-    case "models":
+    case "local":
+    case "remote":
       if (segments.length === 1) {
-        return { view: "models" };
+        return { view: head };
       }
       if (segments.length === 2 && detail) {
         const name = decodeSegment(detail);
-        return name === null ? null : { view: "models", detail: name };
+        return name === null ? null : { view: head, detail: name };
       }
       return null;
     case "discover":
     case "secrets":
       return segments.length === 1 ? { view: head } : null;
     case "profiles":
-      if (segments.length === 1) {
-        return { view: "profiles" };
-      }
-      // #/profiles/include/{encoded-path}: the include-file drill-in.
-      if (segments.length === 3 && detail === "include" && segments[2]) {
-        const path = decodeSegment(segments[2]);
-        return path === null ? null : { view: "profiles", detail: path };
-      }
-      return null;
+      return segments.length === 1 ? { view: "profiles" } : null;
     case "settings":
       if (segments.length === 1) {
         return { view: "settings", detail: "system" };
@@ -92,7 +81,7 @@ export interface RouterWindow {
 }
 
 /** Mounts one view into `<main>` for a matched route. */
-export type ViewMount = (main: HTMLElement, match: RouteMatch) => void;
+export type ViewMount = (main: HTMLElement, match: RouteMatch) => void | (() => void);
 
 /** Construction options for {@link startRouter}. */
 export interface RouterOptions {
@@ -112,17 +101,29 @@ export interface RouterOptions {
  * a shell remount never stacks routers.
  */
 export function startRouter(options: RouterOptions): () => void {
+  let disposeView: () => void = () => undefined;
+  let currentRoute = "";
   const render = () => {
     let match = matchRoute(options.win.location.hash);
     if (!match) {
       // Normalize the address bar; the assignment re-fires hashchange,
       // which re-renders the same view idempotently.
-      options.win.location.hash = "#/models";
-      match = { view: "models" };
+      options.win.location.hash = "#/local";
+      match = { view: "local" };
     }
+    const routeKey = `${match.view}\0${match.detail ?? ""}`;
+    if (routeKey === currentRoute) {
+      return;
+    }
+    currentRoute = routeKey;
+    disposeView();
+    disposeView = () => undefined;
     const mount = options.views?.[match.view];
     if (mount) {
-      mount(options.main, match);
+      const cleanup = mount(options.main, match);
+      if (cleanup) {
+        disposeView = cleanup;
+      }
     } else {
       mountStubView(options.main, match);
     }
@@ -130,7 +131,10 @@ export function startRouter(options: RouterOptions): () => void {
   };
   options.win.addEventListener("hashchange", render);
   render();
-  return () => options.win.removeEventListener("hashchange", render);
+  return () => {
+    disposeView();
+    options.win.removeEventListener("hashchange", render);
+  };
 }
 
 /** Mounts the stub for `match`: the view name and an empty state. */
