@@ -22,6 +22,7 @@ pub mod chat_templates;
 mod dialect;
 mod error;
 pub mod gguf;
+mod launch_templates;
 #[cfg(llama_cuda_embedded)]
 mod llama_cuda_bundle;
 mod runtime;

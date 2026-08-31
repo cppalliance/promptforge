@@ -76,6 +76,16 @@ pub(crate) struct SidecarMeta {
     pub card: Option<String>,
 }
 
+impl SidecarMeta {
+    /// Returns the Hugging Face repository ID recorded by this sidecar's source URL.
+    pub(crate) fn source_model_id(&self) -> Option<String> {
+        self.source
+            .as_deref()
+            .and_then(parse_hf_url)
+            .map(|(repo, _revision)| repo)
+    }
+}
+
 /// Returns the sidecar `.md` path for a given GGUF path.
 pub(crate) fn sidecar_path(gguf: &Path) -> PathBuf {
     gguf.with_extension("md")

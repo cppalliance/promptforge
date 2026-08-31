@@ -12,6 +12,12 @@ and optional `tokenizer.chat_template` - never tensor data), the twelve-family
 bundled chat-template catalog with hash-first known overrides, and CUDA bundle
 staging.
 
+Chat launches keep `--jinja` enabled and resolve templates in this order:
+an explicit custom file, an explicit `builtin:<family>` asset staged under
+`chat-templates/`, a known broken-template override selected by embedded hash
+then sidecar model ID, or the GGUF's non-empty embedded template. A chat model
+without any usable template is refused with the supported fixes.
+
 The gateway drives this crate through `LocalRuntime`: `start` provisions and
 launches one child per `[[local_model]]`, `models` yields the routing table
 entries, and `shutdown` tears every child down deterministically. The crate
