@@ -10,7 +10,7 @@
 //! down anyway, and a stopped barrier reports [`Termination`] back through
 //! [`ServerHandle::shutdown`], so a held socket can never park the host.
 
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -19,7 +19,6 @@ use crate::config::Config;
 use crate::gateway_progress;
 use crate::heartbeat;
 use crate::progress;
-use crate::provision;
 
 /// How long a signaled shutdown waits for in-flight connections to drain
 /// before the watchdog abandons the graceful path. axum's drain waits on
@@ -33,6 +32,8 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// would otherwise hold the runtime's drop - and with it the host's join -
 /// open indefinitely.
 const RUNTIME_TEARDOWN: Duration = Duration::from_secs(1);
+
+type RouteFactory = Box<dyn FnOnce(&AppState) -> axum::Router + Send>;
 
 /// How a [`ServerHandle::shutdown`] ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,8 +122,7 @@ impl Drop for ServerHandle {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SpawnError {
-    /// The shared state (gateway client, tape, voice engine) could not be
-    /// built.
+    /// The shared state (gateway client and tape) could not be built.
     #[non_exhaustive]
     #[error("build shared state")]
     State(#[from] StateError),
@@ -145,18 +145,44 @@ pub enum SpawnError {
 /// tape path or whisper model), and [`SpawnError::Io`] if the bind fails or
 /// the server thread cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
-    spawn_with_grace(config, SHUTDOWN_GRACE)
+    spawn_inner(config, SHUTDOWN_GRACE, Box::new(|_| axum::Router::new()))
+}
+
+/// Spawns the workshop server with gateway-owned routes merged into its
+/// loopback listener.
+///
+/// `routes` runs after shared state construction on the server thread. It
+/// receives the state so an owning gateway subsystem can attach to the
+/// Workshop status bus without moving that subsystem into this crate.
+///
+/// # Errors
+/// Returns [`SpawnError::State`] if shared state cannot be built, or
+/// [`SpawnError::Io`] if the listener or server thread cannot start.
+pub fn spawn_with_routes(
+    config: Config,
+    routes: impl FnOnce(&AppState) -> axum::Router + Send + 'static,
+) -> Result<ServerHandle, SpawnError> {
+    spawn_inner(config, SHUTDOWN_GRACE, Box::new(routes))
 }
 
 /// [`spawn`] with the shutdown grace window injectable, so tests prove the
 /// forced path in milliseconds instead of waiting out the real window.
+#[cfg(test)]
 fn spawn_with_grace(config: Config, grace: Duration) -> Result<ServerHandle, SpawnError> {
+    spawn_inner(config, grace, Box::new(|_| axum::Router::new()))
+}
+
+fn spawn_inner(
+    config: Config,
+    grace: Duration,
+    routes: RouteFactory,
+) -> Result<ServerHandle, SpawnError> {
     let (ready_tx, ready_rx) = mpsc::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let (stopped_tx, stopped_rx) = mpsc::channel();
     let thread = std::thread::Builder::new()
         .name("promptforge-workshop-server".to_string())
-        .spawn(move || serve_thread(config, ready_tx, shutdown_rx, &stopped_tx, grace))?;
+        .spawn(move || serve_thread(config, routes, ready_tx, shutdown_rx, &stopped_tx, grace))?;
     match ready_rx.recv() {
         Ok(Ok(url)) => Ok(ServerHandle {
             url,
@@ -186,6 +212,7 @@ fn spawn_with_grace(config: Config, grace: Duration) -> Result<ServerHandle, Spa
 /// become the thread's return value.
 fn serve_thread(
     config: Config,
+    routes: RouteFactory,
     ready: mpsc::Sender<Result<String, SpawnError>>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
     stopped: &mpsc::Sender<Termination>,
@@ -209,6 +236,7 @@ fn serve_thread(
                 return (Termination::Graceful, Ok(()));
             }
         };
+        let app = router(state.clone()).merge(routes(&state));
         let listener = match reuse_bind(&config.server.bind) {
             Ok(listener) => listener,
             Err(error) => {
@@ -221,10 +249,9 @@ fn serve_thread(
             Err(error) => return (Termination::Graceful, Err(error)),
         };
         let _ = ready.send(Ok(format!("http://{address}")));
-        // The heartbeat, the voice provisioning task, the gateway
-        // progress subscriber, and the progress renderer start with
-        // serving and stop inside the same graceful-shutdown signal, so
-        // they never outlive the server.
+        // The heartbeat, gateway progress subscriber, and progress renderer
+        // start with serving and stop inside the same graceful-shutdown
+        // signal, so they never outlive the server.
         let heartbeat = heartbeat::spawn(
             state.gateway_client().clone(),
             state.push(),
@@ -232,39 +259,22 @@ fn serve_thread(
             heartbeat::HEARTBEAT_INTERVAL,
             state.backoff().clone(),
         );
-        // Voice is GPU-only (see AppState::new): without GPU transcription
-        // the provisioning task gets an empty config and exits immediately,
-        // so a CPU build never downloads models or announces "Voice ready".
-        let voice_config = if promptforge_transcribe::gpu_transcription_available() {
-            config.voice.clone()
-        } else {
-            crate::config::VoiceConfig::default()
-        };
-        let provision = provision::spawn(
-            state.gateway_client().clone(),
-            state.push(),
-            Arc::clone(state.progress()),
-            state.health().clone(),
-            state.voice_slot(),
-            voice_config,
-        );
-        let renderer = progress::spawn(Arc::clone(state.progress()), state.push());
+        let renderer = progress::spawn(std::sync::Arc::clone(state.progress()), state.push());
         let subscriber = gateway_progress::spawn(
             config.gateway.base_url.clone(),
             config.gateway.api_key.clone(),
-            Arc::clone(state.progress()),
+            std::sync::Arc::clone(state.progress()),
             state.health().clone(),
         );
         let (draining_tx, draining_rx) = tokio::sync::oneshot::channel();
         let serve = async {
-            axum::serve(listener, router(state))
+            axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let _ = shutdown.await;
                     // Arm the watchdog before draining the background
                     // tasks, so the grace window bounds the whole stop.
                     let _ = draining_tx.send(());
                     heartbeat.shutdown().await;
-                    provision.shutdown().await;
                     renderer.shutdown().await;
                     subscriber.shutdown().await;
                 })
@@ -320,7 +330,7 @@ mod tests {
 
     use std::path::Path;
 
-    use crate::config::{GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
+    use crate::config::{GatewayConfig, ServerConfig, TapeConfig};
 
     fn test_config(bind: &str, tape_dir: &Path) -> Config {
         Config {
@@ -335,7 +345,6 @@ mod tests {
                 bind: bind.to_string(),
                 open_browser: false,
             },
-            voice: VoiceConfig::default(),
         }
     }
 
@@ -377,25 +386,6 @@ mod tests {
             .await
             .expect("the UI answers");
         assert_eq!(index.status(), reqwest::StatusCode::OK);
-
-        server.shutdown().expect("graceful shutdown succeeds");
-    }
-
-    /// A configured-but-missing voice model with no source URL degrades to
-    /// disabled voice with a status-bar explanation; it must never fail
-    /// startup.
-    #[tokio::test]
-    async fn a_missing_voice_model_without_a_source_still_boots() {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let mut config = test_config("127.0.0.1:0", dir.path());
-        config.voice.interim_model = std::path::PathBuf::from("definitely-missing-model.bin");
-        let server = spawn(config).expect("server spawns with voice degraded");
-        let url = server.url().to_string();
-
-        let health = reqwest::get(format!("{url}/health"))
-            .await
-            .expect("the health endpoint answers");
-        assert_eq!(health.status(), reqwest::StatusCode::OK);
 
         server.shutdown().expect("graceful shutdown succeeds");
     }

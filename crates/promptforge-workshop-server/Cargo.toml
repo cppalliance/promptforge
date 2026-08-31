@@ -1,6 +1,6 @@
 [package]
 name = "promptforge-workshop-server"
-version = "0.1.0"
+version = "1.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -23,7 +23,6 @@ percent-encoding.workspace = true
 promptforge-gateway-client.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-progress.workspace = true
-promptforge-transcribe.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
@@ -39,19 +38,9 @@ url.workspace = true
 
 [features]
 default = []
-# GPU voice transcription: the transcription engine's CUDA backend.
-voice-cuda = ["promptforge-transcribe/cuda"]
-# Compatibility alias for voice-cuda; existing invocations keep working.
-cuda = ["voice-cuda"]
-# Compiles the engine's test fixtures and re-exports them to the
-# integration-test binary; enabled for every test build by the self
-# dev-dependency below, never by production consumers.
-test-fixtures = ["promptforge-transcribe/test-fixtures"]
+test-fixtures = []
 
 [dev-dependencies]
-# The crate dev-depends on itself so every test target - unit and
-# integration alike - builds the library with test-fixtures enabled,
-# without gate commands needing a --features flag.
 promptforge-workshop-server = { path = ".", features = ["test-fixtures"] }
 tempfile.workspace = true
 sha2.workspace = true

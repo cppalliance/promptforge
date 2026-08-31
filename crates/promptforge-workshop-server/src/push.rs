@@ -44,7 +44,7 @@ impl Push {
     /// [`crate::protocol::StatusFrame`] at
     /// [`Severity::Info`](crate::protocol::Severity::Info) with no
     /// progress.
-    pub(crate) fn push_status_update(
+    pub fn push_status_update(
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
@@ -56,7 +56,7 @@ impl Push {
     /// Pushes a failure the user should see: a `{"type":"status",...}`
     /// [`crate::protocol::StatusFrame`] at
     /// [`Severity::Error`](crate::protocol::Severity::Error).
-    pub(crate) fn push_failure(
+    pub fn push_failure(
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
@@ -69,7 +69,7 @@ impl Push {
     /// `{"type":"status",...}` [`crate::protocol::StatusFrame`] at
     /// [`Severity::Debug`](crate::protocol::Severity::Debug), whose
     /// `activity` field drives the status bar's LED.
-    pub(crate) fn push_activity(
+    pub fn push_activity(
         &self,
         label: impl Into<String>,
         description: impl Into<String>,
@@ -96,7 +96,7 @@ impl Push {
 
     /// Pushes the status bar back to its resting state: the `Ready`/`idle`
     /// `{"type":"status",...}` [`crate::protocol::StatusFrame`].
-    pub(crate) fn push_idle(&self) {
+    pub fn push_idle(&self) {
         self.status.idle();
     }
 

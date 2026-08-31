@@ -27,6 +27,8 @@
 //! `[[local_model]]` entry references (local builds), a bearer-authed
 //! `GET /admin/model-info` GGUF-header readout of a cache file's layer and
 //! parameter counts (local builds), a bearer-authed
+//! `POST /v1/audio/transcriptions` OpenAI-compatible multipart STT endpoint
+//! (workshop builds), a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
 //! metrics, a bearer-authed `GET /admin/hf/search` and
 //! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
@@ -98,6 +100,8 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
+#[cfg(feature = "workshop")]
+use axum::extract::FromRequest;
 use axum::extract::State;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
@@ -121,6 +125,8 @@ use promptforge_gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use promptforge_gateway_config::WebSearchConfig;
 use promptforge_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
+#[cfg(feature = "workshop")]
+use promptforge_stt::{SttRuntime, SttState};
 #[cfg(feature = "web-search")]
 use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSearchState};
 
@@ -137,6 +143,8 @@ struct LiveState {
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
     local: LocalRuntime,
+    #[cfg(feature = "workshop")]
+    stt: Option<SttRuntime>,
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
@@ -191,6 +199,10 @@ pub(crate) struct AppState {
     /// Launches the OS file manager for `POST /admin/reveal`; injectable
     /// so tests assert the constructed command without spawning anything.
     reveal: Arc<dyn reveal::RevealLauncher>,
+    /// Stable STT slot shared by gateway and workshop routes across runtime
+    /// replacement.
+    #[cfg(feature = "workshop")]
+    stt_state: SttState,
 }
 
 impl AppState {
@@ -205,6 +217,7 @@ impl AppState {
         key: Secret,
         config: Arc<Config>,
         #[cfg(feature = "local")] local: LocalRuntime,
+        #[cfg(feature = "workshop")] stt: SttRuntime,
         #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
         config_path: Option<std::path::PathBuf>,
         selection: ProfileSelection,
@@ -213,6 +226,8 @@ impl AppState {
         let started = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_nanos());
+        #[cfg(feature = "workshop")]
+        let stt_state = stt.state();
         AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
@@ -222,6 +237,8 @@ impl AppState {
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 #[cfg(feature = "local")]
                 local,
+                #[cfg(feature = "workshop")]
+                stt: Some(stt),
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
             })),
@@ -234,6 +251,8 @@ impl AppState {
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
             reveal: Arc::new(reveal::SpawnLauncher),
+            #[cfg(feature = "workshop")]
+            stt_state,
         }
     }
 
@@ -247,6 +266,12 @@ impl AppState {
     #[cfg(feature = "local")]
     pub(crate) async fn cache_dir(&self) -> Option<String> {
         self.live.read().await.local.cache_dir().map(str::to_owned)
+    }
+
+    /// Shared STT state mounted on both listeners.
+    #[cfg(feature = "workshop")]
+    pub(crate) fn stt_state(&self) -> SttState {
+        self.stt_state.clone()
     }
 
     /// Registers an inference request under the same lock profile switches use.
@@ -268,6 +293,14 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/status", get(admin_status))
         .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile));
+    #[cfg(feature = "workshop")]
+    let router = router.merge(
+        Router::new()
+            .route("/v1/audio/transcriptions", post(audio_transcriptions))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                promptforge_stt::MAX_AUDIO_BYTES + 1024 * 1024,
+            )),
+    );
     // The web-search tool route delegates to the service crate, so it exists
     // only in builds with the `web-search` feature.
     #[cfg(feature = "web-search")]
@@ -368,6 +401,28 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "serving" }))
 }
 
+/// OpenAI-compatible request-response transcription.
+///
+/// Authentication runs before multipart extraction so an unauthorized caller
+/// cannot make the gateway buffer or decode an audio body.
+#[cfg(feature = "workshop")]
+async fn audio_transcriptions(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, request.headers()).await?;
+    let multipart = axum::extract::Multipart::from_request(request, &())
+        .await
+        .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
+    let in_flight = state.begin_inference().await;
+    tokio::select! {
+        result = promptforge_stt::transcribe(&state.stt_state, multipart) => {
+            result.map(IntoResponse::into_response).map_err(GatewayError::from)
+        }
+        () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
+    }
+}
+
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
 const CLIENT_HEADER: &str = "X-PromptForge-Client";
 
@@ -376,6 +431,15 @@ const CLIENT_HEADER: &str = "X-PromptForge-Client";
 #[cfg(not(feature = "local"))]
 const LOCAL_MODELS_UNSUPPORTED: &str =
     "configuration declares [[local_model]] but this build lacks the `local` feature";
+
+/// Error when STT is selected without its required workshop listener.
+const STT_REQUIRES_WORKSHOP: &str =
+    "the active profile selects [[stt_model]] but no [workshop] section is configured";
+
+/// Error when STT reaches a gateway build without the heavy runtime.
+#[cfg(not(feature = "workshop"))]
+const STT_RUNTIME_UNAVAILABLE: &str =
+    "the active profile selects [[stt_model]] but this build lacks the `workshop` feature";
 
 /// The chat route to a backend.
 async fn chat_completions(
@@ -884,28 +948,9 @@ async fn run_switch_with_config(
         Some(config) => config,
         None => state.live.read().await.config.as_ref().clone(),
     };
-    if !catalog
-        .profiles()
-        .iter()
-        .any(|profile| profile.name() == name.as_str())
-    {
-        loading.fail();
-        return Err(GatewayError::ProfileNotFound(name.to_string()));
-    }
-    let config = match catalog.select_profile(&name) {
-        Ok(config) => config,
-        Err(error) => {
-            loading.fail();
-            return Err(GatewayError::switch_failed("select-profile", error));
-        }
-    };
-    let remote_routing = match Routing::from_config(&config) {
-        Ok(routing) => routing,
-        Err(error) => {
-            loading.fail();
-            return Err(GatewayError::switch_failed("build-routing", error));
-        }
-    };
+    let (config, remote_routing) = prepare_switch_target(&catalog, &name, &loading)?;
+    loading.complete();
+
     #[cfg(feature = "web-search")]
     let new_web_search = config
         .web_search_config()
@@ -914,15 +959,14 @@ async fn run_switch_with_config(
     let new_allowlist = config
         .active_profile()
         .map(|profile| profile.models().to_vec());
-    loading.complete();
 
     drain_inference(&state).await;
 
-    // Stop the previous local children before starting new ones so the two
-    // never hold VRAM simultaneously. The bearer key, routing, and web-search
-    // settings are left untouched here, so auth stays stable if start fails.
-    #[cfg(feature = "local")]
-    let (new_local, start_failures) = replace_local_runtime(&state, &config, &tree).await?;
+    // Stop every previous VRAM owner before starting replacements. The bearer
+    // key, routing, and web-search settings stay untouched, so auth remains
+    // stable if a start fails.
+    #[cfg(any(feature = "local", feature = "workshop"))]
+    let replacement = replace_runtimes(&state, &config, &tree).await?;
     // A headless build cannot honor a profile declaring local models; refuse
     // the switch rather than silently dropping them.
     #[cfg(not(feature = "local"))]
@@ -935,7 +979,7 @@ async fn run_switch_with_config(
 
     #[cfg(feature = "local")]
     let routing = remote_routing
-        .merge(new_local.models().iter().cloned())
+        .merge(replacement.local.models().iter().cloned())
         .map_err(|e| GatewayError::switch_failed("merge-routing", e))?;
     #[cfg(not(feature = "local"))]
     let routing = remote_routing;
@@ -959,14 +1003,18 @@ async fn run_switch_with_config(
         }
         #[cfg(feature = "local")]
         {
-            live.local = new_local;
+            live.local = replacement.local;
+        }
+        #[cfg(feature = "workshop")]
+        {
+            live.stt = Some(replacement.stt);
         }
         live.profile_name = Some(name.to_string());
         live.model_allowlist = new_allowlist;
     }
 
     #[cfg(feature = "local")]
-    if !start_failures.is_empty() {
+    if !replacement.start_failures.is_empty() {
         let loaded = state
             .live
             .read()
@@ -976,7 +1024,8 @@ async fn run_switch_with_config(
             .iter()
             .map(|model| model.name.clone())
             .collect();
-        let failed = start_failures
+        let failed = replacement
+            .start_failures
             .into_iter()
             .map(|failure| format!("{}: {}", failure.model(), failure.error()))
             .collect();
@@ -991,6 +1040,51 @@ async fn run_switch_with_config(
     Ok(name.to_string())
 }
 
+fn prepare_switch_target(
+    catalog: &Config,
+    name: &ProfileName,
+    loading: &promptforge_progress::ProgressHandle,
+) -> Result<(Config, Routing), GatewayError> {
+    if !catalog
+        .profiles()
+        .iter()
+        .any(|profile| profile.name() == name.as_str())
+    {
+        loading.fail();
+        return Err(GatewayError::ProfileNotFound(name.to_string()));
+    }
+    let config = match catalog.select_profile(name) {
+        Ok(config) => config,
+        Err(error) => {
+            loading.fail();
+            return Err(GatewayError::switch_failed("select-profile", error));
+        }
+    };
+    if !config.stt_models().is_empty() && config.workshop().is_none() {
+        loading.fail();
+        return Err(GatewayError::switch_failed(
+            "start-stt",
+            std::io::Error::other(STT_REQUIRES_WORKSHOP),
+        ));
+    }
+    #[cfg(not(feature = "workshop"))]
+    if !config.stt_models().is_empty() {
+        loading.fail();
+        return Err(GatewayError::switch_failed(
+            "start-stt",
+            std::io::Error::other(STT_RUNTIME_UNAVAILABLE),
+        ));
+    }
+    let remote_routing = match Routing::from_config(&config) {
+        Ok(routing) => routing,
+        Err(error) => {
+            loading.fail();
+            return Err(GatewayError::switch_failed("build-routing", error));
+        }
+    };
+    Ok((config, remote_routing))
+}
+
 async fn drain_inference(state: &AppState) {
     if !state
         .in_flight
@@ -1003,23 +1097,46 @@ async fn drain_inference(state: &AppState) {
     }
 }
 
-#[cfg(feature = "local")]
-async fn replace_local_runtime(
+#[cfg(any(feature = "local", feature = "workshop"))]
+struct RuntimeReplacement {
+    #[cfg(feature = "local")]
+    local: LocalRuntime,
+    #[cfg(feature = "local")]
+    start_failures: Vec<local::LocalStartFailure>,
+    #[cfg(feature = "workshop")]
+    stt: SttRuntime,
+}
+
+#[cfg(any(feature = "local", feature = "workshop"))]
+async fn replace_runtimes(
     state: &AppState,
     config: &Config,
     tree: &ProgressTree,
-) -> Result<(LocalRuntime, Vec<local::LocalStartFailure>), GatewayError> {
+) -> Result<RuntimeReplacement, GatewayError> {
     let stopping = tree.register("stopping-models", 2.0);
+    #[cfg(feature = "local")]
     let old_local = {
         let mut live = state.live.write().await;
         std::mem::replace(&mut live.local, LocalRuntime::empty())
     };
-    // The routing table also owns each upstream. Explicit shutdown disables
-    // respawn and frees VRAM before replacements start (PFGL-MOD-001).
+    #[cfg(feature = "workshop")]
+    let old_stt = state.live.write().await.stt.take();
+    // The routing table also owns each local upstream. Explicit shutdown
+    // disables respawn and frees all old-profile VRAM before replacements
+    // start (PFGL-MOD-001).
     match tokio::task::spawn_blocking(move || {
-        let result = old_local.shutdown();
-        drop(old_local);
-        result
+        #[cfg(feature = "workshop")]
+        if let Some(runtime) = old_stt {
+            runtime.shutdown();
+        }
+        #[cfg(feature = "local")]
+        {
+            let result = old_local.shutdown();
+            drop(old_local);
+            result
+        }
+        #[cfg(not(feature = "local"))]
+        Ok::<(), std::convert::Infallible>(())
     })
     .await
     {
@@ -1036,28 +1153,66 @@ async fn replace_local_runtime(
 
     stopping.complete();
     let starting = tree.register("starting-models", 5.0);
+    #[cfg(feature = "local")]
     let start_config = config.clone();
-    let outcome =
-        match tokio::task::spawn_blocking(move || LocalRuntime::start_partial(&start_config, None))
-            .await
-        {
-            Ok(Ok(outcome)) => outcome,
-            Ok(Err(error)) => {
-                starting.fail();
-                return Err(GatewayError::switch_failed("start-local", error));
-            }
-            Err(error) => {
-                starting.fail();
-                return Err(GatewayError::switch_failed("start-local-task", error));
-            }
-        };
+    #[cfg(feature = "local")]
+    let start_progress = starting.clone();
+    #[cfg(feature = "local")]
+    let outcome = match tokio::task::spawn_blocking(move || {
+        LocalRuntime::start_partial(&start_config, Some(&start_progress))
+    })
+    .await
+    {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(error)) => {
+            starting.fail();
+            return Err(GatewayError::switch_failed("start-local", error));
+        }
+        Err(error) => {
+            starting.fail();
+            return Err(GatewayError::switch_failed("start-local-task", error));
+        }
+    };
+    #[cfg(feature = "local")]
     let (runtime, failures) = outcome.into_parts();
+    #[cfg(feature = "workshop")]
+    let stt_config = config.clone();
+    #[cfg(feature = "workshop")]
+    let stt_state = state.stt_state.clone();
+    #[cfg(feature = "workshop")]
+    let stt_progress = starting.clone();
+    #[cfg(feature = "workshop")]
+    let stt = match tokio::task::spawn_blocking(move || {
+        SttRuntime::start(&stt_config, stt_state, Some(&stt_progress))
+    })
+    .await
+    {
+        Ok(Ok(runtime)) => runtime,
+        Ok(Err(error)) => {
+            starting.fail();
+            return Err(GatewayError::switch_failed("start-stt", error));
+        }
+        Err(error) => {
+            starting.fail();
+            return Err(GatewayError::switch_failed("start-stt-task", error));
+        }
+    };
+    #[cfg(feature = "local")]
     if failures.is_empty() {
         starting.complete();
     } else {
         starting.fail();
     }
-    Ok((runtime, failures))
+    #[cfg(not(feature = "local"))]
+    starting.complete();
+    Ok(RuntimeReplacement {
+        #[cfg(feature = "local")]
+        local: runtime,
+        #[cfg(feature = "local")]
+        start_failures: failures,
+        #[cfg(feature = "workshop")]
+        stt,
+    })
 }
 
 /// Commits active-profile state while the caller holds the switch lock.
@@ -1290,6 +1445,91 @@ mod auth_tests {
     #[test]
     fn empty_matches_empty() {
         assert!(secret_eq(b"", b""));
+    }
+}
+
+#[cfg(all(test, feature = "workshop"))]
+mod transcription_auth_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "the shared test fixture fails with the invariant named"
+    )]
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use promptforge_gateway_config::Config;
+    use tower::ServiceExt;
+
+    use crate::build_router;
+
+    fn state() -> crate::AppState {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [workshop]\n",
+        )
+        .expect("config parses");
+        app_state(config, None)
+    }
+    use crate::test_support::app_state;
+
+    #[tokio::test]
+    async fn transcription_checks_bearer_auth_before_multipart_extraction() {
+        let response = build_router(state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/transcriptions")
+                    .header("content-type", "not-multipart")
+                    .body(Body::from("not multipart"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "auth refuses the request before its malformed body is extracted"
+        );
+    }
+
+    #[tokio::test]
+    async fn unloaded_transcription_model_returns_openai_model_not_found() {
+        const BOUNDARY: &str = "gateway-stt-boundary";
+        let mut wav = vec![
+            b'R', b'I', b'F', b'F', 36, 0, 0, 0, b'W', b'A', b'V', b'E', b'f', b'm', b't', b' ',
+            16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0x00, 0x7d, 0, 0, 2, 0, 16, 0, b'd', b'a',
+            b't', b'a', 0, 0, 0, 0,
+        ];
+        let mut body = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nghost\r\n\
+             --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\n\
+             Content-Type: audio/wav\r\n\r\n"
+        )
+        .into_bytes();
+        body.append(&mut wav);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        let response = build_router(state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/transcriptions")
+                    .header("authorization", "Bearer test-token")
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={BOUNDARY}"),
+                    )
+                    .body(Body::from(body))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "model_not_found");
     }
 }
 

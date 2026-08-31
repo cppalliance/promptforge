@@ -93,7 +93,7 @@ pub(crate) struct ProvisionedServer {
 
 /// Cache root plus HTTP client for provisioning local inference artifacts.
 #[derive(Debug)]
-pub(crate) struct ArtifactStore {
+pub struct ArtifactStore {
     cache: PathBuf,
     client: Client,
 }
@@ -103,7 +103,7 @@ impl ArtifactStore {
     ///
     /// # Errors
     /// Returns [`LocalError::Io`] or [`LocalError::HttpClient`] on setup failure.
-    pub(crate) fn new(cache: impl Into<PathBuf>) -> Result<Self> {
+    pub fn new(cache: impl Into<PathBuf>) -> Result<Self> {
         let cache = cache.into();
         ensure_cache_directory(&cache, &cache)?;
         // Enforce the private-cache precondition the confinement design relies on
@@ -159,7 +159,7 @@ impl ArtifactStore {
     ///
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.
-    pub(crate) fn ensure_model(&self, source: &str, sha256: Option<&str>) -> Result<PathBuf> {
+    pub fn ensure_model(&self, source: &str, sha256: Option<&str>) -> Result<PathBuf> {
         self.ensure_model_with_progress(source, sha256, None)
     }
 
@@ -172,7 +172,7 @@ impl ArtifactStore {
     ///
     /// # Errors
     /// Returns a [`LocalError`] on download, verification, or path failures.
-    pub(crate) fn ensure_model_with_progress(
+    pub fn ensure_model_with_progress(
         &self,
         source: &str,
         sha256: Option<&str>,

@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway (with streaming over a WebSocket), a JSONL session tape recording every exchange, and a WebSocket voice endpoint that transcribes push-to-talk microphone audio on-device with whisper.cpp. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame of the same workshop.
+The PromptForge Workshop HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway, a JSONL session tape, and workspace APIs. The gateway-owned `promptforge-stt` runtime attaches `/voice` when this server is embedded. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
 
 ## Quick start
 
@@ -37,12 +37,6 @@ Every field of `workshop.toml`:
 | `tape.path` | `tape.jsonl` | Path of the JSONL session tape; one event per chat exchange |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
-| `voice.interim_model` | (empty) | Path to the GGML whisper model for streaming interim transcription; empty disables transcription until a source provides the model. A missing file with `interim_source` set is fetched through the gateway cache; a missing file with no source degrades to voice disabled (with a status-bar note), never a startup failure |
-| `voice.final_model` | (empty) | Path to the whisper model for the pipelined final pass; empty falls back to the interim model. A missing file with no `final_source` drops just the final pass |
-| `voice.interim_source` | (empty) | URL the interim model is downloaded from through the gateway cache when no local file exists |
-| `voice.final_source` | (empty) | URL the final-pass model is downloaded from through the gateway cache when no local file exists |
-| `voice.window_seconds` | `5` | Seconds of trailing audio each interim pass transcribes |
-| `voice.interval_ms` | `800` | Milliseconds between interim passes while a take is recording |
 
 ## Routes
 
@@ -53,13 +47,10 @@ Every field of `workshop.toml`:
 | `GET /v1/models` | Proxies the gateway's model catalog verbatim; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `POST /chat` | Buffered chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` is rejected with 400 - streaming lives on `/ws`; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `GET /ws` | WebSocket upgrade, one persistent socket for all downstream JSON: `{"type":"chat","id","model","messages"}` frames in (the optional `id` is echoed on the reply), `{"type":"delta","content"}` / `{"type":"done"}` / `{"type":"error","message"}` frames out, plus unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates and `{"type":"models","models":[...]}` catalog pushes when the gateway comes back after an outage |
-| `GET /voice` | WebSocket upgrade: binary f32 PCM at 16 kHz mono in, `start`/`stop` control words, interim and final transcripts out. Each `start` is answered with a `{"type":"stream","generation":N}` announcement (counted from 1 per connection) before that take's frames, and every interim and final frame carries its `generation`, so a client can discard frames a stop/restart race left behind |
 
 ## Gateway resilience
 
-A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, chat over `/ws` is answered immediately with a `{"type":"error","message":"Gateway unreachable"}` frame (no upstream attempt, nothing taped), and `GET /v1/models` and `POST /chat` answer 502 `gateway_unreachable` instead of waiting on a dead connection. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. The server boots and serves the UI whether or not the gateway has ever answered; voice works whenever its models are local.
-
-When voice model sources are configured but the model files are not on disk, a provisioning task waits on the heartbeat and, once the gateway answers, calls the gateway's `POST /v1/cache` for each source - streaming download progress to the status bar - then loads the voice engine from the cached paths and reports "Voice ready". A cache hit answers immediately, so a reconnect re-run is cheap; a loaded engine is never re-provisioned. On any failure voice stays disabled, the status bar says why, the app runs on, and the next gateway reconnect retries.
+A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, chat over `/ws` is answered immediately with a `{"type":"error","message":"Gateway unreachable"}` frame (no upstream attempt, nothing taped), and `GET /v1/models` and `POST /chat` answer 502 `gateway_unreachable` instead of waiting on a dead connection. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. The server boots and serves the UI whether or not the gateway has ever answered.
 
 ## UI development
 
@@ -131,10 +122,6 @@ The variables:
 | `--scrollbar-width` | `8px` | Scrollbar thickness (drives thumb rounding) |
 | `--scrollbar-thumb` | `rgba(255,255,255,0.16)` | Scrollbar thumb |
 | `--scrollbar-thumb-hover` | `rgba(255,255,255,0.28)` | Scrollbar thumb on hover |
-
-## Whisper models
-
-With `voice.interim_source` / `voice.final_source` set (the generated config sets both), the workshop downloads the models through the gateway's cache API once the gateway connects and loads them from the cached paths - no manual step. Models can also be placed on disk directly and named with `voice.interim_model` / `voice.final_model`; a local file always wins over a source. The models come from the whisper.cpp GGML model collection on Hugging Face: <https://huggingface.co/ggerganov/whisper.cpp>. Production configs typically pair `ggml-large-v3-turbo.bin` (interim) with `ggml-large-v3.bin` (final). The test suite uses the tiny English model (`ggml-tiny.en.bin`) plus the `jfk.wav` speech fixture, placed in `tests/fixtures/` (gitignored); a missing fixture fails the test with the download URL in the message.
 
 ## Minimum Rust Version
 

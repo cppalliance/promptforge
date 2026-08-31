@@ -1,6 +1,6 @@
 //! Whisper transcription on dedicated worker threads.
 //!
-//! [`VoiceEngine`] owns two worker threads: the interim worker holds the
+//! [`SttEngine`] owns two worker threads: the interim worker holds the
 //! streaming model and transcribes sliding windows, and the final-pass
 //! worker (`FinalTranscriber`, present when [`EngineConfig::final_model`] is
 //! set) holds the larger model and transcribes completed speech segments in
@@ -19,14 +19,14 @@ mod segment;
 mod slot;
 mod worker;
 
-pub use engine::{EngineConfig, VoiceEngine};
+pub use engine::{EngineConfig, SttEngine};
 pub use error::TranscribeError;
 pub use segment::Segmenter;
-pub use slot::VoiceSlot;
+pub use slot::SttSlot;
 
 use std::path::Path;
 
-/// PCM sample rate the voice wire format and whisper both require.
+/// PCM sample rate the streaming wire format and whisper both require.
 pub const SAMPLE_RATE: usize = 16_000;
 
 /// Windows below this RMS are treated as silence and never transcribed.
@@ -86,7 +86,7 @@ pub fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
 
-/// Returns true when voice transcription can run on the GPU: the build
+/// Returns true when STT can run on the GPU: the build
 /// carries the CUDA backend and an NVIDIA driver is present. Without both,
 /// whisper falls back to a CPU pass slow enough that the UI hides the mic
 /// rather than offering a take that stalls for half a minute.

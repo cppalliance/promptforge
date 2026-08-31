@@ -25,16 +25,13 @@
 # the ceiling downward in the same commit to bank the gain.
 
 [modules]
-# Shrank by the startup engine load's move to provision.rs: `AppState::new`
-# no longer loads whisper models, and `startup_engine`, `load_engine`, and
-# `degrade` are absorbed by the provisioning task.
+# `AppState::new` owns only Workshop server state. Gateway-owned STT attaches
+# its routes after construction.
 "app.rs" = 387
 "assets.rs" = 69
 "atomic.rs" = 230
 "backoff.rs" = 232
 "catalog.rs" = 118
-# Grew by the `From<&VoiceConfig> for promptforge_transcribe::EngineConfig`
-# mapping and its test (the constructor seam into the extracted engine).
 "config.rs" = 634
 "cross_site.rs" = 338
 "deadline.rs" = 112
@@ -69,19 +66,6 @@
 # hold continues from the drained level) and the lagged-receiver,
 # pre-subscription catch, and backward-step tests.
 "progress.rs" = 500
-# Grew by the provision migration to tree leaves: `cache_fetch` applies
-# download samples to a per-model leaf instead of pushing progress frames,
-# the engine load registers on the attempt's operation tree, and the
-# scripted-stream test pins the leaf fraction mid-download. Grew again by
-# the failure terminals (a failed attempt fails every leaf still open,
-# `cache_fetch` fails its leaf on its own error paths) and the null-total
-# hold, download-error, and tree-detach tests. Grew again by absorbing the
-# startup engine load: the first attempt fires immediately for local
-# models (`needs_fetch`), a never-resolvable config degrades through
-# `degrade_unresolvable`, and the startup degradation tests moved here.
-# Grew again by the garbage-local-model test pinning the no-wait gate and
-# the load-failure label.
-"provision.rs" = 1396
 "push.rs" = 274
 "relay.rs" = 537
 "routes.rs" = 8
@@ -91,7 +75,6 @@
 # allowlisted key-attaching proxy the panel's postMessage bridge calls.
 "routes/gateway_config.rs" = 334
 "routes/health.rs" = 50
-"routes/voice.rs" = 75
 "routes/workspace.rs" = 20
 "serve.rs" = 566
 "session.rs" = 341
@@ -102,7 +85,6 @@
 "session/menu.rs" = 165
 "status.rs" = 200
 "tape.rs" = 275
-"voice.rs" = 1315
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its

@@ -21,7 +21,6 @@ mod heartbeat;
 mod menu;
 mod progress;
 mod protocol;
-mod provision;
 mod push;
 mod relay;
 mod routes;
@@ -29,7 +28,6 @@ mod serve;
 mod session;
 mod status;
 mod tape;
-mod voice;
 mod workspace;
 
 // The release artifact verifier lives outside src/ so build.rs shares it
@@ -58,25 +56,20 @@ pub mod fixtures {
     pub use crate::status::StatusBus;
 
     #[cfg(feature = "test-fixtures")]
-    pub use promptforge_transcribe::fixtures::{
-        fixture_dir, jfk_samples, model_path, require_model,
-    };
-
-    #[cfg(feature = "test-fixtures")]
     pub use crate::app::fixtures::spawn_gateway;
 }
 
-pub use promptforge_transcribe::TranscribeError;
-
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
-    Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL, DEFAULT_VOICE_INTERVAL_MS,
-    DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,
+    Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL, GatewayConfig,
+    ServerConfig, TapeConfig,
 };
+pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use gateway::{
     CacheEvent, CacheResponse, ChatStream, GatewayClient, GatewayError, GatewayResponse,
     SsePayloadStream, SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
-pub use protocol::ChatRequest;
-pub use serve::{ServerHandle, SpawnError, Termination, spawn};
+pub use protocol::{Activity, ChatRequest};
+pub use push::Push;
+pub use serve::{ServerHandle, SpawnError, Termination, spawn, spawn_with_routes};
 pub use tape::{Tape, TapeError, TapeEvent};

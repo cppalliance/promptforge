@@ -1,7 +1,7 @@
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
-//! search order), generating a default config and its `default` profile in
+//! search order), generating a default config with its `default` profile in
 //! the user profile's `.promptforge` directory on first run, boots the
 //! merged gateway (which hosts the workshop UI on a second loopback
 //! listener) in-process, waits for the workshop's health endpoint to
@@ -78,8 +78,8 @@ fn workshop_url_from(url: Option<&str>) -> anyhow::Result<String> {
     )
 }
 
-/// First run: writes the default `gateway.toml` and its `default` profile
-/// into the user profile's `.promptforge` directory.
+/// First run: writes `gateway.toml` with its `default` profile into the user
+/// profile's `.promptforge` directory.
 fn generate_in_profile() -> anyhow::Result<PathBuf> {
     let home = std::env::home_dir().context("locate the user profile directory")?;
     let path = discover::profile_config_path(&home);

@@ -63,7 +63,7 @@ cd promptforge
 cargo build
 ```
 
-A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server`. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-workshop --no-default-features` (voice transcription then stays off and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
+A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server` and enables the whisper CUDA backend. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-workshop --no-default-features` (STT uses its CPU backend and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
@@ -120,6 +120,7 @@ flowchart LR
 | [promptforge-mcp-server](crates/promptforge-mcp-server) | MCP server for agentic harnesses (Cursor, Claude Code) | [![Crates.io](https://img.shields.io/crates/v/promptforge-mcp-server.svg)](https://crates.io/crates/promptforge-mcp-server) |
 | [promptforge-parser](crates/promptforge-parser) | Prompt document parser: frontmatter, section tree, exact `lua` fence splitting, `ParseError` vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-parser.svg)](https://crates.io/crates/promptforge-parser) |
 | [promptforge-progress](crates/promptforge-progress) | Progress vocabulary: operation-scoped weighted trees, process hub, coalesced events, remote import | not published |
+| [promptforge-stt](crates/promptforge-stt) | Gateway-owned STT runtime: artifact provisioning, engine lifecycle, `/voice`, and OpenAI transcription | not published |
 | [promptforge-store](crates/promptforge-store) | Run-scoped virtual filesystem: `Store` backend contract, `MemStore`/`FileStore` backends, shared `StoreRef` handle | [![Crates.io](https://img.shields.io/crates/v/promptforge-store.svg)](https://crates.io/crates/promptforge-store) |
 | [promptforge-tool-picker](crates/promptforge-tool-picker) | Semantic tool resolution via sentence embeddings | [![Crates.io](https://img.shields.io/crates/v/promptforge-tool-picker.svg)](https://crates.io/crates/promptforge-tool-picker) |
 | [promptforge-tools](crates/promptforge-tools) | Runtime-agnostic tool contract: `Tool`, `ToolCatalog`, `ToolId` | [![Crates.io](https://img.shields.io/crates/v/promptforge-tools.svg)](https://crates.io/crates/promptforge-tools) |
@@ -128,7 +129,7 @@ flowchart LR
 | [promptforge-web-search-service](crates/promptforge-web-search-service) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search-service.svg)](https://crates.io/crates/promptforge-web-search-service) |
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
-| [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: chat relay, session tape, voice transcription | not published |
+| [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: chat relay, session tape, workspace API, and UI assets | not published |
 | [promptforge-desktop-shell](crates/promptforge-desktop-shell) | Workshop desktop shell: windowing, WebView, IPC, platform bridges (wry/tao) | not published |
 | [promptforge-workshop](crates/promptforge-workshop) | Workshop desktop app: boots the gateway and opens the window | not published |
 

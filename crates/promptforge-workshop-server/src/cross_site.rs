@@ -34,7 +34,7 @@ use crate::error::AppError;
 /// non-loopback `Host` answers 403; a POST, PUT, or PATCH whose
 /// `Content-Type` is not `application/json` answers 415. Everything else
 /// passes through.
-pub(crate) async fn guard(request: Request, next: Next) -> Response {
+pub async fn guard(request: Request, next: Next) -> Response {
     if request
         .headers()
         .get("sec-fetch-site")
@@ -86,7 +86,7 @@ fn declares_json(headers: &HeaderMap) -> bool {
 /// Whether a WebSocket upgrade's `Origin` is acceptable: absent (a native
 /// client), or a loopback http(s) origin - the shell webview and the
 /// workshop's own browser-tab origin are both loopback.
-pub(crate) fn origin_allowed(headers: &HeaderMap) -> bool {
+pub fn origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else {
         return true;
     };
@@ -170,7 +170,7 @@ mod tests {
     async fn cross_site_requests_are_refused_and_health_stays_exempt() {
         let (state, _tape_dir) = state_for("http://127.0.0.1:1");
         let app = router(state);
-        for path in ["/v1/models", "/ws", "/voice", "/workspace/tree"] {
+        for path in ["/v1/models", "/ws", "/workspace/tree"] {
             let request = Request::builder()
                 .uri(path)
                 .header("sec-fetch-site", "cross-site")
@@ -186,7 +186,7 @@ mod tests {
         }
         for site in ["same-origin", "none"] {
             let request = Request::builder()
-                .uri("/voice/capability")
+                .uri("/workspace/tree")
                 .header("sec-fetch-site", site)
                 .body(Body::empty())
                 .expect("static request parts are valid");
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(envelope_code(response).await, "cross_site");
         for host in ["127.0.0.1:7910", "localhost:7910", "[::1]:7910"] {
             let request = Request::builder()
-                .uri("/voice/capability")
+                .uri("/workspace/tree")
                 .header("host", host)
                 .body(Body::empty())
                 .expect("static request parts are valid");
@@ -314,7 +314,7 @@ mod tests {
         config.server.bind = "127.0.0.1:0".to_string();
         let server = crate::serve::spawn(config).expect("server spawns");
         let url = server.url().to_string();
-        for path in ["/ws", "/voice"] {
+        for path in ["/ws"] {
             ws_connect(&url, path, None)
                 .await
                 .expect("a native client with no Origin upgrades");

@@ -248,6 +248,7 @@ dependencies = [
  "matchit",
  "memchr",
  "mime",
+ "multer",
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
@@ -3173,6 +3174,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
 
 [[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
+]
+
+[[package]]
 name = "ndk"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4018,7 +4036,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-gateway"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "dotenvy",
@@ -4035,6 +4053,7 @@ dependencies = [
  "promptforge-gateway-protocol",
  "promptforge-gateway-routing",
  "promptforge-progress",
+ "promptforge-stt",
  "promptforge-web-search-service",
  "promptforge-workshop-server",
  "reqwest 0.12.28",
@@ -4110,7 +4129,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-gateway-local"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "flate2",
@@ -4247,6 +4266,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-stt"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "hound",
+ "promptforge-gateway-config",
+ "promptforge-gateway-local",
+ "promptforge-progress",
+ "promptforge-stt",
+ "promptforge-transcribe",
+ "promptforge-workshop-server",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "promptforge-tool-picker"
 version = "0.1.0"
 dependencies = [
@@ -4277,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-transcribe"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "hound",
  "promptforge-progress",
@@ -4353,7 +4396,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-workshop-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -4364,7 +4407,6 @@ dependencies = [
  "promptforge-gateway-client",
  "promptforge-gateway-protocol",
  "promptforge-progress",
- "promptforge-transcribe",
  "promptforge-workshop-server",
  "reqwest 0.12.28",
  "rust-embed",
@@ -5495,6 +5537,12 @@ dependencies = [
  "libc",
  "system-deps",
 ]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 
 [[package]]
 name = "spm_precompiled"

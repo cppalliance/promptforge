@@ -21,6 +21,7 @@ pub const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081";
 
 /// Workshop server configuration loaded from `workshop.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Connection settings for the PromptForge gateway.
     pub gateway: GatewayConfig,
@@ -30,9 +31,6 @@ pub struct Config {
     /// HTTP server settings.
     #[serde(default)]
     pub server: ServerConfig,
-    /// Voice transcription settings.
-    #[serde(default)]
-    pub voice: VoiceConfig,
 }
 
 impl Config {
@@ -142,87 +140,6 @@ impl Default for ServerConfig {
         Self {
             bind: crate::DEFAULT_ADDR.to_string(),
             open_browser: false,
-        }
-    }
-}
-
-/// Default sliding-window length for interim transcription, in seconds.
-pub const DEFAULT_VOICE_WINDOW_SECONDS: u64 = 15;
-
-/// Default interval between interim transcriptions, in milliseconds.
-pub const DEFAULT_VOICE_INTERVAL_MS: u64 = 500;
-
-/// Voice transcription settings: whisper model paths and the interim loop's
-/// window and cadence.
-///
-/// Transcription is enabled by setting `interim_model`; with no model paths
-/// configured the `/voice` endpoint still captures and counts PCM but emits
-/// empty transcripts. Setting `final_model` enables the pipelined final
-/// pass: completed speech segments are transcribed with the final model in
-/// the background while the user talks, and on stop only the unprocessed
-/// tail remains. Without it, the final transcript falls back to one last
-/// interim-model window.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-#[serde(default)]
-pub struct VoiceConfig {
-    /// Path to the GGML/GGUF whisper model for interim (streaming)
-    /// transcription. Empty disables transcription.
-    pub interim_model: PathBuf,
-    /// Path to the whisper model for the pipelined final pass over a take.
-    /// Empty disables the final pass; the final transcript then comes from
-    /// the interim model.
-    pub final_model: PathBuf,
-    /// URL the interim model can be downloaded from. Informational until
-    /// the gateway cache integration lands; empty means no known source.
-    pub interim_source: String,
-    /// URL the final-pass model can be downloaded from. Informational
-    /// until the gateway cache integration lands; empty means no known
-    /// source.
-    pub final_source: String,
-    /// Seconds of trailing audio each interim pass transcribes.
-    pub window_seconds: u64,
-    /// Milliseconds between interim passes while a take is recording.
-    pub interval_ms: u64,
-    /// Domain terms whisper is biased toward (for example `MCP`, `GGUF`,
-    /// `Lua`), formatted into a glossary conditioning prompt on both
-    /// workers. Empty disables biasing.
-    pub vocabulary: Vec<String>,
-}
-
-impl Default for VoiceConfig {
-    fn default() -> Self {
-        Self {
-            interim_model: PathBuf::new(),
-            final_model: PathBuf::new(),
-            interim_source: String::new(),
-            final_source: String::new(),
-            window_seconds: DEFAULT_VOICE_WINDOW_SECONDS,
-            interval_ms: DEFAULT_VOICE_INTERVAL_MS,
-            vocabulary: Vec::new(),
-        }
-    }
-}
-
-impl VoiceConfig {
-    /// Returns true when an interim model path is configured.
-    #[must_use]
-    pub fn enabled(&self) -> bool {
-        !self.interim_model.as_os_str().is_empty()
-    }
-}
-
-impl From<&VoiceConfig> for promptforge_transcribe::EngineConfig {
-    // The narrow seam into the transcription engine: plain values only, so
-    // the engine crate never names this server's configuration types. An
-    // empty `final_model` becomes `None`, which disables the final pass.
-    fn from(config: &VoiceConfig) -> Self {
-        Self {
-            interim_model: config.interim_model.clone(),
-            final_model: (!config.final_model.as_os_str().is_empty())
-                .then(|| config.final_model.clone()),
-            vocabulary: config.vocabulary.clone(),
-            window_seconds: config.window_seconds,
-            interval_ms: config.interval_ms,
         }
     }
 }
@@ -378,6 +295,22 @@ api_key = "k"
     }
 
     #[test]
+    fn removed_voice_section_is_rejected() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[voice]
+interim_model = "old.bin"
+"#;
+        assert!(
+            matches!(Config::from_toml_str(raw), Err(ConfigError::Parse { .. })),
+            "workshop voice ownership was removed instead of silently ignored"
+        );
+    }
+
+    #[test]
     fn explicit_sections_override_defaults() {
         let raw = r#"
 [gateway]
@@ -416,111 +349,6 @@ open_browser = true
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert!(config.server.open_browser);
         assert_eq!(config.server.bind, "127.0.0.1:7910", "bind still defaults");
-    }
-
-    #[test]
-    fn voice_defaults_disable_transcription() {
-        let raw = r#"
-[gateway]
-base_url = "http://127.0.0.1:8081"
-api_key = "k"
-"#;
-        let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert!(!config.voice.enabled(), "no model paths means disabled");
-        assert!(config.voice.interim_source.is_empty());
-        assert!(config.voice.final_source.is_empty());
-        assert_eq!(config.voice.window_seconds, DEFAULT_VOICE_WINDOW_SECONDS);
-        assert_eq!(config.voice.interval_ms, DEFAULT_VOICE_INTERVAL_MS);
-        assert!(config.voice.vocabulary.is_empty());
-    }
-
-    #[test]
-    fn voice_section_parses_model_source_urls() {
-        let raw = r#"
-[gateway]
-base_url = "http://127.0.0.1:8081"
-api_key = "k"
-
-[voice]
-interim_source = "https://example.com/models/ggml-large-v3-turbo.bin"
-final_source = "https://example.com/models/ggml-large-v3.bin"
-"#;
-        let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert!(!config.voice.enabled(), "sources alone do not enable voice");
-        assert_eq!(
-            config.voice.interim_source,
-            "https://example.com/models/ggml-large-v3-turbo.bin"
-        );
-        assert_eq!(
-            config.voice.final_source,
-            "https://example.com/models/ggml-large-v3.bin"
-        );
-    }
-
-    #[test]
-    fn voice_section_parses_model_paths_and_tuning() {
-        let raw = r#"
-[gateway]
-base_url = "http://127.0.0.1:8081"
-api_key = "k"
-
-[voice]
-interim_model = "models/ggml-tiny.en.bin"
-final_model = "models/ggml-small.en.bin"
-window_seconds = 8
-interval_ms = 500
-"#;
-        let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert!(config.voice.enabled());
-        assert_eq!(
-            config.voice.interim_model,
-            PathBuf::from("models/ggml-tiny.en.bin")
-        );
-        assert_eq!(
-            config.voice.final_model,
-            PathBuf::from("models/ggml-small.en.bin")
-        );
-        assert_eq!(config.voice.window_seconds, 8);
-        assert_eq!(config.voice.interval_ms, 500);
-    }
-
-    #[test]
-    fn voice_section_parses_vocabulary() {
-        let raw = r#"
-[gateway]
-base_url = "http://127.0.0.1:8081"
-api_key = "k"
-
-[voice]
-vocabulary = ["MCP", "GGUF", "Lua"]
-"#;
-        let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert_eq!(config.voice.vocabulary, ["MCP", "GGUF", "Lua"]);
-    }
-
-    #[test]
-    fn voice_config_maps_into_engine_config() {
-        let voice = VoiceConfig {
-            interim_model: PathBuf::from("models/interim.bin"),
-            final_model: PathBuf::from("models/final.bin"),
-            vocabulary: vec!["MCP".to_string(), "GGUF".to_string()],
-            window_seconds: 8,
-            interval_ms: 400,
-            ..VoiceConfig::default()
-        };
-        let engine = promptforge_transcribe::EngineConfig::from(&voice);
-        assert_eq!(engine.interim_model, PathBuf::from("models/interim.bin"));
-        assert_eq!(engine.final_model, Some(PathBuf::from("models/final.bin")));
-        assert_eq!(engine.vocabulary, ["MCP", "GGUF"]);
-        assert_eq!(engine.window_seconds, 8);
-        assert_eq!(engine.interval_ms, 400);
-
-        let no_final = promptforge_transcribe::EngineConfig::from(&VoiceConfig::default());
-        assert_eq!(
-            no_final.final_model, None,
-            "an empty final_model disables the final pass instead of \
-             becoming a path the engine would try to load"
-        );
     }
 
     #[test]
