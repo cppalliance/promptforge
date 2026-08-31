@@ -37,7 +37,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A84. Gateway and Workshop may share a process but retain their loopback protocol boundary; headless builds omit Workshop.
 
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
 
@@ -59,6 +58,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A94. Config writes enter validated persistent shadows; only Apply promotes them and Revert removes them.
 
 - A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
+
+- A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
 
 ## Principles
 

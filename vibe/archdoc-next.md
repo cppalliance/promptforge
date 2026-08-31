@@ -101,3 +101,4 @@
 - [2026-08-29-5-gateway-config-spa] app-owned configuration: Managed TOML and env files are canonical machine output rather than comment-preserving hand-edited documents.
 - [2026-08-30-1-chat-templates-injection-defense] template resolution precedence: Explicit, builtin, known content-hash override, then embedded template; no usable template fails visibly.
 - [2026-08-30-1-chat-templates-injection-defense] catalog subset profiles: Profiles select validated global chat, remote, and STT catalog entries rather than overriding fields.
+- [2026-08-31-1-fix-hf-proxy-consistency] renderer-owned stderr: Native library diagnostics must enter structured logging instead of corrupting terminal progress rendering.
