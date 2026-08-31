@@ -1,5 +1,16 @@
-# whisper-rs-sys builds whisper.cpp with CUDA and the static CRT (/MT);
-# Rust links with the dynamic CRT (/MD). The linker resolves this fine
-# but warns about the conflicting default lib. Suppress it.
+# Link the whole binary with the static CRT (/MT), end to end. The old
+# arrangement mixed CRTs - whisper.cpp and the WebView2 loader compile /MT,
+# Rust links /MD - and suppressed the conflict warning with
+# /NODEFAULTLIB:LIBCMT; that held only while the dynamic import libs carried
+# every symbol the /MT objects needed. CUDA 13.2's cudart.lib (built with
+# /guard:cf) and the WebView2 loader's nothrow-new reference broke it. The
+# rustflags line covers Rust and the cc-built C++ (cc follows crt-static);
+# the two env vars ride whisper-rs-sys's CMAKE_* passthrough so cmake
+# compiles the whisper core and the NVCC kernels /MT to match (CMP0091 NEW
+# because whisper.cpp's cmake_minimum_required predates the abstraction).
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-args=/NODEFAULTLIB:LIBCMT"]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+CMAKE_POLICY_DEFAULT_CMP0091 = "NEW"
+CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"

@@ -226,13 +226,11 @@ fn open_transfer(
         source,
     })?;
     loop {
-        let count = existing
-            .read(buffer)
-            .map_err(|source| LocalError::Io {
-                operation: "hash partial download",
-                path: destination.to_owned(),
-                source,
-            })?;
+        let count = existing.read(buffer).map_err(|source| LocalError::Io {
+            operation: "hash partial download",
+            path: destination.to_owned(),
+            source,
+        })?;
         if count == 0 {
             break;
         }
@@ -290,7 +288,14 @@ pub(crate) fn download_with_progress(
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
     let mut downloaded: u64 = resume_from;
-    let file = open_transfer(destination, url, resume_from, &mut hasher, &mut buffer, progress)?;
+    let file = open_transfer(
+        destination,
+        url,
+        resume_from,
+        &mut hasher,
+        &mut buffer,
+        progress,
+    )?;
     let mut writer = BufWriter::new(file);
     loop {
         let count = response

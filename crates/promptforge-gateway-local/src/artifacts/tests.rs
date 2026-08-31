@@ -602,7 +602,11 @@ fn an_interrupted_download_resumes_from_the_partials_offset() {
     let url = server.url("resumed.gguf");
     let dest = temp.path().join("resumed.gguf.part");
     let offset = 20_u64;
-    seed_partial(&dest, &body[..usize::try_from(offset).expect("fixture offset")], &url);
+    seed_partial(
+        &dest,
+        &body[..usize::try_from(offset).expect("fixture offset")],
+        &url,
+    );
     let progress = RecordingProgress::new();
 
     let digest = store
