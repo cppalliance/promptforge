@@ -129,6 +129,19 @@ open = "5"
 rfd = { version = "0.17", default-features = false }
 # Decodes the bundled program-icon PNG into RGBA for the tao window icon.
 png = "0.18"
+# Test-only Jinja2 compatibility oracle for bundled chat templates. Members
+# inherit these only from their dev-dependency tables.
+minijinja = { version = "2.24", default-features = false, features = [
+    "builtins",
+    "debug",
+    "deserialization",
+    "macros",
+    "multi_template",
+    "preserve_order",
+    "serde",
+    "std_collections",
+] }
+minijinja-contrib = { version = "2.24", default-features = false, features = ["pycompat"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

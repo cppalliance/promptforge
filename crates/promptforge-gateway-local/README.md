@@ -7,8 +7,10 @@ respawn, HF metadata sidecars, the blob cache store behind the gateway's
 `/v1/cache` routes, the orphan scan behind the gateway's `GET /admin/orphans`
 route (files under the cache's `models/` tree no loaded `[[local_model]]`
 entry references), the bounded GGUF header parser behind the gateway's
-`GET /admin/model-info` route (architecture, layer count, parameter count -
-never tensor data), and CUDA bundle staging.
+`GET /admin/model-info` route (architecture, layer count, parameter count,
+and optional `tokenizer.chat_template` - never tensor data), the twelve-family
+bundled chat-template catalog with hash-first known overrides, and CUDA bundle
+staging.
 
 The gateway drives this crate through `LocalRuntime`: `start` provisions and
 launches one child per `[[local_model]]`, `models` yields the routing table
