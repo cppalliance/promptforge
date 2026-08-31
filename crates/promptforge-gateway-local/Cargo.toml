@@ -37,6 +37,8 @@ zip.workspace = true
 promptforge-gateway-build = { workspace = true, optional = true }
 
 [dev-dependencies]
+minijinja.workspace = true
+minijinja-contrib.workspace = true
 promptforge-gateway-routing = { workspace = true, features = ["test-helpers"] }
 tempfile.workspace = true
 

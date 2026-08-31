@@ -1,0 +1,98 @@
+[
+  {
+    "family": "chatml",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<|im_start|>system\nSystem fixture: answer exactly.<|im_end|>\n<|im_start|>user\nUser fixture: say hello.\nSecond line.<|im_end|>\n<|im_start|>assistant\nAssistant fixture: hello!<|im_end|>\n<|im_start|>assistant\n",
+    "reference_output_utf8_byte_count": 206,
+    "reference_output_utf8_sha256": "fa0ab05976a1e09b9fd2112d557c2a4d5555da7fd42e54fb830754a36e1d2b1c",
+    "template_utf8_sha256": "3e3e4ccd01b95ae100e861475e34dd42d044d15858f876bb73fe2934fe1603db"
+  },
+  {
+    "family": "llama-3",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<BOS><|start_header_id|>system<|end_header_id|>\n\nSystem fixture: answer exactly.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nUser fixture: say hello.\nSecond line.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nAssistant fixture: hello!<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+    "reference_output_utf8_byte_count": 308,
+    "reference_output_utf8_sha256": "681d66f5cb1d32140874529ed1462d1733c8b0d720821a65e222e49052914200",
+    "template_utf8_sha256": "99195f2f7dc1344662663119562b46fc067034c0ea660cf1cab333617c7290c2"
+  },
+  {
+    "family": "llama-3.1",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"},{\"content\":\"Tool fixture: add 2 and 3.\",\"role\":\"user\"},{\"content\":\"\",\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":{\"a\":2,\"b\":3},\"name\":\"add_numbers\"},\"id\":\"call_001\",\"type\":\"function\"}]},{\"content\":\"{\\\"sum\\\":5}\",\"name\":\"add_numbers\",\"role\":\"tool\",\"tool_call_id\":\"call_001\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\",\"tools\":[{\"function\":{\"description\":\"Add two integers.\",\"name\":\"add_numbers\",\"parameters\":{\"properties\":{\"a\":{\"description\":\"First integer.\",\"type\":\"integer\"},\"b\":{\"description\":\"Second integer.\",\"type\":\"integer\"}},\"required\":[\"a\",\"b\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "reference_output": "<BOS><|start_header_id|>system<|end_header_id|>\n\nEnvironment: ipython\nCutting Knowledge Date: December 2023\nToday Date: 30 August 2026\n\nSystem fixture: answer exactly.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nGiven the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.\n\nRespond in the format {\"name\": function name, \"parameters\": dictionary of argument name and its value}.Do not use variables.\n\n{\n    \"type\": \"function\",\n    \"function\": {\n        \"name\": \"add_numbers\",\n        \"description\": \"Add two integers.\",\n        \"parameters\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"a\": {\n                    \"type\": \"integer\",\n                    \"description\": \"First integer.\"\n                },\n                \"b\": {\n                    \"type\": \"integer\",\n                    \"description\": \"Second integer.\"\n                }\n            },\n            \"required\": [\n                \"a\",\n                \"b\"\n            ]\n        }\n    }\n}\n\nUser fixture: say hello.\nSecond line.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nAssistant fixture: hello!<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nTool fixture: add 2 and 3.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{\"name\": \"add_numbers\", \"parameters\": {\"a\": 2, \"b\": 3}}<|eot_id|><|start_header_id|>ipython<|end_header_id|>\n\n\"{\\\"sum\\\":5}\"<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+    "reference_output_utf8_byte_count": 1502,
+    "reference_output_utf8_sha256": "631ad5f1cd553f493b8628efff540b1952b8f4e0f8a6eaac2c52162ce98331c5",
+    "template_utf8_sha256": "dd2b02f1d93dc00f824fcb75186806a1af3333d9e1069ed6be8c8bdbfde0fd6a"
+  },
+  {
+    "family": "qwen-2.5",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"},{\"content\":\"Tool fixture: add 2 and 3.\",\"role\":\"user\"},{\"content\":\"\",\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":{\"a\":2,\"b\":3},\"name\":\"add_numbers\"},\"id\":\"call_001\",\"type\":\"function\"}]},{\"content\":\"{\\\"sum\\\":5}\",\"name\":\"add_numbers\",\"role\":\"tool\",\"tool_call_id\":\"call_001\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\",\"tools\":[{\"function\":{\"description\":\"Add two integers.\",\"name\":\"add_numbers\",\"parameters\":{\"properties\":{\"a\":{\"description\":\"First integer.\",\"type\":\"integer\"},\"b\":{\"description\":\"Second integer.\",\"type\":\"integer\"}},\"required\":[\"a\",\"b\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "reference_output": "<|im_start|>system\nSystem fixture: answer exactly.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"add_numbers\", \"description\": \"Add two integers.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"integer\", \"description\": \"First integer.\"}, \"b\": {\"type\": \"integer\", \"description\": \"Second integer.\"}}, \"required\": [\"a\", \"b\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nUser fixture: say hello.\nSecond line.<|im_end|>\n<|im_start|>assistant\nAssistant fixture: hello!<|im_end|>\n<|im_start|>user\nTool fixture: add 2 and 3.<|im_end|>\n<|im_start|>assistant\n<tool_call>\n{\"name\": \"add_numbers\", \"arguments\": {\"a\": 2, \"b\": 3}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n{\"sum\":5}\n</tool_response><|im_end|>\n<|im_start|>assistant\n",
+    "reference_output_utf8_byte_count": 1102,
+    "reference_output_utf8_sha256": "05b06ac450c57a1be096408f254b3b4182538f111716383417c4341b699e439a",
+    "template_utf8_sha256": "3aa2ec4c84d331ed2c6efca1ed25f6859c9f86ffcda59fe36b14691896aa9c13"
+  },
+  {
+    "family": "qwen-3",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"},{\"content\":\"Tool fixture: add 2 and 3.\",\"role\":\"user\"},{\"content\":\"\",\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":{\"a\":2,\"b\":3},\"name\":\"add_numbers\"},\"id\":\"call_001\",\"type\":\"function\"}]},{\"content\":\"{\\\"sum\\\":5}\",\"name\":\"add_numbers\",\"role\":\"tool\",\"tool_call_id\":\"call_001\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\",\"tools\":[{\"function\":{\"description\":\"Add two integers.\",\"name\":\"add_numbers\",\"parameters\":{\"properties\":{\"a\":{\"description\":\"First integer.\",\"type\":\"integer\"},\"b\":{\"description\":\"Second integer.\",\"type\":\"integer\"}},\"required\":[\"a\",\"b\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "reference_output": "<|im_start|>system\nSystem fixture: answer exactly.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"add_numbers\", \"description\": \"Add two integers.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"integer\", \"description\": \"First integer.\"}, \"b\": {\"type\": \"integer\", \"description\": \"Second integer.\"}}, \"required\": [\"a\", \"b\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nUser fixture: say hello.\nSecond line.<|im_end|>\n<|im_start|>assistant\nAssistant fixture: hello!<|im_end|>\n<|im_start|>user\nTool fixture: add 2 and 3.<|im_end|>\n<|im_start|>assistant\n<tool_call>\n{\"name\": \"add_numbers\", \"arguments\": {\"a\": 2, \"b\": 3}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n{\"sum\":5}\n</tool_response><|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "reference_output_utf8_byte_count": 1121,
+    "reference_output_utf8_sha256": "1ee673a9b8a08ce30cb580a290d7794f1af6a5a1df8afafee909b501f6a3260d",
+    "template_utf8_sha256": "f2e03cfdf930fb26e7c88ca83abc3a0c1e7c5b1fe68ee43ba81d0c47c8460ceb"
+  },
+  {
+    "family": "gemma-3",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<BOS><start_of_turn>user\nSystem fixture: answer exactly.\n\nUser fixture: say hello.\nSecond line.<end_of_turn>\n<start_of_turn>model\nAssistant fixture: hello!<end_of_turn>\n<start_of_turn>model\n",
+    "reference_output_utf8_byte_count": 190,
+    "reference_output_utf8_sha256": "85e02e43d43dd5d56dee52727f04d1bd8741bd0b3177fa9b07b1462d0502962d",
+    "template_utf8_sha256": "3cb7c5da795557bca16f7dfc2c8784d575870b51b1b00f8405896498fccdea3c"
+  },
+  {
+    "family": "gemma-4",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<|turn>system\nSystem fixture: answer exactly.<turn|>\n<|turn>user\nUser fixture: say hello.\nSecond line.<turn|>\n<|turn>model\nAssistant fixture: hello!<turn|>\n<|turn>model\n",
+    "reference_output_utf8_byte_count": 169,
+    "reference_output_utf8_sha256": "4cbbbc1e020bd95ef91f15a7c3a57e14c8fc175d884890bdfd26e8b768f6505a",
+    "template_utf8_sha256": "88c645d0098a8f6f0607f0e228cf29114f4739605b8c31fbad3b8eb84e7d7491"
+  },
+  {
+    "family": "mistral",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<BOS>[INST] System fixture: answer exactly. User fixture: say hello.\nSecond line. [/INST]Assistant fixture: hello!<EOS>",
+    "reference_output_utf8_byte_count": 119,
+    "reference_output_utf8_sha256": "856d0de094561723f611ff892136b1d88ce6b7a00bdcf22bc778633c0011b154",
+    "template_utf8_sha256": "e5ca69487bf046d5c2ad1dd3889de62c98b8cfd5801fcd561d364c1041d4952e"
+  },
+  {
+    "family": "phi-3",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<|system|>\nSystem fixture: answer exactly.<|end|>\n<|user|>\nUser fixture: say hello.\nSecond line.<|end|>\n<|assistant|>\nAssistant fixture: hello!<|end|>\n<|assistant|>\n",
+    "reference_output_utf8_byte_count": 165,
+    "reference_output_utf8_sha256": "caa66fb1b964fa06d2296715dd80d9162b473466e2e7970711f09bd4605a04ac",
+    "template_utf8_sha256": "6fc812cb52be39ba92df85609cace4d52790c4d2fc6d14e8c8eeee3fab908138"
+  },
+  {
+    "family": "phi-4",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<|im_start|>system<|im_sep|>System fixture: answer exactly.<|im_end|><|im_start|>user<|im_sep|>User fixture: say hello.\nSecond line.<|im_end|><|im_start|>assistant<|im_sep|>Assistant fixture: hello!<|im_end|><|im_start|>assistant<|im_sep|>",
+    "reference_output_utf8_byte_count": 239,
+    "reference_output_utf8_sha256": "b9d1c6bf15c1171d23a65043c1e6ca2907138dc1e22f52162ff7a19afb04433d",
+    "template_utf8_sha256": "fe4120415a3858b873955c92ce3a103a95bc97c2cb00b72e62659aaf0f891ee5"
+  },
+  {
+    "family": "gpt-oss",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"},{\"content\":\"Tool fixture: add 2 and 3.\",\"role\":\"user\"},{\"content\":\"\",\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":{\"a\":2,\"b\":3},\"name\":\"add_numbers\"},\"id\":\"call_001\",\"type\":\"function\"}]},{\"content\":\"{\\\"sum\\\":5}\",\"name\":\"add_numbers\",\"role\":\"tool\",\"tool_call_id\":\"call_001\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\",\"tools\":[{\"function\":{\"description\":\"Add two integers.\",\"name\":\"add_numbers\",\"parameters\":{\"properties\":{\"a\":{\"description\":\"First integer.\",\"type\":\"integer\"},\"b\":{\"description\":\"Second integer.\",\"type\":\"integer\"}},\"required\":[\"a\",\"b\"],\"type\":\"object\"}},\"type\":\"function\"}]}",
+    "reference_output": "<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\nCurrent date: 2026-08-30\n\nReasoning: medium\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.\nCalls to these tools must go to the commentary channel: 'functions'.<|end|><|start|>developer<|message|># Instructions\n\nSystem fixture: answer exactly.\n\n# Tools\n\n## functions\n\nnamespace functions {\n\n// Add two integers.\ntype add_numbers = (_: {\n// First integer.\na: number,\n// Second integer.\nb: number,\n}) => any;\n\n} // namespace functions<|end|><|start|>user<|message|>User fixture: say hello.\nSecond line.<|end|><|start|>assistant<|channel|>final<|message|>Assistant fixture: hello!<|end|><|start|>user<|message|>Tool fixture: add 2 and 3.<|end|><|start|>assistant to=functions.add_numbers<|channel|>commentary json<|message|>{\"a\": 2, \"b\": 3}<|call|><|start|>functions.add_numbers to=assistant<|channel|>commentary<|message|>{\"sum\":5}<|end|><|start|>assistant",
+    "reference_output_utf8_byte_count": 1009,
+    "reference_output_utf8_sha256": "58f86eadb3a78d45bcfa95dd4b6893e995d09afe5052deed202a8d75742696e5",
+    "template_utf8_sha256": "cf69ff19b5e663c88df6583d90b612f7d9b72c3dfd4ef5bbe29eaa6e41decda3"
+  },
+  {
+    "family": "zephyr",
+    "context_json": "{\"add_generation_prompt\":true,\"bos_token\":\"<BOS>\",\"date_string\":\"30 August 2026\",\"enable_thinking\":false,\"eos_token\":\"<EOS>\",\"messages\":[{\"content\":\"System fixture: answer exactly.\",\"role\":\"system\"},{\"content\":\"User fixture: say hello.\\nSecond line.\",\"role\":\"user\"},{\"content\":\"Assistant fixture: hello!\",\"role\":\"assistant\"}],\"preserve_thinking\":false,\"reasoning_effort\":\"medium\"}",
+    "reference_output": "<|system|>\nSystem fixture: answer exactly.<EOS>\n<|user|>\nUser fixture: say hello.\nSecond line.<EOS>\n<|assistant|>\nAssistant fixture: hello!<EOS>\n<|assistant|>\n",
+    "reference_output_utf8_byte_count": 159,
+    "reference_output_utf8_sha256": "22ccfe7625ee429f7ee47aa3e38ecc49272c87d1d9176160b8e835aa68c9efe8",
+    "template_utf8_sha256": "5e2833b50f34f4581d09d801325bf4d7d8285bcad36be595a30a9904b7759f5d"
+  }
+]

@@ -8,7 +8,8 @@
 //! [`Model`](promptforge_gateway_routing::Model). Dropping the runtime kills
 //! the children. The blob cache store behind the gateway's `/v1/cache` routes
 //! lives in [`cache`]; the artifact store and download machinery in
-//! [`artifacts`]; bounded GGUF header inspection in [`gguf`].
+//! [`artifacts`]; chat-template metadata in [`chat_templates`]; bounded GGUF
+//! header inspection in [`gguf`].
 //!
 //! Failures are reported as [`LocalError`]; an explicit teardown failure is
 //! reported as [`ShutdownError`](promptforge_gateway_protocol::ShutdownError).
@@ -17,6 +18,7 @@
 
 pub mod artifacts;
 pub mod cache;
+pub mod chat_templates;
 mod dialect;
 mod error;
 pub mod gguf;
