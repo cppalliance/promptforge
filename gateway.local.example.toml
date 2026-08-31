@@ -1,29 +1,102 @@
-# Example: gateway with one local generative model (managed llama-server child).
-# Copy and adjust paths/secrets. First start downloads the pinned llama-server
-# binary and the GGUF into ~/.promptforge (or [local].cache_dir).
+# PromptForge gateway configuration, schema version 2.
+# The Config UI writes this file. The ordering below is canonical so equivalent
+# edits do not create avoidable merge noise.
+config-version = 2
 
+# Gateway API listener and shared bearer credential.
 [server]
 bind = "127.0.0.1:8081"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
-# Optional. Defaults to ~/.promptforge (Windows: %USERPROFILE%\.promptforge).
-# GGUFs go in <cache_dir>/models; llama-server installs under <cache_dir>/llama.cpp.
-# [local]
-# cache_dir = "~/.promptforge"
+# Optional embedded Workshop listener.
+[workshop]
+bind = "127.0.0.1:7910"
+open_browser = false
 
-# Optional local dominion: one shared concurrency limit and an optional VRAM
-# budget for every local model bound to it.
+# Optional speech capture tuning. STT model files and roles belong in
+# [[stt_model]], not this table.
+[workshop.stt]
+window_seconds = 15
+interval_ms = 500
+vocabulary = ["PromptForge", "WG21", "GGUF"]
+
+# Optional session tape path. Relative paths resolve from this file's directory.
+[workshop.tape]
+path = "tape.jsonl"
+
+# Optional artifact cache root. The default is ~/.promptforge, or
+# %USERPROFILE%\.promptforge on Windows.
+[local]
+cache_dir = "~/.promptforge"
+
+# Optional built-in web search configuration.
+# [tools.web_search]
+# provider = "brave"
+# api_key = "${BRAVE_SEARCH_API_KEY}"
+# base_url = "https://api.search.brave.com/res/v1"
+# default_count = 10
+# max_count = 20
+# max_per_host = 2
+# default_freshness = ""
+# default_safesearch = "moderate"
+# strip_tracking = true
+
+# A local dominion shares concurrency and a declared VRAM budget across
+# selected local chat and STT models.
+[[dominion]]
+id = "gpu0"
+kind = "local"
+max_concurrency = 4
+max_queue = 100
+policy = "queue"
+fair_scheduling = true
+vram_gb = 24
+
+# Optional remote dominion for shared provider admission.
 # [[dominion]]
-# id = "gpu0"
-# kind = "local"
-# max_concurrency = 4
-# vram_gb = 24
+# id = "remote-pool"
+# kind = "remote"
+# max_concurrency = 10
+# max_queue = 100
+# policy = "queue"
+# fair_scheduling = true
 
+# Optional remote endpoint. A remote [[model]] references this id.
+# [[endpoint]]
+# id = "openai"
+# protocol = "openai"
+# base_url = "https://api.openai.com/v1"
+# api_key = "${OPENAI_API_KEY}"
+# dominion = "remote-pool"
+
+# Optional remote model catalog entry.
+# [[model]]
+# name = "gpt-5"
+# kind = "chat"
+# description = "A remote general-purpose reasoning and coding model"
+# context = 200000
+# thinking = "switchable"
+# upstream = "gpt-5"
+# endpoints = ["openai"]
+# default_max_tokens = 8192
+# tool_dialect = "openai"
+# max_output = 32768
+# images = true
+# parallel_tool_calls = true
+# effort_levels = ["low", "medium", "high"]
+# default_effort = "medium"
+# adaptive_thinking = false
+
+# Local chat model served by a managed llama-server child.
 [[local_model]]
 name = "qwen-local"
-description = "A careful analysis model suited to structured reasoning and long-context review"
+kind = "chat"
+description = "A local analysis model for structured reasoning and long-context review"
 source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
 sha256 = "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+dominion = "gpu0"
+parallel = 1
+vram_gb = 6
 context = 65536
 thinking = "never"
 gpu_layers = 99
@@ -31,27 +104,47 @@ flash_attention = true
 cache_type_k = "q8_0"
 cache_type_v = "q4_0"
 n_predict = 8192
-# parallel = 1        # child --parallel and, without a dominion, the queue limit
-# dominion = "gpu0"   # bind to a local dominion to share its limit and budget
-# vram_gb = 6         # footprint estimate; required when the dominion budgets VRAM
+# chat_template_file = "templates/qwen.jinja"
+# max_output = 8192
+# default_temperature = 0.7
+# images = false
+# parallel_tool_calls = true
 
-# Remote models can coexist; local models are registered beside them.
-# [[dominion]]
-# id = "anthropic-pool"
-# kind = "remote"
-# max_concurrency = 10
+# Optional local-model companion tables follow their owning entry.
+# [local_model.speculative]
+# type = "draft-mtp"
+# source = "/models/qwen-mtp.gguf"
+# draft_max = 3
 #
-# [[endpoint]]
-# id = "anthropic"
-# protocol = "openai"
-# base_url = "https://api.anthropic.com/v1"
-# api_key = "${ANTHROPIC_API_KEY}"
-# dominion = "anthropic-pool"
-#
-# [[model]]
-# name = "claude-sonnet-4-6"
-# description = "A model suited for careful analysis, coding, and general assistance"
-# context = 200000
-# thinking = "never"
-# upstream = "claude-sonnet-4-6"
-# endpoints = ["anthropic"]
+# [local_model.multimodal_projector]
+# source = "/models/qwen-mmproj.gguf"
+
+# Recommended digest-pinned STT pair. Profile membership enables each role.
+[[stt_model]]
+name = "whisper-base-en"
+role = "interim"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+vram_gb = 1.0
+dominion = "gpu0"
+
+[[stt_model]]
+name = "whisper-small-en"
+role = "final"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
+sha256 = "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+vram_gb = 2.0
+dominion = "gpu0"
+
+# Profiles are pure catalog checklists. Settings never live under a profile.
+[[profile]]
+name = "work"
+models = ["qwen-local", "whisper-base-en", "whisper-small-en"]
+
+[[profile]]
+name = "travel"
+models = ["qwen-local"]
+
+# Active selection is not stored in this file. The sibling state file is
+# gateway.local.example.state.toml and contains one key:
+# active_profile = "work"

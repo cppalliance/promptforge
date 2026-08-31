@@ -12,59 +12,30 @@ use std::collections::HashSet;
 use url::Url;
 
 use super::companion::validate_artifact_source;
-use super::{Capabilities, Config, DominionKind, ModelKind, ThinkingMode, ToolDialect};
+use super::{
+    Capabilities, Config, DominionKind, ModelKind, SttModelConfig, SttRole, ThinkingMode,
+    ToolDialect,
+};
 use crate::error::ConfigError;
+use crate::profile::ProfileName;
 
 impl Config {
-    /// Filter the merged catalog to the profile's `models` allowlist.
-    ///
-    /// Runs after include-merge and before [`Config::validate`], so reference
-    /// validation and the VRAM co-residency check operate on the loaded set
-    /// only: a filtered-out model's own dangling references are never checked,
-    /// and endpoints and dominions referenced only by filtered-out models may
-    /// remain defined. An allowlist entry naming a model the merged catalog
-    /// does not define is a hard validation error.
-    ///
-    /// # Errors
-    /// Returns [`ConfigError::Validation`] when the allowlist names a model
-    /// that neither `[[model]]` nor `[[local_model]]` defines.
-    pub(crate) fn apply_model_allowlist(&mut self) -> Result<(), ConfigError> {
-        let Some(allowlist) = &self.model_allowlist else {
-            return Ok(());
-        };
-        let known: HashSet<&str> = self
-            .models
-            .iter()
-            .map(|model| model.name.as_str())
-            .chain(self.local_models.iter().map(|model| model.name.as_str()))
-            .collect();
-        for name in allowlist {
-            if !known.contains(name.as_str()) {
-                return Err(ConfigError::Validation(format!(
-                    "models allowlist names undefined model {name}"
-                )));
-            }
-        }
-        self.models.retain(|model| allowlist.contains(&model.name));
-        self.local_models
-            .retain(|model| allowlist.contains(&model.name));
-        Ok(())
-    }
-
     /// Advertise `images = true` for every local model with a multimodal
     /// projector.
     ///
     /// A configured `[local_model.multimodal_projector]` makes the child
     /// image-capable (`--mmproj`), so the catalog must not report the
-    /// `images` default of false. Runs after [`Self::apply_model_allowlist`]
-    /// and before [`Self::validate`], so downstream code reads the resolved
+    /// `images` default of false. Runs before [`Self::validate`], so
+    /// downstream code reads the resolved
     /// capability verbatim. The flag is a plain `bool`, so an explicit
     /// `images = false` cannot be told apart from an absent one; the
     /// projector wins either way because the model does accept images.
     pub(crate) fn imply_projector_images(&mut self) {
-        for local_model in &mut self.local_models {
-            if local_model.multimodal_projector.is_some() {
-                local_model.capabilities.images = true;
+        for models in [&mut self.local_models, &mut self.catalog_local_models] {
+            for local_model in models {
+                if local_model.multimodal_projector.is_some() {
+                    local_model.capabilities.images = true;
+                }
             }
         }
     }
@@ -85,6 +56,12 @@ impl Config {
     /// dominion's `vram_gb` budget exceeded by the bound models' estimates,
     /// or a bound model with no estimate).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        if self.version != 2 {
+            return Err(ConfigError::Validation(format!(
+                "config-version must be 2, got {}",
+                self.version
+            )));
+        }
         if self.server.api_key.is_empty() {
             return Err(ConfigError::Validation(
                 "server.key must not be empty".to_string(),
@@ -93,7 +70,8 @@ impl Config {
         self.validate_dominions()?;
         let endpoint_ids = self.validate_endpoints()?;
         self.validate_models(&endpoint_ids)?;
-        self.validate_vram_budgets()?;
+        self.validate_stt_models()?;
+        self.validate_profiles()?;
         self.validate_tools()?;
         Ok(())
     }
@@ -182,19 +160,20 @@ impl Config {
         Ok(())
     }
 
-    /// Sum the `vram_gb` estimates of the local models bound to each budgeted
-    /// local dominion and reject over-booking. Runs after binding validation,
-    /// so every `local_model.dominion` encountered here names a local
-    /// dominion. A budget is meaningful only when it is complete: a bound
-    /// model without an estimate is an error. A local dominion without a
-    /// budget imposes no co-residency obligation.
-    fn validate_vram_budgets(&self) -> Result<(), ConfigError> {
+    fn validate_profile_vram(
+        &self,
+        profile_name: &str,
+        selected: &HashSet<&str>,
+    ) -> Result<(), ConfigError> {
         for dominion in &self.dominions {
             let Some(budget) = dominion.vram_gb else {
                 continue;
             };
-            let mut total: u64 = 0;
-            for model in &self.local_models {
+            let mut total = 0.0;
+            for model in &self.catalog_local_models {
+                if !selected.contains(model.name.as_str()) {
+                    continue;
+                }
                 let Some(bound) = &model.dominion else {
                     continue;
                 };
@@ -203,20 +182,27 @@ impl Config {
                 }
                 let Some(estimate) = model.vram_gb else {
                     return Err(ConfigError::Validation(format!(
-                        "local_model {} must set vram_gb: dominion {} has a vram_gb budget",
-                        model.name, dominion.id
+                        "profile {profile_name} selects local_model {} without vram_gb, \
+                         but dominion {} has a vram_gb budget",
+                        model.name, dominion.id,
                     )));
                 };
-                total += u64::from(estimate);
+                total += f64::from(estimate);
             }
-            let budget = u64::from(budget);
+            for model in &self.catalog_stt_models {
+                if selected.contains(model.name.as_str())
+                    && model.dominion.as_deref() == Some(dominion.id.as_str())
+                {
+                    total += model.vram_gb;
+                }
+            }
+            let budget = f64::from(budget);
             if total > budget {
                 return Err(ConfigError::Validation(format!(
-                    "dominion {} vram_gb budget {} exceeded by {} (bound local models sum to {})",
+                    "profile {profile_name} exceeds dominion {} vram_gb budget {budget} \
+                     by {} (selected local and STT models sum to {total})",
                     dominion.id,
-                    budget,
                     total - budget,
-                    total
                 )));
             }
         }
@@ -267,7 +253,7 @@ impl Config {
 
     fn validate_models(&self, endpoint_ids: &HashSet<&str>) -> Result<(), ConfigError> {
         let mut model_names = HashSet::new();
-        for model in &self.models {
+        for model in &self.catalog_models {
             if !model_names.insert(model.name.as_str()) {
                 return Err(ConfigError::Validation(format!(
                     "duplicate model name {}",
@@ -351,7 +337,7 @@ impl Config {
         &'a self,
         model_names: &mut HashSet<&'a str>,
     ) -> Result<(), ConfigError> {
-        for local_model in &self.local_models {
+        for local_model in &self.catalog_local_models {
             if local_model.name.is_empty() {
                 return Err(ConfigError::Validation(
                     "local_model name must not be empty".to_string(),
@@ -433,6 +419,215 @@ impl Config {
             )?;
         }
         Ok(())
+    }
+
+    fn validate_stt_models(&self) -> Result<(), ConfigError> {
+        let mut names: HashSet<&str> = self
+            .catalog_models
+            .iter()
+            .map(|model| model.name.as_str())
+            .chain(
+                self.catalog_local_models
+                    .iter()
+                    .map(|model| model.name.as_str()),
+            )
+            .collect();
+        for model in &self.catalog_stt_models {
+            if model.name.trim().is_empty() {
+                return Err(ConfigError::Validation(
+                    "stt_model name must not be empty".to_owned(),
+                ));
+            }
+            if !names.insert(model.name.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate model name {}",
+                    model.name
+                )));
+            }
+            if model.source.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "stt_model {} source must not be empty",
+                    model.name
+                )));
+            }
+            if model.source.starts_with("http://") {
+                return Err(ConfigError::Validation(format!(
+                    "stt_model {} source must use https, not plaintext http",
+                    model.name
+                )));
+            }
+            if model.source.starts_with("https://") {
+                validate_http_url(&format!("stt_model {} source", model.name), &model.source)?;
+            }
+            if let Some(sha256) = &model.sha256
+                && !super::is_sha256_hex(sha256)
+            {
+                return Err(ConfigError::Validation(format!(
+                    "stt_model {} sha256 must be 64 lowercase hex characters",
+                    model.name
+                )));
+            }
+            if !model.vram_gb.is_finite() || model.vram_gb <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "stt_model {} vram_gb must be finite and greater than zero",
+                    model.name
+                )));
+            }
+            self.validate_stt_model_dominion(model)?;
+        }
+        Ok(())
+    }
+
+    fn validate_profiles(&self) -> Result<(), ConfigError> {
+        let catalog: HashSet<&str> = self
+            .catalog_models
+            .iter()
+            .map(|model| model.name.as_str())
+            .chain(
+                self.catalog_local_models
+                    .iter()
+                    .map(|model| model.name.as_str()),
+            )
+            .chain(
+                self.catalog_stt_models
+                    .iter()
+                    .map(|model| model.name.as_str()),
+            )
+            .collect();
+        let mut profile_names = HashSet::new();
+        for profile in &self.profiles {
+            ProfileName::parse(&profile.name).map_err(|error| {
+                ConfigError::Validation(format!(
+                    "profile name {:?} is invalid: {error}",
+                    profile.name
+                ))
+            })?;
+            if !profile_names.insert(profile.name.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate profile name {}",
+                    profile.name
+                )));
+            }
+
+            let mut selected = HashSet::new();
+            let mut interim = None;
+            let mut final_model = None;
+            for name in &profile.models {
+                if !catalog.contains(name.as_str()) {
+                    return Err(ConfigError::Validation(format!(
+                        "profile {} names undefined catalog model {name}",
+                        profile.name
+                    )));
+                }
+                if !selected.insert(name.as_str()) {
+                    return Err(ConfigError::Validation(format!(
+                        "profile {} lists duplicate model {name}",
+                        profile.name
+                    )));
+                }
+                let Some(stt_model) = self
+                    .catalog_stt_models
+                    .iter()
+                    .find(|model| model.name == *name)
+                else {
+                    continue;
+                };
+                let slot = match stt_model.role {
+                    SttRole::Interim => &mut interim,
+                    SttRole::Final => &mut final_model,
+                };
+                if let Some(first) = slot.replace(name.as_str()) {
+                    return Err(ConfigError::Validation(format!(
+                        "profile {} selects more than one {:?} STT model: {first} and {name}",
+                        profile.name, stt_model.role
+                    )));
+                }
+            }
+            if interim.is_none()
+                && let Some(final_name) = final_model
+            {
+                return Err(ConfigError::Validation(format!(
+                    "profile {} selects final STT model {final_name} without an interim model; \
+                     add one interim STT model or remove the final model",
+                    profile.name
+                )));
+            }
+            self.validate_profile_vram(&profile.name, &selected)?;
+        }
+        Ok(())
+    }
+
+    fn validate_stt_model_dominion(&self, model: &SttModelConfig) -> Result<(), ConfigError> {
+        let Some(dominion_id) = &model.dominion else {
+            return Ok(());
+        };
+        let Some(dominion) = self
+            .dominions
+            .iter()
+            .find(|dominion| dominion.id == *dominion_id)
+        else {
+            return Err(ConfigError::Validation(format!(
+                "stt_model {} names undefined dominion {dominion_id}",
+                model.name
+            )));
+        };
+        if dominion.kind != DominionKind::Local {
+            return Err(ConfigError::Validation(format!(
+                "stt_model {} must reference a local dominion, but {dominion_id} is remote",
+                model.name
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn activate_profile(&mut self, name: &ProfileName) -> Result<(), ConfigError> {
+        let Some(index) = self
+            .profiles
+            .iter()
+            .position(|profile| profile.name == name.as_str())
+        else {
+            return Err(ConfigError::Validation(format!(
+                "active profile {} is not defined (defined profiles: {})",
+                name,
+                self.defined_profile_names()
+            )));
+        };
+        let selected: HashSet<&str> = self.profiles[index]
+            .models
+            .iter()
+            .map(String::as_str)
+            .collect();
+        self.models = self
+            .catalog_models
+            .iter()
+            .filter(|model| selected.contains(model.name.as_str()))
+            .cloned()
+            .collect();
+        self.local_models = self
+            .catalog_local_models
+            .iter()
+            .filter(|model| selected.contains(model.name.as_str()))
+            .cloned()
+            .collect();
+        self.stt_models = self
+            .catalog_stt_models
+            .iter()
+            .filter(|model| selected.contains(model.name.as_str()))
+            .cloned()
+            .collect();
+        self.active_profile = Some(index);
+        Ok(())
+    }
+
+    pub(crate) fn defined_profile_names(&self) -> String {
+        if self.profiles.is_empty() {
+            return "<none>".to_owned();
+        }
+        self.profiles
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// A local model's `dominion` must name a defined local dominion.

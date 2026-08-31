@@ -4082,10 +4082,12 @@ dependencies = [
 
 [[package]]
 name = "promptforge-gateway-config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
  "toml",

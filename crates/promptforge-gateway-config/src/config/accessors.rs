@@ -1,25 +1,42 @@
 //! Read accessors for the validated configuration types.
 //!
 //! Every field is private; this module is the read API. Values are only
-//! reachable through validating construction ([`Config::load`],
-//! [`Config::load_profile`], [`Config::from_toml_str`]), so accessors never
-//! re-check operator input.
+//! reachable through validating construction ([`Config::load`] or
+//! [`Config::from_toml_str`]), so accessors never re-check operator input.
 
 use std::net::SocketAddr;
 
 use super::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
-    LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig, WorkshopConfig,
+    LocalModelConfig, ModelConfig, ModelKind, ProfileConfig, Protocol, QueuePolicy, SearchProvider,
+    Secret, ServerConfig, SttModelConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
+    WorkshopConfig,
 };
 
 impl Config {
+    /// Returns the on-disk schema version.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    /// )?;
+    /// assert_eq!(config.config_version(), 2);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn config_version(&self) -> u32 {
+        self.version
+    }
+
     /// Returns the `[server]` section: bind address and shared bearer key.
     ///
     /// # Examples
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -40,6 +57,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -62,6 +80,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -86,6 +105,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -112,6 +132,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -145,6 +166,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -164,40 +186,111 @@ impl Config {
         &self.local_models
     }
 
-    /// Returns the profile's `models` allowlist - the catalog subset the
-    /// profile selected - or `None` when the merged document declares no
-    /// allowlist and the full catalog is loaded.
+    /// Returns the active profile's speech-to-text models.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, ProfileName};
+    /// let catalog = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///      [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n\
+    ///      [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n",
+    /// )?;
+    /// let config = catalog.select_profile(&ProfileName::parse("work")?)?;
+    /// assert_eq!(config.stt_models()[0].name(), "speech");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn stt_models(&self) -> &[SttModelConfig] {
+        &self.stt_models
+    }
+
+    /// Returns every remote model in the global catalog.
     ///
     /// # Examples
     /// ```
     /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # models = ["m"]
-    /// #
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[endpoint]]
-    /// # id = "e"
-    /// # protocol = "openai"
-    /// # base_url = "http://127.0.0.1:9"
-    /// # api_key = ""
-    /// #
-    /// # [[model]]
-    /// # name = "m"
-    /// # description = "a model"
-    /// # context = 8192
-    /// # upstream = "u"
-    /// # endpoints = ["e"]
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.model_allowlist(), Some(&["m".to_string()][..]));
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    /// )?;
+    /// assert!(config.catalog_models().is_empty());
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
-    pub fn model_allowlist(&self) -> Option<&[String]> {
-        self.model_allowlist.as_deref()
+    pub fn catalog_models(&self) -> &[ModelConfig] {
+        &self.catalog_models
+    }
+
+    /// Returns every local chat model in the global catalog.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    /// )?;
+    /// assert!(config.catalog_local_models().is_empty());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn catalog_local_models(&self) -> &[LocalModelConfig] {
+        &self.catalog_local_models
+    }
+
+    /// Returns every speech-to-text model in the global catalog.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n",
+    /// )?;
+    /// assert!(config.catalog_stt_models().is_empty());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn catalog_stt_models(&self) -> &[SttModelConfig] {
+        &self.catalog_stt_models
+    }
+
+    /// Returns every profile checklist in declaration order.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///      [[profile]]\nname = \"work\"\nmodels = []\n",
+    /// )?;
+    /// assert_eq!(config.profiles()[0].name(), "work");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn profiles(&self) -> &[ProfileConfig] {
+        &self.profiles
+    }
+
+    /// Returns the active profile, or `None` for an unselected in-memory
+    /// document.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, ProfileName};
+    /// let catalog = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///      [[profile]]\nname = \"work\"\nmodels = []\n",
+    /// )?;
+    /// assert!(catalog.active_profile().is_none());
+    /// let config = catalog.select_profile(&ProfileName::parse("work")?)?;
+    /// assert_eq!(
+    ///     config.active_profile().map(|profile| profile.name()),
+    ///     Some("work")
+    /// );
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn active_profile(&self) -> Option<&ProfileConfig> {
+        self.active_profile.map(|index| &self.profiles[index])
     }
 
     /// Returns the `[tools]` configuration, or `None` when the section is
@@ -207,6 +300,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -231,6 +325,7 @@ impl Config {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -248,6 +343,42 @@ impl Config {
     }
 }
 
+impl ProfileConfig {
+    /// Returns the profile identifier.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///      [[profile]]\nname = \"work\"\nmodels = []\n",
+    /// )?;
+    /// assert_eq!(config.profiles()[0].name(), "work");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the selected global catalog names in declaration order.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+    ///      [[profile]]\nname = \"work\"\nmodels = []\n",
+    /// )?;
+    /// assert!(config.profiles()[0].models().is_empty());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn models(&self) -> &[String] {
+        &self.models
+    }
+}
+
 impl ServerConfig {
     /// Returns the socket address the gateway binds.
     ///
@@ -255,6 +386,7 @@ impl ServerConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -274,6 +406,7 @@ impl ServerConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -300,6 +433,7 @@ impl ServerConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "0.0.0.0:8081"
     /// # api_key = "secret"
@@ -334,6 +468,7 @@ impl LocalConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -358,6 +493,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -381,6 +517,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, DominionKind};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -405,6 +542,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -429,6 +567,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -453,6 +592,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, QueuePolicy};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -477,6 +617,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -502,6 +643,7 @@ impl DominionConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -529,6 +671,7 @@ impl EndpointConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -554,6 +697,7 @@ impl EndpointConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, Protocol};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -579,6 +723,7 @@ impl EndpointConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -604,6 +749,7 @@ impl EndpointConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -631,6 +777,7 @@ impl EndpointConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -662,6 +809,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -695,6 +843,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, ModelKind};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -729,6 +878,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -761,6 +911,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -794,6 +945,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, ThinkingMode};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -827,6 +979,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -859,6 +1012,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -891,6 +1045,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -926,6 +1081,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, ToolDialect};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -959,6 +1115,7 @@ impl ModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1000,6 +1157,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1026,6 +1184,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, ModelKind};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1053,6 +1212,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1079,6 +1239,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1106,6 +1267,7 @@ impl LocalModelConfig {
     /// # use promptforge_gateway_config::Config;
     /// # let digest = "a".repeat(64);
     /// # let toml = format!(r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1133,6 +1295,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1165,6 +1328,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1192,6 +1356,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1218,6 +1383,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1244,6 +1410,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, ThinkingMode};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1270,6 +1437,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1296,6 +1464,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1322,6 +1491,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1348,6 +1518,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1374,6 +1545,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1401,6 +1573,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1427,6 +1600,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1459,6 +1633,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1493,6 +1668,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1529,6 +1705,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1562,6 +1739,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1596,6 +1774,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1633,6 +1812,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1672,6 +1852,7 @@ impl Capabilities {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1707,6 +1888,7 @@ impl ToolsConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1733,6 +1915,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::{Config, SearchProvider};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1757,6 +1940,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1781,6 +1965,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1806,6 +1991,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1831,6 +2017,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1856,6 +2043,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1882,6 +2070,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1908,6 +2097,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -1934,6 +2124,7 @@ impl WebSearchConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"

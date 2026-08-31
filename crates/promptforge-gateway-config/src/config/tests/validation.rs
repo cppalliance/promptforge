@@ -5,6 +5,7 @@ use super::SAMPLE;
 fn rejects_remote_local_model_without_digest() {
     // ART-002: a remote (https) local_model source must be pinned by sha256.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -24,6 +25,7 @@ context = 1024
 #[test]
 fn rejects_duplicate_endpoint_names() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -56,6 +58,7 @@ endpoints = ["dup"]
 #[test]
 fn rejects_model_naming_undefined_endpoint() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -82,6 +85,7 @@ endpoints = ["ghost"]
 #[test]
 fn rejects_model_with_no_endpoints() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -108,6 +112,7 @@ endpoints = []
 #[test]
 fn parses_web_search_tool_config() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -146,6 +151,7 @@ api_key = "secret-key"
 #[test]
 fn parses_web_search_tool_config_explicit_defaults() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -203,6 +209,7 @@ fn rejects_legacy_queue_section() {
     // The legacy `[queue]` section is gone (absorbed into `[[dominion]]`);
     // `deny_unknown_fields` on the root DTO rejects it at parse time.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -219,6 +226,7 @@ max_depth = 50
 #[test]
 fn rejects_legacy_device_section() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -259,6 +267,7 @@ fn rejects_legacy_local_model_device_and_lane() {
     for legacy_key in ["device = \"gpu0\"", "lane = \"generative\""] {
         let toml = format!(
             r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -281,6 +290,7 @@ context = 4096
 #[test]
 fn parses_local_model_with_defaults() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -312,6 +322,7 @@ thinking = "never"
 #[test]
 fn parses_local_model_knobs_and_cache_dir() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -347,6 +358,7 @@ n_predict = 256
 #[test]
 fn rejects_duplicate_name_across_remote_and_local() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -379,6 +391,7 @@ context = 4096
 #[test]
 fn rejects_invalid_local_model_sha256() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -399,6 +412,7 @@ context = 4096
 #[test]
 fn rejects_empty_local_model_source() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -418,6 +432,7 @@ context = 4096
 #[test]
 fn parses_dominions_and_bindings() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -481,6 +496,7 @@ vram_gb = 14
 #[test]
 fn dominion_defaults_apply() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -501,6 +517,7 @@ kind = "remote"
 #[test]
 fn rejects_empty_dominion_id() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -518,6 +535,7 @@ kind = "remote"
 #[test]
 fn rejects_duplicate_dominion_id() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -539,6 +557,7 @@ kind = "local"
 #[test]
 fn rejects_zero_dominion_max_concurrency() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -557,6 +576,7 @@ max_concurrency = 0
 #[test]
 fn rejects_zero_dominion_max_queue() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -577,6 +597,7 @@ fn rejects_remote_dominion_with_vram_gb() {
     // Kind-incompatible payloads are rejected, same spirit as CFG-004: a VRAM
     // budget is meaningful only for a local GPU.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -595,6 +616,7 @@ vram_gb = 24
 #[test]
 fn rejects_endpoint_naming_undefined_dominion() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -622,6 +644,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_endpoint_naming_local_dominion() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -653,6 +676,7 @@ endpoints = ["e"]
 #[test]
 fn rejects_local_model_naming_undefined_dominion() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -673,6 +697,7 @@ dominion = "missing"
 #[test]
 fn rejects_local_model_naming_remote_dominion() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -697,6 +722,7 @@ dominion = "runpod-pool"
 #[test]
 fn rejects_zero_local_model_parallel() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -717,6 +743,7 @@ parallel = 0
 #[test]
 fn rejects_vram_budget_overflow() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -741,6 +768,10 @@ source = "/models/b.gguf"
 context = 4096
 dominion = "gpu0"
 vram_gb = 14
+
+[[profile]]
+name = "overbooked"
+models = ["a", "b"]
 "#;
     match Config::parse_toml(toml) {
         Err(ConfigError::Validation(message)) => {
@@ -749,7 +780,7 @@ vram_gb = 14
                 "expected the error to name the dominion: {message}"
             );
             assert!(
-                message.contains("exceeded by 4"),
+                message.contains("by 4"),
                 "expected the error to name the overflow amount: {message}"
             );
         }
@@ -762,6 +793,7 @@ fn rejects_bound_model_without_vram_estimate() {
     // Budgets must be complete to be meaningful: a model bound to a budgeted
     // dominion without its own estimate is an error.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -785,6 +817,10 @@ description = "prose"
 source = "/models/b.gguf"
 context = 4096
 dominion = "gpu0"
+
+[[profile]]
+name = "incomplete"
+models = ["a", "b"]
 "#;
     match Config::parse_toml(toml) {
         Err(ConfigError::Validation(message)) => {
@@ -804,6 +840,7 @@ dominion = "gpu0"
 #[test]
 fn accepts_exact_vram_fit() {
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -828,6 +865,10 @@ source = "/models/b.gguf"
 context = 4096
 dominion = "gpu0"
 vram_gb = 10
+
+[[profile]]
+name = "exact"
+models = ["a", "b"]
 "#;
     assert!(Config::parse_toml(toml).is_ok());
 }
@@ -837,6 +878,7 @@ fn accepts_bound_models_when_dominion_has_no_budget() {
     // A local dominion without vram_gb imposes no co-residency obligation:
     // bound models need no estimate.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -864,11 +906,9 @@ vram_gb = 14
 }
 
 #[test]
-fn allowlist_selects_a_subset_of_the_catalog() {
-    // The top-level `models` key coexists with the `[[model]]` definition
-    // array and filters both remote and local models to the listed names.
+fn selected_profile_filters_each_catalog_kind() {
     let toml = r#"
-models = ["m1", "q1"]
+config-version = 2
 
 [server]
 bind = "127.0.0.1:8081"
@@ -881,129 +921,70 @@ base_url = "http://a"
 api_key = ""
 
 [[model]]
-name = "m1"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-
-[[model]]
-name = "m2"
+name = "remote"
 description = "prose"
 context = 8192
 upstream = "u"
 endpoints = ["e"]
 
 [[local_model]]
-name = "q1"
+name = "local"
 description = "prose"
-source = "/models/q1.gguf"
+source = "/models/local.gguf"
 context = 4096
 
-[[local_model]]
-name = "q2"
-description = "prose"
-source = "/models/q2.gguf"
-context = 4096
+[[stt_model]]
+name = "interim"
+role = "interim"
+source = "/models/base.en.bin"
+vram_gb = 1.0
+
+[[profile]]
+name = "work"
+models = ["remote", "interim"]
 "#;
-    let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(
-        config.model_allowlist(),
-        Some(&["m1".to_string(), "q1".to_string()][..])
-    );
-    let remote: Vec<&str> = config.models().iter().map(ModelConfig::name).collect();
-    let local: Vec<&str> = config
-        .local_models()
-        .iter()
-        .map(LocalModelConfig::name)
-        .collect();
-    assert_eq!(remote, ["m1"]);
-    assert_eq!(local, ["q1"]);
+    let catalog = Config::from_toml_str(toml).expect("catalog parses");
+    let selected = catalog
+        .select_profile(&crate::ProfileName::parse("work").expect("profile name"))
+        .expect("profile selects");
+    assert_eq!(selected.models()[0].name(), "remote");
+    assert!(selected.local_models().is_empty());
+    assert_eq!(selected.stt_models()[0].name(), "interim");
+    assert_eq!(selected.catalog_local_models()[0].name(), "local");
 }
 
 #[test]
-fn allowlist_unknown_name_is_a_validation_error() {
-    let toml = r#"
-models = ["m", "ghost"]
-
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "e"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-
-[[model]]
-name = "m"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-"#;
-    match Config::parse_toml(toml) {
+fn every_profile_reference_must_exist() {
+    let toml = format!("{SAMPLE}\n[[profile]]\nname = \"unused\"\nmodels = [\"ghost\"]\n");
+    match Config::parse_toml(&toml) {
         Err(ConfigError::Validation(message)) => {
-            assert!(
-                message.contains("ghost"),
-                "expected the error to name the unknown model: {message}"
-            );
+            assert!(message.contains("unused"), "profile named: {message}");
+            assert!(message.contains("ghost"), "missing model named: {message}");
         }
         other => panic!("expected a validation error, got {other:?}"),
     }
 }
 
 #[test]
-fn absent_allowlist_loads_the_full_catalog() {
-    let config = Config::from_toml_str(SAMPLE).unwrap();
-    assert_eq!(config.model_allowlist(), None);
-    assert_eq!(config.models().len(), 1);
+fn unselected_catalog_entries_still_validate_references() {
+    let toml = format!(
+        "{SAMPLE}\n\
+         [[model]]\nname = \"dangling\"\ndescription = \"prose\"\ncontext = 1\n\
+         upstream = \"u\"\nendpoints = [\"ghost\"]\n\
+         [[profile]]\nname = \"work\"\nmodels = [\"m1\"]\n"
+    );
+    assert!(matches!(
+        Config::parse_toml(&toml),
+        Err(ConfigError::Validation(message)) if message.contains("ghost")
+    ));
 }
 
-#[test]
-fn allowlist_filter_runs_before_reference_validation() {
-    // The filtered-out model names an undefined endpoint; because the filter
-    // runs before validation, its dangling reference is never checked.
-    let toml = r#"
-models = ["good"]
-
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "e"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-
-[[model]]
-name = "good"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-
-[[model]]
-name = "dangling"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["ghost"]
-"#;
-    let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(config.models().len(), 1);
-    assert_eq!(config.models()[0].name(), "good");
-}
-
-/// A catalog whose two local models over-book `gpu0` in total; the variable
-/// part is the top-level `models` allowlist.
-fn overbooked_catalog_with_allowlist(allowlist: &str) -> String {
+/// A catalog whose two local models over-book `gpu0`; `models` is one
+/// profile's checklist.
+fn overbooked_catalog_with_profile(models: &str) -> String {
     format!(
         r#"
-models = {allowlist}
-
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1028,23 +1009,24 @@ source = "/models/b.gguf"
 context = 4096
 dominion = "gpu0"
 vram_gb = 14
+
+[[profile]]
+name = "selected"
+models = {models}
 "#
     )
 }
 
 #[test]
-fn allowlist_filter_runs_before_the_vram_check() {
-    // The full catalog over-books gpu0 (14 + 14 > 24), but the profile's
-    // selection fits: the VRAM co-residency check operates on the loaded set.
-    let toml = overbooked_catalog_with_allowlist("[\"a\"]");
-    let config = Config::from_toml_str(&toml).unwrap();
-    assert_eq!(config.local_models().len(), 1);
-    assert_eq!(config.local_models()[0].name(), "a");
+fn each_profile_vram_check_uses_its_own_subset() {
+    let toml = overbooked_catalog_with_profile("[\"a\"]");
+    let config = Config::from_toml_str(&toml).expect("single model fits");
+    assert_eq!(config.profiles()[0].models(), ["a"]);
 }
 
 #[test]
-fn allowlisted_overbooking_still_fails() {
-    let toml = overbooked_catalog_with_allowlist("[\"a\", \"b\"]");
+fn any_overbooked_profile_rejects_the_whole_catalog() {
+    let toml = overbooked_catalog_with_profile("[\"a\", \"b\"]");
     match Config::parse_toml(&toml) {
         Err(ConfigError::Validation(message)) => {
             assert!(
@@ -1056,11 +1038,188 @@ fn allowlisted_overbooking_still_fails() {
     }
 }
 
+fn stt_profile_config(entries: &str, models: &str) -> String {
+    format!(
+        r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+{entries}
+
+[[profile]]
+name = "work"
+models = {models}
+"#
+    )
+}
+
+#[test]
+fn profile_names_and_membership_are_unique() {
+    let duplicate_names = format!(
+        "{SAMPLE}\n\
+         [[profile]]\nname = \"work\"\nmodels = []\n\
+         [[profile]]\nname = \"work\"\nmodels = []\n"
+    );
+    assert!(matches!(
+        Config::parse_toml(&duplicate_names),
+        Err(ConfigError::Validation(message)) if message.contains("duplicate profile")
+    ));
+
+    let illegal_name = format!("{SAMPLE}\n[[profile]]\nname = \"../work\"\nmodels = []\n");
+    assert!(matches!(
+        Config::parse_toml(&illegal_name),
+        Err(ConfigError::Validation(message)) if message.contains("../work")
+    ));
+
+    let duplicate_member =
+        format!("{SAMPLE}\n[[profile]]\nname = \"work\"\nmodels = [\"m1\", \"m1\"]\n");
+    assert!(matches!(
+        Config::parse_toml(&duplicate_member),
+        Err(ConfigError::Validation(message)) if message.contains("duplicate model m1")
+    ));
+}
+
+#[test]
+fn stt_role_pairing_rejects_duplicate_slots() {
+    for (role, models) in [
+        ("interim", "[\"a\", \"b\"]"),
+        ("final", "[\"interim\", \"a\", \"b\"]"),
+    ] {
+        let prefix = if role == "final" {
+            "[[stt_model]]\nname = \"interim\"\nrole = \"interim\"\n\
+             source = \"/models/interim.bin\"\nvram_gb = 1.0\n"
+        } else {
+            ""
+        };
+        let entries = format!(
+            "{prefix}\
+             [[stt_model]]\nname = \"a\"\nrole = \"{role}\"\n\
+             source = \"/models/a.bin\"\nvram_gb = 1.0\n\
+             [[stt_model]]\nname = \"b\"\nrole = \"{role}\"\n\
+             source = \"/models/b.bin\"\nvram_gb = 1.0\n"
+        );
+        assert!(
+            matches!(
+                Config::parse_toml(&stt_profile_config(&entries, models)),
+                Err(ConfigError::Validation(message))
+                    if message.contains("more than one") && message.contains("work")
+            ),
+            "duplicate {role} slot must fail"
+        );
+    }
+}
+
+#[test]
+fn final_without_interim_names_the_fix() {
+    let entries = r#"
+[[stt_model]]
+name = "final"
+role = "final"
+source = "/models/final.bin"
+vram_gb = 2.0
+"#;
+    match Config::parse_toml(&stt_profile_config(entries, "[\"final\"]")) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(message.contains("final"), "final model named: {message}");
+            assert!(message.contains("add one interim"), "fix named: {message}");
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn interim_without_final_is_supported_degraded_mode() {
+    let entries = r#"
+[[stt_model]]
+name = "interim"
+role = "interim"
+source = "/models/interim.bin"
+vram_gb = 1.0
+"#;
+    assert!(Config::parse_toml(&stt_profile_config(entries, "[\"interim\"]")).is_ok());
+}
+
+#[test]
+fn remote_stt_source_may_omit_optional_digest() {
+    let entries = r#"
+[[stt_model]]
+name = "interim"
+role = "interim"
+source = "https://example.com/models/interim.bin"
+vram_gb = 1.0
+"#;
+    assert!(Config::parse_toml(&stt_profile_config(entries, "[\"interim\"]")).is_ok());
+}
+
+#[test]
+fn stt_models_count_toward_each_profile_vram_budget() {
+    let entries = r#"
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 2
+
+[[local_model]]
+name = "chat"
+description = "prose"
+source = "/models/chat.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 1
+
+[[stt_model]]
+name = "interim"
+role = "interim"
+source = "/models/interim.bin"
+vram_gb = 1.5
+dominion = "gpu0"
+"#;
+    assert!(matches!(
+        Config::parse_toml(&stt_profile_config(entries, "[\"chat\", \"interim\"]")),
+        Err(ConfigError::Validation(message))
+            if message.contains("work") && message.contains("gpu0")
+    ));
+}
+
+#[test]
+fn stt_catalog_validates_source_pin_vram_and_dominion() {
+    for (field, entry) in [
+        (
+            "source",
+            "[[stt_model]]\nname='s'\nrole='interim'\nsource='http://x/s.bin'\nvram_gb=1.0",
+        ),
+        (
+            "sha256",
+            "[[stt_model]]\nname='s'\nrole='interim'\nsource='/s.bin'\nsha256='bad'\nvram_gb=1.0",
+        ),
+        (
+            "vram_gb",
+            "[[stt_model]]\nname='s'\nrole='interim'\nsource='/s.bin'\nvram_gb=0.0",
+        ),
+        (
+            "dominion",
+            "[[stt_model]]\nname='s'\nrole='interim'\nsource='/s.bin'\nvram_gb=1.0\ndominion='missing'",
+        ),
+    ] {
+        assert!(
+            matches!(
+                Config::parse_toml(&stt_profile_config(entry, "[\"s\"]")),
+                Err(ConfigError::Validation(message)) if message.contains(field)
+            ),
+            "invalid STT {field} must fail"
+        );
+    }
+}
+
 /// A config whose only variable part is one `[[endpoint]]` block. Table-driven
 /// endpoint-validation tests substitute the block to exercise one invariant each.
 fn config_with_endpoint(endpoint_block: &str) -> String {
     format!(
         r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1135,6 +1294,7 @@ api_key = """#
 fn config_with_web_search_knobs(freshness: &str, safesearch: &str) -> String {
     format!(
         r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1205,6 +1365,7 @@ fn accepts_valid_web_search_knobs() {
 fn rejects_web_search_non_url_base() {
     // CFG-006: the base URL is parsed, not prefix-matched.
     let toml = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1240,6 +1401,7 @@ base_url = "https://"
 fn catalog_with_model_kind(kind: &str, extra: &str) -> String {
     format!(
         r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -1267,6 +1429,7 @@ endpoints = ["e"]
 fn catalog_with_local_model_kind(kind: &str, extra: &str) -> String {
     format!(
         r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"

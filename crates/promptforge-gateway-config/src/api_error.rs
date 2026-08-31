@@ -18,7 +18,8 @@ use crate::error::ConfigError as ConfigErrorRepr;
 /// ```
 /// use promptforge_gateway_config::{Config, ConfigErrorKind};
 ///
-/// let err = Config::from_toml_str("this is not valid = = toml").unwrap_err();
+/// let err =
+///     Config::from_toml_str("config-version = 2\nthis is not valid = = toml").unwrap_err();
 /// assert_eq!(err.kind(), ConfigErrorKind::Parse);
 /// ```
 #[non_exhaustive]
@@ -38,10 +39,8 @@ pub enum ConfigErrorKind {
     UnresolvedVar,
     /// The configuration parsed but failed a semantic check.
     Validation,
-    /// An `include` chain revisited a file already being resolved.
-    IncludeCycle,
-    /// An `include` chain exceeded the maximum nesting depth.
-    IncludeDepth,
+    /// A removed configuration layout feature was found.
+    HardBreak,
     /// A shadow file could not be written.
     Write,
 }
@@ -56,8 +55,7 @@ impl ConfigError {
             ConfigErrorRepr::Interpolation(_) => ConfigErrorKind::Interpolation,
             ConfigErrorRepr::UnresolvedVar(_) => ConfigErrorKind::UnresolvedVar,
             ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
-            ConfigErrorRepr::IncludeCycle { .. } => ConfigErrorKind::IncludeCycle,
-            ConfigErrorRepr::IncludeDepth { .. } => ConfigErrorKind::IncludeDepth,
+            ConfigErrorRepr::HardBreak { .. } => ConfigErrorKind::HardBreak,
             ConfigErrorRepr::Write { .. } => ConfigErrorKind::Write,
         }
     }
@@ -138,18 +136,13 @@ mod tests {
                 ConfigErrorKind::Validation,
             ),
             (
-                ConfigErrorRepr::IncludeCycle {
+                ConfigErrorRepr::HardBreak {
                     path: PathBuf::from("a.toml"),
-                    chain: vec![PathBuf::from("a.toml")],
+                    line: 4,
+                    key: "include",
+                    replacement: "use one gateway.toml with [[profile]] entries",
                 },
-                ConfigErrorKind::IncludeCycle,
-            ),
-            (
-                ConfigErrorRepr::IncludeDepth {
-                    path: PathBuf::from("a.toml"),
-                    max: 16,
-                },
-                ConfigErrorKind::IncludeDepth,
+                ConfigErrorKind::HardBreak,
             ),
             (
                 ConfigErrorRepr::Write {

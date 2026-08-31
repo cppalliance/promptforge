@@ -128,6 +128,7 @@ pub enum SpeculationType {
 ///
 /// let digest = "9eba819938efccfd6044f8af84e3bbfddc639a2bcf32ebc36420e6a649191919";
 /// let toml = format!(r#"
+/// config-version = 2
 /// [server]
 /// bind = "127.0.0.1:8080"
 /// api_key = "secret"
@@ -220,6 +221,7 @@ impl SpeculativeConfig {
 ///
 /// let digest = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa";
 /// let toml = format!(r#"
+/// config-version = 2
 /// [server]
 /// bind = "127.0.0.1:8080"
 /// api_key = "secret"
@@ -286,6 +288,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -312,6 +315,7 @@ impl LocalModelConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -380,6 +384,7 @@ mod tests {
     use crate::config::Config;
 
     const HEADER: &str = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -434,6 +439,25 @@ source = "/models/q-mmproj.gguf"
         )
         .unwrap();
         assert!(config.local_models()[0].capabilities().images());
+    }
+
+    #[test]
+    fn selected_profile_keeps_projector_images_capability() {
+        let config = parse(
+            r#"
+[local_model.multimodal_projector]
+source = "/models/q-mmproj.gguf"
+
+[[profile]]
+name = "work"
+models = ["q"]
+"#,
+        )
+        .unwrap();
+        let selected = config
+            .select_profile(&crate::ProfileName::parse("work").unwrap())
+            .unwrap();
+        assert!(selected.local_models()[0].capabilities().images());
     }
 
     #[test]
