@@ -187,6 +187,8 @@ pub(crate) struct BootOwned {
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
     profiles: Option<Arc<AdminProfiles>>,
+    /// Process-lifetime identifier used by the config UI to detect a restart.
+    config_generation: Arc<str>,
     /// The boot-owned sections, retained so profile switches can refuse a
     /// profile that changes them.
     boot: Arc<BootOwned>,
@@ -231,6 +233,9 @@ impl AppState {
         boot: BootOwned,
         hub: Arc<ProgressHub>,
     ) -> AppState {
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
         AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
@@ -244,6 +249,7 @@ impl AppState {
                 model_allowlist: selection.model_allowlist,
             })),
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
+            config_generation: format!("{}-{started}", std::process::id()).into(),
             boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
             apply: Arc::new(tokio::sync::Mutex::new(())),
@@ -625,8 +631,8 @@ async fn admin_list_profiles(
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
-/// Current profile name, loaded model names, the profile's model allowlist,
-/// and a queue note.
+/// Current profile name, loaded model names, process config generation,
+/// the profile's model allowlist, and a queue note.
 async fn admin_status(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -648,6 +654,7 @@ async fn admin_status(
     Ok(Json(serde_json::json!({
         "profile": live.profile_name,
         "models": models,
+        "config_generation": state.config_generation.as_ref(),
         "model_allowlist": live.model_allowlist,
         "local_children": local_children,
         "queue": "per-dominion shared waiting queue; switch-profile is immediate (no drain)",
@@ -1681,6 +1688,46 @@ cache_dir = '{cache}'
             status,
             StatusCode::FORBIDDEN,
             "POST /admin/switch-profile keeps its bearer-only, any-source behavior"
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_status_reports_a_stable_config_generation() {
+        let (_temp, state) = fixture();
+        let first = send_with_peer(
+            state.clone(),
+            Method::GET,
+            "/admin/status",
+            Some("127.0.0.1:50000"),
+        )
+        .await;
+        let second =
+            send_with_peer(state, Method::GET, "/admin/status", Some("127.0.0.1:50000")).await;
+        let first: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(first.into_body(), usize::MAX)
+                .await
+                .expect("read first status"),
+        )
+        .expect("parse first status");
+        let second: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(second.into_body(), usize::MAX)
+                .await
+                .expect("read second status"),
+        )
+        .expect("parse second status");
+        let generation = first["config_generation"]
+            .as_str()
+            .expect("status generation is a string");
+        assert!(
+            !generation.is_empty(),
+            "the generation identifies this process"
+        );
+        assert_eq!(
+            generation,
+            second["config_generation"]
+                .as_str()
+                .expect("second status generation is a string"),
+            "one process reports one stable generation"
         );
     }
 

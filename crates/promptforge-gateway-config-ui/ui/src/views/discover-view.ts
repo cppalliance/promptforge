@@ -6,19 +6,20 @@
 // the model card (publisher, verified badge, tags as capability
 // pills), the quant picker table with exact sizes and fit badges
 // against /admin/system [Adapted: LM Studio], one starred Recommended
-// row, and the README below via marked. Downloads flow through the
-// global download store into the shell's progress strip.
+// row, and sanitized inline-HTML README rendering. Download actions
+// stage model entries; Apply owns artifact provisioning.
 
 import { BadgeCheck, Star, createElement as lucideElement } from "lucide";
 
-import { renderMarkdown } from "../components/markdown";
+import { createDropdownControl } from "../components/dropdown-control";
+import { renderMarkdown, setSanitizedHtml } from "../components/markdown";
 import type { ToastStack } from "../components/toast";
 import { formatBytes } from "../format";
+import type { ConfigStore } from "../services/config-store";
 import type { FetchLike, GatewayApi, SystemSnapshot } from "../services/gateway-api";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type { HfApi, HfModelDetail, HfQuant, HfSearchRow, HfSort } from "../services/hf-api";
 import { avatarUrl, parseSearchInput, resolveUrl } from "../services/hf-api";
-import type { DownloadStore } from "../services/download-store";
 
 /** How long the search input waits before querying the hub. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -52,8 +53,8 @@ export interface DiscoverViewDeps {
   api: GatewayApi;
   /** The typed HF proxy client. */
   hf: HfApi;
-  /** The global download store the Download buttons feed. */
-  downloads: DownloadStore;
+  /** Pending-config store the Download buttons stage entries through. */
+  store: ConfigStore;
   /** Outcome surfacing. */
   toasts: ToastStack;
   /** Transport for hub-served README files (same injection as the API). */
@@ -111,7 +112,7 @@ function recommendedQuant(quants: HfQuant[], system: SystemSnapshot): string | n
 
 /** Builds the Discover view (state survives route re-mounts). */
 export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
-  const { api, hf, downloads, toasts, fetchFn } = deps;
+  const { api, hf, store, toasts, fetchFn } = deps;
 
   let query = "";
   let sort: HfSort = "downloads";
@@ -127,6 +128,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   /** Sanitized README HTML, null while loading or when none exists. */
   let readmeHtml: string | null = null;
   let system: SystemSnapshot | null = null;
+  const staging = new Set<string>();
 
   let main: HTMLElement | null = null;
   let listBox: HTMLElement | null = null;
@@ -134,22 +136,6 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let searchSeq = 0;
   let detailSeq = 0;
-
-  // Re-render download buttons only when a download starts or settles,
-  // never on byte progress (which would churn the README subtree).
-  let downloadSignature = "";
-  downloads.subscribe(() => {
-    const signature = downloads
-      .entries()
-      .map((entry) => `${entry.source}:${entry.status}`)
-      .join("|");
-    if (signature !== downloadSignature) {
-      downloadSignature = signature;
-      if (detailBox?.isConnected) {
-        renderDetail();
-      }
-    }
-  });
 
   const runSearch = async (): Promise<void> => {
     const seq = ++searchSeq;
@@ -382,22 +368,21 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     sortLabel.className = "visually-hidden";
     sortLabel.htmlFor = "discover-sort";
     sortLabel.textContent = "Sort results";
-    const sortSelect = document.createElement("select");
-    sortSelect.id = "discover-sort";
-    sortSelect.className = "select select-sm";
-    for (const [value, label] of SORTS) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      sortSelect.append(option);
-    }
-    sortSelect.value = sort;
-    sortSelect.addEventListener("change", () => {
-      sort = sortSelect.value as HfSort;
-      void runSearch();
+    const sortSelect = createDropdownControl({
+      id: "discover-sort",
+      options: SORTS.map(([value, label]) => ({ value, label })),
+      value: sort,
+      onChange: (value) => {
+        const selected = SORTS.find(([candidate]) => candidate === value)?.[0];
+        if (selected !== undefined) {
+          sort = selected;
+          void runSearch();
+        }
+      },
     });
+    sortSelect.trigger.classList.add("select-sm");
 
-    toolbar.append(searchLabel, searchInput, chips, sortLabel, sortSelect);
+    toolbar.append(searchLabel, searchInput, chips, sortLabel, sortSelect.element);
     return toolbar;
   };
 
@@ -659,12 +644,20 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "button button-xs button-primary quant-download";
-      const active = quant.files.some((file) =>
-        downloads.isActive(resolveUrl(model.repo, file)),
-      );
-      button.textContent = active ? "Downloading..." : "Download";
-      button.disabled = active;
-      button.addEventListener("click", () => startDownload(model, quant));
+      const source =
+        quant.files.length === 1 ? resolveUrl(model.repo, quant.files[0] ?? "") : null;
+      const isAdded =
+        source !== null &&
+        store
+          .models()
+          .some((entry) => entry.kind === "local" && entry.data["source"] === source);
+      const isStaging = source !== null && staging.has(source);
+      button.textContent = isAdded ? "Added" : isStaging ? "Adding..." : "Download";
+      button.disabled = source === null || isAdded || isStaging;
+      if (source === null) {
+        button.title = "Multi-part GGUF entries cannot be provisioned as one model.";
+      }
+      button.addEventListener("click", () => void stageDownload(model, quant));
       actions.append(button);
 
       row.append(name, size, fitCell, actions);
@@ -675,17 +668,36 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     return wrap;
   };
 
-  const startDownload = (model: HfModelDetail, quant: HfQuant): void => {
-    // A multi-part quant is one download per part; the store keys each
-    // file by its own source URL.
-    for (const file of quant.files) {
-      downloads.start(resolveUrl(model.repo, file), { label: file });
+  const stageDownload = async (model: HfModelDetail, quant: HfQuant): Promise<void> => {
+    const file = quant.files.length === 1 ? quant.files[0] : undefined;
+    if (file === undefined) {
+      return;
     }
-    const label =
-      quant.files.length === 1
-        ? (quant.files[0] ?? quant.quant)
-        : `${quant.quant} (${quant.files.length} files)`;
-    toasts.show(`Download started: ${label}`, "info");
+    const source = resolveUrl(model.repo, file);
+    staging.add(source);
+    renderDetail();
+    const data: Record<string, unknown> = {
+      name: `${model.name.replace(/-gguf$/i, "")}-${quant.quant}`,
+      kind: "chat",
+      description: `Hugging Face model ${model.repo}`,
+      source,
+      context: 4096,
+    };
+    if (quant.sha256 !== null) {
+      data["sha256"] = quant.sha256;
+    }
+    if (quant.sizeBytes !== null) {
+      data["vram_gb"] = Number((quant.sizeBytes / 1024 ** 3).toFixed(2));
+    }
+    try {
+      const name = await store.stageLocalModel(data);
+      toasts.show(`${name} added - Apply to download`, "success");
+    } catch (error) {
+      toasts.show(error instanceof Error ? error.message : "The model could not be added", "error");
+    } finally {
+      staging.delete(source);
+      renderDetail();
+    }
   };
 
   const readmeSection = (): HTMLElement => {
@@ -705,10 +717,7 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     }
     const body = document.createElement("div");
     body.className = "markdown";
-    // Safe by construction: renderMarkdown escaped every raw-HTML
-    // token and stripped unsafe URLs, so only marked's own markup
-    // reaches innerHTML.
-    body.innerHTML = readmeHtml;
+    setSanitizedHtml(body, readmeHtml);
     section.append(body);
     return section;
   };

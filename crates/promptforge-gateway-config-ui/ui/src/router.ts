@@ -1,12 +1,12 @@
 // Hash router [Adapted: llama.cpp] for both shell modes. Routes:
-// #/models, #/models/{name}, #/discover, #/downloads, #/profiles,
-// #/secrets, #/settings/{section}; anything else falls back to
+// #/models, #/models/{name}, #/discover, #/profiles, #/secrets,
+// #/settings/{section}; anything else falls back to
 // #/models. Each route mounts its view into <main>; until the real
 // views land, the mounts are stubs rendering the view name and an
 // empty state.
 
-/** The six top-level destinations. */
-export type ViewId = "models" | "discover" | "downloads" | "profiles" | "secrets" | "settings";
+/** The five top-level destinations. */
+export type ViewId = "models" | "discover" | "profiles" | "secrets" | "settings";
 
 /** A parsed route: the view plus its optional detail segment. */
 export interface RouteMatch {
@@ -20,7 +20,6 @@ export interface RouteMatch {
 const VIEW_TITLES: Readonly<Record<ViewId, string>> = {
   models: "Models",
   discover: "Discover",
-  downloads: "Downloads",
   profiles: "Profiles",
   secrets: "Secrets",
   settings: "Settings",
@@ -47,7 +46,6 @@ export function matchRoute(hash: string): RouteMatch | null {
       }
       return null;
     case "discover":
-    case "downloads":
     case "secrets":
       return segments.length === 1 ? { view: head } : null;
     case "profiles":

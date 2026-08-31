@@ -48,6 +48,35 @@ struct BlobMeta {
     size_bytes: u64,
 }
 
+/// Writes the cache-list metadata for a blob provisioned by ArtifactStore.
+pub(crate) fn write_blob_meta(
+    root: &Path,
+    blob: &Path,
+    source: &str,
+    sha256: &str,
+) -> Result<(), LocalError> {
+    let size_bytes = fs::metadata(blob)
+        .map_err(|source_err| LocalError::Io {
+            operation: "stat cached blob",
+            path: blob.to_owned(),
+            source: source_err,
+        })?
+        .len();
+    let meta = BlobMeta {
+        source: source.to_owned(),
+        sha256: sha256.to_owned(),
+        size_bytes,
+    };
+    let metadata = meta_path(blob);
+    let encoded = serde_json::to_vec(&meta).map_err(|source_err| LocalError::Io {
+        operation: "encode cache sidecar",
+        path: metadata.clone(),
+        source: io::Error::other(source_err),
+    })?;
+    validate_cache_path(root, &metadata)?;
+    write_synced(&metadata, &encoded)
+}
+
 /// One entry of the cache listing: a blob plus the source it was fetched from.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CacheEntry {
@@ -99,6 +128,23 @@ fn read_meta(blob: &Path) -> Result<Option<BlobMeta>, LocalError> {
             Ok(None)
         }
     }
+}
+
+/// Whether a blob already has usable listing metadata for `source`.
+pub(crate) fn blob_meta_matches(blob: &Path, source: &str) -> Result<bool, LocalError> {
+    let Some(meta) = read_meta(blob)? else {
+        return Ok(false);
+    };
+    let size_bytes = fs::metadata(blob)
+        .map_err(|source_err| LocalError::Io {
+            operation: "stat cached blob",
+            path: blob.to_owned(),
+            source: source_err,
+        })?
+        .len();
+    Ok(meta.source == source
+        && meta.size_bytes == size_bytes
+        && parse_expected_digest(&meta.sha256).is_ok())
 }
 
 /// The cache-hit test: blob and sidecar present, and the sidecar's digest
@@ -360,6 +406,9 @@ impl BlobCache {
             if entry.sha256 == wanted {
                 remove_cache_entry(&self.root, &entry.path)?;
                 remove_cache_entry(&self.root, &meta_path(&entry.path))?;
+                let mut marker = entry.path.as_os_str().to_owned();
+                marker.push(".verified");
+                remove_cache_entry(&self.root, &PathBuf::from(marker))?;
                 return Ok(true);
             }
         }
@@ -383,8 +432,8 @@ pub struct OrphanEntry {
 }
 
 /// Store bookkeeping suffixes that are never orphans: cache sidecars,
-/// model-card sidecars, and staging files.
-const BOOKKEEPING_SUFFIXES: [&str; 3] = [META_SUFFIX, ".md", ".part"];
+/// model-card sidecars, verified markers, and staging files.
+const BOOKKEEPING_SUFFIXES: [&str; 4] = [META_SUFFIX, ".md", ".verified", ".part"];
 
 /// The absolute path a `[[local_model]]` source occupies on disk: the
 /// provisioning cache slot (`models/<key>/<filename>`) for a URL source, the
@@ -409,8 +458,8 @@ fn configured_path(root: &Path, source: &str) -> Option<PathBuf> {
 /// tilde-expanded path). Comparison falls back to canonicalized paths, so a
 /// path source spelled with different case or separators still matches its
 /// file. Store bookkeeping (`.meta.json` cache sidecars, `.md` model-card
-/// sidecars, `.part` staging files) is never reported, and symlinked entries
-/// are skipped as in [`BlobCache::list`]. A missing `models/` directory
+/// sidecars, `.verified` markers, `.part` staging files) is never reported,
+/// and symlinked entries are skipped as in [`BlobCache::list`]. A missing `models/` directory
 /// yields an empty list. Entries sort by path for a stable response.
 ///
 /// # Errors
@@ -688,6 +737,81 @@ mod tests {
     }
 
     #[test]
+    fn artifact_store_downloads_appear_in_the_cache_listing() {
+        let body = b"artifact-store-model";
+        let digest = hex_sha256(body);
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let url = server.url("listed.gguf");
+        let store = crate::artifacts::ArtifactStore::new(temp.path()).expect("artifact store");
+
+        let path = store
+            .ensure_model(&url, Some(&digest))
+            .expect("provision model");
+        let entries = BlobCache::new(temp.path())
+            .expect("blob cache")
+            .list()
+            .expect("list cache");
+
+        assert_eq!(
+            entries,
+            vec![CacheEntry {
+                source: url,
+                path: path.clone(),
+                sha256: digest.clone(),
+                size_bytes: body.len() as u64,
+            }],
+            "Apply-provisioned models feed the Local Models file status"
+        );
+        let mut marker = path.as_os_str().to_owned();
+        marker.push(".verified");
+        let marker = PathBuf::from(marker);
+        assert!(marker.is_file(), "the pinned artifact has a verify marker");
+        assert!(
+            BlobCache::new(temp.path())
+                .expect("blob cache")
+                .remove(&digest)
+                .expect("remove artifact"),
+            "the listed artifact is removable"
+        );
+        assert!(!marker.exists(), "cache deletion removes the verify marker");
+    }
+
+    #[test]
+    fn artifact_store_migrates_an_unpinned_cache_hit_into_the_listing() {
+        let body = b"legacy-unpinned-artifact";
+        let digest = hex_sha256(body);
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let url = server.url("legacy-unpinned.gguf");
+        let store = crate::artifacts::ArtifactStore::new(temp.path()).expect("artifact store");
+
+        let path = store.ensure_model(&url, None).expect("initial provision");
+        fs::remove_file(meta_path(&path)).expect("remove new sidecar to model an old cache");
+        let reused = store.ensure_model(&url, None).expect("migrate cache hit");
+
+        assert_eq!(reused, path);
+        assert_eq!(
+            server.requests(),
+            1,
+            "the existing blob is not downloaded again"
+        );
+        assert_eq!(
+            BlobCache::new(temp.path())
+                .expect("blob cache")
+                .list()
+                .expect("list cache"),
+            vec![CacheEntry {
+                source: url,
+                path,
+                sha256: digest,
+                size_bytes: body.len() as u64,
+            }],
+            "the migrated hit feeds the Local Models file status"
+        );
+    }
+
+    #[test]
     fn sidecar_less_blob_is_not_a_hit_and_is_replaced() {
         // Amendment E: a blob without a sidecar (a pre-existing local model
         // file) is not a cache entry, so the source is re-downloaded and the
@@ -918,6 +1042,7 @@ mod tests {
         // Bookkeeping noise that must never be listed: a model-card sidecar
         // and a staging file.
         fs::write(models.join("local.md"), b"card").expect("write card");
+        fs::write(models.join("local.gguf.verified"), b"marker").expect("write marker");
         fs::write(models.join("stray.gguf.part"), b"partial").expect("write staging");
 
         let config = promptforge_gateway_config::Config::from_toml_str(&format!(

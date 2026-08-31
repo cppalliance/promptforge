@@ -19,8 +19,8 @@ test("?mode=panel skips the key prompt and the medallion", async () => {
   assert.equal(root.querySelector("img.tab-medallion"), null, "no medallion in panel mode");
   assert.equal(
     root.querySelectorAll("nav[aria-label='Primary'] a.tab").length,
-    6,
-    "all six tabs are present",
+    5,
+    "all five tabs are present after Downloads removal",
   );
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",

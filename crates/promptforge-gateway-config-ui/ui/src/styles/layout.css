@@ -1,5 +1,5 @@
-/* Shell layout: tab bar, master-detail split, banners, toasts, the
-   gradient progress strip, modal scaffolding, and metric tiles. Written
+/* Shell layout: tab bar, master-detail split, banners, toasts,
+   modal scaffolding, and metric tiles. Written
    mobile-first; min-width queries widen the split and the tile grid. */
 
 @layer components {
@@ -90,6 +90,10 @@
 		min-width: 0;
 		overflow-y: auto;
 	}
+	.split-list :focus-visible,
+	.split-detail :focus-visible {
+		outline-offset: -2px;
+	}
 	@media (min-width: 768px) {
 		.split {
 			flex-direction: row;
@@ -152,26 +156,6 @@
 	}
 	.toast-info {
 		border-left-color: var(--accent, #E05A2B);
-	}
-
-	/* Thin lava-gradient progress strip (tab bar top edge, download
-	   progress); the owner sets --progress (0 to 1) inline and the
-	   full-width bar scales, so the animation is compositor-only -
-	   transitioning width would relayout on every frame. */
-	.progress-strip {
-		height: 3px;
-		overflow: hidden;
-	}
-	.progress-strip-bar {
-		height: 100%;
-		border-radius: 9999px;
-		background: var(
-			--accent-gradient,
-			linear-gradient(90deg, #8B2500, #E05A2B, #F09030, #FFD080)
-		);
-		transform-origin: 0 50%;
-		transform: scaleX(var(--progress, 0));
-		transition: transform 200ms ease-out;
 	}
 
 	/* Modal scaffolding: dimmed full-screen overlay centering a card. */
@@ -503,6 +487,9 @@
 		font-size: 0.75rem;
 		font-variant-numeric: tabular-nums;
 	}
+	.disabled-tooltip {
+		display: inline-flex;
+	}
 
 	.empty-state {
 		display: flex;
@@ -567,6 +554,18 @@
 	.detail-actions {
 		display: flex;
 		gap: 0.5rem;
+	}
+	.model-file-status {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.file-status[data-status="downloaded"] {
+		color: var(--success-text, #6FCF87);
+	}
+	.file-status[data-status="missing"] {
+		color: var(--warning, #F09030);
 	}
 
 	.detail-section {
@@ -1019,120 +1018,6 @@
 	}
 	.about-license {
 		color: var(--accent, #E05A2B);
-	}
-}
-
-/* Downloads view: active download cards with the lava progress bar,
-   completed cache rows, and the tab bar's active-count badge. */
-@layer components {
-	/* Active-count badge on the Downloads tab: near-black on the
-	   accent, the same 5.2:1 pair as .skip-link. */
-	.tab-badge {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		min-width: 1rem;
-		height: 1rem;
-		padding-inline: 0.25rem;
-		border-radius: 9999px;
-		background: var(--accent, #E05A2B);
-		color: #0F0F0F;
-		font-size: 0.625rem;
-		font-weight: 600;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.downloads-section {
-		margin-block-start: 1rem;
-	}
-	.downloads-heading {
-		margin: 0 0 0.5rem;
-		color: var(--text-secondary, #888888);
-		font-size: 0.6875rem;
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	.download-card {
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-		margin-block-end: 0.5rem;
-		padding: 0.875rem 1rem;
-		border: 1px solid var(--border, #2A2A2A);
-		border-radius: var(--radius, 8px);
-		background: var(--bg-secondary, #1A1A1A);
-	}
-	.download-name {
-		margin: 0;
-		font-family: var(--font-mono, ui-monospace, monospace);
-		font-size: 0.8125rem;
-		overflow-wrap: anywhere;
-	}
-	/* The card's lava bar: the strip's compositor-only scaleX fill at
-	   card height. */
-	.progress-bar {
-		height: 0.5rem;
-		border-radius: 9999px;
-		background: rgb(0 0 0 / 0.4);
-		overflow: hidden;
-	}
-	.progress-bar-fill {
-		height: 100%;
-		border-radius: 9999px;
-		background: var(
-			--accent-gradient,
-			linear-gradient(90deg, #8B2500, #E05A2B, #F09030, #FFD080)
-		);
-		transform-origin: 0 50%;
-		transform: scaleX(var(--progress, 0));
-		transition: transform 200ms ease-out;
-	}
-	.download-stats {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-		margin: 0;
-		color: var(--text-secondary, #888888);
-		font-size: 0.75rem;
-		font-variant-numeric: tabular-nums;
-	}
-	.download-percent {
-		color: var(--text-primary, #E8E8E8);
-	}
-	.download-error {
-		margin: 0;
-		color: var(--danger-text, #F28B93);
-		font-size: 0.8125rem;
-		overflow-wrap: anywhere;
-	}
-	.download-retry {
-		align-self: flex-start;
-	}
-
-	.completed-list {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-	.completed-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.375rem 0.75rem;
-	}
-	.check-icon {
-		display: inline-flex;
-		flex-shrink: 0;
-		color: var(--success, #28A745);
-	}
-	.completed-size {
-		margin-inline-start: auto;
-		color: var(--text-secondary, #888888);
-		font-size: 0.75rem;
-		font-variant-numeric: tabular-nums;
-		white-space: nowrap;
 	}
 }
 

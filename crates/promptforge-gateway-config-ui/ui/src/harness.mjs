@@ -266,10 +266,26 @@ export function hfModelFixture() {
     siblings: [
       { rfilename: "README.md", size: 1234 },
       { rfilename: "config.json", size: 99 },
-      { rfilename: "Qwen3-Test-8B-Q4_K_M.gguf", size: 10 * GIB },
-      { rfilename: "Qwen3-Test-8B-Q6_K.gguf", size: 18 * GIB },
-      { rfilename: "Qwen3-Test-8B-Q8_0.gguf", size: 25 * GIB },
-      { rfilename: "Qwen3-Test-8B-F16.gguf", size: 50 * GIB },
+      {
+        rfilename: "Qwen3-Test-8B-Q4_K_M.gguf",
+        size: 10 * GIB,
+        lfs: { sha256: "1".repeat(64) },
+      },
+      {
+        rfilename: "Qwen3-Test-8B-Q6_K.gguf",
+        size: 18 * GIB,
+        lfs: { sha256: "2".repeat(64) },
+      },
+      {
+        rfilename: "Qwen3-Test-8B-Q8_0.gguf",
+        size: 25 * GIB,
+        lfs: { sha256: "3".repeat(64) },
+      },
+      {
+        rfilename: "Qwen3-Test-8B-F16.gguf",
+        size: 50 * GIB,
+        lfs: { sha256: "4".repeat(64) },
+      },
     ],
   };
 }
@@ -298,9 +314,19 @@ export function cacheListFixture() {
 /** A README carrying the XSS vectors the sanitizer must neutralize. */
 export function readmeFixture() {
   return [
+    "---",
+    "license: apache-2.0",
+    "tags:",
+    "  - gguf",
+    "---",
+    "",
     "# Qwen3 Test",
     "",
     "<script>window.__pwned = true;</script>",
+    "",
+    '<p class="safe-inline">Inline <em>HTML</em> survives.</p>',
+    "",
+    '<img src="x" onerror="window.__pwned = true" alt="unsafe event">',
     "",
     "Safe **body** text.",
     "",
@@ -360,6 +386,8 @@ function redactSecrets(view) {
  */
 export function gatewayStub({
   profile = "default",
+  configGeneration = "generation-1",
+  configGenerationAfterApply,
   profiles = ["default"],
   models = [],
   key,
@@ -403,6 +431,8 @@ export function gatewayStub({
     includes: {},
     /** The active profile; the default switch handler re-points it. */
     active: profile,
+    /** Process-lifetime config generation returned by admin status. */
+    configGeneration,
   };
   const hubDenied = () =>
     jsonResponse(
@@ -471,7 +501,11 @@ export function gatewayStub({
       return channel.response;
     }
     if (url.endsWith("/admin/status")) {
-      return jsonResponse({ profile: state.active, models });
+      return jsonResponse({
+        profile: state.active,
+        models,
+        config_generation: state.configGeneration,
+      });
     }
     // Profile files: POST creates (409 for an existing name, mirroring
     // the gateway), DELETE removes (409 for the active profile, 404 for
@@ -577,6 +611,9 @@ export function gatewayStub({
       state.config = structuredClone(state.pending);
       state.dirty = cleanDirty();
       state.boot = null;
+      if (configGenerationAfterApply !== undefined) {
+        state.configGeneration = configGenerationAfterApply;
+      }
       return jsonResponse(
         applyOutcome ?? {
           applied: ["profiles/default.toml"],

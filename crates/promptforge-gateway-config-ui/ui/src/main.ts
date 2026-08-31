@@ -6,8 +6,8 @@
 // first (when no key is stored) and then the live shell: tab bar,
 // profile switcher, hash router, and the progress subscription. In
 // panel mode the workshop owns all progress display, so the shell never
-// subscribes to the progress stream and instead announces its actions
-// (apply, revert, download-started) to the parent.
+// subscribes to the progress stream and instead announces apply and
+// revert actions to the parent.
 
 import "./styles/base.css";
 import "./styles/controls.css";
@@ -22,13 +22,11 @@ import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "./components/toast";
 import { startRouter } from "./router";
 import { ConfigStore } from "./services/config-store";
-import { DownloadStore } from "./services/download-store";
 import { GatewayApi } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
 import { createDiscoverView } from "./views/discover-view";
-import { createDownloadsView } from "./views/downloads-view";
 import { createModelsView } from "./views/models-view";
 import { createProfilesView } from "./views/profiles-view";
 import { createSecretsView } from "./views/secrets-view";
@@ -172,8 +170,8 @@ function memoryStorage(): Storage {
  * Mounts the live shell and starts its data flows, in either mode:
  * standalone (`bridge` null - medallion, progress subscription) or
  * workshop panel (`bridge` set - no medallion, no progress subscription
- * because the workshop owns progress display, and apply/revert/
- * download-started announced to the parent). `hubFetch` carries only
+ * because the workshop owns progress display, and apply/revert are
+ * announced to the parent). `hubFetch` carries only
  * hub-served bytes (the Discover README); gateway calls go through
  * `api`. Returns the teardown that stops the router and subscriptions.
  */
@@ -188,18 +186,46 @@ function mountLiveShell(
   const overlay = createApplyOverlay(root);
   const switcher = createProfileSwitcher({ api, overlay, toasts });
   const store = new ConfigStore(api);
-  const downloadStore = new DownloadStore(api);
   let applying = false;
+  let disposed = false;
+  let observedConfigGeneration: string | null = null;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Restart banner [INVENTED]: raised when a boot-scoped apply promoted
-  // the boot shadow. The gateway cannot hot-reload its bind, so the
-  // banner persists for the rest of the session; a fresh load after the
-  // restart starts with no pending boot shadow and no banner. (The
-  // plan's /health boot-generation detection is simplified away.)
   const restartBanner = document.createElement("div");
   restartBanner.className = "banner banner-warning banner-restart";
   restartBanner.hidden = true;
   restartBanner.textContent = "Restart the gateway to apply these changes.";
+
+  const watchForRestart = (): void => {
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+    }
+    const poll = async (): Promise<void> => {
+      if (disposed) {
+        return;
+      }
+      try {
+        const status = await api.getStatus();
+        if (
+          observedConfigGeneration !== null &&
+          status.config_generation !== "" &&
+          status.config_generation !== observedConfigGeneration
+        ) {
+          observedConfigGeneration = status.config_generation;
+          restartBanner.hidden = true;
+          restartTimer = null;
+          return;
+        }
+      } catch {
+        // A restart briefly drops the listener; the next poll retries.
+      }
+      if (disposed) {
+        return;
+      }
+      restartTimer = setTimeout(() => void poll(), 1_000);
+    };
+    void poll();
+  };
 
   const runApply = async (): Promise<void> => {
     if (applying) {
@@ -212,6 +238,7 @@ function mountLiveShell(
       overlay.finish();
       if (outcome.restart_required) {
         restartBanner.hidden = false;
+        watchForRestart();
       }
       toasts.show(
         outcome.restart_required
@@ -301,35 +328,10 @@ function mountLiveShell(
   };
   const unsubscribe = store.subscribe(renderPendingState);
 
-  // Top progress strip [Adapted: LocalAI]: a thin lava-gradient bar at
-  // the very top of the window while any download is active, fed by
-  // the global download store so it survives view navigation. The same
-  // subscription drives the Downloads tab's active-count badge.
-  const strip = document.createElement("div");
-  strip.className = "progress-strip global-progress";
-  strip.hidden = true;
-  const stripBar = document.createElement("div");
-  stripBar.className = "progress-strip-bar";
-  strip.append(stripBar);
-  // In panel mode every newly active download is announced to the
-  // workshop, whose status bar owns the visible progress story.
-  let lastActiveCount = 0;
-  const renderStrip = (): void => {
-    const active = downloadStore.active();
-    if (bridge !== null && active.length > lastActiveCount) {
-      bridge.notifyAction("download-started");
-    }
-    lastActiveCount = active.length;
-    strip.hidden = active.length === 0;
-    stripBar.style.setProperty("--progress", String(downloadStore.overallFraction()));
-    tabBar.setDownloadsBadge(active.length);
-  };
-  const unsubscribeDownloads = downloadStore.subscribe(renderStrip);
-
   const bannerBox = document.createElement("div");
   bannerBox.className = "banner-stack";
   bannerBox.append(restartBanner, banner);
-  const main = mountChrome(root, tabBar.element, [toasts.element], bannerBox, strip);
+  const main = mountChrome(root, tabBar.element, [toasts.element], bannerBox);
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
   const modelsView = createModelsView({ store, api, toasts });
@@ -337,11 +339,10 @@ function mountLiveShell(
   const discoverView = createDiscoverView({
     api,
     hf: new HfApi(api),
-    downloads: downloadStore,
+    store,
     toasts,
     fetchFn: hubFetch,
   });
-  const downloadsView = createDownloadsView({ api, downloads: downloadStore, toasts });
   const secretsView = createSecretsView({ store, api, toasts });
   const profilesView = createProfilesView({
     store,
@@ -361,7 +362,6 @@ function mountLiveShell(
     views: {
       models: (target, match) => modelsView.mount(target, match.detail),
       discover: (target) => discoverView.mount(target),
-      downloads: (target) => downloadsView.mount(target),
       profiles: (target, match) => profilesView.mount(target, match.detail),
       secrets: (target) => secretsView.mount(target),
       settings: (target, match) => settingsView.mount(target, match.detail),
@@ -370,15 +370,17 @@ function mountLiveShell(
 
   void api
     .getStatus()
-    .then((status) => switcher.setActiveProfile(status.profile))
+    .then((status) => {
+      observedConfigGeneration = status.config_generation;
+      switcher.setActiveProfile(status.profile);
+    })
     .catch(() => {
       // The dot already went red via onHealth; a 401 already routed to
       // the key prompt via onUnauthorized.
     });
   void store.load();
   // The live progress stream: while an apply is in flight, stage-shaped
-  // events feed the overlay; downloads consume the same stream once
-  // that surface exists. Subscribing at boot keeps the shell an
+  // events feed the overlay. Subscribing at boot keeps the shell an
   // independent subscriber whether or not the workshop is connected.
   // Panel mode never subscribes: the workshop already consumes the same
   // stream and owns all progress display.
@@ -395,10 +397,13 @@ function mountLiveShell(
         })
       : () => undefined;
   return () => {
+    disposed = true;
     stopRouter();
     stopProgress();
     unsubscribe();
-    unsubscribeDownloads();
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+    }
   };
 }
 
@@ -437,7 +442,6 @@ function mountChrome(
   header: HTMLElement,
   fixed: HTMLElement[],
   banner?: HTMLElement,
-  strip?: HTMLElement,
 ): HTMLElement {
   const main = document.createElement("main");
   main.id = "main";
@@ -457,9 +461,6 @@ function mountChrome(
   });
 
   const parts: HTMLElement[] = [skip];
-  if (strip) {
-    parts.push(strip);
-  }
   parts.push(header);
   if (banner) {
     parts.push(banner);

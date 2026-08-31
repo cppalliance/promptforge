@@ -89,7 +89,10 @@ test("the System metric tiles render from the snapshot with the vendor chip", as
   assert.equal(chip.style.color, "rgb(118, 185, 0)", "the NVIDIA chip is #76B900");
 
   const disk = root.querySelector(".metric-disk");
-  assert.match(disk.querySelector(".metric-value").textContent, /700 GiB \/ 4\.0 TiB/);
+  assert.match(
+    disk.querySelector(".metric-value").textContent,
+    /700\u00a0GiB \/ 4\.0\u00a0TiB/,
+  );
   assert.match(disk.querySelector(".metric-sub").textContent, /C:\/pf\/cache/);
 
   assert.ok(root.querySelector(".gpu-devices"), "the GPU Devices section renders");

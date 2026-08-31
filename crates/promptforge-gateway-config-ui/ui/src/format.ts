@@ -1,6 +1,5 @@
 // Shared display formatting for byte sizes and file paths. A root
-// module (like router.ts) so every layer may import it; extracted when
-// the Downloads view would have added a fourth verbatim copy.
+// module (like router.ts) so every layer may import it.
 
 /** Human-readable byte size (GiB/MiB/KiB). */
 export function formatBytes(bytes: number): string {
@@ -11,7 +10,7 @@ export function formatBytes(bytes: number): string {
     value /= 1024;
     unit += 1;
   }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)}\u00a0${units[unit]}`;
 }
 
 /** The last path segment (either separator); "" for a trailing separator. */

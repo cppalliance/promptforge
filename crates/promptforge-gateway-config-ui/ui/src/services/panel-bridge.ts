@@ -18,7 +18,7 @@ export interface PanelContext {
 }
 
 /** The actions the shell announces to the workshop's status bar. */
-export type PanelAction = "apply" | "revert" | "download-started";
+export type PanelAction = "apply" | "revert";
 
 /** The window surface the bridge needs; tests hand in a jsdom window. */
 export interface BridgeWindow {
@@ -38,7 +38,7 @@ export interface PanelBridgeOptions {
   origin: string;
   /** Outgoing-post seam; production posts to the parent at the pinned origin. */
   post?: (message: unknown) => void;
-  /** Reply deadline per bridged call; the default covers everything but downloads. */
+  /** Reply deadline per bridged call. */
   timeoutMs?: number;
 }
 

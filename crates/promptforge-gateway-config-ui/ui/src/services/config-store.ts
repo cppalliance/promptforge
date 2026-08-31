@@ -8,7 +8,7 @@
 // through as the "***" the gateway sent, so no real secret ever leaves
 // or re-enters the browser.
 
-import type { DirtyReport, GatewayApi, OrphanFile } from "./gateway-api";
+import type { CacheListEntry, DirtyReport, GatewayApi, OrphanFile } from "./gateway-api";
 
 /** Which TOML array a model entry lives in. */
 export type ModelSource = "local" | "remote";
@@ -153,6 +153,8 @@ export class ConfigStore {
   dirty: DirtyReport = { dirty: false, pending_files: [], changed_sections: [] };
   /** Unconfigured cache files from the latest refresh. */
   orphans: OrphanFile[] = [];
+  /** Cache metadata used for per-model file status. */
+  cache: CacheListEntry[] = [];
   /** The active profile's name, from `GET /admin/status`. */
   activeProfile = "";
 
@@ -167,6 +169,8 @@ export class ConfigStore {
   private drafts: { kind: ModelSource; data: EntryData }[] = [];
   /** Whether the one-time inherited-edit note has been shown. */
   private inheritNoteShown = false;
+  /** Serializes full-config writes started by Discover. */
+  private stageTail: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
 
   constructor(api: GatewayApi) {
@@ -188,19 +192,21 @@ export class ConfigStore {
   /** Loads everything the models view needs; failures land in `loadError`. */
   async load(): Promise<void> {
     try {
-      const [running, pending, dirty, orphans, status] = await Promise.all([
+      const [running, pending, dirty, orphans, cache, status] = await Promise.all([
         this.api.getConfig(),
         this.api.getConfigPending(),
         this.api.getConfigDirty(),
         // Headless builds lack /admin/orphans (local feature); the list
         // degrades to empty instead of failing the whole load.
         this.api.getOrphans().catch(() => [] as OrphanFile[]),
+        this.api.listCache().catch(() => [] as CacheListEntry[]),
         this.api.getStatus(),
       ]);
       this.running = running;
       this.pending = pending;
       this.dirty = dirty;
-      this.orphans = orphans;
+      this.orphans = visibleOrphans(orphans);
+      this.cache = cache;
       this.activeProfile = status.profile;
       this.runningModels = status.models;
       this.loadError = null;
@@ -227,13 +233,23 @@ export class ConfigStore {
     this.running = running;
     this.activeProfile = status.profile;
     this.runningModels = status.models;
-    await this.refreshPending();
+    await Promise.all([this.refreshPending(), this.refreshArtifacts()]);
   }
 
-  /** Re-reads the orphan list (after a cache delete). */
+  /** Re-reads the cache and orphan lists after adoption or deletion. */
   async refreshOrphans(): Promise<void> {
-    this.orphans = await this.api.getOrphans().catch(() => [] as OrphanFile[]);
+    await this.refreshArtifacts();
     this.notify();
+  }
+
+  /** Re-reads cache metadata and hides ArtifactStore bookkeeping. */
+  private async refreshArtifacts(): Promise<void> {
+    const [orphans, cache] = await Promise.all([
+      this.api.getOrphans().catch(() => [] as OrphanFile[]),
+      this.api.listCache().catch(() => [] as CacheListEntry[]),
+    ]);
+    this.orphans = visibleOrphans(orphans);
+    this.cache = cache;
   }
 
   /** The merged model catalog: pending entries plus unsaved drafts. */
@@ -290,6 +306,31 @@ export class ConfigStore {
   /** Finds one entry by name alone, for the `#/models/{name}` route. */
   findByName(name: string): ModelEntry | null {
     return this.models().find((entry) => entry.name === name) ?? null;
+  }
+
+  /** Cache metadata for a local model's source, when downloaded. */
+  cachedFile(entry: ModelEntry): CacheListEntry | null {
+    if (entry.kind !== "local") {
+      return null;
+    }
+    const source = entry.data["source"];
+    if (typeof source !== "string" || source === "") {
+      return null;
+    }
+    const normalized = source.replaceAll("\\", "/").toLocaleLowerCase();
+    const relative = normalized.replace(/^\.?\//, "");
+    return (
+      this.cache.find(
+        (cached) => {
+          const cachedPath = cached.path.replaceAll("\\", "/").toLocaleLowerCase();
+          return (
+            cached.source === source ||
+            cachedPath === normalized ||
+            cachedPath.endsWith(`/${relative}`)
+          );
+        },
+      ) ?? null
+    );
   }
 
   /** The profile's model allowlist, or null when every model is exposed. */
@@ -567,6 +608,37 @@ export class ConfigStore {
     return name;
   }
 
+  /** Stages a new local model directly into the pending config shadow. */
+  async stageLocalModel(data: EntryData): Promise<string> {
+    const operation = this.stageTail.then(async (): Promise<string> => {
+      const payload = this.buildConfigPayload();
+      const items = this.entriesOf(payload, "local_model");
+      const taken = new Set(this.models().map((entry) => entry.name));
+      const base = String(data["name"] ?? "new-local-model");
+      let name = base;
+      let counter = 2;
+      while (taken.has(name)) {
+        name = `${base}-${counter}`;
+        counter += 1;
+      }
+      items.push({ ...structuredClone(data), name });
+      payload["local_model"] = items;
+      const allowlist = payload["models"];
+      if (Array.isArray(allowlist)) {
+        allowlist.push(name);
+      }
+      await this.api.putConfig(payload);
+      await this.refreshPending();
+      this.notify();
+      return name;
+    });
+    this.stageTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   /** Discards a draft without saving it. */
   discardDraft(entry: ModelEntry): void {
     this.drafts = this.drafts.filter((draft) => draft.data !== entry.data);
@@ -736,4 +808,9 @@ export class ConfigStore {
 /** The edit-map key for one entry. */
 function entryKey(entry: ModelEntry): string {
   return `${entry.kind}:${entry.name}`;
+}
+
+/** Removes ArtifactStore marker files from a gateway response defensively. */
+function visibleOrphans(orphans: OrphanFile[]): OrphanFile[] {
+  return orphans.filter((orphan) => !orphan.path.toLocaleLowerCase().endsWith(".verified"));
 }

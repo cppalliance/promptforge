@@ -80,8 +80,18 @@
 	.input:hover {
 		background: rgba(232, 232, 232, 0.08);
 	}
+	textarea.input {
+		height: auto;
+		padding-block: 0.625rem;
+		border-radius: 0.75rem;
+	}
 
 	/* Select trigger: same pill-and-soft-surface family as .input. */
+	.dropdown-control {
+		position: relative;
+		display: inline-flex;
+		min-width: 0;
+	}
 	.select {
 		display: inline-flex;
 		align-items: center;
@@ -96,8 +106,20 @@
 		font-size: 0.8125rem;
 		cursor: pointer;
 	}
+	.select::after {
+		content: "";
+		width: 0.4rem;
+		height: 0.4rem;
+		border-inline-end: 1px solid currentcolor;
+		border-block-end: 1px solid currentcolor;
+		transform: translateY(-0.125rem) rotate(45deg);
+	}
 	.select:hover {
 		background: rgba(232, 232, 232, 0.08);
+	}
+	.select:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 	.select-sm {
 		height: 2rem;
@@ -131,6 +153,17 @@
 	}
 	.menu-item[aria-selected="true"] {
 		background: var(--accent-subtle, rgba(224, 90, 43, 0.15));
+	}
+	.dropdown-menu {
+		position: absolute;
+		inset-block-start: calc(100% + 0.25rem);
+		inset-inline-start: 0;
+		z-index: 40;
+		max-height: min(18rem, 50vh);
+		overflow-y: auto;
+	}
+	.dropdown-menu[hidden] {
+		display: none;
 	}
 
 	/* Switch: 32x18.4 track with a 16px thumb (.switch-sm: 24x14 with
@@ -204,7 +237,11 @@
 	.slider::-webkit-slider-runnable-track {
 		height: 4px;
 		border-radius: 9999px;
-		background: rgb(255 255 255 / 0.08);
+		background: linear-gradient(
+			to right,
+			var(--text-secondary, #888888) calc(var(--slider-progress, 0) * 100%),
+			rgb(255 255 255 / 0.08) calc(var(--slider-progress, 0) * 100%)
+		);
 	}
 	.slider::-webkit-slider-thumb {
 		appearance: none;
