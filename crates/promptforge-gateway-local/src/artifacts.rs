@@ -23,6 +23,7 @@ pub mod cuda_bundle;
 mod digest;
 mod download;
 mod progress;
+mod staging;
 mod verified;
 
 use std::fs::{self, File, OpenOptions};

@@ -137,6 +137,30 @@ pub enum LocalError {
         reason: String,
     },
 
+    /// An explicit `builtin:<family>` value did not name a bundled family.
+    #[error(
+        "local model `{model}` requests unknown built-in chat-template family `{family}`; set `chat_template_file` to a custom Jinja path or `builtin:<family>` with one of: {valid_families}"
+    )]
+    UnknownChatTemplateFamily {
+        /// The affected configured model.
+        model: String,
+        /// The unknown family spelling.
+        family: String,
+        /// Canonical bundled family names.
+        valid_families: String,
+    },
+
+    /// A chat model had no explicit, known-override, or embedded template.
+    #[error(
+        "local model `{model}` has no usable chat template; set `chat_template_file` to a custom Jinja path or `builtin:<family>` ({valid_families}), or use a GGUF with a non-empty `tokenizer.chat_template`"
+    )]
+    MissingChatTemplate {
+        /// The affected configured model.
+        model: String,
+        /// Canonical bundled family names accepted by `builtin:<family>`.
+        valid_families: String,
+    },
+
     /// The cache root could not be made owner-private (ART-006).
     ///
     /// Enforced on every platform: a Unix filesystem mode (`0700`) or a Windows

@@ -22,6 +22,7 @@ use promptforge_progress::ProgressHandle;
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer};
 use crate::dialect::resolve_local_dialect;
 use crate::error::LocalError;
+use crate::launch_templates::resolve_chat_template_file;
 use crate::server::{LaunchOptions, ServeMode, ServerGuard, SpeculativeLaunch};
 use crate::sidecar;
 use crate::upstream::LocalUpstream;
@@ -314,7 +315,7 @@ fn start_impl(
             maybe_write_sidecar(&store, local_model.source(), &model_path);
 
             let admission = resolve_admission(&dominion_queues, local_model)?;
-            let mut options = launch_options(local_model, admission.parallel);
+            let mut options = launch_options_for(&store, local_model, &model_path, &admission)?;
             options.path_prefix.clone_from(&server.path_prefix);
             provision_companions(&store, local_model, &mut options)?;
             let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
@@ -536,7 +537,7 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_k: model.cache_type_k().to_owned(),
         cache_type_v: model.cache_type_v().to_owned(),
         think: !matches!(model.thinking(), ThinkingMode::Never),
-        chat_template_file: model.chat_template_file().map(PathBuf::from),
+        chat_template_file: None,
         serve_mode: match model.kind() {
             ModelKind::Embedding => ServeMode::Embeddings,
             ModelKind::Classifier => ServeMode::Reranking,
@@ -547,6 +548,17 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         multimodal_projector: None,
         path_prefix: Vec::new(),
     }
+}
+
+fn launch_options_for(
+    store: &ArtifactStore,
+    model: &LocalModelConfig,
+    model_path: &Path,
+    admission: &LocalAdmission,
+) -> Result<LaunchOptions, LocalError> {
+    let mut options = launch_options(model, admission.parallel);
+    options.chat_template_file = resolve_chat_template_file(store, model, model_path)?;
+    Ok(options)
 }
 
 /// Resolves a model's declared companions through the same `ensure_model`
@@ -606,7 +618,7 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
         // current, usable sidecar. An unversioned, oversized, or template-less
         // sidecar falls through and is rewritten.
         match sidecar::read_sidecar(model_path) {
-            Ok(Some(meta)) if meta.chat_template.is_some() => {
+            Ok(Some(meta)) if sidecar_is_current(&meta, source) => {
                 tracing::debug!(path = %sidecar_file.display(), "valid sidecar already exists");
                 return;
             }
@@ -627,32 +639,47 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
         Ok(c) => c,
         Err(e) => {
             tracing::debug!(error = %e, "could not build sidecar HTTP client");
+            write_sidecar_metadata(source, model_path, None, None);
             return;
         }
     };
 
     let bearer = artifacts::hub_bearer_token_from_env();
-    let chat_template = match sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref()) {
-        Ok(Some(template)) => template,
-        Ok(None) => {
-            tracing::debug!(source = %source, "no chat_template from HF metadata");
-            return;
-        }
-        Err(error) => {
-            // Deliberate downgrade (SIDECAR-006): the sidecar is supplementary,
-            // so a fetch failure is logged and skipped, not propagated.
-            tracing::debug!(source = %source, error = %error, "sidecar fetch failed");
-            return;
-        }
-    };
+    let (chat_template, fetched) =
+        match sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref()) {
+            Ok(Some(template)) => (Some(template), Some(sidecar::utc_now_iso())),
+            Ok(None) => {
+                tracing::debug!(source = %source, "no chat_template from HF metadata");
+                (None, Some(sidecar::utc_now_iso()))
+            }
+            Err(error) => {
+                // Deliberate downgrade (SIDECAR-006): the sidecar is supplementary,
+                // so a fetch failure is logged and skipped, not propagated. Source
+                // provenance is still persisted for conservative model-ID matching.
+                tracing::debug!(source = %source, error = %error, "sidecar fetch failed");
+                (None, None)
+            }
+        };
+    write_sidecar_metadata(source, model_path, fetched, chat_template);
+}
 
+fn sidecar_is_current(metadata: &sidecar::SidecarMeta, source: &str) -> bool {
+    metadata.chat_template.is_some() && metadata.source.as_deref() == Some(source)
+}
+
+fn write_sidecar_metadata(
+    source: &str,
+    model_path: &Path,
+    fetched: Option<String>,
+    chat_template: Option<String>,
+) {
     let meta = sidecar::SidecarMeta {
         source: Some(source.to_owned()),
-        fetched: Some(sidecar::utc_now_iso()),
-        chat_template: Some(chat_template),
+        fetched,
+        chat_template,
         card: None,
     };
-
+    let sidecar_file = sidecar::sidecar_path(model_path);
     if let Err(e) = sidecar::write_sidecar(model_path, &meta) {
         tracing::debug!(
             path = %sidecar_file.display(),
@@ -700,6 +727,44 @@ fn startup_interrupt_flag() -> Arc<AtomicBool> {
 mod tests {
     use super::*;
     use promptforge_gateway_config::Config;
+
+    #[test]
+    fn sidecar_keeps_model_id_provenance_when_remote_template_is_unavailable() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let model_path = temp.path().join("model.gguf");
+        let source = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/model.gguf";
+
+        write_sidecar_metadata(source, &model_path, None, None);
+
+        let metadata = sidecar::read_sidecar(&model_path)
+            .expect("read provenance sidecar")
+            .expect("sidecar exists");
+        assert_eq!(
+            metadata.source_model_id().as_deref(),
+            Some("unsloth/gemma-4-E2B-it-GGUF")
+        );
+        assert!(metadata.fetched.is_none());
+        assert!(metadata.chat_template.is_none());
+    }
+
+    #[test]
+    fn sidecar_cache_hit_requires_template_and_matching_source_provenance() {
+        let source = "https://huggingface.co/org/model/resolve/main/model.gguf";
+        let mut metadata = sidecar::SidecarMeta {
+            source: Some(source.to_owned()),
+            fetched: None,
+            chat_template: Some("{{ messages }}".to_owned()),
+            card: None,
+        };
+        assert!(sidecar_is_current(&metadata, source));
+
+        metadata.source =
+            Some("https://huggingface.co/other/model/resolve/main/model.gguf".to_owned());
+        assert!(!sidecar_is_current(&metadata, source));
+        metadata.source = Some(source.to_owned());
+        metadata.chat_template = None;
+        assert!(!sidecar_is_current(&metadata, source));
+    }
 
     #[test]
     fn empty_local_models_starts_noop_runtime() {

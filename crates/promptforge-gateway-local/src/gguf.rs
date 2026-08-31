@@ -110,22 +110,35 @@ pub fn read_model_info(root: &Path, relative: &Path) -> Result<ModelInfo, LocalE
     }
     let path = root.join(relative);
     validate_cache_path(root, &path)?;
-    let file = File::open(&path).map_err(|source| LocalError::Io {
+    read_model_info_path(&path)
+}
+
+/// Reads model facts from an already-provisioned GGUF path.
+///
+/// Provisioning has already applied the source and cache checks appropriate
+/// to the path. This seam lets launch-time template resolution inspect both
+/// cache residents and explicit local path sources.
+///
+/// # Errors
+/// Returns [`LocalError::MalformedGguf`] for an invalid header and
+/// [`LocalError::Io`] when the file cannot be opened or read.
+pub(crate) fn read_model_info_path(path: &Path) -> Result<ModelInfo, LocalError> {
+    let file = File::open(path).map_err(|source| LocalError::Io {
         operation: "open GGUF file",
-        path: path.clone(),
+        path: path.to_owned(),
         source,
     })?;
     let len = file
         .metadata()
         .map_err(|source| LocalError::Io {
             operation: "inspect GGUF file",
-            path: path.clone(),
+            path: path.to_owned(),
             source,
         })?
         .len();
     let mut reader = HeaderReader {
         inner: BufReader::new(file),
-        path,
+        path: path.to_owned(),
         pos: 0,
         len,
     };
