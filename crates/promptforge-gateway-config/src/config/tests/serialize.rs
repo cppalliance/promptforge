@@ -3,7 +3,7 @@ use super::super::*;
 /// A fixture exercising every config struct, every enum spelling, and all
 /// three `Secret` fields.
 const FULL: &str = r#"
-models = ["gpt", "gemma"]
+config-version = 2
 
 [server]
 bind = "127.0.0.1:8081"
@@ -79,6 +79,14 @@ draft_max = 7
 source = "/models/gemma-mmproj.gguf"
 sha256 = "b52f438017efaec5debf1c0d8be690571e212a07c312f1102bbce927258cfc32"
 
+[[stt_model]]
+name = "whisper-base-en"
+role = "interim"
+source = "https://example.com/ggml-base.en.bin"
+sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+vram_gb = 1.0
+dominion = "gpu0"
+
 [tools.web_search]
 provider = "brave"
 api_key = "search-secret-value"
@@ -94,20 +102,21 @@ strip_tracking = false
 bind = "127.0.0.1:7999"
 open_browser = true
 
-[workshop.voice]
-interim_model = "models/tiny.bin"
-final_model = "models/small.bin"
-interim_source = "https://example.com/tiny.bin"
-final_source = "https://example.com/small.bin"
+[workshop.stt]
 window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
 
 [workshop.tape]
 path = "session.jsonl"
+
+[[profile]]
+name = "work"
+models = ["gpt", "gemma", "whisper-base-en"]
 "#;
 
 const MINIMAL: &str = r#"
+config-version = 2
 [server]
 bind = "127.0.0.1:8081"
 api_key = "k"
@@ -144,7 +153,8 @@ fn serialized_shape_uses_the_toml_key_names() {
         "endpoint",
         "model",
         "local_model",
-        "models",
+        "stt_model",
+        "profile",
         "tools",
         "workshop",
     ] {
@@ -203,6 +213,8 @@ fn enums_round_trip_with_their_toml_spellings() {
     check(ModelKind::Chat, "chat");
     check(ModelKind::Embedding, "embedding");
     check(ModelKind::Classifier, "classifier");
+    check(SttRole::Interim, "interim");
+    check(SttRole::Final, "final");
 }
 
 #[test]

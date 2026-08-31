@@ -2,9 +2,8 @@
 
 /// A configuration load or validation failure.
 ///
-/// Paths are kept as [`PathBuf`](std::path::PathBuf) and the include chain as a
-/// `Vec<PathBuf>` (ERR-006); the TOML parse cause is preserved as a private
-/// `#[source]` rather than flattened into a string (ERR-002).
+/// Paths stay as [`PathBuf`](std::path::PathBuf), and TOML parse causes remain
+/// private `#[source]` values rather than flattened strings.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub(crate) enum ConfigError {
@@ -45,24 +44,21 @@ pub(crate) enum ConfigError {
     #[error("invalid config: {0}")]
     Validation(String),
 
-    /// An `include` chain revisited a file already being resolved.
+    /// A removed layout feature was found with an actionable source location.
     #[non_exhaustive]
-    #[error("include cycle at {} (chain: {})", path.display(), render_chain(chain))]
-    IncludeCycle {
-        /// The path that closed the cycle.
+    #[error(
+        "{}:{line}: removed config key `{key}`; {replacement}",
+        path.display()
+    )]
+    HardBreak {
+        /// The file containing the removed layout.
         path: std::path::PathBuf,
-        /// The include stack when the cycle was detected.
-        chain: Vec<std::path::PathBuf>,
-    },
-
-    /// An `include` chain exceeded the maximum nesting depth.
-    #[non_exhaustive]
-    #[error("include depth exceeded {max} at {}", path.display())]
-    IncludeDepth {
-        /// The path that would have been loaded next.
-        path: std::path::PathBuf,
-        /// The configured maximum depth.
-        max: usize,
+        /// One-based source line.
+        line: usize,
+        /// Removed key or layout feature.
+        key: &'static str,
+        /// One-sentence replacement.
+        replacement: &'static str,
     },
 
     /// A shadow file could not be written.
@@ -81,13 +77,4 @@ pub(crate) enum ConfigError {
 fn parse_location(path: Option<&std::path::PathBuf>) -> String {
     path.map(|p| format!(" ({})", p.display()))
         .unwrap_or_default()
-}
-
-/// Renders an include chain as `a -> b -> c`.
-fn render_chain(chain: &[std::path::PathBuf]) -> String {
-    chain
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>()
-        .join(" -> ")
 }

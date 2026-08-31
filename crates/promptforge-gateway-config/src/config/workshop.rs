@@ -1,10 +1,8 @@
 //! The optional `[workshop]` section: the embedded workshop UI server the
 //! gateway can host on a second loopback listener.
 //!
-//! The section is boot-only: like `[server]`, it lives in the boot config,
-//! and the gateway refuses a profile whose merged `[workshop]` differs from
-//! the boot file's. There is deliberately no `[workshop.gateway]` sub-table:
-//! the hosting gateway derives the workshop's client URL from its own
+//! There is deliberately no `[workshop.gateway]` sub-table: the hosting
+//! gateway derives the workshop's client URL from its own
 //! `[server]` bind ([`ServerConfig::client_url`](super::ServerConfig::client_url))
 //! and reuses the same api_key, so no credential is duplicated and none can
 //! drift.
@@ -16,11 +14,11 @@ use serde::{Deserialize, Serialize};
 
 /// Default sliding-window length for interim transcription, in seconds.
 /// Mirrors the workshop server's own default.
-const DEFAULT_VOICE_WINDOW_SECONDS: u64 = 15;
+const DEFAULT_STT_WINDOW_SECONDS: u64 = 15;
 
 /// Default interval between interim transcriptions, in milliseconds.
 /// Mirrors the workshop server's own default.
-const DEFAULT_VOICE_INTERVAL_MS: u64 = 500;
+const DEFAULT_STT_INTERVAL_MS: u64 = 500;
 
 /// The tape filename used when `[workshop.tape]` does not name one.
 /// Mirrors the workshop server's own default.
@@ -44,10 +42,10 @@ pub struct WorkshopConfig {
     /// it is serving. Defaults to false.
     #[serde(default)]
     open_browser: bool,
-    /// Voice transcription settings. Absent when no `[workshop.voice]`
+    /// Speech-to-text capture settings. Absent when no `[workshop.stt]`
     /// section is present.
     #[serde(default)]
-    voice: Option<WorkshopVoiceConfig>,
+    stt: Option<WorkshopSttConfig>,
     /// Session tape settings. Absent when no `[workshop.tape]` section is
     /// present.
     #[serde(default)]
@@ -61,6 +59,7 @@ impl WorkshopConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -84,6 +83,7 @@ impl WorkshopConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -100,28 +100,29 @@ impl WorkshopConfig {
         self.open_browser
     }
 
-    /// Returns the `[workshop.voice]` settings, or `None` when the section
+    /// Returns the `[workshop.stt]` settings, or `None` when the section
     /// is absent.
     ///
     /// # Examples
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
     /// #
-    /// # [workshop.voice]
+    /// # [workshop.stt]
     /// # window_seconds = 8
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
     /// let workshop = config.workshop().expect("workshop section present");
-    /// assert!(workshop.voice().is_some());
+    /// assert!(workshop.stt().is_some());
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
-    pub fn voice(&self) -> Option<&WorkshopVoiceConfig> {
-        self.voice.as_ref()
+    pub fn stt(&self) -> Option<&WorkshopSttConfig> {
+        self.stt.as_ref()
     }
 
     /// Returns the `[workshop.tape]` settings, or `None` when the section is
@@ -131,6 +132,7 @@ impl WorkshopConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -163,6 +165,7 @@ impl WorkshopConfig {
     /// # use promptforge_gateway_config::Config;
     /// # use std::path::{Path, PathBuf};
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -191,25 +194,29 @@ impl WorkshopConfig {
     }
 }
 
-/// The `[workshop.voice]` section: whisper model paths and the interim
-/// loop's window and cadence, mirroring the workshop server's own voice
-/// settings.
+/// The `[workshop.stt]` section: speech capture window, cadence, and bias.
+///
+/// Model sources and roles live in global `[[stt_model]]` catalog entries and
+/// profiles enable them through membership.
+///
+/// # Examples
+/// ```
+/// use promptforge_gateway_config::Config;
+///
+/// let config = Config::from_toml_str(
+///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///      [workshop.stt]\nwindow_seconds = 8\n",
+/// )?;
+/// assert_eq!(
+///     config.workshop().and_then(|workshop| workshop.stt()).map(|stt| stt.window_seconds()),
+///     Some(8)
+/// );
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 #[non_exhaustive]
-pub struct WorkshopVoiceConfig {
-    /// Path to the whisper model for interim (streaming) transcription.
-    /// Empty disables transcription.
-    interim_model: PathBuf,
-    /// Path to the whisper model for the pipelined final pass. Empty
-    /// disables the final pass.
-    final_model: PathBuf,
-    /// URL the interim model can be downloaded from. Empty means no known
-    /// source.
-    interim_source: String,
-    /// URL the final-pass model can be downloaded from. Empty means no
-    /// known source.
-    final_source: String,
+pub struct WorkshopSttConfig {
     /// Seconds of trailing audio each interim pass transcribes.
     window_seconds: u64,
     /// Milliseconds between interim passes while a take is recording.
@@ -218,135 +225,34 @@ pub struct WorkshopVoiceConfig {
     vocabulary: Vec<String>,
 }
 
-impl Default for WorkshopVoiceConfig {
-    fn default() -> WorkshopVoiceConfig {
-        WorkshopVoiceConfig {
-            interim_model: PathBuf::new(),
-            final_model: PathBuf::new(),
-            interim_source: String::new(),
-            final_source: String::new(),
-            window_seconds: DEFAULT_VOICE_WINDOW_SECONDS,
-            interval_ms: DEFAULT_VOICE_INTERVAL_MS,
+impl Default for WorkshopSttConfig {
+    fn default() -> WorkshopSttConfig {
+        WorkshopSttConfig {
+            window_seconds: DEFAULT_STT_WINDOW_SECONDS,
+            interval_ms: DEFAULT_STT_INTERVAL_MS,
             vocabulary: Vec::new(),
         }
     }
 }
 
-impl WorkshopVoiceConfig {
-    /// Returns the path to the whisper model for interim transcription
-    /// (empty when transcription is disabled).
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # use std::path::Path;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.voice]
-    /// # interim_model = "models/ggml-tiny.en.bin"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.interim_model(), Path::new("models/ggml-tiny.en.bin"));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn interim_model(&self) -> &Path {
-        &self.interim_model
-    }
-
-    /// Returns the path to the whisper model for the pipelined final pass
-    /// (empty when the final pass is disabled).
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # use std::path::Path;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.voice]
-    /// # final_model = "models/ggml-small.en.bin"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.final_model(), Path::new("models/ggml-small.en.bin"));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn final_model(&self) -> &Path {
-        &self.final_model
-    }
-
-    /// Returns the URL the interim model can be downloaded from (empty when
-    /// no source is known).
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.voice]
-    /// # interim_source = "https://example.com/tiny.bin"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.interim_source(), "https://example.com/tiny.bin");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn interim_source(&self) -> &str {
-        &self.interim_source
-    }
-
-    /// Returns the URL the final-pass model can be downloaded from (empty
-    /// when no source is known).
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.voice]
-    /// # final_source = "https://example.com/small.bin"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.final_source(), "https://example.com/small.bin");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn final_source(&self) -> &str {
-        &self.final_source
-    }
-
+impl WorkshopSttConfig {
     /// Returns the seconds of trailing audio each interim pass transcribes.
     ///
     /// # Examples
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
     /// #
-    /// # [workshop.voice]
+    /// # [workshop.stt]
     /// # window_seconds = 8
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.window_seconds(), 8);
+    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
+    /// assert_eq!(stt.window_seconds(), 8);
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
@@ -361,16 +267,17 @@ impl WorkshopVoiceConfig {
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
     /// #
-    /// # [workshop.voice]
+    /// # [workshop.stt]
     /// # interval_ms = 250
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.interval_ms(), 250);
+    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
+    /// assert_eq!(stt.interval_ms(), 250);
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
@@ -378,23 +285,23 @@ impl WorkshopVoiceConfig {
         self.interval_ms
     }
 
-    /// Returns the domain terms whisper is biased toward (empty disables
-    /// biasing).
+    /// Returns the domain terms whisper is biased toward.
     ///
     /// # Examples
     /// ```
     /// # use promptforge_gateway_config::Config;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
     /// #
-    /// # [workshop.voice]
+    /// # [workshop.stt]
     /// # vocabulary = ["MCP", "GGUF"]
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
-    /// let voice = config.workshop().and_then(|w| w.voice()).expect("voice present");
-    /// assert_eq!(voice.vocabulary(), ["MCP", "GGUF"]);
+    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
+    /// assert_eq!(stt.vocabulary(), ["MCP", "GGUF"]);
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
@@ -433,6 +340,7 @@ impl WorkshopTapeConfig {
     /// # use promptforge_gateway_config::Config;
     /// # use std::path::Path;
     /// # let toml = r#"
+    /// # config-version = 2
     /// # [server]
     /// # bind = "127.0.0.1:8080"
     /// # api_key = "secret"
@@ -459,7 +367,7 @@ mod tests {
     use crate::config::Config;
 
     /// A minimal valid `[server]` to prefix workshop fixtures with.
-    const BASE: &str = "[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n";
+    const BASE: &str = "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n";
 
     fn parse(extra: &str) -> Config {
         Config::from_toml_str(&format!("{BASE}{extra}")).expect("fixture parses")
@@ -476,7 +384,7 @@ mod tests {
         let workshop = config.workshop().expect("workshop section present");
         assert_eq!(workshop.bind().to_string(), "127.0.0.1:7910");
         assert!(!workshop.open_browser());
-        assert!(workshop.voice().is_none());
+        assert!(workshop.stt().is_none());
         assert!(workshop.tape().is_none());
     }
 
@@ -488,11 +396,7 @@ mod tests {
 bind = "127.0.0.1:7999"
 open_browser = true
 
-[workshop.voice]
-interim_model = "models/tiny.bin"
-final_model = "models/small.bin"
-interim_source = "https://example.com/tiny.bin"
-final_source = "https://example.com/small.bin"
+[workshop.stt]
 window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
@@ -504,39 +408,31 @@ path = "session.jsonl"
         let workshop = config.workshop().expect("workshop section present");
         assert_eq!(workshop.bind().to_string(), "127.0.0.1:7999");
         assert!(workshop.open_browser());
-        let voice = workshop.voice().expect("voice present");
-        assert_eq!(voice.interim_model(), Path::new("models/tiny.bin"));
-        assert_eq!(voice.final_model(), Path::new("models/small.bin"));
-        assert_eq!(voice.interim_source(), "https://example.com/tiny.bin");
-        assert_eq!(voice.final_source(), "https://example.com/small.bin");
-        assert_eq!(voice.window_seconds(), 8);
-        assert_eq!(voice.interval_ms(), 250);
-        assert_eq!(voice.vocabulary(), ["MCP", "GGUF"]);
+        let stt = workshop.stt().expect("stt present");
+        assert_eq!(stt.window_seconds(), 8);
+        assert_eq!(stt.interval_ms(), 250);
+        assert_eq!(stt.vocabulary(), ["MCP", "GGUF"]);
         let tape = workshop.tape().expect("tape present");
         assert_eq!(tape.path(), Path::new("session.jsonl"));
     }
 
     #[test]
-    fn workshop_voice_defaults_mirror_the_workshop_server() {
-        let config = parse("[workshop.voice]\n");
-        let voice = config
+    fn workshop_stt_defaults_match_capture_defaults() {
+        let config = parse("[workshop.stt]\n");
+        let stt = config
             .workshop()
-            .and_then(|workshop| workshop.voice())
-            .expect("voice present");
-        assert!(voice.interim_model().as_os_str().is_empty());
-        assert!(voice.final_model().as_os_str().is_empty());
-        assert!(voice.interim_source().is_empty());
-        assert!(voice.final_source().is_empty());
-        assert_eq!(voice.window_seconds(), 15);
-        assert_eq!(voice.interval_ms(), 500);
-        assert!(voice.vocabulary().is_empty());
+            .and_then(WorkshopConfig::stt)
+            .expect("stt present");
+        assert_eq!(stt.window_seconds(), 15);
+        assert_eq!(stt.interval_ms(), 500);
+        assert!(stt.vocabulary().is_empty());
     }
 
     #[test]
     fn workshop_rejects_unknown_fields_in_every_sub_table() {
         for section in [
             "[workshop]\nbogus = 1\n",
-            "[workshop.voice]\nbogus = 1\n",
+            "[workshop.stt]\nbogus = 1\n",
             "[workshop.tape]\nbogus = 1\n",
         ] {
             let error = Config::from_toml_str(&format!("{BASE}{section}"))
@@ -548,10 +444,12 @@ path = "session.jsonl"
     #[test]
     fn workshop_client_url_swaps_unspecified_bind_for_loopback() {
         let url = |bind: &str| {
-            Config::from_toml_str(&format!("[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"))
-                .expect("fixture parses")
-                .server()
-                .client_url()
+            Config::from_toml_str(&format!(
+                "config-version = 2\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+            ))
+            .expect("fixture parses")
+            .server()
+            .client_url()
         };
         assert_eq!(url("0.0.0.0:8081"), "http://127.0.0.1:8081");
         assert_eq!(url("[::]:8081"), "http://[::1]:8081");
@@ -560,10 +458,12 @@ path = "session.jsonl"
     #[test]
     fn workshop_client_url_keeps_reachable_binds() {
         let url = |bind: &str| {
-            Config::from_toml_str(&format!("[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"))
-                .expect("fixture parses")
-                .server()
-                .client_url()
+            Config::from_toml_str(&format!(
+                "config-version = 2\n[server]\nbind = \"{bind}\"\napi_key = \"k\"\n"
+            ))
+            .expect("fixture parses")
+            .server()
+            .client_url()
         };
         assert_eq!(url("127.0.0.1:8081"), "http://127.0.0.1:8081");
         assert_eq!(url("192.168.1.5:9000"), "http://192.168.1.5:9000");
@@ -612,8 +512,7 @@ path = "session.jsonl"
 bind = "127.0.0.1:7999"
 open_browser = true
 
-[workshop.voice]
-interim_model = "models/tiny.bin"
+[workshop.stt]
 window_seconds = 8
 vocabulary = ["MCP", "GGUF"]
 

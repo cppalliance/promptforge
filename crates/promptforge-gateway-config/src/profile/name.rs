@@ -1,13 +1,11 @@
-//! The [`ProfileName`] confinement type and its parse error.
+//! The [`ProfileName`] identifier type and its parse error.
 
 use std::path::Path;
 
-/// A validated profile name: exactly one normal path component with a non-empty
-/// UTF-8 stem.
+/// A validated profile name safe for URLs, state files, and operator labels.
 ///
-/// Rejects path separators, `.`, `..`, and the empty string, so a profile
-/// selection can never escape the configured profiles directory. This is the
-/// profile-switch confinement type.
+/// Rejects surrounding whitespace, path separators, `.`, `..`, and the empty
+/// string so one spelling remains safe in every profile-selection surface.
 ///
 /// # Examples
 /// ```
@@ -22,14 +20,18 @@ use std::path::Path;
 pub struct ProfileName(String);
 
 impl ProfileName {
-    /// Parse a profile name, confining it to a single normal path component.
+    /// Parses a profile name as one normal path component.
     ///
     /// # Errors
-    /// Returns [`ProfileNameError`] when `name` is empty, is `.` or `..`,
-    /// contains a path separator or NUL, or is not exactly one normal path
-    /// component.
+    /// Returns [`ProfileNameError`] when `name` has surrounding whitespace, is
+    /// empty, is `.` or `..`, contains a path separator or NUL, or is not
+    /// exactly one normal path component.
     pub fn parse(name: &str) -> Result<ProfileName, ProfileNameError> {
-        let name = name.trim();
+        if name != name.trim() {
+            return Err(ProfileNameError::new(
+                "profile name must not have surrounding whitespace",
+            ));
+        }
         if name.is_empty() {
             return Err(ProfileNameError::new("profile name must not be empty"));
         }
@@ -58,7 +60,7 @@ impl ProfileName {
 
     /// The validated name as a string slice.
     #[must_use]
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -104,12 +106,13 @@ mod tests {
     #[test]
     fn accepts_simple_names() {
         assert_eq!(ProfileName::parse("dev").unwrap().as_str(), "dev");
-        assert_eq!(ProfileName::parse("  prod  ").unwrap().as_str(), "prod");
     }
 
     #[test]
     fn rejects_traversal_and_separators() {
-        for bad in ["", ".", "..", "a/b", "a\\b", "../x", "x\0y"] {
+        for bad in [
+            "", " prod", "prod ", ".", "..", "a/b", "a\\b", "../x", "x\0y",
+        ] {
             assert!(ProfileName::parse(bad).is_err(), "should reject {bad:?}");
         }
     }

@@ -1,36 +1,32 @@
 //! Configuration for the PromptForge inference gateway.
 //!
-//! This crate owns everything needed to turn a `gateway.toml` (or a named
-//! profile with recursive `include` resolution) into a validated [`Config`]:
-//! TOML parsing, `${VAR}` environment interpolation over string leaves, and
-//! semantic validation. A [`Config`] cannot be constructed without validation,
-//! so downstream code never re-checks operator input.
+//! This crate owns everything needed to turn one version-2 `gateway.toml`
+//! plus its sibling profile state into a validated [`Config`]: TOML parsing,
+//! `${VAR}` interpolation, startup profile selection, and validation of every
+//! profile before any can run.
 //!
 //! It is deliberately free of the gateway's HTTP stack: consumers that only
 //! need to read a configuration (IDE tooling, config editors, CLIs) depend on
 //! this crate alone.
 //!
-//! Start at [`Config`]: [`Config::load`] reads a file with include resolution,
-//! [`Config::load_profile`] loads a named profile from a profiles directory,
-//! and [`Config::from_toml_str`] parses a TOML string.
-//! [`Config::load_profile_with_chain`] additionally returns the resolved
-//! include chain, and [`load_server`] and [`load_workshop`] read only a boot
-//! file's `[server]` and `[workshop]` sections (includes and interpolation,
-//! without full validation); [`load_boot_sections`] reads both in one pass.
-//! Failures are reported as the opaque
+//! Start at [`Config`]: [`Config::load`] reads the single file and resolves
+//! command-line, environment, or sibling-state selection, while
+//! [`Config::from_toml_str`] validates an unselected in-memory catalog.
+//! Removed include chains, profile directories, top-level allowlists, and
+//! `[workshop.voice]` fields produce hard-break diagnostics with file, key,
+//! and line. Failures are reported as the opaque
 //! [`ConfigError`]; classify them with [`ConfigError::kind`].
 //!
 //! Pending edits stage as shadow files beside the real ones
-//! (`default.toml` gains `default.toml.next`): [`save_profile_shadow`],
-//! [`save_include_shadow`], and [`save_boot_shadow`] validate the merged
-//! pending state before writing, [`write_shadow`] stages arbitrary sibling
-//! content (env files), and [`shadow_path`] names the shadow for any
-//! managed file. No save ever touches a real file. Reading the pending
-//! state back, [`load_pending_profile`] loads the chain with shadows
-//! preferred (provenance names the `.next` files), and [`pending_report`]
-//! summarizes which files carry shadows and which sections they change.
-//! [`promote_shadow`] is the explicit apply step: one atomic rename makes
-//! the shadow the real file.
+//! (`gateway.toml` gains `gateway.toml.next`):
+//! [`save_config_shadow`] validates a pending admin document and splits its
+//! `active_profile` into the sibling state shadow, [`write_shadow`] stages
+//! arbitrary sibling content, and [`shadow_path`] names either shadow.
+//! [`load_pending_config`] reads both shadows with the same selection rules,
+//! and [`pending_report`] summarizes changed sections.
+//! [`promote_shadow`] is the explicit apply step. It uses atomic replacement
+//! where the platform supports it and a failure-safe backup fallback
+//! elsewhere.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -41,7 +37,8 @@
 //! use promptforge_gateway_config::Config;
 //! use std::path::Path;
 //!
-//! let config = Config::load(Path::new("gateway.toml"))?;
+//! let inputs = promptforge_gateway_config::ProfileSelection::new(Some("work"), None);
+//! let config = Config::load(Path::new("gateway.toml"), &inputs)?;
 //! println!("{} models configured", config.models().len());
 //! # Ok::<(), promptforge_gateway_config::ConfigError>(())
 //! ```
@@ -50,18 +47,21 @@ mod api_error;
 mod config;
 mod error;
 mod profile;
+mod shadow;
 
 pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
     Capabilities, Config, DominionConfig, DominionKind, DraftTokenMax, DraftTokenMaxError,
     EndpointConfig, LocalConfig, LocalModelConfig, ModelConfig, ModelKind,
-    MultimodalProjectorConfig, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig,
-    SpeculationType, SpeculativeConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
-    WorkshopConfig, WorkshopTapeConfig, WorkshopVoiceConfig,
+    MultimodalProjectorConfig, ProfileConfig, Protocol, QueuePolicy, RECOMMENDED_STT_MODELS,
+    RecommendedSttModel, SearchProvider, Secret, ServerConfig, SpeculationType, SpeculativeConfig,
+    SttModelConfig, SttRole, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
+    WorkshopConfig, WorkshopSttConfig, WorkshopTapeConfig,
 };
 pub use crate::profile::{
-    PendingReport, ProfileName, ProfileNameError, list_profiles, load_boot_sections,
-    load_pending_profile, load_server, load_workshop, pending_report, pending_var_references,
-    promote_shadow, save_boot_shadow, save_include_shadow, save_profile_shadow, shadow_path,
-    write_shadow,
+    ProfileName, ProfileNameError, ProfileSelection, ProfileState, profile_state_path,
+};
+pub use crate::shadow::{
+    PendingReport, PendingShadows, load_pending_config, pending_report, pending_var_references,
+    promote_shadow, save_config_shadow, shadow_path, write_shadow,
 };

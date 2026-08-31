@@ -10,6 +10,7 @@ mod accessors;
 mod companion;
 mod imp;
 mod interpolate;
+mod stt;
 mod validate;
 mod workshop;
 
@@ -17,10 +18,12 @@ pub use companion::{
     DraftTokenMax, DraftTokenMaxError, MultimodalProjectorConfig, SpeculationType,
     SpeculativeConfig,
 };
+pub(crate) use imp::reject_profiles_directory;
 #[cfg(test)]
 pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
-pub use workshop::{WorkshopConfig, WorkshopTapeConfig, WorkshopVoiceConfig};
+pub use stt::{RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttRole};
+pub use workshop::{WorkshopConfig, WorkshopSttConfig, WorkshopTapeConfig};
 
 #[cfg(test)]
 use crate::error::ConfigError;
@@ -141,6 +144,8 @@ pub enum Protocol {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Config {
+    /// On-disk schema version.
+    version: u32,
     /// Server bind address and shared key.
     server: ServerConfig,
     /// Cache and binary settings for gateway-owned local inference.
@@ -149,28 +154,28 @@ pub struct Config {
     dominions: Vec<DominionConfig>,
     /// The configured backends.
     endpoints: Vec<EndpointConfig>,
-    /// The routing table from model name to remote backend.
+    /// The active profile's remote routing table.
     models: Vec<ModelConfig>,
-    /// Local generative models served by a managed `llama-server` child.
+    /// The active profile's local generative models.
     local_models: Vec<LocalModelConfig>,
-    /// The profile's top-level `models = [...]` allowlist: the catalog subset
-    /// the profile selected. `None` loads the full catalog.
-    model_allowlist: Option<Vec<String>>,
+    /// The active profile's speech-to-text models.
+    stt_models: Vec<SttModelConfig>,
+    /// Every remote model in the global catalog.
+    catalog_models: Vec<ModelConfig>,
+    /// Every local chat model in the global catalog.
+    catalog_local_models: Vec<LocalModelConfig>,
+    /// Every speech-to-text model in the global catalog.
+    catalog_stt_models: Vec<SttModelConfig>,
+    /// Pure-checklist profiles over the global catalog.
+    profiles: Vec<ProfileConfig>,
+    /// Selected profile index, absent for an unselected in-memory document.
+    active_profile: Option<usize>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     tools: Option<ToolsConfig>,
     /// Optional hosted-workshop configuration. Absent when no `[workshop]`
     /// section is present. Boot-only, like `[server]`.
     workshop: Option<WorkshopConfig>,
-    /// Which file each merged entry came from, recorded during include
-    /// resolution. Empty when the config was built without it (for example
-    /// [`Config::from_toml_str`]).
-    provenance: crate::profile::Provenance,
-    /// The loaded root file's own `include` array, verbatim and ordered as
-    /// written (the shadow's when a pending load preferred one). Empty when
-    /// the root declares no includes or the config was built without include
-    /// resolution (for example [`Config::from_toml_str`]).
-    include: Vec<String>,
 }
 
 /// Private DTO for [`Config`]. Holds the raw TOML shape before validation and
@@ -180,6 +185,8 @@ pub struct Config {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    #[serde(rename = "config-version")]
+    config_version: u32,
     server: ServerConfig,
     #[serde(default)]
     local: LocalConfig,
@@ -191,10 +198,10 @@ pub(crate) struct RawConfig {
     models: Vec<ModelConfig>,
     #[serde(rename = "local_model", default)]
     local_models: Vec<LocalModelConfig>,
-    /// The top-level `models = [...]` allowlist: an array of model names,
-    /// distinct from the `[[model]]` definition array mapped to `models`.
-    #[serde(rename = "models", default)]
-    model_allowlist: Option<Vec<String>>,
+    #[serde(rename = "stt_model", default)]
+    stt_models: Vec<SttModelConfig>,
+    #[serde(rename = "profile", default)]
+    profiles: Vec<ProfileConfig>,
     #[serde(default)]
     tools: Option<ToolsConfig>,
     #[serde(default)]
@@ -203,20 +210,53 @@ pub(crate) struct RawConfig {
 
 impl From<RawConfig> for Config {
     fn from(raw: RawConfig) -> Config {
+        let models = raw.models.clone();
+        let local_models = raw.local_models.clone();
+        let stt_models = raw.stt_models.clone();
         Config {
+            version: raw.config_version,
             server: raw.server,
             local: raw.local,
             dominions: raw.dominions,
             endpoints: raw.endpoints,
-            models: raw.models,
-            local_models: raw.local_models,
-            model_allowlist: raw.model_allowlist,
+            models,
+            local_models,
+            stt_models,
+            catalog_models: raw.models,
+            catalog_local_models: raw.local_models,
+            catalog_stt_models: raw.stt_models,
+            profiles: raw.profiles,
+            active_profile: None,
             tools: raw.tools,
             workshop: raw.workshop,
-            provenance: crate::profile::Provenance::default(),
-            include: Vec::new(),
         }
     }
+}
+
+/// One pure-checklist profile declared as `[[profile]]`.
+///
+/// A profile owns no settings. Its `models` list selects entries from the
+/// global `[[model]]`, `[[local_model]]`, and `[[stt_model]]` catalog.
+///
+/// # Examples
+/// ```
+/// use promptforge_gateway_config::Config;
+///
+/// let config = Config::from_toml_str(
+///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///      [[profile]]\nname = \"work\"\nmodels = []\n",
+/// )?;
+/// assert_eq!(config.profiles()[0].name(), "work");
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ProfileConfig {
+    /// Operator-facing profile name.
+    name: String,
+    /// Catalog model names selected by this profile.
+    models: Vec<String>,
 }
 
 /// Whether a dominion pools remote providers or local GPUs managed by the
