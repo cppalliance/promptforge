@@ -16,6 +16,7 @@ import {
   createElement as lucideElement,
 } from "lucide";
 
+import { createChatTemplateControl } from "../components/chat-template-control";
 import { confirmDialog } from "../components/confirm-modal";
 import { createChipInput } from "../components/chip-input";
 import { createDropdownControl } from "../components/dropdown-control";
@@ -76,6 +77,8 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
   const collapsed = new Set<string>();
   /** GGUF layer totals by model name; null = lookup failed (plain N). */
   const layerTotals = new Map<string, number | null>();
+  /** Models whose empty custom-path field is open but not committed yet. */
+  const customTemplateModes = new Set<string>();
   let main: HTMLElement | null = null;
   /** The last-rendered split root; a re-render is legal only while it owns `main`. */
   let viewRoot: HTMLElement | null = null;
@@ -853,7 +856,9 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
       !sameJson(store.value(entry, def.dependsOn.key) ?? defaultOf(entry, def.dependsOn.key), def.dependsOn.value);
     const value = store.value(entry, def.key);
 
-    if (def.type === "slider") {
+    if (def.type === "chat-template") {
+      row.append(createChatTemplateControl({ id, entry, store, commit, customTemplateModes }));
+    } else if (def.type === "slider") {
       const slider = createSliderControl({
         id,
         min: def.min ?? 0,

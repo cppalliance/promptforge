@@ -210,8 +210,9 @@ fn family_metadata_matches_the_catalog() {
     for family in Family::ALL {
         writeln!(
             &mut snapshot,
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             family.canonical_name(),
+            family.display_label(),
             family.aliases().join(","),
             family.default_system_message().unwrap_or("<none>"),
             family.stop_tokens().join(",")
@@ -220,7 +221,22 @@ fn family_metadata_matches_the_catalog() {
     }
     assert_eq!(
         sha256(&snapshot),
-        "b21d0ee322ce65116d5585264b17f3a9e393acd3564248fe7c4e347a58455d4b"
+        "d87d01746e84381bae73f7307fef0dc5144d138f1f304094ac2a9f50bfe7b4e8"
+    );
+}
+
+#[test]
+fn source_detection_and_exported_mappings_share_the_exact_mapper() {
+    let source =
+        "https://huggingface.co/qwen/qwen3-8b/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true";
+    assert_eq!(family_for_model_source(source), Some(Family::Qwen3));
+    assert!(model_family_mappings().contains(&("qwen/qwen3-8b", Family::Qwen3)));
+    assert_eq!(
+        family_for_model_source(
+            "https://huggingface.co/qwen/qwen3-8b-GGUF/resolve/main/model.gguf"
+        ),
+        None,
+        "source detection must not invent repository-name heuristics"
     );
 }
 

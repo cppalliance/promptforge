@@ -138,6 +138,10 @@ test("panel mode routes every gateway call through the bridge, with no fetch and
   );
 
   assert.ok(parent.apiPaths().includes("/admin/config"), "the config load rode the bridge");
+  assert.ok(
+    parent.apiPaths().includes("/admin/chat-templates"),
+    "the template catalog load rode the bridge",
+  );
   assert.ok(parent.apiPaths().includes("/admin/status"), "the status probe rode the bridge");
   assert.ok(
     root.textContent.includes("qwen-common"),

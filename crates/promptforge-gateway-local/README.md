@@ -17,6 +17,8 @@ an explicit custom file, an explicit `builtin:<family>` asset staged under
 `chat-templates/`, a known broken-template override selected by embedded hash
 then sidecar model ID, or the GGUF's non-empty embedded template. A chat model
 without any usable template is refused with the supported fixes.
+`inspect_chat_template` exposes that same decision without staging an asset,
+so the gateway can report effective sources and reasons to the Config UI.
 
 The gateway drives this crate through `LocalRuntime`: `start` provisions and
 launches one child per `[[local_model]]`, `models` yields the routing table

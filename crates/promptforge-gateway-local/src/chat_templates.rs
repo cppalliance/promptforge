@@ -83,6 +83,28 @@ pub fn family_for_model(hint: &str) -> Option<Family> {
         .map(|index| mapper_data::MODEL_FAMILIES[index].1)
 }
 
+/// Returns the family mapped from a Hugging Face model download URL.
+///
+/// The repository identifier before `/resolve/` is passed through the same
+/// exact-match mapper as [`family_for_model`].
+#[must_use]
+pub fn family_for_model_source(source: &str) -> Option<Family> {
+    hugging_face_model_id(source).and_then(family_for_model)
+}
+
+/// Returns every exact model-to-family mapping in stable lookup order.
+#[must_use]
+pub fn model_family_mappings() -> &'static [(&'static str, Family)] {
+    mapper_data::MODEL_FAMILIES
+}
+
+pub(crate) fn hugging_face_model_id(source: &str) -> Option<&str> {
+    let path = source.strip_prefix("https://huggingface.co/")?;
+    let model_end = path.find("/resolve/")?;
+    let model = &path[..model_end];
+    (model.split('/').count() == 2).then_some(model)
+}
+
 /// An inclusive range of validated `llama.cpp` release builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

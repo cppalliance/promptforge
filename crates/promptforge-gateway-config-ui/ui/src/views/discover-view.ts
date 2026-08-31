@@ -759,6 +759,12 @@ export function createDiscoverView(deps: DiscoverViewDeps): DiscoverView {
     if (quant.sizeBytes !== null) {
       data["vram_gb"] = Number((quant.sizeBytes / 1024 ** 3).toFixed(2));
     }
+    if (!isStt) {
+      const family = store.mappedChatTemplateFamily(model.repo);
+      if (family !== null) {
+        data["chat_template_file"] = `builtin:${family}`;
+      }
+    }
     try {
       const name = await store.stageDiscoveredModel(isStt ? "stt" : "local", data);
       toasts.show(`${name} added - Apply to download`, "success");

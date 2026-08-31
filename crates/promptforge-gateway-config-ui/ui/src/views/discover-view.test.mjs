@@ -10,6 +10,7 @@ import test from "node:test";
 import {
   GIB,
   bootApp,
+  chatTemplateCatalogFixture,
   gatewayStub,
   hfModelFixture,
   hfSearchFixture,
@@ -337,6 +338,31 @@ test("Download stages a pending model without touching the cache", async () => {
   );
   assert.match(root.querySelector(".apply-button")?.textContent ?? "", /Apply \(1\)/);
   assert.equal(root.querySelector(".quant-download").textContent, "Added");
+});
+
+test("Download prefills a mapped built-in template from the server catalog", async () => {
+  const catalog = chatTemplateCatalogFixture();
+  catalog.mappings = [{ model_id: REPO.toLowerCase(), family: "qwen-3" }];
+  const config = modelsFixture();
+  const stub = discoverStub({
+    config,
+    pending: structuredClone(config),
+    chatTemplates: catalog,
+  });
+  const { root } = await openDiscover(stub);
+  root.querySelector(".result-row").click();
+  await settle();
+  root.querySelector(".quant-download").click();
+  await settle();
+
+  const staged = stub.state.pending.local_model.find((entry) =>
+    String(entry.source).startsWith("https://huggingface.co/"),
+  );
+  assert.equal(
+    staged.chat_template_file,
+    "builtin:qwen-3",
+    "the browser copies the current server mapper result, not a TypeScript model table",
+  );
 });
 
 test("concurrent Download staging preserves every model and profile choice", async () => {
