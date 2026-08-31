@@ -26,7 +26,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
 
 
-- A65. Clients and core speak one canonical protocol; per-model backend dialect translation exists only inside the gateway and grows by demonstrated need.
 
 
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
@@ -61,6 +60,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
 
 - A97. Per-crate guides are source truth; mdBook and flat guides assemble them without duplicate narratives.
+
+- A98. Publishable crates have registry-resolvable dependency closure and release in dependency order.
 
 ## Principles
 
