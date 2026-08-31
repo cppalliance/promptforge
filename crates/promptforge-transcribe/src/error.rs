@@ -1,8 +1,8 @@
-//! Voice-engine construction and transcription failures.
+//! STT engine construction and transcription failures.
 
 use std::path::PathBuf;
 
-/// A voice-engine construction or transcription failure.
+/// An STT engine construction or transcription failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TranscribeError {
@@ -32,8 +32,8 @@ pub enum TranscribeError {
     #[error("transcription worker exited")]
     WorkerGone,
 
-    /// The `[voice]` configuration is invalid.
+    /// The STT engine configuration is invalid.
     #[non_exhaustive]
-    #[error("invalid voice configuration: {0}")]
+    #[error("invalid STT configuration: {0}")]
     InvalidConfig(String),
 }

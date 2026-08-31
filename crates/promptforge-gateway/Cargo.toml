@@ -1,6 +1,6 @@
 [package]
 name = "promptforge-gateway"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -43,6 +43,7 @@ promptforge-gateway-protocol.workspace = true
 promptforge-gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
 promptforge-progress = { workspace = true, features = ["serde"] }
+promptforge-stt = { workspace = true, optional = true }
 promptforge-web-search-service = { workspace = true, optional = true }
 promptforge-workshop-server = { workspace = true, optional = true }
 serde.workspace = true
@@ -74,12 +75,12 @@ config-ui = ["dep:promptforge-gateway-config-ui"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull whisper, CUDA, or the
 # Node UI build into the graph.
-workshop = ["dep:promptforge-workshop-server", "dep:open"]
+workshop = ["dep:promptforge-stt", "dep:promptforge-workshop-server", "dep:open"]
 # Compile the pinned llama.cpp submodule into an embedded, host-native CUDA
 # llama-server bundle during the Cargo build. Windows x86-64 with a CUDA
 # Toolkit >= 12.8 only; a no-op on every other target.
 llama-cuda = ["local", "promptforge-gateway-local/llama-cuda"]
-workshop-cuda = ["workshop", "llama-cuda", "promptforge-workshop-server/voice-cuda"]
+workshop-cuda = ["workshop", "llama-cuda", "promptforge-stt/cuda"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.

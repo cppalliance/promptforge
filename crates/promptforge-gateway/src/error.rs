@@ -43,6 +43,17 @@ pub(crate) enum GatewayError {
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
+    /// The uploaded transcription body exceeded the configured cap.
+    #[cfg(feature = "workshop")]
+    #[error("audio file exceeds the 25 MiB limit")]
+    AudioTooLarge,
+
+    /// The active STT engine rejected an otherwise valid request.
+    #[cfg(feature = "workshop")]
+    #[non_exhaustive]
+    #[error("transcription failed")]
+    Transcription(#[source] promptforge_stt::TranscriptionError),
+
     /// A transport- or protocol-level failure from the upstream seam. The
     /// variants live in [`ProtocolError`]; the gateway wraps them so a route
     /// handler deals with one error type.
@@ -197,6 +208,23 @@ impl From<crate::queue::AdmitError> for GatewayError {
     }
 }
 
+#[cfg(feature = "workshop")]
+impl From<promptforge_stt::TranscriptionError> for GatewayError {
+    fn from(value: promptforge_stt::TranscriptionError) -> Self {
+        if let Some(model) = value.model_not_found() {
+            return GatewayError::UnknownModel(model.to_owned());
+        }
+        if value.is_file_too_large() {
+            return GatewayError::AudioTooLarge;
+        }
+        if value.is_inference() {
+            GatewayError::Transcription(value)
+        } else {
+            GatewayError::MalformedRequest(value.to_string())
+        }
+    }
+}
+
 #[cfg(feature = "web-search")]
 impl From<promptforge_web_search_service::WebSearchError> for GatewayError {
     fn from(value: promptforge_web_search_service::WebSearchError) -> Self {
@@ -288,6 +316,18 @@ impl GatewayError {
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "malformed_request",
+            ),
+            #[cfg(feature = "workshop")]
+            GatewayError::AudioTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "invalid_request_error",
+                "file_too_large",
+            ),
+            #[cfg(feature = "workshop")]
+            GatewayError::Transcription(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "transcription_error",
             ),
             GatewayError::Protocol(error) => error.classify(),
             GatewayError::QueueFull => (
@@ -582,6 +622,24 @@ mod tests {
         assert_eq!(
             error.source().map(ToString::to_string).as_deref(),
             Some("bad json")
+        );
+    }
+
+    #[cfg(feature = "workshop")]
+    #[test]
+    fn unloaded_stt_model_maps_to_openai_model_not_found() {
+        let error = GatewayError::from(promptforge_stt::TranscriptionError::model_not_found_error(
+            "ghost",
+        ));
+        assert!(matches!(error, GatewayError::UnknownModel(model) if model == "ghost"));
+        let error = GatewayError::UnknownModel("ghost".to_owned());
+        assert_eq!(
+            error.classify(),
+            (
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+                "model_not_found"
+            )
         );
     }
 

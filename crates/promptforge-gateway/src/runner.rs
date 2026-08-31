@@ -159,6 +159,31 @@ impl Gateway {
                 crate::LOCAL_MODELS_UNSUPPORTED,
             )));
         }
+        if !config.stt_models().is_empty() && config.workshop().is_none() {
+            return Err(StartupError::provisioning(std::io::Error::other(
+                crate::STT_REQUIRES_WORKSHOP,
+            )));
+        }
+        #[cfg(feature = "workshop")]
+        let stt = {
+            let tree = hub.operation();
+            let progress = tree.register("startup-stt", 1.0);
+            let state = promptforge_stt::SttState::default();
+            let started = promptforge_stt::SttRuntime::start(config, state, Some(&progress))
+                .map_err(StartupError::provisioning);
+            match &started {
+                Ok(_) => progress.complete(),
+                Err(_) => progress.fail(),
+            }
+            drop(tree);
+            started?
+        };
+        #[cfg(not(feature = "workshop"))]
+        if !config.stt_models().is_empty() {
+            return Err(StartupError::provisioning(std::io::Error::other(
+                crate::STT_RUNTIME_UNAVAILABLE,
+            )));
+        }
         let routing = Routing::from_config(config).map_err(StartupError::config)?;
         #[cfg(feature = "local")]
         let routing = routing
@@ -177,6 +202,8 @@ impl Gateway {
             Arc::new(config.clone()),
             #[cfg(feature = "local")]
             local,
+            #[cfg(feature = "workshop")]
+            stt,
             #[cfg(feature = "web-search")]
             config.web_search_config(),
             profiles.config_path,
@@ -237,6 +264,35 @@ impl Gateway {
         .with_graceful_shutdown(shutdown)
         .await
         .map_err(ServeError::io)
+    }
+}
+
+#[cfg(test)]
+mod stt_tests {
+    use super::*;
+
+    #[test]
+    fn a_headless_gateway_refuses_an_active_stt_model() {
+        let catalog = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
+             [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\n\
+             source = \"missing.bin\"\nvram_gb = 1.0\n\
+             [[profile]]\nname = \"work\"\nmodels = [\"speech\"]\n",
+        )
+        .expect("catalog parses");
+        let config = catalog
+            .select_profile(&ProfileName::parse("work").expect("profile name"))
+            .expect("profile selects");
+        let error = Gateway::from_config(&config, ProfilesContext::default())
+            .expect_err("STT without a workshop listener must be refused");
+        let detail = std::error::Error::source(&error)
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        assert!(
+            detail.contains("[workshop]"),
+            "the refusal names the missing listener section: {error}: {detail}"
+        );
     }
 }
 
@@ -480,7 +536,16 @@ fn serve_thread(
             return Ok(());
         }
     };
-    let workshop = match workshop::spawn_if_configured(&config, &options.config_path, address) {
+    #[cfg(feature = "workshop")]
+    let workshop = workshop::spawn_if_configured(
+        &config,
+        &options.config_path,
+        address,
+        gateway.state.stt_state(),
+    );
+    #[cfg(not(feature = "workshop"))]
+    let workshop = workshop::spawn_if_configured(&config, &options.config_path, address);
+    let workshop = match workshop {
         Ok(workshop) => workshop,
         Err(error) => {
             let _ = ready.send(Err(error));

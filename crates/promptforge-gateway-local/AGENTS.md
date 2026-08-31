@@ -1,8 +1,9 @@
 # promptforge-gateway-local
 
-This crate owns gateway-owned local inference: the artifact store, GGUF
+This crate owns gateway-owned local inference: the shared artifact store, GGUF
 provisioning, dialect probing, the managed `llama-server` child lifecycle,
-sidecars, the blob cache store, and CUDA bundle staging.
+sidecars, the blob cache store, and CUDA bundle staging. `promptforge-stt`
+reuses the public `ArtifactStore` for speech-model provisioning.
 
 ## Rules
 

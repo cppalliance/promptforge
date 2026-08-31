@@ -13,7 +13,7 @@ use crate::{GLOSSARY_TOKEN_BUDGET, MIN_WINDOW_SAMPLES, is_silence};
 /// One take's final-pass state: the large model's whisper context and state
 /// plus the take's accumulated transcript, which conditions each new
 /// segment so domain vocabulary and phrasing survive segmentation. The
-/// glossary prompt (fitted at load from `[voice].vocabulary`) biases every
+/// glossary prompt (fitted at load from the STT vocabulary) biases every
 /// segment toward the configured domain terms.
 #[derive(Debug)]
 pub(crate) struct FinalPass {
@@ -103,6 +103,16 @@ impl FinalPass {
         }
         Ok(segment)
     }
+
+    /// Transcribes one independent request without reading or changing the
+    /// active streaming take.
+    fn transcribe_standalone(&mut self, samples: &[f32]) -> Result<String, TranscribeError> {
+        if samples.len() < MIN_WINDOW_SAMPLES || is_silence(samples) {
+            return Ok(String::new());
+        }
+        let prompt = final_prompt(&self.ctx, self.glossary.as_deref(), "");
+        transcribe_blocking(&mut self.state, samples, Some(&prompt), false)
+    }
 }
 
 /// A command for the final-pass worker thread.
@@ -122,13 +132,19 @@ enum FinalJob {
         reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
         notify: bool,
     },
+    /// Transcribe an independent request without touching take state.
+    Standalone {
+        samples: Vec<f32>,
+        reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
+    },
 }
 
 /// Handle to the final-pass worker thread: the large model transcribing
 /// completed segments in the background while a take records.
 #[derive(Debug)]
 pub(crate) struct FinalTranscriber {
-    job_tx: std::sync::mpsc::Sender<FinalJob>,
+    job_tx: Option<std::sync::mpsc::Sender<FinalJob>>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl FinalTranscriber {
@@ -150,31 +166,41 @@ impl FinalTranscriber {
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
         let path = model_path.to_path_buf();
         let vocabulary = vocabulary.to_vec();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("whisper-final".to_string())
             .spawn(move || {
                 final_worker_loop(&path, &vocabulary, progress.as_ref(), &job_rx, &init_tx);
             })
             .map_err(TranscribeError::SpawnWorker)?;
-        Ok((Self { job_tx }, init_rx))
+        Ok((
+            Self {
+                job_tx: Some(job_tx),
+                worker: Some(worker),
+            },
+            init_rx,
+        ))
     }
 
     /// Starts a new take, installing `on_segment` as the channel each
     /// background segment's text is reported on. If the worker is gone the
     /// next `finish` reports it.
     pub(super) fn reset(&self, on_segment: std::sync::mpsc::Sender<String>) {
-        let _ = self.job_tx.send(FinalJob::Reset { on_segment });
+        if let Some(job_tx) = &self.job_tx {
+            let _ = job_tx.send(FinalJob::Reset { on_segment });
+        }
     }
 
     /// Queues a completed segment for background transcription; the
     /// segment's text is reported on the take's channel.
     pub(super) fn submit(&self, samples: Vec<f32>) {
         let (reply, _dropped) = tokio::sync::oneshot::channel();
-        let _ = self.job_tx.send(FinalJob::Segment {
-            samples,
-            reply,
-            notify: true,
-        });
+        if let Some(job_tx) = &self.job_tx {
+            let _ = job_tx.send(FinalJob::Segment {
+                samples,
+                reply,
+                notify: true,
+            });
+        }
     }
 
     /// Queues the take's tail and awaits the tail's own text, empty when
@@ -182,7 +208,10 @@ impl FinalTranscriber {
     /// reply also drains every segment submitted earlier in the take.
     pub(super) async fn finish(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
-        self.job_tx
+        let Some(job_tx) = &self.job_tx else {
+            return Err(TranscribeError::WorkerGone);
+        };
+        job_tx
             .send(FinalJob::Segment {
                 samples,
                 reply,
@@ -190,6 +219,29 @@ impl FinalTranscriber {
             })
             .map_err(|_| TranscribeError::WorkerGone)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
+    }
+
+    /// Transcribes one independent buffer without changing the active take.
+    pub(super) async fn transcribe(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
+        let (reply, reply_rx) = tokio::sync::oneshot::channel();
+        let Some(job_tx) = &self.job_tx else {
+            return Err(TranscribeError::WorkerGone);
+        };
+        job_tx
+            .send(FinalJob::Standalone { samples, reply })
+            .map_err(|_| TranscribeError::WorkerGone)?;
+        reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
+    }
+}
+
+impl Drop for FinalTranscriber {
+    fn drop(&mut self) {
+        // Close the queue before joining so the worker drains prior jobs,
+        // releases its Whisper context, and cannot overlap a replacement.
+        drop(self.job_tx.take());
+        if let Some(worker) = self.worker.take() {
+            let _ignored = worker.join();
+        }
     }
 }
 
@@ -248,6 +300,13 @@ fn final_worker_loop(
                 // closed mid-take) is fine: the transcript was computed.
                 let _ = reply.send(result.map(Option::unwrap_or_default));
             }
+            FinalJob::Standalone { samples, reply } => {
+                let result = pass.transcribe_standalone(&samples);
+                if let Err(error) = &result {
+                    tracing::warn!(%error, "standalone final-model transcription failed");
+                }
+                let _ = reply.send(result);
+            }
         }
     }
 }
@@ -258,7 +317,7 @@ mod tests {
 
     use super::*;
 
-    use crate::engine::VoiceEngine;
+    use crate::engine::SttEngine;
     use crate::{EngineConfig, SAMPLE_RATE, fixtures};
 
     #[test]
@@ -309,7 +368,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        let engine = SttEngine::new(&config).expect("engine loads the fixture model");
         let (segment_tx, segment_rx) = std::sync::mpsc::channel();
         engine.final_reset(segment_tx);
         engine.final_submit(fixtures::jfk_samples());
@@ -355,7 +414,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        let engine = SttEngine::new(&config).expect("engine loads the fixture model");
         let (segment_tx, segment_rx) = std::sync::mpsc::channel();
         engine.final_reset(segment_tx);
         engine.final_submit(fixtures::jfk_samples());
@@ -462,6 +521,30 @@ mod tests {
             second,
             "the accumulated transcript forgot the previous take"
         );
+    }
+
+    #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
+    fn standalone_transcription_does_not_change_the_streaming_take() {
+        let mut pass = FinalPass::load(&fixtures::require_model(), &[], None)
+            .expect("final pass loads the fixture model");
+        let jfk = fixtures::jfk_samples();
+        let _first = pass
+            .transcribe_segment(&jfk)
+            .expect("streaming segment transcribes")
+            .expect("streaming segment has text");
+        let transcript = pass.transcript().to_owned();
+        let last_prompt = pass.last_prompt().to_owned();
+        let standalone = pass
+            .transcribe_standalone(&jfk)
+            .expect("standalone request transcribes");
+        assert!(standalone.to_lowercase().contains("country"));
+        assert_eq!(
+            pass.transcript(),
+            transcript,
+            "request-response transcription cannot change streaming take state"
+        );
+        assert_eq!(pass.last_prompt(), last_prompt);
     }
 
     #[test]

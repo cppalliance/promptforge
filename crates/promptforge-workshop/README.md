@@ -28,7 +28,7 @@ The generated config leaves `workshop.open_browser` off. Setting it in a boot co
 
 ## Features
 
-- `cuda` (default) - forwards to the gateway's `workshop-cuda`, which implies `llama-cuda` (the pinned `third_party/llama.cpp` submodule is compiled into an embedded CUDA `llama-server` during the Cargo build) plus `voice-cuda` (CUDA acceleration for the whisper voice engine). Building with it requires the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU. On a machine without those, build with `--no-default-features`: voice transcription stays off and local inference keeps the standard Vulkan archive path.
+- `cuda` (default) - forwards to the gateway's `workshop-cuda`, which implies `llama-cuda` (the pinned `third_party/llama.cpp` submodule is compiled into an embedded CUDA `llama-server` during the Cargo build) plus `promptforge-stt/cuda` for the whisper engine. Building with it requires the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU. On a machine without those, build with `--no-default-features`: STT uses its CPU backend and local inference keeps the standard Vulkan archive path.
 
 ## Minimum Rust Version
 

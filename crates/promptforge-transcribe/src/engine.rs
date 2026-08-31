@@ -1,4 +1,4 @@
-//! The voice engine driving the interim and final-pass whisper workers.
+//! The STT engine driving the interim and final-pass whisper workers.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -31,18 +31,18 @@ pub struct EngineConfig {
     pub interval_ms: u64,
 }
 
-/// The voice engine: the interim and final-pass whisper workers plus the
+/// The STT engine: the interim and final-pass whisper workers plus the
 /// interim loop's window and cadence, built once at startup from the host's
-/// voice configuration.
+/// STT configuration.
 #[derive(Debug)]
-pub struct VoiceEngine {
+pub struct SttEngine {
     transcriber: Transcriber,
     final_pass: Option<FinalTranscriber>,
     window_samples: usize,
     interval: Duration,
 }
 
-impl VoiceEngine {
+impl SttEngine {
     /// Loads the interim model, and the final model when configured, each
     /// onto a fresh worker thread.
     ///
@@ -55,7 +55,7 @@ impl VoiceEngine {
         Self::new_with_progress(config, None)
     }
 
-    /// [`VoiceEngine::new`] plus progress reporting: `progress` gains one
+    /// [`SttEngine::new`] plus progress reporting: `progress` gains one
     /// child per loaded model (`interim`, `final`), each with a byte-counted
     /// `prewarm` leaf and an indeterminate `init` leaf completed when the
     /// whisper context is ready. Both worker threads prewarm and load in
@@ -76,20 +76,20 @@ impl VoiceEngine {
     ) -> Result<Self, TranscribeError> {
         if config.window_seconds == 0 {
             return Err(TranscribeError::InvalidConfig(
-                "voice.window_seconds must be at least 1".to_string(),
+                "stt.window_seconds must be at least 1".to_string(),
             ));
         }
         if config.interval_ms == 0 {
             return Err(TranscribeError::InvalidConfig(
-                "voice.interval_ms must be at least 1".to_string(),
+                "stt.interval_ms must be at least 1".to_string(),
             ));
         }
         let window_seconds = usize::try_from(config.window_seconds).map_err(|_| {
-            TranscribeError::InvalidConfig("voice.window_seconds is too large".to_string())
+            TranscribeError::InvalidConfig("stt.window_seconds is too large".to_string())
         })?;
         let Some(window_samples) = window_seconds.checked_mul(SAMPLE_RATE) else {
             return Err(TranscribeError::InvalidConfig(
-                "voice.window_seconds is too large".to_string(),
+                "stt.window_seconds is too large".to_string(),
             ));
         };
         let interim_progress = progress.as_ref().map(|handle| handle.child("interim", 1.0));
@@ -169,6 +169,23 @@ impl VoiceEngine {
         self.transcriber.transcribe(samples).await
     }
 
+    /// Transcribes one independent buffer with the final model.
+    ///
+    /// This request does not read or change the active streaming take.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::Inference`] when the model rejects the
+    /// audio and [`TranscribeError::WorkerGone`] when the worker exits.
+    pub async fn transcribe_final(
+        &self,
+        samples: Vec<f32>,
+    ) -> Option<Result<String, TranscribeError>> {
+        match &self.final_pass {
+            Some(final_pass) => Some(final_pass.transcribe(samples).await),
+            None => None,
+        }
+    }
+
     /// Starts a new take on the final-pass worker, discarding the previous
     /// take's accumulated transcript and installing `on_segment` as the
     /// take's completion channel: each background segment's text is sent on
@@ -223,7 +240,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        let engine = SttEngine::new(&config).expect("engine loads the fixture model");
         let text = engine
             .transcribe(fixtures::jfk_samples())
             .await
@@ -235,12 +252,12 @@ mod tests {
     }
 
     #[test]
-    fn invalid_voice_config_is_rejected() {
+    fn invalid_stt_config_is_rejected() {
         let config = EngineConfig {
             window_seconds: 0,
             ..EngineConfig::default()
         };
-        let err = VoiceEngine::new(&config).expect_err("zero window must fail");
+        let err = SttEngine::new(&config).expect_err("zero window must fail");
         assert!(
             matches!(err, TranscribeError::InvalidConfig(_)),
             "expected InvalidConfig, got {err:?}"
@@ -257,7 +274,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let err = VoiceEngine::new(&config).expect_err("a missing final model must fail");
+        let err = SttEngine::new(&config).expect_err("a missing final model must fail");
         assert!(
             matches!(err, TranscribeError::LoadModel { .. }),
             "expected LoadModel, got {err:?}"
@@ -278,7 +295,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        let engine = SttEngine::new(&config).expect("engine loads the fixture model");
         let (segment_tx, _segment_rx) = std::sync::mpsc::channel();
         engine.final_reset(segment_tx);
         engine.final_submit(fixtures::jfk_samples());
@@ -296,7 +313,7 @@ mod tests {
             interval_ms: 500,
             ..EngineConfig::default()
         };
-        let err = VoiceEngine::new(&config).expect_err("a missing model must fail");
+        let err = SttEngine::new(&config).expect_err("a missing model must fail");
         assert!(
             matches!(err, TranscribeError::LoadModel { .. }),
             "expected LoadModel, got {err:?}"
@@ -316,7 +333,7 @@ mod tests {
             ..EngineConfig::default()
         };
         let err =
-            VoiceEngine::new_with_progress(&config, None).expect_err("a missing model must fail");
+            SttEngine::new_with_progress(&config, None).expect_err("a missing model must fail");
         assert!(
             matches!(err, TranscribeError::LoadModel { .. }),
             "expected LoadModel, got {err:?}"

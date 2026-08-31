@@ -4,6 +4,8 @@ This crate owns the inference gateway: OpenAI-shaped HTTP routing, profile
 switching, and the serving lifecycle. Local model provisioning and the
 `llama-server` child lifecycle live in `promptforge-gateway-local` behind the
 default-on `local` feature; the gateway drives them through `LocalRuntime`.
+Gateway-hosted speech-to-text lifecycle and HTTP routes live in
+`promptforge-stt` behind the `workshop` feature.
 
 ## Rules
 

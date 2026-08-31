@@ -77,6 +77,8 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
         Arc::clone(&config),
         #[cfg(feature = "local")]
         crate::local::LocalRuntime::empty(),
+        #[cfg(feature = "workshop")]
+        promptforge_stt::SttRuntime::empty(promptforge_stt::SttState::default()),
         #[cfg(feature = "web-search")]
         config.web_search_config(),
         config_path,

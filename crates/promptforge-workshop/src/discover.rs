@@ -13,23 +13,19 @@ use anyhow::Context as _;
 /// Canonical file name searched for at each candidate location.
 const CONFIG_FILE_NAME: &str = "gateway.toml";
 
-/// The profiles directory beside the boot config, where the gateway
-/// resolves its profile from.
-const PROFILES_DIR_NAME: &str = "profiles";
-
 /// The profile the shell boots the gateway into; generated on first run.
 pub(crate) const DEFAULT_PROFILE: &str = "default";
 
 /// The boot configuration written on first run, with a freshly generated
 /// bearer key baked in.
 ///
-/// The gateway binds loopback-only by default, and the hosted workshop gets
-/// its own loopback listener via the `[workshop]` section. Voice provisions
-/// itself: the `*_source` URLs let the workshop download the whisper models
-/// through the gateway cache, then load them.
+/// The gateway binds loopback-only, hosts the workshop on a second listener,
+/// and provisions the recommended STT pair through the artifact store.
 fn default_boot_config(api_key: &str) -> String {
     format!(
-        r#"# PromptForge gateway configuration
+        r#"config-version = 2
+
+# PromptForge gateway configuration
 # Generated on first run. Edit as needed.
 # See: crates/promptforge-gateway/README.md
 
@@ -41,34 +37,32 @@ api_key = "{api_key}"
 [workshop]
 bind = "127.0.0.1:7910"
 
-[workshop.voice]
-interim_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
-final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
-# Voice provisions itself: with the sources above set, the models download
-# through the gateway cache once the gateway is up, then load. Set the
-# paths below only to use local model files instead:
-# interim_model = "~/.promptforge/models/ggml-large-v3-turbo.bin"
-# final_model = "~/.promptforge/models/ggml-large-v3.bin"
+[workshop.stt]
 window_seconds = 15
 interval_ms = 500
 # Domain terms whisper is biased toward, passed as a glossary prompt:
 # vocabulary = ["MCP", "GGUF", "Lua"]
+
+[[stt_model]]
+name = "whisper-base-en"
+role = "interim"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+vram_gb = 1.0
+
+[[stt_model]]
+name = "whisper-small-en"
+role = "final"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin"
+sha256 = "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
+vram_gb = 2.0
+
+[[profile]]
+name = "default"
+models = ["whisper-base-en", "whisper-small-en"]
 "#
     )
 }
-
-/// The `default` profile written on first run.
-///
-/// The gateway boots into a named profile from the `profiles/` directory
-/// beside the boot config; this one just includes the boot file, so
-/// `[[model]]` and `[[endpoint]]` entries added to `gateway.toml` are the
-/// default catalog.
-const DEFAULT_PROFILE_TEMPLATE: &str = r#"# PromptForge gateway profile: default
-# Generated on first run. This profile includes the boot config, so
-# [[model]] and [[endpoint]] entries added to ../gateway.toml appear in
-# it. Add profile-specific entries here.
-include = ["../gateway.toml"]
-"#;
 
 /// Locates `gateway.toml`, searching beside the executable first, then the
 /// current directory, then the user profile's `.promptforge` directory.
@@ -115,9 +109,8 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|path| path.is_file()).cloned()
 }
 
-/// Writes the default boot configuration to `path` with a fresh random
-/// api_key, plus the `default` profile in the sibling `profiles/`
-/// directory when none exists yet, creating both directories as needed.
+/// Writes the default single-file configuration to `path` with a fresh
+/// random api_key and the `default` profile checklist.
 /// Returns the boot config path written.
 ///
 /// # Errors
@@ -126,20 +119,7 @@ pub(crate) fn generate_default(path: &Path) -> anyhow::Result<PathBuf> {
     let dir = path
         .parent()
         .context("the boot config path has no parent")?;
-    let profiles = dir.join(PROFILES_DIR_NAME);
-    std::fs::create_dir_all(&profiles).with_context(|| format!("create {}", profiles.display()))?;
-    let profile_path = profiles.join(format!("{DEFAULT_PROFILE}.toml"));
-    // Never clobber an existing profile: discovery keys on gateway.toml
-    // alone, so a user who removed the boot config but kept a customized
-    // profiles/default.toml (headless gateway use) reaches this path, and
-    // regeneration must not erase their file.
-    if !profile_path.exists() {
-        std::fs::write(&profile_path, DEFAULT_PROFILE_TEMPLATE)
-            .with_context(|| format!("write {}", profile_path.display()))?;
-    }
-    // The boot config is written last: discovery keys on gateway.toml, so a
-    // failure between the two writes never leaves a discoverable boot
-    // config missing its profile.
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     std::fs::write(path, default_boot_config(&generate_api_key()))
         .with_context(|| format!("write {}", path.display()))?;
     Ok(path.to_path_buf())
@@ -217,28 +197,21 @@ mod tests {
     }
 
     #[test]
-    fn generate_default_writes_a_pair_the_gateway_can_boot() {
+    fn generate_default_writes_one_file_the_gateway_can_boot() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let path = dir.path().join(CONFIG_FILE_NAME);
         let written = generate_default(&path).expect("first run generates");
         assert_eq!(written, path);
 
-        // Resolve the profile exactly as the gateway's own boot does.
         let profile =
             promptforge_gateway::ProfileName::parse(DEFAULT_PROFILE).expect("valid profile name");
-        let (config, chain) = promptforge_gateway::Config::load_profile_with_chain(
-            &dir.path().join(PROFILES_DIR_NAME),
-            &profile,
+        let catalog = promptforge_gateway::Config::from_toml_str(
+            &std::fs::read_to_string(&path).expect("generated config reads"),
         )
-        .expect("the generated default profile resolves");
-
-        let boot = path.canonicalize().expect("the boot config exists");
-        assert!(
-            chain
-                .iter()
-                .any(|entry| entry.canonicalize().ok().as_deref() == Some(boot.as_path())),
-            "the boot config is in the profile's include chain: {chain:?}"
-        );
+        .expect("generated catalog parses");
+        let config = catalog
+            .select_profile(&profile)
+            .expect("generated default profile selects");
         assert_eq!(
             config.server().bind().to_string(),
             "127.0.0.1:8081",
@@ -252,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn the_generated_config_hosts_the_workshop_with_voice_defaults() {
+    fn the_generated_config_hosts_the_workshop_with_recommended_stt() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let path = generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("generates");
         let raw = std::fs::read_to_string(&path).expect("read back");
@@ -266,39 +239,12 @@ mod tests {
             workshop.bind().ip().is_loopback(),
             "the workshop listener is loopback-only"
         );
-        let voice = workshop.voice().expect("voice section present");
-        assert!(
-            voice.interim_source().starts_with("https://"),
-            "the interim model has a download source"
-        );
-        assert!(
-            voice.final_source().starts_with("https://"),
-            "the final model has a download source"
-        );
-        assert_eq!(voice.window_seconds(), 15);
-        assert_eq!(voice.interval_ms(), 500);
-        assert!(
-            voice.interim_model().as_os_str().is_empty(),
-            "no local model path: voice provisions itself through the sources"
-        );
-    }
-
-    #[test]
-    fn regeneration_preserves_an_existing_default_profile() {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let profiles = dir.path().join(PROFILES_DIR_NAME);
-        std::fs::create_dir_all(&profiles).expect("create profiles dir");
-        let profile_path = profiles.join(format!("{DEFAULT_PROFILE}.toml"));
-        let customized = "# user-customized profile\ninclude = [\"../gateway.toml\"]\n";
-        std::fs::write(&profile_path, customized).expect("write fixture");
-
-        generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("boot config regenerates");
-
-        let preserved = std::fs::read_to_string(&profile_path).expect("read back");
-        assert_eq!(
-            preserved, customized,
-            "first-run generation must not overwrite a user's existing profile"
-        );
+        let stt = workshop.stt().expect("STT tuning section present");
+        assert_eq!(stt.window_seconds(), 15);
+        assert_eq!(stt.interval_ms(), 500);
+        assert_eq!(config.catalog_stt_models().len(), 2);
+        assert!(raw.contains("sha256 = "));
+        assert!(raw.contains("models = [\"whisper-base-en\", \"whisper-small-en\"]"));
     }
 
     #[test]

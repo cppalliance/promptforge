@@ -13,9 +13,7 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use promptforge_workshop_server::{
-    Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig, VoiceConfig,
-};
+use promptforge_workshop_server::{Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -35,15 +33,8 @@ pub(crate) struct TestServer {
 }
 
 impl TestServer {
-    /// Spawns the server against the gateway at `gateway_base_url` with
-    /// voice disabled.
+    /// Spawns the server against the gateway at `gateway_base_url`.
     pub(crate) fn spawn(gateway_base_url: &str) -> Self {
-        Self::spawn_with_voice(gateway_base_url, VoiceConfig::default())
-    }
-
-    /// Spawns the server against the gateway at `gateway_base_url` with
-    /// the given voice configuration.
-    pub(crate) fn spawn_with_voice(gateway_base_url: &str, voice: VoiceConfig) -> Self {
         let tape_dir = tempfile::TempDir::new().expect("tempdir");
         let config = Config {
             gateway: GatewayConfig {
@@ -57,7 +48,6 @@ impl TestServer {
                 bind: "127.0.0.1:0".to_string(),
                 open_browser: false,
             },
-            voice,
         };
         let handle =
             promptforge_workshop_server::spawn(config).expect("the workshop server spawns");
@@ -130,14 +120,6 @@ impl JsonSocket {
             .send(Message::Text(text.to_string().into()))
             .await
             .expect("the text frame is sent");
-    }
-
-    /// Sends one binary frame.
-    pub(crate) async fn send_binary(&mut self, bytes: Vec<u8>) {
-        self.socket
-            .send(Message::Binary(bytes.into()))
-            .await
-            .expect("the binary frame is sent");
     }
 
     /// Receives the next text frame and parses it as JSON, failing after

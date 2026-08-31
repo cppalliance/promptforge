@@ -14,9 +14,7 @@ mod hosted {
     use std::net::SocketAddr;
     use std::path::Path;
 
-    use promptforge_gateway_config::{
-        Config, ConfigError, ServerConfig, WorkshopConfig, WorkshopSttConfig,
-    };
+    use promptforge_gateway_config::{Config, ConfigError, ServerConfig, WorkshopConfig};
 
     use crate::api_error::StartupError;
 
@@ -71,8 +69,9 @@ mod hosted {
         config: &Config,
         config_path: &Path,
         bound: SocketAddr,
+        stt: promptforge_stt::SttState,
     ) -> Result<Option<WorkshopHandle>, StartupError> {
-        spawn_with_opener(config, config_path, bound, |url| open::that(url))
+        spawn_with_opener(config, config_path, bound, stt, |url| open::that(url))
     }
 
     /// The testable core of [`spawn_if_configured`], with the browser
@@ -82,6 +81,7 @@ mod hosted {
         config: &Config,
         config_path: &Path,
         bound: SocketAddr,
+        stt: promptforge_stt::SttState,
         open_url: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> Result<Option<WorkshopHandle>, StartupError> {
         let Some(workshop) = config.workshop() else {
@@ -100,12 +100,10 @@ mod hosted {
         // duplication is harmless - each port answers with its own - but it
         // is the known blocker for the documented future option of nesting
         // the workshop under a path on the gateway listener.
-        let handle = promptforge_workshop_server::spawn(ws_config(
-            config.server(),
-            workshop,
-            config_path,
-            bound,
-        ))
+        let handle = promptforge_workshop_server::spawn_with_routes(
+            ws_config(config.server(), workshop, config_path, bound),
+            move |state| promptforge_stt::voice_routes(stt, state.push()),
+        )
         .map_err(StartupError::workshop)?;
         tracing::info!("workshop serving on {}", handle.url());
         if workshop.open_browser() {
@@ -144,10 +142,6 @@ mod hosted {
                 bind: workshop.bind().to_string(),
                 open_browser: workshop.open_browser(),
             },
-            voice: workshop.stt().map_or_else(
-                promptforge_workshop_server::VoiceConfig::default,
-                stt_config,
-            ),
         }
     }
 
@@ -168,16 +162,6 @@ mod hosted {
         }
     }
 
-    /// Mirrors `[workshop.stt]` capture tuning while Step 4 owns model wiring.
-    fn stt_config(stt: &WorkshopSttConfig) -> promptforge_workshop_server::VoiceConfig {
-        promptforge_workshop_server::VoiceConfig {
-            window_seconds: stt.window_seconds(),
-            interval_ms: stt.interval_ms(),
-            vocabulary: stt.vocabulary().to_vec(),
-            ..promptforge_workshop_server::VoiceConfig::default()
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use std::net::SocketAddr;
@@ -186,6 +170,7 @@ mod hosted {
         use super::{client_url, spawn_if_configured, spawn_with_opener, ws_config};
         use crate::api_error::StartupErrorKind;
         use promptforge_gateway_config::Config;
+        use promptforge_stt::SttState;
 
         fn config(toml: &str) -> Config {
             let document = if toml.contains("config-version") {
@@ -245,13 +230,6 @@ vocabulary = ["MCP", "GGUF"]
             );
             assert_eq!(ws.server.bind, "127.0.0.1:7911");
             assert!(ws.server.open_browser);
-            assert!(ws.voice.interim_model.as_os_str().is_empty());
-            assert!(ws.voice.final_model.as_os_str().is_empty());
-            assert!(ws.voice.interim_source.is_empty());
-            assert!(ws.voice.final_source.is_empty());
-            assert_eq!(ws.voice.window_seconds, 8);
-            assert_eq!(ws.voice.interval_ms, 250);
-            assert_eq!(ws.voice.vocabulary, ["MCP", "GGUF"]);
         }
 
         #[test]
@@ -264,10 +242,6 @@ vocabulary = ["MCP", "GGUF"]
                 workshop,
                 Path::new("gateway.toml"),
                 bound("127.0.0.1:8081"),
-            );
-            assert_eq!(
-                ws.voice,
-                promptforge_workshop_server::VoiceConfig::default()
             );
             assert_eq!(
                 ws.tape.path,
@@ -298,18 +272,26 @@ vocabulary = ["MCP", "GGUF"]
             let config = config(
                 "[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\n[workshop]\nbind = \"0.0.0.0:7910\"\n",
             );
-            let error =
-                spawn_if_configured(&config, Path::new("gateway.toml"), bound("127.0.0.1:8081"))
-                    .expect_err("a non-loopback workshop bind must fail");
+            let error = spawn_if_configured(
+                &config,
+                Path::new("gateway.toml"),
+                bound("127.0.0.1:8081"),
+                SttState::default(),
+            )
+            .expect_err("a non-loopback workshop bind must fail");
             assert_eq!(error.kind(), StartupErrorKind::Config);
         }
 
         #[test]
         fn no_workshop_section_hosts_nothing() {
             let config = config("[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n");
-            let hosted =
-                spawn_if_configured(&config, Path::new("gateway.toml"), bound("127.0.0.1:8081"))
-                    .expect("no workshop section is not an error");
+            let hosted = spawn_if_configured(
+                &config,
+                Path::new("gateway.toml"),
+                bound("127.0.0.1:8081"),
+                SttState::default(),
+            )
+            .expect("no workshop section is not an error");
             assert!(hosted.is_none());
         }
 
@@ -330,13 +312,18 @@ vocabulary = ["MCP", "GGUF"]
             let tmp = tempfile::TempDir::new().expect("tempdir");
             let (config, config_path) = opener_fixture(&tmp, "open_browser = true\n");
             let (tx, rx) = std::sync::mpsc::channel();
-            let hosted =
-                spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), move |url| {
+            let hosted = spawn_with_opener(
+                &config,
+                &config_path,
+                bound("127.0.0.1:0"),
+                SttState::default(),
+                move |url| {
                     tx.send(url.to_string()).expect("the receiver is alive");
                     Ok(())
-                })
-                .expect("the workshop spawns")
-                .expect("a [workshop] section hosts a workshop");
+                },
+            )
+            .expect("the workshop spawns")
+            .expect("a [workshop] section hosts a workshop");
             let opened = rx.recv().expect("the opener runs before spawn returns");
             assert_eq!(opened, hosted.url(), "the opener gets the workshop URL");
             hosted.shutdown();
@@ -347,13 +334,18 @@ vocabulary = ["MCP", "GGUF"]
             let tmp = tempfile::TempDir::new().expect("tempdir");
             let (config, config_path) = opener_fixture(&tmp, "");
             let (tx, rx) = std::sync::mpsc::channel::<String>();
-            let hosted =
-                spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), move |url| {
+            let hosted = spawn_with_opener(
+                &config,
+                &config_path,
+                bound("127.0.0.1:0"),
+                SttState::default(),
+                move |url| {
                     tx.send(url.to_string()).expect("the receiver is alive");
                     Ok(())
-                })
-                .expect("the workshop spawns")
-                .expect("a [workshop] section hosts a workshop");
+                },
+            )
+            .expect("the workshop spawns")
+            .expect("a [workshop] section hosts a workshop");
             // spawn_with_opener is synchronous: an opener call would have
             // landed in the channel before it returned.
             assert!(
@@ -367,9 +359,13 @@ vocabulary = ["MCP", "GGUF"]
         fn a_failing_opener_does_not_fail_the_spawn() {
             let tmp = tempfile::TempDir::new().expect("tempdir");
             let (config, config_path) = opener_fixture(&tmp, "open_browser = true\n");
-            let hosted = spawn_with_opener(&config, &config_path, bound("127.0.0.1:0"), |_| {
-                Err(std::io::Error::other("no display"))
-            })
+            let hosted = spawn_with_opener(
+                &config,
+                &config_path,
+                bound("127.0.0.1:0"),
+                SttState::default(),
+                |_| Err(std::io::Error::other("no display")),
+            )
             .expect("a browser that will not open is not a startup failure")
             .expect("a [workshop] section hosts a workshop");
             hosted.shutdown();

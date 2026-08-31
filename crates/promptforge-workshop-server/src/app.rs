@@ -6,7 +6,6 @@ use std::sync::Arc;
 use axum::Router;
 
 use promptforge_progress::ProgressHub;
-use promptforge_transcribe::{VoiceEngine, VoiceSlot};
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;
@@ -27,13 +26,11 @@ pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
 /// tape, the status, catalog, and menu buses, the process progress hub,
-/// and the voice transcription engine slot, filled by the provisioning
-/// task once the models load from local files or the gateway cache.
+/// and the hosted workspace state.
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub(crate) gateway: GatewayClient,
     pub(crate) tape: Arc<Tape>,
-    pub(crate) voice: VoiceSlot,
     pub(crate) status: StatusBus,
     pub(crate) progress: Arc<ProgressHub>,
     pub(crate) health: GatewayHealth,
@@ -45,13 +42,6 @@ pub struct AppState {
 
 impl AppState {
     /// Builds shared state from the loaded configuration.
-    ///
-    /// Voice never loads here: the engine load is deferred to the
-    /// provisioning task, which starts alongside the progress renderer
-    /// when the server spawns, so construction never blocks on
-    /// multi-gigabyte model files and the load's progress reports while
-    /// the renderer is live. Without GPU transcription the models are
-    /// never loaded at all.
     ///
     /// # Errors
     /// Returns [`StateError::Gateway`] if the HTTP client cannot be built
@@ -80,27 +70,11 @@ impl AppState {
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(StateError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(StateError::Tape)?;
-        let voice = VoiceSlot::default();
         let progress = Arc::new(ProgressHub::new());
-        // Voice is GPU-only: without the CUDA backend and an NVIDIA driver
-        // a take stalls on a CPU pass and the UI hides the mic, so the
-        // server never loads the multi-gigabyte whisper models it could
-        // not use, and never announces voice over a mic that is not there.
-        // The load itself belongs to the provisioning task; serve passes
-        // it an empty voice config when this push fires.
-        if !promptforge_transcribe::gpu_transcription_available() && config.voice.enabled() {
-            tracing::info!("voice disabled: GPU transcription is unavailable");
-            push.push_status_update(
-                "Voice disabled",
-                "GPU transcription is unavailable; the whisper models stay unloaded",
-                Activity::General,
-            );
-        }
         push.push_idle();
         Ok(Self {
             gateway,
             tape: Arc::new(tape),
-            voice,
             status,
             progress,
             health: GatewayHealth::new(),
@@ -109,17 +83,6 @@ impl AppState {
             menu,
             workspace: Workspace::new(),
         })
-    }
-
-    /// The voice transcription engine, when one has loaded.
-    pub(crate) fn voice_engine(&self) -> Option<Arc<VoiceEngine>> {
-        self.voice.engine()
-    }
-
-    /// The voice engine slot, shared with the provisioning task, which
-    /// fills it once the gateway cache has provided the models.
-    pub(crate) fn voice_slot(&self) -> VoiceSlot {
-        self.voice.clone()
     }
 
     /// The status bus, which every `/ws` session subscribes to so it can
@@ -222,8 +185,7 @@ pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
     let api = Router::new()
         .merge(routes::chat::routes(state.clone()))
-        .merge(routes::gateway_config::routes(state.clone()))
-        .merge(routes::voice::routes(state))
+        .merge(routes::gateway_config::routes(state))
         .merge(with_deadline(
             routes::workspace::routes(workspace),
             DEFAULT_DEADLINE,
@@ -263,7 +225,7 @@ pub(crate) mod fixtures {
     #[cfg(test)]
     use crate::app::AppState;
     #[cfg(test)]
-    use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
+    use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig};
 
     /// Builds a configuration pointing at `base_url`, taping to `tape_path`.
     #[cfg(test)]
@@ -277,7 +239,6 @@ pub(crate) mod fixtures {
                 path: tape_path.to_path_buf(),
             },
             server: ServerConfig::default(),
-            voice: VoiceConfig::default(),
         }
     }
 

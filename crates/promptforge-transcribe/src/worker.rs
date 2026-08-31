@@ -23,7 +23,8 @@ struct Job {
 /// Handle to the whisper worker thread.
 #[derive(Debug)]
 pub(crate) struct Transcriber {
-    job_tx: std::sync::mpsc::Sender<Job>,
+    job_tx: Option<std::sync::mpsc::Sender<Job>>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Transcriber {
@@ -45,20 +46,40 @@ impl Transcriber {
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
         let path = model_path.to_path_buf();
         let vocabulary = vocabulary.to_vec();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("whisper-transcribe".to_string())
             .spawn(move || worker_loop(&path, &vocabulary, progress.as_ref(), &job_rx, &init_tx))
             .map_err(TranscribeError::SpawnWorker)?;
-        Ok((Self { job_tx }, init_rx))
+        Ok((
+            Self {
+                job_tx: Some(job_tx),
+                worker: Some(worker),
+            },
+            init_rx,
+        ))
     }
 
     /// Queues `samples` for transcription and awaits the trimmed text.
     pub(super) async fn transcribe(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
-        self.job_tx
+        let Some(job_tx) = &self.job_tx else {
+            return Err(TranscribeError::WorkerGone);
+        };
+        job_tx
             .send(Job { samples, reply })
             .map_err(|_| TranscribeError::WorkerGone)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
+    }
+}
+
+impl Drop for Transcriber {
+    fn drop(&mut self) {
+        // Close the queue before joining so the worker exits after any
+        // in-progress inference and releases its Whisper context.
+        drop(self.job_tx.take());
+        if let Some(worker) = self.worker.take() {
+            let _ignored = worker.join();
+        }
     }
 }
 

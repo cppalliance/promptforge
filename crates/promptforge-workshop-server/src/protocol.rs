@@ -57,7 +57,7 @@
 //! the cursor, so a missed wakeup is harmless because the next one
 //! delivers everything past the cursor. A durable frame that answers
 //! the connection's own request (the chat reply stream relayed from the
-//! gateway, the voice announcements and stop replies) is sent directly
+//! gateway) is sent directly
 //! by the loop that owns the socket, which delivers exactly without any
 //! cursor - no shared state exists for a cursor to index.
 //!
@@ -66,8 +66,7 @@
 //! its channel lags out and its connection may drop. The drop is
 //! harmless because every ephemeral frame has a repair path that owes
 //! nothing to its predecessors: status and catalog are complete
-//! snapshots resent on reconnect, and a voice interim is superseded by
-//! the next interim of its take.
+//! snapshots resent on reconnect.
 //!
 //! ## Classification
 //!
@@ -101,17 +100,6 @@
 //! freely, demuxed by the echoed `id`. The interleaving changes nothing
 //! about the durable classification of the chat reply frames above.
 //!
-//! Voice socket (`/voice`):
-//!
-//! - [`StreamFrame`] - durable. The single per-take generation
-//!   announcement; every interim and final frame that follows refers to
-//!   it and nothing resends it.
-//! - [`InterimFrame`] - ephemeral. Each interim supersedes the previous
-//!   one - the committed prefix plus a fresh tentative decode - so a
-//!   dropped interim is overwritten by the next.
-//! - [`FinalFrame`] - durable. The take's single stop reply carrying the
-//!   assembled transcript; it has no successor and is never resent.
-
 use serde::Serialize;
 
 pub use promptforge_gateway_protocol::wire::ChatRequest;
@@ -135,13 +123,6 @@ pub(crate) fn parse_chat_request(
     request.rest.clear();
     Ok(request)
 }
-
-/// The `/voice` control message that begins a take.
-pub(crate) const VOICE_START: &str = "start";
-
-/// The `/voice` control message that ends a take and requests its final
-/// transcript.
-pub(crate) const VOICE_STOP: &str = "stop";
 
 // --- Outbound: server to client ------------------------------------------
 
@@ -411,91 +392,6 @@ impl ErrorFrame {
     }
 }
 
-/// The `/voice` stream announcement: `{"type":"stream","generation":N}`,
-/// sent when a `start` begins a new stream generation and before any of
-/// that generation's interim or final frames. Generations count from 1
-/// per connection, so the client can discard frames a stop/restart race
-/// left behind from a superseded take.
-///
-/// Delivery: durable - the single per-take generation announcement that
-/// every following interim and final frame refers to; nothing resends it.
-#[derive(Debug, Serialize)]
-pub(crate) struct StreamFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    generation: u64,
-}
-
-impl StreamFrame {
-    /// Builds the announcement for `generation`.
-    pub(crate) fn new(generation: u64) -> Self {
-        Self {
-            kind: "stream",
-            generation,
-        }
-    }
-}
-
-/// One interim transcription push on `/voice`:
-/// `{"type":"interim","committed":"...","tentative":"...","generation":N}`.
-/// `committed` is the take's crystallized prefix (append-only within a
-/// take), `tentative` is the interim model's decode of the audio past it,
-/// and `generation` names the announced stream generation the frame
-/// belongs to.
-///
-/// Delivery: ephemeral - each interim supersedes the previous one, so a
-/// dropped interim is overwritten by the next.
-#[derive(Debug, Serialize)]
-pub(crate) struct InterimFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    committed: String,
-    tentative: String,
-    generation: u64,
-}
-
-impl InterimFrame {
-    /// Builds an interim frame from the take's two transcript fields,
-    /// tagged with the take's stream generation.
-    pub(crate) fn new(committed: String, tentative: String, generation: u64) -> Self {
-        Self {
-            kind: "interim",
-            committed,
-            tentative,
-            generation,
-        }
-    }
-}
-
-/// The take's single stop reply on `/voice`:
-/// `{"type":"final","text":"...","frames":N,"generation":N}` - the
-/// assembled transcript, the total PCM frames received since the most
-/// recent start, and the announced stream generation the take belongs to.
-///
-/// Delivery: durable - the take's single stop reply; it has no successor
-/// and is never resent.
-#[derive(Debug, Serialize)]
-pub(crate) struct FinalFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    text: String,
-    frames: u64,
-    generation: u64,
-}
-
-impl FinalFrame {
-    /// Builds the stop reply from the transcript and the frame count,
-    /// tagged with the take's stream generation.
-    pub(crate) fn new(text: String, frames: u64, generation: u64) -> Self {
-        Self {
-            kind: "final",
-            text,
-            frames,
-            generation,
-        }
-    }
-}
-
 // Every test below pins one frame's wire shape against the exact JSON
 // literal the pre-refactor code built with `serde_json::json!`, so a field
 // rename, retype, or optionality change fails here before it reaches a
@@ -712,57 +608,5 @@ mod tests {
             tagged,
             serde_json::json!({"type": "error", "message": "Gateway unreachable", "id": 7})
         );
-    }
-
-    #[test]
-    fn a_stream_frame_serializes_its_generation() {
-        let frame = serde_json::to_value(StreamFrame::new(3)).expect("the frame serializes");
-        assert_eq!(
-            frame,
-            serde_json::json!({
-                "type": "stream",
-                "generation": 3,
-            })
-        );
-    }
-
-    #[test]
-    fn an_interim_frame_serializes_both_transcript_fields() {
-        let frame = serde_json::to_value(InterimFrame::new(
-            "ask not".to_string(),
-            "what you".to_string(),
-            1,
-        ))
-        .expect("the frame serializes");
-        assert_eq!(
-            frame,
-            serde_json::json!({
-                "type": "interim",
-                "committed": "ask not",
-                "tentative": "what you",
-                "generation": 1,
-            })
-        );
-    }
-
-    #[test]
-    fn a_final_frame_serializes_the_transcript_and_the_frame_count() {
-        let frame = serde_json::to_value(FinalFrame::new(String::new(), 192, 2))
-            .expect("the frame serializes");
-        assert_eq!(
-            frame,
-            serde_json::json!({
-                "type": "final",
-                "text": "",
-                "frames": 192,
-                "generation": 2,
-            })
-        );
-    }
-
-    #[test]
-    fn the_voice_control_messages_are_bare_words() {
-        assert_eq!(VOICE_START, "start");
-        assert_eq!(VOICE_STOP, "stop");
     }
 }

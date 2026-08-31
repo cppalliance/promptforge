@@ -173,8 +173,6 @@ mod tests {
     use axum::{Json, Router};
     use tower::ServiceExt;
 
-    use promptforge_transcribe::VoiceSlot;
-
     use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
     use crate::app::router;
     use crate::catalog::CatalogBus;
@@ -520,7 +518,6 @@ mod tests {
         let state = AppState {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
-            voice: VoiceSlot::default(),
             status: StatusBus::new(),
             progress: Arc::new(promptforge_progress::ProgressHub::new()),
             health: GatewayHealth::new(),
