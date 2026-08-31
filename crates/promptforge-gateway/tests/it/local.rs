@@ -25,6 +25,8 @@ async fn local_model_chat_completion_returns_text() {
     let cache = tempfile::tempdir().unwrap();
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -111,6 +113,8 @@ async fn local_model_embeddings_return_vectors() {
     let cache = tempfile::tempdir().unwrap();
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -195,6 +199,8 @@ async fn local_model_rerank_returns_scores() {
     let cache = tempfile::tempdir().unwrap();
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

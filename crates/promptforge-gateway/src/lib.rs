@@ -13,11 +13,11 @@
 //! passthrough at `POST /v1/rerank` for `kind = "classifier"` models, shared
 //! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
 //! gateway-owned local generative inference via a managed `llama-server`
-//! subprocess (`[[local_model]]`), named profiles with recursive `include`
-//! and immediate `POST /admin/switch-profile` streaming its stages over
-//! SSE, a bearer-authed
+//! subprocess (`[[local_model]]`), named profile checklists from one loaded
+//! catalog with bounded-drain `POST /admin/switch-profile` streaming its
+//! existing stages over SSE, a bearer-authed
 //! `GET /v1/models` catalog, a bearer-authed `GET /admin/config` view of the
-//! running configuration as JSON (secrets redacted, per-file provenance), a
+//! running global configuration as JSON with secrets redacted, a
 //! bearer-authed `GET /admin/progress` SSE
 //! stream of the process progress hub, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, an on-demand blob cache
@@ -32,9 +32,8 @@
 //! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
 //! (attaching the process `HF_TOKEN` when set), bearer-authed shadow-file
 //! write routes staging pending edits beside the real files without ever
-//! touching them (`PUT /admin/config`, `PUT /admin/boot-config`,
-//! `PUT /admin/include/{path}`, `PUT /admin/env`) plus a bearer-authed
-//! `GET /admin/env` readout of the real boot and profile `.env` files,
+//! touching them (`PUT /admin/config`, `PUT /admin/env`) plus a bearer-authed
+//! `GET /admin/env` readout of the single config-sibling `.env` file,
 //! bearer-authed pending-state reads - `GET /admin/config-pending` (the
 //! merged real-plus-shadow view in the `GET /admin/config` shape, with a
 //! distinct boot side for the restart-required banner) and
@@ -43,16 +42,11 @@
 //! shadow to its real file, then reload the active profile, or report
 //! restart-required for a promoted boot shadow) and
 //! `POST /admin/config-revert` (delete every shadow, touching nothing
-//! else), bearer-authed profile file management -
-//! `POST /admin/profiles/{name}` creating a real profile file (empty, a
-//! verbatim copy of another profile, or an include leaf) and
-//! `DELETE /admin/profiles/{name}` deleting one (refusing the active
-//! profile, removing any shadow alongside) - a loopback-only,
-//! bearer-authed `POST /admin/reveal` opening the host OS file manager at
-//! a path confined to the artifact cache or the profiles directory - and
+//! else), a loopback-only, bearer-authed `POST /admin/reveal` opening the
+//! host OS file manager at a path confined to the artifact cache - and
 //! `GET /health`. The whole admin config surface (config read/write, env,
 //! pending state, apply/revert, orphans, system, model-info, the HF
-//! proxy, profile create/delete, reveal) sits behind the shared loopback
+//! proxy, reveal) sits behind the shared loopback
 //! wall from `promptforge-gateway-loopback` in every build; with the
 //! `config-ui` feature the embedded config SPA is served at `/config/`
 //! behind the same wall. In-process
@@ -65,6 +59,7 @@ mod config_apply;
 mod config_pending;
 mod config_write;
 mod dialect;
+mod drain;
 mod env_file;
 mod error;
 mod hf;
@@ -72,7 +67,6 @@ mod hf;
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
-mod profile_files;
 mod render;
 mod reveal;
 mod routing;
@@ -100,7 +94,6 @@ pub use promptforge_gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
 };
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
@@ -111,7 +104,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 #[cfg(feature = "local")]
 use axum::routing::delete;
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
@@ -124,9 +117,9 @@ use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse, RerankRequest,
     RerankResponse,
 };
+use promptforge_gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use promptforge_gateway_config::WebSearchConfig;
-use promptforge_gateway_config::{ModelKind, ServerConfig, WorkshopConfig};
 use promptforge_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
 #[cfg(feature = "web-search")]
 use promptforge_web_search_service::{WebSearchRequest, WebSearchResponse, WebSearchState};
@@ -149,10 +142,10 @@ struct LiveState {
     model_allowlist: Option<Vec<String>>,
 }
 
-/// Directory used by admin profile routes.
+/// Single configuration file used by admin routes and profile persistence.
 #[derive(Debug)]
-struct AdminProfiles {
-    dir: PathBuf,
+struct AdminConfig {
+    path: std::path::PathBuf,
 }
 
 /// What the active profile selected: its name and its `models` allowlist.
@@ -166,38 +159,23 @@ pub(crate) struct ProfileSelection {
     pub(crate) model_allowlist: Option<Vec<String>>,
 }
 
-/// The boot file's boot-owned sections, fixed for the process lifetime and
-/// enforced against every profile switch.
-#[derive(Debug, Clone)]
-pub(crate) struct BootOwned {
-    /// The boot `[server]`: the socket and the gateway bearer key.
-    pub(crate) server: ServerConfig,
-    /// The boot `[workshop]`, when present: the hosted workshop is started
-    /// once at boot and cannot be moved, reconfigured, or removed mid-run.
-    pub(crate) workshop: Option<WorkshopConfig>,
-    /// The boot config path, when known: `PUT /admin/boot-config` writes
-    /// its shadow and the env routes read its sibling `.env` file. `None`
-    /// in embedded assemblies built straight from a `Config`.
-    pub(crate) config_path: Option<PathBuf>,
-}
-
-/// Shared handler state: live routing/key/local runtime, the boot-owned
-/// `[server]` and `[workshop]` settings, and optional profiles dir.
+/// Shared handler state: live routing/key/local runtime, configuration path,
+/// and switch coordination.
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
-    profiles: Option<Arc<AdminProfiles>>,
+    config: Option<Arc<AdminConfig>>,
     /// Process-lifetime identifier used by the config UI to detect a restart.
     config_generation: Arc<str>,
-    /// The boot-owned sections, retained so profile switches can refuse a
-    /// profile that changes them.
-    boot: Arc<BootOwned>,
     /// Serializes profile switches so two concurrent switches cannot interleave
-    /// their reads and writes of the live state.
+    /// their reads and writes of the live state. Inference registration takes
+    /// this same lock before entering the in-flight set.
     switch: Arc<tokio::sync::Mutex<()>>,
-    /// Serializes `POST /admin/config-apply`, `POST /admin/config-revert`,
-    /// and every shadow-writing `PUT` save, so a second apply cannot race
-    /// the first through enumeration, promotion, and reload, and apply only
+    /// Inference requests that must drain before local children stop.
+    in_flight: Arc<drain::InFlight>,
+    /// Serializes direct profile switches, `POST /admin/config-apply`,
+    /// `POST /admin/config-revert`, and every shadow-writing `PUT` save, so
+    /// state persistence cannot race pending-state promotion and Apply only
     /// promotes shadow combinations the latest save validated whole.
     apply: Arc<tokio::sync::Mutex<()>>,
     /// The process-lifetime progress broker: operations attach trees for
@@ -228,9 +206,8 @@ impl AppState {
         config: Arc<Config>,
         #[cfg(feature = "local")] local: LocalRuntime,
         #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
-        profiles_dir: Option<PathBuf>,
+        config_path: Option<std::path::PathBuf>,
         selection: ProfileSelection,
-        boot: BootOwned,
         hub: Arc<ProgressHub>,
     ) -> AppState {
         let started = std::time::SystemTime::now()
@@ -248,10 +225,10 @@ impl AppState {
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
             })),
-            profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
+            config: config_path.map(|path| Arc::new(AdminConfig { path })),
             config_generation: format!("{}-{started}", std::process::id()).into(),
-            boot: Arc::new(boot),
             switch: Arc::new(tokio::sync::Mutex::new(())),
+            in_flight: Arc::new(drain::InFlight::default()),
             apply: Arc::new(tokio::sync::Mutex::new(())),
             hub,
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
@@ -270,6 +247,12 @@ impl AppState {
     #[cfg(feature = "local")]
     pub(crate) async fn cache_dir(&self) -> Option<String> {
         self.live.read().await.local.cache_dir().map(str::to_owned)
+    }
+
+    /// Registers an inference request under the same lock profile switches use.
+    async fn begin_inference(&self) -> drain::InFlightGuard {
+        let _switch = self.switch.lock().await;
+        self.in_flight.register()
     }
 }
 
@@ -301,10 +284,6 @@ pub(crate) fn build_router(state: AppState) -> Router {
     // loopback wall in every build: a non-loopback peer is refused with
     // 403 before bearer auth even runs.
     let walled = Router::new()
-        .route(
-            "/admin/profiles/{name}",
-            post(profile_files::admin_create_profile).delete(profile_files::admin_delete_profile),
-        )
         .route("/admin/system", get(system::admin_system))
         .route(
             "/admin/config",
@@ -325,14 +304,6 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route(
             "/admin/config-revert",
             post(config_apply::admin_config_revert),
-        )
-        .route(
-            "/admin/boot-config",
-            put(config_write::admin_put_boot_config),
-        )
-        .route(
-            "/admin/include/{*path}",
-            put(config_write::admin_put_include),
         )
         .route(
             "/admin/env",
@@ -416,6 +387,7 @@ async fn chat_completions(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
+    let in_flight = state.begin_inference().await;
     let model = {
         let live = state.live.read().await;
         live.routing.model(&request.model)?
@@ -426,7 +398,10 @@ async fn chat_completions(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    let permit = tokio::select! {
+        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
     // Emulated dialects rewrite the request (guide injection, tool stripping)
     // and parse the reply's content fences; the emulated parse applies to
     // non-streaming completions only.
@@ -442,18 +417,16 @@ async fn chat_completions(
         // A failure here is before the SSE response starts, so it is
         // consumed as a normal JSON error, never a stream that dies
         // mid-flight.
-        let streamed = model
-            .endpoint
-            .upstream
-            .stream(request, &model.upstream_name)
-            .await?;
-        return Ok(relay_sse(streamed, permit));
+        let streamed = tokio::select! {
+            result = model.endpoint.upstream.stream(request, &model.upstream_name) => result?,
+            () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+        };
+        return Ok(relay_sse(streamed, permit, in_flight));
     }
-    let response = model
-        .endpoint
-        .upstream
-        .send(request, &model.upstream_name)
-        .await?;
+    let response = tokio::select! {
+        result = model.endpoint.upstream.send(request, &model.upstream_name) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -478,33 +451,47 @@ async fn chat_completions(
 /// goes away the response body is dropped, which drops the chunk stream,
 /// which drops the upstream response and aborts the upstream connection,
 /// releasing the permit in the same unwind. There is no explicit cancel path.
-fn relay_sse(streamed: crate::upstream::StreamedChunks, permit: crate::queue::Permit) -> Response {
+fn relay_sse(
+    streamed: crate::upstream::StreamedChunks,
+    permit: crate::queue::Permit,
+    in_flight: drain::InFlightGuard,
+) -> Response {
     use futures_util::StreamExt as _;
 
-    let relayed = streamed
-        .chunks
-        .scan((false, permit), |(failed, _permit), item| {
-            if *failed {
-                return std::future::ready(None);
+    let relayed = futures_util::stream::unfold(
+        (streamed.chunks, false, permit, in_flight),
+        |(mut chunks, failed, permit, in_flight)| async move {
+            if failed {
+                return None;
             }
-            let line = match item {
-                Ok(chunk) => match serde_json::to_string(&chunk) {
-                    Ok(json) => format!("data: {json}\n\n"),
-                    Err(error) => {
-                        *failed = true;
-                        format!(
-                            "data: {}\n\n",
-                            GatewayError::upstream_protocol(error).envelope()
-                        )
+            let (line, failed) = tokio::select! {
+                item = chunks.next() => {
+                    let item = item?;
+                    match item {
+                        Ok(chunk) => match serde_json::to_string(&chunk) {
+                            Ok(json) => (format!("data: {json}\n\n"), false),
+                            Err(error) => (
+                                format!(
+                                    "data: {}\n\n",
+                                    GatewayError::upstream_protocol(error).envelope()
+                                ),
+                                true,
+                            ),
+                        },
+                        Err(error) => (format!("data: {}\n\n", error.envelope()), true),
                     }
-                },
-                Err(error) => {
-                    *failed = true;
-                    format!("data: {}\n\n", error.envelope())
                 }
+                () = in_flight.cancelled() => (
+                    format!("data: {}\n\n", GatewayError::RequestCancelled.envelope()),
+                    true,
+                ),
             };
-            std::future::ready(Some(Ok::<String, std::convert::Infallible>(line)))
-        });
+            Some((
+                Ok::<String, std::convert::Infallible>(line),
+                (chunks, failed, permit, in_flight),
+            ))
+        },
+    );
     let done = futures_util::stream::once(async { Ok("data: [DONE]\n\n".to_owned()) });
     let mut response = Response::new(Body::from_stream(relayed.chain(done)));
     let headers = response.headers_mut();
@@ -532,6 +519,7 @@ async fn embeddings(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
+    let in_flight = state.begin_inference().await;
     let model = {
         let live = state.live.read().await;
         live.routing.model(&request.model)?
@@ -542,12 +530,14 @@ async fn embeddings(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
-    let response = model
-        .endpoint
-        .upstream
-        .send_embeddings(request, &model.upstream_name)
-        .await?;
+    let _permit = tokio::select! {
+        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
+    let response = tokio::select! {
+        result = model.endpoint.upstream.send_embeddings(request, &model.upstream_name) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -565,6 +555,7 @@ async fn rerank(
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
+    let in_flight = state.begin_inference().await;
     let model = {
         let live = state.live.read().await;
         live.routing.model(&request.model)?
@@ -575,12 +566,14 @@ async fn rerank(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
-    let response = model
-        .endpoint
-        .upstream
-        .send_rerank(request, &model.upstream_name)
-        .await?;
+    let _permit = tokio::select! {
+        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
+    let response = tokio::select! {
+        result = model.endpoint.upstream.send_rerank(request, &model.upstream_name) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
@@ -619,15 +612,19 @@ struct SwitchProfileRequest {
     name: String,
 }
 
-/// Lists `*.toml` stems in the profiles directory.
+/// Lists profile names from the loaded global catalog.
 async fn admin_list_profiles(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
-    let dir = profiles_dir(&state)?;
-    let profiles = promptforge_gateway_config::list_profiles(dir)
-        .map_err(|e| GatewayError::switch_failed("list-profiles", e))?;
+    let live = state.live.read().await;
+    let profiles: Vec<&str> = live
+        .config
+        .profiles()
+        .iter()
+        .map(promptforge_gateway_config::ProfileConfig::name)
+        .collect();
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
@@ -657,22 +654,28 @@ async fn admin_status(
         "config_generation": state.config_generation.as_ref(),
         "model_allowlist": live.model_allowlist,
         "local_children": local_children,
-        "queue": "per-dominion shared waiting queue; switch-profile is immediate (no drain)",
+        "queue": "per-dominion shared waiting queue; profile switch drains in-flight inference for up to 30 seconds",
     })))
 }
 
-/// The `GET /admin/config` route: bearer-authed, renders the running
-/// configuration as JSON in the TOML shape, with secrets redacted, each
-/// keyed-array entry annotated with the file its definition came from, and
-/// the active profile leaf's own `include` array carried verbatim (see
-/// [`promptforge_gateway_config::Config::to_json`]).
+/// The `GET /admin/config` route: bearer-authed, renders the running global
+/// config plus its active profile in the pending admin shape.
 async fn admin_config(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
     let live = state.live.read().await;
-    Ok(Json(live.config.to_json()))
+    let mut document = live.config.to_json();
+    if let Some(table) = document.as_object_mut()
+        && let Some(profile) = live.config.active_profile()
+    {
+        table.insert(
+            "active_profile".to_owned(),
+            serde_json::Value::String(profile.name().to_owned()),
+        );
+    }
+    Ok(Json(document))
 }
 
 /// Heartbeat cadence for the progress stream: SSE comment lines keep an
@@ -804,9 +807,9 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// `starting-models` before the new children load their weights into VRAM
 /// (the long pole) - and the stream ends with exactly one terminal event,
 /// `{"status": "ready", "profile": ...}` or `{"status": "error",
-/// "message": ...}`. There is no drain stage because the gateway does not
-/// drain. A refusal before the switch starts (bad auth, no profiles
-/// directory, a malformed name) stays a buffered JSON error envelope. Builds
+/// "message": ...}`. The bounded drain has no stage of its own, preserving
+/// the existing stage vocabulary. A refusal before the switch starts (bad
+/// auth or a malformed name) stays a buffered JSON error envelope. Builds
 /// without the `local` feature emit no `stopping-models`/`starting-models`
 /// stages, and refuse a profile declaring `[[local_model]]` with a terminal
 /// error event instead of starting children.
@@ -820,7 +823,6 @@ async fn admin_switch_profile(
     Json(request): Json<SwitchProfileRequest>,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &headers).await?;
-    let dir = profiles_dir(&state)?.to_path_buf();
     let name = ProfileName::parse(&request.name)
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
     // Subscribe before the tree attaches so no event of this switch is
@@ -828,7 +830,7 @@ async fn admin_switch_profile(
     let rx = state.hub.subscribe();
     let tree = state.hub.operation();
     let operation = tree.operation();
-    let switch = tokio::spawn(run_switch(state, dir, name, tree));
+    let switch = tokio::spawn(run_switch(state, name, tree));
     Ok(switch_sse_response(rx, operation, switch))
 }
 
@@ -836,28 +838,39 @@ async fn admin_switch_profile(
 /// tree.
 ///
 /// Switches are serialized by a dedicated mutex, so two concurrent requests
-/// cannot interleave. The new profile's env file loads before the profile
-/// itself (the boot file's env file is already in the process environment
-/// from startup). Configuration is loaded and validated off the live lock;
-/// a config or routing failure returns an error and leaves the live state
-/// untouched. The boot file owns `[server]` and `[workshop]`: a profile
-/// whose merged `[server]` or `[workshop]` differs from the boot file's is
-/// rejected - the refusal reaches the caller as the switch stream's terminal
-/// error event - so the socket, the gateway bearer key, and the hosted
-/// workshop's settings are fixed for the process lifetime and a switch never
-/// rotates the admin credential. The routing and web-search
-/// settings of the new profile are committed only after the new local
-/// runtime starts successfully, via a single atomic swap under the write
-/// lock. Because old and new `llama-server` children must not both hold
-/// VRAM, the old children are stopped before the new ones start; a start
-/// failure therefore leaves the previous profile authenticated and
-/// remote-routable but without its local models (a documented degraded
-/// state) rather than a half-applied new profile.
+/// cannot interleave. The target subset is derived from the already parsed
+/// global catalog while that lock is held. Existing inference requests then
+/// receive a bounded drain window before stragglers are cancelled and local
+/// children stop. New inference requests cannot register until the switch
+/// releases the same lock.
 async fn run_switch(
     state: AppState,
-    dir: PathBuf,
     name: ProfileName,
     tree: ProgressTree,
+) -> Result<String, GatewayError> {
+    // Direct switches serialize with pending saves and Apply. Their atomic
+    // state write preserves any existing `.next` selection.
+    let _apply = state.apply.lock().await;
+    run_switch_with_config(state.clone(), name, tree, None, StatePersistence::Write).await
+}
+
+/// How a successful switch commits its active-profile state.
+pub(crate) enum StatePersistence {
+    /// The selection already matches persisted state.
+    None,
+    /// Atomically replace real state while preserving any pending shadow.
+    Write,
+    /// Promote the pending state shadow as part of Apply.
+    Promote(std::path::PathBuf),
+}
+
+/// Executes a switch using an optional catalog parsed by Apply.
+async fn run_switch_with_config(
+    state: AppState,
+    name: ProfileName,
+    tree: ProgressTree,
+    candidate: Option<Config>,
+    persistence: StatePersistence,
 ) -> Result<String, GatewayError> {
     // Serialize switches for the whole operation (LIB-008).
     let _switch = state.switch.lock().await;
@@ -867,24 +880,30 @@ async fn run_switch(
     // reach. Weights track expected duration: starting the new children is
     // the long pole.
     let loading = tree.register("loading-profile", 1.0);
-    let path = dir.join(format!("{name}.toml"));
-    if !path.is_file() {
+    let catalog = match candidate {
+        Some(config) => config,
+        None => state.live.read().await.config.as_ref().clone(),
+    };
+    if !catalog
+        .profiles()
+        .iter()
+        .any(|profile| profile.name() == name.as_str())
+    {
         loading.fail();
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
-
-    // The profile's env file must be in the process environment before the
-    // profile is interpolated. dotenvy never overrides, so anything already
-    // set (the process environment, the boot env file) wins.
-    crate::runner::load_env_file(&path.with_extension("env"));
-
-    // Build and validate the entire remote side off the live lock. Any failure
-    // here returns before mutating live state at all (LIB-009).
-    let (config, remote_routing) = match load_switch_config(&state, &dir, &name) {
-        Ok(loaded) => loaded,
+    let config = match catalog.select_profile(&name) {
+        Ok(config) => config,
         Err(error) => {
             loading.fail();
-            return Err(error);
+            return Err(GatewayError::switch_failed("select-profile", error));
+        }
+    };
+    let remote_routing = match Routing::from_config(&config) {
+        Ok(routing) => routing,
+        Err(error) => {
+            loading.fail();
+            return Err(GatewayError::switch_failed("build-routing", error));
         }
     };
     #[cfg(feature = "web-search")]
@@ -892,67 +911,18 @@ async fn run_switch(
         .web_search_config()
         .map(WebSearchState::new)
         .map(Arc::new);
-    let new_key = config.server_key();
-    let new_allowlist = config.model_allowlist().map(<[String]>::to_vec);
+    let new_allowlist = config
+        .active_profile()
+        .map(|profile| profile.models().to_vec());
     loading.complete();
+
+    drain_inference(&state).await;
 
     // Stop the previous local children before starting new ones so the two
     // never hold VRAM simultaneously. The bearer key, routing, and web-search
     // settings are left untouched here, so auth stays stable if start fails.
     #[cfg(feature = "local")]
-    let new_local = {
-        let stopping = tree.register("stopping-models", 2.0);
-        let old_local = {
-            let mut live = state.live.write().await;
-            std::mem::replace(&mut live.local, LocalRuntime::empty())
-        };
-        // Explicitly terminate the old children before starting new ones, and abort
-        // the switch if teardown fails. Dropping the runtime does not free their
-        // VRAM here (the still-live old routing holds Arc<dyn Upstream> clones, so
-        // the runtime is not the sole owner - PFGL-MOD-001); the teardown also
-        // cancels any in-flight recovery/respawn and disables further respawn, so no
-        // old child can outlive the switch (PF-GW-SERVER-004). Every child failure
-        // is surfaced, never discarded, so we never start replacements on top of a
-        // survivor.
-        match tokio::task::spawn_blocking(move || {
-            let result = old_local.shutdown();
-            drop(old_local);
-            result
-        })
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                stopping.fail();
-                return Err(GatewayError::switch_failed("shutdown-local", e));
-            }
-            Err(e) => {
-                stopping.fail();
-                return Err(GatewayError::switch_failed("shutdown-local-task", e));
-            }
-        }
-
-        stopping.complete();
-        let starting = tree.register("starting-models", 5.0);
-        // A clone feeds the blocking start so `config` survives to the swap.
-        let start_config = config.clone();
-        let runtime =
-            match tokio::task::spawn_blocking(move || LocalRuntime::start(&start_config, None))
-                .await
-            {
-                Ok(Ok(runtime)) => runtime,
-                Ok(Err(e)) => {
-                    starting.fail();
-                    return Err(GatewayError::switch_failed("start-local", e));
-                }
-                Err(e) => {
-                    starting.fail();
-                    return Err(GatewayError::switch_failed("start-local-task", e));
-                }
-            };
-        starting.complete();
-        runtime
-    };
+    let (new_local, start_failures) = replace_local_runtime(&state, &config, &tree).await?;
     // A headless build cannot honor a profile declaring local models; refuse
     // the switch rather than silently dropping them.
     #[cfg(not(feature = "local"))]
@@ -970,11 +940,18 @@ async fn run_switch(
     #[cfg(not(feature = "local"))]
     let routing = remote_routing;
 
+    // Persistence is part of the serialized switch. Once the state file
+    // commits, the in-memory swap below is infallible, so another switch can
+    // never overwrite pending state between activation and persistence.
+    commit_profile_state(&state, &name, persistence).await?;
+
     // Atomic swap: commit the whole new profile at once.
     {
         let mut live = state.live.write().await;
         live.routing = Arc::new(routing);
-        live.key = new_key;
+        // The listener and bearer key are process-owned `[server]` state.
+        // Apply reports their edits as restart-required, so a profile reload
+        // must not change authentication before that restart.
         live.config = Arc::new(config);
         #[cfg(feature = "web-search")]
         {
@@ -988,31 +965,132 @@ async fn run_switch(
         live.model_allowlist = new_allowlist;
     }
 
+    #[cfg(feature = "local")]
+    if !start_failures.is_empty() {
+        let loaded = state
+            .live
+            .read()
+            .await
+            .local
+            .models()
+            .iter()
+            .map(|model| model.name.clone())
+            .collect();
+        let failed = start_failures
+            .into_iter()
+            .map(|failure| format!("{}: {}", failure.model(), failure.error()))
+            .collect();
+        return Err(GatewayError::PartialStart {
+            profile: name.to_string(),
+            loaded,
+            failed,
+        });
+    }
+
     tracing::info!(profile = %name, "switched profile");
     Ok(name.to_string())
 }
 
-/// Loads and validates the switch target's configuration and builds its
-/// remote routing, all off the live lock (LIB-009): any failure leaves the
-/// live state untouched.
-fn load_switch_config(
+async fn drain_inference(state: &AppState) {
+    if !state
+        .in_flight
+        .drain_or_cancel(std::time::Duration::from_secs(30))
+        .await
+    {
+        tracing::warn!(
+            "profile-switch cancellation grace expired; stopping local children with request guards still registered"
+        );
+    }
+}
+
+#[cfg(feature = "local")]
+async fn replace_local_runtime(
     state: &AppState,
-    dir: &Path,
+    config: &Config,
+    tree: &ProgressTree,
+) -> Result<(LocalRuntime, Vec<local::LocalStartFailure>), GatewayError> {
+    let stopping = tree.register("stopping-models", 2.0);
+    let old_local = {
+        let mut live = state.live.write().await;
+        std::mem::replace(&mut live.local, LocalRuntime::empty())
+    };
+    // The routing table also owns each upstream. Explicit shutdown disables
+    // respawn and frees VRAM before replacements start (PFGL-MOD-001).
+    match tokio::task::spawn_blocking(move || {
+        let result = old_local.shutdown();
+        drop(old_local);
+        result
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            stopping.fail();
+            return Err(GatewayError::switch_failed("shutdown-local", error));
+        }
+        Err(error) => {
+            stopping.fail();
+            return Err(GatewayError::switch_failed("shutdown-local-task", error));
+        }
+    }
+
+    stopping.complete();
+    let starting = tree.register("starting-models", 5.0);
+    let start_config = config.clone();
+    let outcome =
+        match tokio::task::spawn_blocking(move || LocalRuntime::start_partial(&start_config, None))
+            .await
+        {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => {
+                starting.fail();
+                return Err(GatewayError::switch_failed("start-local", error));
+            }
+            Err(error) => {
+                starting.fail();
+                return Err(GatewayError::switch_failed("start-local-task", error));
+            }
+        };
+    let (runtime, failures) = outcome.into_parts();
+    if failures.is_empty() {
+        starting.complete();
+    } else {
+        starting.fail();
+    }
+    Ok((runtime, failures))
+}
+
+/// Commits active-profile state while the caller holds the switch lock.
+async fn commit_profile_state(
+    state: &AppState,
     name: &ProfileName,
-) -> Result<(Config, Routing), GatewayError> {
-    let config = Config::load_profile(dir, name)
-        .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
-    crate::runner::check_server_matches_boot(&state.boot.server, config.server(), name)
-        .map_err(|e| GatewayError::switch_failed("server-mismatch", e))?;
-    crate::runner::check_workshop_matches_boot(
-        state.boot.workshop.as_ref(),
-        config.workshop(),
-        name,
-    )
-    .map_err(|e| GatewayError::switch_failed("workshop-mismatch", e))?;
-    let remote_routing = Routing::from_config(&config)
-        .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
-    Ok((config, remote_routing))
+    persistence: StatePersistence,
+) -> Result<(), GatewayError> {
+    match persistence {
+        StatePersistence::None => Ok(()),
+        StatePersistence::Write => persist_active_profile(state, name).await,
+        StatePersistence::Promote(state_path) => tokio::task::spawn_blocking(move || {
+            promptforge_gateway_config::promote_shadow(&state_path)
+        })
+        .await
+        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+        .map_err(config_write::config_write_error),
+    }
+}
+
+/// Persists the active profile beside the single configuration file.
+async fn persist_active_profile(state: &AppState, name: &ProfileName) -> Result<(), GatewayError> {
+    let Some(config) = state.config.as_ref() else {
+        return Ok(());
+    };
+    let config_path = config.path.clone();
+    let name = name.clone();
+    tokio::task::spawn_blocking(move || {
+        promptforge_gateway_config::persist_profile_state(&config_path, &name)
+    })
+    .await
+    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+    .map_err(config_write::config_write_error)
 }
 
 /// Builds the switch-profile SSE response: the hub's event stream filtered
@@ -1068,13 +1146,7 @@ fn switch_sse_response(
                         result = &mut switch => break result,
                     }
                 };
-                while let Ok(event) = rx.try_recv() {
-                    if event.operation == operation
-                        && matches!(event.state, EventState::Begun { .. })
-                    {
-                        pending.push_back(stage_line(&event));
-                    }
-                }
+                drain_switch_stages(&mut rx, operation, &mut pending);
                 done = true;
                 pending.push_back(terminal_line(result));
             }
@@ -1087,6 +1159,32 @@ fn switch_sse_response(
     response
 }
 
+/// Drains stage events already queued when the switch task completes.
+///
+/// A lag marker describes dropped older events, not an empty receiver, so
+/// catch-up continues after it and preserves every retained stage.
+fn drain_switch_stages(
+    rx: &mut tokio::sync::broadcast::Receiver<ProgressEvent>,
+    operation: OperationId,
+    pending: &mut std::collections::VecDeque<String>,
+) {
+    loop {
+        match rx.try_recv() {
+            Ok(event)
+                if event.operation == operation
+                    && matches!(event.state, EventState::Begun { .. }) =>
+            {
+                pending.push_back(stage_line(&event));
+            }
+            Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+            Err(
+                tokio::sync::broadcast::error::TryRecvError::Empty
+                | tokio::sync::broadcast::error::TryRecvError::Closed,
+            ) => break,
+        }
+    }
+}
+
 /// Maps a leaf's `Begun` to the switch stream's stage event.
 fn stage_line(event: &ProgressEvent) -> String {
     format!("data: {}\n\n", serde_json::json!({ "stage": event.label }))
@@ -1096,6 +1194,17 @@ fn stage_line(event: &ProgressEvent) -> String {
 fn terminal_line(result: Result<Result<String, GatewayError>, tokio::task::JoinError>) -> String {
     let payload = match result {
         Ok(Ok(profile)) => serde_json::json!({ "status": "ready", "profile": profile }),
+        #[cfg(feature = "local")]
+        Ok(Err(GatewayError::PartialStart {
+            profile,
+            loaded,
+            failed,
+        })) => serde_json::json!({
+            "status": "error",
+            "profile": profile,
+            "loaded": loaded,
+            "failed": failed,
+        }),
         Ok(Err(error)) => serde_json::json!({
             "status": "error",
             "message": error_chain(&error),
@@ -1124,12 +1233,12 @@ fn error_chain(error: &GatewayError) -> String {
     message
 }
 
-fn profiles_dir(state: &AppState) -> Result<&Path, GatewayError> {
+fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
     state
-        .profiles
+        .config
         .as_ref()
-        .map(|ctx| ctx.dir.as_path())
-        .ok_or(GatewayError::ProfilesUnavailable)
+        .map(|config| config.path.as_path())
+        .ok_or(GatewayError::ConfigPathUnavailable)
 }
 
 /// Compare the request's bearer token against the configured token.
@@ -1401,12 +1510,13 @@ mod progress_tests {
 
 #[cfg(test)]
 mod switch_tests {
+    use std::collections::VecDeque;
     use std::sync::Arc;
 
     use futures_util::StreamExt as _;
     use promptforge_progress::ProgressHub;
 
-    use super::{GatewayError, switch_sse_response};
+    use super::{GatewayError, drain_switch_stages, switch_sse_response};
 
     /// Collects the finite switch stream's full body text.
     async fn body_text(response: axum::response::Response) -> String {
@@ -1461,6 +1571,31 @@ mod switch_tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "local")]
+    async fn partial_start_terminal_reports_every_ready_and_failed_model() {
+        let hub = Arc::new(ProgressHub::new());
+        let rx = hub.subscribe();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let switch = tokio::spawn(async {
+            Err::<String, _>(GatewayError::PartialStart {
+                profile: "beta".to_owned(),
+                loaded: vec!["ready".to_owned()],
+                failed: vec!["broken: startup error".to_owned()],
+            })
+        });
+
+        let text = body_text(switch_sse_response(rx, operation, switch)).await;
+
+        assert!(text.contains("\"profile\":\"beta\""), "body: {text}");
+        assert!(text.contains("\"loaded\":[\"ready\"]"), "body: {text}");
+        assert!(
+            text.contains("\"failed\":[\"broken: startup error\"]"),
+            "body: {text}"
+        );
+    }
+
+    #[tokio::test]
     async fn the_switch_stream_survives_broadcast_lag() {
         let hub = Arc::new(ProgressHub::new());
         let rx = hub.subscribe();
@@ -1485,6 +1620,29 @@ mod switch_tests {
         assert!(
             text.contains("\"status\":\"ready\"") && text.contains("\"profile\":\"beta\""),
             "the terminal event comes from the join result: {text}"
+        );
+    }
+
+    #[test]
+    fn completed_switch_catch_up_continues_after_a_lag_marker() {
+        let hub = Arc::new(ProgressHub::new());
+        let mut rx = hub.subscribe();
+        let noise = hub.operation();
+        let _noise_leaves: Vec<_> = (0..1100)
+            .map(|index| noise.register(&format!("noise-{index}"), 1.0))
+            .collect();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let _loading = tree.register("loading-profile", 1.0);
+        let mut pending = VecDeque::new();
+
+        drain_switch_stages(&mut rx, operation, &mut pending);
+
+        assert_eq!(
+            pending,
+            [r#"data: {"stage":"loading-profile"}
+
+"#]
         );
     }
 }
@@ -1516,13 +1674,12 @@ mod loopback_wall_tests {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let models = temp.path().join("cache").join("models");
         std::fs::create_dir_all(&models).expect("mkdir cache models");
-        let profiles = temp.path().join("profiles");
-        std::fs::create_dir(&profiles).expect("mkdir profiles");
-        std::fs::write(profiles.join("main.toml"), "").expect("write profile");
         let boot = temp.path().join("gateway.toml");
         std::fs::write(&boot, "").expect("write boot");
         let config = Config::from_toml_str(&format!(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -1536,9 +1693,9 @@ cache_dir = '{cache}'
         let state = app_state(
             config,
             Some(AdminPaths {
-                profiles_dir: profiles,
+                fixture_dir: temp.path().to_path_buf(),
                 active: "main".to_owned(),
-                boot_config: boot,
+                config_path: boot,
             }),
         );
         (temp, state)
@@ -1555,8 +1712,6 @@ cache_dir = '{cache}'
         let mut requests = vec![
             (Method::GET, "/admin/config"),
             (Method::PUT, "/admin/config"),
-            (Method::PUT, "/admin/boot-config"),
-            (Method::PUT, "/admin/include/common.toml"),
             (Method::GET, "/admin/env"),
             (Method::PUT, "/admin/env"),
             (Method::GET, "/admin/config-pending"),
@@ -1566,8 +1721,6 @@ cache_dir = '{cache}'
             (Method::GET, "/admin/system"),
             (Method::GET, "/admin/hf/search?q=a&q=b"),
             (Method::GET, "/admin/hf/model/noslash"),
-            (Method::POST, "/admin/profiles/zz-brand-new"),
-            (Method::DELETE, "/admin/profiles/zz-brand-new"),
             (Method::POST, "/admin/reveal"),
         ];
         #[cfg(feature = "local")]

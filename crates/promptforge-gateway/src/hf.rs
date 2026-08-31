@@ -212,6 +212,8 @@ mod tests {
     fn hf_config() -> Config {
         Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

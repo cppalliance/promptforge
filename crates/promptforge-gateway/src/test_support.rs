@@ -9,17 +9,16 @@ use promptforge_gateway_config::Config;
 use promptforge_progress::ProgressHub;
 
 use crate::routing::Routing;
-use crate::{AppState, BootOwned, ProfileSelection, build_router};
+use crate::{AppState, ProfileSelection, build_router};
 
-/// Filesystem context for the shadow-write and env admin routes: the
-/// profiles directory, the active profile name, and the boot config path.
+/// Filesystem context for shadow-write and env admin-route tests.
 pub(crate) struct AdminPaths {
-    /// Directory of named profiles.
-    pub(crate) profiles_dir: PathBuf,
-    /// The active profile name (its `<name>.toml` lives in `profiles_dir`).
+    /// Fixture directory used by filesystem-boundary tests.
+    pub(crate) fixture_dir: PathBuf,
+    /// The active profile name.
     pub(crate) active: String,
-    /// The boot config path (its `.env` sibling serves the env routes).
-    pub(crate) boot_config: PathBuf,
+    /// The single config path.
+    pub(crate) config_path: PathBuf,
 }
 
 /// Serves `build_router` over a state assembled from `config` with no
@@ -36,9 +35,7 @@ pub(crate) async fn serve_with_hf(config: Config, hf: crate::hf::HfProxy) -> Soc
     serve_with(config, Some(hf), None).await
 }
 
-/// Serves like [`serve`], but with the profiles directory, active profile,
-/// and boot config path wired in, so the shadow-write and env routes have
-/// real files to stage against.
+/// Serves like [`serve`], but with active profile and config-file context.
 pub(crate) async fn serve_with_paths(config: Config, paths: AdminPaths) -> SocketAddr {
     serve_with(config, None, Some(paths)).await
 }
@@ -62,19 +59,17 @@ async fn serve_with(
 /// handler directly.
 pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
     let key = config.server_key();
-    let server = config.server().clone();
     let routing = Routing::from_config(&config).expect("routing builds");
     let config = Arc::new(config);
-    let (profiles_dir, selection, boot_path) = match paths {
+    let (config_path, selection) = match paths {
         Some(paths) => (
-            Some(paths.profiles_dir),
+            Some(paths.config_path),
             ProfileSelection {
                 name: Some(paths.active),
                 model_allowlist: None,
             },
-            Some(paths.boot_config),
         ),
-        None => (None, ProfileSelection::default(), None),
+        None => (None, ProfileSelection::default()),
     };
     AppState::from_parts(
         Arc::new(routing),
@@ -84,13 +79,8 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
         crate::local::LocalRuntime::empty(),
         #[cfg(feature = "web-search")]
         config.web_search_config(),
-        profiles_dir,
+        config_path,
         selection,
-        BootOwned {
-            server,
-            workshop: None,
-            config_path: boot_path,
-        },
         Arc::new(ProgressHub::new()),
     )
 }

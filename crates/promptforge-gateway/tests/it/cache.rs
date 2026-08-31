@@ -27,6 +27,8 @@ use crate::support::{TestServer, json_within, parse_sse, send_within, spawn_back
 async fn cache_gateway(cache_dir: &Path) -> TestServer {
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

@@ -136,6 +136,8 @@ async fn non_chat_kinds_are_rejected_on_the_chat_route() {
     let backend = fake_backend().await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -294,6 +296,8 @@ async fn models_catalog_carries_model_kinds() {
     let backend = fake_backend().await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -356,6 +360,8 @@ async fn models_catalog_includes_capabilities() {
     let backend = fake_backend().await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -513,6 +519,8 @@ async fn gemma_gateway(reply: Value) -> (TestServer, crate::support::Recorder) {
     let backend = spawn_backend(router).await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

@@ -1,5 +1,5 @@
 //! The `promptforge-gateway` binary:
-//! `promptforge-gateway serve [config.toml] --profile NAME`.
+//! `promptforge-gateway serve [config.toml] [--profile NAME]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
 //! hands off to [`run`], which owns the tokio runtime, provisioning, and serving.
@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use promptforge_gateway::{ProfileName, ServeOptions, run};
 
 const USAGE: &str = concat!(
-    "usage: promptforge-gateway serve [config.toml] --profile NAME\n",
+    "usage: promptforge-gateway serve [config.toml] [--profile NAME]\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable",
 );
 
@@ -63,8 +63,8 @@ enum ParseError {
 ///
 /// Uses `OsString` operands so non-UTF-8 config paths survive. Boot requires
 /// two things: a config path (the one optional positional, falling back to
-/// `PROMPTFORGE_GATEWAY_CONFIG`) and `--profile NAME`, which is validated
-/// into a [`ProfileName`] at parse time.
+/// `PROMPTFORGE_GATEWAY_CONFIG`) and an optional `--profile NAME` override,
+/// which is validated into a [`ProfileName`] at parse time.
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, ParseError> {
     let mut args = args.into_iter();
     let _binary = args.next();
@@ -112,18 +112,13 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
         }
     }
 
-    let Some(profile) = profile else {
-        return Err(ParseError::Usage(
-            "--profile NAME is required; there is no anonymous boot".to_string(),
-        ));
-    };
     let config_path =
         resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"))?;
 
     Ok(ServeOptions::new(config_path, profile))
 }
 
-/// Resolve the boot config path: the CLI positional wins, then the
+/// Resolves the config path: the CLI positional wins, then the
 /// `PROMPTFORGE_GATEWAY_CONFIG` environment variable.
 ///
 /// Pure, so tests pass both sources explicitly and never touch the process
@@ -177,14 +172,17 @@ mod tests {
     fn parses_path_and_profile() {
         let options =
             parse_args(args(&["serve", "gateway.toml", "--profile", "dev"])).expect("parse");
-        assert_eq!(options.profile.to_string(), "dev");
+        assert_eq!(
+            options.profile.as_ref().map(ProfileName::as_str),
+            Some("dev")
+        );
         assert_eq!(options.config_path, PathBuf::from("gateway.toml"));
     }
 
     #[test]
-    fn missing_profile_is_a_usage_error() {
-        let error = parse_args(args(&["serve", "gateway.toml"])).unwrap_err();
-        assert!(matches!(error, ParseError::Usage(_)));
+    fn missing_profile_defers_to_environment_or_state() {
+        let options = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        assert!(options.profile.is_none());
     }
 
     #[test]

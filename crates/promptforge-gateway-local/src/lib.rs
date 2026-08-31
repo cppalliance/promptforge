@@ -31,4 +31,4 @@ mod upstream;
 
 pub use crate::dialect::DialectResolveError;
 pub use crate::error::LocalError;
-pub use crate::runtime::{LocalRuntime, resolve_cache_root};
+pub use crate::runtime::{LocalRuntime, LocalStartFailure, LocalStartOutcome, resolve_cache_root};

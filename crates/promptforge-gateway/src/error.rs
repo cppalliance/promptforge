@@ -59,6 +59,10 @@ pub(crate) enum GatewayError {
     #[error("queue rejected at capacity")]
     QueueRejected,
 
+    /// A bounded profile-switch drain expired and cancelled the request.
+    #[error("request cancelled for profile switch")]
+    RequestCancelled,
+
     /// `POST /admin/switch-profile` named a profile that is not on disk.
     #[non_exhaustive]
     #[error("profile not found: {0}")]
@@ -76,14 +80,26 @@ pub(crate) enum GatewayError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    /// Admin profile routes were reached without a configured profiles directory.
-    #[error("profiles directory not configured")]
-    ProfilesUnavailable,
+    /// Some target-profile local models started while others failed.
+    #[cfg(feature = "local")]
+    #[non_exhaustive]
+    #[error("profile {profile} started partially; loaded: {loaded:?}; failed: {failed:?}")]
+    PartialStart {
+        /// Target profile now active in degraded mode.
+        profile: String,
+        /// Local model names that reached readiness and remain running.
+        loaded: Vec<String>,
+        /// Failed model names and their startup errors.
+        failed: Vec<String>,
+    },
 
-    /// A boot-config route was reached without a known boot config path
-    /// (the gateway was assembled without one, as in embedded use).
-    #[error("boot config path not configured")]
-    BootConfigUnavailable,
+    /// An operation required a selected profile, but none is active.
+    #[error("active profile not configured")]
+    ActiveProfileUnavailable,
+
+    /// A file-backed admin route was reached without a known config path.
+    #[error("config path not configured")]
+    ConfigPathUnavailable,
 
     /// A shadow-write route refused the payload: the body could not be
     /// rendered as TOML, a redacted secret had no existing value to
@@ -98,22 +114,14 @@ pub(crate) enum GatewayError {
     #[error("config write failed")]
     ConfigWriteIo(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// `PUT /admin/include/{path}` named a file absent from the profiles
-    /// directory.
-    #[non_exhaustive]
-    #[error("include file not found: {0}")]
-    IncludeNotFound(String),
-
-    /// `POST /admin/config-apply` promoted every shadow but the profile
-    /// reload failed: the gateway keeps running the previous configuration
-    /// while the real files already carry the new one, which loads on the
-    /// next restart. The message carries the reload failure's full cause
-    /// chain.
+    /// `POST /admin/config-apply` promoted configuration files but profile
+    /// activation failed. The message carries the activation failure's full
+    /// cause chain; callers inspect status before retrying because failure can
+    /// occur before or after a degraded partial activation.
     #[non_exhaustive]
     #[error(
-        "config promoted to disk but the reload failed ({0}); the gateway keeps \
-         running the previous configuration and the new config loads on the \
-         next restart"
+        "config promoted to disk but profile activation failed ({0}); inspect \
+         gateway status and retry Apply"
     )]
     ApplyReloadFailed(String),
 
@@ -130,23 +138,6 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("env file unreadable")]
     EnvFile(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// `POST /admin/profiles/{name}` named a profile that already exists.
-    #[non_exhaustive]
-    #[error("profile already exists: {0}")]
-    ProfileExists(String),
-
-    /// `DELETE /admin/profiles/{name}` named the active profile, which
-    /// cannot be deleted while the gateway is running it.
-    #[non_exhaustive]
-    #[error("profile is active: {0}")]
-    ProfileActive(String),
-
-    /// A profile file could not be created or deleted on disk after every
-    /// refusal check passed.
-    #[non_exhaustive]
-    #[error("profile file operation failed")]
-    ProfileFileIo(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The `GET /admin/system` sampling task did not run to completion.
     #[non_exhaustive]
@@ -309,6 +300,11 @@ impl GatewayError {
                 "rate_limit_error",
                 "queue_rejected",
             ),
+            GatewayError::RequestCancelled => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "profile_switch",
+            ),
             GatewayError::ProfileNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
@@ -319,15 +315,21 @@ impl GatewayError {
                 "invalid_request_error",
                 "switch_failed",
             ),
-            GatewayError::ProfilesUnavailable => (
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                "profiles_unavailable",
+            #[cfg(feature = "local")]
+            GatewayError::PartialStart { .. } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "partial_start",
             ),
-            GatewayError::BootConfigUnavailable => (
+            GatewayError::ActiveProfileUnavailable => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
-                "boot_config_unavailable",
+                "active_profile_unavailable",
+            ),
+            GatewayError::ConfigPathUnavailable => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "config_path_unavailable",
             ),
             GatewayError::ConfigWriteRejected(_) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -338,11 +340,6 @@ impl GatewayError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "config_write_error",
-            ),
-            GatewayError::IncludeNotFound(_) => (
-                StatusCode::NOT_FOUND,
-                "invalid_request_error",
-                "include_not_found",
             ),
             GatewayError::ApplyReloadFailed(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -358,21 +355,6 @@ impl GatewayError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "env_file_error",
-            ),
-            GatewayError::ProfileExists(_) => (
-                StatusCode::CONFLICT,
-                "invalid_request_error",
-                "profile_exists",
-            ),
-            GatewayError::ProfileActive(_) => (
-                StatusCode::CONFLICT,
-                "invalid_request_error",
-                "profile_active",
-            ),
-            GatewayError::ProfileFileIo(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "profile_file_error",
             ),
             GatewayError::SystemMetrics(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -523,19 +505,11 @@ mod tests {
                 ),
             ),
             (
-                GatewayError::IncludeNotFound("ghost.toml".to_owned()),
-                (
-                    StatusCode::NOT_FOUND,
-                    "invalid_request_error",
-                    "include_not_found",
-                ),
-            ),
-            (
-                GatewayError::BootConfigUnavailable,
+                GatewayError::ConfigPathUnavailable,
                 (
                     StatusCode::BAD_REQUEST,
                     "invalid_request_error",
-                    "boot_config_unavailable",
+                    "config_path_unavailable",
                 ),
             ),
             (
@@ -560,39 +534,6 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "apply_reload_failed",
-                ),
-            ),
-        ];
-        for (error, expected) in cases {
-            assert_eq!(error.classify(), expected);
-        }
-    }
-
-    #[test]
-    fn profile_file_errors_classify_is_table_driven() {
-        let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
-            (
-                GatewayError::ProfileExists("main".to_owned()),
-                (
-                    StatusCode::CONFLICT,
-                    "invalid_request_error",
-                    "profile_exists",
-                ),
-            ),
-            (
-                GatewayError::ProfileActive("main".to_owned()),
-                (
-                    StatusCode::CONFLICT,
-                    "invalid_request_error",
-                    "profile_active",
-                ),
-            ),
-            (
-                GatewayError::ProfileFileIo(Box::new(std::io::Error::other("disk"))),
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "server_error",
-                    "profile_file_error",
                 ),
             ),
         ];

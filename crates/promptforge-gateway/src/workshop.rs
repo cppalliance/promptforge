@@ -15,7 +15,7 @@ mod hosted {
     use std::path::Path;
 
     use promptforge_gateway_config::{
-        Config, ConfigError, ServerConfig, WorkshopConfig, WorkshopVoiceConfig,
+        Config, ConfigError, ServerConfig, WorkshopConfig, WorkshopSttConfig,
     };
 
     use crate::api_error::StartupError;
@@ -144,9 +144,9 @@ mod hosted {
                 bind: workshop.bind().to_string(),
                 open_browser: workshop.open_browser(),
             },
-            voice: workshop.voice().map_or_else(
+            voice: workshop.stt().map_or_else(
                 promptforge_workshop_server::VoiceConfig::default,
-                voice_config,
+                stt_config,
             ),
         }
     }
@@ -168,17 +168,13 @@ mod hosted {
         }
     }
 
-    /// Mirrors `[workshop.voice]` onto the workshop server's own voice
-    /// settings, field for field.
-    fn voice_config(voice: &WorkshopVoiceConfig) -> promptforge_workshop_server::VoiceConfig {
+    /// Mirrors `[workshop.stt]` capture tuning while Step 4 owns model wiring.
+    fn stt_config(stt: &WorkshopSttConfig) -> promptforge_workshop_server::VoiceConfig {
         promptforge_workshop_server::VoiceConfig {
-            interim_model: voice.interim_model().to_path_buf(),
-            final_model: voice.final_model().to_path_buf(),
-            interim_source: voice.interim_source().to_string(),
-            final_source: voice.final_source().to_string(),
-            window_seconds: voice.window_seconds(),
-            interval_ms: voice.interval_ms(),
-            vocabulary: voice.vocabulary().to_vec(),
+            window_seconds: stt.window_seconds(),
+            interval_ms: stt.interval_ms(),
+            vocabulary: stt.vocabulary().to_vec(),
+            ..promptforge_workshop_server::VoiceConfig::default()
         }
     }
 
@@ -192,7 +188,12 @@ mod hosted {
         use promptforge_gateway_config::Config;
 
         fn config(toml: &str) -> Config {
-            Config::from_toml_str(toml).expect("fixture parses")
+            let document = if toml.contains("config-version") {
+                toml.to_owned()
+            } else {
+                format!("config-version = 2\n{toml}")
+            };
+            Config::from_toml_str(&document).expect("fixture parses")
         }
 
         fn bound(address: &str) -> SocketAddr {
@@ -203,6 +204,8 @@ mod hosted {
         fn ws_config_derives_the_client_and_anchors_the_tape() {
             let config = config(
                 r#"
+config-version = 2
+
 [server]
 bind = "0.0.0.0:8081"
 api_key = "boot-key"
@@ -214,11 +217,7 @@ open_browser = true
 [workshop.tape]
 path = "tapes/session.jsonl"
 
-[workshop.voice]
-interim_model = "models/tiny.bin"
-final_model = "models/small.bin"
-interim_source = "https://example.com/tiny.bin"
-final_source = "https://example.com/small.bin"
+[workshop.stt]
 window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
@@ -246,10 +245,10 @@ vocabulary = ["MCP", "GGUF"]
             );
             assert_eq!(ws.server.bind, "127.0.0.1:7911");
             assert!(ws.server.open_browser);
-            assert_eq!(ws.voice.interim_model, Path::new("models/tiny.bin"));
-            assert_eq!(ws.voice.final_model, Path::new("models/small.bin"));
-            assert_eq!(ws.voice.interim_source, "https://example.com/tiny.bin");
-            assert_eq!(ws.voice.final_source, "https://example.com/small.bin");
+            assert!(ws.voice.interim_model.as_os_str().is_empty());
+            assert!(ws.voice.final_model.as_os_str().is_empty());
+            assert!(ws.voice.interim_source.is_empty());
+            assert!(ws.voice.final_source.is_empty());
             assert_eq!(ws.voice.window_seconds, 8);
             assert_eq!(ws.voice.interval_ms, 250);
             assert_eq!(ws.voice.vocabulary, ["MCP", "GGUF"]);

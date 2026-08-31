@@ -1047,6 +1047,8 @@ mod tests {
 
         let config = promptforge_gateway_config::Config::from_toml_str(&format!(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
