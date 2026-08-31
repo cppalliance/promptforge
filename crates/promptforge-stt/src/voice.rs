@@ -10,7 +10,9 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use promptforge_transcribe::{MIN_WINDOW_SAMPLES, Segmenter, SttEngine, is_silence, tail};
+use promptforge_transcribe::{
+    MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail,
+};
 use promptforge_workshop_server::{Activity, Push};
 use serde::Serialize;
 use tokio::sync::watch;
@@ -43,11 +45,12 @@ pub fn routes(stt: SttState, push: Push) -> Router {
         .with_state(VoiceState { stt, push })
 }
 
-async fn capability() -> impl IntoResponse {
+async fn capability(State(state): State<VoiceState>) -> impl IntoResponse {
     let gpu = promptforge_transcribe::gpu_transcription_available();
+    let engine = state.stt.is_active();
     (
         [(header::CONTENT_TYPE, "application/json")],
-        format!(r#"{{"gpu":{gpu}}}"#),
+        format!(r#"{{"gpu":{gpu},"engine":{engine}}}"#),
     )
 }
 
@@ -293,6 +296,58 @@ async fn final_transcript(
     }
 }
 
+/// The dropped leading samples when a take's uncommitted audio exceeds one
+/// interim window, or `None` when the whole take fits.
+fn truncation_drop(uncommitted: usize, window_samples: usize) -> Option<usize> {
+    if uncommitted > window_samples {
+        Some(uncommitted - window_samples)
+    } else {
+        None
+    }
+}
+
+/// The status-bar description of one truncation: the window length and the
+/// dropped lead, both in seconds (the lead to a truncated tenth).
+fn truncation_message(window_samples: usize, dropped: usize) -> String {
+    format!(
+        "the take ran past the {} s interim window with no final transcription, so its first {}.{} s were dropped",
+        window_samples / SAMPLE_RATE,
+        dropped / SAMPLE_RATE,
+        dropped % SAMPLE_RATE * 10 / SAMPLE_RATE,
+    )
+}
+
+/// The interim-window fallback transcribes only the take's last window of
+/// audio; a longer take loses its leading audio. Name the truncation on the
+/// status bar and in the log instead of dropping it silently.
+fn warn_if_truncated(
+    session: u64,
+    engine: &SttEngine,
+    state: &TakeState,
+    segmenter: &Segmenter,
+    push: &Push,
+) {
+    let uncommitted = {
+        let guard = state.lock_buffer();
+        guard.len().saturating_sub(segmenter.consumed())
+    };
+    let window = engine.window_samples();
+    let Some(dropped) = truncation_drop(uncommitted, window) else {
+        return;
+    };
+    tracing::warn!(
+        session,
+        dropped_samples = dropped,
+        window_samples = window,
+        "take exceeded the interim window; leading audio dropped from the transcript"
+    );
+    push.push_failure(
+        "Transcript truncated",
+        truncation_message(window, dropped),
+        Activity::General,
+    );
+}
+
 async fn stop_transcript(
     session: u64,
     engine: Option<&SttEngine>,
@@ -316,6 +371,7 @@ async fn stop_transcript(
                 %error,
                 "final-pass transcription failed; falling back to the interim model"
             );
+            warn_if_truncated(session, engine, state, segmenter, push);
             final_transcript(session, engine, state, segmenter, push).await
         }
         None => {
@@ -323,6 +379,7 @@ async fn stop_transcript(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
+            warn_if_truncated(session, engine, state, segmenter, push);
             final_transcript(session, engine, state, segmenter, push).await
         }
     };
@@ -600,6 +657,25 @@ mod tests {
     fn the_voice_control_messages_are_bare_words() {
         assert_eq!(VOICE_START, "start");
         assert_eq!(VOICE_STOP, "stop");
+    }
+
+    #[test]
+    fn truncation_starts_past_the_window() {
+        let window = 15 * SAMPLE_RATE;
+        assert_eq!(truncation_drop(0, window), None);
+        assert_eq!(truncation_drop(window, window), None);
+        assert_eq!(truncation_drop(window + 1, window), Some(1));
+        assert_eq!(
+            truncation_drop(20 * SAMPLE_RATE, window),
+            Some(5 * SAMPLE_RATE)
+        );
+    }
+
+    #[test]
+    fn the_truncation_message_names_the_window_and_the_dropped_lead() {
+        let message = truncation_message(15 * SAMPLE_RATE, 5 * SAMPLE_RATE);
+        assert!(message.contains("15 s"), "{message}");
+        assert!(message.contains("5.0 s"), "{message}");
     }
 
     #[test]

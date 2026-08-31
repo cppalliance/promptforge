@@ -1,14 +1,17 @@
-//! HTTP blob download with connect timeout, size cap, and scoped HF auth.
+//! HTTP blob download with connect timeout, size cap, scoped HF auth, and
+//! resume of interrupted transfers.
 
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
 use promptforge_progress::ProgressHandle;
-use reqwest::blocking::Client;
+use reqwest::StatusCode;
+use reqwest::blocking::{Client, Response};
 use sha2::{Digest, Sha256};
 
 use super::Result;
+use super::confine::source_marker_path;
 use super::digest::hex_digest;
 use super::progress::{DownloadProgress, NoopProgress, TreeProgress};
 use crate::error::LocalError;
@@ -99,8 +102,163 @@ fn run_download(
     }
 }
 
+/// Records the partial's source URL for a later resume. Best-effort: a
+/// marker that cannot be written costs resume on the next attempt, never
+/// the download itself.
+fn write_source_marker(part: &Path, url: &str) {
+    if let Err(error) = fs::write(source_marker_path(part), url) {
+        tracing::warn!(
+            path = %part.display(),
+            error = %error,
+            "could not write the download provenance marker; a retry restarts from zero"
+        );
+    }
+}
+
+/// Removes the provenance marker on a completed transfer.
+fn remove_source_marker(part: &Path) {
+    let _ignored = fs::remove_file(source_marker_path(part));
+}
+
+/// The length of a resumable partial at `destination`: its byte length when
+/// the provenance marker names this same `url`, or zero when there is no
+/// partial or the provenance is unknown or foreign.
+fn resumable_len(destination: &Path, url: &str) -> Result<u64> {
+    let Ok(recorded) = fs::read_to_string(source_marker_path(destination)) else {
+        return Ok(0);
+    };
+    if recorded != url {
+        return Ok(0);
+    }
+    match fs::metadata(destination) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(source) => Err(LocalError::Io {
+            operation: "stat partial download",
+            path: destination.to_owned(),
+            source,
+        }),
+    }
+}
+
+/// Issues the GET: the HF bearer token when eligible, and a `Range` header
+/// when resuming past `resume_from`.
+fn send(client: &Client, url: &str, resume_from: u64) -> Result<Response> {
+    let mut request = client.get(url);
+    if is_huggingface_https(url)
+        && let Some(token) = hub_bearer_token(env_var)
+    {
+        request = request.bearer_auth(token);
+    }
+    if resume_from > 0 {
+        request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
+    }
+    request.send().map_err(|source| LocalError::Download {
+        url: url.to_owned(),
+        source,
+    })
+}
+
+/// The range start and declared total from a 206 answer's `Content-Range`
+/// header (`bytes <start>-<end>/<total>`), `None` when the header is absent
+/// or malformed.
+fn content_range(response: &Response) -> Option<(u64, u64)> {
+    let value = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)?
+        .to_str()
+        .ok()?;
+    let range = value.strip_prefix("bytes ")?;
+    let (span, total) = range.split_once('/')?;
+    let (start, _end) = span.split_once('-')?;
+    let start = start.trim().parse().ok()?;
+    let total = total.trim().parse().ok()?;
+    Some((start, total))
+}
+
+/// Issues the GET and settles the resume offset. A 206 must continue
+/// exactly at the partial's end within the declared total; a 200 means the
+/// server ignored the Range; a 416 means the partial meets or exceeds the
+/// blob. Any doubt restarts the transfer from zero with a fresh request.
+fn negotiate_resume(client: &Client, url: &str, resume_from: u64) -> Result<(Response, u64)> {
+    let response = send(client, url, resume_from)?;
+    if resume_from == 0 {
+        return Ok((response, 0));
+    }
+    let restart = if response.status() == StatusCode::PARTIAL_CONTENT {
+        match content_range(&response) {
+            Some((start, total)) => start != resume_from || resume_from > total,
+            None => true,
+        }
+    } else {
+        true
+    };
+    if restart {
+        drop(response);
+        return Ok((send(client, url, 0)?, 0));
+    }
+    Ok((response, resume_from))
+}
+
+/// Opens `destination` for the transfer. Resuming opens the existing
+/// partial in append mode after passing its bytes through the hasher, so
+/// the digest covers the whole blob; a fresh transfer truncates and writes
+/// the provenance marker.
+fn open_transfer(
+    destination: &Path,
+    url: &str,
+    resume_from: u64,
+    hasher: &mut Sha256,
+    buffer: &mut [u8],
+    progress: &dyn DownloadProgress,
+) -> Result<File> {
+    if resume_from == 0 {
+        write_source_marker(destination, url);
+        return File::create(destination).map_err(|source| LocalError::Io {
+            operation: "create partial download",
+            path: destination.to_owned(),
+            source,
+        });
+    }
+    let mut existing = File::open(destination).map_err(|source| LocalError::Io {
+        operation: "open partial download for resume",
+        path: destination.to_owned(),
+        source,
+    })?;
+    loop {
+        let count = existing
+            .read(buffer)
+            .map_err(|source| LocalError::Io {
+                operation: "hash partial download",
+                path: destination.to_owned(),
+                source,
+            })?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    progress.inc(resume_from);
+    OpenOptions::new()
+        .append(true)
+        .open(destination)
+        .map_err(|source| LocalError::Io {
+            operation: "append to partial download",
+            path: destination.to_owned(),
+            source,
+        })
+}
+
 /// Streams `url` to `destination`, reporting to `progress`, enforcing the
 /// [`MAX_ARTIFACT_BYTES`] ceiling on both the declared and streamed length.
+///
+/// An interrupted attempt resumes: when `destination` exists with a
+/// provenance marker naming this same `url`, the transfer continues at the
+/// partial's length through a `Range` request. The marker is written when a
+/// fresh transfer starts and removed when one completes, so a partial whose
+/// transfer finished (and then failed the caller's digest gate) is never
+/// resumed. A transfer that ends short of the declared length keeps both,
+/// so the next attempt resumes.
 ///
 /// # Errors
 /// Returns [`LocalError`] on transport, size-cap, or filesystem failure.
@@ -110,20 +268,16 @@ pub(crate) fn download_with_progress(
     destination: &Path,
     progress: &dyn DownloadProgress,
 ) -> Result<String> {
-    let mut request = client.get(url);
-    if is_huggingface_https(url)
-        && let Some(token) = hub_bearer_token(env_var)
-    {
-        request = request.bearer_auth(token);
-    }
-    let mut response = request
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
+    let (response, resume_from) = negotiate_resume(client, url, resumable_len(destination, url)?)?;
+    let mut response = response
+        .error_for_status()
         .map_err(|source| LocalError::Download {
             url: url.to_owned(),
             source,
         })?;
-    let total = response.content_length();
+    let total = response
+        .content_length()
+        .map(|remaining| remaining + resume_from);
     if let Some(total) = total
         && total > MAX_ARTIFACT_BYTES
     {
@@ -133,15 +287,11 @@ pub(crate) fn download_with_progress(
         });
     }
     progress.set_len(total);
-    let file = File::create(destination).map_err(|source| LocalError::Io {
-        operation: "create partial download",
-        path: destination.to_owned(),
-        source,
-    })?;
-    let mut writer = BufWriter::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-    let mut downloaded: u64 = 0;
+    let mut downloaded: u64 = resume_from;
+    let file = open_transfer(destination, url, resume_from, &mut hasher, &mut buffer, progress)?;
+    let mut writer = BufWriter::new(file);
     loop {
         let count = response
             .read(&mut buffer)
@@ -182,5 +332,20 @@ pub(crate) fn download_with_progress(
             path: destination.to_owned(),
             source,
         })?;
+    // A body short of the declared length is a failed transfer, not a
+    // complete one: keep the partial and its marker so the next attempt
+    // resumes from the offset.
+    if let Some(total) = total
+        && downloaded != total
+    {
+        return Err(LocalError::DownloadRead {
+            url: url.to_owned(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("transfer ended at {downloaded} of {total} bytes"),
+            ),
+        });
+    }
+    remove_source_marker(destination);
     Ok(hex_digest(hasher))
 }

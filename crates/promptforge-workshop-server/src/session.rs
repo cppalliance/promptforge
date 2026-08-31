@@ -134,7 +134,10 @@ async fn run_session(mut socket: WebSocket, state: AppState) {
     // The delivery contract resends the current status, catalog, and
     // workbench snapshots on reconnect; the buses retain the newest copy
     // for exactly this send, so the UI boots with zero HTTP state fetches.
-    if let Some(update) = state.status().latest()
+    // The status line is the one exception: a retained heartbeat transition
+    // ("Connected to gateway") describes a past moment, so the join line is
+    // recomputed from the current probe instead of replayed stale.
+    if let Some(update) = crate::heartbeat::join_status(state.status().latest(), state.health())
         && !send_frame(&mut socket, &update.frame()).await
     {
         return;

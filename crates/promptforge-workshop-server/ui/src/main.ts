@@ -18,7 +18,7 @@ import { WorkshopProvider } from "./services/workshop-provider";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { setupGatewayConfigBridge } from "./ui/gateway-config-bridge";
 import { StatusBar } from "./ui/status-bar";
-import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./ui/voice";
+import { setupVoice, voiceCapability, type VoiceCapability, type VoiceHandle } from "./ui/voice";
 import { setupWindowChrome } from "./ui/window-chrome";
 import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/window-menu";
 import { setupWorkspaceDrops } from "./ui/workspace-drops";
@@ -77,52 +77,59 @@ disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
 disposables.add(workshopSocket.onAbort(() => statusBar.clearActivity()));
 workshopSocket.connect();
 
-// The mic button joins murm-ui's composer through the plugin seam, but only
-// when the server can transcribe on a GPU; a CPU take stalls long enough to
-// read as broken, so the control stays hidden instead. Voice messages paint
+// The mic button joins murm-ui's composer through the plugin seam and stays
+// visible whether or not voice can run here: a click while blocked names the
+// blocker on the status bar (no GPU, no provisioned speech models, chat not
+// ready) instead of the control silently disappearing. Voice messages paint
 // the status bar directly. Each Agent tab gets its own plugin instance -
 // the handle is per-tab so recording in one tab never touches another.
 function createVoicePlugin(): ChatPlugin {
   let voiceHandle: VoiceHandle | null = null;
-  let mic: HTMLButtonElement | null = null;
   let workbenchListener: IDisposable | null = null;
+  // The capability probe resolves after mount; undefined while in flight.
+  let capability: VoiceCapability | null | undefined;
   return {
     name: "voice",
     onInputMount({ form, input, requestSubmitStateSync }) {
-      // Chat gating follows the server's chat_ready: the mic disables,
-      // and a live take is discarded - whisper on the workshop server
-      // could still transcribe it, but a take that cannot be sent is a
-      // trap. The subscription is per-mount, so each Agent tab's dies
-      // with its own tab; the send button re-evaluates through the
-      // composer's own sync, never by touching it directly.
+      // Chat gating follows the server's chat_ready: a live take is
+      // discarded - whisper on the workshop server could still transcribe
+      // it, but a take that cannot be sent is a trap. The subscription is
+      // per-mount, so each Agent tab's dies with its own tab; the send
+      // button re-evaluates through the composer's own sync, never by
+      // touching it directly.
       workbenchListener = workbenchService.onDidChangeSnapshot((snapshot) => {
-        if (mic) {
-          mic.disabled = !snapshot.chatReady;
-        }
         if (!snapshot.chatReady) {
           voiceHandle?.discardIfRecording();
         }
         requestSubmitStateSync();
       });
-      void voiceGpuAvailable().then((gpu) => {
-        if (!gpu) {
-          return;
-        }
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "voice-mic mur-form-icon-btn";
-        button.title = "Push to talk";
-        button.setAttribute("aria-label", "Push to talk");
-        button.setAttribute("aria-pressed", "false");
-        button.innerHTML =
-          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
-        // The mic can mount after workbench snapshots already arrived
-        // (the GPU probe is a fetch), so it starts from the held one.
-        button.disabled = !workbenchService.snapshot.chatReady;
-        form.insertBefore(button, form.querySelector(".mur-form-footer-right"));
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "voice-mic mur-form-icon-btn";
+      button.title = "Push to talk";
+      button.setAttribute("aria-label", "Push to talk");
+      button.setAttribute("aria-pressed", "false");
+      button.innerHTML =
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
+      form.insertBefore(button, form.querySelector(".mur-form-footer-right"));
 
-        voiceHandle = setupVoice({ mic: button, input }, statusBar);
-        mic = button;
+      voiceHandle = setupVoice({ mic: button, input }, statusBar, () => {
+        if (capability === null) {
+          return "Voice dictation is unavailable: the server's capability probe failed.";
+        }
+        if (capability !== undefined && !capability.gpu) {
+          return "Voice dictation needs a GPU this server doesn't have.";
+        }
+        if (capability !== undefined && !capability.engine) {
+          return "No speech models are provisioned in the active profile.";
+        }
+        if (!workbenchService.snapshot.chatReady) {
+          return "Chat isn't ready; the status bar carries the server's reason.";
+        }
+        return null;
+      });
+      void voiceCapability().then((answer) => {
+        capability = answer;
       });
     },
     onUserSubmit() {

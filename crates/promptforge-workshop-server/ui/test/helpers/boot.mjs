@@ -199,7 +199,7 @@ export async function bootWorkbench(name, run) {
     }
     if (url === "/voice/capability") {
       return Promise.resolve(
-        new Response(JSON.stringify({ gpu: true }), {
+        new Response(JSON.stringify({ gpu: true, engine: true }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),

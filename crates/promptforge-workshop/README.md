@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop desktop window. It boots the merged gateway (`promptforge-gateway` with the `workshop` feature) in-process, waits for the hosted workshop's health endpoint to answer, and opens a native window (wry/tao, WebView2 on Windows) pointed at the workshop UI. Closing the window shuts the gateway down cleanly. One binary, one process: the window, the gateway, and the workshop it hosts ship together.
+The PromptForge Workshop desktop window. It boots the merged gateway (`promptforge-gateway` with the `workshop` feature) in-process, waits for the hosted workshop's health endpoint to answer, and opens a Tauri window (WebView2 on Windows) pointed at the workshop UI served on the gateway's loopback listener. Closing the window shuts the gateway down cleanly. One binary, one process: the window, the gateway, and the workshop it hosts ship together.
 
 ## Quick start
 

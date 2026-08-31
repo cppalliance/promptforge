@@ -33,8 +33,49 @@ use tokio::sync::{oneshot, watch};
 
 use crate::backoff::ReconnectBackoff;
 use crate::gateway::GatewayClient;
-use crate::protocol::Activity;
+use crate::protocol::{Activity, Severity, StatusBarUpdate};
 use crate::push::Push;
+
+/// The status line announcing that the gateway answers its health probe.
+pub(crate) const CONNECTED_LABEL: &str = "Connected to gateway";
+/// The status line announcing that the gateway does not answer.
+pub(crate) const UNREACHABLE_LABEL: &str = "Gateway unreachable";
+/// The description riding the unreachable announcement.
+pub(crate) const UNREACHABLE_DESCRIPTION: &str = "the gateway does not answer its health probe";
+
+/// The status frame a joining session hears first: the bus's retained
+/// frame, unless that frame is one of the heartbeat's transition
+/// announcements. A transition describes a past moment, not the current
+/// state - the boot-time "Connected to gateway" outlives itself within
+/// seconds - so the line is recomputed from the current probe. A retained
+/// frame carrying real work (a download's progress, a chat's activity)
+/// replays as-is.
+pub(crate) fn join_status(
+    retained: Option<StatusBarUpdate>,
+    health: &GatewayHealth,
+) -> Option<StatusBarUpdate> {
+    let update = retained?;
+    if update.label != CONNECTED_LABEL && update.label != UNREACHABLE_LABEL {
+        return Some(update);
+    }
+    let reachable = health.is_reachable();
+    Some(StatusBarUpdate {
+        label: if reachable {
+            "Ready"
+        } else {
+            UNREACHABLE_LABEL
+        }
+        .to_owned(),
+        description: if reachable {
+            "idle".to_owned()
+        } else {
+            UNREACHABLE_DESCRIPTION.to_owned()
+        },
+        progress: None,
+        severity: Severity::Info,
+        activity: Activity::General,
+    })
+}
 
 /// How often the heartbeat probes a reachable gateway. Hardcoded for
 /// now; a configuration knob may follow once someone needs one. Probes
@@ -187,7 +228,7 @@ async fn run(
         push.menu().set_gateway_reachable(reachable);
         if reachable {
             push.push_status_update(
-                "Connected to gateway",
+                CONNECTED_LABEL,
                 "the gateway answers its health probe",
                 Activity::General,
             );
@@ -212,8 +253,8 @@ async fn run(
             push.menu().restore_selection();
         } else {
             push.push_status_update(
-                "Gateway unreachable",
-                "the gateway does not answer its health probe",
+                UNREACHABLE_LABEL,
+                UNREACHABLE_DESCRIPTION,
                 Activity::General,
             );
         }
@@ -347,7 +388,70 @@ mod tests {
 
     use crate::catalog::CatalogBus;
     use crate::menu::MenuBus;
-    use crate::protocol::{CatalogPush, Severity, StatusBarUpdate, WorkbenchSnapshot};
+    use crate::protocol::{CatalogPush, Progress, Severity, StatusBarUpdate, WorkbenchSnapshot};
+
+    fn retained(label: &str) -> StatusBarUpdate {
+        StatusBarUpdate {
+            label: label.to_owned(),
+            description: String::new(),
+            progress: None,
+            severity: Severity::Info,
+            activity: Activity::General,
+        }
+    }
+
+    #[test]
+    fn a_join_recomputes_a_stale_connect_announcement_to_the_resting_line() {
+        let health = GatewayHealth::new();
+        let update = join_status(Some(retained(CONNECTED_LABEL)), &health)
+            .expect("a retained transition still yields a join line");
+        assert_eq!(update.label, "Ready");
+        assert_eq!(update.severity, Severity::Info);
+    }
+
+    #[test]
+    fn a_join_recomputes_a_stale_connect_announcement_during_an_outage() {
+        let health = GatewayHealth::new();
+        health.publish(false);
+        let update = join_status(Some(retained(CONNECTED_LABEL)), &health)
+            .expect("a retained transition still yields a join line");
+        assert_eq!(update.label, UNREACHABLE_LABEL);
+        assert_eq!(update.description, UNREACHABLE_DESCRIPTION);
+    }
+
+    #[test]
+    fn a_join_keeps_a_retained_outage_while_the_gateway_is_down() {
+        let health = GatewayHealth::new();
+        health.publish(false);
+        let update = join_status(Some(retained(UNREACHABLE_LABEL)), &health)
+            .expect("the outage line survives the recompute");
+        assert_eq!(update.label, UNREACHABLE_LABEL);
+    }
+
+    #[test]
+    fn a_join_replays_a_retained_frame_carrying_real_work() {
+        let health = GatewayHealth::new();
+        let working = Some(StatusBarUpdate {
+            label: "Downloading model".to_owned(),
+            description: "ggml-large-v3.bin".to_owned(),
+            progress: Some(Progress {
+                current: 1,
+                total: 2,
+            }),
+            severity: Severity::Info,
+            activity: Activity::General,
+        });
+        let update = join_status(working, &health).expect("the work frame replays as-is");
+        assert_eq!(update.label, "Downloading model");
+        assert!(update.progress.is_some());
+    }
+
+    #[test]
+    fn a_join_with_no_retained_frame_sends_nothing() {
+        let health = GatewayHealth::new();
+        assert!(join_status(None, &health).is_none());
+    }
+
     use crate::status::StatusBus;
 
     /// Fast enough to observe transitions without real waiting, slow

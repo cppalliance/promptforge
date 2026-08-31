@@ -14,3 +14,5 @@
 /crates/promptforge-gateway-config-ui/ui/node_modules/
 # Workshop tape, written to the cwd when the server runs from the repo root.
 /tape.jsonl
+# tauri-build's generated ACL schemas, regenerated on every workshop build.
+/crates/promptforge-workshop/gen/

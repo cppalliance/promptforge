@@ -298,13 +298,17 @@ async fn post_cache_digest_mismatch_streams_an_error_event() {
         "terminal event: {terminal}"
     );
 
-    // No blob, sidecar, or staging file survives a failed publication; only
-    // the artifact lock file remains under the cache root.
+    // No blob or sidecar survives a failed publication. The staged partial
+    // stays for a fresh restart (its transfer completed, so its resume
+    // marker is gone), beside the artifact lock file.
     let left = all_files(temp.path());
     assert!(
-        left.iter()
-            .all(|path| path.parent().is_some_and(|dir| dir.ends_with(".locks"))),
-        "only lock files may remain: {left:?}"
+        left.iter().all(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "model.bin.part")
+                || path.parent().is_some_and(|dir| dir.ends_with(".locks"))
+        }),
+        "only lock files and the kept partial may remain: {left:?}"
     );
     gateway.shutdown().await;
 }

@@ -473,24 +473,11 @@ impl LocalRuntime {
 /// home variable is unset or empty.
 pub fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
     match configured {
-        Some(path) if !path.is_empty() => expand_configured_path(path),
+        Some(path) if !path.is_empty() => artifacts::expand_tilde(path),
         // An unset cache_dir defaults to `~/.promptforge`; a missing home is a
         // typed error rather than a silent working-directory fallback (ART-009).
         _ => artifacts::default_promptforge_root_checked(),
     }
-}
-
-fn expand_configured_path(path: &str) -> Result<PathBuf, LocalError> {
-    if let Some(rest) = path.strip_prefix("~/") {
-        return Ok(artifacts::default_home_checked()?.join(rest));
-    }
-    if let Some(rest) = path.strip_prefix("~\\") {
-        return Ok(artifacts::default_home_checked()?.join(rest));
-    }
-    if path == "~" {
-        return artifacts::default_home_checked();
-    }
-    Ok(PathBuf::from(path))
 }
 
 /// The admission wiring resolved for one local model: the child's
