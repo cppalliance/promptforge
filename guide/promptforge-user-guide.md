@@ -6,1291 +6,1618 @@ PromptForge turns Markdown files into executable AI prompt pipelines. This guide
 
 ## promptforge-cli User Guide
 
-`promptforge` is a command-line tool that runs PromptForge prompt files in a single process. Point it at a prompt file, and it parses the sections, executes them top to bottom, and prints the returned value. No server to start, no connection to manage, no configuration to write. You edit a prompt, run it, and see what it produces. This guide covers every capability the CLI provides, from the first invocation to gateway configuration and cancellation.
+PromptForge CLI is a command-line tool that runs PromptForge prompt files against LLM providers. You point it at a prompt file, and it runs the prompt in a single process. There is no server to start, no connection to manage, and no configuration file to write. Your credentials stay in environment variables, never on the command line. Built-in web tools let your prompts fetch pages and search the web. If you can type one command in a shell, you can run any PromptForge prompt.
 
-### Running Your First Prompt
+### What promptforge-cli Does
 
-The binary is named `promptforge`. It has one command:
+You run a PromptForge prompt file from the command line by pointing the tool at the file. The tool parses the prompt and executes its sections top to bottom in a single process. Running a prompt is a single command.
 
-```bash
-promptforge run <file.md> [input]
-```
+The tool runs only genuine PromptForge prompts. If a file's frontmatter does not declare a `promptforge:` version, the tool refuses to run it.
 
-The file must be a PromptForge prompt. That means its YAML frontmatter must declare a `promptforge:` version. If it does not, the CLI refuses the file before attempting to parse it:
+On success, the prompt's returned value is printed to stdout. Stdout contains exactly that returned value and nothing else. Errors go to stderr. This contract makes the tool safe to use in scripts and pipelines.
 
-```
-error: prompt.md is not a promptforge prompt: its frontmatter declares no `promptforge:` version
-```
+### Getting Started
 
-A valid prompt file is read from disk, parsed by the core parser, and executed in-process. The binary links the PromptForge executor directly rather than connecting to an MCP server or any other service. This is a development tool for the edit-run loop: you edit a prompt file, run it with `promptforge run`, and see the result immediately.
+Install the tool from crates.io. The install produces an executable named `promptforge`. The install requires Rust 1.89 or later.
 
-The simplest invocation takes just a file path:
+Run a prompt file with the `run` subcommand:
 
-```bash
+````
 promptforge run prompts/hello.md
-```
+````
 
-Prompts are addressed by file path, not by name from a catalog. There is no configuration file, no resolution rule, and no catalog lookup. Shell completion, relative paths, and `..` work as they do with any file argument.
+The tool reads the file from your local filesystem, executes it, and prints the result. You address prompts directly by file path. There is no configuration file, no name resolution rule, and no catalog lookup.
 
-### Input and Output
+You can pass a raw input string to the prompt as an optional positional argument after the file path:
 
-The optional second argument is a raw input string that becomes the prompt's `args` value in its entirety:
-
-```bash
+````
 promptforge run prompts/staker.md "Bloomberg"
-```
+````
 
-The prompt body decides what that text means. The binary does not inspect, split, or coerce it. An input containing spaces must be quoted as a single shell argument.
+Inside the prompt, the input is exposed as `args`. It defaults to empty. The tool does not inspect, split, or coerce the input. An input that contains spaces must be quoted as a single shell argument.
 
-When the prompt completes, its returned value goes to stdout. Errors go to stderr. Nothing is mixed. On success, stdout contains exactly the returned value and nothing else. On failure, nothing appears on stdout. This clean separation means shell substitution works:
+### Configuring the Gateway
 
-```bash
-report=$(promptforge run prompts/digest.md "2026-08")
-```
+You connect to a remote PromptForge gateway by setting two environment variables together:
 
-The variable `report` captures exactly what the prompt returned.
-
-### Gateway Configuration
-
-Gateway credentials come from two environment variables:
-
-- `PROMPTFORGE_GATEWAY_URL` - the gateway base URL
-- `PROMPTFORGE_GATEWAY_API_KEY` - the bearer token
-
-There are no CLI flags for credentials. This is deliberate: secrets never appear in `argv`, where `ps` and shell history can expose them.
-
-**Local-only mode** is the default. With neither variable set (or with empty/whitespace-only values), the CLI runs without a gateway. The `web_fetch` tool is available, but there is no `web_search` and no remote model catalog. A prompt that makes no model calls works entirely self-contained in this mode.
-
-**Remote mode** activates when both variables are set:
-
-```bash
+````
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
 export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
-promptforge run prompts/search-demo.md "latest Rust news"
-```
+````
 
-This enables the `web_search` tool and fetches the remote model catalog, so prompts can perform inference through the gateway.
+This enables the `web_search` tool and the remote model catalog for inference through the gateway.
 
-Setting a key without a URL is rejected explicitly:
+Credentials are accepted only through environment variables, never through command-line flags. This keeps tokens out of argv, process listings, and shell history.
 
-```
-error: PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
-```
+You run entirely local-only, with no network access, by leaving the gateway API key unset or blank. A gateway URL set without a key also yields local-only mode. Local-only mode yields an empty model catalog and a local tool set.
 
-### Tools
+The error cases are strict. A key set without a URL is a startup error, not a fallback. A gateway endpoint that is not a valid URL fails at startup, before the run begins. Blank or whitespace-only credential values are treated as absent. Whitespace around otherwise valid values is tolerated.
 
-Two tools are available to prompts, depending on the gateway configuration:
+The bearer token never appears in logs or diagnostic output. When the tool renders the gateway configuration for diagnostics, it shows the endpoint but replaces the token with a redaction marker.
 
-**`web_fetch`** runs locally and is always available regardless of gateway mode. It needs no credentials.
+### Built-in Tools
 
-**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
+Any prompt can fetch a web page and return its main content as markdown using the built-in `web_fetch` tool. It runs locally. It is always available in every mode. It needs no credentials.
 
-The tool picker resolves `tools.bind` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the tool catalog and picker catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
+A prompt can search the web and receive a list of results with title, url, and description using the `web_search` tool. The tool offers `web_search` only when gateway credentials are configured.
 
-### File Validation
+If a prompt explicitly binds to a tool that is not available, the run fails before any section executes. For example, a prompt that explicitly binds to `web_search` without gateway credentials fails with an absent-capability error.
 
-Before parsing, the CLI checks whether the file's YAML frontmatter declares a `promptforge:` version key. If the key is absent, the file is refused with a clear message naming the reason.
+### Selecting Tools for a Run
 
-This matters because pointing the tool at an ordinary markdown file without this check would produce a confusing parse error about syntax, sending the user to fix the wrong thing. The version check answers a different question: is this file one of ours at all?
+The tool selects tools semantically for each prompt. During startup, it loads an embedding model and builds a semantic tool picker over the available tool catalog.
 
-### Cancellation and Exit Codes
+Capability binding is automatic. When `web_search` is unavailable, a prompt's search capability request falls back to `web_fetch`. When the gateway is configured, the search capability binds to `web_search`. You do not configure this mapping. The tool derives it from the available catalog.
 
-Press Ctrl-C to cancel a running prompt. The signal trips a cooperative cancellation handle, and the process exits with code 130.
+### Startup Progress
 
-The four exit codes:
+While stderr is an interactive terminal, you see live progress bars during startup. The startup sequence has three labeled phases: "model catalog", "embedding model", and "tool index". Each bar shows its phase name and a numeric percentage. Finished phases disappear as their bars are cleared.
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success - the prompt completed and its value was printed |
-| 1 | Operational failure - unreadable file, not a prompt, parse error, setup failure, or execution failure |
-| 2 | Usage error - owned by the argument parser (missing file, unknown command) |
-| 130 | Cancelled - the run was interrupted with Ctrl-C |
+The bars are suppressed entirely when output is piped. This keeps stderr clean for scripts. If the progress display itself fails to start, the tool prints a warning and the run proceeds without bars. A progress failure never fails the run.
 
-In a script, check `$?` to branch on success or failure. If you need to distinguish failure causes, read the error message on stderr.
+### Cancelling a Run and Exit Codes
 
-### Runtime Behavior
+You can interrupt a running prompt with Ctrl-C. This cooperatively cancels the run. If the Ctrl-C listener cannot be installed, the tool prints a stderr warning that the run is not cancellable, and the run proceeds.
 
-Each run creates an in-memory store. A prompt's filed state lives exactly as long as the process. Nothing is written to disk unless the prompt itself writes something. State does not accumulate across runs. A prompt that needs durable artifacts requires a caller that provides a durable store.
+Scripts can branch on four exit codes:
 
-Each run generates a unique execution ID, a 36-character string prefixed with `cli-`, for correlating observations within a single invocation.
+| Exit code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Operational failure (unreadable file, not a prompt, parse error, setup failure, execution failure) |
+| 2 | Usage error (missing file argument, unknown subcommand) |
+| 130 | Cancelled with Ctrl-C |
 
-Progress is discarded by default. The binary installs a null observer, so long runs produce no progress output. The result appears when the run finishes, and silence in between is expected. A rendering client or progress display would be a separate concern.
+In a script, check `$?` to branch on success or failure. Remember the output contract: on success, stdout holds exactly the returned value. Errors go to stderr as an error chain.
+
+### State and Observability
+
+By default, each run uses a fresh in-memory store. A prompt's state lives exactly as long as the process. Nothing persists or accumulates across runs.
+
+You can persist the prompt's store across runs with the `--store DIR` option:
+
+````
+promptforge run prompts/staker.md "Bloomberg" --store ./state
+````
+
+This switches from the default ephemeral in-memory store to a persistent file-backed store in the directory you name.
+
+Each run generates a unique execution ID, a 36-character string prefixed with `cli-`. Use it to correlate observations within a single invocation.
+
+During the run itself, the tool produces no progress output. Long runs are silent until the result appears. Silence in between is expected.
+
+### Errors and Invocation Edge Cases
+
+Error messages name the failing stage. Examples include "read prompt file <path>", "parse prompt file <path>", "fetch the model catalog", and "load the tool embedding model". Each error goes to stderr as an error chain, so you see the full context of the failure.
+
+The invocation parser is strict. A missing file argument is an error. An unknown subcommand is an error. Extra trailing arguments are an error. None of these are silently ignored.
+
+The frontmatter gate applies to every run. A file whose frontmatter declares no `promptforge:` version is rejected before execution. This is how the tool guarantees it runs only genuine PromptForge prompts.
 
 ---
 
-## User Guide - promptforge-gateway
+## Gateway Configuration
 
-promptforge-gateway is the one process in PromptForge that talks to LLM backends. Point it at a TOML file, and it serves an OpenAI-compatible HTTP API that routes chat completions to configured backends, holds every credential, manages a model catalog, runs a built-in web search tool, and optionally spawns local `llama-server` processes for GGUF models. Nothing above it holds a vendor key. Nothing above it knows which machine answers. A key rotation touches one file on one host. After reading this guide, you will be able to configure, start, and operate the gateway for remote endpoints, local models, multiple profiles, and built-in tools.
+One file runs the whole gateway. `gateway.toml` holds your bind address, your credentials, your complete model catalog, and every deployment profile. Edit the file, and the gateway parses it, expands environment variables, and validates every rule before anything runs. A file that fails any check never starts a gateway. This guide teaches you the full schema, section by section, with working examples you can copy and edit. Operators normally use the Config UI to edit configuration. This guide is for advanced users who edit `gateway.toml` directly. The canonical commented example is `gateway.local.example.toml` at the workspace root. It is guaranteed to parse and validate against the current schema.
 
-### What the Gateway Does
+### One File, One Version
 
-The gateway accepts `POST /v1/chat/completions` requests in the OpenAI chat completions format. It resolves the model name the caller asked for, substitutes the backend's own model string into the outgoing request, forwards it, and restores the caller's model name on the response. Everything else in the request body - sampling parameters, tool definitions, template arguments - passes through untouched in a flattened map, so a parameter the gateway has never heard of reaches the backend without a gateway release. Models configured with `kind = "embedding"` are served instead at `POST /v1/embeddings` in the OpenAI embeddings format, with the same routing and passthrough discipline. Models configured with `kind = "classifier"` serve rerank requests at `POST /v1/rerank` - a query and a document set in, ranked relevance scores out - under the same discipline.
+You pin the on-disk schema by writing `config-version = 2` at the top of the file. Version 2 is the profile-and-STT layout. Any other value, or a missing version, fails with migration guidance.
 
-Credentials live here and nowhere else. Each `[[endpoint]]` carries an `api_key`, each `[tools.web_search]` carries a search provider key, and each `[[local_model]]` is reached over a loopback connection with a generated bearer. The `Secret` type ensures no credential can be serialized, logged, or printed: it redacts in both `Debug` and `Display`, and `expose()` is the single plaintext accessor.
+One file owns everything. Global settings live in `[server]`, `[workshop]`, `[local]`, and `[tools]`. Remote providers live in `[[endpoint]]`. Compute pools live in `[[dominion]]`. The model catalog lives in `[[model]]`, `[[local_model]]`, and `[[stt_model]]`. Deployment variants live in `[[profile]]`. Keep sections in this canonical order. The Config UI writes this order, so equivalent edits stay merge-friendly.
 
-Model resolution is one exact string lookup. A miss is a 404. There is no prefix matching, no regex, no alias chain, and no default model. A typo is a clear error rather than a silent charge against the wrong backend.
+The active profile is state, not config. It lives in a sibling file named `<config-stem>.state.toml` with a single key, `active_profile = "name"`. You switch profiles without editing `gateway.toml`, and the gateway remembers the selection across restarts.
 
-### Configuration
+### The Core Sections
 
-The gateway boots from two TOML files: the boot file named on the command line, which is the catalog and infrastructure, and a named profile from the boot file's sibling `profiles/` directory, which is the initial loaded set. Every configuration struct uses `deny_unknown_fields`, so a misspelled key is a boot failure rather than a setting silently ignored.
+`[server]` sets the socket address the gateway binds to and the shared bearer key every `/v1/*` request must present. `[workshop]` runs an embedded workshop UI on its own bind address. `[local]` chooses the cache directory for downloaded models and the pinned llama.cpp install. `[tools]` holds optional built-in tools such as web search.
 
-A minimal configuration defines a server (bind address and bearer key), one endpoint, and one model:
+The smallest valid config needs only the version, the bind address, and the API key:
 
-```toml
+````toml
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8080"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+````
 
+Everything else has defaults or is optional. The API key must not be empty. The gateway never starts without authentication.
+
+### Validation at Load
+
+Validation is upfront and total. Load reads the file, expands variables, and checks every rule before any profile runs. Every profile is validated, not only the active one. This includes VRAM budgets and STT role pairing. A broken inactive profile cannot slip through.
+
+Misspelled or unknown keys are rejected everywhere, so typos fail fast at load. Removed v1 constructs are hard-break errors that name the file, the key, and the exact line. A configuration that fails any check never produces a running gateway.
+
+### Server, Secrets, and Interpolation
+
+You set the bind address and API key in `[server]`:
+
+````toml
+[server]
+bind = "127.0.0.1:8080"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+````
+
+You reference environment variables in any string value with `${VAR}` syntax, including strings nested inside arrays and tables. Keep secrets and host-specific settings out of the file this way. Write `$$` for a literal dollar sign. An unset variable is a startup error that names the variable. An unclosed `${...` is a distinct malformed-interpolation error. Text in comments and keys is never expanded.
+
+Secrets are safe by construction. API keys render as `redacted` in logs and debug output. They serialize as `"***"` in exported JSON. Error messages may name fields, model names, and sources, but never render a secret. When you edit a config that shows `"***"`, leave the marker in place. The real secret carries over on save. Secrets match entries by name or id, so reordering models or endpoints does not lose them.
+
+If you bind `0.0.0.0` or `::`, same-host clients such as the workshop use the matching loopback URL automatically. You configure no separate client address.
+
+### Endpoints and Remote Models
+
+You declare each remote provider as an `[[endpoint]]` with an id you choose, the wire protocol, the base URL, and the API key:
+
+````toml
 [[endpoint]]
-id = "anthropic"
+id = "openai"
 protocol = "openai"
-base_url = "https://api.anthropic.com/v1"
-api_key = "${ANTHROPIC_API_KEY}"
+base_url = "https://api.openai.com/v1"
+api_key = "${OPENAI_API_KEY}"
+````
 
+`protocol = "openai"` is the only protocol. The gateway targets OpenAI-compatible backends. Base URLs must be absolute `http` or `https` URLs with a real host.
+
+You publish caller-facing model names with `[[model]]` entries. Each entry carries a description, a context window, the upstream model string the backend knows, and the endpoint ids that serve it:
+
+````toml
 [[model]]
-name = "reasoning-large"
-description = "Anthropic's best reasoning model"
+name = "gpt-5"
+description = "General-purpose chat model"
 context = 200000
-upstream = "claude-sonnet-4-6"
-endpoints = ["anthropic"]
-```
+upstream = "gpt-5"
+endpoints = ["openai"]
+````
 
-The `name` is what callers request. The `upstream` is what the backend knows the model by. Name your models by capability (`reasoning-large`, `fast-draft`) when you want the same prompt to work across environments where the backend changes.
+This decouples what clients request from what the provider calls the model. The `endpoints` list must name defined endpoint ids, must not be empty, and must not repeat an endpoint. Every model needs a description and a nonzero context size.
 
-Any string value can use `${VAR}` to reference an environment variable. Interpolation runs after the TOML is parsed, so it applies only to string values. An unresolved variable fails the load, so a deployment that forgot to export a credential never starts serving with a blank one. Use `$$` for a literal dollar sign.
+You classify each model by workload kind: `chat`, `embedding`, or `classifier`. Kind defaults to `chat`. You declare thinking tokens as `never`, `always`, or `switchable` (caller-toggleable per request). The default is `never`. You pick the tool-calling dialect per model: `openai` (the default) for native wire tool calls, or `gemma3_tool_code`, an emulated content-fence mode for models like Gemma 3 that lack native tool arrays.
 
-There is no implicit pickup of `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from the ambient environment. Every credential must appear in the configuration as an explicit `${VAR}` reference.
+A full chat model adds capability metadata and per-model defaults:
 
-At boot the process environment is populated from at most two env files: the profile's own file first (`profiles/main.env` for `--profile main`), then the boot file's sibling env file (`gateway.env` beside `gateway.toml`). Neither file overrides a variable that is already set, so precedence is the process environment, then the profile's file, then the boot file's. Included files' env files are never loaded. On a profile switch only the new profile's env file is loaded; the boot file's is already in the process.
-
-#### Model fields
-
-| Field | Required | Default | Purpose |
-|---|---|---|---|
-| `name` | yes | - | Caller-facing model name |
-| `kind` | no | `chat` | Model kind: `chat`, `embedding`, or `classifier` |
-| `description` | yes | - | Prose for catalog consumers |
-| `context` | yes | - | Context window size in tokens |
-| `upstream` | yes | - | The string the backend knows this model by |
-| `endpoints` | yes | - | Endpoint ids (first is used) |
-| `thinking` | no | `never` | `never`, `always`, or `switchable`; chat kind only |
-| `default_max_tokens` | no | - | Parsed, not yet consumed; chat kind only |
-| `max_output` | no | - | Max output tokens per completion; must not exceed `context` |
-| `default_temperature` | no | - | Sampling temperature applied when the caller omits one |
-| `images` | no | `false` | Whether the model accepts image inputs |
-| `parallel_tool_calls` | no | `false` | Whether the model can emit parallel tool calls |
-| `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
-| `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
-| `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
-| `tool_dialect` | no | `openai` | Tool-calling dialect: `openai` (native) or `gemma3_tool_code` (emulated fences); chat kind only |
-
-`embedding` and `classifier` models reject chat-only fields at load: `thinking`, `default_max_tokens`, `tool_dialect`, `effort_levels`, `default_effort`, and `adaptive_thinking` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request. The effort knobs (`effort_levels`, `default_effort`) are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
-
-#### Endpoint fields
-
-| Field | Required | Default | Purpose |
-|---|---|---|---|
-| `id` | yes | - | Operator handle referenced by models |
-| `protocol` | yes | - | Wire protocol; only `openai` |
-| `base_url` | yes | - | Backend URL (trailing slash trimmed) |
-| `api_key` | yes | - | Backend credential; empty string skips the `Authorization` header |
-| `dominion` | no | - | Remote dominion id for a shared limit and queue |
-
-### Starting the Gateway
-
-```
-promptforge-gateway serve gateway.toml --profile main
-```
-
-Boot requires two things: a config path and a profile name. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable; the CLI argument wins, and with neither set the boot fails with a usage error naming both sources. The profile name comes from `--profile` only (no env var). It is required - there is no anonymous boot. Every gateway has at least one profile; the initial loaded set always has a name.
-
-The profiles directory is always the `profiles/` directory beside the config file - never independently configurable, and there is no `~/.promptforge/profiles` default. Booting with an unknown profile name fails with a startup error listing the available profiles; a missing `profiles/` directory or a missing profile file is likewise a startup error.
-
-The boot file is the catalog and infrastructure; it is not loaded as the runtime config directly. The named profile is loaded with include resolution and becomes the initial config. A profile may declare a top-level `models = ["name", ...]` allowlist selecting a subset of the catalog's `[[model]]` and `[[local_model]]` entries; the loaded set is exactly the selection, so `GET /v1/models` shows nothing else. An allowlist entry naming a model the catalog does not define is a validation error at load. With no `models` key, the profile loads the full catalog. The single-file setup needs one minimal profile, `profiles/main.toml` beside `gateway.toml`:
-
-```toml
-include = ["../gateway.toml"]
-```
-
-Startup order: load the two env files, resolve the profile's include chain, start local model runtime (when `[[local_model]]` is present), build the routing table, bind, serve. A broken config never reaches a listening socket.
-
-### Model Catalog and Routing
-
-Clients discover available models by calling `GET /v1/models` with a bearer token:
-
-```json
-{
-  "object": "list",
-  "data": [
-    {
-      "id": "reasoning-large",
-      "object": "model",
-      "kind": "chat",
-      "description": "Anthropic's best reasoning model",
-      "context": 200000,
-      "thinking": "switchable",
-      "max_output": 64000,
-      "images": true,
-      "parallel_tool_calls": true,
-      "effort_levels": ["low", "high"],
-      "default_effort": "low",
-      "adaptive_thinking": false
-    }
-  ]
-}
-```
-
-Each entry includes the model's kind, context window, thinking mode, and capability metadata so clients can make binding decisions before sending a request. The flags (`images`, `parallel_tool_calls`, `adaptive_thinking`) and `effort_levels` are always present; the optional knobs (`max_output`, `default_temperature`, `default_effort`) appear only when configured.
-
-A chat completion request names a model and provides messages:
-
-```json
-{
-  "model": "reasoning-large",
-  "messages": [{"role": "user", "content": "Explain monads"}],
-  "temperature": 0.7
-}
-```
-
-Send this as `POST /v1/chat/completions` with `Authorization: Bearer <token>`.
-
-The gateway validates: model must be non-empty, messages must be non-empty, each message must be a JSON object with a supported role (`system`, `user`, `assistant`, `tool`, `function`, `developer`) and either `content` or a tool/function call. Everything else passes through verbatim.
-
-The response carries the caller's model name, not the backend's.
-
-### Emulated Tool Calling
-
-A chat model whose backend has no native tool array can still serve tool calls by setting `tool_dialect = "gemma3_tool_code"` on its `[[model]]` entry:
-
-```toml
+````toml
 [[model]]
-name = "gemma-remote"
-description = "A Gemma 3 instruct model behind an OpenAI-shaped server"
-context = 8192
-tool_dialect = "gemma3_tool_code"
-upstream = "gemma3-it"
-endpoints = ["local-llama"]
-```
+name = "gpt-5-reasoning"
+description = "Reasoning chat model with effort levels"
+kind = "chat"
+context = 200000
+upstream = "gpt-5"
+endpoints = ["openai"]
+thinking = "switchable"
+tool_dialect = "openai"
+default_max_tokens = 8192
+max_output = 32768
+default_temperature = 0.7
+images = true
+parallel_tool_calls = true
+effort_levels = ["low", "medium", "high"]
+default_effort = "medium"
+adaptive_thinking = false
+````
 
-For a non-streaming chat completion to such a model the gateway emulates the protocol. Outbound, the OpenAI `tools` array is translated into a plain-language system guide teaching the `tool_code` fence protocol (one `name(key=value)` call per line) and prepended as a system message; `tools` and `tool_choice` are stripped from the forwarded request. Inbound, the reply's content is scanned for a leading `tool_code` fence (or an interim `json` fence carrying a `tool_calls` blob); a well-formed fence becomes OpenAI `tool_calls` objects with a null `content` and a `tool_calls` finish reason.
+Capabilities surface verbatim on `GET /v1/models`. All capability fields are optional and default to absent. `default_max_tokens` applies when the caller omits a token limit. `max_output` may not exceed the context window. Effort knobs require thinking: you set `effort_levels` and `default_effort` only on models whose thinking is `always` or `switchable`, and `default_effort` must name a listed level. Chat-only fields are rejected on embedding and classifier models. These are `thinking`, effort knobs, `adaptive_thinking`, `tool_dialect`, and `default_max_tokens`.
 
-Recovery is warn-and-continue, never silent and never fatal: a recognized-but-malformed fence (unterminated, empty, an invalid call line, or trailing prose after the fence) yields an empty `content` plus a `gateway_warning` field on the message carrying the reason, and the recovery is logged at warn. `gateway_warning` is a gateway-specific extension on the OpenAI response shape; downstream clients should ignore unknown fields. The dialect uses content-fence parsing only - the gateway never sets `response_format: json_object`.
+### Local Models and Companions
 
-Emulation applies to non-streaming completions only; a `stream: true` request is forwarded unchanged.
+You serve local GGUF models through gateway-managed `llama-server` child processes. Declare a `[[local_model]]` with a name, description, source, and context size:
 
-### Streaming
-
-Pass `"stream": true` on a chat completion to get a server-sent events stream instead of a single JSON response:
-
-```json
-{
-  "model": "reasoning-large",
-  "messages": [{"role": "user", "content": "Explain monads"}],
-  "stream": true
-}
-```
-
-The response is `Content-Type: text/event-stream` with one `data:` line per chunk, terminated by `data: [DONE]`. The relay is typed: the gateway parses and validates each upstream chunk, rewrites the model name back to the caller's, and re-serializes it - it never splices raw upstream bytes through. A failure before the stream starts (an upstream 4xx/5xx, an unreachable backend) comes back as the usual JSON error envelope, never as an SSE stream that dies mid-flight; a failure mid-stream is emitted as an error-envelope `data:` event before the stream ends. The dominion queue slot is held for the stream's whole lifetime, so a long stream counts against concurrency until it ends. Streaming requests use a connect-timeout-only HTTP client: the usual whole-request deadline is not applied, since it would kill any stream that outlived it.
-
-Two caveats. A client that disconnects mid-stream cancels the upstream stream: dropping the response drops the upstream connection and frees the queue slot in the same unwind, so a hung client never holds a backend stream open. And a malformed upstream chunk - one that is not JSON, or that lacks the minimal choice shape (at least one choice with an `index` and a `delta`) - is logged and skipped rather than relayed or fatal, so one bad chunk never ends an otherwise healthy stream. The terminal `data: [DONE]` is a sentinel, not JSON; it is recognized before parsing and never logged as malformed.
-
-### Embeddings
-
-Models configured with `kind = "embedding"` serve OpenAI-shaped embedding requests at `POST /v1/embeddings`:
-
-```json
-{
-  "model": "embed-large",
-  "input": ["first document", "second document"],
-  "encoding_format": "float"
-}
-```
-
-The `input` is a single string or an array of strings; `encoding_format` (`float` or `base64`) is optional, and every other OpenAI embeddings field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `data` and `usage` passed through from the backend. Naming a chat or classifier model here is a 400 `kind_mismatch`. A model whose upstream cannot serve embeddings at all - a local chat server, for example - fails with 400 and `code: "model_unavailable"`.
-
-### Rerank
-
-Models configured with `kind = "classifier"` serve rerank requests at `POST /v1/rerank`:
-
-```json
-{
-  "model": "rerank-large",
-  "query": "what is rust",
-  "documents": ["a card game", "a systems language"],
-  "top_n": 2
-}
-```
-
-The request names a query and the documents to rank against it; `top_n` is optional, and every other field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `results` and `usage` passed through from the backend. Naming a chat or embedding model here is a 400 `kind_mismatch`. A model whose upstream cannot serve rerank at all - a local chat server, for example - fails with 400 and `code: "model_unavailable"`.
-
-### Authentication and Errors
-
-Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.api_key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
-
-`GET /health` is unauthenticated and always returns `{"status": "serving"}` while the process is up.
-
-All errors use the OpenAI error envelope:
-
-```json
-{
-  "error": {
-    "message": "unknown model reasoning-large",
-    "type": "invalid_request_error",
-    "code": "model_not_found"
-  }
-}
-```
-
-| Condition | Status | `type` | `code` |
-|---|---|---|---|
-| Wrong or missing bearer | 401 | `authentication_error` | `unauthorized` |
-| Unknown model | 404 | `invalid_request_error` | `model_not_found` |
-| Model kind does not match the route | 400 | `invalid_request_error` | `kind_mismatch` |
-| Model's upstream cannot serve the route's workload | 400 | `invalid_request_error` | `model_unavailable` |
-| Tool not configured | 404 | `invalid_request_error` | `not_found` |
-| Bad request body | 400 | `invalid_request_error` | `malformed_request` |
-| Backend connection failed before the request was sent | 502 | `server_error` | `upstream_connect` |
-| Backend unreachable mid-flight (read/timeout) | 502 | `server_error` | `upstream_transport` |
-| Backend decode failure | 502 | `server_error` | `upstream_protocol` |
-| Backend 4xx | upstream's | `invalid_request_error` | `upstream_client_error` |
-| Backend 5xx | 502 | `server_error` | `upstream_error` |
-| Queue full | 503 | `server_error` | `queue_full` |
-| Rejected at capacity (`policy = "reject"`) | 429 | `rate_limit_error` | `queue_rejected` |
-
-An unmodified OpenAI SDK surfaces these as its own error types rather than unparseable blobs.
-
-### Concurrency and Queuing
-
-Bind an endpoint to a dominion to cap how many requests are in flight at once. The limit lives on the dominion, so everything bound to it shares one pool of slots:
-
-```toml
-[[dominion]]
-id = "anthropic-pool"
-kind = "remote"
-max_concurrency = 10
-max_queue = 100         # waiting requests (not counting in-flight); default 100
-policy = "queue"        # "queue" | "reject" (fail-fast); default "queue"
-fair_scheduling = true  # round-robin by client key; default true
-
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "https://api.anthropic.com/v1"
-api_key = "${ANTHROPIC_API_KEY}"
-dominion = "anthropic-pool"
-```
-
-Requests beyond the limit wait in the dominion's bounded queue. What a full queue does comes from `policy`: with `queue` (the default), up to `max_queue` requests wait and further arrivals are rejected with 503 and `code: "queue_full"`; with `reject`, a request that finds no free concurrency slot is turned away immediately - fail-fast, mapped to 429 with `code: "queue_rejected"`.
-
-When `fair_scheduling` is true, callers identify themselves via the `X-PromptForge-Client` header. Each client gets turns in round-robin order, so one fast client cannot monopolize slots. Missing or invalid headers map to the `"default"` bucket. The scheduler tracks up to 32 distinct client labels; additional labels fold into `"default"`. The header is self-asserted: a scheduling hint for trusted-host callers, not an authenticated identity.
-
-An endpoint without a `dominion` is unlimited.
-
-### Dominions
-
-A dominion is a named pool of compute - a remote provider pool or a local GPU - carrying one concurrency limit and one bounded waiting queue shared by everything bound to it: two endpoints bound to the same dominion compete for the same slots. A dominion binding is the only way to cap concurrency.
-
-```toml
-[[dominion]]
-id = "runpod-pool"
-kind = "remote"
-max_concurrency = 4
-max_queue = 50            # bounded wait, then rejection; default 100
-policy = "queue"          # "queue" | "reject" (fail-fast); default "queue"
-fair_scheduling = true    # per-client round-robin; default true
-
-[[dominion]]
-id = "gpu0"
-kind = "local"
-vram_gb = 24              # local kind only; co-residency budget
-
-[[endpoint]]
-id = "runpod-a"
-protocol = "openai"
-base_url = "https://..."
-api_key = "${RUNPOD_KEY}"
-dominion = "runpod-pool"  # optional; absent = unlimited pass-through
-
+````toml
 [[local_model]]
 name = "qwen-local"
-description = "..."
-source = "..."
+description = "Local chat model"
+source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
+sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 context = 65536
-dominion = "gpu0"         # optional; must name a local dominion
-parallel = 4              # child --parallel; the queue limit when no dominion is bound
-vram_gb = 14              # footprint estimate for the co-residency check
-```
+````
 
-| Field | Required | Default | Purpose |
-|---|---|---|---|
-| `id` | yes | - | Operator handle referenced by endpoints and local models |
-| `kind` | yes | - | `remote` (bindable by endpoints) or `local` (bindable by local models) |
-| `max_concurrency` | no | unlimited | Max in-flight requests admitted across every binder |
-| `max_queue` | no | 100 | Max waiting requests before new admits are rejected |
-| `policy` | no | `queue` | `queue` waits for a slot; `reject` fails fast at capacity |
-| `fair_scheduling` | no | `true` | Round-robin waiting callers by client key |
-| `vram_gb` | no | - | VRAM budget in GiB; local kind only |
+The source is an https download URL or a local filesystem path. A remote source must carry a `sha256` pin, verified after download. Local paths are operator-controlled and may be unpinned. Plaintext `http` sources are rejected. Any pin present must be exactly 64 lowercase hex characters.
 
-Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
+You tune llama.cpp inference per model:
 
-An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model.
-
-When a local dominion sets `vram_gb`, every local model bound to it must set its own `vram_gb` footprint estimate, and the estimates must sum to no more than the budget: an over-booked or incomplete budget fails validation at boot and at profile switch, before any child process starts and surfaces as an OOM. A local dominion without `vram_gb` imposes no co-residency obligation.
-
-### Web Search Tool
-
-Enable the built-in web search tool by adding a `[tools.web_search]` section:
-
-```toml
-[tools.web_search]
-provider = "brave"
-api_key = "${BRAVE_API_KEY}"
-```
-
-The gateway proxies search requests to the Brave Search API with its own credential. The executor never sees the search key.
-
-Send a search request:
-
-```json
-{
-  "query": "Rust async runtime comparison",
-  "count": 5
-}
-```
-
-Send this as `POST /v1/tools/web_search` with `Authorization: Bearer <token>`.
-
-The response contains trimmed results:
-
-```json
-{
-  "query": "Rust async runtime comparison",
-  "results": [
-    {
-      "title": "Comparing Tokio, async-std, and smol",
-      "url": "https://example.com/article",
-      "description": "A detailed comparison of...",
-      "age": "2 days ago",
-      "site_name": "example.com"
-    }
-  ]
-}
-```
-
-Provider extras like thumbnails and ranking metadata are dropped - every byte would land in a model's context window.
-
-#### Request fields
-
-| Field | Required | Default | Purpose |
-|---|---|---|---|
-| `query` | yes | - | Search query (Unicode trimmed, max 512 chars) |
-| `count` | no | `default_count` (10) | Results requested; clamped to `1..=max_count` |
-| `freshness` | no | `default_freshness` | `pd` (day), `pw` (week), `pm` (month), `py` (year), or `YYYY-MM-DDtoYYYY-MM-DD` |
-| `country` | no | - | 2-char country code |
-| `search_lang` | no | - | 2-3 char language code |
-| `safesearch` | no | `default_safesearch` | `off`, `moderate`, or `strict` |
-| `include_domains` | no | - | Bare hostnames to include |
-| `exclude_domains` | no | - | Bare hostnames to exclude |
-
-Domain filters must be bare hostnames (no scheme, path, or port). A hostname matches when it equals the domain or ends with `.<domain>`.
-
-#### Configuration defaults
-
-| Key | Default | Purpose |
-|---|---|---|
-| `provider` | (required) | Only `brave` |
-| `api_key` | (required) | Provider credential |
-| `base_url` | `https://api.search.brave.com/res/v1` | Provider URL |
-| `default_count` | 10 | Used when request omits `count` |
-| `max_count` | 20 | Clamp ceiling |
-| `max_per_host` | 2 | Diversity cap per hostname |
-| `default_freshness` | `""` (omit) | Applied when request omits freshness |
-| `default_safesearch` | `""` (omit) | Applied when request omits safesearch |
-| `strip_tracking` | `true` | Remove `utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid` from URLs |
-
-Results are post-processed in fixed order: sanitize text, strip tracking parameters, set `site_name`, apply include/exclude domain filters, diversify by hostname (max 2 per host by default), then cap at `count`. Over-length URLs are dropped whole rather than truncated into broken links.
-
-When `[tools.web_search]` is absent, the route returns 404 - an absent resource, not a broken capability.
-
-### Named Profiles
-
-Organize configurations for different environments as TOML files in the `profiles/` directory beside the boot file:
-
-```
-<config-parent>/
-  gateway.toml
-  profiles/
-    main.toml
-    analytical.toml
-    dev.toml
-```
-
-Start with a named profile:
-
-```
-promptforge-gateway serve gateway.toml --profile analytical
-```
-
-Every gateway boots into a profile, so the initial loaded set always has a name. A profile typically contains `include = ["../gateway.toml"]` plus its own overrides, keeping the boot file as the shared catalog.
-
-#### Selecting a subset of the catalog
-
-A profile selects its loaded set with a top-level `models` allowlist:
-
-```toml
-# analytical.toml
-include = ["../gateway.toml"]
-models = ["reasoning-large", "qwen3.8-local"]
-```
-
-After the include chain merges, the catalog's `[[model]]` and `[[local_model]]` arrays filter to the listed names: the loaded set is the selection, and `GET /v1/models` shows exactly it. The filter runs before validation, so reference checks and the VRAM co-residency check apply to the loaded set only - a catalog whose local models over-book a GPU in total still boots a profile whose selection fits the dominion's `vram_gb` budget, and endpoints or dominions referenced only by filtered-out models may stay defined. An allowlist entry naming a model the catalog does not define fails the load. With no `models` key the profile loads the full catalog, and when several files in one include chain declare `models`, the later file's list replaces the earlier one. `GET /admin/status` reports the active selection as `model_allowlist` (`null` when the full catalog is loaded).
-
-#### Profile inheritance
-
-A profile can include parent files:
-
-```toml
-# analytical.toml
-include = ["base.toml"]
-
-[[model]]
-name = "analysis"
-description = "Deep analysis model"
-context = 200000
-upstream = "claude-sonnet-4-6"
-endpoints = ["anthropic"]
-```
-
-Includes resolve depth-first relative to the including file. Max nesting depth is 16. Cycles are detected and rejected.
-
-Merge rules:
-- Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[dominion]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
-- Scalars (`server.*`, `[local].cache_dir`): later wins.
-- The `models` allowlist: later wins - one list replaces the other, never unioned.
-
-#### The boot file owns `[server]`
-
-After include resolution, the profile's merged `[server]` section must equal the boot file's `[server]` exactly - bind address and api_key, compared as values after `${VAR}` interpolation. A mismatch fails the boot (or the profile switch): a bind mismatch names both addresses, while an api_key mismatch names only the profile and the field, with both keys redacted. The conventional setup passes by construction because profiles include the boot file. The consequence: the socket and the gateway bearer key are fixed for the process lifetime, and a profile switch never rotates the admin credential.
-
-Includes remain free-form: a profile may include a different file than the boot path, or be self-contained - a self-contained profile must replicate the boot file's `[server]` verbatim to boot. At startup the gateway logs the resolved include chain, plus a warning when the boot file is not in it: the likely-mistake case, where edits to the boot file have no effect.
-
-#### Admin routes
-
-All admin routes use the same bearer token as `/v1`:
-
-| Route | Method | Purpose |
-|---|---|---|
-| `/admin/profiles` | GET | List `*.toml` stems in the profiles directory |
-| `/admin/status` | GET | Current profile name, loaded model names, local child count, and the profile's `models` allowlist |
-| `/admin/switch-profile` | POST | Switch to a named profile immediately |
-
-Switch with:
-
-```json
-{"name": "analytical"}
-```
-
-Send this as `POST /admin/switch-profile` with `Authorization: Bearer <token>`.
-
-Profile switches are serialized by a mutex. The old local children are stopped (freeing VRAM) before new ones start. The new configuration is built and validated before touching live state. On success, the routing, web-search settings, and local runtime are atomically swapped. On failure, the previous state stays intact with a stable admin credential.
-
-The `[server]` section does not change on switch: the boot file owns it, and a profile whose merged `[server]` differs from the boot file's is rejected. Moving the socket or rotating the gateway key requires a restart.
-
-Profile names must be a single path component - no separators, no `.` or `..`, no empty string. This confinement prevents directory traversal through the admin API.
-
-### Local Inference
-
-Run local generative models by declaring `[[local_model]]` entries. The gateway provisions a pinned `llama-server` binary (GPU builds: Vulkan on Windows/Linux, Metal on macOS), downloads each GGUF, and spawns one child process per model.
-
-```toml
-[local]
-# cache_dir = "~/.promptforge"  # default
-
+````toml
 [[local_model]]
 name = "qwen-local"
-description = "A careful analysis model suited to structured reasoning"
-source = "https://huggingface.co/Qwen/Qwen3.5-9B-GGUF/resolve/main/qwen3.5-9b-q4_k_m.gguf"
-sha256 = "abcdef..."
+description = "Local chat model"
+source = "/models/qwen.gguf"
 context = 65536
 gpu_layers = 99
 flash_attention = true
-```
+cache_type_k = "q8_0"
+cache_type_v = "q4_0"
+parallel = 1
+n_predict = 8192
+chat_template_file = "templates/qwen.jinja"
+````
 
-Each local model becomes a normal catalog entry. Clients reach it through the same `POST /v1/chat/completions` as remote models (`POST /v1/embeddings` for `kind = "embedding"`, `POST /v1/rerank` for `kind = "classifier"`) - the fact that it runs locally is invisible to callers.
+Defaults: `gpu_layers` 99, `flash_attention` on, `cache_type_k` `q8_0`, `cache_type_v` `q4_0`, `n_predict` 8192, `parallel` 1. The `parallel` value sets the child process parallelism. It also caps the gateway queue for the model when the model has no compute pool binding (pools are covered in Dominions and VRAM Budgeting). Use `chat_template_file` when the GGUF embeds a template without tool-calling support.
 
-#### Configuration fields
+You attach a speculative-decoding drafter to accelerate generation:
 
-| Field | Required | Default | Purpose |
-|---|---|---|---|
-| `name` | yes | - | Caller-facing model name |
-| `kind` | no | `chat` | Model kind: `chat`, `embedding`, or `classifier` |
-| `description` | yes | - | Prose for catalog and semantic bind |
-| `source` | yes | - | Hugging Face URL or local path to GGUF |
-| `sha256` | no | - | SHA-256 hex pin; verified after download |
-| `context` | yes | - | Context window (`--ctx-size`) |
-| `thinking` | no | `never` | `never`, `always`, or `switchable`; chat kind only |
-| `gpu_layers` | no | 99 | GPU layers offloaded (`-ngl`) |
-| `flash_attention` | no | `true` | Enable flash attention |
-| `cache_type_k` | no | `q8_0` | KV cache type for K |
-| `cache_type_v` | no | `q4_0` | KV cache type for V |
-| `n_predict` | no | 8192 | Generation ceiling (`--n-predict`) |
-| `chat_template_file` | no | - | Jinja template override (`--chat-template-file`); chat kind only |
-| `dominion` | no | - | Local dominion id for a shared limit |
-| `parallel` | no | 1 | Max concurrent inferences (`--parallel`; the queue limit when no dominion is bound) |
-| `vram_gb` | no | - | VRAM footprint estimate in GiB |
-| `max_output` | no | - | Max output tokens per completion; must not exceed `context` |
-| `default_temperature` | no | - | Sampling temperature applied when the caller omits one |
-| `images` | no | `false` | Whether the model accepts image inputs |
-| `parallel_tool_calls` | no | `false` | Whether the model can emit parallel tool calls |
-| `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
-| `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
-| `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
+````toml
+[local_model.speculative]
+type = "draft-mtp"
+source = "/models/qwen-mtp.gguf"
+draft_max = 3
+````
 
-A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking`, `chat_template_file`, `effort_levels`, `default_effort`, and `adaptive_thinking` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind. The effort knobs are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
+`draft-mtp` is the only supported speculation type. `draft_max` is bounded from 1 to 16. You attach a multimodal projector to give a local chat model image input:
 
-#### Local embeddings
+````toml
+[local_model.multimodal_projector]
+source = "/models/qwen-mmproj.gguf"
+````
 
-A local model with `kind = "embedding"` launches its child as `llama-server --embeddings` and serves `POST /v1/embeddings` exactly like a remote embedding model. Artifact download, digest pinning, dominion binding, and child supervision (respawn of a dead child) are unchanged from a chat child.
+Once attached, the model automatically advertises image capability in the catalog. Both companions follow the same source rules: https URL or local path, with a `sha256` pin required for remote sources. Companions attach only to chat-kind local models.
 
-```toml
+You choose the cache location with `[local] cache_dir`. Omit it for the default `~/.promptforge` (`%USERPROFILE%\.promptforge` on Windows). Models land in `<cache_dir>/models`. The pinned llama.cpp install lands in `<cache_dir>/llama.cpp`.
+
+### Speech-to-Text Models
+
+You declare speech-to-text models in the same catalog as chat models:
+
+````toml
+[[stt_model]]
+name = "whisper-base-en"
+role = "interim"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+vram_gb = 1.0
+````
+
+This entry is the built-in recommended interim model, shown verbatim.
+
+Each STT model fills one of two pipeline slots. `interim` is a low-latency model used while a take is still recording. `final` is a higher-accuracy model that crystallizes completed audio. Each profile selects at most one interim and one final STT model. Interim-only is allowed as a degraded mode. Final-only is rejected because streaming requires an interim model, and the error names the fix.
+
+A recommended digest-pinned pair ships built in: `whisper-base-en` for interim and `whisper-small-en` for final. The pair carries canonical whisper.cpp download URLs, SHA-256 pins, and conservative VRAM estimates of 1.0 and 2.0 GiB with headroom above resident footprints, so speech-to-text can run CPU-friendly. The Config UI offers a restore action that re-seeds this curated pair instead of hand-writing entries.
+
+Remote STT sources may omit the pin. This asymmetry with local models and companions is intentional. `[workshop.stt]` holds capture tuning only. Model selection lives in the catalog and profiles, not in the workshop section.
+
+### Dominions and VRAM Budgeting
+
+You declare named compute pools as `[[dominion]]` entries. A dominion is either `local` (a GPU pool) or `remote` (a provider pool):
+
+````toml
+[[dominion]]
+id = "gpu0"
+kind = "local"
+max_concurrency = 4
+max_queue = 100
+policy = "queue"
+fair_scheduling = true
+vram_gb = 24
+
+[[dominion]]
+id = "remote-pool"
+kind = "remote"
+max_concurrency = 10
+````
+
+You bind remote endpoints to remote dominions and local or STT models to local dominions by id. Add `dominion = "gpu0"` to a `[[local_model]]` or `[[stt_model]]` entry, or `dominion = "remote-pool"` to an `[[endpoint]]` entry. An endpoint or model with no binding gets unlimited pass-through. A binding to an undefined dominion, or to a dominion of the wrong kind, is rejected.
+
+Per dominion you set `max_concurrency` (or leave it unlimited), `max_queue` (default 100), a full-queue `policy` of `queue` (wait) or `reject` (fail fast), and `fair_scheduling` (round-robin by client key, on by default). Limits must be at least 1 when set.
+
+A local dominion can carry a `vram_gb` budget. The gateway then checks every profile's selected local and STT models against that budget and rejects any profile that would over-book the GPU. The error names the profile, the dominion, and the exact overshoot. A model bound to a budgeted dominion must declare its own `vram_gb` estimate. An exact fit is accepted. Models bound to an unbudgeted dominion need no estimate. Different profiles may collectively over-book a GPU as long as each profile's own selection fits. A remote dominion that declares `vram_gb` is rejected.
+
+### Profiles and Startup Selection
+
+You define named profiles so one `gateway.toml` holds multiple deployment variants. A profile is a pure checklist: a name and a `models` list selecting entries from the global catalog:
+
+````toml
+[[profile]]
+name = "work"
+models = ["gpt-5", "qwen-local", "whisper-base-en", "whisper-small-en"]
+
+[[profile]]
+name = "travel"
+models = ["gpt-5"]
+````
+
+A profile owns no settings. Profiles can mix remote, local, and STT models. An empty checklist is allowed. Every name must resolve across the combined catalog, and duplicates within one profile are rejected. The global catalog holds every defined model. The active profile filters it down to what a deployment actually exposes.
+
+Profile names must be a single safe path component: no path separators, no `.` or `..`, no surrounding whitespace, no NUL bytes. Each violation is rejected with a specific reason.
+
+Startup selection follows a fixed precedence. The `--profile` command-line flag wins, then the `PROMPTFORGE_PROFILE` environment variable, then the persisted state file. If no profile is selected anywhere, startup fails with an error listing the defined profiles and the three ways to select one. If the persisted or requested profile does not exist, the error names the stale value and lists the defined profiles.
+
+### Loading, JSON, and Pending Edits
+
+Loading reads the single file, expands variables, validates everything, and activates the selected profile in one step. Tooling can validate a TOML document in memory without touching disk. Tooling can switch the active profile on an already-loaded configuration without re-reading anything.
+
+You export the resolved configuration as JSON for inspection or piping into other tooling. Every secret field redacts to `"***"`. The JSON uses the same key names as the TOML.
+
+Admin edits are staged as pending shadow files: `gateway.toml.next` and `gateway.state.toml.next`. No save touches the live config until the staged edit is explicitly promoted. Promotion is atomic, with automatic backup-and-restore if the replacement fails midway. A staged edit is fully validated against the real schema and profile definitions before it reaches disk. A bad edit leaves no shadow behind.
+
+You preview a pending edit exactly as it would run. Command-line and environment profile overrides still win. A pending-changes report lists which files have staged edits and which top-level sections will change, including a pending profile switch. A single admin document can carry both the global config and an `active_profile` choice. The profile choice is split out into the pending state file automatically, preserving the config/state boundary. A profile still recorded as active cannot be deleted in a pending edit.
+
+### Built-In Tools: Web Search and Workshop
+
+You give models a built-in web-search tool with an optional `[tools.web_search]` section backed by the Brave Search API:
+
+````toml
+[tools.web_search]
+provider = "brave"
+api_key = "${BRAVE_SEARCH_API_KEY}"
+default_count = 10
+max_count = 20
+max_per_host = 2
+default_freshness = "pw"
+default_safesearch = "moderate"
+strip_tracking = true
+````
+
+`provider = "brave"` is the only provider. The base URL defaults to `https://api.search.brave.com/res/v1`, and you can override it with a custom absolute URL. `default_count` and `max_count` must each be at least 1, and the default may not exceed the maximum. `max_per_host` caps results per hostname group (default 2). `default_freshness` accepts only `pd`, `pw`, `pm`, `py`, an explicit `YYYY-MM-DDtoYYYY-MM-DD` range, or empty. `default_safesearch` accepts only `off`, `moderate`, `strict`, or empty. `strip_tracking` scrubs known tracking parameters from result URLs and is on by default.
+
+You run the embedded workshop UI with an optional `[workshop]` section:
+
+````toml
+[workshop]
+bind = "127.0.0.1:7910"
+open_browser = false
+
+[workshop.stt]
+window_seconds = 15
+interval_ms = 500
+vocabulary = ["PromptForge", "WG21", "GGUF"]
+
+[workshop.tape]
+path = "tape.jsonl"
+````
+
+The workshop binds `127.0.0.1:7910` by default. Set `open_browser = true` to open the system browser once the UI is serving. The workshop derives its gateway connection from `[server]`: same address, same API key. No credential is duplicated and none can drift.
+
+`[workshop.stt]` tunes live capture. `window_seconds` sets the seconds of trailing audio per interim pass (default 15). `interval_ms` sets the milliseconds between passes (default 500). `vocabulary` lists domain terms the transcriber is biased toward; an empty list disables biasing. `[workshop.tape]` enables session recording to a JSONL tape file (default `tape.jsonl`). Relative paths resolve from the config file's directory, never the process's current directory.
+
+### Errors and Migration
+
+Every load failure classifies into one of seven stable categories: the file could not be read, the TOML did not parse, an interpolation was malformed, an environment variable was unset, a semantic check failed, a removed layout feature was found, or a shadow file could not be written. Tooling reacts to the category without parsing error text.
+
+Removed v1 constructs are hard-break errors, not silent ignores. Each diagnostic names the file, the removed key, the exact line, and the replacement layout:
+
+- `include` key: use one `gateway.toml` with `[[profile]]` checklist entries.
+- A sibling `profiles/` directory: move every profile into this file as a `[[profile]]` checklist.
+- A top-level `models` allowlist: move the checklist into a `[[profile]]` `models` key.
+- `[workshop.voice]` model keys: use `[workshop.stt]` tuning and a global `[[stt_model]]` entry.
+- A missing or wrong `config-version`: set `config-version = 2`.
+
+Legacy `[queue]` and `[[device]]` sections, and per-endpoint or per-model device keys, fail as parse errors. Queue and device settings moved into `[[dominion]]`.
+
+---
+
+## Running Local Models With The PromptForge Gateway
+
+The PromptForge gateway can run LLM inference entirely on your own machine. You declare a model once. The gateway downloads the weights, verifies them against your SHA-256 pin, installs a prebuilt llama-server build matched to your platform, and picks the correct chat template automatically. You install nothing and compile nothing. This guide shows you how to add models, control their chat templates, run and supervise them, and manage the cache.
+
+### Local models at a glance
+
+A local model is an entry in the gateway configuration. You declare each one in its own `[[local_model]]` table. The entry names a source: an HTTP(S) URL to a GGUF file, or a path to a GGUF file already on your disk.
+
+The gateway runs each local model as a managed llama-server child process. The gateway selects the correct prebuilt binary for your operating system and CPU architecture. Windows and Linux use Vulkan builds. macOS uses Metal builds on both Intel and Apple Silicon. Windows ARM64 uses a CPU build, because the pinned release has no Vulkan build for that platform. Windows x86-64 CUDA builds stage an embedded CUDA bundle instead of downloading a server archive.
+
+Local models appear in the gateway routing table exactly like remote models. You call them through the same OpenAI-compatible endpoints. Chat completions, streaming, embeddings, and reranking work the same way for local and remote models.
+
+The Config UI is your operator surface. It shows pending downloads, chat template decisions, and model metadata. There is no separate command-line tool for local models.
+
+### Adding and downloading models
+
+To add a model, give its `[[local_model]]` entry a `source`. The simplest source is an HTTP(S) URL to a GGUF file.
+
+````toml
 [[local_model]]
-name = "bge-local"
-kind = "embedding"
-description = "A compact English embedding model for retrieval and similarity"
-source = "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf"
-sha256 = "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514"
-context = 512
-```
+source = "https://huggingface.co/unsloth/gemma-4-31b-it-GGUF/resolve/main/gemma-4-31b-it-Q4_K_M.gguf"
+````
 
-#### Local classifiers
+You can also point `source` at a file already on your disk. Paths under your home directory work. The gateway expands `~` for you. A path source skips the download stage.
 
-A local model with `kind = "classifier"` launches its child as `llama-server --reranking` and serves `POST /v1/rerank` exactly like a remote classifier model. Artifact download, digest pinning, dominion binding, and child supervision (respawn of a dead child) are unchanged from a chat child.
-
-```toml
+````toml
 [[local_model]]
-name = "jina-local"
+source = "~/models/my-model.gguf"
+````
+
+Pin a model to an exact SHA-256 digest with the `sha256` key. The gateway verifies the weights after download and on every cache hit. A pin is exactly 64 lowercase hexadecimal characters.
+
+````toml
+[[local_model]]
+source = "https://huggingface.co/unsloth/gemma-4-31b-it-GGUF/resolve/main/gemma-4-31b-it-Q4_K_M.gguf"
+sha256 = "9f2c1ab4e0d7..."
+````
+
+Downloads land in a private cache. The default cache root is `~/.promptforge`. You choose a different location with `[local].cache_dir`.
+
+````toml
+[local]
+cache_dir = "~/models-cache"
+````
+
+The cache is private to your account. On Unix the gateway sets the root to mode 0700 and re-checks it. On Windows the gateway strips inherited permissions and grants your account sole full control. If the cache cannot be made private, the gateway refuses to operate.
+
+A download never appears half-written. The gateway stages each artifact in a `.part` location and renames it into place only after verification. A verified marker then lets later runs skip the re-hash of multi-gigabyte weights. If a cached model fails its pin, the gateway repairs it with a clean re-download instead of failing.
+
+For gated Hugging Face models, set `HF_TOKEN` in the environment. `HUGGING_FACE_HUB_TOKEN` is the fallback. The token is attached only to HTTPS requests to huggingface.co and its subdomains.
+
+While a model or server is provisioned, you can watch live progress of the download, verify, and extract stages. Downloads allow a 30-second connect timeout and a 2-hour whole-request ceiling. Each artifact is capped at 256 GiB.
+
+### Chat templates
+
+A chat template formats the conversation for the model. The wrong template produces broken output, so the gateway resolves the template for you.
+
+With no configuration at all, the gateway uses the chat template embedded in the GGUF file. For over a hundred popular open-weight models, the gateway also resolves the correct template family automatically from the exact Hugging Face repository identifier. Matching is exact only. Partial names are rejected, so a model is never silently assigned the wrong template.
+
+You can override the default in two ways. Set `chat_template_file` to a `builtin:<family>` alias to select one of the twelve bundled families.
+
+````toml
+[[local_model]]
+source = "~/models/my-model.gguf"
+chat_template_file = "builtin:qwen3"
+````
+
+The bundled catalog covers ChatML, Llama 3, Llama 3.1/3.2/3.3, Qwen 2.5, Qwen 3, Gemma 3, Gemma 4, Mistral, Phi 3/3.5, Phi 4, GPT-OSS, and Zephyr.
+
+Or set `chat_template_file` to a path to your own Jinja template file. A custom path overrides everything else.
+
+````toml
+[[local_model]]
+source = "~/models/my-model.gguf"
+chat_template_file = "~/templates/my-template.jinja"
+````
+
+One repair is automatic. A Gemma 4 GGUF with a known-broken embedded template gets a bundled known-good replacement, matched by the template's content hash. Renamed or re-uploaded repositories still get the fix. The replacement templates ship inside the gateway, so the fix works offline.
+
+The Config UI can preview which template a model will use before the model file downloads. It also shows a plain-language reason for the decision and reports the source as `embedded`, `known-override`, `builtin`, or `custom`.
+
+If no usable template exists, startup fails with a message that lists the remedies: set a custom Jinja path, set a `builtin:<family>` alias, or use a GGUF with an embedded template. An unknown `builtin:` alias fails with a message that lists every valid family name.
+
+### Running and supervising models
+
+Start every configured local model with one action. The gateway provisions the pinned server binary, downloads and verifies each model, and spawns the child processes. If no `[[local_model]]` entry exists, startup does nothing and downloads nothing.
+
+A server is ready only after it passes an authenticated identity check on its health endpoint, not just an open port. Each launch attempt gets a fresh random model alias and bearer API key, so the local server answers only this gateway instance. Startup allows up to 4 fresh-port attempts on bind collisions and a 180-second readiness deadline. You can interrupt a slow startup with Ctrl-C.
+
+Best-effort startup keeps one failing model from blocking the rest. You can then inspect exactly which models failed and why.
+
+If a local server crashes, the gateway respawns it automatically and retries the failed request. The caller does not see the outage. A respawn reuses the same port, alias, and API key, so routing stays valid. A 3-second cooldown between respawns prevents a dead model from restart-looping.
+
+Shut down all local children explicitly to free VRAM before you switch profiles. Tearing down the runtime kills every managed child automatically.
+
+You can read bounded captured-output tails of each running child, keyed by model name. Server logs are captured at forced verbosity, so GPU device reports and tensor-offload evidence appear in the diagnostics. API keys are redacted from logs and diagnostics.
+
+#### Model kinds and tuning
+
+Chat is the default mode. Set `kind = "embedding"` to serve an embedding model through the gateway embeddings endpoint. Set `kind = "classifier"` to serve a reranking model through the gateway rerank endpoint.
+
+````toml
+[[local_model]]
+source = "~/models/bge-reranker.gguf"
 kind = "classifier"
-description = "A tiny English reranker for scoring query-document relevance"
-source = "https://huggingface.co/gpustack/jina-reranker-v1-tiny-en-GGUF/resolve/main/jina-reranker-v1-tiny-en-Q8_0.gguf"
-sha256 = "0defc1f8a1f4dd22183124a2a25a97765603e5a9e42258046c9b2c8a26d1f553"
-context = 512
-```
+````
 
-#### Cache and provisioning
+Cap concurrent requests per model with `parallel`. The default is 1. Excess requests queue instead of being rejected. Bind several models to one shared `dominion` so they compete for a single concurrency pool, such as one GPU's worth of slots.
 
-The cache directory defaults to `~/.promptforge` (set `[local].cache_dir` to override). Models land in `<cache>/models/`, the llama.cpp binary in `<cache>/llama.cpp/`.
-
-First-time downloads and other long-running operations show indicatif progress bars on interactive TTY stderr. On non-TTY stderr, periodic tracing progress lines are emitted instead.
-
-When `sha256` is set, the downloaded file is verified against the digest.
-
-#### Tool-calling dialect detection
-
-After a local child reports ready, the gateway queries its `/props` endpoint and resolves a tool-calling dialect from that evidence, hard-failing on ambiguous or absent evidence so a local model never silently defaults to an incorrect dialect. A sidecar `.md` file beside the GGUF (with frontmatter and a Jinja chat template) provides fallback evidence when `/props` omits `chat_template`; live props always win. The probe runs for `kind = "chat"` children only: a non-chat child has no chat template to evidence a dialect, so it carries the default `openai` dialect, same as a remote model. The resolved dialect is gateway-internal and selects how tool calls are emulated; it is not advertised in the catalog.
-
-#### Child supervision
-
-If a transport failure occurs against a dead `llama-server` child, the gateway respawns it once on the same port and alias, then retries the request. There is no background watchdog. `GET /health` remains process-level liveness only.
-
-#### Local concurrency
-
-`parallel` on a `[[local_model]]` (default 1) is both the child's `--parallel` argument and, when the model has no `dominion`, its gateway queue limit:
-
-```toml
+````toml
 [[local_model]]
-name = "qwen-local"
-description = "..."
-source = "..."
-context = 65536
+source = "~/models/my-model.gguf"
 parallel = 4
-```
+dominion = "gpu0"
+````
 
-Bind the model to a local dominion to share one concurrency limit and one VRAM budget with every other bound model; admission is then governed by the dominion's shared queue instead of a per-model limit.
+Tune per-model inference from config: `context`, `n_predict`, `gpu_layers`, `flash_attention`, `cache_type_k`, `cache_type_v`, and thinking mode. Thinking mode switches the sampling presets automatically. Thinking uses temperature 1.0 and top-p 0.95. Non-thinking uses temperature 0.7 and top-p 0.8.
 
-Dropping the `LocalRuntime` (on process exit or profile switch) kills all `llama-server` children.
+Two companions extend a chat model. Declare a pinned draft model under `[local_model.speculative]` to speed up generation with speculative decoding. Declare a pinned multimodal projector companion to add vision input. A bad companion aborts startup before any child spawns.
+
+Tool calling needs no configuration. The gateway probes each freshly started chat server and detects the correct tool-call dialect automatically. A model whose dialect cannot be determined fails loudly at startup.
+
+### Managing the cache
+
+All downloaded artifacts live under the cache root. Cache slots are keyed by a hash of the full source URL, so two URLs that share a filename never collide.
+
+You can check whether a URL is already cached, optionally against a digest pin, without triggering a download. You can list every cached blob with its source URL, SHA-256, and size. Listing reads only metadata sidecars, so it stays cheap even for multi-gigabyte entries.
+
+Delete a cached blob by its SHA-256 digest. The blob, its metadata sidecar, and its verify marker are removed in one operation. Run the orphan scan to find files on disk that no configured local model references, so you can reclaim disk space.
+
+Cached artifacts are served to clients through the gateway `/v1/cache` routes.
+
+Each GGUF downloaded from Hugging Face gets a metadata sidecar beside it. Open it in any text editor to see the model's source URL, fetch timestamp, chat template, and model card excerpt.
+
+### Limits and safety rules
+
+The managed server is a single pinned llama.cpp release, b10082. Every platform asset carries a hardcoded SHA-256. The bundled chat templates are validated against b10082 only. A platform with no managed build produces an explicit error naming your OS and CPU architecture.
+
+Every cache path is confined to the cache root. Paths with `..` or absolute prefixes are rejected. Every path component is checked for symlinks and reparse points. Deletion refuses symlink or reparse-point targets. Archives are extracted defensively: zip-slip entries, absolute paths, symlinks, and device nodes are rejected.
+
+GGUF header parsing is bounded. Metadata entries and tensors are capped at 65,536. Strings are capped at 4,096 bytes. Embedded chat templates are capped at 1 MiB. Big-endian GGUF files are not supported. A malformed file fails with a typed error that names the file and the reason.
+
+CUDA on Windows requires an installed CUDA Toolkit. The versioned variable, for example `CUDA_PATH_V13_3`, takes precedence over the generic `CUDA_PATH`. A missing toolkit produces an error that names the exact version and the variables to set.
+
+Every failure produces a specific, actionable message. A digest mismatch shows the expected and actual hashes. A cache-privacy failure names the root and tells you to restrict it and re-run. A readiness timeout shows the deadline. Errors are classified as retryable or permanent, so transient faults are retried and permanent faults are reported as-is.
 
 ---
 
-## promptforge-core User Guide
+## Speech-to-Text User Guide
 
-promptforge-core is a Rust library that turns Markdown files into executable AI prompt pipelines. You write a prompt as a document - YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions - and the library parses it into a validated representation, then executes it against any OpenAI-compatible endpoint. No process-global state, no framework lock-in, no runtime compilation surprises. The caller owns every resource. What you get: structured multi-section prompts with tool dispatch, model orchestration, concurrent fanout, and a virtual filesystem, all driven from a single `run` call that returns a string.
+The PromptForge gateway has a built-in speech-to-text runtime. It gives you two things at once: a live voice channel that streams interim transcripts while you speak, and an OpenAI-compatible file transcription endpoint that your existing client code can call without changes. Models are pinned by digest, provisioned automatically, and loaded only for the profile you select. This guide shows you how to configure the runtime, transcribe audio files, and run live voice sessions. When you finish, you will have a transcription service you can configure, call, and observe.
+
+### What This Is
+
+The gateway owns and operates the speech-to-text runtime. You do not run a separate service. You select an STT profile in the gateway configuration, and the gateway provisions, verifies, and loads the models for that profile.
+
+You interact with the runtime in two ways. You stream microphone audio over a WebSocket for live results. Or you upload a WAV file over HTTP and receive the transcript in the response.
+
+### Endpoints and Transports
+
+The gateway exposes three endpoints:
+
+- `GET /voice` - a WebSocket endpoint for live, streaming speech-to-text. Workshop clients use this persistent socket for voice interaction. Any WebSocket client can use it.
+- `POST /v1/audio/transcriptions` - an OpenAI-compatible multipart endpoint for file transcription. Existing OpenAI client tooling works against it without modification.
+- `GET /voice/capability` - a JSON probe that reports whether GPU-accelerated transcription is available.
+
+Use `/voice` when you speak to the gateway in real time. Use `/v1/audio/transcriptions` when you have an audio file.
+
+### Configuration and Runtime Lifecycle
+
+You configure the runtime through the shared gateway configuration. There is no separate STT config file. You declare model catalog entries with `[[stt_model]]` tables, and you attach models to a profile with `[[profile]]`.
+
+A minimal configuration declares one interim model and selects it in a profile:
+
+````toml
+[[stt_model]]
+name = "speech"
+role = "interim"
+source = "model.bin"
+vram_gb = 1.0
+
+[[profile]]
+name = "voice"
+models = ["speech"]
+````
+
+The `role` field is `interim` or `final`. An interim model produces live partial results during streaming. A final model is optional and produces higher-quality committed text. With only an interim model, the streaming endpoint keeps working with a degraded stop fallback.
+
+When the runtime starts, the gateway provisions only the models the selected profile declares. Unused models are not downloaded. Downloaded artifacts are verified before use. Switching profiles loads the new engine on demand and unloads the previous engine automatically.
+
+A fuller configuration adds a final model, pins an artifact by digest, and tunes capture behavior:
+
+````toml
+[[stt_model]]
+name = "speech"
+role = "interim"
+source = "model.bin"
+vram_gb = 1.0
+
+[[stt_model]]
+name = "speech-final"
+role = "final"
+source = "model-final.bin"
+sha256 = "<64-hex-digit digest>"
+vram_gb = 2.0
+
+[workshop.stt]
+window_seconds = 8
+interval_ms = 400
+
+[[profile]]
+name = "voice"
+models = ["speech", "speech-final"]
+````
+
+- Set `sha256` on a model to pin it to an exact digest. The gateway rejects a tampered or wrong artifact at provisioning time.
+- Omit `sha256` and point `source` at a local file such as `model.bin` to use an unpinned model directly.
+- Tune capture through `[workshop.stt]`: `vocabulary` biases recognition toward your terms, `window_seconds` sets the analysis window, and `interval_ms` sets the pass interval.
+
+Three profile shapes are valid:
+
+- Interim plus final: full quality pipeline.
+- Interim only: one model loads; streaming still works.
+- No STT models: the gateway starts cleanly with no STT.
+
+Two configurations are rejected. A profile with a final model but no interim model fails validation with an error that names the profile and the fix: add one interim STT model or remove the final model. A headless gateway refuses an active profile that selects STT models.
+
+### GPU Acceleration
+
+GPU-accelerated transcription through CUDA is a build-time feature. The `promptforge-workshop` desktop build enables it by default. A gateway build opts in with the `workshop-cuda` feature, which turns on the `promptforge-stt` crate's `cuda` feature.
+
+Before you start a voice session, query the capability endpoint to check GPU availability:
+
+````bash
+curl "$GATEWAY/voice/capability"
+````
+
+The response reports availability:
+
+````json
+{"gpu": true}
+````
+
+### File Transcription API
+
+You transcribe a file with one multipart POST. Authenticate every request with the gateway bearer token. The simplest request uploads a WAV file and names a loaded model:
+
+````bash
+curl -X POST "$GATEWAY/v1/audio/transcriptions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F file=@meeting.wav \
+  -F model=speech
+````
+
+The default response is compact JSON containing only the transcript:
+
+````json
+{"text": "hello"}
+````
+
+The `model` field selects which loaded model handles the request: the interim-role model or the final-role model. If the name matches no loaded model, the gateway returns HTTP 404 with a message naming the unknown model. A malformed request returns HTTP 400.
+
+Uploaded audio must be 16 kHz mono WAV, at most 25 MiB. Integer WAV of any bit depth and 32-bit float WAV are both accepted; integer PCM is normalized to floating point automatically. Oversized files are rejected before any decoding work happens.
+
+A maximal request chooses the verbose response shape, hints the language, and requests timestamp granularity:
+
+````bash
+curl -X POST "$GATEWAY/v1/audio/transcriptions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F file=@meeting.wav \
+  -F model=speech-final \
+  -F response_format=verbose_json \
+  -F language=en \
+  -F "timestamp_granularities[]=segment" \
+  -F prompt="quarterly planning meeting" \
+  -F temperature=0.0
+````
+
+- `response_format` is `json` (default) or `verbose_json`.
+- `language` is a hint. It defaults to `en` and is echoed back in the verbose response.
+- `timestamp_granularities[]` accepts `segment` (the default) and `word`. Word-level timestamps can be requested, but the `words` array is currently empty because the engine has no word alignment.
+- `prompt` and `temperature` are accepted without errors for OpenAI compatibility, but the current transcription workers ignore them. `temperature` must be a finite number greater than or equal to 0.0.
+
+The verbose response adds duration, language, task name, and segment timestamps:
+
+````json
+{
+  "task": "transcribe",
+  "language": "en",
+  "duration": 12.0,
+  "text": "hello world",
+  "segments": [
+    {"id": 0, "start": 0.0, "end": 12.0, "text": "hello world"}
+  ],
+  "words": []
+}
+````
+
+Errors are distinguishable by cause. Each error message names the cause. Two examples:
+
+````text
+audio file exceeds the 25 MiB limit
+````
+
+````text
+audio must be 16 kHz mono, got 44100 Hz and 2 channels
+````
+
+Missing fields, invalid field values, unsupported response formats, bad WAV data, and inference failures each produce a distinct, identifiable error.
+
+### Voice Session Basics
+
+A live voice session runs over the `/voice` WebSocket. You open one connection, then run one or more push-to-talk takes on it.
+
+The flow for one take:
+
+1. Open a WebSocket connection to `/voice`.
+2. Send the text message `start` to begin a take.
+3. Receive a `stream` announcement frame. It carries a generation number that identifies the take.
+4. Send audio as binary WebSocket frames: 16 kHz mono little-endian 32-bit float PCM, 4 bytes per sample.
+5. Receive `interim` frames while you speak. Each frame splits the transcript into a stable `committed` prefix and a still-changing `tentative` suffix.
+6. Send the text message `stop` to end the take.
+7. Receive a `final` frame with the complete transcript.
+
+Control messages are bare words, not JSON. Committed text is append-only: once words appear in `committed` they are never revised, so you can render them permanently.
+
+You can run multiple takes on one connection without reconnecting. State resets between takes. Send `start` again mid-connection to restart with an incremented generation. Generation counters are per-connection: a new connection starts numbering at 1.
+
+### Voice Wire Protocol
+
+The wire contract, by example. You send bare control words and binary audio:
+
+````text
+start
+<binary PCM frames>
+stop
+````
+
+The server answers with JSON frames. The `stream` announcement arrives immediately after `start`, before any other frame:
+
+````json
+{"type": "stream", "generation": 1}
+````
+
+While audio streams, `interim` frames carry the live partial result:
+
+````json
+{"type": "interim", "committed": "we hold these truths", "tentative": "to be self", "generation": 1}
+````
+
+On `stop`, the `final` frame carries the full transcript, the count of complete audio samples received, and the take generation:
+
+````json
+{"type": "final", "text": "we hold these truths to be self evident", "frames": 192, "generation": 1}
+````
+
+Rules to rely on:
+
+- Every frame carries the same `generation` counter. Correlate any frame with its take and discard stale frames.
+- A partial trailing sample in a binary frame is dropped. Only complete 4-byte samples are counted in `frames`.
+- Unknown text messages are ignored. They do not break the take or disturb transcription.
+- Standard WebSocket ping/pong keepalive is handled transparently.
+
+### Transcription Quality Pipeline
+
+During a take, the runtime refines the transcript in the background. You observe this through the frames.
+
+When a final-role model is configured, `committed` text grows segment by segment as the final-pass model finishes closed speech segments. If the final pass fails, or no final model is configured, the runtime falls back to the interim model automatically. The interim-only fallback decodes the entire take on stop, so no speech is lost.
+
+The final transcript is the committed prefix plus a freshly transcribed tail, joined by a single space. If you stop exactly at a segment boundary, the final transcript is just the committed prefix, with no redundant tail transcription.
+
+Three suppression behaviors keep the stream clean:
+
+- Silent or too-short audio windows are never sent to the transcription engine. Silent audio produces no interim frames and an empty final transcript.
+- Interim frames are sent only when the transcript changed. Duplicates are suppressed.
+- A slow-reading client always sees the freshest interim result. Stale interims are dropped in favor of the newest.
+
+If the engine is swapped mid-stream, for example by a profile switch, the current take resets cleanly instead of corrupting the transcript.
+
+### Session Observability and Security
+
+During a take, the gateway pushes live status updates to the workshop activity feed: "Listening...", "Transcribing...", and "Finalizing transcript...". Transcription failures produce visible failure notifications ("Transcription failed") in the feed rather than silent drops.
+
+The `/voice` endpoint accepts connections only from native clients (no `Origin` header) or allowed loopback origins. Cross-site requests are rejected. A foreign origin is refused with HTTP 403 at upgrade time, before any session starts.
 
 ---
 
-### Prompt Files
+## PromptForge Gateway User Guide
 
-A prompt file is a Markdown document with YAML frontmatter. The frontmatter must declare `name` and `description`. A `promptforge:` key identifies the file as a promptforge prompt - the runtime refuses files that lack a supported version number.
+PromptForge Gateway is a local model-serving gateway. It serves your prompts and models through an OpenAI-compatible HTTP API, so your existing OpenAI clients and tools work against it without modification. You describe every model once in a single `gateway.toml` file. You group models into named profiles. You then switch the served model set mid-run without downtime, and you keep every vendor key in one file on one host. This guide teaches you to start the gateway, configure models and profiles, run local models on your own GPU, and operate the admin surface with confidence.
 
-```yaml
+### What the Gateway Is
+
+The gateway is one binary, `promptforge-gateway`. It routes OpenAI-shaped chat completion requests to a backend. You run it in the foreground and it serves until you stop it.
+
+Every client addresses a model by the public `name` you gave it in `gateway.toml`. The gateway resolves that name to a configured endpoint. It rewrites the name to the endpoint's upstream model alias before it calls the provider. Your clients never learn the upstream alias.
+
+The gateway is the only process that holds a vendor key. Clients authenticate to the gateway with a single shared bearer key. The gateway authenticates to the provider with the vendor key. The caller's bearer key never leaks upstream.
+
+The gateway can also run local models with no external server. It downloads model files, verifies their checksums, and manages the `llama-server` child processes for you. Local and remote models merge into one catalog. Clients address both by name in the same way.
+
+Named profiles select which models the gateway serves. You switch the active profile mid-run. In-flight requests drain before the switch completes.
+
+### Running the Gateway
+
+Start the gateway with one command:
+
+````bash
+promptforge-gateway serve gateway.toml --profile main
+````
+
+`serve` is the only subcommand. Boot requires two things: a config path and a profile name.
+
+The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable. The argument wins. With neither, boot aborts with a usage error.
+
+The profile comes from three sources, in fixed precedence: the `--profile` flag beats `PROMPTFORGE_PROFILE`, which beats the persisted state file. The gateway records the active profile in a `<config-stem>.state.toml` sibling as `active_profile = "name"`, so the selection survives restarts.
+
+A minimal config file looks like this:
+
+````toml
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8080"
+api_key = "my-secret-key"
+````
+
+The file must be a single `gateway.toml` with `config-version = 2` at the top. A missing or wrong version fails to load. The old include/profiles-dir layout is a hard break: load fails with an error that names the file, the key, the line, and the replacement to use.
+
+The `[server]` section sets the listener address and the shared bearer key. Both fields accept `${VAR}` interpolation from the process environment. A `.env` file next to the config loads automatically at startup. It never overrides variables already set in the process environment.
+
+Once serving, a log line announces the bound address. Press Ctrl-C to shut down gracefully. The process exits 0 on success and non-zero otherwise. Failures print a chain of `caused by:` lines so you see the root cause. Startup failures are classified into six named categories: Config, Provisioning, Bind, Thread, Serve, and Workshop. You can tell a bad config file from a port conflict without reading internals.
+
+Run `promptforge-gateway -h` to print usage and exit. Unknown flags, unknown subcommands, and a missing `serve` subcommand are usage errors printed to stderr with the full usage text.
+
+### Inference Endpoints
+
+Call the chat endpoint with any OpenAI client. Send your bearer key on every request:
+
+````bash
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "my-model", "messages": [{"role": "user", "content": "Hello"}]}'
+````
+
+The `model` field carries your public model name. The gateway resolves it to a configured endpoint and returns the model's reply. A wrong token gets a 401. An unknown model name gets a 404 with code `model_not_found`.
+
+Add `"stream": true` to switch the response to a server-sent event stream of typed chunks. The stream ends in a `data: [DONE]` sentinel. If the upstream fails before streaming starts, you get a JSON 502, never a dying event stream.
+
+The gateway serves three inference routes. Each enforces the model's declared `kind`:
+
+- `POST /v1/chat/completions` serves chat models.
+- `POST /v1/embeddings` serves models configured with `kind = "embedding"`. Batches, encoding formats, and provider token-usage statistics pass through.
+- `POST /v1/rerank` serves models configured with `kind = "classifier"`. You send a query, a document set, and an optional `top_n`. You receive ranked results with relevance scores.
+
+A rerank call looks like this:
+
+````bash
+curl http://127.0.0.1:8080/v1/rerank \
+  -H "Authorization: Bearer my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "rerank-model", "query": "what is rust", "documents": ["doc one", "doc two"], "top_n": 2}'
+````
+
+A model called on the wrong route is refused with a 400 `kind_mismatch` before any queue slot is consumed or any upstream call is made.
+
+`GET /v1/models` lists the served catalog. Each entry shows the model's id, kind, description, context size, thinking flag, and capabilities. Optional fields are omitted rather than null when unset. `GET /health` needs no authentication and always returns 200 while the gateway is serving.
+
+Every error arrives in the standard OpenAI error envelope:
+
+````json
+{"error": {"message": "unknown model ghost", "type": "invalid_request_error", "code": "model_not_found"}}
+````
+
+This shape holds for JSON error responses and for mid-stream SSE error events.
+
+### Model Routing and Concurrency
+
+Each `[[model]]` entry in `gateway.toml` binds a public name to one or more endpoints. An endpoint supplies the provider's `base_url` and `api_key`. The catalog listing follows `gateway.toml` order.
+
+You control concurrency with named pools. Declare a `[[dominion]]` and bind endpoints to it:
+
+````toml
+[[dominion]]
+name = "pool"
+max_concurrency = 4
+max_queue = 16
+````
+
+An endpoint binds to the pool with `dominion = "pool"`. All endpoints bound to one dominion compete for a single pool of concurrency slots. The `max_concurrency` limit caps how many requests reach the backend at once. Excess requests wait in a bounded queue rather than reaching the backend.
+
+Requests identify themselves to the fair scheduler with the `X-PromptForge-Client` header. The header defaults to `"default"`.
+
+When all concurrency and waiting slots are exhausted, the request is rejected. You get a 503 `queue_full`, or a 429 `queue_rejected` under the fail-fast reject policy (`policy = "reject"`), so OpenAI clients see a retryable rate-limit error. A streaming request holds its slot for the stream's entire lifetime.
+
+Two limits apply by omission. An endpoint with no `dominion` has unlimited concurrency. A dominion without `max_concurrency` is unlimited and its queue settings never engage.
+
+Startup validation catches routing mistakes. Two models sharing one name fail startup. So does a model with no endpoints, a model naming an undefined endpoint, or an endpoint naming an undefined dominion.
+
+### Profiles and Profile Switching
+
+A profile is a named checklist over the global catalog. Declare profiles as `[[profile]]` tables:
+
+````toml
+[[profile]]
+name = "alpha"
+models = ["test-model"]
+
+[[profile]]
+name = "beta"
+models = ["beta-model"]
+````
+
+Only the active profile's models appear in the served catalog. Activating a profile applies its allowlist to routing.
+
+Switch the active profile mid-run with one call:
+
+````bash
+curl -X POST http://127.0.0.1:8080/admin/switch-profile \
+  -H "Authorization: Bearer my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "beta"}'
+````
+
+The response is a server-sent event stream. It reports the stages `loading-profile`, `stopping-models`, and `starting-models`, then ends with exactly one terminal event: `ready` with the new profile name, or `error` with a message. Disconnecting from the stream never interrupts the switch.
+
+A switch waits for in-flight inference requests to finish, up to a bounded 30-second drain window. An active conversation is never cut off mid-stream. Stragglers are then cancelled with a further 1-second grace, so a stuck request can never block a switch longer than about 31 seconds. New requests that arrive during a switch wait behind it and are then served against the new profile's routing, never the old one.
+
+Switches are safe by construction:
+
+- The switch uses the already-loaded catalog. It needs no disk reload, so it stays correct even if the config file on disk is corrupted after startup.
+- Switching performs no inference requests and generates no backend traffic or cost.
+- Two concurrent switches cannot interleave.
+- Old local models shut down and free their VRAM before replacements start.
+- A successful switch persists the new active profile to the state file immediately.
+
+Profiles carry no sections, so a switch never changes `[server]` or `[workshop]`. The bearer key and listener are process-owned `[server]` state: they stay stable across profile switches. A staged edit to `[server]` or `[workshop]` promotes to disk on Apply but takes effect only on restart, which the apply response reports as `restart_required`.
+
+Two read endpoints report the current state. `GET /admin/status` reports the active profile name, loaded model names, the model allowlist, local child count, and a queue note. `GET /admin/profiles` lists every profile name in the loaded catalog.
+
+### Local Models and GPU Inference
+
+Declare a `[[local_model]]` entry to run a model on your own hardware. The gateway downloads the file, verifies it, and starts a managed `llama-server` child process:
+
+````toml
+[local]
+cache_dir = "/data/promptforge-cache"
+
+[[local_model]]
+name = "qwen-tiny"
+description = "A tiny chat model"
+source = "https://example.com/qwen-tiny.gguf"
+sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+context = 4096
+thinking = "never"
+gpu_layers = 0
+flash_attention = false
+n_predict = 64
+````
+
+Each entry takes a name, a description, a download `source` URL, and a `sha256` checksum. Sources are pinned: an `https` URL requires a `sha256`, a local path may go unpinned, and plaintext `http` is rejected outright. Configured local models are provisioned and started automatically as part of gateway startup, with live progress while downloads run. Restarting against a warm cache relaunches without re-downloading multi-gigabyte artifacts.
+
+Per-model settings control context size, thinking mode, GPU layer offload, flash attention, parallelism, and max predicted tokens. Setting `gpu_layers = 0` runs entirely on CPU. The `[local] cache_dir` setting chooses where downloaded model files are stored. The default is `~/.promptforge`.
+
+Local models can be chat, embedding (`kind = "embedding"`), or reranking (`kind = "classifier"`) models. They merge into the same catalog as remote models. Clients address both by name the same way, and local requests authenticate with the same bearer key.
+
+Two optional blocks extend a local chat model. A speculative drafter speeds up generation:
+
+````toml
+[local_model.speculative]
+type = "draft-mtp"
+draft_max = 2
+````
+
+The `draft_max` value is bounded to 1 through 16. The response's `timings` extension reports how many drafted tokens were accepted. A multimodal projector lets the model accept image inputs:
+
+````toml
+[local_model.multimodal_projector]
+source = "https://example.com/mmproj-F16.gguf"
+sha256 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+````
+
+The catalog then advertises `images = true` for that model.
+
+Speech-to-text models are first-class catalog entries. Declare `[[stt_model]]` blocks alongside `[[model]]` and `[[local_model]]`. Profile-checked STT models load into the gateway-owned transcription engine and serve `POST /v1/audio/transcriptions`. STT requires the `workshop` build feature and a `[workshop]` section; the refusal names the missing section.
+
+On a native Windows x86-64 build with CUDA Toolkit 12.8 or newer, the `llama-cuda` build feature serves a prebuilt CUDA `llama-server` bundle for real NVIDIA GPUs, with no build tools required at runtime. A tampered payload, target mismatch, or missing toolkit DLL is a named startup error, never a silent fallback. A `--no-default-features` build is headless: it refuses any configuration that declares `[[local_model]]`, at startup and on profile switch.
+
+You can inspect bounded, credential-redacted stdout/stderr tails from each running local model, keyed by your configured model name. Use the tails to verify what a child actually reported, such as the CUDA device seen or layers offloaded, without reaching its private port.
+
+### Artifact Cache and Files
+
+Downloaded model files live in the artifact cache. The cache root comes from the `[local] cache_dir` setting, defaulting to `~/.promptforge`. Blobs land under `<cache_dir>/models/<key>/`.
+
+Download a remote blob into the cache with one call:
+
+````bash
+curl -X POST http://127.0.0.1:8080/v1/cache \
+  -H "Authorization: Bearer my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"source": "https://example.com/model.gguf", "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}'
+````
+
+The `sha256` pin is optional. When present, the downloaded bytes are verified against it. The response streams live progress as server-sent events of the form `{"status": "downloading", "bytes", "total"}`. A digest mismatch arrives as a terminal error event, not a failed HTTP status. An already-cached source answers immediately with `status: "ready"` and no re-download. A failed download leaves no partial files behind. Validation failures, such as a non-http(s) URL or a pin that is not a 64-character hex digest, are rejected before any network access.
+
+Three more endpoints manage the cache:
+
+- `GET /v1/cache` lists every cached blob with its source URL, on-disk path, SHA-256 digest, and size. It never re-hashes any file. The listing is sorted by source URL for a stable order.
+- `DELETE /v1/cache/{sha256}` removes a cached blob and its metadata. The path parameter must be a 64-character hex digest.
+- `GET /admin/orphans` lists cache files no loaded `[[local_model]]` entry references, so you can find leftovers to adopt or delete. Sizes come from the filesystem and digests from cache sidecars; multi-gigabyte blobs are never re-hashed. The digest is null for files the cache API never downloaded.
+
+On local builds, `GET /admin/model-info?path=` reads a cached GGUF file's architecture, layer count, and parameter count from its header only. It never loads tensor data. The path must be relative and confined to the artifact cache; traversal attempts are refused.
+
+`POST /admin/reveal` opens the host OS file manager at a path confined to the artifact cache. It replies immediately with 204 without waiting for the file manager. On Windows the target file is highlighted in its folder. On macOS and Linux the parent folder opens. This endpoint backs the config UI's "reveal in folder" button and is loopback-only.
+
+### Web Search and Speech
+
+The gateway includes a built-in, Brave-powered web search endpoint. It is compiled in by default and active when `[tools.web_search]` is configured. POST a query and receive results:
+
+````bash
+curl -X POST http://127.0.0.1:8080/v1/tools/web_search \
+  -H "Authorization: Bearer my-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "promptforge gateway"}'
+````
+
+Each result carries a title, URL, site name, and extra snippets. Results are capped at 2 per host by default so no single site dominates. An empty or whitespace-only query is a 400. Calling the endpoint when web search is not configured is a 404.
+
+With the `workshop` feature, the gateway accepts OpenAI-compatible multipart audio transcription at `POST /v1/audio/transcriptions`. Audio uploads are capped at 25 MiB; larger bodies get a 413 `file_too_large`.
+
+### Tool-Call Dialects
+
+Models that declare no dialect default to standard OpenAI tool calling. For models without native tool support, such as Gemma 3, set one key on the model entry:
+
+````toml
+tool_dialect = "gemma3_tool_code"
+````
+
+You then send standard OpenAI `tools` and `tool_choice` fields. The gateway converts your tool definitions into a plain-language system guide, strips the unsupported fields before the upstream call, and converts the model's `tool_code` fence replies back into standard OpenAI `tool_calls` objects with `finish_reason: "tool_calls"`. Each call gets a unique synthetic id.
+
+The model writes Python-style calls, `name(key=<json>)`, one per line, inside a `tool_code` fence. Full JSON values round-trip as arguments. A recognized-but-malformed fence never corrupts the turn: the reply content is emptied, a `gateway_warning` field explains why, and the recovery is logged. Ordinary prose passes through untouched.
+
+### Administration and Configuration
+
+The gateway serves an embedded config UI at `/config/` on the gateway's own port. There is no second listener. `GET /config` redirects to `/config/`. The entire admin config surface sits behind a loopback wall: a non-loopback peer gets a bare 403 before bearer auth even runs, in every build.
+
+Read the running configuration as JSON:
+
+````bash
+curl http://127.0.0.1:8080/admin/config \
+  -H "Authorization: Bearer my-secret-key"
+````
+
+Secrets are redacted in the response. Stage a new configuration with `PUT /admin/config` using the same JSON shape. Secrets sent as `"***"` preserve the existing value.
+
+Edits are staged as shadow files beside the real files: `gateway.toml.next`, and likewise for the state and env files. The live config is never touched and the gateway never reloads until you apply. Saves are validated before anything is written, so a bad save leaves no shadow file behind.
+
+Three endpoints complete the staging workflow:
+
+- `POST /admin/config-apply` promotes every staged shadow to its real file and reloads the active profile. Its response tells you which files were promoted, whether a reload happened, and whether a restart is required. Changes to `[server]`, `[workshop]`, or the env file only take effect after a restart; the `restart_required` flag tells you. After an API-key change is applied, the old key keeps working until restart. Applying with nothing staged is a clean no-op. An invalid staged config is rejected without touching live files.
+- `POST /admin/config-revert` discards every staged change and nothing else.
+- `GET /admin/config-pending` previews the full configuration exactly as it will look after applying, including which profile a pending change would activate. `GET /admin/config-dirty` is a cheap poll reporting whether unapplied changes exist, which files are pending, and which top-level sections would change, so you can judge blast radius.
+
+The env file has its own pair of endpoints. `GET /admin/env` reads the gateway's `.env` file with values included, and shows which config fields reference each variable. `PUT /admin/env` stages edits to it. Env edits take effect only on restart; the process environment of a running gateway is never mutated. Variable names must start with a letter or underscore and contain only letters, digits, and underscores.
+
+Four more read endpoints serve the config UI's views:
+
+- `GET /admin/hf/search` and `GET /admin/hf/model/{repo}` proxy Hugging Face hub search and model details through the gateway, so the browser never holds a token. The gateway authenticates with a process `HF_TOKEN` read once at boot; with no token, public repos still work anonymously. `limit` must be 1 through 100, `sort` is only `downloads`, `trendingScore`, or `lastModified`, and `filter` is only `gguf`.
+- `GET /admin/system` reports host CPU, RAM, cache-drive disk usage, and NVIDIA GPU name and VRAM. It succeeds on machines without a GPU or driver.
+- `GET /admin/chat-templates` catalogs the bundled chat-template families, the built-in model-to-family mappings, and each configured chat model's effective template resolution with a plain-language reason. You can override a model's template with `chat_template_file`, either a bundled builtin such as `builtin:phi-4` or a path to a custom Jinja template.
+
+Because the gateway is the only component holding vendor keys, rotating a credential means editing one file on one host.
+
+### Workshop UI
+
+The gateway can host the PromptForge Workshop UI on a second, loopback-only listener inside the same process. Enable it by adding a `[workshop]` section to the boot config:
+
+````toml
+[workshop]
+open_browser = true
+
+[workshop.stt]
+window_seconds = 8
+interval_ms = 250
+vocabulary = ["MCP", "GGUF"]
+````
+
+Omitting the `[workshop]` section runs the gateway headless with no workshop hosted. The default bind is `127.0.0.1:7910`, and the listener must be a loopback address; anything else is a startup error.
+
+The workshop's client URL and bearer key derive from the boot `[server]` section. No credential is duplicated and none can drift. Set `open_browser` to open the system browser at the workshop URL once it is serving; a browser that fails to open is logged, never fatal.
+
+Session tapes default to `tape.jsonl`, anchored to the boot config's directory, never the process working directory. The `[workshop.stt]` section tunes push-to-talk transcription: `window_seconds` defaults to 15, `interval_ms` defaults to 500, and `vocabulary` lists domain terms whisper is biased toward. An empty list disables biasing. Both listeners answer `/health` and `/v1/models` independently.
+
+### Progress and Observability
+
+During long-running operations, such as startup provisioning, model downloads, and applies, the gateway draws live progress bars in the terminal. When stderr is not a terminal, progress appears as plain log lines: `started` on first sight, a percentage line at each 5-percent advance, and `done` at completion.
+
+Subscribe to the same events over HTTP:
+
+````bash
+curl http://127.0.0.1:8080/admin/progress \
+  -H "Authorization: Bearer my-secret-key"
+````
+
+`GET /admin/progress` streams every progress event as a bearer-authenticated server-sent event stream. A fresh subscriber first receives the currently live operations replayed. Heartbeat lines every 15 seconds keep the connection alive through NAT and firewall timeouts. The apply route reports its reload stages through this stream while its own response stays plain JSON.
+
+For routine state checks, poll `GET /admin/status`. It reports the active profile, loaded models, the model allowlist, local child count, and a queue note, along with a process-lifetime `config_generation` identifier the config UI uses to detect a restart.
+
 ---
-name: summarizer
-description: Summarize a document into bullet points
+
+## Writing Prompts in PromptForge
+
+A PromptForge prompt is one markdown file that runs as a program. You write YAML frontmatter, a title, and sections that mix ordinary prose with Lua code. PromptForge parses the file, validates it, and executes it. Your prose goes to a model as instructions. Your Lua steers the run. Tools, fanout, and a virtual file store give one file the reach of a script, a prompt template, and an orchestration loop combined. After one read of this guide, you can write a prompt that calls models, calls tools, runs work in parallel, and saves its results.
+
+### The Prompt Document
+
+You write a prompt as a single markdown file. The file has three parts: YAML frontmatter at the top, one H1 title, and H2 sections.
+
+Here is the smallest complete prompt:
+
+````
+---
+name: greeter
+description: says hi
 promptforge: 1
 ---
-```
 
-Below the frontmatter, the document has one H1 title and zero or more H2 sections. A prompt with H2 sections walks them top to bottom in fall-through order. A prompt with no H2 sections executes the H1 blocks and returns the model reply. The H1 region always runs first, resolving tools and models before any section begins.
+# Greeter
 
-#### Minimal Prompt File
+## Say hi
 
-```markdown
+Say hello.
+````
+
+Each part does one job:
+
+- The frontmatter sits between `---` markers and carries the prompt's metadata. The `promptforge: 1` key declares the file as a PromptForge prompt. The runtime validates this version before anything executes. A file without the key is declined. A file with an unsupported major version, such as `promptforge: 2`, is refused.
+- The H1 heading is the prompt's title. It is required. A file without an H1 is invalid.
+- The H2 headings divide the body into named sections.
+- Prose under a section is an instruction. The runtime sends it to a model. The model's answer becomes the section's reply.
+
+When a file fails to parse, you get a structured error with a machine-readable kind and the byte span of the broken region. Broken frontmatter YAML keeps the original YAML parser diagnostic.
+
+### The Execution Model
+
+The run walks the top-level H2 sections in file order. Each section runs once, in its own isolated Lua VM, with a fresh conversation.
+
+Here is a minimal two-section run:
+
+````
 ---
-name: hello
-description: A greeting prompt
+name: two-step
+description: ask, then report
 promptforge: 1
 ---
 
-# Hello
+# Two Step
 
+## Ask
+
+Say something.
+
+## Report
+
+```lua
+return reply
+```
+````
+
+The `## Ask` section has prose only. The prose goes to the model as a user message, and the answer is bound to the `reply` global. The section has no Lua block that returns, so control falls through to `## Report`. The Lua block in `## Report` reads `reply` and returns it. That string is the run's result.
+
+The fall-through rules:
+
+- A section whose Lua block returns nothing hands control to the next section in document order.
+- A `return "..."` in a section's Lua block produces output directly from Lua.
+- If no Lua block in the prompt returns anything, the run's result is the last model reply. If there was no reply, the result is the string "done".
+- A prompt with no H2 sections is valid. Its H1-level Lua and prose run once, first, and a return value or prose reply from the H1 content becomes the run's result.
+
+### Frontmatter and Run Configuration
+
+A typical frontmatter declares `name`, `description`, and `promptforge: 1`. You can add `max_tool_iterations` to cap a section's tool loop:
+
+````
+---
+name: researcher
+description: research a topic with tools
+promptforge: 1
+max_tool_iterations: 5
+---
+````
+
+The keys you can set:
+
+- `promptforge: 1` - required. Declares the format version. Only major version 1 is supported.
+- `name` - the prompt's name.
+- `description` - what the prompt does.
+- `max_tool_iterations` - caps how many model-tool round trips one section's tool loop may take. The built-in default is 24. A model that never stops requesting tools fails the run with "tool-call loop did not converge" instead of hanging.
+
+### Document Structure
+
+Within the H1 content and within each section, content alternates between exact `lua` code fences and prose blocks. Those are the only two block kinds. A fence with any other language tag is not a PromptForge Lua block.
+
+The classic section shape is Lua, then prose, then Lua:
+
+````
+## Summarize
+
+```lua
+local limit = 100
+```
+
+Summarize the input in under 100 words.
+
+```lua
+return reply
+```
+````
+
+Lua before a section's first prose is a prologue. It runs before the model call. Lua after the prose is an epilogue. It runs after the model's reply. A prologue that returns a value ends the section early: the prose and the epilogue are skipped.
+
+Sections nest by heading depth: H3 inside H2, H4 inside H3, and so on down through H6. The top-level walk never descends into a section's children. Children run only when you address them by heading, which the control flow section covers.
+
+You can place content directly under the H1, before the first H2 section. This H1-level content runs once, first, before any section runs. One special fence lives here: a prompt may include at most one `lua shared` block. It defines Lua code shared across the whole prompt, and it replays as the first chunk of every section's VM. Use it for shared helper functions and for the prompt-wide declarations that later sections introduce.
+
+A `---` thematic break changes what a section does:
+
+- Placed as a section's first content, with only whitespace before it, `---` marks the section off-walk. The normal walk skips it. It runs only when you address it by name.
+- Placed anywhere else, `---` starts a reader-only comment region. Everything below it until the next heading is excluded from execution: no Lua compiles, no prose reaches the model, no list items parse from it.
+
+### Lua Blocks and Host Globals
+
+Each section's Lua runs in a fresh, sandboxed VM. You have the `string`, `table`, and `math` standard libraries plus the safe base functions. There is no `io`, `os`, or `debug`.
+
+Inside a block you can read and write a set of host globals:
+
+````
+## Inspect
+
+```lua
+log('section ' .. sys.section_name)
+var.seen = args
+return var.seen
+```
+````
+
+- `args` - the run's raw input string.
+- `reply` - the previous section's model reply. Assign a string to steer what the next section sees and what the run reports. Assign `reply = nil` to clear it. The value must be a string or nil; anything else fails at section end. `reply` is nil in the first section of a prompt.
+- `var` - the walk's clipboard. Writes in one section are visible in later sections, across fall-through and jumps. `var` holds JSON data only; assigning a function into it fails the run and names the field and type. Mutate its fields (`var.count = 1`); never reassign the `var` global itself.
+- `sys` - runtime metadata: `sys.id` (a run-global section counter; the H1 pass is id 0), `sys.section_name`, `sys.execution`, `sys.section_count`, and `sys.reply_finish_reason` (only after prose has run).
+- `log('message')` - emits a log checkpoint, callable even at shared-block load time.
+
+Host calls that fail raise ordinary Lua errors at the call site, so `pcall` can catch them. Later sections add model, tool, control-flow, and store functions to this environment.
+
+### Prose and Substitution
+
+Prose in a section is sent to the model as a user message. Before the send, the runtime resolves `{{ }}` placeholders in the prose. Lua source is never substituted.
+
+````
 ## Greet
 
-Say hello to the user in a friendly tone.
-```
-
-The parser compiles Lua code at parse time. A successfully parsed prompt is syntactically executable without any runtime compilation step - Lua syntax errors surface before any network call is made.
-
-#### Structural Rules
-
-The parser enforces strict structure:
-
-- When H2 sections are present, the first and every root heading must be exactly H2.
-- Sibling section names must be unique; duplicates produce a diagnostic naming both heading locations.
-- Orphan deep headings (H4 under H2 with no H3) are rejected rather than silently reparented.
-- Unknown frontmatter fields are rejected so misspelled keys fail loudly.
-- Sections nest recursively using heading levels H2 through H6.
-- Executable Lua fences must use exact unindented triple-backtick `lua` openers. Longer markers, indentation, or extra info-string words remain inert prose.
-
-Parse errors report stable kind discriminants and optional byte spans for editor diagnostics. Lua compilation errors include absolute source-line numbers that map back to the original prompt file.
-
-#### Optional Frontmatter Fields
-
-- `max_tool_iterations` - integer between 1 and 1000 (default: 24)
-
----
-
-### Execution Model
-
-Execution is a free function call over caller-owned resources. There is no process-global state. The caller owns the prompt, the execution id, the tool picker, the tool catalog, the model catalog, the store, and the observer.
-
-```rust
-use promptforge_core::{run, Prompt, RunConfig, StoreRef, ResolutionContext};
-use promptforge_core::tools::ToolCatalog;
-
-let prompt = Prompt::parse(source, "my-execution", &observer)?;
-let tool_catalog = ToolCatalog::new(&tools)?;
-
-let result = run(
-    &prompt,
-    "user input here",
-    ResolutionContext::new(&picker, &models, &tool_catalog),
-    &StoreRef::memory(),
-    RunConfig::new("my-execution"),
-).await?;
-```
-
-The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, or the generic string `"done"` only if no model reply exists.
-
-#### Run Configuration
-
-`RunConfig` uses a builder pattern:
-
-```rust
-RunConfig::new("execution-id")
-    .observer(my_observer)
-    .debug(my_debug_capture)
-    .client(gateway_client)
-    .cancel(cancel_handle)
-    .limits(run_limits)
-```
-
-All builder methods are optional. Without `.client()`, the runtime lazily constructs one from environment variables.
-
-#### Run Limits
-
-Configurable limits cap resource consumption:
-
-```rust
-RunLimits::new()
-    .max_tool_iterations(NonZeroU32::new(24).unwrap())        // model round-trips per section
-    .max_fanout_concurrency(NonZeroUsize::new(8).unwrap())    // parallel arms
-    .max_response_bytes(NonZeroU64::new(16 * 1024 * 1024).unwrap())
-    .lua_memory_bytes(NonZeroUsize::new(64 * 1024 * 1024).unwrap())
-    .lua_log_events(NonZeroU32::new(1024).unwrap())
-    .request_timeout(Duration::from_secs(120))
-```
-
----
-
-### Lua Scripting
-
-A prompt is built from alternating Lua and prose blocks. Each section can contain any number of Lua blocks interleaved with prose segments. The last prose block in a section runs a full tool-call loop; earlier prose blocks run single-shot (one model round, then control continues to the next Lua block).
-
-Preamble, prologue, and epilog are positions, not phases: the preamble is the H1 region, the prologue is a section's Lua before its first prose, and the epilog is Lua after the last prose.
-
-#### The H1 Preamble
-
-Lua blocks in the H1 region execute once in source order before any H2 section. The preamble declares tools and models, sets variables, and can short-circuit the entire run:
-
-````markdown
-# My Prompt
-
 ```lua
-models.default("writer", "a capable writing model")
-tools.bind("search", "web search capability")
-tools.always("search")
-var.topic = "Rust async patterns"
+var.name = args
 ```
 
-## Write
-
-Write an article about {{ var.topic }}.
+Say hello to {{ var.name }}.
 ````
 
-Returning a scalar value (string, integer, number, or boolean) from H1 skips all H2 sections and becomes the run result.
+When the run input is "Acme Corp", the model receives "Say hello to Acme Corp.".
 
-#### Shared Libraries
+The placeholders you can write:
 
-A `lua shared` fence in the H1 defines a reusable library compiled once and replayed into every section VM as its first chunk:
+- `{{ args }}` - the run's input string.
+- `{{ reply }}` - the previous section's reply. Using it before any reply exists is a hard error.
+- `{{ var.key }}` - a value your Lua wrote. Dotted paths drill into nested tables: `{{ var.row.a }}`. A whole table or array renders as compact JSON.
+- `{{ sys.key }}` - runtime metadata, such as `{{ sys.model }}` for the resolved model id.
+- `{{ name }}` - a section-local Lua global assigned without `local`, such as `answer = 42`.
 
-````markdown
+The rules:
+
+- `{{ var }}` and `{{ sys }}` require a `.key` suffix.
+- Unknown namespaces, missing keys, null values, empty path segments, and unclosed `{{` are all hard errors with the byte offset reported.
+- Substitution is a single non-recursive pass. A substituted value that contains `{{ ... }}` is emitted verbatim. Substitution does no arithmetic: compute in Lua and reference the result.
+- Escape literal braces with `\{{` and `\}}`. Escape a literal backslash with `\\`.
+- Within one section, prose blocks build up a multi-turn conversation.
+
+### Models and Inference
+
+A section with non-empty prose must have a bound model, or the run fails with "model binding required for section X". You bind models in the `lua shared` block. The simplest form declares a prompt-wide default:
+
+````
+---
+name: greeter
+description: says hi
+promptforge: 1
+---
+
+# Greeter
+
 ```lua shared
-function summarize(text)
-    return "Summary: " .. text
-end
+models.default('writer', 'A general model for tests')
+```
+
+## Say hi
+
+Say hello.
+````
+
+`models.default(alias, description)` binds the alias and makes it the default, so sections that name no model still have one. The description is natural language. The runtime matches it against the model catalog at run time and freezes the invocation parameters for the run.
+
+The full set of declarations:
+
+- `models.bind(alias, description, options)` declares a named binding without making it the default. The options table can set `thinking`, `temperature`, `max_tokens`, and `context` (context window size): `models.bind('analyst', 'careful analysis', { thinking = false, temperature = 0, max_tokens = 256 })`.
+- `models.default('writer')` with a single argument makes a previously bound alias the default.
+- `models.use('analyst')` in a section's prologue selects which bound model that section runs under. Call it at most once per section, before the prose.
+- `models.get('analyst')` returns a handle exposing `name` and `model_id` without changing the section's active model.
+
+The constraints: call `models.default` at most once per prompt, and only from the H1 block. Bind an alias before you use it. Duplicate aliases are rejected. A requested `context` size beyond what the model supports fails the bind.
+
+You can also call a model directly from Lua, without prose:
+
+````
+```lua
+local tag = models.infer('Classify: ' .. args)
 ```
 ````
 
-The replay runs with the full section environment installed (`args`, `sys`, `var`, `reply`, `store`, `log`, the `tools`/`models` tables, and the control globals), so top-level shared code may use them at load. Two exclusions apply: the captured tool/model alias globals install only after the replay (a declared alias wins over a same-named shared global), and `jump` during the load is a hard error. A scalar top-level return is discarded - the replay loads a library, it does not produce the section's result.
+- `models.infer(prompt)` runs a one-shot, tool-free inference on a fresh single-message conversation, using the section's current model. It returns the reply as a plain string. It does not set `reply` or touch `sys`.
+- `handle:infer(prompt)` does the same against a specific bound model, regardless of the section's active model: `models.get('analyst'):infer('ping')`. A bound alias also works directly as a global: `writer:infer('say hello')`.
 
-#### Section Environment
-
-Each section VM provides these globals:
-
-| Global | Purpose |
-|--------|---------|
-| `args` | Input string passed to the run |
-| `sys` | Sealed read-only runtime metadata |
-| `var` | Writable data bridge, persists across sections |
-| `store` | Virtual filesystem |
-| `tools` | Tool scope and call counts |
-| `log` | Diagnostic checkpoint function |
-| `reply` | Previous section's model answer |
-
-The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced. `sys.id` is the run-global execution-unit counter: H1 keeps id 0, and every section entry and every fanout arm takes the next value. A fanout arm also carries `sys.index`, its 1-based position within the current fanout; `sys.index` is absent outside fanout.
-
-`var` is the walk-local clipboard: writes persist across sections on the same walk (H1 included), and `execute`/`fanout` clone it in and discard it out - child writes never reach the caller. `var` holds JSON data only; a non-JSON value fails at the assigning line. Bare globals (`x = 42` without `local`) are section-local scratch, visible to prose as `{{ x }}`.
-
-#### Template Substitution
-
-Prose blocks support `{{ path }}` template substitutions. The sources are `args`, `reply`, `var`, `sys`, `item` (fanout arms only), and bare globals - a section-local Lua global resolves as `{{ x }}`, with dotted paths indexing into its JSON form:
-
-````markdown
-## Research
-
-```lua
-var.query = "latest Rust async runtimes"
-```
-
-Search for {{ var.query }} and summarize the results for {{ args }}.
-The previous section said: {{ reply }}
-Current item: {{ item }}
-Run id: {{ sys.id }}
-````
-
-Escape literal delimiters with backslash: `\{{` emits `{{`.
-
-#### Control Flow
-
-`jump(target)` transfers control to another section by heading name, clearing conversation context. The current `reply` value is preserved across the jump. Clear it explicitly with `reply = nil` before jumping when the target should not inherit the previous reply. `execute(target, input)` runs a section as a subroutine with a fresh VM and conversation, returning that section's reply:
-
-````markdown
-## Router
-
-```lua
-local result = execute("## Research", "find Rust crates for HTTP")
-var.research = result
-jump("## Synthesize")
-```
-
-## Research
-
-Research the topic: {{ args }}
-
-## Synthesize
-
-Using this research: {{ var.research }}
-
-Write a summary.
-````
-
-`execute()` nests up to 8 levels deep, and the count accumulates across `fanout` boundaries. A chain starts with `reply` set to nil - pass context through the `input` parameter instead - and with a clone of the caller's `var`. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections are referenced by heading string.
-
-#### Sandbox Constraints
-
-The Lua sandbox provides only `string`, `table`, and `math` standard libraries. Dangerous globals (`load`, `dofile`, `require`, `print`, `rawget`, `rawset`, `collectgarbage`) are removed. A runaway Lua block is automatically aborted after exceeding the instruction budget (approximately 10 million instructions). Per-VM memory ceiling defaults to 64 MiB. The `log()` function accepts messages limited to 256 Unicode scalars with no newlines or control characters.
-
-Tool and model aliases must match `[A-Za-z][A-Za-z0-9_-]{0,63}`.
-
----
-
-### Models
-
-Models are declared by capability description and resolved semantically against a model catalog at runtime.
-
-#### Declaring and Binding
-
-```lua
--- Declare a model by what you need it to do
-models.bind("writer", "a creative writing model", {
-    thinking = true,
-    temperature = 0.7,
-    context = 128000,
-    max_tokens = 4096
-})
-
--- Set it as the prompt-wide baseline
-models.default("writer")
-```
-
-The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.bind`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
-
-```lua
-local analyst = models.use("analyst")
-```
-
-Sections without `models.use` inherit the `models.default` baseline. A prompt can carry both - the baseline applies everywhere a section does not override it. Sections with non-empty prose but no model binding receive a clear error.
-
-#### Hard Constraints
-
-The opts table filters the catalog before semantic resolution:
-
-- `thinking` - boolean, required or forbidden
-- `context` - minimum context window (positive integer)
-- `temperature` - float in range 0.0 to 2.0
-- `max_tokens` - positive integer
-
-Duplicate model aliases or duplicate `models.default` calls are rejected atomically. `models.use` may be called at most once per section.
-
-#### Model Inference from Lua
-
-`infer` has one shape: a single tool-free inference round on a fresh conversation. It never sets `reply` and never touches `sys`. Two forms exist:
-
-```lua
--- The section's current model (the models.use selection, else the models.default baseline)
-local tag = models.infer("One-word sentiment of: " .. args)
-
--- Any declared model, via its handle
-local critic = models.get("critic")
-local review = critic:infer("Critique this draft: " .. reply)
-```
-
-`models.get(alias)` returns the handle for a declared model without changing the section's model selection, so `handle:infer` is the way to consult a different model inside a section. A Lua block that needs tools uses `execute` on a section instead.
-
-#### Inspecting Model Properties
-
-After binding, a model handle's frozen properties are accessible from Lua: `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens`.
-
-#### Model Catalog
-
-The library fetches a live model catalog from a gateway's `GET /v1/models` endpoint with bearer authentication. The caller provides a model catalog built from descriptors with identity, description, context window, and thinking mode (Always, Switchable, or Never).
-
----
+Use direct inference for cheap auxiliary work: classification, extraction, rewriting.
 
 ### Tools
 
-#### Declaring Tools
+You declare tools by capability in the shared block:
 
-Tools are declared by capability description and resolved semantically at runtime via a picker:
+````
+```lua shared
+tools.bind('search', 'web search')
+```
+````
 
-```lua
--- Declare a tool binding
-local search = tools.bind("search", "web search capability")
+`tools.bind(alias, capability)` matches a natural-language capability description against the tool catalog at run time. Web search is a built-in capability.
 
--- Promote to prompt-wide scope (available in all sections)
-tools.always("search")
+A bound tool is withheld from the model until you scope it:
+
+- `tools.always('search')` in the shared block exposes it in every section.
+- `tools.add('search')` in a section's own Lua block exposes it in that section only.
+- `tools.add('search', 'Find current facts on the web')` overrides the model-facing description at the point of use.
+
+Here is a complete prompt with a scoped tool:
+
+````
+---
+name: researcher
+description: answer with web search
+promptforge: 1
+---
+
+# Researcher
+
+```lua shared
+models.default('writer', 'A general model for tests')
+tools.bind('search', 'web search')
 ```
 
-A tool declared with `tools.bind` is not exposed to the model unless `tools.always` or `tools.add` is called. This is explicit - you control exactly what the model sees.
+## Answer
 
 ```lua
--- Section-local scoping
-tools.add("search")            -- by alias string
-tools.add(search)              -- by handle object
-tools.add({"a", "b", tool_c}) -- arrays of strings or handles
+tools.add('search')
 ```
 
-`tools.add` calls are atomic: a failure rolls back all entries. An empty add is a no-op.
-
-#### Tool Properties
-
-After `tools.bind`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
+Answer the question: {{ args }}.
 
 ```lua
-tools.bind("search", "web search capability", "Search the web for current information")
-tools.always("search", "Search the web for current information")
-tools.add("search", "Search the web for current information")
+assert(tools.calls['search'] > 0, 'search was never called')
+return reply
 ```
+````
 
-Precedence is `add` over `bind`/`always` over the catalog description.
+The model calls the tool by the alias you bound. The section runs a multi-round tool-call loop: the model calls tools, then produces a final text answer. The `max_tool_iterations` frontmatter key caps the loop. Only the last prose block of a section runs the full tool loop; earlier prose blocks are single-shot. The epilogue reads `tools.calls['search']` to assert the model actually called the tool.
 
-#### Tool Dispatch Loop
+You can also define a Lua-backed local tool inside a section:
 
-The tool loop runs the model in a cycle: dispatch tool calls, feed results back, re-prompt until the model produces a final text reply or the iteration cap is reached (default 24 rounds, configurable via `max_tool_iterations` in frontmatter).
-
-#### Tool Safety
-
-Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. One nonce per run; envelopes are deterministic within a run. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
-
-Near-duplicate tools in the same section scope are detected and rejected before any model call, with similarity diagnostics. Out-of-scope tool calls produce a clear error distinguishing globally-declared-but-unscoped tools from truly unknown ones.
-
-#### Tool Call Counts
-
-Per-alias call counts are tracked during execution. Read them from Lua to measure or assert model behavior:
-
+````
 ```lua
-tools.add("search")
-```
-
-After the prose block runs with the tool loop:
-
-```lua
-if tools.calls.search == 0 then
-    log("model never searched")
-end
-```
-
-Counts increment even when a tool call fails. Mistyped aliases produce a hard error with the available scope listed.
-
-#### Local Tools
-
-`tools.add_local(alias, description, params, handler)` declares a tool backed by a Lua function, available from any H2 Lua block. When the model calls the tool, the handler runs synchronously in the declaring section's VM rather than reaching an external service:
-
-```lua
-tools.add_local("grab", "Grab a value from the store", {
-    key = {"string", "Store path to read"},
-}, function(args)
-    return store.read(args.key)
+tools.add_local('grab', 'Grab a value', { value = 'string' }, function(args)
+  return 'got ' .. args.value
 end)
 ```
+````
 
-The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
+`tools.add_local(name, description, schema, handler)` declares the tool in place. The schema is a Lua table mapping argument names to JSON types. The handler receives the model's arguments as an `args` table and returns a string that reaches the model verbatim. A local tool alias must not collide with a `tools.bind` alias or with another local tool in the same section.
 
-The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and the `infer` forms (`models.infer(prompt)`, `handle:infer(prompt)`), and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block.
+### Control Flow
 
-#### Implementing Custom Tools
+You already know the basic exit rule: a section whose Lua returns nothing falls through. The full rules:
 
-A custom tool requires:
+- A scalar return from a prologue (early) Lua block ends just that section.
+- A scalar return from an epilogue (late) Lua block ends the entire run.
+- A return from the H1 block ends the run before any section runs.
+- Running off the last section ends the run: the result is the last model reply, else "done".
 
-- A stable `ToolId` (server + name pair)
-- A wire name matching `[A-Za-z0-9_.-]`
-- A description string
-- A JSON-Schema parameters definition
-- An async `call` method returning `ToolOutput` (marked trusted or untrusted)
+Three functions move control between sections.
 
-Tools can run locally in-process or proxy through a remote gateway, both dispatched uniformly through the `Tool` trait.
+`jump('## Heading')` transfers control to another section by heading:
 
-#### Built-in Web Search
+````
+```lua
+jump('## Help')
+```
+````
 
-The web search tool sends queries through a gateway proxy so the search provider credential never leaves the server. Results are automatically marked as untrusted output. Parameters include count (1-20), freshness filter (pd/pw/pm/py), SafeSearch level (off/moderate/strict), domain inclusion/exclusion lists (up to 20 each), country code, and language code.
+The jump ends the current block immediately and skips the section's remaining blocks. The conversation is cleared, but the current `reply` and `var` carry across. Jumping to a child heading such as `### X` starts a child-level walk over that section's children; the parent walk resumes after the jumper when the child level exhausts.
+
+`execute('## Heading')` runs a contained sub-chain and returns its final reply:
+
+````
+```lua
+local findings = execute('## Research')
+```
+````
+
+The chain runs with a fresh VM and a fresh conversation. An optional second argument passes an input string that overrides the child's `args`: `execute('## Research', 'chain-args')`. A `return` inside the chain ends only the chain, not the run, and the outer walk resumes at the section after the caller. The chain gets a clone of the caller's `var`; the child's `var` writes are discarded. Chains nest to a cap of 8.
+
+Off-walk sections act as shared subroutines. The walk skips them, but `execute` and `jump` run them on demand.
+
+`list_from_section('### Items')` reads a list section's bullet or numbered items into Lua as an array of strings, with markers stripped:
+
+````
+## Gather
+
+```lua
+local items = list_from_section('### Items')
+return table.concat(items, ',')
+```
+
+### Items
 
 ---
+
+- alpha
+- beta
+````
+
+The off-walk marker keeps the list out of the walk, so it serves as a reusable item source.
+
+Addressing rules apply to all three functions. Headings must match level and name exactly: `'### Items'`, not `'Items'`. A section's visible set is its siblings minus itself, plus its direct children. A section cannot address itself, its nieces and nephews, or (from inside a child) top-level sections. Not-found errors list the available visible sections. Two visible sections sharing a level and name produce an ambiguity error. Called from the H1 block, `execute`, `jump`, and `list_from_section` fail with "only available in sections". A local tool handler cannot call `jump`.
 
 ### Fanout
 
-`fanout(worker, collection)` maps a worker section over a collection in parallel. Each member is processed by its own isolated execution arm with a fresh Lua VM.
+`fanout(worker, collection)` maps a worker section over a collection, running the worker once per member, concurrently:
 
-````markdown
-## Process
+````
+---
+name: batch
+description: reply about each item
+promptforge: 1
+---
+
+# Batch
+
+```lua shared
+models.default('writer', 'A general model for tests')
+```
+
+## Run
 
 ```lua
-local results = fanout("### Worker", list_from_section("### URLs"))
-var.output = table.concat(results, "\n\n")
+local r = fanout('### Worker', list_from_section('### Items'))
+return table.concat(r, ',')
 ```
+
+### Items
+
+---
+
+- alpha
+- beta
 
 ### Worker
 
-Fetch and summarize: {{ item }}
+---
 
-### URLs
-
-- https://example.com/page1
-- https://example.com/page2
-- https://example.com/page3
+Reply about {{ item }}.
 ````
 
-The worker is referenced by markdown heading address (level + name). The second parameter is always a collection, never a section name: any Lua table works, and `list_from_section("### List")` feeds a list section's pre-parsed items straight in. An empty collection is an error - no work is likely a bug.
+The walk never visits the off-walk `### Items` or `### Worker` sections. The fanout runs the worker once per item and returns the results.
 
-#### Arm Execution
+What each arm sees and what you get back:
 
-Each arm receives the current member as the `item` variable, a `sys.index` giving its 1-based position within the current fanout, and a unique run-global `sys.id`. Each arm starts with a fresh clone of the caller's `var` - arm writes to `var` never reach the caller. The arm can:
+- Each array member arrives inside the arm as the `item` global, in its native Lua type. A hash member arrives as a pair table with `item.key` and `item.value`.
+- `{{ item }}` in worker prose interpolates the arm's member. Non-string items render as compact JSON.
+- `sys.index` gives the arm's 1-based position within its fanout. `sys.id` continues the run-global sequence.
+- `fanout` returns a Lua array of per-arm results in collection order, not finish order. Each result has `text`, `ok`, `item`, and `exhausted` fields. Results stringify to their text, so `table.concat(r, ',')` works.
 
-- Run Lua blocks that short-circuit before any prose (enabling pure-Lua map operations)
-- Substitute `{{ item }}` in prose
-- Run the full model tool loop
-- Run Lua blocks after the prose for post-processing
+The constraints:
 
-Results are returned in collection order (not finish order). Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields; an arm that produces no reply yields `.text == ""` with `.ok == true`. The result array supports `table.concat` since objects coerce via `__tostring`. All arms share the run's store: two arms of one fanout writing the same path is a hard error (a write-write race), while `store.append` from concurrent arms stays legal.
+- Up to 8 arms run at once by default.
+- The collection must be a Lua table. An empty collection is an immediate error.
+- A list section cannot be a fanout worker.
+- Called from the H1 block, `fanout` fails with "only available in sections".
+- An arm whose tool loop exhausts soft-degrades into a failure result (`ok == false`, `exhausted == true`) instead of killing the fanout. A fatal error in one arm aborts its queued and in-flight siblings.
 
-#### Resilience
+### The Store
 
-An exhausted arm (tool loop budget exceeded) soft-degrades into an incomplete stub rather than failing the entire fanout. A fatal error in any arm aborts all sibling arms, preventing wasted work. Cancellation propagates from the parent into each spawned arm cooperatively.
+The store is a run-scoped virtual filesystem. You read and write virtual files addressed by logical string paths. One store is shared across all sections of a run, and it survives the context-clearing transitions that wipe each section's conversation.
 
-Default concurrency is 8 parallel arms, configurable via `RunLimits`.
-
----
-
-### Store
-
-The store is a run-scoped virtual filesystem shared across all sections. Data persists within a single run and the handle is thread-safe across concurrent tasks.
-
-```lua
-store.write("notes/summary.md", "# Summary\n" .. reply)
-store.append("log.txt", "processed: " .. args .. "\n")
-
-local content = store.read("notes/summary.md")
-local numbered = store.read_numbered("notes/summary.md")
-
-store.str_replace("notes/summary.md", "old text", "new text")
-
-local files = store.glob("notes/*.md")
-local exists = store.exists("notes/summary.md")
-
-store.delete("notes/summary.md")
-```
-
-`store.delete` on a missing path is silent - delete is idempotent. Within a single `fanout`, two arms calling `store.write` on the same path is a hard error (a write-write race); `store.append` from concurrent arms stays legal.
-
-#### Safe Injection
-
-Wrap stored content in the untrusted-input guard envelope with the `untrusted(s)` global before re-injecting it into model prompts: `untrusted(store.read(path))`. Forged close-tags in stored content are escaped, so injected data cannot break out of the envelope:
+````
+## Writer
 
 ```lua
-store.write("user-data.txt", user_provided_content)
--- Later, safely inject into a prompt context:
-local safe = untrusted(store.read("user-data.txt"))
+store.write('note.txt', 'carried across')
 ```
 
-#### Path Validation
+## Reader
 
-All store paths are validated:
+```lua
+return store.read('note.txt')
+```
+````
 
-- Forward-slash only (backslash rejected)
-- No path traversal (`.` and `..` segments rejected)
-- No Windows reserved device names (CON, NUL, COM1-9, LPT1-9)
-- No trailing dots or spaces
-- Maximum 1024 bytes
+The operations, one per line:
 
-#### Glob Matching
+- `store.write(path, value)` writes a file.
+- `store.read(path)` reads the verbatim contents.
+- `store.read(path, start, end)` reads a 1-based inclusive slice of lines.
+- `store.read_numbered(path, start, end)` reads a line range with absolute line numbers attached. With no bounds it numbers the whole file from 1.
+- `store.append(path, value)` accumulates onto a file.
+- `store.delete(path)` deletes a file.
+- `store.exists(path)` checks whether a file exists.
+- `store.glob(pattern)` lists matching files.
+- `store.str_replace(path, old, new)` edits by anchor-based string replacement, so edits survive content shifts.
 
-- `*` matches within a single path segment
-- `**` matches across path separators
-- Unsupported syntax (backslash escapes, triple-star, misplaced `**`) is rejected
-- Matching uses a bounded, non-backtracking algorithm
+The frontmatter `input:` and `output:` keys declare the prompt's input and output files, each a path plus a description. The input is expected in the store when the run starts. The output is left there when the run finishes. Writes from an epilogue or from a local tool handler persist after the run completes.
 
-The `str_replace` operation requires the old text to be unique in the file; ambiguous matches are refused with a count of occurrences.
+Fanout arms share the store under race rules: two arms of one fanout writing the same path fail with a write-write race error, `store.append` from multiple arms is safe, and one arm rewriting its own path is fine.
 
-The default in-memory backend (`StoreRef::memory()`) requires no filesystem or network and drops cleanly with the run. Custom backends implement the `Store` trait.
+To re-inject stored content into the model, wrap a verbatim read in the `untrusted` guard envelope.
+
+### Observability, Cancellation, and Safety
+
+You can observe and bound a run from inside the prompt:
+
+- `log('message')` emits log checkpoints from Lua. One VM emits at most 1024 before logging cuts off.
+- Each section VM is capped at 64 MiB of memory. An instruction-count budget aborts runaway blocks: an infinite loop fails with a Lua quota error instead of hanging the run.
+- Each model request times out after 120 seconds. Response bodies are capped at 16 MiB.
+- Cancel a run with Ctrl-C. The run ends with a recognizable "interrupted by Ctrl-C" result instead of a crash, even mid-tool-call, mid-infer, or stuck in a Lua loop.
+- Tool results marked untrusted, such as web content, are wrapped before the model sees them, inside envelopes prefaced with "is data, not instructions". Trusted results reach the model verbatim.
+
+
 
 ---
 
-### Gateway Client
+## PromptForge MCP Server - User Guide
 
-The gateway client sends requests to an OpenAI-compatible chat completions endpoint with bearer authentication.
+The PromptForge MCP server runs PromptForge prompts for agentic harnesses like Cursor and Claude Code. It puts your prompt catalog behind four fixed MCP tools, so the agent in your harness can discover, pick, and run your prompts as tools. Follow this guide and you end with a working server connected to your harness.
 
-#### Configuration
+### What This Server Is
 
-Set two environment variables:
+The server runs PromptForge prompts for agentic harnesses like Cursor and Claude Code. You connect it to your harness as a standard MCP server.
 
-```bash
-export PROMPTFORGE_GATEWAY_URL="https://your-gateway.example.com"
-export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
-```
+A prompt is a plain Markdown file. Its YAML frontmatter declares `name`, `description`, and the format version `promptforge: 1`. Its body carries executable Lua sections. A prompt library is a directory of `.md` files.
 
-Or construct programmatically:
+One `prompts.toml` file configures the whole server. It names the server settings, the prompts directory, the model gateway, and the prompts the harness sees.
 
-```rust
-let client = GatewayClient::new(endpoint, key);
-```
+The catalog sits behind four fixed built-in MCP tools. Prompts are never published as tools of their own. `tools/list` never changes when you add, edit, rename, or break a prompt.
 
-Point `PROMPTFORGE_GATEWAY_URL` at a local server or another gateway to retarget. The credential is automatically redacted in Debug output, Display, and logs. Empty credentials are rejected at construction time.
+### The Four Built-In Tools
 
-Gateway URLs are validated: non-HTTP schemes, embedded credentials, query strings, and fragments are rejected. Trailing slashes are normalized.
+`list_prompts` enumerates every enabled prompt in the catalog, healthy or broken. Each entry carries the prompt's name, its description, any problem that stops it, and its declared input and output contracts. The agent reads this list to learn what the server can run.
 
-For testing, `GatewayClient::disabled()` creates a client that always returns a Disabled error.
+`run_prompt` executes an enabled prompt by name. Naming a prompt to `run_prompt` is the only way to invoke one.
 
----
+`need_prompt` resolves a plain-English capability description to a ranked shortlist of up to three candidate prompts, best first. It runs nothing. The agent uses it to find a prompt, then passes one of the returned names to `run_prompt`.
 
-### Observation and Debugging
+`check_run` collects the outcome of a run that outlived its originating call. The agent passes the `run_id` that the earlier result named.
 
-#### Observer
+### Deployment and Execution Model
 
-The observer is a pluggable, report-only seam for watching execution in flight. Implement the `Observer` trait:
+The server speaks MCP over two transports. Streamable HTTP serves remote or shared access behind a shared bearer token. Stdio serves harnesses that spawn the server as a local child process, as line-framed JSON-RPC.
 
-```rust
-fn observe(&self, execution: &str, section: &str, event: Observation<'_>);
-```
+Prompt runs make their model calls through an OpenAI-compatible chat-completions gateway. You configure the gateway in `prompts.toml`. Its credentials stay separate from the MCP-facing credentials.
 
-Events include parse started/completed, run started/succeeded/failed, section started/finished, model turn completed/truncated, tool call succeeded/failed, store operations, fanout arm lifecycle, and Lua log checkpoints. All observations are correlated by execution id and section name.
+A filesystem watcher keeps the catalog current while the server runs. Edit a prompt file and the change takes effect immediately. You do not restart the server. The client does not reconnect.
 
-`NullObserver` discards all events when no tracing is needed. Attaching or detaching an observer does not change execution results.
+Boot is fail-fast. The server validates the catalog before it binds any transport. It refuses to serve an incomplete or broken catalog rather than start with prompts silently missing.
 
-#### Debug Capture
+### Installation, Launch, and Boot
 
-A separate debug sink records raw request and response JSON for each model turn:
+Install the `promptforge-mcp-server` package from crates.io. Any toolchain at Rust 1.89 or later builds it. The install puts one `promptforge-mcp-server` binary on your path.
 
-```rust
-fn on_event(&self, execution: &str, section: &str, turn_index: u32, event: DebugEvent);
-```
+Launch the server with one of exactly two command-line shapes. Use the first for HTTP. Use the second for stdio.
 
-Debug events capture the full request body as JSON and the response finish reason with reasoning content. Events from nested `model:infer` calls and fanout arms are forwarded to the same sink.
-
-#### Cancellation
-
-Cancellation is cooperative via a caller-supplied `CancelHandle`. It propagates into tools, models, Lua instruction hooks, and fanout arms. A cancelled run returns a `RunError` with `is_cancelled() == true`, distinguishable from faults.
-
----
-
-### Error Handling
-
-Every public boundary returns its own typed error rather than one crate-wide error type. Each error exposes a stable `kind()` classifier for programmatic handling without matching on private representations. Public structs are `#[non_exhaustive]` so they evolve without breaking downstream code.
-
-| Error | Kinds | Queries |
-|-------|-------|---------|
-| `RunError` | Parse, Version, Binding, Completion, Tool, Store, Lua, Quota, Substitution, Cancelled, Internal | `is_retryable()`, `is_cancelled()` |
-| `CompletionError` | Transport, Backend, MalformedResponse, EmptyReply, Disabled, Config | `is_retryable()`, `is_timeout()`, `status()` |
-| `StoreError` | NotFound, Anchor, InvalidAnchor, InvalidPath, InvalidPattern, Backend | `is_not_found()`, `path()` |
-| `ToolError` | InvalidArguments, Backend, Transport, Cancelled, Other | `is_retryable()`, `is_cancelled()` |
-| `ParseError` | (by kind) | `kind()`, `span()` |
-
-Backend error bodies are accessible through opt-in accessors but never leak into Display output.
-
-`promptforge_version(source)` detects whether a file is a promptforge prompt without requiring a full parse - it needs only the `promptforge:` key.
-
----
-
-## promptforge-mcp-server
-
-promptforge-mcp-server runs PromptForge prompts for agentic harnesses like Cursor and Claude Code. It puts a prompt catalog behind four fixed MCP tools rather than publishing each prompt as its own tool, which means `tools/list` never changes and a prompt saved ten seconds ago is callable with no reconnect. You point it at a `prompts.toml`, it resolves your prompts, connects to a gateway, and serves - over HTTP with bearer auth, or over stdio for a local spawn.
-
-### Starting the Server
-
-````sh
+````console
 promptforge-mcp-server serve prompts.toml
-````
-
-This binds the streamable-HTTP transport at `http://127.0.0.1:9310/mcp`. Every request to `/mcp` must carry an `Authorization: Bearer <token>` header matching `[server].api_key`.
-
-For a harness that spawns the server as a child process:
-
-````sh
 promptforge-mcp-server serve --stdio prompts.toml
 ````
 
-Stdio speaks JSON-RPC over standard input and output, binds no port, and ignores `[server].api_key` entirely. Logs go to stderr so they do not corrupt the wire.
+Any other command line prints a usage error and exits nonzero.
 
-### Configuration
+A healthy boot logs each boot step - catalog resolve, retrieval index, tool build - and ends serving:
 
-A single `prompts.toml` carries everything the server needs. The minimal configuration:
+````text
+promptforge-mcp-server serving on http://127.0.0.1:9310/mcp
+````
+
+A refused boot prints every catalog fault in one pass. Each fault names its prompt and its file. The process then exits nonzero, so you fix all faults in one pass rather than one restart each. A missing config file error reports the exact path and distinguishes a missing file from a permission failure.
+
+Script around the binary with conventional exit codes: zero on a clean serve, nonzero on any boot or argument failure. Stop the server with Ctrl-C. Both transports drain and close.
+
+### Server Configuration and Secrets
+
+Start with a minimal `prompts.toml`. This is a complete config for HTTP:
 
 ````toml
 [server]
@@ -1301,33 +1628,81 @@ url = "http://127.0.0.1:8081/v1"
 api_key = "gateway-bearer"
 ````
 
-Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].api_key`, where it drops the key silently so a stdio install can boot without a credential its transport never reads.
-
-#### Full configuration
+Every setting you omit takes a default. A full config shows what you can tune:
 
 ````toml
 [server]
 bind = "127.0.0.1:9310"
-api_key = "${PROMPTFORGE_MCP_SERVER_API_KEY}"
+api_key = "shared-bearer"
+allowed_hosts = ["localhost", "127.0.0.1", "::1"]
 max_concurrent_runs = 4
 admission_timeout = "30s"
 reply_deadline = "240s"
 retain_completed = "1h"
 watch = true
 watch_debounce = "500ms"
-allowed_hosts = ["example.com", "example.com:8080"]
+
+[gateway]
+url = "http://127.0.0.1:8081/v1"
+api_key = "gateway-bearer"
 
 [paths]
 prompts = "prompts"
 
+[tools]
+web_fetch = true
+web_search = true
+````
+
+Under `[server]`:
+
+- `bind` sets the HTTP bind address. Default `127.0.0.1:9310`.
+- `api_key` sets the shared bearer token every `/mcp` request must present. Omit it for a local stdio install; `serve --stdio` never reads it.
+- `allowed_hosts` lists the host authorities the server accepts.
+- `max_concurrent_runs` sets how many prompts run at once. Default 4.
+- `admission_timeout` sets how long a call waits for a run slot. Default `30s`.
+- `reply_deadline` sets how long a call waits for its run. Default `240s`, kept under Cursor's ~300-second call ceiling.
+- `retain_completed` sets how long a finished run stays collectable. Default `1h`.
+- `watch` toggles hot reload. Default on.
+- `watch_debounce` sets how long the watcher waits for filesystem events to settle. Default `500ms`.
+
+Write durations in human-readable form: `30s`, `4m`, `500ms`, `1h`.
+
+Under `[gateway]`, set `url` and `api_key`. Both are required. The URL must be a real http or https URL with a host. All prompt-run model traffic goes to this gateway.
+
+Under `[tools]`, opt into `web_fetch` and `web_search` to grant prompts live web access. Both default to disabled. A prompt with no `[tools]` section runs in a true sandbox with no network access.
+
+Keep secrets and machine-specific values out of `prompts.toml`. Write `${VAR}` references in any TOML string value:
+
+````toml
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+api_key = "${GATEWAY_KEY}"
+````
 
+A name-matched `prompts.env` file beside `prompts.toml` can supply the values. Real environment variables always win over the file. File values never enter the process environment. A missing or malformed `prompts.env` never fails the load. Interpolation works in nested arrays and sub-tables, not just top-level strings.
+
+An unset variable aborts the load and names the exact field. The one exception is `[server].api_key`: an unset variable there leaves the key absent, so stdio installs stay unblocked. Write `$$` for a literal dollar sign. A bare `$` not followed by `$` or `{` passes through literally. An unclosed `${...` is a load error.
+
+The server refuses blank or whitespace-only secrets at load. Secrets redact as `Secret(redacted)` in all debug and display output and never serialize. Unknown or misspelled config keys fail the load and name the offending key. A config file over 4 MiB is refused.
+
+### Catalog Configuration and Resolution
+
+Point the server at your prompts directory with `[paths].prompts`. The default is `prompts/` relative to the working directory. Relative and absolute paths both work.
+
+Select which prompt files enter the catalog with glob patterns:
+
+````toml
 [catalog]
 include = ["*.md", "governance/**/*.md"]
 exclude = ["_*.md", "drafts/**"]
+````
 
+`*` matches within one path segment. `**` crosses separators. Matching is case-sensitive. A recursive pattern like `governance/**/*.md` reaches nested directories while `*.md` matches only the top level. Exclusions always win over inclusions. Exclude patterns match root-relative paths, so `drafts/**` means what it reads as.
+
+Override glob results per prompt with a `[prompts.NAME]` block:
+
+````toml
 [prompts.scratch_test]
 enabled = false
 
@@ -1335,876 +1710,650 @@ enabled = false
 file = "experiments/staker-v3.md"
 ````
 
-#### Defaults
+Set `enabled = false` to drop a prompt the globs caught. Set `file` to publish a file no glob matches. The path is relative to the prompts directory. Absolute paths and any `..` component are rejected at config load. A leading `./` is accepted, and Windows backslash paths parse.
 
-| Key | Default | Notes |
-|-----|---------|-------|
-| `bind` | `127.0.0.1:9310` | |
-| `max_concurrent_runs` | `4` | |
-| `admission_timeout` | `30s` | |
-| `reply_deadline` | `240s` | Inside Cursor's 300s call ceiling |
-| `retain_completed` | `1h` | |
-| `watch` | `true` | |
-| `watch_debounce` | `500ms` | |
-| `paths.prompts` | `prompts` | Relative to working directory |
+Keep ordinary non-prompt Markdown files in the prompts directory. A glob-matched file with no `promptforge:` frontmatter marker is skipped without comment. Notes and drafts never leak into the tool surface.
 
-Durations use humantime format: `"30s"`, `"5m"`, `"1h"`, `"500ms"`.
+Prompt names must match `^[a-z][a-z0-9_]{0,47}$`: a lowercase ASCII start, then lowercase letters, digits, and underscores, 48 characters maximum. The four built-in tool names are reserved in every build. Two healthy prompts declaring the same name is a fault that lists every file that declared it. An empty resolved catalog is a hard fault; the server never boots serving nothing. A block whose `file` declares a different frontmatter name than the block key is a hard fault naming both names. A block with no `file` that matches no globbed prompt is a stale-override fault naming the dead key.
 
-Unknown keys are rejected outright - a misspelled key fails the load rather than being silently ignored.
+A prompt file over 2 MiB is refused as a broken entry. Every served file is confined to the prompts directory: a symlink or reparse point under the root that points outside it is resolved and dropped.
 
-#### Sections
+Boot and reload treat a broken prompt differently. Boot rejects it and refuses to serve. Reload retains it as a broken entry: still listed under a placeholder name suffixed `(broken)`, sorted after healthy entries, exposing no source text. Calling it returns the validation failure rather than silently running a stale copy. The catalog listing is always ordered by prompt name.
 
-**`[server]`** - Bind address, shared bearer key, concurrency limits, timing, and reload settings. `allowed_hosts` controls DNS-rebinding protection: on a loopback bind an empty list defaults to `localhost`, `127.0.0.1`, `::1`; a non-loopback bind with no hosts is refused.
+### Prompt Authoring
 
-**`[paths]`** - The prompts directory. Catalog patterns and `[prompts.NAME].file` paths are both relative to it.
+A prompt is a Markdown file with YAML frontmatter and Lua code blocks. This is a complete prompt:
 
-**`[gateway]`** - The model gateway every run goes through. `url` must be a valid http/https URL with a host. `api_key` is the bearer credential sent on every model call.
+````markdown
+---
+name: echo
+description: Returns its argument
+promptforge: 1
+---
 
-**`[catalog]`** - Glob patterns that assemble the catalog. `include` names what to resolve; `exclude` subtracts from it. `*` does not cross a separator, `**` does.
+# Echo
 
-**`[prompts.NAME]`** - Per-prompt overrides keyed by the prompt's frontmatter name. Set `enabled = false` to drop one the globs caught. Set `file = "path.md"` to add a file no glob matches. The key must match the prompt-name shape: `^[a-z][a-z0-9_]{0,47}$`.
+## Main
 
-### The Tool Surface
-
-The server publishes a fixed set of built-in tools. No prompt appears in `tools/list` - a prompt is reached only by naming it to `run_prompt`.
-
-| Tool | Purpose |
-|------|---------|
-| `list_prompts` | Report every enabled prompt: name, description, and any problem stopping it |
-| `run_prompt` | Execute a named prompt and return its artifact |
-| `check_run` | Collect a run that outlived its call |
-| `need_prompt` | Discover prompts by semantic similarity (requires `picker` feature) |
-
-The `picker` feature is on by default. Without it the server publishes three tools and `need_prompt` is absent. A build without `picker` is smaller and removes the embedding model weights.
-
-### Running a Prompt
-
-Call `run_prompt` with `prompt` (required) and `args` (optional):
-
-````json
-{
-  "prompt": "research_person",
-  "args": "Herb Sutter, ABI stability positions"
-}
+```lua
+return args
+```
 ````
 
-#### What happens
+The frontmatter declares `name`, `description`, and `promptforge: 1`. Each `##` section carries a Lua code block.
 
-1. **Name resolution** - The name is matched case-normalized against the catalog. An unresolvable name returns all enabled names nearest-first so the model can correct itself.
+A Lua prologue runs before any model call. Return a value from it to short-circuit the whole run. In a multi-section prompt, each section either falls through to the next or returns a final value to end the run. A Lua-visible `var` store shares state across section boundaries.
 
-2. **Admission** - The call waits for one of `max_concurrent_runs` slots. If none comes free within `admission_timeout`, the call gets a retryable refusal: "every run slot is busy and none came free within 30s. Retry in a moment."
+Declare input and output file contracts in the frontmatter. Give each a path and a description:
 
-3. **Execution** - The prompt runs against the gateway. Progress notifications stream to the client if it supplied a `progressToken`.
+````markdown
+---
+name: reader
+description: Reads its input and writes it to its output
+promptforge: 1
+input:
+  path: paper.md
+  description: The input file
+output:
+  path: report.md
+  description: The output file
+---
 
-4. **Reply deadline** - If the run finishes in time, the result comes back inline. If it exceeds `reply_deadline`, the call returns immediately with status `running` and a `run_id`.
+# Reader
 
-#### Background runs
+## Main
 
-A run that outlives its call continues in background. Collect it with `check_run`:
-
-````json
-{
-  "run_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
-}
+```lua
+local content = store.read("paper.md")
+store.write("report.md", content)
+return "done"
+```
 ````
 
-A finished run stays collectable for `retain_completed` (default 1 hour), then is evicted.
+The prompt reads and writes the declared files at run time through `store.read(path)` and `store.write(path, content)`.
 
-If the client disconnects while a run is in progress, the run is cancelled cooperatively.
+Bind external capabilities to tool names with `tools.bind(name, capability)`, and activate them per section with `tools.add(name)`. Declare capabilities in natural language; the server resolves them to enabled tools at run time. This scopes which tools a model may use in each section.
 
-#### Result format
+Bind a model to a named role with `models.default(role, description)` or `models.bind(alias, description, opts)`, and pick a role per section with `models.use(alias)`. The prompt chooses which gateway model serves each prose section. Role bindings resolve live against the gateway model catalog at boot.
 
-Every result carries structured content:
+Try the shipped example catalog to see working prompts: analyst_example, echo, greet, hello, research_person. It loads and serves exactly as shipped, out of the box.
 
-````json
-{
-  "run_id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
-  "prompt": "research_person",
-  "status": "completed",
-  "value": "The full artifact text...",
-  "turns": 3,
-  "elapsed_ms": 42000,
-  "error": null
-}
-````
+### Running and Collecting
 
-Status is one of `running`, `completed`, or `failed`. A completed run carries `value`; a failed run carries `error`; a running run carries neither.
-
-### Discovering Prompts
-
-#### list_prompts
-
-Browse the catalog with optional pagination:
+The simplest call names a prompt and nothing else:
 
 ````json
-{ "cursor": "100" }
+{ "prompt": "echo" }
 ````
 
-Returns up to 100 entries per page:
+Pass the prompt's input as one raw string with `args`. Omitting it passes the empty string.
 
 ````json
-{
-  "prompts": [
-    { "name": "research_person", "description": "Build a stakeholder profile...", "problem": null },
-    { "name": "broken_one", "description": "", "problem": "parse error at line 3" }
-  ],
-  "next_cursor": "200"
-}
+{ "prompt": "echo", "args": "hello" }
 ````
 
-A broken prompt appears in the listing with its problem visible, so the operator knows what to fix.
+Seed a declared input with `input_file` (a filesystem path) or `input_text` (text placed directly in the prompt's store). The two are mutually exclusive; specify one, not both. Write a declared output to disk with `output_file`. Omit it to receive the output inline as the result value.
 
-#### need_prompt
+Every run outcome comes back in `structuredContent`, a flat JSON object:
 
-When you have a capability description rather than a name:
+````json
+{ "run_id": "0123456789abcdef0123456789abcdef", "prompt": "echo", "status": "completed", "value": "hello", "turns": 0, "elapsed_ms": 4, "error": null }
+````
+
+A plain text block mirrors it: the value on completion, the error on failure, a collection instruction while running. `status` serializes as `running`, `completed`, or `failed`. A `completed` result always carries a `value` and a null `error`. A `failed` result always carries an `error` and a null `value`. `turns` counts model round trips; a Lua-only prompt reports zero. `elapsed_ms` measures only the run itself, never the queue wait.
+
+A run can outlive its call. Past `reply_deadline`, the call returns a `running` result naming a `run_id` instead of failing. The run keeps executing in the background under a supervisor. Collect the finished record later with `check_run`:
+
+````json
+{ "run_id": "0123456789abcdef0123456789abcdef" }
+````
+
+Run ids are 128 random bits rendered as 32 hex digits. A finished run stays collectable for `retain_completed` and is then evicted. A still-running run is never evicted and reports its live elapsed time. Polling an unknown or evicted `run_id` returns a tool error whose message names the retention window. A run started in one HTTP session is collectable by `check_run` from a different session.
+
+Stop a run by abandoning the awaiting call. When the client cancels the request or disconnects mid-wait, the run is signalled to cancel and its concurrency slot frees for a fresh run.
+
+Recover from a mistyped prompt name by reading the error result. It lists every enabled prompt name ordered nearest-first, and nothing is run on a miss. Name resolution folds letter case and treats `-` and `_` as the same character, so `Research-Person` reaches `research_person`.
+
+Admission is bounded. A call waits up to `admission_timeout` for one of `max_concurrent_runs` slots, then is refused with a retryable answer naming the exact wait spent.
+
+### Discovery, Retrieval, and Tool Surface
+
+Call `list_prompts` with no arguments to read the first page of the catalog:
+
+````json
+{}
+````
+
+Page through a large catalog with the optional `cursor` parameter. A page carries at most 100 entries. `next_cursor` in the response fetches the next page. A cursor the server never issued is a `-32602` invalid-params error.
+
+Call `need_prompt` with a `capability` string to find a prompt without reading the whole catalog:
 
 ````json
 { "capability": "Build a stakeholder position report for one entity." }
 ````
 
-Returns up to three candidates ranked best-first:
+Phrase the capability in author register: a short imperative phrase naming the operation and what it acts on, with no entity names or conversational framing. Good: "Build a stakeholder position report for one entity." Bad: "I need to know what Herb Sutter has said about ABI stability." Casual phrasings still return candidates. A capability over 4096 bytes is rejected with a message telling you to restate it as one short imperative.
+
+The shortlist holds up to three candidates, best first. Each candidate carries a `name` you can pass to `run_prompt` and its verbatim `description`. An empty candidate list is a complete answer - "no prompt is close to this" - not an error. Broken prompts are never recommended. If the retrieval index is unavailable, `need_prompt` says so and redirects you to `list_prompts`.
+
+The tool list is fixed for the life of the process: `list_prompts`, `run_prompt`, `need_prompt`, `check_run`, in that order. All four input schemas set `additionalProperties: false`, so a misspelled or obsolete argument is refused, not silently dropped. A prompt name is never dispatchable as a tool: calling `echo` directly returns METHOD_NOT_FOUND. A build without the `picker` feature publishes three tools instead of four, dropping `need_prompt`.
+
+### Progress, Logging, and Error Surface
+
+Attach a `progressToken` to a `tools/call` to receive live `notifications/progress` updates in Cursor or Claude Code while a multi-minute run is in flight. Frame 0 is captioned with the prompt's H1 title the moment the run starts. Each later frame is captioned with a section's H2 heading. Values latch monotonically from 0 and `total` is never sent, so the client shows a changing caption rather than a filling bar. Progress is strictly best-effort: a client that stops accepting notifications silently ends the stream without failing the call. Omit the token and the run is silent with an identical result.
+
+Watch operations through structured logs. Every run boundary is an `info` event. Within-run chatter stays at `debug`. Failed tool calls and failed model turns surface at `warn`. Logs go to stdout normally and to stderr in stdio mode, so log capture never collides with the MCP wire protocol. Terminal run records carry run_id, prompt, status, turns, and elapsed_ms. Prompt content never reaches the log. Boot progress appears as log records for catalog resolve, retrieval index, and tool build, weighted by expected duration.
+
+Read model-correctable failures as ordinary tool results with `isError` set: a broken prompt, an unresolvable capability, a refused admission, a failed run. The calling model reads the corrective detail and acts. Only malformed argument shapes are protocol errors. A missing required argument is a `-32602` error naming the key. An explicit `null` for an optional string is rejected as a client bug rather than coerced to empty.
+
+### Transports and Security
+
+On stdio, the server binds no network listener and reads no token. A config that sets `bind` or `api_key` anyway is logged as ignored. Each JSON-RPC message is one line. A line over 4 MiB, or a malformed line, is dropped and the session survives. EOF on stdin ends the session cleanly.
+
+Over HTTP, the server serves MCP at `/mcp`. Every `/mcp` request must present the shared bearer token from `[server].api_key`. The check runs per request, not per session: a rotated-away token is refused on the very next request, even on an initialized session. The `Bearer` scheme is matched case-insensitively. Refusals are 401 with a `WWW-Authenticate: Bearer` header. HTTP refuses to bind without `[server].api_key`, before the socket is bound.
+
+`allowed_hosts` validates the request `Host` header as a DNS-rebinding defence. Empty on a loopback bind defaults to `localhost`, `127.0.0.1`, `::1`. Empty on a non-loopback bind refuses to start with an error naming the bind address and the required setting; enumerate the public authorities instead, for example `["example.com", "example.com:8080"]`. A disallowed Host is rejected with 403 even with a valid token.
+
+`/healthz` is public, outside the bearer layer, and returns `{"status": "serving"}`. A 15-second SSE keep-alive keeps long-running tool calls alive through proxies. The server speaks MCP protocol revision 2025-06-18 and does not advertise tool-list change notifications, because the tool list never moves.
+
+### Hot Reload and the Watcher
+
+The watcher is on by default. Add, edit, rename, or delete prompt files while the server runs. The change is live on the very next tool call on the same already-open MCP session, with no reconnect and no client notification. `watch_debounce` (default `500ms`) lets filesystem events settle before a reload, so one save costs one reload.
+
+Edit `prompts.toml` itself and the save triggers the same reload path. Catalog-shaping changes apply on the next reload. These settings stay pinned to boot values and are logged by name as requiring a restart: `[server].bind`, `[server].api_key`, `[server].max_concurrent_runs`, `[server].admission_timeout`, `[server].reply_deadline`, `[server].retain_completed`, `[server].watch`, `[server].watch_debounce`, `[server].allowed_hosts`, `[paths].prompts`, `[gateway].url`, and `[gateway].api_key`.
+
+Tolerate a prompt broken by a bad save. It stays listed as a broken entry carrying its error, and the rest of the catalog keeps serving. A reload that cannot re-resolve - an unparsable `prompts.toml`, a stale override, duplicate names, an empty result - keeps the previous catalog and logs the reason. A typo in one file never takes the running service down. Each reload logs its outcome: how many prompts loaded, how many are broken, whether ranking changed, and whether the retrieval index is current or stale.
+
+Set `watch = false` to serve exactly the boot-resolved catalog for the life of the process.
+
+---
+
+## Semantic Tool Binding in PromptForge
+
+PromptForge decides which tools a prompt can use. You describe each tool in plain prose. PromptForge matches the intent of a prompt against those descriptions with a small embedding model that runs on your machine. There is no LLM call. There is no network access at runtime. There is no keyword matching. The right tools reach the model. The wrong ones stay out. This guide shows you how to declare tools, tune the match, and read the results.
+
+### What Tool Binding Does
+
+You write a need in plain prose, for example "read a file from disk". PromptForge resolves that need to the tool that performs it. The match uses sentence embeddings. The whole embedding model is compiled into the library. You configure no model path. You ship no weights file. You make no runtime network call.
+
+You describe your tools in a catalog. Each entry in the catalog is a tool descriptor. A descriptor pairs a tool identity with a natural-language description and a JSON Schema for its arguments. The identity has two parts: a server name and a tool name. The pair identifies a tool without ambiguity. Two tools with the same name on different servers never collide. Delimiter characters inside either part stay unambiguous.
+
+You build a picker over the catalog. You then ask the picker which tool a given need refers to. You build the picker once. You ask it about as many needs as you like.
+
+Every query returns one of four outcomes. The picker can bind one tool. It can report a group of duplicate tools published by one server. It can return a shortlist of candidates it could not separate. It can abstain when nothing fits.
+
+### The Four Outcomes of a Match
+
+Each need you resolve ends in exactly one outcome. You handle each case in your own code.
+
+**Bound.** One tool cleared the similarity floor (the minimum score a candidate must reach) and left the runner-up behind by at least the configured margin. You call the chosen tool immediately.
+
+**Duplicate.** One server publishes two tools that are near-verbatim copies of each other. This is a catalog fault. The picker fails loudly and names the pair. The group always holds at least two members, in ranked order. You fix the catalog.
+
+**Ambiguous.** Two or more tools sit within the decision margin and the picker cannot separate them. This happens most often when one tool is republished across two servers. The group always holds at least two members, in ranked order. You choose for yourself, or you sharpen the descriptions.
+
+**Absent.** Nothing in the catalog matched the need well enough to offer. An abstention is a successful answer, not an error. You can tell an abstention apart from an engine failure. An abstention means the policy answered. An error means the engine could not run.
+
+One rule sits between binding and abstention. The solo floor is a second, lower score bar. A lone candidate that scores at or above the solo floor, but below the similarity floor, still binds when no runner-up reaches the solo floor. There is nothing to confuse it with. Two such candidates cause an abstention instead. Section "Setting Match Thresholds" gives the defaults for both floors.
+
+The same tool republished on one server is a duplicate. The same tool republished across two servers is ambiguous. The distinction is the server name in the identity.
+
+### Declaring Tools for Matching
+
+Tools enter the catalog as descriptors. You write each descriptor. A descriptor carries four things: the server name, the tool name, your description, and a JSON Schema for the arguments. A descriptor carries nothing that could invoke the tool. Mapping a resolved descriptor onto something callable is your job.
+
+The engine matches against three parts of each tool: the tool name with underscores removed, the description, and the parameter names in sorted order. Your wording directly steers the match. Parameter names in the schema affect semantic matching.
+
+A minimal descriptor in JSON looks like this:
 
 ````json
 {
-  "prompts": [
-    { "name": "research_person", "description": "Build a stakeholder profile..." },
-    { "name": "staker", "description": "Assess positions on a proposal..." }
-  ]
-}
-````
-
-State the capability the way a tool author would document it: an imperative phrase naming the operation and what it acts on. Conversational phrasing resolves less reliably.
-
-If retrieval is unavailable (model failed to load), `need_prompt` reports it and points you at `list_prompts` instead.
-
-### Live Reload
-
-With `watch = true` (the default), saving a prompt file or `prompts.toml` triggers a re-resolution after the debounce window settles. The catalog and its retrieval index are published together as one atomic generation - no reader ever sees a torn pair.
-
-What reload does:
-
-- A healthy edit updates the catalog immediately. The tool list stays the same because tools are fixed; only the catalog behind `run_prompt` changes.
-- A broken edit (parse error, bad name) retains the prompt as a listed entry carrying its problem rather than freezing the whole catalog.
-- An edit to a prompt's body alone (no name or description change) carries the previous retrieval index forward without rebuilding it.
-- A broken platform watch is re-registered on the next settled window rather than permanently losing live reload.
-
-Set `watch = false` to serve a static catalog for the life of the process.
-
-### Transport and Security
-
-#### HTTP
-
-The streamable-HTTP transport puts MCP at `/mcp` and a liveness probe at `/healthz`. The bearer check wraps `/mcp` only - `/healthz` is unauthenticated by design.
-
-Authentication is per-request, not per-session. The token is fixed for the life of the server, but the check happens on every HTTP request rather than once at initialization - so a session that already completed the MCP handshake is still refused if its credential does not match. The comparison is constant-time.
-
-SSE keep-alive is 15 seconds, so a run that thinks between sections does not look dead to a proxy.
-
-`allowed_hosts` is the DNS-rebinding defence. On a loopback bind it defaults to `localhost`, `127.0.0.1`, `::1`. On a non-loopback bind you must enumerate the authorities explicitly or the server refuses to start.
-
-#### Stdio
-
-Stdio binds no port, checks no token, and has a bounded line reader so a peer without newlines costs a fixed buffer rather than the process. The harness that spawned it is the only thing that can talk to it.
-
-#### Shutdown
-
-Ctrl-C triggers graceful shutdown on both transports. The SSE streams are closed, in-flight calls drain, and the watcher stops before the process exits. No late reload can publish after the shutdown signal.
-
-### Boot Sequence and Gateway
-
-At startup the server:
-
-1. Loads and validates `prompts.toml`
-2. Resolves the catalog (refuses to start on any fault)
-3. Builds the retrieval index over the catalog (if `picker` feature is present; a failure is logged and the server continues)
-4. Fetches the gateway model catalog via `GET /v1/models`
-5. Builds the live tool catalog (`web_fetch`, `web_search`) and the semantic tool picker
-6. Starts the filesystem watcher
-7. Serves the chosen transport
-
-The gateway fetch distinguishes transient failures from fatal ones. A connection timeout or a 5xx is transient: the server warns and serves with an empty model catalog, so prompts without `models.bind` keep working. A 401, a bad URL, or a malformed response is fatal: the server refuses to boot rather than hiding a misconfiguration behind runtime failures.
-
----
-
-## promptforge-tool-picker
-
-A sentence-embedding resolver that turns "read a file from disk" into the tool that does it - no LLM call, no network, no guessing. You describe your tools in prose, build a picker over the catalog, and ask it which tool a need refers to. It answers with a decision: one bound tool, a duplicate report, an ambiguous shortlist, or an abstention. The model is compiled into the library, so there is no path to configure and no weights to ship. Querying is a dot product, not an API call. Determinism is structural: the same inputs always produce the same answer.
-
-### Identity, Descriptors, and Catalogs
-
-Every tool is identified by a `(server, name)` pair. The pair is structural - never concatenated - so a server or name containing any delimiter stays unambiguous.
-
-````rust
-use promptforge_tool_picker::{ToolId, ToolDescriptor, ToolAnnotations, Catalog};
-use serde_json::json;
-
-let id = ToolId::new("files", "read_file");
-assert_eq!(id.server(), "files");
-assert_eq!(id.name(), "read_file");
-````
-
-A `ToolDescriptor` carries the identity, a prose description, a JSON Schema for the tool's arguments, and optional behavioral hints:
-
-````rust
-let tool = ToolDescriptor::new(
-    ToolId::new("files", "read_file"),
-    "Read a file from disk",
-    json!({"properties": {"path": {"type": "string"}}}),
-);
-
-let tool = tool.with_annotations(
-    ToolAnnotations::new()
-        .with_read_only(true)
-        .with_destructive(false),
-);
-
-assert_eq!(tool.name(), "read_file");
-assert_eq!(tool.description(), "Read a file from disk");
-assert_eq!(tool.annotations().read_only(), Some(true));
-````
-
-Annotations are optional and advisory. They affect ranking only as a tie-break between candidates that score identically. A positive read-only claim is preferred first, then non-destructive, then idempotent.
-
-A `Catalog` is an ordered collection of descriptors:
-
-````rust
-let catalog = Catalog::new(vec![
-    ToolDescriptor::new(
-        ToolId::new("files", "read_file"),
-        "Read a file from disk",
-        json!({"properties": {"path": {"type": "string"}}}),
-    ),
-    ToolDescriptor::new(
-        ToolId::new("net", "fetch_url"),
-        "Fetch a web page over HTTP",
-        json!({"properties": {"url": {"type": "string"}}}),
-    ),
-]);
-
-assert_eq!(catalog.len(), 2);
-
-let found = catalog.get(&ToolId::new("net", "fetch_url"));
-assert_eq!(found.map(|t| t.name()), Some("fetch_url"));
-
-for tool in &catalog {
-    println!("{}: {}", tool.name(), tool.description());
-}
-````
-
-You can also build a catalog from an iterator or a `Vec`:
-
-````rust
-let catalog: Catalog = vec![/* descriptors */].into();
-let catalog: Catalog = some_iterator.collect();
-````
-
-With the `serde` feature (enabled by default), catalogs deserialize from JSON. The identity fields are flat on each descriptor. The schema field accepts both `input_schema` and its MCP spelling `inputSchema`:
-
-````json
-[
-  {
-    "server": "files",
-    "name": "read_file",
-    "description": "Read a file from disk",
-    "inputSchema": {
-      "properties": { "path": { "type": "string" } }
-    },
-    "annotations": { "readOnlyHint": true }
+  "server": "files",
+  "name": "read_file",
+  "description": "Read a file from disk",
+  "inputSchema": {
+    "properties": {
+      "path": { "type": "string" }
+    }
   }
-]
-````
-
-Duplicate identities in a catalog are accepted. Two tools claiming the same identity is a result the engine reports, not an input it refuses.
-
-### Building a Picker
-
-The simplest path loads the model and indexes a catalog in one call:
-
-````rust
-use promptforge_tool_picker::{ToolPicker, Catalog, Config};
-
-let picker = ToolPicker::build(catalog, Config::default())?;
-assert_eq!(picker.len(), 2);
-````
-
-Loading the model is the expensive step - it materializes the compiled-in weights into memory. If you serve several catalogs, load the model once and build each picker against it:
-
-````rust
-use promptforge_tool_picker::Model;
-
-let model = Model::load()?;
-
-let files_picker = ToolPicker::build_with_model(&model, files_catalog, Config::default())?;
-let weather_picker = ToolPicker::build_with_model(&model, weather_catalog, Config::default())?;
-````
-
-`Model` is cheap to clone (it shares the loaded weights through an `Arc`), and it is `Send + Sync + 'static`, so you can pass it across threads.
-
-When your catalog changes - a reconnected server, a watched directory - rebuild from the existing picker to preserve its model and configuration:
-
-````rust
-let updated = picker.rebuild(new_catalog)?;
-````
-
-The original picker is immutable and still answers from its own catalog. The rebuilt picker answers from the new catalog with the same model and config.
-
-You can iterate a picker's tools with `picker.iter()` or `for tool in &picker`, and look up a specific tool with `picker.get(&id)`.
-
-### Resolving a Need
-
-`resolve` takes a plain-English need and returns one of four outcomes:
-
-````rust
-use promptforge_tool_picker::Outcome;
-
-match picker.resolve("read a file from disk")? {
-    Outcome::Bind(tool) => {
-        println!("call {}", tool.name());
-    }
-    Outcome::Duplicate(group) => {
-        // One server publishes tools that are copies of each other.
-        println!("{} publishes {} twins", group.first().server(), group.len());
-    }
-    Outcome::Ambiguous(group) => {
-        // Several tools match well enough that the margin could not separate them.
-        for tool in &group {
-            println!("candidate: {}/{}", tool.server(), tool.name());
-        }
-    }
-    Outcome::Absent => {
-        println!("no tool covers this need");
-    }
-    _ => {}
 }
 ````
 
-`Absent` is a successful answer, not an error. An `Err` from `resolve` means the need could not be embedded (tokenization or inference failed), so no answer was produced at all.
+The schema field accepts both `input_schema` and the MCP spelling `inputSchema`. Optional fields can be omitted. A missing schema becomes null on load. Missing annotations become the default, with every hint absent.
 
-Results borrow the picker's descriptors. No schema or descriptor is deep-cloned. If you need to keep a tool identity beyond the picker's lifetime, clone the specific `ToolId`:
-
-````rust
-let kept_id: ToolId = match picker.resolve("read a file")? {
-    Outcome::Bind(tool) => tool.id().clone(),
-    _ => return Ok(()),
-};
-````
-
-A `CandidateGroup` (from `Duplicate` or `Ambiguous`) always contains at least two entries. You can inspect them with `group.first()`, `group.second()`, `group.get(index)`, `group.len()`, and `group.iter()`.
-
-### Shortlisting
-
-`shortlist` returns candidates above the similarity floor without making a final decision, so the caller can choose:
-
-````rust
-let candidates = picker.shortlist("read a file from disk", 3)?;
-
-for tool in &candidates {
-    println!("{}: {}", tool.name(), tool.description());
-}
-
-if candidates.is_empty() {
-    println!("nothing relevant");
-}
-````
-
-`resolve` and `shortlist` never contradict each other on relevance. If `resolve` abstains, `shortlist` returns nothing. If `resolve` binds a tool, `shortlist` offers exactly that tool.
-
-The solo-candidate exception applies to both: when one candidate sits between the solo floor and the strict similarity floor, and no runner-up reaches the solo floor, that candidate is offered.
-
-A `limit` of zero returns an empty shortlist without embedding the need. The `Shortlist` type offers `.len()`, `.is_empty()`, `.first()`, `.get(index)`, and `.iter()`.
-
-### Configuration
-
-`Config::default()` provides justified defaults. A caller who has not measured their own catalog should change none of them:
-
-| Threshold | Default | Meaning |
-|-----------|---------|---------|
-| `similarity_floor` | 0.825 | Cosine similarity a candidate must reach to be considered |
-| `margin` | 0.05 | Gap the leader must clear the runner-up by to bind |
-| `duplicate_threshold` | 0.98 | Tool-to-tool similarity at which two tools are treated as twins |
-| `solo_floor` | 0.5 | Minimum score for a lone candidate to bind below the strict floor |
-| `top_k` | 3 | How many candidates a duplicate or ambiguous outcome reports |
-
-Adjust one threshold at a time with checked consuming setters:
-
-````rust
-use promptforge_tool_picker::Config;
-
-let config = Config::default()
-    .with_similarity_floor(0.85)?
-    .with_top_k(5)?;
-
-assert_eq!(config.top_k().get(), 5);
-````
-
-Every `Config` is always valid. Thresholds must be finite and in `0.0..=1.0`. `top_k` must be nonzero. There is no `validate` method because no public operation can produce an invalid value.
-
-A setter that receives an out-of-domain value returns `ConfigError`, which names the rejected field:
-
-````rust
-use promptforge_tool_picker::{ConfigError, ConfigField};
-
-let error: ConfigError = Config::default()
-    .with_similarity_floor(2.0)
-    .expect_err("out of domain");
-assert_eq!(error.field(), ConfigField::SimilarityFloor);
-````
-
-With the `serde` feature, configuration serializes and deserializes as JSON. Absent fields take their defaults, and checked deserialization rejects invalid wire values:
+You can attach MCP behavioral hints to a descriptor: read-only, destructive, idempotent. Each hint is optional and absent by default. An absent hint never changes a ranking. Hints act only as a tie-break between candidates with identical scores. A positive read-only claim wins first, then a non-destructive claim, then an idempotent claim.
 
 ````json
-{"similarity_floor": 0.85, "top_k": 5}
-````
-
-**Decision precedence** is fixed: absent, then duplicate, then bind, then ambiguous. The similarity floor is checked first. Then same-server twins are detected against the duplicate threshold (measured between the tools' own embeddings, not against the query). Then the margin test separates a clear leader from a near-tie. Every threshold boundary is inclusive - a score exactly at the floor is considered.
-
-**The solo-candidate rule:** when the top candidate scores at or above `solo_floor` but below `similarity_floor`, and no runner-up reaches the solo floor, the leader binds. Two candidates between the floors abstain.
-
-### Near-Duplicate Detection
-
-`near_duplicates` compares selected tools against the configured duplicate threshold using the picker's stored embeddings. The comparison is tool-to-tool, not need-to-tool - it measures how alike two tools' own descriptions are, independent of any query.
-
-````rust
-let pairs = picker.near_duplicates(&[
-    ToolId::new("calendar", "create_event"),
-    ToolId::new("calendar", "add_event"),
-])?;
-
-for pair in &pairs {
-    println!(
-        "{}/{} and {}/{} are {:.3} similar",
-        pair.first().server(), pair.first().name(),
-        pair.second().server(), pair.second().name(),
-        pair.similarity(),
-    );
+{
+  "server": "files",
+  "name": "read_file",
+  "description": "Read a file from disk",
+  "inputSchema": {
+    "properties": {
+      "path": { "type": "string" }
+    }
+  },
+  "annotations": { "readOnlyHint": true }
 }
 ````
 
-Every requested identity must be present in the picker. An absent identity returns `SelectionError` before any comparison happens, naming the first missing `ToolId` via `error.missing_id()`. Repeated identities are idempotent set membership.
+You assemble descriptors into a catalog. The catalog is the sole input contract of the picker. Order is preserved. Duplicate identities are accepted, not refused. Two tools claiming the same identity is a result the engine reports, not an input it rejects. You can look up the first descriptor that matches a given identity. You can ask the catalog its size. You can iterate its descriptors in the order you gave them.
 
-Pairs are output in catalog pair order. Each `NearDuplicate` provides `.first()`, `.second()`, and `.similarity()`. The `NearDuplicates` collection provides `.len()`, `.is_empty()`, `.get(index)`, and `.iter()`.
+A catalog serializes as a plain JSON array of descriptors. It round-trips losslessly. You can commit a catalog as data and load it back.
 
-### Error Handling
+### Setting Match Thresholds
 
-Each fallible operation returns its own error type. There is no crate-wide error enum.
+Five thresholds steer which of the four outcomes a need receives. The defaults are pre-calibrated. They were measured against a real catalog. You can resolve tools without tuning anything.
 
-| Operation | Error Type | Key Accessor |
-|-----------|-----------|--------------|
-| `Model::load` | `ModelLoadError` | - |
-| `ToolPicker::build` | `BuildError` | - |
-| `ToolPicker::build_with_model` | `IndexError` | - |
-| `ToolPicker::resolve` / `shortlist` | `QueryError` | `.kind()` |
-| `ToolPicker::near_duplicates` | `SelectionError` | `.missing_id()` |
-| `Config::with_*` | `ConfigError` | `.field()` |
+| Key | Default | Effect |
+|---|---|---|
+| `similarity_floor` | 0.825 | The minimum cosine similarity a candidate must reach to be considered at all. Raise it to bind less often. Lower it to consider weaker matches. |
+| `margin` | 0.05 | The score gap the top candidate must clear the runner-up by before the engine binds. Raise it to demand a clearer winner. Set it to zero to let annotation hints choose between tied tools. |
+| `duplicate_threshold` | 0.98 | The similarity at or above which two tools are treated as twins. The comparison uses the tools' own embeddings, not the query. |
+| `solo_floor` | 0.5 | The minimum score at which a lone candidate still binds. Set it equal to `similarity_floor` to disable the solo rule. |
+| `top_k` | 3 | How many candidates an ambiguous or duplicate outcome reports back. Must be nonzero. |
 
-`QueryError::kind()` returns a `QueryErrorKind` that classifies the failure without exposing dependency types:
+You tune the thresholds with checked setters that start from the defaults. Each threshold must be finite and within 0.0..=1.0. `top_k` must be nonzero. An out-of-domain value produces a configuration error that names the rejected field. Every stored configuration is always valid. There is no separate validation step to remember.
 
-````rust
-use promptforge_tool_picker::{QueryError, QueryErrorKind};
+You can persist or transmit a configuration as JSON. Every field is optional. Absent fields are filled from the calibrated defaults.
 
-match error.kind() {
-    QueryErrorKind::Tokenization => { /* the need text could not be tokenized */ }
-    QueryErrorKind::Inference => { /* the model's forward pass failed */ }
-    QueryErrorKind::InvalidEmbedding => { /* the produced vector could not be normalized */ }
-    _ => {}
+````json
+{
+  "similarity_floor": 0.85,
+  "top_k": 5
 }
 ````
 
-`BuildError` wraps either a `ModelLoadError` or an `IndexError`, and implements `From` for both. All error types are `Send + Sync + 'static`.
+Invalid values in a configuration file are rejected, not silently accepted. A document with `similarity_floor` set to 2.0 fails. A document with `top_k` set to 0 fails.
 
-### Determinism and the Embedded Model
+Every threshold boundary is inclusive. A score exactly at the floor is considered. A gap exactly equal to the margin binds. A pair exactly at the duplicate threshold is a twin.
 
-The crate promises deterministic results: the same model bytes, dependency versions, target, execution environment, catalog, configuration, and need always produce the same outcome. Cross-platform byte-identical vectors at floating-point boundaries are not promised.
+### Reading the Shortlist
 
-The embedding model (BAAI/bge-small-en-v1.5, 384 dimensions) is compiled into the library. There is no model path in the configuration, no weights file to deploy, and no network call at runtime. The build script fetches the model from the Hugging Face Hub at a pinned immutable commit, verifies every file against a hardcoded SHA-256 digest, and downcasts the fp32 weights to fp16 to halve binary size. Subsequent builds reuse the Hugging Face cache.
+You can ask for a shortlist instead of a decision. Use this when you would rather choose for yourself, for example when an end user picks the tool.
 
-At load time, the crate verifies that the embedded weights' provenance metadata matches the pinned repository and revision. A mismatched or substituted checkpoint fails loudly rather than silently altering rankings.
+A shortlist is the best N tools for a need, ranked best first. You choose the cap. A shortlist lists candidates above the similarity floor without making a final decision. The solo-candidate exception is preserved: a lone leader between the solo floor and the strict floor is offered. A limit of zero returns an empty shortlist without paying for an embedding. A shortlist never drops either side of a tie. Even with `top_k` set to 1, a tie yields two entries.
 
-The first build requires network access to the Hugging Face Hub (about 130 MB download). Set `HF_HUB_CACHE` or `HF_HOME` to point at an existing cache, or `HF_ENDPOINT` to a reachable mirror.
+Resolve and shortlist never contradict each other. If resolve abstains, shortlist returns nothing. If resolve binds a tool, shortlist offers exactly that tool.
+
+You can inspect an ambiguous or duplicate group the same way. You can ask its length. You can take the first or second candidate. You can index into it. You can iterate it.
+
+You can also detect near-duplicate pairs inside a chosen set of tool identities. The analysis compares the selected tools' own embeddings against the duplicate threshold. It runs independent of any query. Every requested identity is validated before any pair is compared. A missing identity fails the whole analysis and names the first absent one. Repeated identities collapse to set membership. Each detected pair exposes the two tools and their exact cosine similarity score. Pairs come back in deterministic catalog order, regardless of the order you requested.
+
+Use these views to act. Tune descriptions. Split overloaded tools. Delete copy-pasted duplicates. Resolve ambiguity before it reaches the model.
+
+### Writing Better Tool Descriptions
+
+The engine reads the de-underscored tool name, the description, and the sorted parameter names. Write all three for the match.
+
+- State the action in the description. A need that restates one tool's capability binds that tool. "Read a file from disk" binds a need phrased as "read the contents of a file from disk".
+- Name parameters with meaningful words. Parameter names are part of the matched text. A schema full of `arg1` and `arg2` tells the engine nothing.
+- Keep sibling tools distinct. Two tools that differ only by a copy-pasted name will surface as duplicates. Two tools that genuinely cover the same ground will surface as ambiguous. Both outcomes tell you to sharpen the wording.
+- Attach behavioral hints to otherwise identical tools. On an exact score tie, a positive read-only claim wins first, then a non-destructive claim, then an idempotent claim. Catalog position decides when hints are absent or equal.
+- Treat abstention as a wording signal. If a need you expect to match comes back absent, the description does not cover that phrasing. Broaden the description or lower `similarity_floor`.
+- Treat ambiguity as an overlap signal. If two tools tie, their descriptions claim the same capability. Differentiate the descriptions, or attach hints so the tie breaks your way.
+
+### Building and Rebuilding the Index
+
+You build a picker from a catalog in a single call. The build loads the compiled-in model and indexes every tool. A build error is reported if the model cannot load or the catalog cannot be indexed. An empty catalog builds without error and reports every need as absent.
+
+Loading the model is the expensive step. It happens once. You keep the returned handle and reuse it. Cloning a loaded handle is cheap. Several pickers share the same weights instead of reloading them. You can serve several catalogs from one loaded model. Each picker resolves only its own catalog's tools.
+
+You can replace a picker's catalog with a new one. The rebuild preserves the model and the configuration. The original picker is left unchanged and still answers from its own catalog.
+
+You can observe a picker. You can ask how many tools it indexes. You can ask whether it is empty. You can iterate its tools in catalog order, including reverse. You can look up a tool by identity. You can read back the configuration it was built with. Debug output shows the index size and shape. It never dumps raw embedding vectors.
+
+Results borrow the picker's descriptors. No schema or descriptor is deep-cloned. To keep a resolved tool identity beyond the picker's lifetime, clone just the identity.
+
+While the model loads, you can watch byte-level progress through an optional progress handle. While indexing, the handle advances one step per embedded tool. It completes even for an empty catalog.
+
+### The Embedding Model Asset
+
+The library embeds the BAAI/bge-small-en-v1.5 model, 384 dimensions, compiled into the binary. It runs locally on CPU. The finished binary needs no runtime download.
+
+The first build needs network access. It downloads about 130 MB from the Hugging Face Hub. Later builds reuse the cache. Every downloaded file is pinned to one immutable commit and checked against a hardcoded SHA-256 digest before use. If a checksum fails, the build error names the expected and actual digests and the cache path. You delete the corrupt or tampered cached copy and rebuild.
+
+To build offline or behind a proxy, point `HF_HUB_CACHE` or `HF_HOME` at a warm Hugging Face cache, or set `HF_ENDPOINT` to a reachable mirror.
+
+The build downcasts the model weights from fp32 to fp16 before embedding them. The shipped binary is smaller. Repeated rebuilds skip the download and conversion work. A stamp file records the pinned revision, the conversion version, and the digests of the generated outputs. Corrupted, truncated, or replaced outputs are detected and regenerated. All generated artifacts land under the build output directory inside `target/`. Nothing is written into the source tree. At compile time you can inspect provenance: the pinned revision and the source repository are recorded alongside the embedded assets.
+
+If the Hugging Face Hub is unreachable, the build error states which file could not be obtained, why network access is needed, and the full cause chain.
+
+### Errors and What They Mean
+
+Each fallible operation reports its own narrow failure category. There is no single catch-all error.
+
+- **Model-load failure.** The compiled-in weights, tokenizer, or configuration could not be turned into a usable encoder. Every cause is a build defect. There is nothing to fix at the call site. The message names the category: configuration, dimension mismatch, provenance, tokenizer, truncation, weights, or architecture.
+- **Index failure.** The catalog could not be indexed. Model-load and index failures flow into the single build error when you use the one-call build.
+- **Query failure.** The need itself could not be embedded. The failure classifies into a stable category: tokenization, inference, or invalid embedding. A query failure is not an abstention. An abstention is a successful policy answer.
+- **Selection failure.** A near-duplicate analysis referenced a tool not in the catalog. The error names the first missing tool identity. Selection analysis is validation, so an absent identity fails loudly rather than being silently dropped.
+- **Configuration failure.** A threshold or `top_k` fell outside the supported domain. The error names the rejected field.
+
+You can walk the underlying dependency cause of any failure through the standard error source chain. Error messages are compact lowercase noun phrases. They display transparently without wrapper noise.
+
+### Guarantees at a Glance
+
+- Determinism: the same model bytes, dependency versions, target, environment, catalog, configuration, and need always produce the same outcome. Cross-platform byte-identical vectors at floating-point boundaries are not promised.
+- Thread safety: the model handle and the picker move or share across threads. They work in static and async contexts.
+- Shared weights: two pickers over one model produce byte-identical embeddings for identical text.
+- Zero-copy results: query results, shortlists, and duplicate pairs borrow the picker's descriptors. No schema or descriptor is deep-cloned.
+- Model reuse: load once, clone cheaply, serve many catalogs.
+- Stable text embedding: the same text always embeds to the identical vector. Cached or persisted vectors stay valid.
 
 ---
 
-## promptforge-webfetch
+## Web Fetch Tool
 
-Hand a language model one tool and let it read the web. `promptforge-webfetch` fetches a URL, extracts the useful content, and returns it as markdown the model can cite - while enforcing an SSRF boundary that prevents the model from reaching your internal network no matter what URL it supplies. The common call is one argument (`url`). The security is layered and runs at DNS-resolution time on every hop, so it catches names that resolve inward, rebinding attacks, and redirect chains that point somewhere they should not. By the end of this guide you will know how to wire the tool into a promptforge pipeline, tune its policy for your deployment, and trust it with model-supplied URLs.
+The `web_fetch` tool fetches one web page and returns its main content as markdown. You call it from a prompt with a URL. The tool reads the page, strips the boilerplate, and gives the model clean text it can cite. It also guards your network. It checks every URL before any request leaves the machine. You add live web content to your prompts without opening a security hole.
+
+### What the Tool Does
+
+You give the tool a URL. It fetches that page and returns the main content as markdown. That is the whole scope.
+
+You supply the exact URL. The tool does no search, crawling, or discovery on its own. If the model needs a page, the prompt must name the page.
+
+You can let the model choose URLs at runtime. The tool is the security boundary between an untrusted model-supplied URL and the network. It validates every URL before any network access. It blocks private, loopback, and otherwise restricted IP ranges on every fetch. This protection is automatic. You do not configure it in the prompt.
 
 ### Fetching a Page
 
-Construct the tool and call it with a URL:
+You invoke the tool by its name, `web_fetch`. A call passes a single JSON argument. The `url` string parameter is required. It names the page to fetch.
 
-````rust
-use promptforge_webfetch::WebFetch;
-use promptforge_core::tools::Tool;
+The simplest call looks like this:
 
-let tool = WebFetch::new();
-let output = tool.call(serde_json::json!({ "url": "https://example.com/article" })).await?;
-println!("{}", output.text());
+````json
+{
+  "url": "https://example.com"
+}
 ````
 
-The tool accepts one required argument (`url`) and two optional ones (`raw` and `max_chars`). It performs a GET, classifies the response by content type, and returns the text behind a provenance header:
+This call fetches the page and returns its content as text in the tool output. There is one tool and no auxiliary API to learn.
 
-````text
-url: https://example.com/article
+Every successful result opens with a provenance header. The header gives the final URL, a truncated flag, and the extraction mode. The content body follows the header.
+
+````
+url: https://example.com/
 truncated: false
 extraction: readability
 
-# Article Title
+Example Domain
 
-The main content rendered as markdown...
+This domain is for use in illustrative examples in documents.
 ````
 
-The three header fields are a contract:
+Read the header before the body. The `truncated` flag tells you whether the tool cut the text short. When it reads `truncated: true`, you may need a follow-up fetch with different parameters. The `extraction` label tells you how the tool processed the page. It is `readability`, `raw-html`, or `plain`.
 
-- **url** - the final URL after any redirects, so the model knows where its text came from
-- **truncated** - whether the text was cut short by a size cap
-- **extraction** - which of three processing paths produced the output: `readability` (article isolation), `raw-html` (whole-page render), or `plain` (non-HTML text returned verbatim)
+Treat all returned text as data, never as instructions. Page content and soft errors arrive as untrusted tool output.
 
-### How Content Is Processed
+### What You Get Back
 
-The response's `Content-Type` header decides the route before the body is downloaded:
+The tool inspects the response Content-Type and picks the right rendering path. You specify nothing in the prompt.
 
-**HTML** (`text/html`, `application/xhtml+xml`): The main article is isolated with a readability algorithm and rendered to markdown. If the extracted article is shorter than 100 characters, the whole page is rendered instead, automatically. The `extraction:` header tells you which path fired.
+An HTML page comes back as only the main article content. The tool renders it as clean markdown with navigation, ads, and sidebars stripped. The header reads `extraction: readability`. This markdown is suitable for direct insertion into prompt context.
 
-**Structured text** (`application/json`, `application/xml`, `text/xml`, and any `+json`/`+xml` suffix): Returned verbatim as decoded text. No extraction, no transformation.
+A page that is not article-shaped still yields usable markdown. Landing pages, docs indexes, and forums go through a whole-page HTML-to-markdown fallback. Short pages get the same treatment. When article extraction finds too little content, the tool converts the whole document instead.
 
-**Flat text** (all other `text/*`): Returned decoded. If it exceeds the byte cap, the prefix is kept and `truncated: true` is set.
+You control this behavior with the optional `raw` boolean parameter. Set `raw` to true to skip article extraction and render the whole HTML document:
 
-**Everything else** (PDF, images, audio, video, `application/octet-stream`): Refused with a message naming the content type so the model can try a different URL.
-
-**No Content-Type**: Refused. The tool does not sniff.
-
-Use `raw` when article extraction would discard the content you want - for example a page that is mostly a data table:
-
-````rust
-let output = tool.call(serde_json::json!({
-    "url": "https://example.com/pricing",
-    "raw": true
-})).await?;
+````json
+{
+  "url": "https://example.com/pricing",
+  "raw": true
+}
 ````
 
-This forces whole-page rendering and reports `extraction: raw-html`. Ignored for non-HTML responses.
+Use `raw` for pages that are mostly tables or lists, where extraction would discard content. The header then reads `extraction: raw-html`. The parameter is ignored for non-HTML responses and defaults to false.
 
-Responses compressed with gzip or brotli are decompressed transparently.
+Non-HTML text resources come back decoded verbatim. A JSON endpoint returns its body unmodified. JSON and XML responses, including any `+json` or `+xml` suffixed media type, decode as plain text. Plain-text resources return as-is. The header reads `extraction: plain` for all of these.
 
-### Size Limits and Truncation
+The tool handles encoding for you. It detects the charset the server declares and transcodes non-UTF-8 pages. Invalid UTF-8 decodes with lossy replacement rather than failure. XHTML served as `application/xhtml+xml` gets the same article-extraction treatment as regular HTML.
 
-Two caps govern how much data the tool accepts:
+A URL whose content type the tool cannot render earns a clear refusal. Binary types such as PDF, octet-stream, images, audio, video, and archives are refused up front, without downloading the body. Your prompt fails visibly instead of ingesting garbage. The set of accepted content types is fixed by the tool.
 
-- **Byte cap** (`max_bytes`, default 8 MiB): the largest decompressed response body. A declared `Content-Length` over this cap is refused before any bytes are read. A streaming body that crosses it mid-read is aborted.
-- **Character cap** (`max_chars`, default 40,000): the longest text returned to the model. Text is cut on a character boundary so multibyte characters are never split.
+### Controlling the Size
 
-The two caps interact differently depending on the content type:
+You cap the returned text with the optional `max_chars` integer parameter:
 
-| Route | Body over byte cap | Text over char cap |
-|---|---|---|
-| HTML | Refused (incomplete HTML is invalid) | Truncated, flagged |
-| Structured (JSON, XML) | Refused (truncated prefix is invalid) | Truncated, flagged |
-| Flat text | Truncated at byte cap, flagged | Truncated at char cap, flagged |
-
-A per-call `max_chars` argument lets the model request less text for one call:
-
-````rust
-let output = tool.call(serde_json::json!({
-    "url": "https://example.com/long-page",
-    "max_chars": 5000
-})).await?;
+````json
+{
+  "url": "https://example.com/long-article",
+  "max_chars": 2000
+}
 ````
 
-The per-call value is clamped to the configured ceiling - a model cannot request more than the policy allows, only less.
+This call returns at most 2,000 characters of text. When you omit `max_chars`, the configured ceiling applies. The default ceiling is 40,000 characters per call. A request above the ceiling is clamped to it. Cuts always fall on a character boundary, so multibyte characters are never split.
 
-### Customizing the Security Policy
+The tool also bounds the response body. Bodies are capped at 8 MiB decompressed by default. Gzip and brotli responses are transparently decompressed and measured on their expanded size, so compression cannot smuggle content past the cap. A response whose declared Content-Length exceeds the byte cap is refused before the body downloads.
 
-The default policy (`WebFetch::new()`) is safe for fetching the public internet: HTTPS only, ports 80 and 443, no bare IP-literal URLs, every non-globally-reachable address blocked. Customize it through the builder:
+Truncation depends on the content type. A structured body such as JSON or XML is delivered complete or not at all. An oversized one is refused, never cut into an invalid prefix. A flat text body over the cap returns a truncated prefix flagged `truncated: true`. Watch that flag. It tells you a follow-up fetch with a tighter `max_chars` or a different URL may be needed.
 
-````rust
-use std::time::Duration;
-use promptforge_webfetch::{FetchConfig, WebFetch};
+Timeouts are fixed limits you observe as behavior. The tool allows 5 seconds to establish a connection and 20 seconds for the whole request by default. A slow server produces a soft, recoverable "timed out" message instead of a hung call.
 
-let policy = FetchConfig::builder()
-    .allow_http(true)
-    .allow_ports([80, 443, 8080])
-    .max_bytes(16 * 1024 * 1024)
-    .max_chars(100_000)
-    .timeout(Duration::from_secs(60))
-    .user_agent("my-service/1.0")
-    .build()?;
+### Redirects
 
-let tool = WebFetch::try_with_config(policy)?;
-````
+The tool follows redirects automatically. It vets every hop before it follows it.
 
-Every setter returns `self` for chaining. Validation happens once at `.build()`, which returns `ConfigError` for any invalid field. The available knobs:
+Redirects are capped at 5 hops by default. An embedding may set the cap to 0 to forbid redirects entirely. The hard ceiling is 20.
 
-| Knob | Default | Ceiling | Notes |
+Every redirect target is re-validated against the full URL policy. DNS is re-resolved and re-filtered on every hop. A redirect cannot bounce a fetch to an internal address. An https-to-http downgrade redirect is always refused, even when plain http is enabled.
+
+A refused redirect fails the fetch. The message names the from URL, the to URL, and the reason. You see exactly why the chain stopped.
+
+### Safety Rules for URLs
+
+The tool admits only `https://` URLs by default. Plain `http://` is rejected unless the embedding enabled it. Any other scheme, such as ftp, file, or gopher, is refused before any network access.
+
+These rules decide what you can fetch:
+
+- A malformed or unparseable URL is rejected before any network activity.
+- URL fragments such as `#section` are stripped before fetching. The query string is preserved intact.
+- URLs with embedded credentials, such as `user:pass@host`, are always rejected.
+- Only ports 80 and 443 are allowed by default. A URL naming another port, such as 8080, is refused. When the URL omits a port, the default comes from the scheme: 443 for https, 80 for http.
+- A URL whose host is a bare IP address is rejected by default in every encoding: octal, decimal-integer, IPv6, and shorthand forms.
+- Non-global address classes remain hard-blocked even where IP literals are permitted: loopback, private RFC1918, link-local including the cloud metadata address 169.254.169.254, CGNAT, IPv6 loopback, IPv4-mapped and IPv4-compatible loopback, NAT64 loopback, and multicast.
+- The whole loopback block is denied, not just 127.0.0.1. The blocklist applies equally to IPv6. IPv4 addresses disguised in IPv6 form are unwrapped and reclassified.
+
+All policy checks run before any network access. A rejected URL never costs a request. The same checks are re-applied to every redirect target.
+
+The blocklist tracks a pinned IANA special-purpose registry snapshot (2025). It is precise. Ordinary public addresses immediately adjacent to blocked ranges still fetch normally.
+
+The tool protects your privacy in both directions. Error messages never leak URL secrets. Query strings, credentials, and fragments are stripped from every URL before it appears in any error. A blocked-address error says only that the host is not fetchable. It never reveals internal network topology. Every request carries no ambient identity: no cookies, no Authorization header, no Referer, and no proxy, including after a redirect.
+
+### Errors and Recovery
+
+Every failure mode returns a specific, human-readable message naming the cause. You never get a generic failure.
+
+Failures come in two kinds. Hard errors fail fast. Malformed arguments, such as a missing `url`, a non-integer `max_chars`, or a non-boolean `raw`, are hard invalid-argument errors. Policy-violating URLs, such as embedded credentials, a disallowed port, an IP-literal host, or a blocked address, are also hard errors.
+
+Soft errors arrive as ordinary tool output the model can react to. The model can try a different URL instead of the whole tool call aborting. Soft outcomes include:
+
+- A disallowed scheme. The message names the scheme, for example `scheme not allowed: http`.
+- An HTTP error status such as 404 or 500. The message names the status code and the final post-redirect URL.
+- An unsupported content type. The message names the type, such as `application/pdf`, and suggests an HTML version of the page or a different URL.
+- A missing content type. The tool refuses to guess the format.
+- A timeout. The message says the request timed out and suggests a retry or a different URL.
+- An oversized body. The message names the exact byte cap.
+- A mid-stream network failure while reading a body. The message suggests a retry or a different URL.
+- A DNS failure. The message names the host that could not be resolved.
+- An unrecognized charset. The message names the label the tool cannot decode.
+
+### Configuration
+
+The tool works out of the box with a built-in safe fetch policy. No configuration is required. Configuration exists only at embed time. You observe it as fixed defaults and limits. Whoever embeds the tool customizes the policy through a single validated entry point. Invalid configurations are rejected up front with one error naming the offending field and the violated constraint.
+
+The keys, defaults, and ceilings:
+
+| Key | Default | Ceiling | Effect |
 |---|---|---|---|
-| `allow_http` | `false` | - | Whether `http://` URLs are permitted |
-| `allow_ports` | `[80, 443]` | - | Replaces the port allowlist |
-| `allow_ip_literals` | `false` | - | Grants literal syntax only; address still classified |
-| `deny_cidr` | (none) | - | Adds a blocked CIDR range (can call multiple times) |
-| `allow_host_address` | (none) | - | Exact escape hatch (see next section) |
-| `max_redirects` | `5` | `20` | Zero refuses all redirects |
-| `max_bytes` | 8 MiB | 64 MiB | Must be >= 1 |
-| `max_chars` | `40,000` | `10,000,000` | Must be >= 1 |
-| `connect_timeout` | 5s | 60s | Must be > 0 |
-| `timeout` | 20s | 300s | Must be > 0 |
-| `pool_idle_timeout` | 10s | 600s | Must be > 0 |
-| `user_agent` | `"promptforge-webfetch/0.0"` | - | Must be a valid HTTP header value |
+| `allow_http` | `false` | n/a | Permits `http://` URLs. `https://` is always allowed. |
+| `allow_ports` | `[80, 443]` | n/a | Ports a fetch may target, matched against the URL's effective port. |
+| `allow_ip_literals` | `false` | n/a | Grants literal syntax only. Non-global literals stay blocked. |
+| `deny_cidr("...")` | empty | n/a | Adds denied CIDR ranges on top of the built-in table. |
+| `allow_host_address(host, addr)` | empty | n/a | Exact (host, IP) escape hatch. The only supported way to reach an otherwise-blocked address. |
+| `max_redirects` | 5 | 20 | Redirect hops per fetch. 0 forbids redirects entirely. |
+| `max_bytes` | 8 MiB | 64 MiB | Response body cap, counted on decompressed bytes. |
+| `max_chars` | 40,000 | 10,000,000 | Per-call cap on returned text length. |
+| `connect_timeout` | 5s | 60s | Time allowed to establish a TCP connection on any hop. |
+| `timeout` | 20s | 300s | Cap on the total time a single request may take. |
+| `pool_idle_timeout` | 10s | 600s | How long idle connections stay in the pool. |
+| `user_agent` | `"promptforge-webfetch/0.0"` | n/a | The User-Agent header sent on every request. |
 
-### Reaching an Internal Host
-
-By default, every non-globally-reachable address is blocked. The only supported way to reach one is an exact host-plus-address pair:
-
-````rust
-use std::net::IpAddr;
-use promptforge_webfetch::FetchConfig;
-
-let addr: IpAddr = "10.0.5.42".parse()?;
-let policy = FetchConfig::builder()
-    .allow_http(true)
-    .allow_ports([80, 443, 8080])
-    .allow_host_address("wiki.internal.corp", addr)
-    .build()?;
-````
-
-The escape hatch is deliberately narrow:
-
-- Keyed on **both** host and address, so `evil.com` resolving to `10.0.5.42` does not inherit the exception
-- Grants access to exactly one address, not a range
-- The host is canonicalized (lowercased, trailing dot stripped) so case variants match
-
-You can also block additional ranges for your deployment:
-
-````rust
-let policy = FetchConfig::builder()
-    .deny_cidr("10.99.0.0/16")
-    .deny_cidr("172.20.0.0/14")
-    .build()?;
-````
-
-### The SSRF Boundary
-
-The tool enforces four layers of defense, in order:
-
-1. **URL admission** (before any network access): Rejects bad schemes, embedded userinfo, non-allowed ports, and bare IP literals that map to blocked addresses. Catches obfuscated IPv4 encodings (`0177.0.0.1`, `2130706433`, `127.1`, `[::ffff:127.0.0.1]`).
-
-2. **Guarded DNS resolver** (at connect time, every hop): Resolves the host, filters the answers through the address policy, hands only the allowed addresses to the HTTP client. A host that resolves entirely to blocked addresses fails. A host with mixed public/private answers connects to the public one. No verdict is cached, so a DNS-rebinding answer is caught on the hop that returns it.
-
-3. **Redirect re-validation** (on every redirect hop): Re-runs the full URL policy on the redirect target. Refuses HTTPS-to-HTTP downgrades. Enforces the hop cap. The resolver re-classifies the redirect target's addresses at connect time.
-
-4. **No ambient identity**: The client carries no cookies, no `Authorization` header, no `Referer`, and disables ambient proxy (`HTTP_PROXY`/`HTTPS_PROXY`). A redirect cannot smuggle credentials to a cross-origin target.
-
-The built-in blocked-address table covers all IPv4 and IPv6 special-use space: loopback, RFC1918, CGNAT, link-local (including `169.254.169.254`), documentation, benchmarking, multicast, reserved, and IPv6 equivalents including IPv4-mapped, NAT64, unique-local, and deprecated site-local. IPv4-embedded IPv6 addresses (`::ffff:127.0.0.1`, `::10.0.0.1`) are normalized to their embedded IPv4 value and reclassified.
-
-### Error Behavior
-
-Errors split into two categories based on whether a retry makes sense:
-
-**Soft outcomes** (returned as tool text the model can act on):
-- HTTP error status (404, 500, etc.)
-- Timeouts
-- DNS failures
-- Unsupported or absent content type
-- Body too large
-- Body read failure mid-stream
-- Redirect refused
-- Blocked scheme (`http` when only `https` is allowed)
-
-**Hard errors** (the URL itself is invalid, no retry will help):
-- Unparseable URL
-- URL contains userinfo
-- Port not on the allowlist
-- IP literal not allowed
-- Address is blocked / no allowed address for the host
-
-When a blocked address is reported to the model, only the host name appears in the message - never the resolved address or the blocking range. Query strings and fragments are redacted from all diagnostic URLs so a `?token=secret` never reaches logs or model output.
+Two keys shape the address policy. `deny_cidr("...")` blocks additional ranges that would otherwise be fetchable, such as an organization's own address space. `allow_host_address(host, addr)` admits one exact host-plus-address pair, for example localhost at 127.0.0.1. The exception never widens. It admits only the named address, and a DNS answer for another name cannot inherit it.
 
 ---
 
-## promptforge-dev
+## promptforge-dev User Guide
 
-promptforge-dev is the edit-run-inspect loop for PromptForge prompts. Point it at a prompt file, and it runs the prompt against your already-running gateway, dumps the store for inspection, and optionally watches for saves so every edit triggers a fresh run. No gateway management, no model downloads, no weight files - just the prompt and its output, tight enough that your iteration cycle is limited by how fast you can think, not how long you wait.
+You write prompts. You want to see what they do. `promptforge-dev` runs one prompt file against your already-running PromptForge gateway with a single command. Edit the file. Save it. See the result. Add `--watch` and every save triggers a fresh run, so the loop from edit to result takes seconds. The tool dumps the prompt's store to disk after each run, prints the final result on stdout, and keeps diagnostics on stderr. You get a fast, inspectable loop for prompt development with no gateway management, no model downloads, and no weight files.
 
-### Prerequisites
+### The Prompt Runner and Edit-Run Loop
 
-promptforge-dev requires a running `promptforge-gateway`. Start it yourself, then export two environment variables:
+`promptforge-dev` is a command-line tool. You point it at a prompt file. It runs that prompt against a PromptForge gateway that is already running. One command gives you one run.
 
-````sh
+The tool connects to an existing gateway. It never starts one. You do not manage a gateway lifecycle. You do not download models. You do not handle weight files.
+
+Pass `--watch` to enable watch mode. Every save of the prompt file triggers a fresh run. You get a live edit-run feedback loop while you develop a prompt.
+
+### Installation and Gateway Setup
+
+Install the tool from crates.io with one command. The package is published. You do not build from source. The tool requires Rust 1.89 or later.
+
+The tool needs two environment variables. Set both before you run it. There are no CLI flags for them.
+
+````bash
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
 export PROMPTFORGE_GATEWAY_API_KEY=<bearer from your gateway profile>
 ````
 
-Both must be set and non-empty. If either is missing, the binary fails immediately with a message naming the missing variable and reminding you to start the gateway. No prompt file is read until both are validated.
+`PROMPTFORGE_GATEWAY_URL` is the gateway API root. `PROMPTFORGE_GATEWAY_API_KEY` is your bearer credential. Both must be set and non-empty. An empty value counts as missing.
 
-### Your First Run
+The tool validates the environment once at startup, before it does any work. If a variable is missing or empty, you get a startup error. The error names the missing variable. It tells you to start promptforge-gateway first, then export both variables. The tool exits with code 1.
 
-From the PromptForge repository root:
+A malformed gateway URL or a blank credential aborts startup before any prompt run. Your bearer credential never appears in logs or debug output. It renders as redacted.
 
-````sh
-cargo run -p promptforge-dev -- my-prompt.md
+### Running a Prompt
+
+The simplest invocation names a prompt file.
+
+````bash
+promptforge-dev my-prompt.md
 ````
 
-This runs `my-prompt.md` with an empty input. The second positional argument supplies an input string:
+Pass an input string as the second positional argument. The input becomes the prompt's `args`. If you omit it, it defaults to empty.
 
-````sh
-cargo run -p promptforge-dev -- my-prompt.md "summarize this paragraph"
+````bash
+promptforge-dev my-prompt.md "summarize this paragraph"
 ````
 
-The input becomes the prompt's `args`. If you omit it, it defaults to empty.
+To pass an input that begins with `--`, place a bare `--` delimiter before it.
 
-Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.bind` or `models.default`. The binary's argument surface is deliberately minimal: `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]`.
-
-### What Happens During a Run
-
-Each invocation follows a fixed pipeline:
-
-1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set.
-2. **Fetch the model catalog.** One HTTP call to the gateway. The catalog is fetched once and reused across watch-mode reruns.
-3. **Build the tool set.** Two tools are always constructed: `web_fetch` (runs locally) and `web_search` (proxies through the gateway). A semantic tool picker is derived from the same live set, so no picker descriptor can advertise a tool without a matching callable.
-4. **Parse the prompt.** The file must declare `promptforge:` in its YAML frontmatter. A file without it is refused: "is not a promptforge prompt."
-5. **Execute.** The prompt runs against the gateway. The store stays in memory during execution - no filesystem writes happen on the async path.
-6. **Dump the store.** After the run (success or failure), the in-memory store is reconciled to disk beside the prompt file.
-
-A unique execution id is minted for each run: `dev-` followed by 128 random hex bits. It prints to stderr before any observer output, so you can always tell which run produced which output:
-
-````text
-run id: dev-3a7f1b2c9e4d5a8f0011223344556677
+````bash
+promptforge-dev my-prompt.md -- "--verbose"
 ````
 
-Observer records stream to stderr as single trace lines:
+Declare context, thinking, and max tokens on the prompt file itself. Use `models.bind` or `models.always`. The tool rejects CLI flags for these settings. `--context`, `--max-tokens`, `--no-think`, and `--verbose` all produce unknown-flag errors.
 
-````text
-[dev-3a7f1b2c9e4d5a8f0011223344556677] Research: Run started
-[dev-3a7f1b2c9e4d5a8f0011223344556677] Research: Lua: checkpoint
-````
+The tool runs only files that declare a `promptforge:` version in frontmatter. It refuses other files with a clear message.
 
-The final result prints to stdout. This separation lets you pipe or redirect output without observer noise.
+Each run follows a fixed pipeline: validate environment, fetch model catalog, build tool set, parse prompt, execute, dump store. The catalog is fetched once and reused across watch-mode reruns. Every run prints a unique run id to stderr. The id correlates console output, traces, and store files.
 
-### Inspecting Output
+When a run fails, you get a diagnostic that names the prompt file. The tool exits with code 1. A missing prompt file or more than two positional arguments produces a one-line problem description and the usage line, with exit code 2. Argument errors report before any credential check.
 
-Every run dumps its store to `<prompt-stem>.store/` beside the prompt file. For a prompt named `briefer.md`, the dump lands in `briefer.store/`:
+The exit codes are documented: 0 success, 1 runtime error, 2 usage error, 130 interrupted. Cancel a running prompt with Ctrl-C. You receive an "interrupted by Ctrl-C" message. The exit code is 130. Scripts can branch on these codes.
+
+### Results and the Store Dump
+
+When a run succeeds, the prompt's final result string prints on stdout. The result is separate from the diagnostic stream on stderr. You can pipe or redirect the result without observer noise.
+
+After a run, the tool dumps the prompt store. You inspect what the prompt produced. Store dumping is part of the default run behavior. No extra flag is needed.
+
+Every run's store lands in a directory beside the prompt file, named after it. For a prompt named `briefer.md`, the dump lands in `briefer/`. It contains the files the prompt wrote, such as `evidence.md` and `notes/deep.txt`.
 
 ````text
 briefer.md
-briefer.store/
+briefer/
   evidence.md
   notes/
     deep.txt
 ````
 
-The dump reconciles on every run:
+Every store write lands on disk immediately during the run. There is no post-run reconcile step. The tool clears the previous store directory before each new run, so stale files never masquerade as current output. A run that produces nothing removes its empty store directory when it finishes. Your directory tree stays clean. A failed run keeps its partial store on disk. You can debug from it.
 
-- Changed files are overwritten with current contents.
-- Files from a previous run that are no longer in the store are deleted.
-- The `.trace/` subdirectory (used by raw trace capture) is preserved across reconciles.
-- When the store is empty and no trace files remain, the dump directory is removed entirely.
-
-A failed run still dumps its partial store. That partial output is exactly what you need when debugging a prompt that errored partway through.
+The tool skips unsafe store paths and reports the status. Unsafe paths include absolute paths, `..` traversal, backslashes, control characters, and Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
 
 ### Watch Mode
 
-Add `--watch` to enter a rerun loop:
+Pass `--watch` to rerun the prompt automatically on every save.
 
-````sh
-cargo run -p promptforge-dev -- --watch my-prompt.md "test input"
+````bash
+promptforge-dev --watch my-prompt.md
 ````
 
-The prompt runs once, then the file is watched for changes:
+The tool prints a startup line: it is watching the file, and Ctrl-C stops it. Edit the prompt. Save it. A fresh run fires. Successful results print to stdout on every rerun. Diagnostics stay on stderr.
+
+A failed rerun prints its error on stderr. Watch mode keeps watching for the next save. You keep iterating.
+
+A burst of rapid saves coalesces into one rerun. The rerun fires after 300ms of quiet. One logical edit produces exactly one run. Editors that save through atomic write-then-rename still trigger reruns.
+
+Watch mode watches only the prompt file. Changes to other files in the same directory never trigger a rerun. This includes the store directory's contents. A bare file name as the prompt path watches the current directory. If the filesystem watcher backend fails, watch mode stops with a descriptive error.
+
+Reruns are fast. The run environment is built once and reused across every save. The tool does not refetch the model catalog or rebuild the tool picker on each save.
+
+Stop watch mode at any time with Ctrl-C. The exit is clean. You see "interrupted by Ctrl-C". No spurious final rerun fires, even if a save was mid-debounce.
+
+### Web Tools and Tool Picking
+
+Your prompts get web fetching and web search tools during a run. Both tools are always available on every run. There is no offline mode. There is zero configuration.
+
+The model fetches a web page with `web_fetch`. The tool returns the page's main content as markdown. It runs locally.
+
+The model searches the web mid-run with `web_search`. The tool proxies through the PromptForge gateway. It uses your validated bearer credential.
+
+The run picks relevant tools for the prompt automatically. A semantic tool picker resolves natural-language capability descriptions to the matching tool. The picker is built over the live tool catalog and an embedding model. The live tool set is validated before the picker is derived, so every advertised tool is actually callable. Duplicate tool identities or illegal wire names produce clear startup errors instead of silent breakage.
+
+### Raw Capture and Trace Files
+
+Pass `--capture-raw` to persist verbatim request and response bodies. This covers full prompts, tool arguments and results, and model output.
+
+````bash
+promptforge-dev --capture-raw my-prompt.md
+````
+
+This flag is the only way trace capture activates. An ordinary run never silently persists sensitive data. When the flag is active, a warning on stderr names the trace directory.
+
+The traces go to a `.trace/` directory inside the prompt's store directory: `<prompt-stem>/.trace/`. Each model turn produces one pretty-printed JSON file per direction, named `turn-{N}-request.json` and `turn-{N}-response.json`. Each file holds one verbatim request or response body. You inspect or replay exactly what happened during a session.
+
+Trace capture never blocks the run. A background worker writes the files. If the capture queue falls behind, events drop. The tool reports the exact drop count on stderr when the run finishes. Each written trace file gets a stderr confirmation. A failed trace write produces a stderr diagnostic, and the run continues.
+
+### Progress and Console Output
+
+During setup, progress bars render when stderr is a terminal. They cover the catalog fetch, the embedding-model load, and tool indexing. Bars clear as phases finish. Off a terminal, stderr stays clean.
+
+During the run, you watch a live verbose trace on stderr. Every observation is its own bracketed line. Each line is prefixed with the run id.
 
 ````text
-watching my-prompt.md for changes; press Ctrl-C to stop
+[dev-3a7f...] Research: Run started
+[dev-3a7f...] Section: Lua: step one
 ````
 
-Every save triggers a rerun after a 300 ms debounce quiet period. The debounce absorbs editor write-then-rename save bursts so a single save produces a single rerun, not two or three.
+The final result prints separately to stdout. You can pipe or redirect output without observer noise.
 
-The gateway catalog, tools, and picker built at startup are reused across every rerun - no repeated network calls. Each rerun gets a fresh execution id.
+### Diagnostics and Failure Reporting
 
-If a rerun fails, the error prints to stderr and watching continues. A broken edit does not kill your session.
-
-The watcher monitors the prompt's parent directory, filtered to the prompt's file name. Store dump writes (to the `.store/` directory) do not retrigger reruns. The watcher uses a capacity-one bounded channel, so a slow rerun or a noisy filesystem cannot grow an unbounded event backlog. Watcher backend errors surface through a separate loss-proof slot - they are never silently dropped, even when the channel is full.
-
-### Raw Trace Capture
-
-Add `--capture-raw` to persist the verbatim request and response bodies for each model turn:
-
-````sh
-cargo run -p promptforge-dev -- --capture-raw my-prompt.md
-````
-
-A warning prints to stderr:
+When a run fails inside a Lua section, the error message leads with the prompt file path and the exact line number.
 
 ````text
-warning: --capture-raw persists verbatim prompts, tool arguments and results, and model output to my-prompt.store/.trace
+dev run failed: briefer.md:51: <detail>
 ````
 
-Each model turn writes two files under `.trace/`:
+The line number points at the innermost failing section. A failure not tied to a prompt line shows a plain message without a line number. Errors name the failing file and stage, whether the file cannot be read, parsed, or executed.
 
-````text
-my-prompt.store/
-  .trace/
-    turn-1-request.json
-    turn-1-response.json
-    turn-2-request.json
-    turn-2-response.json
-````
-
-These contain the full, unredacted request and response JSON. The material is sensitive - raw prompts, tool arguments and results, model output - which is why capture is off by default and requires an explicit flag.
-
-Trace capture uses a bounded queue (128 events) with a dedicated worker thread. The worker serializes and writes each payload with owner-only permissions and atomic semantics. If the worker falls behind, events are counted as dropped and the count is reported when the run finishes. I/O never blocks the run's async task.
-
-All queued writes are flushed before the store dump reconcile, so trace files are always complete when you inspect the dump directory.
+Use the run id prefix on each trace line to correlate console output, traces, and store files for one run.
 
 ### Filesystem Security
 
-All dump writes - store files and trace captures - go through a security layer:
+All dump and trace writes are owner-only. Directories are mode 0o700 and files are mode 0o600 on Unix. On Windows, full control goes to the current user alone. You do not configure this. It is always active. On Windows, this hardening depends on the USERNAME environment variable.
 
-- **Owner-only permissions.** Directories are created `0o700` and files `0o600` on Unix. On Windows, inherited access is stripped and full control is granted to the current user alone via `icacls`.
-- **No symlink traversal.** Every write checks the target and all existing ancestors for symlinks and Windows reparse points. A planted link at any path component is refused, preventing writes from escaping the dump tree.
-- **Atomic writes.** Each file is written to a sibling temporary (`.{name}.tmp{random}`), flushed, permission-restricted, then renamed over the destination. An interrupted write cannot truncate a prior file. The temporary is cleaned up on failure.
-- **Path safety.** Store paths that are absolute, traverse with `..`, contain backslashes, control characters, or Windows reserved characters (`*`, `?`, `"`, `<`, `>`, `|`) are skipped with a status report. Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9 - including Unicode superscript digit variants) are also rejected.
-
-You do not configure any of this. It is always active.
-
-### Diagnostics
-
-When a Lua error maps to a prompt line, the failure message leads with the file and line number:
-
-````text
-dev run failed: briefer.md:51: run briefer.md: lua error: section `Web Search` epilog:51: assertion failed!
-````
-
-This format enables click-to-navigate in editors that recognize `file:line:` patterns.
-
-Errors without a mapped prompt line omit the line prefix:
-
-````text
-dev run failed: some transport error
-````
-
-**Exit codes:**
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Runtime error (gateway, parse, execution, dump) |
-| 2 | Usage error (bad arguments) |
-| 130 | Interrupted by Ctrl-C |
-
-Ctrl-C is handled cooperatively: the run is cancelled, its completion is awaited (so blocking fanout joins are not abandoned), and the process exits with code 130.
-
-### Edge Cases and Validation
-
-**Unknown flags.** Any flag starting with `--` that is not `--watch`, `--capture-raw`, or `--` is rejected with usage text. This includes former server knobs like `--context`, `--max-tokens`, and `--no-think` that were removed when model parameters moved to the prompt file.
-
-**Non-PromptForge files.** A markdown file whose YAML frontmatter does not declare `promptforge:` is refused with a clear message rather than producing a confusing parse error.
-
-**The `--` delimiter.** Use `--` to pass an input that begins with dashes:
-
-````sh
-cargo run -p promptforge-dev -- my-prompt.md -- --this-is-input-not-a-flag
-````
-
-Everything after `--` is treated as a positional argument.
-
-**Credential protection.** The bearer key is wrapped in a `GatewayKey` type that renders as `<redacted>` in Debug output. An accidental `{:?}` on a `GatewayEnv` cannot leak the credential.
+The tool refuses to write through symlinked or reparse-point ancestors. A planted link cannot redirect sensitive output outside the dump tree. Dump files are written atomically. Content goes to a temporary file, then renames over the destination. An interrupted write never corrupts a previously dumped file. A failed write removes its partial temporary file.
 
 ---
 

@@ -1,111 +1,109 @@
 # promptforge-cli User Guide
 
-`promptforge` is a command-line tool that runs PromptForge prompt files in a single process. Point it at a prompt file, and it parses the sections, executes them top to bottom, and prints the returned value. No server to start, no connection to manage, no configuration to write. You edit a prompt, run it, and see what it produces. This guide covers every capability the CLI provides, from the first invocation to gateway configuration and cancellation.
+PromptForge CLI is a command-line tool that runs PromptForge prompt files against LLM providers. You point it at a prompt file, and it runs the prompt in a single process. There is no server to start, no connection to manage, and no configuration file to write. Your credentials stay in environment variables, never on the command line. Built-in web tools let your prompts fetch pages and search the web. If you can type one command in a shell, you can run any PromptForge prompt.
 
-## Running Your First Prompt
+## What promptforge-cli Does
 
-The binary is named `promptforge`. It has one command:
+You run a PromptForge prompt file from the command line by pointing the tool at the file. The tool parses the prompt and executes its sections top to bottom in a single process. Running a prompt is a single command.
 
-```bash
-promptforge run <file.md> [input]
-```
+The tool runs only genuine PromptForge prompts. If a file's frontmatter does not declare a `promptforge:` version, the tool refuses to run it.
 
-The file must be a PromptForge prompt. That means its YAML frontmatter must declare a `promptforge:` version. If it does not, the CLI refuses the file before attempting to parse it:
+On success, the prompt's returned value is printed to stdout. Stdout contains exactly that returned value and nothing else. Errors go to stderr. This contract makes the tool safe to use in scripts and pipelines.
 
-```
-error: prompt.md is not a promptforge prompt: its frontmatter declares no `promptforge:` version
-```
+## Getting Started
 
-A valid prompt file is read from disk, parsed by the core parser, and executed in-process. The binary links the PromptForge executor directly rather than connecting to an MCP server or any other service. This is a development tool for the edit-run loop: you edit a prompt file, run it with `promptforge run`, and see the result immediately.
+Install the tool from crates.io. The install produces an executable named `promptforge`. The install requires Rust 1.89 or later.
 
-The simplest invocation takes just a file path:
+Run a prompt file with the `run` subcommand:
 
-```bash
+````
 promptforge run prompts/hello.md
-```
+````
 
-Prompts are addressed by file path, not by name from a catalog. There is no configuration file, no resolution rule, and no catalog lookup. Shell completion, relative paths, and `..` work as they do with any file argument.
+The tool reads the file from your local filesystem, executes it, and prints the result. You address prompts directly by file path. There is no configuration file, no name resolution rule, and no catalog lookup.
 
-## Input and Output
+You can pass a raw input string to the prompt as an optional positional argument after the file path:
 
-The optional second argument is a raw input string that becomes the prompt's `args` value in its entirety:
-
-```bash
+````
 promptforge run prompts/staker.md "Bloomberg"
-```
+````
 
-The prompt body decides what that text means. The binary does not inspect, split, or coerce it. An input containing spaces must be quoted as a single shell argument.
+Inside the prompt, the input is exposed as `args`. It defaults to empty. The tool does not inspect, split, or coerce the input. An input that contains spaces must be quoted as a single shell argument.
 
-When the prompt completes, its returned value goes to stdout. Errors go to stderr. Nothing is mixed. On success, stdout contains exactly the returned value and nothing else. On failure, nothing appears on stdout. This clean separation means shell substitution works:
+## Configuring the Gateway
 
-```bash
-report=$(promptforge run prompts/digest.md "2026-08")
-```
+You connect to a remote PromptForge gateway by setting two environment variables together:
 
-The variable `report` captures exactly what the prompt returned.
-
-## Gateway Configuration
-
-Gateway credentials come from two environment variables:
-
-- `PROMPTFORGE_GATEWAY_URL` - the gateway base URL
-- `PROMPTFORGE_GATEWAY_API_KEY` - the bearer token
-
-There are no CLI flags for credentials. This is deliberate: secrets never appear in `argv`, where `ps` and shell history can expose them.
-
-**Local-only mode** is the default. With neither variable set (or with empty/whitespace-only values), the CLI runs without a gateway. The `web_fetch` tool is available, but there is no `web_search` and no remote model catalog. A prompt that makes no model calls works entirely self-contained in this mode.
-
-**Remote mode** activates when both variables are set:
-
-```bash
+````
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
 export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
-promptforge run prompts/search-demo.md "latest Rust news"
-```
+````
 
-This enables the `web_search` tool and fetches the remote model catalog, so prompts can perform inference through the gateway.
+This enables the `web_search` tool and the remote model catalog for inference through the gateway.
 
-Setting a key without a URL is rejected explicitly:
+Credentials are accepted only through environment variables, never through command-line flags. This keeps tokens out of argv, process listings, and shell history.
 
-```
-error: PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
-```
+You run entirely local-only, with no network access, by leaving the gateway API key unset or blank. A gateway URL set without a key also yields local-only mode. Local-only mode yields an empty model catalog and a local tool set.
 
-## Tools
+The error cases are strict. A key set without a URL is a startup error, not a fallback. A gateway endpoint that is not a valid URL fails at startup, before the run begins. Blank or whitespace-only credential values are treated as absent. Whitespace around otherwise valid values is tolerated.
 
-Two tools are available to prompts, depending on the gateway configuration:
+The bearer token never appears in logs or diagnostic output. When the tool renders the gateway configuration for diagnostics, it shows the endpoint but replaces the token with a redaction marker.
 
-**`web_fetch`** runs locally and is always available regardless of gateway mode. It needs no credentials.
+## Built-in Tools
 
-**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
+Any prompt can fetch a web page and return its main content as markdown using the built-in `web_fetch` tool. It runs locally. It is always available in every mode. It needs no credentials.
 
-The tool picker resolves `tools.bind` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the tool catalog and picker catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
+A prompt can search the web and receive a list of results with title, url, and description using the `web_search` tool. The tool offers `web_search` only when gateway credentials are configured.
 
-## File Validation
+If a prompt explicitly binds to a tool that is not available, the run fails before any section executes. For example, a prompt that explicitly binds to `web_search` without gateway credentials fails with an absent-capability error.
 
-Before parsing, the CLI checks whether the file's YAML frontmatter declares a `promptforge:` version key. If the key is absent, the file is refused with a clear message naming the reason.
+## Selecting Tools for a Run
 
-This matters because pointing the tool at an ordinary markdown file without this check would produce a confusing parse error about syntax, sending the user to fix the wrong thing. The version check answers a different question: is this file one of ours at all?
+The tool selects tools semantically for each prompt. During startup, it loads an embedding model and builds a semantic tool picker over the available tool catalog.
 
-## Cancellation and Exit Codes
+Capability binding is automatic. When `web_search` is unavailable, a prompt's search capability request falls back to `web_fetch`. When the gateway is configured, the search capability binds to `web_search`. You do not configure this mapping. The tool derives it from the available catalog.
 
-Press Ctrl-C to cancel a running prompt. The signal trips a cooperative cancellation handle, and the process exits with code 130.
+## Startup Progress
 
-The four exit codes:
+While stderr is an interactive terminal, you see live progress bars during startup. The startup sequence has three labeled phases: "model catalog", "embedding model", and "tool index". Each bar shows its phase name and a numeric percentage. Finished phases disappear as their bars are cleared.
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success - the prompt completed and its value was printed |
-| 1 | Operational failure - unreadable file, not a prompt, parse error, setup failure, or execution failure |
-| 2 | Usage error - owned by the argument parser (missing file, unknown command) |
-| 130 | Cancelled - the run was interrupted with Ctrl-C |
+The bars are suppressed entirely when output is piped. This keeps stderr clean for scripts. If the progress display itself fails to start, the tool prints a warning and the run proceeds without bars. A progress failure never fails the run.
 
-In a script, check `$?` to branch on success or failure. If you need to distinguish failure causes, read the error message on stderr.
+## Cancelling a Run and Exit Codes
 
-## Runtime Behavior
+You can interrupt a running prompt with Ctrl-C. This cooperatively cancels the run. If the Ctrl-C listener cannot be installed, the tool prints a stderr warning that the run is not cancellable, and the run proceeds.
 
-Each run creates an in-memory store. A prompt's filed state lives exactly as long as the process. Nothing is written to disk unless the prompt itself writes something. State does not accumulate across runs. A prompt that needs durable artifacts requires a caller that provides a durable store.
+Scripts can branch on four exit codes:
 
-Each run generates a unique execution ID, a 36-character string prefixed with `cli-`, for correlating observations within a single invocation.
+| Exit code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Operational failure (unreadable file, not a prompt, parse error, setup failure, execution failure) |
+| 2 | Usage error (missing file argument, unknown subcommand) |
+| 130 | Cancelled with Ctrl-C |
 
-Progress is discarded by default. The binary installs a null observer, so long runs produce no progress output. The result appears when the run finishes, and silence in between is expected. A rendering client or progress display would be a separate concern.
+In a script, check `$?` to branch on success or failure. Remember the output contract: on success, stdout holds exactly the returned value. Errors go to stderr as an error chain.
+
+## State and Observability
+
+By default, each run uses a fresh in-memory store. A prompt's state lives exactly as long as the process. Nothing persists or accumulates across runs.
+
+You can persist the prompt's store across runs with the `--store DIR` option:
+
+````
+promptforge run prompts/staker.md "Bloomberg" --store ./state
+````
+
+This switches from the default ephemeral in-memory store to a persistent file-backed store in the directory you name.
+
+Each run generates a unique execution ID, a 36-character string prefixed with `cli-`. Use it to correlate observations within a single invocation.
+
+During the run itself, the tool produces no progress output. Long runs are silent until the result appears. Silence in between is expected.
+
+## Errors and Invocation Edge Cases
+
+Error messages name the failing stage. Examples include "read prompt file <path>", "parse prompt file <path>", "fetch the model catalog", and "load the tool embedding model". Each error goes to stderr as an error chain, so you see the full context of the failure.
+
+The invocation parser is strict. A missing file argument is an error. An unknown subcommand is an error. Extra trailing arguments are an error. None of these are silently ignored.
+
+The frontmatter gate applies to every run. A file whose frontmatter declares no `promptforge:` version is rejected before execution. This is how the tool guarantees it runs only genuine PromptForge prompts.

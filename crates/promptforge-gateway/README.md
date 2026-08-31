@@ -18,13 +18,41 @@ cargo install promptforge-gateway
 promptforge-gateway serve gateway.toml --profile main
 ```
 
-Boot requires two things: a config path and a profile name. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). The profile is required and is loaded from the `profiles/` directory beside the boot file; a minimal `profiles/main.toml` containing only `include = ["../gateway.toml"]` loads the full catalog.
+Boot requires a config path and a selected profile. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). The profile comes from `--profile NAME`, the `PROMPTFORGE_PROFILE` environment variable, or the sibling state file, in that precedence; with none set, startup refuses and lists the profiles the config defines.
 
 Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions`, serves a model catalog at `GET /v1/models`, and, with `workshop`, accepts OpenAI-compatible multipart transcription at `POST /v1/audio/transcriptions`.
 
 Embedding hosts use the library API instead of the binary: `spawn` starts the gateway on a dedicated thread with its own runtime and blocks until the listener is bound, returning a `GatewayHandle` that carries the bound URL and a graceful-shutdown switch (`url()`, `shutdown()`, `join()`).
 
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
+
+## Profiles
+
+One `gateway.toml` holds the entire catalog, opened by `config-version = 2`: global sections once (`[server]`, `[workshop]`, `[local]`, `[tools]`, `[[endpoint]]`, `[[dominion]]`), remote models as `[[model]]`, local models as `[[local_model]]`, and speech-to-text models as `[[stt_model]]`. Profiles are named checklists over that catalog:
+
+```toml
+[[profile]]
+name = "work"
+models = ["gpt-5", "qwen3-local", "whisper-base-en", "whisper-small-en"]
+
+[[profile]]
+name = "travel"
+models = ["qwen3-local"]
+```
+
+The active profile filters the catalog before validation and spawn: checked remote models route, checked local models spawn `llama-server` children, checked STT models load into the gateway-owned transcription engine. Membership is the entire definition; profiles carry no per-field overrides.
+
+The active profile is not a config key. It lives in a sibling state file - `gateway.toml` maps to `gateway.state.toml` - with one canonical key:
+
+```toml
+active_profile = "work"
+```
+
+Every profile is validated at load: names are unique and legal, every listed model exists in the catalog, and each profile's local and STT subset is checked against dominion VRAM budgets, so a live switch can never land on an invalid profile. A state file naming a profile that no longer exists is a startup error naming the stale value.
+
+Switching runs from the already-loaded catalog through `POST /admin/switch-profile`, streaming its stages (`loading-profile`, `stopping-models`, `starting-models`, one terminal event) over SSE. In-flight inference requests get a bounded drain - up to 30 seconds - before stragglers are cancelled and local children stop; the new subset then spawns and routing swaps atomically, and the choice persists to the state file. The Config UI stages `active_profile` as pending state like any other edit, so the switch lands atomically on Apply.
+
+The pre-2 layout is a hard break with no compat loader: a config carrying an `include` key, a top-level `models` allowlist, or the old `[workshop.voice]` model keys, a missing or wrong `config-version`, or a sibling `profiles/` directory fails to load with an error naming the file, key, and line, plus the replacement to use.
 
 ## The `[server]` section
 
@@ -35,7 +63,7 @@ The boot config's `[server]` section is required and has no defaults. Both field
 | `bind` | required | Socket address the gateway listener binds. |
 | `api_key` | required | Shared bearer key every `/v1/*` request must present. |
 
-Like `[workshop]`, the section is owned by the boot config: a profile whose merged `[server]` differs from the boot file's is refused at startup or, on a mid-run switch, with the running state left untouched.
+Like `[workshop]`, the section is process-owned: a pending edit that changes it is promoted to disk on Apply but takes effect only on restart, reported as `restart_required` in the apply response.
 
 ## Hosting the workshop
 
@@ -79,9 +107,33 @@ Without `llama-cuda`, the Windows/Linux Vulkan and macOS Metal archive provision
 | `bind` | `127.0.0.1:7910` | Socket address of the workshop listener. Must be a loopback address; a non-loopback bind is refused at startup. |
 | `open_browser` | `false` | Open the system browser at the workshop URL once it is serving. Meant for running the gateway (or hosting the UI) without the desktop shell; a browser that fails to open is logged, never fatal. |
 
+### Speech-to-text models
+
+Speech-to-text models are first-class catalog entries, provisioned through the same pinned, digest-verified cache machinery as local chat models and governed by profile membership: transcription is on when the active profile's list contains STT models, off otherwise. A gateway with no `[workshop]` section refuses an active profile that selects STT models, same as a `--no-default-features` build refuses `[[local_model]]`.
+
+```toml
+[[stt_model]]
+name = "whisper-base-en"
+role = "interim"
+source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+sha256 = "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+vram_gb = 1.0
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `name` | required | Catalog name that `[[profile]].models` entries reference. |
+| `role` | required | `interim` (the streaming passes while a take records) or `final` (the crystallizing pass at stop). |
+| `source` | required | `https` download URL or operator-controlled local path; plaintext `http` is rejected. |
+| `sha256` | none | Lowercase hex SHA-256 pin, enforced after download when set. |
+| `vram_gb` | required | Estimated VRAM use in gibibytes; counts toward a bound dominion's budget. |
+| `dominion` | none | Local dominion that accounts for this model's VRAM. |
+
+A profile may select at most one interim and one final STT model. Interim without final is allowed as a degraded mode: nothing crystallizes mid-take and the final pass falls back to one interim decode at stop. Final without interim is a validation error naming the fix. The config crate ships a digest-pinned recommended pair - `whisper-base-en` (interim) and `whisper-small-en` (final) from the whisper.cpp Hugging Face repo - and the Config UI's **Restore recommended models** button writes both entries into the pending config.
+
 `[workshop.stt]` (optional) configures push-to-talk capture tuning. Model
-sources, pins, and interim/final roles live in global `[[stt_model]]` entries;
-the active profile enables them by catalog name.
+sources, pins, and interim/final roles live in the global `[[stt_model]]`
+entries above; the active profile enables them by catalog name.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -120,13 +172,17 @@ sha256 = "140be8d7849741f88c50757d529b84373ee8e27052cc2236855b537f4a8215fa"
 
 `[local_model.speculative]` attaches a multi-token-prediction drafter: the child launches with `--spec-draft-model`, `--spec-type draft-mtp`, and `--spec-draft-n-max` (`draft_max`, bounded to `1..=16`). `[local_model.multimodal_projector]` attaches a vision projector (`--mmproj`) so the model accepts image inputs, and the catalog advertises `images = true` for it. Companion sources follow the main source's rules: an `https` URL requires a `sha256` pin, a local path may go unpinned, and plaintext `http` is rejected. Both companions are chat-only and validated at load. The resolved paths live in the child's launch state, so a respawn re-emits the exact verified artifacts, and a model without companions gets the same command line as before companions existed.
 
+### Chat templates
+
+A local chat model's template is chosen at launch with a fixed precedence: an explicit `chat_template_file` path, then `chat_template_file = "builtin:<family>"` (a bundled, versioned template staged into the cache), then a known-override match (the gateway ships a table of known-broken embedded templates, matched by embedded-template content hash first and model id second), then the GGUF's embedded template under the always-present `--jinja` flag. When none of these yields a usable template the launch is refused with an error naming the model and the fix; there is no silent passthrough. The Config UI surfaces this on each local model as a dropdown - Auto, one option per bundled family, or a custom path - with a read-only summary of the effective source, the detected family, and the reason behind the decision.
+
 ### Derived client credentials
 
-There is no `[workshop.gateway]` sub-table. The hosted workshop reaches the gateway through its own HTTP client, and that client's `base_url` and `api_key` derive from the boot `[server]` section: the URL is the `[server]` bind with an unspecified address swapped for loopback (`0.0.0.0` becomes `127.0.0.1`, `[::]` becomes `[::1]`), and the bearer key is the `[server]` `api_key` itself. No credential is duplicated in `[workshop]`, so none can drift.
+There is no `[workshop.gateway]` sub-table. The hosted workshop reaches the gateway through its own HTTP client, and that client's `base_url` and `api_key` derive from the `[server]` section: the URL is the `[server]` bind with an unspecified address swapped for loopback (`0.0.0.0` becomes `127.0.0.1`, `[::]` becomes `[::1]`), and the bearer key is the `[server]` `api_key` itself. No credential is duplicated in `[workshop]`, so none can drift.
 
-### The boot-only rule
+### Process-owned sections
 
-Like `[server]`, the `[workshop]` section is owned by the boot config. A profile whose merged `[workshop]` differs from the boot file's is refused, and one-sided presence - the section in only one of the two files - is refused the same way. At boot the refusal fails startup; on a mid-run profile switch it reaches the caller as the switch stream's terminal SSE error event and leaves the running state untouched. The workshop's listener, tape, and voice settings are therefore fixed for the process lifetime.
+`[server]` and `[workshop]` are process-owned. Apply promotes edits to them to disk and answers `restart_required: true`; the running process keeps its booted listener, tape, and STT capture settings until restart. A profile switch never changes them, because profiles are checklists over the model catalog and carry no sections.
 
 ## Minimum Rust Version
 

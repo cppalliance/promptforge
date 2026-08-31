@@ -1,186 +1,153 @@
-# promptforge-dev
+# promptforge-dev User Guide
 
-promptforge-dev is the edit-run-inspect loop for PromptForge prompts. Point it at a prompt file, and it runs the prompt against your already-running gateway, dumps the store for inspection, and optionally watches for saves so every edit triggers a fresh run. No gateway management, no model downloads, no weight files - just the prompt and its output, tight enough that your iteration cycle is limited by how fast you can think, not how long you wait.
+You write prompts. You want to see what they do. `promptforge-dev` runs one prompt file against your already-running PromptForge gateway with a single command. Edit the file. Save it. See the result. Add `--watch` and every save triggers a fresh run, so the loop from edit to result takes seconds. The tool dumps the prompt's store to disk after each run, prints the final result on stdout, and keeps diagnostics on stderr. You get a fast, inspectable loop for prompt development with no gateway management, no model downloads, and no weight files.
 
-## Prerequisites
+## The Prompt Runner and Edit-Run Loop
 
-promptforge-dev requires a running `promptforge-gateway`. Start it yourself, then export two environment variables:
+`promptforge-dev` is a command-line tool. You point it at a prompt file. It runs that prompt against a PromptForge gateway that is already running. One command gives you one run.
 
-````sh
+The tool connects to an existing gateway. It never starts one. You do not manage a gateway lifecycle. You do not download models. You do not handle weight files.
+
+Pass `--watch` to enable watch mode. Every save of the prompt file triggers a fresh run. You get a live edit-run feedback loop while you develop a prompt.
+
+## Installation and Gateway Setup
+
+Install the tool from crates.io with one command. The package is published. You do not build from source. The tool requires Rust 1.89 or later.
+
+The tool needs two environment variables. Set both before you run it. There are no CLI flags for them.
+
+````bash
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
 export PROMPTFORGE_GATEWAY_API_KEY=<bearer from your gateway profile>
 ````
 
-Both must be set and non-empty. If either is missing, the binary fails immediately with a message naming the missing variable and reminding you to start the gateway. No prompt file is read until both are validated.
+`PROMPTFORGE_GATEWAY_URL` is the gateway API root. `PROMPTFORGE_GATEWAY_API_KEY` is your bearer credential. Both must be set and non-empty. An empty value counts as missing.
 
-## Your First Run
+The tool validates the environment once at startup, before it does any work. If a variable is missing or empty, you get a startup error. The error names the missing variable. It tells you to start promptforge-gateway first, then export both variables. The tool exits with code 1.
 
-From the PromptForge repository root:
+A malformed gateway URL or a blank credential aborts startup before any prompt run. Your bearer credential never appears in logs or debug output. It renders as redacted.
 
-````sh
-cargo run -p promptforge-dev -- my-prompt.md
+## Running a Prompt
+
+The simplest invocation names a prompt file.
+
+````bash
+promptforge-dev my-prompt.md
 ````
 
-This runs `my-prompt.md` with an empty input. The second positional argument supplies an input string:
+Pass an input string as the second positional argument. The input becomes the prompt's `args`. If you omit it, it defaults to empty.
 
-````sh
-cargo run -p promptforge-dev -- my-prompt.md "summarize this paragraph"
+````bash
+promptforge-dev my-prompt.md "summarize this paragraph"
 ````
 
-The input becomes the prompt's `args`. If you omit it, it defaults to empty.
+To pass an input that begins with `--`, place a bare `--` delimiter before it.
 
-Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.bind` or `models.default`. The binary's argument surface is deliberately minimal: `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]`.
-
-## What Happens During a Run
-
-Each invocation follows a fixed pipeline:
-
-1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set.
-2. **Fetch the model catalog.** One HTTP call to the gateway. The catalog is fetched once and reused across watch-mode reruns.
-3. **Build the tool set.** Two tools are always constructed: `web_fetch` (runs locally) and `web_search` (proxies through the gateway). A semantic tool picker is derived from the same live set, so no picker descriptor can advertise a tool without a matching callable.
-4. **Parse the prompt.** The file must declare `promptforge:` in its YAML frontmatter. A file without it is refused: "is not a promptforge prompt."
-5. **Execute.** The prompt runs against the gateway. The store stays in memory during execution - no filesystem writes happen on the async path.
-6. **Dump the store.** After the run (success or failure), the in-memory store is reconciled to disk beside the prompt file.
-
-A unique execution id is minted for each run: `dev-` followed by 128 random hex bits. It prints to stderr before any observer output, so you can always tell which run produced which output:
-
-````text
-run id: dev-3a7f1b2c9e4d5a8f0011223344556677
+````bash
+promptforge-dev my-prompt.md -- "--verbose"
 ````
 
-Observer records stream to stderr as single trace lines:
+Declare context, thinking, and max tokens on the prompt file itself. Use `models.bind` or `models.always`. The tool rejects CLI flags for these settings. `--context`, `--max-tokens`, `--no-think`, and `--verbose` all produce unknown-flag errors.
 
-````text
-[dev-3a7f1b2c9e4d5a8f0011223344556677] Research: Run started
-[dev-3a7f1b2c9e4d5a8f0011223344556677] Research: Lua: checkpoint
-````
+The tool runs only files that declare a `promptforge:` version in frontmatter. It refuses other files with a clear message.
 
-The final result prints to stdout. This separation lets you pipe or redirect output without observer noise.
+Each run follows a fixed pipeline: validate environment, fetch model catalog, build tool set, parse prompt, execute, dump store. The catalog is fetched once and reused across watch-mode reruns. Every run prints a unique run id to stderr. The id correlates console output, traces, and store files.
 
-## Inspecting Output
+When a run fails, you get a diagnostic that names the prompt file. The tool exits with code 1. A missing prompt file or more than two positional arguments produces a one-line problem description and the usage line, with exit code 2. Argument errors report before any credential check.
 
-Every run dumps its store to `<prompt-stem>.store/` beside the prompt file. For a prompt named `briefer.md`, the dump lands in `briefer.store/`:
+The exit codes are documented: 0 success, 1 runtime error, 2 usage error, 130 interrupted. Cancel a running prompt with Ctrl-C. You receive an "interrupted by Ctrl-C" message. The exit code is 130. Scripts can branch on these codes.
+
+## Results and the Store Dump
+
+When a run succeeds, the prompt's final result string prints on stdout. The result is separate from the diagnostic stream on stderr. You can pipe or redirect the result without observer noise.
+
+After a run, the tool dumps the prompt store. You inspect what the prompt produced. Store dumping is part of the default run behavior. No extra flag is needed.
+
+Every run's store lands in a directory beside the prompt file, named after it. For a prompt named `briefer.md`, the dump lands in `briefer/`. It contains the files the prompt wrote, such as `evidence.md` and `notes/deep.txt`.
 
 ````text
 briefer.md
-briefer.store/
+briefer/
   evidence.md
   notes/
     deep.txt
 ````
 
-The dump reconciles on every run:
+Every store write lands on disk immediately during the run. There is no post-run reconcile step. The tool clears the previous store directory before each new run, so stale files never masquerade as current output. A run that produces nothing removes its empty store directory when it finishes. Your directory tree stays clean. A failed run keeps its partial store on disk. You can debug from it.
 
-- Changed files are overwritten with current contents.
-- Files from a previous run that are no longer in the store are deleted.
-- The `.trace/` subdirectory (used by raw trace capture) is preserved across reconciles.
-- When the store is empty and no trace files remain, the dump directory is removed entirely.
-
-A failed run still dumps its partial store. That partial output is exactly what you need when debugging a prompt that errored partway through.
+The tool skips unsafe store paths and reports the status. Unsafe paths include absolute paths, `..` traversal, backslashes, control characters, and Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
 
 ## Watch Mode
 
-Add `--watch` to enter a rerun loop:
+Pass `--watch` to rerun the prompt automatically on every save.
 
-````sh
-cargo run -p promptforge-dev -- --watch my-prompt.md "test input"
+````bash
+promptforge-dev --watch my-prompt.md
 ````
 
-The prompt runs once, then the file is watched for changes:
+The tool prints a startup line: it is watching the file, and Ctrl-C stops it. Edit the prompt. Save it. A fresh run fires. Successful results print to stdout on every rerun. Diagnostics stay on stderr.
+
+A failed rerun prints its error on stderr. Watch mode keeps watching for the next save. You keep iterating.
+
+A burst of rapid saves coalesces into one rerun. The rerun fires after 300ms of quiet. One logical edit produces exactly one run. Editors that save through atomic write-then-rename still trigger reruns.
+
+Watch mode watches only the prompt file. Changes to other files in the same directory never trigger a rerun. This includes the store directory's contents. A bare file name as the prompt path watches the current directory. If the filesystem watcher backend fails, watch mode stops with a descriptive error.
+
+Reruns are fast. The run environment is built once and reused across every save. The tool does not refetch the model catalog or rebuild the tool picker on each save.
+
+Stop watch mode at any time with Ctrl-C. The exit is clean. You see "interrupted by Ctrl-C". No spurious final rerun fires, even if a save was mid-debounce.
+
+## Web Tools and Tool Picking
+
+Your prompts get web fetching and web search tools during a run. Both tools are always available on every run. There is no offline mode. There is zero configuration.
+
+The model fetches a web page with `web_fetch`. The tool returns the page's main content as markdown. It runs locally.
+
+The model searches the web mid-run with `web_search`. The tool proxies through the PromptForge gateway. It uses your validated bearer credential.
+
+The run picks relevant tools for the prompt automatically. A semantic tool picker resolves natural-language capability descriptions to the matching tool. The picker is built over the live tool catalog and an embedding model. The live tool set is validated before the picker is derived, so every advertised tool is actually callable. Duplicate tool identities or illegal wire names produce clear startup errors instead of silent breakage.
+
+## Raw Capture and Trace Files
+
+Pass `--capture-raw` to persist verbatim request and response bodies. This covers full prompts, tool arguments and results, and model output.
+
+````bash
+promptforge-dev --capture-raw my-prompt.md
+````
+
+This flag is the only way trace capture activates. An ordinary run never silently persists sensitive data. When the flag is active, a warning on stderr names the trace directory.
+
+The traces go to a `.trace/` directory inside the prompt's store directory: `<prompt-stem>/.trace/`. Each model turn produces one pretty-printed JSON file per direction, named `turn-{N}-request.json` and `turn-{N}-response.json`. Each file holds one verbatim request or response body. You inspect or replay exactly what happened during a session.
+
+Trace capture never blocks the run. A background worker writes the files. If the capture queue falls behind, events drop. The tool reports the exact drop count on stderr when the run finishes. Each written trace file gets a stderr confirmation. A failed trace write produces a stderr diagnostic, and the run continues.
+
+## Progress and Console Output
+
+During setup, progress bars render when stderr is a terminal. They cover the catalog fetch, the embedding-model load, and tool indexing. Bars clear as phases finish. Off a terminal, stderr stays clean.
+
+During the run, you watch a live verbose trace on stderr. Every observation is its own bracketed line. Each line is prefixed with the run id.
 
 ````text
-watching my-prompt.md for changes; press Ctrl-C to stop
+[dev-3a7f...] Research: Run started
+[dev-3a7f...] Section: Lua: step one
 ````
 
-Every save triggers a rerun after a 300 ms debounce quiet period. The debounce absorbs editor write-then-rename save bursts so a single save produces a single rerun, not two or three.
+The final result prints separately to stdout. You can pipe or redirect output without observer noise.
 
-The gateway catalog, tools, and picker built at startup are reused across every rerun - no repeated network calls. Each rerun gets a fresh execution id.
+## Diagnostics and Failure Reporting
 
-If a rerun fails, the error prints to stderr and watching continues. A broken edit does not kill your session.
-
-The watcher monitors the prompt's parent directory, filtered to the prompt's file name. Store dump writes (to the `.store/` directory) do not retrigger reruns. The watcher uses a capacity-one bounded channel, so a slow rerun or a noisy filesystem cannot grow an unbounded event backlog. Watcher backend errors surface through a separate loss-proof slot - they are never silently dropped, even when the channel is full.
-
-## Raw Trace Capture
-
-Add `--capture-raw` to persist the verbatim request and response bodies for each model turn:
-
-````sh
-cargo run -p promptforge-dev -- --capture-raw my-prompt.md
-````
-
-A warning prints to stderr:
+When a run fails inside a Lua section, the error message leads with the prompt file path and the exact line number.
 
 ````text
-warning: --capture-raw persists verbatim prompts, tool arguments and results, and model output to my-prompt.store/.trace
+dev run failed: briefer.md:51: <detail>
 ````
 
-Each model turn writes two files under `.trace/`:
+The line number points at the innermost failing section. A failure not tied to a prompt line shows a plain message without a line number. Errors name the failing file and stage, whether the file cannot be read, parsed, or executed.
 
-````text
-my-prompt.store/
-  .trace/
-    turn-1-request.json
-    turn-1-response.json
-    turn-2-request.json
-    turn-2-response.json
-````
-
-These contain the full, unredacted request and response JSON. The material is sensitive - raw prompts, tool arguments and results, model output - which is why capture is off by default and requires an explicit flag.
-
-Trace capture uses a bounded queue (128 events) with a dedicated worker thread. The worker serializes and writes each payload with owner-only permissions and atomic semantics. If the worker falls behind, events are counted as dropped and the count is reported when the run finishes. I/O never blocks the run's async task.
-
-All queued writes are flushed before the store dump reconcile, so trace files are always complete when you inspect the dump directory.
+Use the run id prefix on each trace line to correlate console output, traces, and store files for one run.
 
 ## Filesystem Security
 
-All dump writes - store files and trace captures - go through a security layer:
+All dump and trace writes are owner-only. Directories are mode 0o700 and files are mode 0o600 on Unix. On Windows, full control goes to the current user alone. You do not configure this. It is always active. On Windows, this hardening depends on the USERNAME environment variable.
 
-- **Owner-only permissions.** Directories are created `0o700` and files `0o600` on Unix. On Windows, inherited access is stripped and full control is granted to the current user alone via `icacls`.
-- **No symlink traversal.** Every write checks the target and all existing ancestors for symlinks and Windows reparse points. A planted link at any path component is refused, preventing writes from escaping the dump tree.
-- **Atomic writes.** Each file is written to a sibling temporary (`.{name}.tmp{random}`), flushed, permission-restricted, then renamed over the destination. An interrupted write cannot truncate a prior file. The temporary is cleaned up on failure.
-- **Path safety.** Store paths that are absolute, traverse with `..`, contain backslashes, control characters, or Windows reserved characters (`*`, `?`, `"`, `<`, `>`, `|`) are skipped with a status report. Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9 - including Unicode superscript digit variants) are also rejected.
-
-You do not configure any of this. It is always active.
-
-## Diagnostics
-
-When a Lua error maps to a prompt line, the failure message leads with the file and line number:
-
-````text
-dev run failed: briefer.md:51: run briefer.md: lua error: section `Web Search` epilog:51: assertion failed!
-````
-
-This format enables click-to-navigate in editors that recognize `file:line:` patterns.
-
-Errors without a mapped prompt line omit the line prefix:
-
-````text
-dev run failed: some transport error
-````
-
-**Exit codes:**
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Runtime error (gateway, parse, execution, dump) |
-| 2 | Usage error (bad arguments) |
-| 130 | Interrupted by Ctrl-C |
-
-Ctrl-C is handled cooperatively: the run is cancelled, its completion is awaited (so blocking fanout joins are not abandoned), and the process exits with code 130.
-
-## Edge Cases and Validation
-
-**Unknown flags.** Any flag starting with `--` that is not `--watch`, `--capture-raw`, or `--` is rejected with usage text. This includes former server knobs like `--context`, `--max-tokens`, and `--no-think` that were removed when model parameters moved to the prompt file.
-
-**Non-PromptForge files.** A markdown file whose YAML frontmatter does not declare `promptforge:` is refused with a clear message rather than producing a confusing parse error.
-
-**The `--` delimiter.** Use `--` to pass an input that begins with dashes:
-
-````sh
-cargo run -p promptforge-dev -- my-prompt.md -- --this-is-input-not-a-flag
-````
-
-Everything after `--` is treated as a positional argument.
-
-**Credential protection.** The bearer key is wrapped in a `GatewayKey` type that renders as `<redacted>` in Debug output. An accidental `{:?}` on a `GatewayEnv` cannot leak the credential.
+The tool refuses to write through symlinked or reparse-point ancestors. A planted link cannot redirect sensitive output outside the dump tree. Dump files are written atomically. Content goes to a temporary file, then renames over the destination. An interrupted write never corrupts a previously dumped file. A failed write removes its partial temporary file.
