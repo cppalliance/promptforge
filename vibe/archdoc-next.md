@@ -102,3 +102,4 @@
 - [2026-08-30-1-chat-templates-injection-defense] template resolution precedence: Explicit, builtin, known content-hash override, then embedded template; no usable template fails visibly.
 - [2026-08-30-1-chat-templates-injection-defense] catalog subset profiles: Profiles select validated global chat, remote, and STT catalog entries rather than overriding fields.
 - [2026-08-31-1-fix-hf-proxy-consistency] renderer-owned stderr: Native library diagnostics must enter structured logging instead of corrupting terminal progress rendering.
+- [2026-08-31-2-rebuild-mdbook-from-includes] explicit fence semantics: Included operator examples declare their fence language so documentation tests do not interpret them as Rust.
