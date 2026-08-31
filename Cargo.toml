@@ -3,37 +3,37 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSL-1.0"
 repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
-promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
-promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.1.0" }
-promptforge-desktop-shell = { path = "crates/promptforge-desktop-shell", version = "0.1.0" }
-promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.3.0" }
-promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.1.0" }
-promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.1.0" }
-promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "1.1.0" }
-promptforge-gateway-config-ui = { path = "crates/promptforge-gateway-config-ui", version = "0.1.0" }
+promptforge-core = { path = "crates/promptforge-core", version = "0.2.0" }
+promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.2.0" }
+promptforge-desktop-shell = { path = "crates/promptforge-desktop-shell", version = "0.2.0" }
+promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.2.0" }
+promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.2.0" }
+promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.2.0" }
+promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.2.0" }
+promptforge-gateway-config-ui = { path = "crates/promptforge-gateway-config-ui", version = "0.2.0" }
 promptforge-gateway-local = { path = "crates/promptforge-gateway-local", version = "0.2.0" }
-promptforge-gateway-loopback = { path = "crates/promptforge-gateway-loopback", version = "0.1.0" }
-promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.1.0" }
-promptforge-gateway-routing = { path = "crates/promptforge-gateway-routing", version = "0.1.0" }
-promptforge-lua = { path = "crates/promptforge-lua", version = "0.1.0" }
-promptforge-parser = { path = "crates/promptforge-parser", version = "0.1.0" }
-promptforge-progress = { path = "crates/promptforge-progress", version = "0.1.0" }
-promptforge-stt = { path = "crates/promptforge-stt", version = "0.0.0" }
-promptforge-store = { path = "crates/promptforge-store", version = "0.1.0" }
-promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
-promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
-promptforge-tools = { path = "crates/promptforge-tools", version = "0.1.0" }
-promptforge-transcribe = { path = "crates/promptforge-transcribe", version = "1.0.0" }
-promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.1.0" }
-promptforge-web-search-service = { path = "crates/promptforge-web-search-service", version = "0.1.0" }
-promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "1.0.0" }
+promptforge-gateway-loopback = { path = "crates/promptforge-gateway-loopback", version = "0.2.0" }
+promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.2.0" }
+promptforge-gateway-routing = { path = "crates/promptforge-gateway-routing", version = "0.2.0" }
+promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
+promptforge-parser = { path = "crates/promptforge-parser", version = "0.2.0" }
+promptforge-progress = { path = "crates/promptforge-progress", version = "0.2.0" }
+promptforge-stt = { path = "crates/promptforge-stt", version = "0.2.0" }
+promptforge-store = { path = "crates/promptforge-store", version = "0.2.0" }
+promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.2.0" }
+promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.2.0" }
+promptforge-tools = { path = "crates/promptforge-tools", version = "0.2.0" }
+promptforge-transcribe = { path = "crates/promptforge-transcribe", version = "0.2.0" }
+promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.2.0" }
+promptforge-web-search-service = { path = "crates/promptforge-web-search-service", version = "0.2.0" }
+promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "0.2.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"

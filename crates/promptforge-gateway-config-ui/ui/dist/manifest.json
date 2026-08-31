@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "minified": true,
+  "inputHash": "c81a017588f7bdc5352d1f0cb5c9c23b286c49d2820bc0db12603b1b01aaec8d",
+  "files": [
+    "app.css",
+    "app.js",
+    "icons/promptforge-icon-1.png",
+    "index.html"
+  ]
+}

@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
 
 description = "PromptForge progress vocabulary: operation-scoped weighted trees, a process hub, coalesced events, and remote import"
 

@@ -10,10 +10,13 @@
 //! `cargo build --release` is sufficient. See `build/manifest.rs` for the
 //! artifact contract.
 //!
-//! Both paths require Node.js on `PATH` and one `npm ci` in `ui/` per
-//! checkout (see the crate README). The debug bundle prefers the local
-//! `ui/node_modules/.bin/esbuild`; without it the build falls back to
-//! `npx esbuild`, which may download esbuild on first use.
+//! The artifact is checked into the repository, so packaged crates and
+//! checkouts without `ui/node_modules` build from it verbatim in both
+//! profiles. Rebuilding the UI requires Node.js on `PATH` and one
+//! `npm ci` in `ui/` per checkout (see the crate README). The debug
+//! bundle prefers the local `ui/node_modules/.bin/esbuild`; without it
+//! the build falls back to `npx esbuild`, which may download esbuild on
+//! first use.
 
 #[path = "build/manifest.rs"]
 mod manifest;
@@ -68,6 +71,12 @@ fn run() -> Result<(), String> {
 
     if std::env::var("PROFILE").as_deref() == Ok("release") {
         return release_artifact(&ui_dir);
+    }
+
+    // Packaged crates ship no ui/node_modules, so esbuild cannot run;
+    // serve the checked-in artifact verbatim when it verifies.
+    if !has_local_esbuild(&ui_dir) && manifest::verify(&ui_dir).is_ok() {
+        return Ok(());
     }
 
     // dist/ is rebuilt from scratch so removed assets never linger in what
@@ -175,6 +184,20 @@ fn esbuild_command(ui_dir: &Path) -> Command {
         let mut command = Command::new("npx");
         command.arg("--yes").arg("esbuild");
         command
+    }
+}
+
+/// True when `ui/` has a local esbuild install, i.e. a developer checkout
+/// after `npm ci`; packaged crates ship no node_modules.
+fn has_local_esbuild(ui_dir: &Path) -> bool {
+    let bin_dir = ui_dir.join("node_modules").join(".bin");
+    #[cfg(windows)]
+    {
+        bin_dir.join("esbuild.cmd").exists()
+    }
+    #[cfg(not(windows))]
+    {
+        bin_dir.join("esbuild").exists()
     }
 }
 
