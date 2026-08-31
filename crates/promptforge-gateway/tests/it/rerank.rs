@@ -64,6 +64,8 @@ async fn recording_rerank_backend() -> (SocketAddr, Recorder) {
 async fn rerank_gateway(backend: SocketAddr) -> TestServer {
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -170,6 +172,8 @@ async fn non_classifier_kinds_are_rejected_on_the_rerank_route() {
     let (backend, recorder) = recording_rerank_backend().await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

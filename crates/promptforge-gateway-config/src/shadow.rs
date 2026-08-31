@@ -104,16 +104,21 @@ pub fn write_shadow(target: &Path, contents: &str) -> Result<PathBuf, crate::Con
 
 fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
     let shadow = shadow_path(target);
-    let temp = unique_sidecar(&shadow, "tmp");
+    write_atomic_repr(&shadow, contents)?;
+    Ok(shadow)
+}
+
+fn write_atomic_repr(target: &Path, contents: &str) -> Result<(), Repr> {
+    let temp = unique_sidecar(target, "tmp");
     if let Err(source) = fs::write(&temp, contents) {
         let _ = fs::remove_file(&temp);
         return Err(Repr::Write { path: temp, source });
     }
-    if let Err(error) = replace_file(&temp, &shadow) {
+    if let Err(error) = replace_file(&temp, target) {
         let _ = fs::remove_file(&temp);
         return Err(error);
     }
-    Ok(shadow)
+    Ok(())
 }
 
 fn unique_sidecar(path: &Path, kind: &str) -> PathBuf {
@@ -202,6 +207,34 @@ pub fn promote_shadow(target: &Path) -> Result<(), crate::ConfigError> {
     }
     replace_file(&shadow, target).map_err(crate::ConfigError::from)?;
     Ok(())
+}
+
+/// Persists the active profile without consuming a pending state shadow.
+///
+/// The real sibling state file is replaced through a unique temporary file,
+/// so an immediate runtime switch can coexist with an unapplied Config UI
+/// selection in `gateway.state.toml.next`.
+///
+/// # Errors
+/// Returns [`ConfigError`](crate::ConfigError) when rendering, writing, or
+/// replacing the sibling state file fails.
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::{ProfileName, persist_profile_state};
+/// use std::path::Path;
+///
+/// let profile = ProfileName::parse("work")?;
+/// persist_profile_state(Path::new("gateway.toml"), &profile)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn persist_profile_state(
+    config_path: &Path,
+    profile: &ProfileName,
+) -> Result<(), crate::ConfigError> {
+    let rendered = ProfileState::new(profile).to_toml_string()?;
+    write_atomic_repr(&crate::profile_state_path(config_path), &rendered)
+        .map_err(crate::ConfigError::from)
 }
 
 /// Validates and stages one pending admin document.

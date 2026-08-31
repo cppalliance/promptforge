@@ -109,6 +109,8 @@ max_concurrency = {limit}
     };
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -261,6 +263,8 @@ async fn non_embedding_kinds_are_rejected_on_the_embeddings_route() {
     let (backend, recorder) = recording_embeddings_backend().await;
     let toml = format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

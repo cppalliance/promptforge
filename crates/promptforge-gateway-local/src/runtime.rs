@@ -41,6 +41,138 @@ pub struct LocalRuntime {
     cache_dir: Option<String>,
 }
 
+/// Result of a best-effort local-model startup.
+///
+/// Successfully started children remain owned by [`runtime`](Self::runtime)
+/// when another configured model fails to start.
+///
+/// # Examples
+/// ```
+/// use promptforge_gateway_config::Config;
+/// use promptforge_gateway_local::LocalRuntime;
+///
+/// let config = Config::from_toml_str(
+///     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+/// )?;
+/// let outcome = LocalRuntime::start_partial(&config, None)?;
+/// assert!(outcome.failures().is_empty());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct LocalStartOutcome {
+    runtime: LocalRuntime,
+    failures: Vec<LocalStartFailure>,
+}
+
+impl LocalStartOutcome {
+    /// Returns the successfully started local runtime.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # use promptforge_gateway_local::LocalRuntime;
+    /// # let config = Config::from_toml_str(
+    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// # )?;
+    /// let outcome = LocalRuntime::start_partial(&config, None)?;
+    /// assert_eq!(outcome.runtime().child_count(), 0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn runtime(&self) -> &LocalRuntime {
+        &self.runtime
+    }
+
+    /// Returns one failure for each local model that did not start.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # use promptforge_gateway_local::LocalRuntime;
+    /// # let config = Config::from_toml_str(
+    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// # )?;
+    /// let outcome = LocalRuntime::start_partial(&config, None)?;
+    /// assert!(outcome.failures().is_empty());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn failures(&self) -> &[LocalStartFailure] {
+        &self.failures
+    }
+
+    /// Splits the outcome into its running children and failures.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # use promptforge_gateway_local::LocalRuntime;
+    /// # let config = Config::from_toml_str(
+    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// # )?;
+    /// let outcome = LocalRuntime::start_partial(&config, None)?;
+    /// let (runtime, failures) = outcome.into_parts();
+    /// assert_eq!(runtime.child_count(), 0);
+    /// assert!(failures.is_empty());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn into_parts(self) -> (LocalRuntime, Vec<LocalStartFailure>) {
+        (self.runtime, self.failures)
+    }
+}
+
+/// One local model that failed during best-effort startup.
+///
+/// Values are reported by [`LocalRuntime::start_partial`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct LocalStartFailure {
+    model: String,
+    error: LocalError,
+}
+
+impl LocalStartFailure {
+    /// Returns the configured model name.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use promptforge_gateway_config::Config;
+    /// # use promptforge_gateway_local::LocalRuntime;
+    /// # let config = Config::from_toml_str(
+    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// # )?;
+    /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
+    ///     eprintln!("{} did not start", failure.model());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Returns the startup failure.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use promptforge_gateway_config::Config;
+    /// # use promptforge_gateway_local::LocalRuntime;
+    /// # let config = Config::from_toml_str(
+    /// #     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// # )?;
+    /// for failure in LocalRuntime::start_partial(&config, None)?.failures() {
+    ///     eprintln!("{}", failure.error());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn error(&self) -> &LocalError {
+        &self.error
+    }
+}
+
 impl LocalRuntime {
     /// An empty runtime with no children. Used when no `[[local_model]]` is set
     /// and as the placeholder before the first profile switch.
@@ -70,13 +202,56 @@ impl LocalRuntime {
         config: &Config,
         progress: Option<&ProgressHandle>,
     ) -> Result<LocalRuntime, LocalError> {
+        let outcome = start_impl(
+            config,
+            progress,
+            ArtifactStore::provision_llama_server_with_progress,
+            ServerGuard::start,
+            StartPolicy::FailFast,
+        )?;
+        Ok(outcome.runtime)
+    }
+
+    /// Provisions local models independently and retains every ready child.
+    ///
+    /// A failure shared by the whole runtime, such as staging
+    /// `llama-server`, still returns immediately because no model can start.
+    /// Per-model download, launch, readiness, and dialect failures are
+    /// collected while later models continue.
+    ///
+    /// # Errors
+    /// Returns [`LocalError`] when shared runtime provisioning fails.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway_config::Config;
+    /// use promptforge_gateway_local::LocalRuntime;
+    ///
+    /// let config = Config::from_toml_str(
+    ///     "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test\"\n",
+    /// )?;
+    /// let outcome = LocalRuntime::start_partial(&config, None)?;
+    /// assert_eq!(outcome.runtime().child_count(), 0);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn start_partial(
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<LocalStartOutcome, LocalError> {
         start_impl(
             config,
             progress,
             ArtifactStore::provision_llama_server_with_progress,
             ServerGuard::start,
+            StartPolicy::KeepReady,
         )
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartPolicy {
+    FailFast,
+    KeepReady,
 }
 
 /// Shared body of [`LocalRuntime::start`] with the two externalities - the
@@ -96,13 +271,17 @@ fn start_impl(
         &AtomicBool,
         Option<&ProgressHandle>,
     ) -> Result<ServerGuard, LocalError>,
-) -> Result<LocalRuntime, LocalError> {
+    policy: StartPolicy,
+) -> Result<LocalStartOutcome, LocalError> {
     let cache_dir = config.local().cache_dir().map(str::to_owned);
     if config.local_models().is_empty() {
-        return Ok(LocalRuntime {
-            models: Vec::new(),
-            upstreams: Vec::new(),
-            cache_dir,
+        return Ok(LocalStartOutcome {
+            runtime: LocalRuntime {
+                models: Vec::new(),
+                upstreams: Vec::new(),
+                cache_dir,
+            },
+            failures: Vec::new(),
         });
     }
 
@@ -115,83 +294,118 @@ fn start_impl(
 
     let interrupted = startup_interrupt_flag();
     let dominion_queues = dominion_queues(config);
-    let mut models = Vec::with_capacity(config.local_models().len());
-    let mut upstreams = Vec::with_capacity(config.local_models().len());
+    let mut started_models = Vec::with_capacity(config.local_models().len());
+    let mut failures = Vec::new();
 
     for local_model in config.local_models() {
         let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
-        let model_path = store.ensure_model_with_progress(
-            local_model.source(),
-            local_model.sha256(),
-            model_tree.as_ref(),
-        )?;
-        tracing::info!(
-            model = %local_model.name(),
-            path = %model_path.display(),
-            "provisioned local GGUF"
-        );
+        let started = (|| {
+            let model_path = store.ensure_model_with_progress(
+                local_model.source(),
+                local_model.sha256(),
+                model_tree.as_ref(),
+            )?;
+            tracing::info!(
+                model = %local_model.name(),
+                path = %model_path.display(),
+                "provisioned local GGUF"
+            );
 
-        maybe_write_sidecar(&store, local_model.source(), &model_path);
+            maybe_write_sidecar(&store, local_model.source(), &model_path);
 
-        let admission = resolve_admission(&dominion_queues, local_model)?;
-        let mut options = launch_options(local_model, admission.parallel);
-        options.path_prefix.clone_from(&server.path_prefix);
-        provision_companions(&store, local_model, &mut options)?;
-        let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
-        let guard = spawn(
-            &server.executable,
-            &model_path,
-            &options,
-            interrupted.as_ref(),
-            ready.as_ref(),
+            let admission = resolve_admission(&dominion_queues, local_model)?;
+            let mut options = launch_options(local_model, admission.parallel);
+            options.path_prefix.clone_from(&server.path_prefix);
+            provision_companions(&store, local_model, &mut options)?;
+            let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
+            let guard = spawn(
+                &server.executable,
+                &model_path,
+                &options,
+                interrupted.as_ref(),
+                ready.as_ref(),
+            )?;
+            let endpoint_id = format!("local-{}", local_model.name());
+            // A non-chat child has no chat completions to dialect-match: like a
+            // remote model, it carries the OpenAI default rather than hard-failing
+            // on template-less `/props` evidence.
+            let tool_dialect = match local_model.kind() {
+                ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
+                _ => "openai",
+            };
+            let upstream_name = guard.model_alias().to_owned();
+            let base_url = guard.base_url();
+            let upstream = LocalUpstream::new(
+                guard,
+                server.executable.clone(),
+                model_path,
+                options,
+                local_model.name().to_owned(),
+            );
+            let model = Arc::new(Model {
+                name: local_model.name().to_owned(),
+                kind: local_model.kind(),
+                description: local_model.description().to_owned(),
+                context: local_model.context(),
+                thinking: local_model.thinking(),
+                capabilities: local_model.capabilities().clone(),
+                tool_dialect: tool_dialect.to_owned(),
+                upstream_name,
+                endpoint: Arc::new(Endpoint {
+                    id: endpoint_id,
+                    upstream: Arc::new(upstream.clone()),
+                    queue: admission.queue,
+                }),
+            });
+            tracing::info!(
+                model = %local_model.name(),
+                base_url = %base_url,
+                "local llama-server ready"
+            );
+            Ok::<_, LocalError>((model, upstream))
+        })();
+        retain_start(
+            policy,
+            local_model.name(),
+            started,
+            &mut started_models,
+            &mut failures,
         )?;
-        let endpoint_id = format!("local-{}", local_model.name());
-        // A non-chat child has no chat completions to dialect-match: like a
-        // remote model, it carries the OpenAI default rather than hard-failing
-        // on template-less `/props` evidence.
-        let tool_dialect = match local_model.kind() {
-            ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
-            _ => "openai",
-        };
-        let upstream_name = guard.model_alias().to_owned();
-        let base_url = guard.base_url();
-        let upstream = LocalUpstream::new(
-            guard,
-            server.executable.clone(),
-            model_path.clone(),
-            options,
-            local_model.name().to_owned(),
-        );
-        upstreams.push(upstream.clone());
-        let upstream = Arc::new(upstream);
-        let endpoint = Arc::new(Endpoint {
-            id: endpoint_id,
-            upstream,
-            queue: admission.queue,
-        });
-        models.push(Arc::new(Model {
-            name: local_model.name().to_owned(),
-            kind: local_model.kind(),
-            description: local_model.description().to_owned(),
-            context: local_model.context(),
-            thinking: local_model.thinking(),
-            capabilities: local_model.capabilities().clone(),
-            tool_dialect: tool_dialect.to_owned(),
-            upstream_name,
-            endpoint,
-        }));
-        tracing::info!(
-            model = %local_model.name(),
-            base_url = %base_url,
-            "local llama-server ready"
-        );
     }
+    let (models, upstreams) = started_models.into_iter().unzip();
 
-    Ok(LocalRuntime {
-        models,
-        upstreams,
-        cache_dir,
+    Ok(LocalStartOutcome {
+        runtime: LocalRuntime {
+            models,
+            upstreams,
+            cache_dir,
+        },
+        failures,
     })
+}
+
+fn retain_start<T>(
+    policy: StartPolicy,
+    model: &str,
+    result: Result<T, LocalError>,
+    started: &mut Vec<T>,
+    failures: &mut Vec<LocalStartFailure>,
+) -> Result<(), LocalError> {
+    let error = match result {
+        Ok(value) => {
+            started.push(value);
+            return Ok(());
+        }
+        Err(error) => error,
+    };
+    if policy == StartPolicy::FailFast {
+        return Err(error);
+    }
+    failures.push(LocalStartFailure {
+        model: model.to_owned(),
+        error,
+    });
+    Ok(())
 }
 
 impl LocalRuntime {
@@ -491,6 +705,8 @@ mod tests {
     fn empty_local_models_starts_noop_runtime() {
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -517,11 +733,56 @@ endpoints = ["e"]
     }
 
     #[test]
+    fn partial_policy_retains_successes_and_collects_each_failure() {
+        let mut started = Vec::new();
+        let mut failures = Vec::new();
+        retain_start(
+            StartPolicy::KeepReady,
+            "ready",
+            Ok(7),
+            &mut started,
+            &mut failures,
+        )
+        .expect("partial startup keeps ready models");
+        retain_start(
+            StartPolicy::KeepReady,
+            "first",
+            Err(LocalError::EarlyExit {
+                status: "first stopped".to_owned(),
+            }),
+            &mut started,
+            &mut failures,
+        )
+        .expect("partial startup continues");
+        retain_start(
+            StartPolicy::KeepReady,
+            "second",
+            Err(LocalError::EarlyExit {
+                status: "second stopped".to_owned(),
+            }),
+            &mut started,
+            &mut failures,
+        )
+        .expect("partial startup continues");
+
+        assert_eq!(started, [7]);
+        assert_eq!(
+            failures
+                .iter()
+                .map(LocalStartFailure::model)
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+    }
+
+    #[test]
     fn start_with_no_local_models_registers_no_leaves() {
         // An empty `[[local_model]]` set is a no-op start: the parent leaf
         // gains no children at all.
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -568,6 +829,8 @@ endpoints = ["e"]
         std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
         let config = Config::from_toml_str(&format!(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -611,6 +874,7 @@ context = 512
                     status: "the mock layout has no llama-server to spawn".to_owned(),
                 })
             },
+            StartPolicy::FailFast,
         )
         .expect_err("the mock layout cannot launch a real child");
         assert!(matches!(error, LocalError::EarlyExit { .. }));
@@ -645,6 +909,8 @@ context = 512
         // requests through its per-model queue.
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -688,6 +954,8 @@ parallel = 3
         // parks the other model's admit.
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -740,6 +1008,8 @@ dominion = "gpu0"
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -772,6 +1042,8 @@ context = 4096
         // the argv); a chat child launches without it.
         let config = Config::from_toml_str(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
@@ -803,6 +1075,8 @@ context = 4096
     fn companion_config(body: &str) -> Config {
         Config::from_toml_str(&format!(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"

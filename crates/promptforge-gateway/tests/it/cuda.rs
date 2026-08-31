@@ -78,6 +78,8 @@ const ARTIFACTS: [PinnedArtifact; 3] = [
 fn live_config_toml(cache: &Path) -> String {
     format!(
         r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"

@@ -13,10 +13,10 @@ repository = "https://github.com/cppalliance/promptforge"
 promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
 promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.1.0" }
 promptforge-desktop-shell = { path = "crates/promptforge-desktop-shell", version = "0.1.0" }
-promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.1.0" }
+promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.2.0" }
 promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.1.0" }
 promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.1.0" }
-promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "1.0.0" }
+promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "1.1.0" }
 promptforge-gateway-config-ui = { path = "crates/promptforge-gateway-config-ui", version = "0.1.0" }
 promptforge-gateway-local = { path = "crates/promptforge-gateway-local", version = "0.1.0" }
 promptforge-gateway-loopback = { path = "crates/promptforge-gateway-loopback", version = "0.1.0" }

@@ -8,8 +8,7 @@
 //! `promptforge-gateway-loopback`, which refuses any non-loopback or
 //! unknown peer with a bare 403 before this handler ever runs (and
 //! before auth). The caller must present the bearer key (401). And the named
-//! path must canonicalize to strictly inside one of the known-safe roots -
-//! the artifact cache and the profiles directory (a root itself is
+//! path must canonicalize to strictly inside the artifact cache (the root is
 //! refused, so the non-Windows parent-directory reveal can never name a
 //! directory outside every root; 400 otherwise, 404 when the path does
 //! not exist). The path never crosses a shell: the file manager is
@@ -103,26 +102,22 @@ pub(crate) async fn admin_reveal(
     let Json(request) =
         body.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
 
-    let mut roots: Vec<PathBuf> = Vec::new();
     #[cfg(feature = "local")]
-    {
+    let roots = {
+        let mut roots = Vec::new();
         let config = {
             let live = state.live.read().await;
             Arc::clone(&live.config)
         };
         // An unresolvable cache root (no cache_dir configured and no home
-        // directory) contributes no safe root; a reveal aimed at the
-        // profiles directory must still work.
+        // directory) contributes no safe root.
         if let Ok(root) = crate::local::resolve_cache_root(config.local().cache_dir()) {
             roots.push(root);
         }
-    }
-    // A gateway assembled without a profiles directory offers no config
-    // root; the cache root (when present) still confines reveals.
-    if let Ok(dir) = crate::profiles_dir(&state) {
-        roots.push(dir.to_path_buf());
-    }
-
+        roots
+    };
+    #[cfg(not(feature = "local"))]
+    let roots: Vec<PathBuf> = Vec::new();
     // Canonicalization and the spawn are blocking filesystem work.
     let launcher = Arc::clone(&state.reveal);
     tokio::task::spawn_blocking(move || {
@@ -167,7 +162,7 @@ fn resolve_reveal(roots: &[PathBuf], path: &Path) -> Result<RevealCommand, Gatew
         .any(|root| canonical.starts_with(&root) && canonical != root);
     if !confined {
         return Err(GatewayError::MalformedRequest(format!(
-            "path `{}` is not inside the artifact cache or the profiles directory",
+            "path `{}` is not inside the artifact cache",
             path.display()
         )));
     }
@@ -283,6 +278,8 @@ mod tests {
         std::fs::write(&boot, "").expect("write boot");
         let config = Config::from_toml_str(&format!(
             r#"
+config-version = 2
+
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
@@ -294,9 +291,9 @@ cache_dir = '{cache}'
         ))
         .expect("the fixture profile parses");
         let paths = AdminPaths {
-            profiles_dir: profiles,
+            fixture_dir: profiles,
             active: "main".to_owned(),
-            boot_config: boot,
+            config_path: boot,
         };
         (temp, config, paths)
     }
@@ -378,17 +375,6 @@ cache_dir = '{cache}'
     }
 
     #[tokio::test]
-    async fn reveal_selects_a_profile_file_in_the_file_manager() {
-        let (_temp, config, paths) = fixture();
-        let target = paths.profiles_dir.join("main.toml");
-        let (addr, launcher) = serve_reveal(config, paths).await;
-
-        let response = post_reveal(addr, Some("test-token"), &target.display().to_string()).await;
-        assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
-        assert_eq!(launcher.commands(), vec![expected_command(&target)]);
-    }
-
-    #[tokio::test]
     async fn reveal_rejects_a_path_outside_the_safe_roots() {
         let (temp, config, paths) = fixture();
         // Both exist on disk; neither is under the cache or profiles root
@@ -447,7 +433,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn reveal_refuses_the_safe_root_itself() {
         let (_temp, config, paths) = fixture();
-        let root = paths.profiles_dir.clone();
+        let root = paths.fixture_dir.clone();
         let (addr, launcher) = serve_reveal(config, paths).await;
 
         // Containment is strict: on non-Windows the reveal opens the
@@ -466,7 +452,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn a_missing_peer_address_fails_closed_as_non_loopback() {
         let (_temp, config, paths) = fixture();
-        let target = paths.profiles_dir.join("main.toml");
+        let target = paths.fixture_dir.join("main.toml");
         let launcher = Arc::new(RecordingLauncher::default());
         let mut state = app_state(config, Some(paths));
         state.reveal = Arc::clone(&launcher) as Arc<dyn RevealLauncher>;
@@ -493,7 +479,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn reveal_rejects_a_missing_path() {
         let (_temp, config, paths) = fixture();
-        let ghost = paths.profiles_dir.join("ghost.toml");
+        let ghost = paths.fixture_dir.join("ghost.toml");
         let (addr, launcher) = serve_reveal(config, paths).await;
 
         let response = post_reveal(addr, Some("test-token"), &ghost.display().to_string()).await;
@@ -509,7 +495,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn reveal_requires_bearer_auth() {
         let (_temp, config, paths) = fixture();
-        let target = paths.profiles_dir.join("main.toml");
+        let target = paths.fixture_dir.join("main.toml");
         let (addr, launcher) = serve_reveal(config, paths).await;
 
         for token in [None, Some("wrong-token")] {
@@ -529,7 +515,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn reveal_refuses_a_non_loopback_caller() {
         let (_temp, config, paths) = fixture();
-        let target = paths.profiles_dir.join("main.toml");
+        let target = paths.fixture_dir.join("main.toml");
         let launcher = Arc::new(RecordingLauncher::default());
         let mut state = app_state(config, Some(paths));
         state.reveal = Arc::clone(&launcher) as Arc<dyn RevealLauncher>;

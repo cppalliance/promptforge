@@ -151,3 +151,23 @@ fn pending_report_includes_config_and_active_profile_changes() {
     assert_eq!(report.shadowed_files, [path.clone(), state]);
     assert_eq!(report.changed_sections, ["active_profile", "local_model"]);
 }
+
+#[test]
+fn immediate_persistence_preserves_an_unapplied_state_shadow() {
+    let (_temp, path) = write_config();
+    let state = crate::profile_state_path(&path);
+    fs::write(&state, "active_profile = \"work\"\n").expect("write state");
+    write_shadow(&state, "active_profile = \"travel\"\n").expect("write pending state");
+    let selected = ProfileName::parse("work").expect("profile name");
+
+    persist_profile_state(&path, &selected).expect("persist immediate selection");
+
+    assert_eq!(
+        fs::read_to_string(&state).expect("read real state"),
+        "active_profile = \"work\"\n"
+    );
+    assert_eq!(
+        fs::read_to_string(shadow_path(&state)).expect("read pending state"),
+        "active_profile = \"travel\"\n"
+    );
+}
