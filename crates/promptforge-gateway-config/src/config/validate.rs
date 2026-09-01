@@ -187,7 +187,7 @@ impl Config {
                         model.name, dominion.id,
                     )));
                 };
-                total += f64::from(estimate);
+                total += estimate;
             }
             for model in &self.catalog_stt_models {
                 if selected.contains(model.name.as_str())
@@ -382,6 +382,14 @@ impl Config {
             if local_model.parallel < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} parallel must be at least 1",
+                    local_model.name
+                )));
+            }
+            if let Some(vram_gb) = local_model.vram_gb
+                && (!vram_gb.is_finite() || vram_gb <= 0.0)
+            {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} vram_gb must be finite and greater than zero",
                     local_model.name
                 )));
             }

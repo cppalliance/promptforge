@@ -354,9 +354,9 @@ pub struct LocalModelConfig {
     #[serde(default = "default_parallel")]
     parallel: u32,
     /// VRAM footprint estimate in gibibytes for the dominion co-residency
-    /// check.
+    /// check. Fractional values are accepted, matching `[[stt_model]]`.
     #[serde(default)]
-    vram_gb: Option<u32>,
+    vram_gb: Option<f64>,
     /// Context window size in tokens (`--ctx-size`).
     context: u32,
     /// Whether thinking tokens are never, always, or switchably available.

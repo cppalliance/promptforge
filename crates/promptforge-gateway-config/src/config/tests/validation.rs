@@ -490,7 +490,8 @@ vram_gb = 14
     let model = &config.local_models[0];
     assert_eq!(model.dominion.as_deref(), Some("gpu0"));
     assert_eq!(model.parallel, 4);
-    assert_eq!(model.vram_gb, Some(14));
+    // Integer TOML still parses into the f64 field (pre-existing configs).
+    assert_eq!(model.vram_gb, Some(14.0));
 }
 
 #[test]
@@ -871,6 +872,66 @@ name = "exact"
 models = ["a", "b"]
 "#;
     assert!(Config::parse_toml(toml).is_ok());
+}
+
+#[test]
+fn accepts_fractional_local_model_vram_estimate() {
+    // The Discover UI writes the quant file size in GiB rounded to two
+    // decimals, e.g. 1.22 for a 1.2 GiB download. A u32 schema rejected
+    // that for every non-whole-GiB model (workshop finding 30).
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 1.22
+
+[[profile]]
+name = "fractional"
+models = ["a"]
+"#;
+    let config = Config::parse_toml(toml).expect("fractional vram_gb parses");
+    assert_eq!(config.local_models[0].vram_gb, Some(1.22));
+}
+
+#[test]
+fn rejects_non_positive_local_model_vram_estimate() {
+    for value in ["0.0", "-1.0", "nan", "inf"] {
+        let toml = format!(
+            r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+vram_gb = {value}
+"#
+        );
+        match Config::parse_toml(&toml) {
+            Err(ConfigError::Validation(message)) => assert!(
+                message.contains("vram_gb must be finite and greater than zero"),
+                "expected the vram_gb error for {value}: {message}"
+            ),
+            other => panic!("expected a validation error for {value}, got {other:?}"),
+        }
+    }
 }
 
 #[test]
