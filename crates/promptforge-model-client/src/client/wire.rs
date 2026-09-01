@@ -307,6 +307,22 @@ impl ToolArguments<'_> {
     }
 }
 
+/// One live increment from a streaming completion.
+///
+/// [`GatewayClient::complete`](crate::client::GatewayClient::complete) invokes
+/// its delta callback with these as the stream arrives: answer text and the
+/// reasoning side channel stay separated so a consumer can render them
+/// differently. Tool-call fragments are never surfaced as deltas; they buffer
+/// inside the client until the batch is complete and validated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StreamDelta {
+    /// A fragment of the assistant's answer text.
+    Text(String),
+    /// A fragment of the reasoning side channel, never part of the answer.
+    Reasoning(String),
+}
+
 /// The outcome of a completion round trip.
 ///
 /// `Eq` holds because [`ToolCall`] arguments are a [`serde_json::Value`],
@@ -381,15 +397,15 @@ pub struct Completion {
     /// vLLM's `metrics` extension, when that backend served the call.
     #[doc(hidden)]
     pub vllm_metrics: Option<VllmMetrics>,
-    /// Timing measured by this client's own clock, when the transport
-    /// measured one. The buffered transport has no per-token clock and
-    /// records `None`; the streaming transport populates it.
+    /// Timing measured by this client's own clock: time to first token,
+    /// mean inter-token latency, and end-to-end wall time for the stream.
     #[doc(hidden)]
     pub client_timing: Option<ClientTiming>,
     /// The JSON body sent to the gateway.
     #[doc(hidden)]
     pub request_body: Value,
-    /// The JSON body returned by the gateway.
+    /// The buffered chat-completion body reassembled from the streamed
+    /// chunks, in the same shape a non-streaming backend would return.
     #[doc(hidden)]
     pub response_body: Value,
 }

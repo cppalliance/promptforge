@@ -574,7 +574,9 @@ impl Tool for ScopedFixtureTool {
 /// The single configurable mock gateway every execution test uses
 /// (EXEC-TESTS-005). It serves a fixed script of chat-completions responses in
 /// order, repeating the last entry once the script is exhausted, records every
-/// request body it receives, and counts calls.
+/// request body it receives, and counts calls. Scripts stay in the buffered
+/// chat-completion shape; each is converted to the SSE chunk stream the
+/// always-streaming client consumes at serve time (see [`sse_events`]).
 ///
 /// The server is OWNED (EXEC-TESTS-003): the guard holds the bound address, a
 /// graceful-shutdown sender, and the serving task's `JoinHandle`. Dropping the
@@ -607,6 +609,117 @@ struct ScriptState {
     calls: Arc<AtomicUsize>,
 }
 
+/// Splits `text` at its char midpoint, so a scripted string streams as two
+/// fragments and the client's accumulation is actually exercised.
+fn split_for_stream(text: &str) -> (&str, &str) {
+    let mid = text.chars().count() / 2;
+    let at = text
+        .char_indices()
+        .nth(mid)
+        .map_or(text.len(), |(index, _)| index);
+    text.split_at(at)
+}
+
+/// Converts one buffered chat-completion body into the SSE event text a
+/// streaming backend would emit for it: reasoning deltas, content split
+/// across fragments, tool calls as split argument fragments, the
+/// finish-reason chunk, a trailing empty-choices summary chunk when the
+/// body carries `usage`/`timings`/`metrics`, and the `[DONE]` sentinel.
+fn sse_events(body: &Value) -> String {
+    let model = body.get("model").cloned();
+    let choice = body["choices"].get(0).cloned().unwrap_or_default();
+    let message = choice.get("message").cloned().unwrap_or_default();
+    let chunk = |delta: Value, finish: Option<&Value>| -> Value {
+        let mut chunk_choice = json!({ "index": 0, "delta": delta });
+        if let Some(finish) = finish {
+            chunk_choice["finish_reason"] = finish.clone();
+        }
+        let mut event = json!({ "object": "chat.completion.chunk", "choices": [chunk_choice] });
+        if let Some(model) = &model {
+            event["model"] = model.clone();
+        }
+        event
+    };
+    let mut events: Vec<Value> = Vec::new();
+    if let Some(reasoning) = message.get("reasoning_content").and_then(Value::as_str) {
+        events.push(chunk(json!({ "reasoning_content": reasoning }), None));
+    }
+    if let Some(content) = message.get("content").and_then(Value::as_str) {
+        let (first, second) = split_for_stream(content);
+        for part in [first, second] {
+            if !part.is_empty() {
+                events.push(chunk(json!({ "content": part }), None));
+            }
+        }
+    }
+    if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+        for (index, call) in calls.iter().enumerate() {
+            let arguments = call
+                .pointer("/function/arguments")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let (first, second) = split_for_stream(arguments);
+            let mut opener = json!({
+                "index": index,
+                "type": "function",
+                "function": {
+                    "name": call.pointer("/function/name").cloned().unwrap_or(Value::Null),
+                    "arguments": first,
+                },
+            });
+            if let Some(id) = call.get("id") {
+                opener["id"] = id.clone();
+            }
+            events.push(chunk(json!({ "tool_calls": [opener] }), None));
+            if !second.is_empty() {
+                events.push(chunk(
+                    json!({ "tool_calls": [{
+                        "index": index,
+                        "function": { "arguments": second },
+                    }] }),
+                    None,
+                ));
+            }
+        }
+    }
+    let finish = choice.get("finish_reason").cloned().unwrap_or(Value::Null);
+    events.push(chunk(json!({}), Some(&finish)));
+    let mut summary = serde_json::Map::new();
+    for key in ["usage", "timings", "metrics"] {
+        if let Some(section) = body.get(key).filter(|section| !section.is_null()) {
+            summary.insert(key.to_owned(), section.clone());
+        }
+    }
+    if !summary.is_empty() {
+        let mut event = json!({ "object": "chat.completion.chunk", "choices": [] });
+        if let Some(model) = &model {
+            event["model"] = model.clone();
+        }
+        for (key, value) in summary {
+            event[key] = value;
+        }
+        events.push(event);
+    }
+    let mut out = String::new();
+    for event in &events {
+        out.push_str("data: ");
+        out.push_str(&event.to_string());
+        out.push_str("\n\n");
+    }
+    out.push_str("data: [DONE]\n\n");
+    out
+}
+
+/// Renders a scripted body as the SSE response the streaming client expects.
+fn sse_response(body: &Value) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+        sse_events(body),
+    )
+        .into_response()
+}
+
 impl ScriptedGateway {
     /// Starts a gateway serving `responses` in order (repeating the last).
     async fn start(responses: Vec<GatewayReply>) -> ScriptedGateway {
@@ -623,7 +736,7 @@ impl ScriptedGateway {
                 .push(body);
             let index = n.min(state.responses.len() - 1);
             match &state.responses[index] {
-                GatewayReply::Json(value) => Json(value.clone()).into_response(),
+                GatewayReply::Json(value) => sse_response(value),
                 GatewayReply::Status(code, body) => (
                     StatusCode::from_u16(*code).expect("valid test status code"),
                     body.clone(),
@@ -631,7 +744,7 @@ impl ScriptedGateway {
                     .into_response(),
                 GatewayReply::DelayedJson(delay, value) => {
                     tokio::time::sleep(*delay).await;
-                    Json(value.clone()).into_response()
+                    sse_response(value)
                 }
             }
         }

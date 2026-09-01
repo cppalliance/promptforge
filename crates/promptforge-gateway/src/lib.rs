@@ -479,9 +479,12 @@ async fn chat_completions(
         () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
     };
     // Emulated dialects rewrite the request (guide injection, tool stripping)
-    // and parse the reply's content fences; the emulated parse applies to
-    // non-streaming completions only.
-    let emulated = model.tool_dialect == crate::dialect::GEMMA3_TOOL_CODE && !request.stream;
+    // and parse the reply's content fences. The fence parse needs the whole
+    // reply, so the emulated streaming path buffers one non-streaming
+    // upstream round trip and re-emits the rewritten response as synthetic
+    // chunks; without it an always-streaming caller would silently lose
+    // tool calling on this dialect.
+    let emulated = model.tool_dialect == crate::dialect::GEMMA3_TOOL_CODE;
     let request = if emulated {
         let mut request = request;
         crate::dialect::prepare_request(&mut request)?;
@@ -490,6 +493,28 @@ async fn chat_completions(
         request
     };
     if request.stream {
+        if emulated {
+            let mut buffered = request;
+            buffered.stream = false;
+            // Streaming-only options must not reach a non-streaming upstream
+            // call; the synthetic summary chunk restores the usage the
+            // caller asked `stream_options.include_usage` for.
+            buffered.rest.remove("stream_options");
+            let response = tokio::select! {
+                result = model.endpoint.upstream.send(buffered, &model.upstream_name) => result?,
+                () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+            };
+            response
+                .validate()
+                .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
+            let mut response = response;
+            crate::dialect::apply_response(&mut response, &model.name);
+            return Ok(relay_sse(
+                crate::dialect::response_chunks(response),
+                permit,
+                in_flight,
+            ));
+        }
         // A failure here is before the SSE response starts, so it is
         // consumed as a normal JSON error, never a stream that dies
         // mid-flight.
