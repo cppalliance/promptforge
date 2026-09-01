@@ -12,7 +12,7 @@ use super::{
     log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
     wrap_shimmed_handle,
 };
-use promptforge_gateway_client::client::ToolSchema;
+use promptforge_model_client::client::ToolSchema;
 
 use crate::protocol::{Answer, Request, YieldParse};
 

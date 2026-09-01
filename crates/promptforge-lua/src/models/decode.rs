@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 
 use mlua::{MultiValue, Table, Value};
 
-use promptforge_gateway_client::model::{ModelBindOpts, Temperature};
+use promptforge_model_client::model::{ModelBindOpts, Temperature};
 
 use crate::{Error, Result};
 

@@ -15,7 +15,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 [dependencies]
 mlua.workspace = true
 promptforge-core-support.workspace = true
-promptforge-gateway-client.workspace = true
+promptforge-model-client.workspace = true
 promptforge-store.workspace = true
 promptforge-tools.workspace = true
 serde_json.workspace = true

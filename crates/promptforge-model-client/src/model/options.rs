@@ -72,7 +72,7 @@ pub enum TemperatureError {
 /// # Examples
 ///
 /// ```
-/// use promptforge_gateway_client::model::ThinkingMode;
+/// use promptforge_model_client::model::ThinkingMode;
 ///
 /// // Deserialized from the lowercase gateway wire form.
 /// let mode: ThinkingMode = serde_json::from_str("\"switchable\"")?;
@@ -114,7 +114,7 @@ impl ModelDescriptor {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_gateway_client::model::{ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge_model_client::model::{ModelDescriptor, ModelId, ThinkingMode};
     ///
     /// let context = NonZeroU32::new(131_072).ok_or("context is non-zero")?;
     /// let model = ModelDescriptor::new(
@@ -324,7 +324,7 @@ impl CompletionOptions {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_gateway_client::model::CompletionOptions;
+    /// use promptforge_model_client::model::CompletionOptions;
     ///
     /// let options = CompletionOptions::new("analyst")
     ///     .with_temperature(0.2)?

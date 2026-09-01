@@ -1,4 +1,4 @@
-# promptforge-gateway-client
+# promptforge-model-client
 
 The PromptForge gateway's model client: an `OpenAI`-compatible chat
 completions transport (`GatewayClient`), the wire types it exchanges, the

@@ -53,7 +53,7 @@ impl ModelCatalog {
     ///
     /// ```
     /// use std::num::NonZeroU32;
-    /// use promptforge_gateway_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     ///
     /// let ctx = NonZeroU32::new(8_192).ok_or("context is non-zero")?;
     /// let id = ModelId::gateway("small")?;

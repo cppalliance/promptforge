@@ -26,13 +26,13 @@ impl SecretString {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_gateway_client::client::SecretString;
+    /// use promptforge_model_client::client::SecretString;
     ///
     /// let secret = SecretString::new("bearer-token")?;
     /// assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
     /// assert_eq!(format!("{secret}"), "<redacted>");
     /// assert!(SecretString::new("").is_err());
-    /// # Ok::<(), promptforge_gateway_client::client::SecretError>(())
+    /// # Ok::<(), promptforge_model_client::client::SecretError>(())
     /// ```
     pub fn new(secret: impl Into<String>) -> std::result::Result<SecretString, SecretError> {
         let secret = secret.into();
@@ -114,13 +114,13 @@ impl GatewayEndpoint {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_gateway_client::client::GatewayEndpoint;
+    /// use promptforge_model_client::client::GatewayEndpoint;
     ///
     /// let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")?;
     /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
     /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
     /// assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
-    /// # Ok::<(), promptforge_gateway_client::model::CompletionError>(())
+    /// # Ok::<(), promptforge_model_client::model::CompletionError>(())
     /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
         let reject = |detail: String| CompletionError::from(Error::InvalidConfig(detail));

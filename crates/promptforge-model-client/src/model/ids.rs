@@ -27,12 +27,12 @@ impl ModelId {
     /// # Examples
     ///
     /// ```
-    /// use promptforge_gateway_client::model::ModelId;
+    /// use promptforge_model_client::model::ModelId;
     ///
     /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
     /// assert_eq!(id.server(), "gateway");
     /// assert_eq!(id.name(), "claude-sonnet-4-6");
-    /// # Ok::<(), promptforge_gateway_client::model::ModelIdError>(())
+    /// # Ok::<(), promptforge_model_client::model::ModelIdError>(())
     /// ```
     pub fn new(
         server: impl Into<String>,

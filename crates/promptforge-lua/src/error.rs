@@ -9,8 +9,8 @@
 //! it is not a stable API and is not marked `#[non_exhaustive]`, so the
 //! mapping stays total.
 
-use promptforge_gateway_client::Error as GatewayClientError;
-use promptforge_gateway_client::model::ModelId;
+use promptforge_model_client::Error as GatewayClientError;
+use promptforge_model_client::model::ModelId;
 use promptforge_tools::ToolId;
 
 /// A type-erased owned error cause used by the internal substrate.
