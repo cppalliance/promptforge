@@ -128,12 +128,11 @@ fn set_owner_only_windows_dacl(root: &Path, account: &str) -> Result<()> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(crate::CREATE_NO_WINDOW);
     }
-    let output = cmd.output()
-        .map_err(|source| LocalError::Io {
-            operation: "run icacls to restrict cache DACL",
-            path: root.to_owned(),
-            source,
-        })?;
+    let output = cmd.output().map_err(|source| LocalError::Io {
+        operation: "run icacls to restrict cache DACL",
+        path: root.to_owned(),
+        source,
+    })?;
     if !output.status.success() {
         return Err(LocalError::CacheNotPrivate {
             path: root.to_owned(),
@@ -156,12 +155,11 @@ fn verify_private_windows_dacl(root: &Path) -> Result<()> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(crate::CREATE_NO_WINDOW);
     }
-    let output = cmd.output()
-        .map_err(|source| LocalError::Io {
-            operation: "run icacls to verify cache DACL",
-            path: root.to_owned(),
-            source,
-        })?;
+    let output = cmd.output().map_err(|source| LocalError::Io {
+        operation: "run icacls to verify cache DACL",
+        path: root.to_owned(),
+        source,
+    })?;
     if !output.status.success() {
         return Err(LocalError::CacheNotPrivate {
             path: root.to_owned(),
