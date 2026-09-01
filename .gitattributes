@@ -5,3 +5,6 @@ crates/promptforge-workshop-server/ui/** text eol=lf
 # Images are not text; the blanket rules above must not convert them.
 crates/promptforge-gateway-config-ui/ui/**/*.png binary
 crates/promptforge-workshop-server/ui/**/*.png binary
+# The event-log schema canary pins the version-1 file exactly as the log
+# writer emits it (LF); autocrlf must not rewrite it on Windows checkouts.
+crates/promptforge-workshop-server/tests/it/observer/*.jsonl text eol=lf

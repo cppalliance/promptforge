@@ -19,6 +19,7 @@ dunce.workspace = true
 futures-util.workspace = true
 open.workspace = true
 percent-encoding.workspace = true
+promptforge-core-support.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-model-client.workspace = true
 promptforge-progress.workspace = true

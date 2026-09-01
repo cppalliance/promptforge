@@ -123,6 +123,10 @@ The variables:
 | `--scrollbar-thumb` | `rgba(255,255,255,0.16)` | Scrollbar thumb |
 | `--scrollbar-thumb-hover` | `rgba(255,255,255,0.28)` | Scrollbar thumb on hover |
 
+## Run event log
+
+`WorkshopObserver` is the crate's append-only run event log. The `Observer` content hooks append runtime events (the write side), the `EventLog` trait serves indexed reads (the read side), and `subscribe()` broadcasts every appended entry live. Given a persist path it appends each event as one JSONL line behind a versioned header line; `load_from` replays such a file - refusing headers and lines it does not speak - and continues appending to it. A committed fixture in the crate's integration tests pins the version-1 file format against schema drift.
+
 ## Minimum Rust Version
 
 Rust 1.89 or later.
