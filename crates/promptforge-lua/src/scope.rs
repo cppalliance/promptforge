@@ -1,6 +1,8 @@
 use super::{Arc, BTreeMap, Error, Mutex, Result};
 
-/// Shared per-VM tool-call counts, pre-seeded at 0 for every in-scope alias.
+/// Shared per-VM tool-call counts, seeded at 0 for every alias the installer
+/// was given; a script dispatch seeds a missing bound alias on demand through
+/// [`ensure`](Self::ensure).
 ///
 /// The executor increments a count when dispatch is attempted (even if the tool
 /// later errors). Lua reads the snapshot through the `tools.calls` table.
@@ -38,7 +40,8 @@ impl ToolCallCounts {
     /// Increments the count for `alias`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned or alias is not in scope.
+    /// Returns [`Error::Lua`] if the mutex is poisoned or `alias` was never
+    /// seeded.
     pub fn increment(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         let count = map.get_mut(alias).ok_or_else(|| {
@@ -50,7 +53,8 @@ impl ToolCallCounts {
         Ok(())
     }
 
-    /// Returns the current count for `alias`, or `None` if not in scope.
+    /// Returns the current count for `alias`, or `None` when `alias` was
+    /// never seeded.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
@@ -58,7 +62,7 @@ impl ToolCallCounts {
         Ok(self.lock()?.get(alias).copied())
     }
 
-    /// Returns a snapshot of all in-scope aliases.
+    /// Returns a snapshot of every seeded alias.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.

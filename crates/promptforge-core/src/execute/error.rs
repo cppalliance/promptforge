@@ -74,9 +74,10 @@ impl RunError {
             | Error::EmptyModelReply { .. } => RunErrorKind::Completion,
             Error::Interrupted => RunErrorKind::Cancelled,
             Error::Substitution(_) => RunErrorKind::Substitution,
-            Error::ToolLoopExhausted | Error::OutOfScopeToolCall { .. } | Error::Tool { .. } => {
-                RunErrorKind::Tool
-            }
+            Error::ToolLoopExhausted
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnboundToolCall { .. }
+            | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Internal(_) | Error::TimestampFormat(_) => RunErrorKind::Internal,
             Error::Bind { .. }
             | Error::BindSchema { .. }

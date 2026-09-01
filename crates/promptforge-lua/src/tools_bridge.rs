@@ -4,7 +4,8 @@ use super::{
 };
 use promptforge_model_client::client::ToolSchema;
 
-/// Installs the read-only `tools.calls` counter table for declared aliases.
+/// Installs the read-only `tools.calls` counter table over `counts`;
+/// `declared` feeds the unknown-key diagnostic.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the Lua table or callbacks cannot be created or
@@ -28,14 +29,15 @@ pub(crate) fn install_lua_tool_calls(
             if let Some(count) = value {
                 Ok(count)
             } else {
-                let in_scope = counts_for_index.aliases().map_err(mlua::Error::external)?;
-                let declared_unscoped = declared.iter().any(|alias| alias == &key);
+                let seeded = counts_for_index.aliases().map_err(mlua::Error::external)?;
+                let declared_unseeded = declared.iter().any(|alias| alias == &key);
                 Err(mlua::Error::external(format!(
-                    "tools.calls: {key:?} is not in this section's tool scope; \
-                     in-scope aliases: {in_scope:?}{}",
-                    if declared_unscoped {
-                        " (alias was declared by tools.bind but not added to this section's scope)"
-                    } else if in_scope.is_empty() {
+                    "tools.calls: {key:?} has no seeded count; \
+                     seeded aliases: {seeded:?}{}",
+                    if declared_unseeded {
+                        " (alias was declared by tools.bind but neither added to \
+                         this section's scope nor dispatched by tool_call)"
+                    } else if seeded.is_empty() {
                         ""
                     } else {
                         " - check for typos or add it via tools.add"

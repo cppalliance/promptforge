@@ -311,7 +311,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 }
 
 #[tokio::test]
-async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
+async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.bind('search', 'search tool')\n\
@@ -334,12 +334,12 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     .expect_err("accessing a typo alias in tools.calls must hard error");
     let msg = error.to_string();
     assert!(
-        msg.contains("serach") && msg.contains("not in this section's tool scope"),
-        "error must name the bad key and state it's out of scope: {msg}"
+        msg.contains("serach") && msg.contains("has no seeded count"),
+        "error must name the bad key and state it was never seeded: {msg}"
     );
     assert!(
         msg.contains("search"),
-        "error must list in-scope aliases: {msg}"
+        "error must list the seeded aliases: {msg}"
     );
 }
 
