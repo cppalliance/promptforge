@@ -6,6 +6,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod agents;
 mod chat;
 mod heartbeat;
 mod observer;

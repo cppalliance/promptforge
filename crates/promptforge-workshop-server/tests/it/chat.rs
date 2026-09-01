@@ -36,7 +36,7 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite;
 
 use promptforge_workshop_server::{
-    AppState, Config, GatewayConfig, ServerConfig, TapeConfig, router,
+    AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, TapeConfig, router,
 };
 
 use crate::common::{JsonSocket, spawn_gateway};
@@ -169,7 +169,11 @@ async fn spawn_chat_server(base_url: &str) -> (String, tempfile::TempDir, AppSta
         tape: TapeConfig {
             path: tape_dir.path().join("tape.jsonl"),
         },
-        server: ServerConfig::default(),
+        server: ServerConfig {
+            state_dir: tape_dir.path().to_path_buf(),
+            ..ServerConfig::default()
+        },
+        agents: AgentsConfig::default(),
     };
     let state = AppState::new(&config).expect("state builds in tests");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

@@ -17,6 +17,7 @@ use crate::menu::MenuBus;
 use crate::protocol::Activity;
 use crate::push::Push;
 use crate::routes;
+use crate::session_agents::{AgentSessions, SessionHost};
 use crate::status::StatusBus;
 use crate::tape::{Tape, TapeError};
 use crate::workspace::Workspace;
@@ -26,7 +27,7 @@ pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
 /// tape, the status, catalog, and menu buses, the process progress hub,
-/// and the hosted workspace state.
+/// the hosted workspace state, and the agent-session registry.
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub(crate) gateway: GatewayClient,
@@ -38,6 +39,7 @@ pub struct AppState {
     pub(crate) catalog: CatalogBus,
     pub(crate) menu: MenuBus,
     pub(crate) workspace: Workspace,
+    pub(crate) agents: AgentSessions,
 }
 
 impl AppState {
@@ -71,6 +73,20 @@ impl AppState {
             .map_err(StateError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(StateError::Tape)?;
         let progress = Arc::new(ProgressHub::new());
+        let backoff = ReconnectBackoff::new();
+        let workspace = Workspace::new();
+        let agents = AgentSessions::new(
+            config.agents.path.clone(),
+            config.server.state_dir.join("sessions"),
+            crate::session_agents::model_client(&config.gateway.base_url, &config.gateway.api_key),
+            SessionHost {
+                push: push.clone(),
+                backoff: backoff.clone(),
+                menu: menu.clone(),
+                workspace: workspace.clone(),
+                catalog: catalog.clone(),
+            },
+        );
         push.push_idle();
         Ok(Self {
             gateway,
@@ -78,10 +94,11 @@ impl AppState {
             status,
             progress,
             health: GatewayHealth::new(),
-            backoff: ReconnectBackoff::new(),
+            backoff,
             catalog,
             menu,
-            workspace: Workspace::new(),
+            workspace,
+            agents,
         })
     }
 
@@ -155,6 +172,15 @@ impl AppState {
     pub(crate) fn workspace(&self) -> &Workspace {
         &self.workspace
     }
+
+    /// The agent-session registry: discovery, launch, and the running
+    /// sessions behind the `/agents/ws` socket. Sessions outlive
+    /// sockets, so an embedding host ends one through
+    /// [`AgentSessions::close`].
+    #[must_use]
+    pub fn agents(&self) -> &AgentSessions {
+        &self.agents
+    }
 }
 
 /// A shared-state construction failure: rich, init-only, and never sent
@@ -185,6 +211,7 @@ pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
     let api = Router::new()
         .merge(routes::chat::routes(state.clone()))
+        .merge(crate::session_agents::socket::routes(state.clone()))
         .merge(routes::gateway_config::routes(state))
         .merge(with_deadline(
             routes::workspace::routes(workspace),
@@ -225,11 +252,16 @@ pub(crate) mod fixtures {
     #[cfg(test)]
     use crate::app::AppState;
     #[cfg(test)]
-    use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig};
+    use crate::config::{AgentsConfig, Config, GatewayConfig, ServerConfig, TapeConfig};
 
-    /// Builds a configuration pointing at `base_url`, taping to `tape_path`.
+    /// Builds a configuration pointing at `base_url`, taping to `tape_path`
+    /// and anchoring the state directory beside the tape.
     #[cfg(test)]
     pub(crate) fn config_for(base_url: &str, tape_path: &Path) -> Config {
+        let state_dir = tape_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
         Config {
             gateway: GatewayConfig {
                 base_url: base_url.to_string(),
@@ -238,7 +270,11 @@ pub(crate) mod fixtures {
             tape: TapeConfig {
                 path: tape_path.to_path_buf(),
             },
-            server: ServerConfig::default(),
+            server: ServerConfig {
+                state_dir,
+                ..ServerConfig::default()
+            },
+            agents: AgentsConfig::default(),
         }
     }
 

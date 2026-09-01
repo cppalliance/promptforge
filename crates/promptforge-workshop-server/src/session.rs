@@ -323,7 +323,8 @@ async fn handle_frame(
 }
 
 /// Sends one JSON text frame; a false return means the client is gone.
-async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
+/// Shared with the agent-session socket, its second production consumer.
+pub(crate) async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
     // Serializing the protocol frames cannot fail: strings, integers, and
     // JSON values only. A frame that somehow cannot serialize is skipped,
     // which is not a gone client.
@@ -334,8 +335,9 @@ async fn send_frame<F: serde::Serialize>(socket: &mut WebSocket, frame: &F) -> b
 }
 
 /// Sends one `error` frame carrying `message`, tagged with the request's
-/// `id` when there is one, ignoring a dead client.
-async fn send_error(
+/// `id` when there is one, ignoring a dead client. Shared with the
+/// agent-session socket, its second production consumer.
+pub(crate) async fn send_error(
     socket: &mut WebSocket,
     id: Option<&serde_json::Value>,
     message: impl Into<String>,

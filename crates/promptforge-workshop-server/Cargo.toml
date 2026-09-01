@@ -24,6 +24,7 @@ promptforge-core-support.workspace = true
 promptforge-gateway-protocol.workspace = true
 promptforge-model-client.workspace = true
 promptforge-progress.workspace = true
+promptforge-store.workspace = true
 promptforge-tools.workspace = true
 rand.workspace = true
 reqwest.workspace = true
@@ -38,6 +39,7 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
+workshop-agent.workspace = true
 
 [features]
 default = []

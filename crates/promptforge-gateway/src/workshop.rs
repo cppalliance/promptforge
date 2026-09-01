@@ -120,9 +120,9 @@ mod hosted {
     }
 
     /// Builds the workshop server's config from the gateway's boot config:
-    /// the gateway client derived from `[server]`, the tape path anchored
-    /// to the boot config's directory, and `[workshop]`'s own listener and
-    /// voice settings mirrored across.
+    /// the gateway client derived from `[server]`, the tape, state, and
+    /// agent-program paths anchored to the boot config's directory, and
+    /// `[workshop]`'s own listener and voice settings mirrored across.
     fn ws_config(
         server: &ServerConfig,
         workshop: &WorkshopConfig,
@@ -130,7 +130,7 @@ mod hosted {
         bound: SocketAddr,
     ) -> promptforge_workshop_server::Config {
         let boot_dir = config_path.parent().unwrap_or(Path::new("."));
-        promptforge_workshop_server::Config {
+        let mut config = promptforge_workshop_server::Config {
             gateway: promptforge_workshop_server::GatewayConfig {
                 base_url: client_url(server, bound),
                 api_key: server.api_key().expose().to_string(),
@@ -141,8 +141,15 @@ mod hosted {
             server: promptforge_workshop_server::ServerConfig {
                 bind: workshop.bind().to_string(),
                 open_browser: workshop.open_browser(),
+                ..promptforge_workshop_server::ServerConfig::default()
             },
-        }
+            agents: promptforge_workshop_server::AgentsConfig::default(),
+        };
+        // The boot config carries no keys for the workshop's state and
+        // agent-program paths, so their empty defaults anchor beside the
+        // boot config, exactly as an absent key anchors beside workshop.toml.
+        config.anchor_path_defaults(boot_dir);
+        config
     }
 
     /// The gateway URL the workshop's client dials: the boot `[server]`'s
@@ -227,6 +234,16 @@ vocabulary = ["MCP", "GGUF"]
                 ws.tape.path,
                 Path::new("/etc/pf").join("tapes").join("session.jsonl"),
                 "a relative tape path anchors to the boot config's directory"
+            );
+            assert_eq!(
+                ws.server.state_dir,
+                Path::new("/etc/pf"),
+                "the state dir defaults to the boot config's directory"
+            );
+            assert_eq!(
+                ws.agents.path,
+                Path::new("/etc/pf").join("agents"),
+                "the agents dir defaults to agents/ beside the boot config"
             );
             assert_eq!(ws.server.bind, "127.0.0.1:7911");
             assert!(ws.server.open_browser);

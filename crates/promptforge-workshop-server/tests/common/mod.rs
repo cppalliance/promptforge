@@ -13,7 +13,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use promptforge_workshop_server::{Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig};
+use promptforge_workshop_server::{
+    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -47,7 +49,9 @@ impl TestServer {
             server: ServerConfig {
                 bind: "127.0.0.1:0".to_string(),
                 open_browser: false,
+                state_dir: tape_dir.path().to_path_buf(),
             },
+            agents: AgentsConfig::default(),
         };
         let handle =
             promptforge_workshop_server::spawn(config).expect("the workshop server spawns");

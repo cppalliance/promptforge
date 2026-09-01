@@ -44,6 +44,25 @@
 //! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
 //!
+//! # Agent-session frames
+//!
+//! The `/agents/ws` socket speaks its own frame family. On connect the
+//! server pushes [`AgentsFrame`], the discovered agent list. The client
+//! opens a session with `{"type":"launch","agent":"..."}` or reattaches
+//! with `{"type":"attach","session":"..."}`; either is answered with
+//! [`AgentSessionFrame`] naming the session id. A running session streams
+//! [`AgentEventFrame`]s - the durable event log, each frame carrying its
+//! log index, replayed from the top on attach - and [`AgentDeltaFrame`]s,
+//! the ephemeral live chunks, each stamped with the `reply` id of the
+//! durable event that will supersede it. `{"type":"cancel"}` fires the
+//! session's turn-cancel: cancellation is a stop reason, never an error -
+//! no error frame follows, pending waits die as `input_cancelled`, and
+//! the relaunched agent returns to waiting. Frames already in flight
+//! from the cancelled run may still arrive between the cancel and the
+//! relaunch: a defined grace window, absorbed by the reply-id
+//! coalescing (the cancelled round never settles, so its deltas fall to
+//! the round that eventually does), never a protocol violation.
+//!
 //! # Agent-session input frames
 //!
 //! An agent session asks its operator for input through the Workshop's
@@ -138,6 +157,145 @@ pub(crate) fn parse_chat_request(
     let mut request: ChatRequest = serde_json::from_value(value)?;
     request.rest.clear();
     Ok(request)
+}
+
+// --- Agent-session frames --------------------------------------------------
+
+/// The agent list pushed when an `/agents/ws` socket connects:
+/// `{"type":"agents","agents":["chat","research"]}`.
+///
+/// Delivery: ephemeral - every push is the complete discovered list,
+/// resent on every connect; there is no incremental form to lose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct AgentsFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    /// The launchable agent names, in discovery order.
+    agents: Vec<String>,
+}
+
+impl AgentsFrame {
+    /// Builds the list frame over the discovered agent names.
+    pub(crate) fn new(agents: Vec<String>) -> Self {
+        Self {
+            kind: "agents",
+            agents,
+        }
+    }
+}
+
+/// The direct reply to a `launch` or `attach` frame:
+/// `{"type":"agent_session","session":"...","agent":"..."}`. The client
+/// keeps the session id to reattach after a disconnect - sessions
+/// outlive sockets.
+///
+/// Delivery: durable - a direct per-request reply sent by the loop that
+/// owns the socket, the contract's no-cursor case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct AgentSessionFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    /// The session's unguessable id.
+    session: String,
+    /// The launched agent's name.
+    agent: String,
+}
+
+impl AgentSessionFrame {
+    /// Builds the acknowledgment for `session` running `agent`.
+    pub(crate) fn new(session: String, agent: String) -> Self {
+        Self {
+            kind: "agent_session",
+            session,
+            agent,
+        }
+    }
+}
+
+/// One durable entry of an agent session's event log:
+/// `{"type":"agent_event","index":N,"event":{...}}` plus, on the
+/// model-round content kinds (`agent_thought`, `agent_message`,
+/// `tool_call`), the `reply` id that coalesces the round's ephemeral
+/// deltas away (see [`AgentDeltaFrame`]).
+///
+/// Delivery: durable - `index` is the entry's position in the session's
+/// event log, the per-client cursor recovers everything past it on
+/// reconnect, and a future `replayFrom` cursor rides the same field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct AgentEventFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    /// The entry's log index.
+    index: u64,
+    /// The reply id this event settles, present on the model-round
+    /// content kinds and omitted elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply: Option<u64>,
+    /// The logged entry, in its persisted vocabulary shape.
+    event: promptforge_core_support::events::RuntimeEvent,
+}
+
+impl AgentEventFrame {
+    /// Builds the frame for the entry at `index`.
+    pub(crate) fn new(
+        index: u64,
+        reply: Option<u64>,
+        event: promptforge_core_support::events::RuntimeEvent,
+    ) -> Self {
+        Self {
+            kind: "agent_event",
+            index,
+            reply,
+            event,
+        }
+    }
+}
+
+/// Which streaming side channel one agent delta belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AgentDeltaKind {
+    /// Answer content, superseded by the round's `agent_message` event.
+    Text,
+    /// Reasoning content, superseded by the round's `agent_thought`
+    /// event.
+    Reasoning,
+}
+
+/// One live streaming chunk of an agent's model round:
+/// `{"type":"agent_delta","kind":"text","content":"...","reply":N}`.
+///
+/// Every delta is stamped with the `reply` id of the durable event that
+/// will supersede it, so the SPA coalesces chunks by that id and replaces
+/// them when the event arrives (the ACP messageId chunk-vs-upsert rule).
+///
+/// Delivery: ephemeral - deltas ride a bounded broadcast and may drop
+/// under lag; the completed-reply event is the repair path, which is why
+/// agent deltas never enter the event log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct AgentDeltaFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    /// Which side channel the chunk belongs to.
+    #[serde(rename = "kind")]
+    channel: AgentDeltaKind,
+    /// The chunk's text.
+    content: String,
+    /// The id of the durable event that will supersede this delta.
+    reply: u64,
+}
+
+impl AgentDeltaFrame {
+    /// Builds a delta frame carrying `content` on `channel`, stamped with
+    /// the superseding `reply` id.
+    pub(crate) fn new(channel: AgentDeltaKind, content: String, reply: u64) -> Self {
+        Self {
+            kind: "agent_delta",
+            channel,
+            content,
+            reply,
+        }
+    }
 }
 
 // --- Agent-session input frames -------------------------------------------
@@ -650,6 +808,93 @@ mod tests {
         let id = serde_json::json!(2);
         let tagged = serde_json::to_value(DoneFrame::new(Some(&id))).expect("the frame serializes");
         assert_eq!(tagged, serde_json::json!({"type": "done", "id": 2}));
+    }
+
+    #[test]
+    fn an_agents_frame_serializes_the_discovered_names() {
+        let frame = serde_json::to_value(AgentsFrame::new(vec![
+            "chat".to_owned(),
+            "research".to_owned(),
+        ]))
+        .expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({"type": "agents", "agents": ["chat", "research"]}),
+            "the wire shape matches the chat protocol's frame taxonomy"
+        );
+    }
+
+    #[test]
+    fn an_agent_session_frame_serializes_its_id_and_agent() {
+        let frame =
+            serde_json::to_value(AgentSessionFrame::new("a1b2".to_owned(), "chat".to_owned()))
+                .expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({"type": "agent_session", "session": "a1b2", "agent": "chat"}),
+        );
+    }
+
+    #[test]
+    fn an_agent_event_frame_carries_its_log_index_and_optional_reply_id() {
+        use promptforge_core_support::events::{RuntimeEvent, RuntimeEventKind};
+        let event = RuntimeEvent {
+            kind: RuntimeEventKind::UserInput,
+            section: "chat".to_owned(),
+            chain_id: 0,
+            depth: 0,
+            turn: 0,
+            content: "hi".to_owned(),
+            model: None,
+            tool_call_id: None,
+            finish_reason: None,
+            metrics: None,
+        };
+        let plain = serde_json::to_value(AgentEventFrame::new(3, None, event.clone()))
+            .expect("the frame serializes");
+        assert_eq!(plain["type"], "agent_event");
+        assert_eq!(plain["index"], 3, "the frame carries the entry's log index");
+        assert!(
+            plain.get("reply").is_none(),
+            "an absent reply id is omitted from the wire, not serialized as null"
+        );
+        assert_eq!(
+            plain["event"],
+            serde_json::to_value(&event).expect("events serialize"),
+            "the entry rides in its persisted vocabulary shape"
+        );
+        let stamped = serde_json::to_value(AgentEventFrame::new(4, Some(1), event))
+            .expect("the frame serializes");
+        assert_eq!(
+            stamped["reply"], 1,
+            "a superseding event is stamped with the reply id its deltas carried"
+        );
+    }
+
+    #[test]
+    fn an_agent_delta_frame_is_stamped_with_its_superseding_reply_id() {
+        let text = serde_json::to_value(AgentDeltaFrame::new(
+            AgentDeltaKind::Text,
+            "po".to_owned(),
+            2,
+        ))
+        .expect("the frame serializes");
+        assert_eq!(
+            text,
+            serde_json::json!({"type": "agent_delta", "kind": "text", "content": "po", "reply": 2}),
+        );
+        let reasoning = serde_json::to_value(AgentDeltaFrame::new(
+            AgentDeltaKind::Reasoning,
+            "hmm".to_owned(),
+            2,
+        ))
+        .expect("the frame serializes");
+        assert_eq!(
+            reasoning,
+            serde_json::json!({
+                "type": "agent_delta", "kind": "reasoning", "content": "hmm", "reply": 2,
+            }),
+        );
     }
 
     #[test]

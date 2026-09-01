@@ -37,6 +37,8 @@ Every field of `workshop.toml`:
 | `tape.path` | `tape.jsonl` | Path of the JSONL session tape; one event per chat exchange |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
+| `server.state_dir` | the config file's directory | Directory holding the server's persistent state; agent session event logs live under `state_dir/sessions/` |
+| `agents.path` | `agents/` beside the config file | Directory whose `.lua` files are the launchable agent programs; a missing directory offers no agents |
 
 ## Routes
 
@@ -47,6 +49,7 @@ Every field of `workshop.toml`:
 | `GET /v1/models` | Proxies the gateway's model catalog verbatim; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `POST /chat` | Buffered chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` is rejected with 400 - streaming lives on `/ws`; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
 | `GET /ws` | WebSocket upgrade, one persistent socket for all downstream JSON: `{"type":"chat","id","model","messages"}` frames in (the optional `id` is echoed on the reply), `{"type":"delta","content"}` / `{"type":"done"}` / `{"type":"error","message"}` frames out, plus unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates and `{"type":"models","models":[...]}` catalog pushes when the gateway comes back after an outage |
+| `GET /agents/ws` | WebSocket upgrade for one agent session: the discovered agent list on connect, `{"type":"launch","agent"}` / `{"type":"attach","session"}` in (acknowledged with `{"type":"agent_session","session","agent"}`), then durable `{"type":"agent_event","index","event",...}` log entries, ephemeral `{"type":"agent_delta","kind","content","reply"}` streaming chunks, and the `input_required` / `input_cancelled` wait frames answered by `{"type":"input_response","token","text"}`; `{"type":"cancel"}` fires turn-cancel |
 
 ## Gateway resilience
 
@@ -130,6 +133,10 @@ The variables:
 ## Agent input waits
 
 `WaitRegistry` holds an agent session's unresolved user-input waits behind single-use cryptographic tokens, retained across socket loss and resent on reconnect. `UserInputTool` is the Workshop's `user_input` tool - never advertised to a model - whose `call()` registers a wait, pushes the durable `input_required` frame itself, and suspends until `deliver_input_response` fires `on_user_input` byte-exact and completes the wait; its output is trusted, structured JSON (`text` byte-exact, `images` present and empty). A drop guard turns every dying wait into a durable `input_cancelled` frame, so a cancelled turn never leaks a wait or leaves a stale prompt.
+
+## Agent sessions
+
+`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.lua` agent programs from `agents.path`, launches each as a session running `workshop_agent::run_agent` with the Workshop's `user_input` tool, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
 
 ## Minimum Rust Version
 
