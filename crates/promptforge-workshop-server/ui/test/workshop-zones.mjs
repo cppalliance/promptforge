@@ -1,10 +1,10 @@
 // Integration test for the workshop zone registry and file tree
 // (src/ui/workshop/zones.ts, panel-types.ts, workshop-panel.ts). Bundles the
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
-// real index.html, and drives the public API. Covers: Agent and Workshop
-// panels mount through the registry; multiple Agent panels coexist as
-// tabs with stable per-agent ids; every panel renders a normal chip tab
-// and the Workshop tree's tab has no close button; the tree requests
+// real index.html, and drives the public API. Covers: the agent-session
+// and Workshop panels mount through the registry; the agent panel is a
+// singleton whose reopen focuses it; every panel renders a normal chip
+// tab and the Workshop tree's tab has no close button; the tree requests
 // directory paths from /workspace/tree and never file contents;
 // openInZone places panels by affinity and honors per-panel overrides; a
 // zone group is rebuilt after its last panel closes; tree expansion
@@ -27,7 +27,6 @@ const bundle = await esbuild.build({
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,
-        openAgentPanel,
         openInZone,
         panelIdFor,
         setZoneOverride,
@@ -190,6 +189,19 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.window = window;
 globalThis.document = window.document;
 
+// The agent panel composes an AgentSocket on init; a scripted stand-in
+// that never opens keeps the panel inert - this test drives placement,
+// not the agent wire.
+globalThis.WebSocket = class {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  readyState = 0;
+  send() {}
+  close() {}
+};
+
 // The bundle includes all of dockview, so it is far too large for a data
 // URL (a failure would print the whole megabyte-long URL). Import from a
 // temp file instead, which also keeps stack traces readable.
@@ -199,7 +211,6 @@ const {
   createDockview,
   themeDark,
   initZones,
-  openAgentPanel,
   openInZone,
   panelIdFor,
   setZoneOverride,
@@ -242,16 +253,16 @@ const dock = createDockview(window.document.getElementById("dock"), {
 });
 initZones(dock);
 
-// --- Boot: the first Agent and the Workshop mount through the registry -----
+// --- Boot: the agent session and the Workshop mount through the registry ---
 
-const chatPanel = openAgentPanel();
+const agentPanel = openInZone("agent", {});
 const treePanel = openInZone("tree", {});
 await flush();
 
 check("boot opens exactly the agent and tree panels", dock.panels.length === 2);
-check("the agent panel mounts its .mur-app surface", !!window.document.querySelector("#dock .mur-app"));
+check("the agent panel mounts its session surface", !!window.document.querySelector("#dock .agent-panel"));
 check("the Workshop tree panel mounts", !!window.document.querySelector("#dock .workshop-tree"));
-check("the agent opens in the right zone", zoneOfPanel(chatPanel) === "right");
+check("the agent opens in the right zone", zoneOfPanel(agentPanel) === "right");
 check("the tree opens in the left zone", zoneOfPanel(treePanel) === "left");
 check("boot renders two zone groups", dock.groups.length === 2);
 check(
@@ -262,7 +273,7 @@ check(
 // --- Tabs: normal chips, and the tree's has no close button -----------------
 
 const treeTab = treePanel.view.tab.element;
-const chatTab = chatPanel.view.tab.element;
+const agentTab = agentPanel.view.tab.element;
 check(
   "the tree tab renders the default chip structure",
   treeTab.classList.contains("dv-default-tab") &&
@@ -270,9 +281,9 @@ check(
 );
 check("the tree tab has no close button", treeTab.querySelector(".dv-default-tab-action") === null);
 check(
-  "agent tabs keep the default closable chip",
-  chatTab.classList.contains("dv-default-tab") &&
-    chatTab.querySelector(".dv-default-tab-action") !== null,
+  "the agent tab keeps the default closable chip",
+  agentTab.classList.contains("dv-default-tab") &&
+    agentTab.querySelector(".dv-default-tab-action") !== null,
 );
 treePanel.api.setTitle("Renamed");
 check(
@@ -281,45 +292,14 @@ check(
 );
 treePanel.api.setTitle("Workshop");
 
-// --- Agent tabs: every New Agent is a fresh panel in the right bank --------
+// --- The agent session is a singleton: reopening focuses it ----------------
 
-const agentB = openAgentPanel();
-check("a second agent opens as a distinct panel", agentB !== chatPanel && dock.panels.length === 3);
+check("the agent tab carries the Agent Session title", agentPanel.title === "Agent Session");
+check("the agent panel keys by its type name", panelIdFor("agent", {}) === "agent");
 check(
-  "agent panels carry stable per-agent ids",
-  chatPanel.id.startsWith("chat:") && agentB.id.startsWith("chat:") && chatPanel.id !== agentB.id,
+  "reopening the agent session activates the same panel",
+  openInZone("agent", {}) === agentPanel && dock.panels.length === 2,
 );
-check(
-  "agent tabs default to the Agent title",
-  chatPanel.title === "Agent" && agentB.title === "Agent",
-);
-check(
-  "coexisting agents share the right-zone group as tabs",
-  agentB.group.id === chatPanel.group.id && dock.groups.length === 2,
-);
-check(
-  "the second agent mounts its own .mur-app surface",
-  agentB.view.content.element.querySelector(".mur-app") !== null &&
-    agentB.view.content.element.querySelector(".mur-app") !==
-      chatPanel.view.content.element.querySelector(".mur-app"),
-);
-check(
-  "panelIdFor honors a provided agent id",
-  panelIdFor("chat", { agentId: "fixed" }) === "chat:fixed",
-);
-check(
-  "panelIdFor generates unique agent ids without one",
-  panelIdFor("chat", {}) !== panelIdFor("chat", {}),
-);
-// A restored layout reopens an agent by its persisted id: same panel, no copy.
-const fixedAgent = openInZone("chat", { agentId: "fixed" });
-check(
-  "reopening an agent by id activates the same panel",
-  openInZone("chat", { agentId: "fixed" }) === fixedAgent && dock.panels.length === 4,
-);
-check("an agent opened by id lands in the right zone", zoneOfPanel(fixedAgent) === "right");
-dock.removePanel(fixedAgent);
-check("closing one agent leaves the others open", dock.panels.length === 3);
 
 // --- The tree requests paths, never file contents ---------------------------
 
@@ -368,8 +348,8 @@ check(
   editorB.group.id === editorA.group.id && dock.groups.length === 3,
 );
 check(
-  "the main group is neither the chat nor the tree group",
-  editorB.group.id !== chatPanel.group.id && editorB.group.id !== treePanel.group.id,
+  "the main group is neither the agent nor the tree group",
+  editorB.group.id !== agentPanel.group.id && editorB.group.id !== treePanel.group.id,
 );
 
 // --- Overrides: a moved panel reopens in its chosen zone --------------------
@@ -381,7 +361,7 @@ const editorB2 = openInZone("editor", { path: `${ROOT}\\b.txt` });
 check("an overridden panel reopens in the override zone", zoneOfPanel(editorB2) === "right");
 check(
   "the override lands the panel within the right zone's group",
-  editorB2.group.id === chatPanel.group.id,
+  editorB2.group.id === agentPanel.group.id,
 );
 // Moving back to the affinity zone deletes the override.
 setZoneOverride(bId, "main");
@@ -398,7 +378,7 @@ const mainGroupId = editorA.group.id;
 dock.removePanel(editorA);
 dock.removePanel(editorB3);
 check("closing every main panel removes its group", dock.getGroup(mainGroupId) === undefined);
-check("only the chat and tree groups remain", dock.groups.length === 2);
+check("only the agent and tree groups remain", dock.groups.length === 2);
 const editorC = openInZone("editor", { path: `${ROOT}\\c.txt` });
 check("the next main-zone open rebuilds the group", dock.groups.length === 3);
 check(

@@ -1,37 +1,16 @@
-// The persistent workshop socket: one WebSocket to /ws carries every
-// downstream JSON frame - chat replies for in-flight generations and
-// unsolicited status, catalog, and workbench pushes from the server. Chat
-// requests are multiplexed by an incrementing id the server echoes on that
-// chat's delta/done/error frames, so several chats can stream on the socket
-// at once, each held in the pending map until its own terminal frame. The
-// frame shapes themselves live in protocol.ts.
+// The persistent workshop socket: one WebSocket to /ws carries the
+// server's downstream JSON - unsolicited status, catalog, and workbench
+// pushes - and the inbound Model-menu events (select_model,
+// switch_profile). Chat itself rides the /agents/ws socket
+// (agent-socket.ts); this connection carries no chat frames. The frame
+// shapes themselves live in protocol.ts.
 
 import { Emitter, type Event } from "../base/event";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type { CatalogModel, ChatPayload, StatusFrame, WorkbenchFrame } from "./protocol";
-
-/** The per-chat stream callbacks handed to `streamChat`. */
-export interface ChatStreamHandlers {
-  /** Called for each answer-content delta. */
-  onDelta: (content: string) => void;
-  /** Called for each reasoning side-channel delta, when the model has one. */
-  onReasoning?: (content: string) => void;
-}
-
-interface PendingChat {
-  onDelta: (content: string) => void;
-  onReasoning: ((content: string) => void) | undefined;
-  resolve: () => void;
-  reject: (error: Error) => void;
-  started: boolean;
-  settled: boolean;
-}
+import type { CatalogModel, StatusFrame, WorkbenchFrame } from "./protocol";
 
 interface ServerFrame {
   type?: unknown;
-  id?: unknown;
-  content?: unknown;
-  message?: unknown;
   models?: unknown;
 }
 
@@ -63,16 +42,13 @@ type QueuedPush =
  * and replayed in arrival order when the composition root declares itself
  * ready - handlers attached at different points of boot would otherwise
  * race the server's first pushes.
- * After `ready()`, pushes deliver immediately. Chat reply frames are never
- * queued: they answer a `streamChat` call, which implies a running app.
+ * After `ready()`, pushes deliver immediately.
  */
 export class WorkshopSocket extends Disposable {
   private socket: WebSocket | null = null;
   private opening: { socket: WebSocket; promise: Promise<void> } | null = null;
-  private nextId = 1;
   private reconnectDelayMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly pending = new Map<number, PendingChat>();
   private isReady = false;
   private readonly bootQueue: QueuedPush[] = [];
 
@@ -92,20 +68,11 @@ export class WorkshopSocket extends Disposable {
   /** Fires when the socket disconnects. */
   readonly onDisconnect: Event<void> = this._onDisconnect.event;
 
-  private readonly _onAbort = this._register(new Emitter<void>());
-  /**
-   * Fires when an in-flight chat is aborted. The server answers a cancel
-   * with no reply frame, so no terminal status frame for the aborted chat
-   * ever arrives; listeners must clear local activity state themselves.
-   */
-  readonly onAbort: Event<void> = this._onAbort.event;
-
   constructor(private readonly url: string = defaultUrl()) {
     super();
     // Disposal silences the socket before closing it (onclose detached
     // first), so teardown is never mistaken for a dropout: no disconnect
-    // fan-out, no reconnect backoff. In-flight chats settle the same way a
-    // close would, so no caller awaits a reply forever.
+    // fan-out, no reconnect backoff.
     this._register(
       toDisposable(() => {
         if (this.reconnectTimer !== null) {
@@ -118,7 +85,6 @@ export class WorkshopSocket extends Disposable {
           socket.close();
           this.socket = null;
         }
-        this.settleAll();
         this.bootQueue.length = 0;
       }),
     );
@@ -127,7 +93,7 @@ export class WorkshopSocket extends Disposable {
   /** Opens the socket unless it is already open or opening. */
   connect(): void {
     // A failed open is ignored here: `onerror` has already reset the state,
-    // and the next `streamChat` retries through `ensureOpen`.
+    // and the reconnect backoff retries through `ensureOpen`.
     void this.ensureOpen().catch(() => {});
   }
 
@@ -146,61 +112,6 @@ export class WorkshopSocket extends Disposable {
     for (const push of this.bootQueue.splice(0)) {
       this.emitPush(push);
     }
-  }
-
-  /**
-   * Sends one id-tagged chat frame and resolves when its `done` frame
-   * arrives. Rejects on an `error` frame, or on a socket close before any
-   * answer content streamed (reasoning alone does not count); a close after
-   * answer content started resolves, mirroring an SSE body that ends early.
-   * Aborting the signal sends a cancel frame for this chat's id - the
-   * server drops that stream and answers with nothing - and settles this
-   * chat locally, while every other chat on the socket streams on.
-   */
-  async streamChat(
-    payload: ChatPayload,
-    handlers: ChatStreamHandlers,
-    signal: AbortSignal,
-  ): Promise<void> {
-    await this.ensureOpen();
-    const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      throw new Error("the workshop socket is not open");
-    }
-    const id = this.nextId++;
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = (): void => {
-        if (!this.pending.has(id)) return;
-        // When the socket is already down, its close settled or will settle
-        // everything server-side too, so the local settle is the whole job.
-        this.sendFrame({ type: "cancel", id });
-        this.settle(id, (chat) => chat.resolve());
-        this._onAbort.fire(undefined);
-      };
-      const finish = (): void => signal.removeEventListener("abort", onAbort);
-      this.pending.set(id, {
-        onDelta: handlers.onDelta,
-        onReasoning: handlers.onReasoning,
-        resolve: () => {
-          finish();
-          resolve();
-        },
-        reject: (error: Error) => {
-          finish();
-          reject(error);
-        },
-        started: false,
-        settled: false,
-      });
-      signal.addEventListener("abort", onAbort, { once: true });
-      try {
-        socket.send(JSON.stringify({ type: "chat", id, ...payload }));
-      } catch (error) {
-        this.settle(id, (chat) =>
-          chat.reject(error instanceof Error ? error : new Error(String(error))),
-        );
-      }
-    });
   }
 
   private ensureOpen(): Promise<void> {
@@ -224,7 +135,7 @@ export class WorkshopSocket extends Disposable {
         resolve();
       };
       // A failure while opening rejects the waiters; a failure on an
-      // established socket is followed by close, which settles pendings.
+      // established socket is followed by close, which reconnects.
       socket.onerror = () => {
         if (this.socket === socket) this.socket = null;
         if (this.opening === entry) this.opening = null;
@@ -236,7 +147,6 @@ export class WorkshopSocket extends Disposable {
     socket.onclose = () => {
       if (this.socket === socket) this.socket = null;
       if (this.opening === entry) this.opening = null;
-      this.settleAll();
       // A dropped connection invalidates its queued pushes: replaying them
       // after the onDisconnect reset would render state from a dead socket.
       this.bootQueue.length = 0;
@@ -304,7 +214,7 @@ export class WorkshopSocket extends Disposable {
     try {
       frame = JSON.parse(String(event.data)) as ServerFrame;
     } catch {
-      // A non-JSON frame carries no chat or status event; keep reading.
+      // A non-JSON frame carries no push; keep reading.
       return;
     }
     if (frame.type === "status") {
@@ -318,39 +228,9 @@ export class WorkshopSocket extends Disposable {
     }
     if (frame.type === "workbench") {
       this.deliverPush({ kind: "workbench", frame: frame as unknown as WorkbenchFrame });
-      return;
     }
-    if (typeof frame.id !== "number") return;
-    const chat = this.pending.get(frame.id);
-    // A reply for a detached (aborted) chat is dropped.
-    if (!chat) return;
-    if (frame.type === "delta" && typeof frame.content === "string" && frame.content !== "") {
-      chat.started = true;
-      chat.onDelta(frame.content);
-      return;
-    }
-    if (frame.type === "reasoning" && typeof frame.content === "string" && frame.content !== "") {
-      // Reasoning does not mark the reply started: scratch work with no
-      // answer token is not a usable reply, so a socket that closes after
-      // only reasoning streamed rejects instead of resolving an empty turn.
-      chat.onReasoning?.(frame.content);
-      return;
-    }
-    if (frame.type === "done") {
-      this.settle(frame.id, (c) => c.resolve());
-      return;
-    }
-    if (frame.type === "error") {
-      this.settle(frame.id, (c) =>
-        c.reject(
-          new Error(
-            typeof frame.message === "string" && frame.message !== ""
-              ? frame.message
-              : "the chat stream failed",
-          ),
-        ),
-      );
-    }
+    // Error frames answer menu events; the server's status frames carry
+    // the user-visible outcome, so they need no local routing.
   }
 
   /** Queues a push before `ready()`, dropping the oldest at the cap. */
@@ -372,28 +252,6 @@ export class WorkshopSocket extends Disposable {
       this._onModels.fire(push.models);
     } else {
       this._onWorkbench.fire(push.frame);
-    }
-  }
-
-  /** Settles one pending chat exactly once and drops it from the map. */
-  private settle(id: number, fn: (chat: PendingChat) => void): void {
-    const chat = this.pending.get(id);
-    if (!chat || chat.settled) return;
-    chat.settled = true;
-    this.pending.delete(id);
-    fn(chat);
-  }
-
-  /** Settles every pending chat after the socket closed under it. */
-  private settleAll(): void {
-    for (const id of [...this.pending.keys()]) {
-      this.settle(id, (chat) => {
-        if (chat.started) {
-          chat.resolve();
-        } else {
-          chat.reject(new Error("the workshop socket closed before the reply completed"));
-        }
-      });
     }
   }
 }

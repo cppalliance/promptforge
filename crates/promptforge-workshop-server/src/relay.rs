@@ -1,8 +1,5 @@
-//! The buffered gateway relay: the `/chat` and `/v1/models` handlers and
-//! the helpers that shape their responses and tape their round-trips.
-
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+//! The buffered gateway relay: the `/v1/models` catalog passthrough and
+//! the helpers that shape gateway responses for the wire.
 
 use axum::extract::State;
 use axum::http::header;
@@ -11,9 +8,8 @@ use axum::response::{IntoResponse, Response};
 use crate::app::AppState;
 use crate::error::AppError;
 use crate::gateway::{GatewayError, GatewayResponse};
-use crate::protocol::{Activity, ChatRequest, parse_chat_request};
+use crate::protocol::Activity;
 use crate::push::Push;
-use crate::tape::{Tape, TapeEvent};
 
 /// Relays the gateway's model catalog to the caller verbatim.
 ///
@@ -52,99 +48,10 @@ fn report_gateway_outcome(
     }
 }
 
-/// Forwards a buffered chat completion to the gateway, tapes the
-/// round-trip, and relays the reply verbatim.
-///
-/// A completed round-trip is recorded on the session tape; a tape failure is
-/// logged and never changes the response. Streaming moved to `GET /ws`: a
-/// request carrying `"stream": true` is rejected with 400.
-pub(crate) async fn chat(State(state): State<AppState>, body: String) -> Response {
-    let request_value: serde_json::Value = match serde_json::from_str(&body) {
-        Ok(value) => value,
-        Err(error) => return AppError::BadRequest(error).into_response(),
-    };
-    if request_value
-        .get("stream")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
-        return AppError::StreamUnsupported.into_response();
-    }
-    let request: ChatRequest = match parse_chat_request(request_value.clone()) {
-        Ok(request) => request,
-        Err(error) => return AppError::BadRequest(error).into_response(),
-    };
-    // A gateway the heartbeat knows is down is not attempted, matching the
-    // /ws chat short-circuit.
-    if !state.health().is_reachable() {
-        return AppError::GatewayUnreachable.into_response();
-    }
-    let push = state.push();
-    push.push_status_update(
-        "Submitting request...",
-        "a buffered chat completion",
-        Activity::General,
-    );
-    push.push_status_update(
-        "Waiting for response...",
-        "the gateway has the request",
-        Activity::General,
-    );
-    let started = Instant::now();
-    let result = state.gateway.chat_completion(&request).await;
-    report_gateway_outcome(&push, &result, "POST /v1/chat/completions");
-    let latency = started.elapsed();
-    // A completed completion is useful work: the reconnect backoff
-    // returns to its base. A declined or failed one is not - only real
-    // delivery may reset the anti-flap escalation.
-    if let Ok(upstream) = &result
-        && upstream.status.is_success()
-    {
-        state.backoff().record_useful_work();
-    }
-    if let Ok(upstream) = &result {
-        let response_value = value_from_bytes(&upstream.body);
-        tape_round_trip(
-            &state.tape,
-            request.model,
-            request_value,
-            response_value,
-            latency,
-        )
-        .await;
-    }
-    relay(result)
-}
-
 /// Parses a gateway body as JSON, falling back to a plain string.
 pub(crate) fn value_from_bytes(body: &[u8]) -> serde_json::Value {
     serde_json::from_slice(body)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()))
-}
-
-/// Records one chat round-trip on the session tape.
-///
-/// A tape failure is logged and never changes the response.
-pub(crate) async fn tape_round_trip(
-    tape: &Arc<Tape>,
-    model: String,
-    request: serde_json::Value,
-    response: serde_json::Value,
-    latency: Duration,
-) {
-    let written = {
-        let tape = Arc::clone(tape);
-        tokio::task::spawn_blocking(move || {
-            let event = TapeEvent::chat(model, request, response, latency)?;
-            tape.record(&event)
-        })
-        .await
-    };
-    match written {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::error!(%error, "session tape event was not recorded"),
-        Err(error) => tracing::error!(%error, "session tape writer did not finish"),
-    }
 }
 
 /// Turns a gateway call outcome into the workshop's HTTP response.
@@ -165,30 +72,19 @@ pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use axum::body::Body;
-    use axum::http::{HeaderMap, Request, StatusCode};
-    use axum::routing::{get, post};
-    use axum::{Json, Router};
+    use axum::http::{HeaderMap, Request, StatusCode, header};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use axum::Router;
     use tower::ServiceExt;
 
     use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
     use crate::app::router;
-    use crate::catalog::CatalogBus;
-    use crate::gateway::GatewayClient;
-    use crate::heartbeat::GatewayHealth;
-    use crate::status::StatusBus;
-    use crate::workspace::Workspace;
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
-    const COMPLETION: &str = r#"{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
     const UPSTREAM_ERROR: &str =
         r#"{"error":{"message":"model unloaded","code":"upstream_unavailable"}}"#;
-    const CHAT_BODY: &str =
-        r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}]}"#;
-    const STREAM_CHAT_BODY: &str =
-        r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}],"stream":true}"#;
 
     fn authorized(headers: &HeaderMap) -> bool {
         headers
@@ -204,15 +100,6 @@ mod tests {
         ([(header::CONTENT_TYPE, "application/json")], CATALOG).into_response()
     }
 
-    async fn mock_chat(headers: HeaderMap, Json(body): Json<serde_json::Value>) -> Response {
-        if !authorized(&headers) {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-        assert_eq!(body["model"], "test-model");
-        assert!(body["messages"].is_array());
-        ([(header::CONTENT_TYPE, "application/json")], COMPLETION).into_response()
-    }
-
     async fn mock_broken_models() -> Response {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -222,58 +109,19 @@ mod tests {
             .into_response()
     }
 
-    async fn mock_chat_not_json(headers: HeaderMap) -> Response {
-        if !authorized(&headers) {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-        (
-            [(header::CONTENT_TYPE, "text/plain")],
-            "gateway replied in plain text",
-        )
-            .into_response()
-    }
-
-    async fn spawn_mock_gateway() -> String {
-        spawn_gateway(
-            Router::new()
-                .route("/v1/models", get(mock_models))
-                .route("/v1/chat/completions", post(mock_chat)),
-        )
-        .await
-    }
-
-    async fn spawn_broken_mock_gateway() -> String {
-        spawn_gateway(Router::new().route("/v1/models", get(mock_broken_models))).await
-    }
-
-    fn chat_request() -> Request<Body> {
+    fn models_request() -> Request<Body> {
         Request::builder()
-            .method("POST")
-            .uri("/chat")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(CHAT_BODY))
-            .expect("static request parts are valid")
-    }
-
-    fn stream_chat_request() -> Request<Body> {
-        Request::builder()
-            .method("POST")
-            .uri("/chat")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(STREAM_CHAT_BODY))
+            .uri("/v1/models")
+            .body(Body::empty())
             .expect("static request parts are valid")
     }
 
     #[tokio::test]
     async fn models_are_relayed_byte_for_byte() {
-        let base_url = spawn_mock_gateway().await;
-        let (state, _tape_dir) = state_for(&base_url);
-        let request = Request::builder()
-            .uri("/v1/models")
-            .body(Body::empty())
-            .expect("static request parts are valid");
+        let base_url = spawn_gateway(Router::new().route("/v1/models", get(mock_models))).await;
+        let (state, _state_dir) = state_for(&base_url);
         let response = router(state)
-            .oneshot(request)
+            .oneshot(models_request())
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::OK);
@@ -281,27 +129,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_completions_are_relayed_byte_for_byte() {
-        let base_url = spawn_mock_gateway().await;
-        let (state, _tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(&body_bytes(response).await[..], COMPLETION.as_bytes());
-    }
-
-    #[tokio::test]
     async fn gateway_error_status_is_relayed_byte_for_byte() {
-        let base_url = spawn_broken_mock_gateway().await;
-        let (state, _tape_dir) = state_for(&base_url);
-        let request = Request::builder()
-            .uri("/v1/models")
-            .body(Body::empty())
-            .expect("static request parts are valid");
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/models", get(mock_broken_models))).await;
+        let (state, _state_dir) = state_for(&base_url);
         let response = router(state)
-            .oneshot(request)
+            .oneshot(models_request())
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -311,13 +144,9 @@ mod tests {
     #[tokio::test]
     async fn unreachable_gateway_becomes_bad_gateway() {
         // Port 1 is never listening, so the connect fails deterministically.
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .uri("/v1/models")
-            .body(Body::empty())
-            .expect("static request parts are valid");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let response = router(state)
-            .oneshot(request)
+            .oneshot(models_request())
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
@@ -328,14 +157,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_gateway_known_down_short_circuits_the_catalog_with_bad_gateway() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         state.health().publish(false);
-        let request = Request::builder()
-            .uri("/v1/models")
-            .body(Body::empty())
-            .expect("static request parts are valid");
         let response = router(state)
-            .oneshot(request)
+            .oneshot(models_request())
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
@@ -346,208 +171,5 @@ mod tests {
             json["error"]["message"], "Gateway unreachable",
             "the short-circuit message is user-visible"
         );
-    }
-
-    #[tokio::test]
-    async fn a_gateway_known_down_short_circuits_buffered_chat_with_bad_gateway() {
-        let (state, tape_dir) = state_for("http://127.0.0.1:1");
-        state.health().publish(false);
-        let response = router(state)
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        let body = body_bytes(response).await;
-        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
-        assert_eq!(json["error"]["code"], "gateway_unreachable");
-        assert_eq!(json["error"]["message"], "Gateway unreachable");
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        assert!(
-            raw.trim().is_empty(),
-            "no upstream attempt means no tape event"
-        );
-    }
-
-    #[tokio::test]
-    async fn malformed_chat_body_is_a_bad_request() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let request = Request::builder()
-            .method("POST")
-            .uri("/chat")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"not_model":true}"#))
-            .expect("static request parts are valid");
-        let response = router(state)
-            .oneshot(request)
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn chat_round_trip_writes_exactly_one_tape_event() {
-        let base_url = spawn_mock_gateway().await;
-        let (state, tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        assert!(raw.ends_with('\n'), "the tape line is complete: {raw:?}");
-        let lines: Vec<&str> = raw.lines().collect();
-        assert_eq!(lines.len(), 1, "exactly one event per round-trip");
-        let event: serde_json::Value =
-            serde_json::from_str(lines[0]).expect("the tape line is valid JSON");
-        assert_eq!(event["kind"], "chat");
-        assert_eq!(event["model"], "test-model");
-        assert_eq!(event["request"]["messages"][0]["content"], "ping");
-        assert_eq!(event["response"]["id"], "chatcmpl-1");
-        assert!(event["latency_ms"].is_u64(), "latency_ms is an integer");
-        let ts = event["ts"].as_str().expect("ts is a string");
-        time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
-            .expect("ts is RFC 3339");
-    }
-
-    #[tokio::test]
-    async fn non_json_gateway_body_is_taped_as_a_string() {
-        let base_url =
-            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_not_json)))
-                .await;
-        let (state, tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        let event: serde_json::Value =
-            serde_json::from_str(raw.lines().next().expect("one event per round-trip"))
-                .expect("the tape line is valid JSON");
-        assert_eq!(event["response"], "gateway replied in plain text");
-    }
-
-    /// Declines a buffered chat with the gateway's error envelope.
-    async fn mock_chat_declines(headers: HeaderMap) -> Response {
-        assert!(authorized(&headers));
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [(header::CONTENT_TYPE, "application/json")],
-            UPSTREAM_ERROR,
-        )
-            .into_response()
-    }
-
-    /// Draws a few delays so the backoff stands escalated, as it would
-    /// after an outage.
-    fn escalate(state: &AppState) {
-        let _ = state.backoff().next_delay();
-        let _ = state.backoff().next_delay();
-        assert!(state.backoff().is_escalated_for_test());
-    }
-
-    #[tokio::test]
-    async fn a_successful_buffered_completion_resets_the_backoff() {
-        let base_url = spawn_mock_gateway().await;
-        let (state, _tape_dir) = state_for(&base_url);
-        escalate(&state);
-        let response = router(state.clone())
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            !state.backoff().is_escalated_for_test(),
-            "a completed completion is useful work and resets the backoff"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_declined_completion_does_not_reset_the_backoff() {
-        // The gateway answered - it connected - but delivered nothing, so
-        // the anti-flap escalation must stand.
-        let base_url =
-            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_declines)))
-                .await;
-        let (state, _tape_dir) = state_for(&base_url);
-        escalate(&state);
-        let response = router(state.clone())
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert!(
-            state.backoff().is_escalated_for_test(),
-            "an answer without delivery must not reset the backoff"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_streaming_chat_request_is_rejected_with_bad_request() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
-        let response = router(state)
-            .oneshot(stream_chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = body_bytes(response).await;
-        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
-        assert_eq!(json["error"]["code"], "stream_unsupported");
-    }
-
-    #[tokio::test]
-    async fn tape_write_failure_does_not_fail_the_chat_response() {
-        struct FailingWriter;
-        impl std::io::Write for FailingWriter {
-            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-                Err(std::io::Error::other("injected tape failure"))
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let base_url = spawn_mock_gateway().await;
-        let gateway = GatewayClient::new(&base_url, "test-key").expect("client builds in tests");
-        let catalog = CatalogBus::new();
-        let status = StatusBus::new();
-        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
-        let backoff = crate::backoff::ReconnectBackoff::new();
-        let workspace = Workspace::new();
-        let agents = crate::session_agents::AgentSessions::new(
-            std::path::PathBuf::new(),
-            std::path::PathBuf::new(),
-            None,
-            crate::session_agents::SessionHost {
-                push: crate::push::Push::new(status.clone(), catalog.clone(), menu.clone()),
-                backoff: backoff.clone(),
-                menu: menu.clone(),
-                workspace: workspace.clone(),
-                catalog: catalog.clone(),
-            },
-        );
-        let state = AppState {
-            gateway,
-            tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
-            status,
-            progress: Arc::new(promptforge_progress::ProgressHub::new()),
-            health: GatewayHealth::new(),
-            backoff,
-            menu,
-            catalog,
-            workspace,
-            agents,
-        };
-        let response = router(state)
-            .oneshot(chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(&body_bytes(response).await[..], COMPLETION.as_bytes());
     }
 }

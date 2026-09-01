@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use promptforge_stt::{SttRuntime, SttState};
-use promptforge_workshop_server::{Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig};
+use promptforge_workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -19,7 +19,7 @@ pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) struct TestServer {
     handle: Option<ServerHandle>,
     _runtime: Option<SttRuntime>,
-    _tape_dir: tempfile::TempDir,
+    _state_dir: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -28,19 +28,18 @@ impl TestServer {
     }
 
     pub(crate) fn spawn_with(state: SttState, runtime: Option<SttRuntime>) -> Self {
-        let tape_dir = tempfile::TempDir::new().expect("tempdir");
+        let state_dir = tempfile::TempDir::new().expect("tempdir");
         let config = Config {
             gateway: GatewayConfig {
                 base_url: "http://127.0.0.1:1".to_owned(),
                 api_key: "test-key".to_owned(),
             },
-            tape: TapeConfig {
-                path: tape_dir.path().join("tape.jsonl"),
-            },
             server: ServerConfig {
                 bind: "127.0.0.1:0".to_owned(),
                 open_browser: false,
+                state_dir: state_dir.path().to_path_buf(),
             },
+            agents: AgentsConfig::default(),
         };
         let route_state = state;
         let handle = promptforge_workshop_server::spawn_with_routes(config, move |app| {
@@ -50,7 +49,7 @@ impl TestServer {
         Self {
             handle: Some(handle),
             _runtime: runtime,
-            _tape_dir: tape_dir,
+            _state_dir: state_dir,
         }
     }
 

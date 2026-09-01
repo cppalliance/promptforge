@@ -13,7 +13,7 @@ Degrade-not-crash features (voice provisioning, gateway outages) are zone two by
 
 ## WebSocket session model
 
-One task owns each socket: a single `select!` loop reads and writes the same socket handle. No outbox channel, no writer task, no session registry. Durable messages deliver via `Notify` plus a per-client cursor and coalesce; ephemeral messages go through a bounded broadcast and drop on lag. Malformed inbound frames are logged and skipped, or close the connection with a policy code - never a panic. Each endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists - never share hypothetical reuse. The session owns transport and multiplexing, not chat execution: direct gateway execution is the current adapter, not the session architecture.
+One task owns each socket: a single `select!` loop reads and writes the same socket handle. No outbox channel, no writer task, no session registry. Durable messages deliver via `Notify` plus a per-client cursor and coalesce; ephemeral messages go through a bounded broadcast and drop on lag. Malformed inbound frames are logged and skipped, or close the connection with a policy code - never a panic. Each endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists - never share hypothetical reuse. The session owns transport, not chat execution: chat runs through agent sessions, never on this socket.
 
 Carve-out: agent sessions (`session_agents`) keep a session registry, because agent sessions survive socket disconnect by design - sockets attach and detach, reconnect replays the persisted event log and re-announces unresolved waits. The no-session-registry rule governed per-request relay work, where every held resource belonged to one socket; it stands for every other endpoint.
 
@@ -23,7 +23,7 @@ Every pushed message type is classified in the protocol module as durable or eph
 
 ## Drop-guard cancellation
 
-Work held on behalf of a client - a gateway completion, a whisper job, a tape span - is wrapped in a guard that cancels on disconnect. A resource that still needs a manual cleanup call is a wrong factoring.
+Work held on behalf of a client - a gateway completion, a whisper job, an input wait - is wrapped in a guard that cancels on disconnect. A resource that still needs a manual cleanup call is a wrong factoring.
 
 ## Embedding and process hygiene
 

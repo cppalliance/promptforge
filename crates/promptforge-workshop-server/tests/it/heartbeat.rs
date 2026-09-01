@@ -1,6 +1,6 @@
-//! Characterization tests for the heartbeat-driven frames on the chat
-//! socket: the fail-fast error frame while the gateway is known down, and
-//! the refreshed catalog push on reconnect.
+//! Characterization tests for the heartbeat-driven frames on the workshop
+//! socket: the outage status while the gateway is known down, and the
+//! refreshed catalog push on reconnect.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,59 +33,23 @@ async fn mock_models() -> Response {
     ([(header::CONTENT_TYPE, "application/json")], CATALOG).into_response()
 }
 
-/// Sends chat frames tagged with `id` until one is answered with the
-/// fail-fast "Gateway unreachable" error, proving the heartbeat has
-/// published the outage; earlier frames can race the first probe and be
-/// answered with ordinary upstream errors instead.
-#[expect(
-    clippy::expect_used,
-    reason = "test helpers fail by panicking with the invariant named"
-)]
-async fn await_gateway_known_down(socket: &mut JsonSocket, id: u64) -> serde_json::Value {
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            socket
-                .send_json(&json!({
-                    "type": "chat",
-                    "id": id,
-                    "model": "test-model",
-                    "messages": [{"role": "user", "content": "ping"}],
-                }))
-                .await;
-            let reply = socket.recv_non_status().await;
-            assert_eq!(
-                reply["type"], "error",
-                "a chat against a down gateway is answered with an error frame: {reply}"
-            );
-            if reply["message"] == "Gateway unreachable" {
-                break reply;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("the heartbeat publishes the outage within the deadline")
+/// Waits until the heartbeat's observed outage reaches this socket as
+/// the "Gateway unreachable" status frame - the connect snapshot or a
+/// live push, whichever lands first.
+async fn await_gateway_known_down(socket: &mut JsonSocket) {
+    socket
+        .recv_until(Duration::from_secs(10), |frame| {
+            frame["type"] == "status" && frame["label"] == "Gateway unreachable"
+        })
+        .await;
 }
 
 #[tokio::test]
-async fn a_gateway_known_down_short_circuits_chat_with_an_error_frame() {
-    // Nothing listens on port 1, so the probe and any raced chat attempts
-    // fail deterministically.
+async fn a_gateway_known_down_publishes_the_outage_status() {
+    // Nothing listens on port 1, so the probe fails deterministically.
     let server = TestServer::spawn("http://127.0.0.1:1");
     let mut socket = JsonSocket::connect(&server.ws_url("/ws")).await;
-
-    let reply = await_gateway_known_down(&mut socket, 7).await;
-    assert_eq!(
-        reply,
-        json!({"type": "error", "message": "Gateway unreachable", "id": 7}),
-        "the chat fails fast, with the request id echoed"
-    );
-    // A transport failure before the stream opens tapes nothing either, so
-    // the raced attempts leave no events behind.
-    assert!(
-        server.tape_events().is_empty(),
-        "no upstream attempt means no tape event"
-    );
+    await_gateway_known_down(&mut socket).await;
     socket.close().await;
 }
 
@@ -101,7 +65,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog() {
     let mut socket = JsonSocket::connect(&server.ws_url("/ws")).await;
     // Hold the flip until the outage is observable, so the recovery is a
     // real down-to-up transition; the initial connect pushes no catalog.
-    await_gateway_known_down(&mut socket, 9).await;
+    await_gateway_known_down(&mut socket).await;
 
     healthy.store(true, Ordering::Relaxed);
     // The next probe lands within the 5 s heartbeat interval and the

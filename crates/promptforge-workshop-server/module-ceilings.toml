@@ -26,22 +26,29 @@
 
 [modules]
 # `AppState::new` owns only Workshop server state. Gateway-owned STT attaches
-# its routes after construction.
-"app.rs" = 387
+# its routes after construction. Shrank in the chat-relay excision: the
+# session recorder left the state and its construction.
+"app.rs" = 347
 "assets.rs" = 69
 "atomic.rs" = 230
-"backoff.rs" = 232
+# Re-recorded at measured size: an earlier growth commit missed this
+# re-record (the slack absorbed it), and the chat-relay excision's doc
+# edit here is net zero.
+"backoff.rs" = 235
 "catalog.rs" = 118
-"config.rs" = 634
+"config.rs" = 541
 "cross_site.rs" = 338
 "deadline.rs" = 112
 # Grew by the revoke seam: the `NotGranted` variant's wire mapping (404,
-# `not_granted`) and its case in the seam test.
-"error.rs" = 517
+# `not_granted`) and its case in the seam test. Shrank in the chat-relay
+# excision: `BadRequest` and `StreamUnsupported` left with their tests.
+"error.rs" = 494
 # Grew by the config-panel proxy seam: the `base_url` accessor,
 # `ForwardedResponse`, and the `forward` relay the /gateway/api route
-# calls - one more request shape on the same gateway HTTP client.
-"gateway.rs" = 1365
+# calls - one more request shape on the same gateway HTTP client. Shrank
+# in the chat-relay excision: the chat completion methods and `ChatStream`
+# left with their tests.
+"gateway.rs" = 1232
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
 # RemoteOperation while the heartbeat reads the gateway as reachable.
@@ -70,7 +77,7 @@
 # declaration and re-exports.
 "lib.rs" = 81
 "main.rs" = 47
-"menu.rs" = 926
+"menu.rs" = 922
 # New module: the run event log (WorkshopObserver) - Observer write side,
 # EventLog read side, subscribe() broadcast, and versioned JSONL
 # persistence with load_from replay; roughly half the count is its
@@ -83,11 +90,10 @@
 # pins - the same one-responsibility protocol module, more frames. Grew
 # again by the shared agent-frame fixture test, asserting the same JSON
 # (tests/fixtures/agent-frames.json) the SPA suite asserts from its
-# side - same responsibility, cross-suite drift coverage. Grew by the
-# module-doc classification of the agent-session error push (ephemeral
-# on that socket): the frame type existed, this documents its new
-# delivery path.
-"protocol.rs" = 1165
+# side - same responsibility, cross-suite drift coverage. Shrank in the
+# chat-relay excision: the chat request parser and the delta, reasoning,
+# and done frames left with their tests.
+"protocol.rs" = 945
 # New module: the ProgressHub-to-status-bar renderer and its anti-flicker
 # state machine (show delay, minimum visible time, detach poll). Grew by
 # the lapsed-deadline detach poll (a past wake instant re-armed would spin
@@ -97,10 +103,14 @@
 # pre-subscription catch, and backward-step tests.
 "progress.rs" = 500
 "push.rs" = 274
-"relay.rs" = 537
+# Shrank in the chat-relay excision: the buffered chat handler and its
+# recorder left with their tests; the catalog passthrough stays.
+"relay.rs" = 175
 "routes.rs" = 8
 "routes/assets.rs" = 117
-"routes/chat.rs" = 46
+# Grew in the chat-relay excision by the POST /chat absence pin (404),
+# while the route itself left.
+"routes/chat.rs" = 72
 # New module: the gateway-config panel's origin probe and the
 # allowlisted key-attaching proxy the panel's postMessage bridge calls.
 # Grew by the same-origin config SPA proxy (the index and asset routes,
@@ -109,8 +119,10 @@
 "routes/gateway_config.rs" = 390
 "routes/health.rs" = 50
 "routes/workspace.rs" = 20
-"serve.rs" = 566
-"session.rs" = 341
+"serve.rs" = 560
+# Shrank in the chat-relay excision: the socket keeps the menu events,
+# boot snapshots, and bus forwarding; the chat multiplexing left whole.
+"session.rs" = 225
 # New module: the agent-session registry (the documented carve-out from
 # the no-session-registry socket rule: sessions outlive sockets) -
 # discovery, launch, the per-session supervisor with turn-cancel
@@ -136,13 +148,9 @@
 # of the wait frames - the same forwarding responsibility, one more
 # family.
 "session_agents/socket.rs" = 419
-"session/gateway_chat.rs" = 417
-"session/gateway_chat/delta.rs" = 92
-"session/gateway_chat/tape.rs" = 135
 "session/log.rs" = 15
 "session/menu.rs" = 165
-"status.rs" = 200
-"tape.rs" = 275
+"status.rs" = 199
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its

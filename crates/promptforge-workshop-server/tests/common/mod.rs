@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use promptforge_workshop_server::{
-    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle, TapeConfig,
+    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle,
 };
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -24,32 +24,29 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 /// for a slow CI runner, far below any test's own deadline.
 pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A workshop server spawned in-process for one test, taping into a
-/// tempdir that lives as long as the fixture.
+/// A workshop server spawned in-process for one test, anchoring its state
+/// in a tempdir that lives as long as the fixture.
 ///
 /// Dropping the fixture shuts the server down and waits for its thread, so
-/// the tape file is closed before the tempdir is deleted.
+/// every state file is closed before the tempdir is deleted.
 pub(crate) struct TestServer {
     handle: Option<ServerHandle>,
-    tape_dir: tempfile::TempDir,
+    _state_dir: tempfile::TempDir,
 }
 
 impl TestServer {
     /// Spawns the server against the gateway at `gateway_base_url`.
     pub(crate) fn spawn(gateway_base_url: &str) -> Self {
-        let tape_dir = tempfile::TempDir::new().expect("tempdir");
+        let state_dir = tempfile::TempDir::new().expect("tempdir");
         let config = Config {
             gateway: GatewayConfig {
                 base_url: gateway_base_url.to_string(),
                 api_key: "test-key".to_string(),
             },
-            tape: TapeConfig {
-                path: tape_dir.path().join("tape.jsonl"),
-            },
             server: ServerConfig {
                 bind: "127.0.0.1:0".to_string(),
                 open_browser: false,
-                state_dir: tape_dir.path().to_path_buf(),
+                state_dir: state_dir.path().to_path_buf(),
             },
             agents: AgentsConfig::default(),
         };
@@ -57,7 +54,7 @@ impl TestServer {
             promptforge_workshop_server::spawn(config).expect("the workshop server spawns");
         Self {
             handle: Some(handle),
-            tape_dir,
+            _state_dir: state_dir,
         }
     }
 
@@ -73,15 +70,6 @@ impl TestServer {
             .strip_prefix("http")
             .expect("the server URL scheme is http");
         format!("ws{rest}{path}")
-    }
-
-    /// Every event on the server's tape, oldest first.
-    pub(crate) fn tape_events(&self) -> Vec<serde_json::Value> {
-        let raw = std::fs::read_to_string(self.tape_dir.path().join("tape.jsonl"))
-            .expect("the tape exists once the server is spawned");
-        raw.lines()
-            .map(|line| serde_json::from_str(line).expect("the tape line is valid JSON"))
-            .collect()
     }
 }
 
@@ -142,19 +130,6 @@ impl JsonSocket {
             .expect("the frame is not a socket error");
         let text = message.into_text().expect("the frame is text");
         serde_json::from_str(&text).expect("the frame is JSON")
-    }
-
-    /// Receives frames until one arrives whose `type` is neither `status`
-    /// nor `workbench`. Both are unsolicited pushes - the heartbeat and
-    /// the menu bus interleave them with replies at any point - so reply
-    /// assertions skip them.
-    pub(crate) async fn recv_non_status(&mut self) -> serde_json::Value {
-        loop {
-            let frame = self.recv_json().await;
-            if frame["type"] != "status" && frame["type"] != "workbench" {
-                return frame;
-            }
-        }
     }
 
     /// Receives frames until `keep` accepts one, failing after `deadline`.

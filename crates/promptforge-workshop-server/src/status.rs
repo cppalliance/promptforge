@@ -10,9 +10,8 @@
 //! at the oldest retained update. Sending never blocks, so instrumenting a
 //! hot path cannot stall the subsystem it observes.
 //!
-//! On the wire each update rides the main chat socket as an unsolicited
-//! `{"type":"status",...}` frame (see [`StatusBarUpdate::frame`]),
-//! interleaving freely with a chat's `delta`/`done`/`error` replies. The
+//! On the wire each update rides the workshop socket as an unsolicited
+//! `{"type":"status",...}` frame (see [`StatusBarUpdate::frame`]). The
 //! bus also retains the newest update, so a session that connects later
 //! sends the current status immediately - the delivery contract's
 //! resend-on-reconnect for ephemeral frames.
@@ -23,9 +22,9 @@ use tokio::sync::broadcast;
 
 use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
 
-/// Ring capacity of the status bus. Covers a startup burst plus a chat's
-/// phase transitions with headroom; a receiver lagging past it skips ahead
-/// rather than slowing the senders.
+/// Ring capacity of the status bus. Covers a startup burst plus an agent
+/// turn's phase transitions with headroom; a receiver lagging past it
+/// skips ahead rather than slowing the senders.
 const STATUS_CHANNEL_CAPACITY: usize = 64;
 
 /// The shared status bus: a cloneable handle onto the broadcast channel.

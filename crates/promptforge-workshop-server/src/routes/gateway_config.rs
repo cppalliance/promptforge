@@ -238,7 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_origin_route_answers_the_configured_gateway_base_url() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:8081");
+        let (state, _state_dir) = state_for("http://127.0.0.1:8081");
         let request = Request::builder()
             .uri("/gateway/origin")
             .body(Body::empty())
@@ -269,7 +269,7 @@ mod tests {
             }),
         );
         let base_url = spawn_gateway(gateway).await;
-        let (state, _tape_dir) = state_for(&base_url);
+        let (state, _state_dir) = state_for(&base_url);
         let request = Request::builder()
             .uri("/gateway/api/admin/status")
             .body(Body::empty())
@@ -321,7 +321,7 @@ mod tests {
             ),
         );
         let base_url = spawn_gateway(gateway).await;
-        let (state, _tape_dir) = state_for(&base_url);
+        let (state, _state_dir) = state_for(&base_url);
         let request = Request::builder()
             .method("PUT")
             .uri("/gateway/api/admin/config?source=panel")
@@ -346,7 +346,7 @@ mod tests {
     async fn the_proxy_refuses_a_non_allowlisted_path_without_dialing() {
         // An unroutable gateway address: a refused path must answer 403
         // before any dial, so no transport error can occur.
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         for path in [
             "/gateway/api/v1/chat/completions",
             "/gateway/api/admin/progress",
@@ -372,7 +372,7 @@ mod tests {
         // The workshop listener binds loopback only; on top of that the
         // cross-site guard refuses a DNS-rebound Host, so the proxy is
         // covered by the same wall as the rest of the API surface.
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .uri("/gateway/api/admin/status")
             .header("host", "rebound.example:7910")

@@ -2,9 +2,9 @@
 // the jsdom boot that smoke.mjs originally built inline, extracted so every
 // per-feature slice boots the exact same way. bootWorkbench(name, run)
 // loads dist/index.html into jsdom, stands in fakes for the APIs jsdom
-// lacks (WebSocket, audio capture, fetch, layout metrics), imports the
-// bundled dist/app.js, waits for the app to settle, then runs `run` under
-// the shared disposable-leak check and reports the verdict through the
+// lacks (WebSocket, fetch, layout metrics), imports the bundled
+// dist/app.js, waits for the app to settle, then runs `run` under the
+// shared disposable-leak check and reports the verdict through the
 // process exit code. Run after `npm run build`.
 // Export-only module: the node --test runner discovers every file under
 // test/, so running this file directly must (and does) exit 0.
@@ -25,19 +25,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * app's own boot tree is exempt by construction (the tracker installs after
  * boot settles); it lives for the page lifetime by design.
  *
- * `ctx` carries the window, the scripted-socket registry, the composer
- * elements, and the interaction helpers; `run` records failed expectations
- * by pushing plain-English messages onto ctx.failures.
+ * `ctx` carries the window, the scripted-socket registry, the status bar
+ * elements, and the push helpers; `run` records failed expectations by
+ * pushing plain-English messages onto ctx.failures.
  * This function never returns: it prints the verdict and exits the process,
- * because pending app timers (the voice stop grace window, the status-bar
- * LED pulse) outlive the assertions.
+ * because pending app timers (the status-bar LED pulse, reconnect backoffs)
+ * outlive the assertions.
  */
 export async function bootWorkbench(name, run) {
   const html = await readFile(path.join(distDir, "index.html"), "utf8");
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/", pretendToBeVisual: true });
   const { window } = dom;
 
-  // jsdom lacks layout APIs the feed touches; no-op stubs are enough because
+  // jsdom lacks layout APIs the panels touch; no-op stubs are enough because
   // nothing scrolls in the tests.
   window.matchMedia =
     window.matchMedia ||
@@ -65,26 +65,14 @@ export async function bootWorkbench(name, run) {
   };
   window.Element.prototype.scrollTo = () => {};
   window.HTMLElement.prototype.scrollIntoView = () => {};
-  // jsdom has no layout engine, so scrollHeight is always 0 and murm-ui's
-  // adjustHeight would pin the composer at 0px. Simulate line-based metrics
-  // for textareas so composer auto-growth is observable as inline height.
-  Object.defineProperty(window.HTMLElement.prototype, "scrollHeight", {
-    configurable: true,
-    get() {
-      if (this instanceof window.HTMLTextAreaElement) {
-        return 36 + (this.value.split("\n").length - 1) * 21;
-      }
-      return 0;
-    },
-  });
 
-  // A scripted WebSocket stands in for the server's persistent /ws route. It
-  // must live on globalThis: the bundle calls the global `WebSocket`, not
-  // `window.WebSocket`. The app opens one socket on load; each chat frame
-  // sent on it is captured and answered with two delta frames and a done
-  // frame echoing the frame's id, scheduled in order so the provider's
-  // round-trip runs. The socket stays open after `done` - it is persistent.
-  const chatSockets = [];
+  // A scripted WebSocket stands in for the server's persistent sockets:
+  // the workshop /ws connection the composition root opens, and the
+  // /agents/ws connection the agent panel opens. It must live on
+  // globalThis: the bundle calls the global `WebSocket`, not
+  // `window.WebSocket`. Frames a test wants answered are pushed through
+  // the socket's own onmessage by the ctx helpers below.
+  const sockets = [];
   class FakeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -93,55 +81,20 @@ export async function bootWorkbench(name, run) {
     constructor(url) {
       this.url = url;
       this.readyState = FakeWebSocket.CONNECTING;
-      // Mid-stream hang mode: answer a chat frame with one delta and no
-      // done, so the generation stays in flight until the client aborts.
-      this.hangChat = false;
-      // Reasoning mode: stream two reasoning frames before the content
-      // deltas, as a reasoning model's side channel would.
-      this.reasonChat = false;
-      chatSockets.push(this);
+      this.sent = [];
+      sockets.push(this);
       setTimeout(() => {
         this.readyState = FakeWebSocket.OPEN;
         this.onopen?.();
       }, 0);
     }
-    // The voice path attaches with addEventListener; chain listeners onto the
-    // on* properties the chat path assigns directly.
     addEventListener(type, listener) {
       const prop = `on${type}`;
       const previous = this[prop];
       this[prop] = previous ? (event) => (previous(event), listener(event)) : listener;
     }
     send(data) {
-      let frame;
-      try {
-        frame = JSON.parse(data);
-      } catch {
-        return; // voice control words ("start"/"stop") are not JSON
-      }
-      if (frame.type !== "chat") return;
-      this.chatFrame = frame;
-      if (this.hangChat) {
-        queueMicrotask(() =>
-          this.onmessage?.({ data: JSON.stringify({ type: "delta", content: "partial", id: frame.id }) }),
-        );
-        return;
-      }
-      const frames = [];
-      if (this.reasonChat) {
-        frames.push(
-          { type: "reasoning", content: "consider the ask", id: frame.id },
-          { type: "reasoning", content: " then answer", id: frame.id },
-        );
-      }
-      frames.push(
-        { type: "delta", content: "Hello", id: frame.id },
-        { type: "delta", content: " back [docs](https://example.com/)", id: frame.id },
-        { type: "done", id: frame.id },
-      );
-      for (const reply of frames) {
-        queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
-      }
+      this.sent.push(data);
     }
     close() {
       this.readyState = FakeWebSocket.CLOSED;
@@ -149,45 +102,12 @@ export async function bootWorkbench(name, run) {
   }
   globalThis.WebSocket = FakeWebSocket;
 
-  // Voice capture stubs: jsdom has no audio stack, so the mic button's
-  // getUserMedia/AudioContext path is scripted to succeed. The bundle reads
-  // the globals, so they land on both window and globalThis; `navigator` is
-  // Node's own global (the key-copy loop below skips keys already present),
-  // so mediaDevices goes on it directly.
-  const fakeAudioStream = { getTracks: () => [{ stop() {} }] };
-  const fakeMediaDevices = { getUserMedia: () => Promise.resolve(fakeAudioStream) };
-  window.navigator.mediaDevices = fakeMediaDevices;
-  globalThis.navigator.mediaDevices = fakeMediaDevices;
-  class FakeAudioContext {
-    constructor() {
-      this.destination = {};
-      this.audioWorklet = { addModule: () => Promise.resolve() };
-    }
-    createMediaStreamSource() {
-      return { connect() {}, disconnect() {} };
-    }
-    close() {
-      return Promise.resolve();
-    }
-  }
-  class FakeAudioWorkletNode {
-    constructor() {
-      this.port = { onmessage: null };
-    }
-    connect() {}
-    disconnect() {}
-  }
-  window.AudioContext = FakeAudioContext;
-  globalThis.AudioContext = FakeAudioContext;
-  window.AudioWorkletNode = FakeAudioWorkletNode;
-  globalThis.AudioWorkletNode = FakeAudioWorkletNode;
-
   // The workbench state (models, profiles, selection) arrives only over
   // the socket, so a booted workbench fetches nothing but the Workshop
-  // tree's roots listing (answered empty: no grants yet) and the voice
-  // GPU capability probe. Any other fetch - including the retired
-  // /v1/models and /profiles boot fetches and the POST /chat SSE path -
-  // rejects the test.
+  // tree's roots listing (answered empty: no grants yet) and the Gateway
+  // Config panel's origin probe when that panel opens. Any other fetch -
+  // including the retired /v1/models and /profiles boot fetches - rejects
+  // the test.
   globalThis.fetch = (url) => {
     if (url === "/workspace/tree") {
       return Promise.resolve(
@@ -197,16 +117,7 @@ export async function bootWorkbench(name, run) {
         }),
       );
     }
-    if (url === "/voice/capability") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ gpu: true, engine: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    }
     if (url === "/gateway/origin") {
-      // The Gateway Config panel asks for the gateway origin when opened.
       return Promise.resolve(
         new Response(JSON.stringify({ origin: "http://127.0.0.1:8081" }), {
           status: 200,
@@ -274,18 +185,6 @@ export async function bootWorkbench(name, run) {
   );
   const lifecycle = { setDisposableTracker: bundle.__setDisposableTracker };
 
-  // The mic button waits on the GPU capability fetch, so it mounts a
-  // microtask or two after the rest of the composer.
-  let mic = null;
-  for (let i = 0; i < 100 && !mic; i++) {
-    mic = window.document.querySelector(".voice-mic");
-    if (!mic) await sleep(20);
-  }
-
-  const input = window.document.querySelector(".mur-chat-input");
-  const form = window.document.querySelector(".mur-chat-form");
-  const history = window.document.querySelector(".mur-chat-history");
-  const send = window.document.querySelector(".mur-send-btn");
   const statusBar = window.document.querySelector(".status-bar");
   const statusText = window.document.querySelector(".status-bar__text");
   const statusSlot = window.document.querySelector(".status-bar__slot");
@@ -294,13 +193,18 @@ export async function bootWorkbench(name, run) {
   const ledEl = window.document.querySelector(".status-bar__led");
   const recEl = window.document.querySelector(".status-bar__rec");
 
-  // Every interaction helper needs these four; a workbench without them is
-  // a broken boot, not a per-feature failure, so fail loudly here.
+  // Every booted test reads the status bar and the mounted workbench; a
+  // boot without them is broken, not a per-feature failure, so fail
+  // loudly here. The agent panel mounts a beat after the dock, so poll.
+  let agentPanel = null;
+  for (let i = 0; i < 100 && !agentPanel; i++) {
+    agentPanel = window.document.querySelector("#dock .agent-panel");
+    if (!agentPanel) await sleep(20);
+  }
   const missing = [
-    ["the mic button", mic],
-    ["the chat input", input],
-    ["the chat form", form],
-    ["the chat history", history],
+    ["the status bar", statusBar],
+    ["the agent-session panel", agentPanel],
+    ["the Workshop tree", window.document.querySelector("#dock .workshop-tree")],
   ]
     .filter(([, node]) => !node)
     .map(([what]) => what);
@@ -308,9 +212,12 @@ export async function bootWorkbench(name, run) {
     throw new Error(`the workbench did not boot: ${missing.join(", ")} never mounted`);
   }
 
-  const wsSocket = () => chatSockets.filter((socket) => socket.url.endsWith("/ws")).at(-1);
+  // The composition root's own workshop socket: /ws exactly, never the
+  // agent panel's /agents/ws connection.
+  const wsSocket = () =>
+    sockets.filter((socket) => socket.url.endsWith("/ws") && !socket.url.endsWith("/agents/ws")).at(-1);
 
-  // The fake socket flips to OPEN on a 0ms timer, and the mic can mount
+  // The fake socket flips to OPEN on a 0ms timer, and the app can boot
   // during the bundle import's own microtask drain - before any macrotask
   // ran. Wait for the boot socket to open so no test body observes (or
   // drops) a socket that is still CONNECTING: a real WebSocket never fires
@@ -367,61 +274,20 @@ export async function bootWorkbench(name, run) {
   // workbench snapshot on connect, in that order (session.rs) - the app
   // makes no HTTP state fetches at boot. Mirror all three pushes here:
   // the status seeds the status bar, the catalog populates the Model
-  // menu, and without the snapshot's selection every submission stays
-  // blocked.
+  // menu, and the snapshot carries the selection.
   emitStatus();
   emitModels([{ id: "test-model", description: "scripted" }]);
   emitWorkbench();
-
-  // Drives one chat submission through murm-ui's real form handling and
-  // waits for the scripted reply to render. Returns the chat frame the
-  // provider sent (undefined when submission stayed blocked).
-  async function submitChat(text) {
-    const socket = wsSocket();
-    const repliesBefore = (history.textContent.match(/Hello back/g) || []).length;
-    input.value = text;
-    input.dispatchEvent(new window.Event("input", { bubbles: true }));
-    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    const replyDeadline = Date.now() + 5000;
-    while (
-      (history.textContent.match(/Hello back/g) || []).length === repliesBefore &&
-      Date.now() < replyDeadline
-    ) {
-      await sleep(20);
-    }
-    return socket?.chatFrame;
-  }
-
-  // Clicks the mic and waits for the take's /voice socket to open with its
-  // message listener wired. Returns the socket, or null when no take
-  // started before the deadline.
-  async function startTake() {
-    const before = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
-    mic.click();
-    const openDeadline = Date.now() + 5000;
-    while (Date.now() < openDeadline) {
-      const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
-      if (voiceSockets.length > before && typeof voiceSockets.at(-1).onmessage === "function") {
-        return voiceSockets.at(-1);
-      }
-      await sleep(20);
-    }
-    return null;
-  }
 
   const failures = [];
 
   const ctx = {
     window,
     document: window.document,
-    chatSockets,
+    sockets,
     FakeWebSocket,
     wsSocket,
-    mic,
-    input,
-    form,
-    history,
-    send,
+    agentPanel,
     statusBar,
     statusText,
     statusSlot,
@@ -432,8 +298,6 @@ export async function bootWorkbench(name, run) {
     emitStatus,
     emitModels,
     emitWorkbench,
-    submitChat,
-    startTake,
     sleep,
     failures,
   };

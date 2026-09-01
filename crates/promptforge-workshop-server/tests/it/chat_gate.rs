@@ -38,7 +38,7 @@ use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
 use promptforge_workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ServerConfig,
-    TapeConfig, UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
+    UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
 };
 use workshop_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 
@@ -148,9 +148,6 @@ async fn spawn_chat_server(models: &[&str]) -> GateServer {
         gateway: GatewayConfig {
             base_url: gateway_url.clone(),
             api_key: "test-key".to_string(),
-        },
-        tape: TapeConfig {
-            path: dir.path().join("tape.jsonl"),
         },
         server: ServerConfig {
             state_dir: dir.path().to_path_buf(),

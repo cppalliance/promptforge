@@ -1,8 +1,8 @@
 /* Styles for zones.ts, which imports this file; esbuild bundles it into
    dist/app.css. Covers the dock scaffolding the zones place panels into
    and the Workshop tree, plus the shared panel plumbing rules
-   (.chat-panel from chat-panel.ts, .panel-unknown from panel-types.ts).
-   Themed values come from the :root tokens in style.css. */
+   (.panel-unknown from panel-types.ts). Themed values come from the
+   :root tokens in style.css. */
 
 .shell {
   display: flex;
@@ -21,10 +21,6 @@
 .dock {
   flex: 1;
   min-height: 0;
-}
-
-.chat-panel {
-  height: 100%;
 }
 
 /* The Workshop file tree panel: one directory per level, folders before

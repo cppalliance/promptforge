@@ -57,9 +57,9 @@ export interface WorkshopMenuCommands {
 }
 
 /**
- * The agent surface the File menu dispatches through: New Agent opens a
- * fresh Agent tab, the only way to start a new conversation. The Agent
- * panel controller satisfies this structurally.
+ * The agent surface the File menu dispatches through: New Agent opens or
+ * focuses the agent-session panel. Agent windows are modal - one session
+ * per window - so the panel is a singleton and reopening focuses it.
  */
 export interface AgentMenuCommands {
   readonly newAgent: () => void;

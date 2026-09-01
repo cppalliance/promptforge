@@ -18,11 +18,6 @@ base_url = "http://127.0.0.1:8081"
 # Bearer key for the gateway API. Empty sends no Authorization header.
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
-[tape]
-# Path of the JSONL session tape; one event per chat exchange.
-# Default: "tape.jsonl"
-path = "tape.jsonl"
-
 [server]
 # Address the workshop server binds to.
 # Default: "127.0.0.1:7910"
@@ -33,7 +28,8 @@ bind = "127.0.0.1:7910"
 # Default: false
 open_browser = false
 # Directory holding the server's persistent state; agent session event
-# logs live under state_dir/sessions/.
+# logs live under state_dir/sessions/, and the per-profile model memory
+# is written here.
 # Default: the directory holding this config file.
 #state_dir = "."
 

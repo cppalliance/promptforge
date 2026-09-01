@@ -3,8 +3,9 @@
 //! [`GatewayClient`] wraps `reqwest` with bearer authentication and returns
 //! responses as raw bytes so the workshop routes can relay them to the
 //! caller byte-for-byte. A non-success status from the gateway is *not* an
-//! error here: it is part of the relayed response. Streaming chat requests
-//! are decoded from SSE into a [`SsePayloadStream`] of `data:` payloads.
+//! error here: it is part of the relayed response. Streaming responses
+//! (profile switches, cache downloads) are decoded from SSE into a
+//! [`SsePayloadStream`] of `data:` payloads.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -13,8 +14,6 @@ use std::time::Duration;
 
 use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
-
-use crate::protocol::ChatRequest;
 
 /// Default bound on a single `GET /health` probe: a gateway that accepts
 /// the connection but never answers must still read as unreachable, and two
@@ -26,12 +25,11 @@ pub(crate) const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// on Linux, ~75 s on Windows).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Default whole-request timeout for non-streaming operations: model
-/// catalog fetch, buffered chat completions, and the initial cache API
-/// handshake. Streaming responses (SSE chat, cache downloads, and profile
-/// switches) can legitimately run for minutes, so the same bound covers
-/// only their header phase (see `send_bounded`) and the body stream stays
-/// open-ended.
+/// Default whole-request timeout for non-streaming operations: the model
+/// catalog fetch and the initial cache API handshake. Streaming responses
+/// (cache downloads and profile switches) can legitimately run for
+/// minutes, so the same bound covers only their header phase (see
+/// `send_bounded`) and the body stream stays open-ended.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A gateway HTTP response captured for verbatim relay.
@@ -59,42 +57,9 @@ pub(crate) struct ForwardedResponse {
 
 /// A stream of SSE `data:` payloads from the gateway, in arrival order.
 ///
-/// Each item is one event's data, verbatim; the OpenAI terminal sentinel
-/// arrives as the payload `"[DONE]"`. A transport failure mid-stream yields
-/// one error item and then ends the stream.
+/// Each item is one event's data, verbatim. A transport failure mid-stream
+/// yields one error item and then ends the stream.
 pub type SsePayloadStream = Pin<Box<dyn Stream<Item = Result<String, GatewayError>> + Send>>;
-
-/// The outcome of a streaming chat request to the gateway.
-#[non_exhaustive]
-pub enum ChatStream {
-    /// The gateway accepted the stream; payloads arrive in order.
-    #[non_exhaustive]
-    Stream {
-        /// The gateway's success status, relayed unchanged.
-        status: reqwest::StatusCode,
-        /// The SSE payload stream, ending with the `"[DONE]"` payload.
-        payloads: SsePayloadStream,
-    },
-
-    /// The gateway answered with an ordinary (non-SSE) response, buffered
-    /// for verbatim relay; this is how a declined stream reports its error
-    /// envelope.
-    #[non_exhaustive]
-    Relay(GatewayResponse),
-}
-
-// Manual because the boxed payload stream has no `Debug` impl.
-impl std::fmt::Debug for ChatStream {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Stream { status, .. } => f
-                .debug_struct("ChatStream")
-                .field("status", status)
-                .finish_non_exhaustive(),
-            Self::Relay(response) => f.debug_tuple("Relay").field(response).finish(),
-        }
-    }
-}
 
 /// The gateway's answer to a cache-ensure request, `POST /v1/cache`.
 ///
@@ -294,11 +259,6 @@ pub enum GatewayError {
     #[non_exhaustive]
     #[error("read gateway response body")]
     ReadBody(#[source] Box<dyn std::error::Error + Send + Sync>),
-
-    /// The chat request could not be serialized to JSON.
-    #[non_exhaustive]
-    #[error("serialize chat request")]
-    Serialize(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Bearer-authenticated client for the gateway's OpenAI-compatible
@@ -549,74 +509,6 @@ impl GatewayClient {
             });
         }
         read(response).await.map(SwitchResponse::Buffered)
-    }
-
-    /// Posts a non-streaming chat completion to
-    /// `POST /v1/chat/completions`.
-    ///
-    /// A non-success status is relayed in the returned
-    /// [`GatewayResponse`], not reported as an error.
-    ///
-    /// # Errors
-    /// Returns [`GatewayError::Transport`] if the request cannot be
-    /// completed and [`GatewayError::ReadBody`] if the response body cannot
-    /// be read.
-    pub async fn chat_completion(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<GatewayResponse, GatewayError> {
-        let response = self
-            .authorize(
-                self.http
-                    .post(format!("{}/v1/chat/completions", self.base_url)),
-            )
-            .json(request)
-            .timeout(self.request_timeout)
-            .send()
-            .await
-            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
-        read(response).await
-    }
-
-    /// Posts a streaming chat completion to `POST /v1/chat/completions`
-    /// with `"stream": true` added to the request body.
-    ///
-    /// A success status yields [`ChatStream::Stream`] carrying the SSE
-    /// payload stream; any other status is buffered and returned as
-    /// [`ChatStream::Relay`] so the caller can relay the gateway's error
-    /// envelope verbatim. Only the wait for the response headers is
-    /// bounded; the accepted stream itself carries no deadline.
-    ///
-    /// # Errors
-    /// Returns [`GatewayError::Serialize`] if the request cannot be
-    /// serialized, [`GatewayError::Transport`] if the request cannot be
-    /// completed (the header bound elapsing included), and
-    /// [`GatewayError::ReadBody`] if a declined stream's error body cannot
-    /// be read.
-    pub async fn chat_completion_stream(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<ChatStream, GatewayError> {
-        let mut body = serde_json::to_value(request)
-            .map_err(|source| GatewayError::Serialize(Box::new(source)))?;
-        if let Some(object) = body.as_object_mut() {
-            object.insert("stream".to_string(), serde_json::Value::Bool(true));
-        }
-        let request = self
-            .authorize(
-                self.http
-                    .post(format!("{}/v1/chat/completions", self.base_url)),
-            )
-            .json(&body);
-        let response = self.send_bounded(request).await?;
-        let status = response.status();
-        if !status.is_success() {
-            return read(response).await.map(ChatStream::Relay);
-        }
-        Ok(ChatStream::Stream {
-            status,
-            payloads: payload_stream(response),
-        })
     }
 
     /// Posts a cache-ensure request to `POST /v1/cache`, asking the gateway
@@ -1033,35 +925,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stalled_gateway_trips_the_buffered_chat_timeout() {
-        let base_url = spawn_stalled_gateway().await;
-        let request = ChatRequest {
-            model: "test-model".to_string(),
-            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-            stream: false,
-            rest: serde_json::Map::new(),
-        };
-        let error = impatient_client(&base_url)
-            .chat_completion(&request)
-            .await
-            .expect_err("a gateway that never answers must trip the request timeout");
-        assert!(
-            matches!(error, GatewayError::Transport(_)),
-            "expected Transport, got {error:?}"
-        );
-    }
-
-    #[tokio::test]
     async fn a_stalled_gateway_trips_the_stream_header_bound() {
         let base_url = spawn_stalled_gateway().await;
-        let request = ChatRequest {
-            model: "test-model".to_string(),
-            messages: vec![serde_json::json!({"role": "user", "content": "hi"})],
-            stream: false,
-            rest: serde_json::Map::new(),
-        };
         let error = impatient_client(&base_url)
-            .chat_completion_stream(&request)
+            .switch_profile("beta")
             .await
             .expect_err("a gateway that never sends headers must trip the header bound");
         assert!(

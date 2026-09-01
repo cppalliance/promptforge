@@ -49,12 +49,6 @@ export interface WorkbenchFrame {
   chat_ready: boolean;
 }
 
-/** The chat payload sent upstream in one `{"type":"chat",...}` frame. */
-export interface ChatPayload {
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-}
-
 // --- Agent-session frames (/agents/ws) --------------------------------------
 // The Rust half of this family is the frame structs in
 // crates/promptforge-workshop-server/src/protocol.rs and the routing in

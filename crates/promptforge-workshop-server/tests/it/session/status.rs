@@ -1,14 +1,14 @@
-//! Status and snapshot behavior of the `/ws` chat socket: status frames
-//! riding the socket, the retained status, catalog, and workbench
-//! snapshots on connect, the fail-fast frame while the gateway is known
-//! down, and the catalog push on reconnect.
+//! Status and snapshot behavior of the `/ws` workshop socket: status
+//! frames riding the socket, the retained status, catalog, and workbench
+//! snapshots on connect, the malformed- and unknown-frame refusals, and
+//! the catalog push on reconnect.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::get;
 use futures_util::SinkExt;
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
@@ -20,76 +20,8 @@ use promptforge_workshop_server::fixtures::{
 use crate::common::{JsonSocket, TestServer, spawn_gateway};
 
 use super::{
-    STREAM_BODY, flippable_health, mock_chat_stream, mock_models, read_frame,
-    read_non_status_frame, send_chat, send_chat_json, spawn_chat_server, streaming_gateway,
+    flippable_health, mock_models, read_frame, read_non_status_frame, spawn_session_server,
 };
-
-#[tokio::test]
-async fn a_chat_pushes_status_frames_on_the_same_socket() {
-    let base_url = spawn_gateway(streaming_gateway(STREAM_BODY)).await;
-    let server = TestServer::spawn(&base_url);
-    let mut socket = JsonSocket::connect(&server.ws_url("/ws")).await;
-    // Every session's first frame is the retained status snapshot, which
-    // may already read Ready; consume it so the Ready watched for below
-    // can only be the post-chat idle. (Licensed by the protocol contract:
-    // the current status is resent on reconnect.)
-    let snapshot = socket.recv_json().await;
-    assert_eq!(snapshot["type"], "status", "the snapshot arrives first");
-    send_chat_json(&mut socket, 1).await;
-
-    // Collect the chat's status frames up to the terminal idle push; the
-    // idle frame follows `done` on the bus, so reading until Ready sees
-    // the whole sequence.
-    let mut labels: Vec<String> = Vec::new();
-    let mut saw_generating_pulse = false;
-    let idle = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let frame = socket.recv_json().await;
-            if frame["type"] != "status" {
-                continue;
-            }
-            if frame["severity"] == "debug" && frame["activity"] == "generating" {
-                saw_generating_pulse = true;
-            }
-            let label = frame["label"]
-                .as_str()
-                .expect("a status frame carries a label")
-                .to_string();
-            if label == "Ready" {
-                break frame;
-            }
-            labels.push(label);
-        }
-    })
-    .await
-    .expect("the idle frame arrives after the chat settles");
-
-    assert_eq!(
-        idle,
-        json!({
-            "type": "status",
-            "label": "Ready",
-            "description": "idle",
-            "progress": null,
-            "severity": "info",
-            "activity": "general",
-        }),
-        "the resting status frame arrives with the full wire shape"
-    );
-    assert!(
-        labels.iter().any(|label| label.contains("Submitting")),
-        "a Submitting status frame arrived: {labels:?}"
-    );
-    assert!(
-        labels.iter().any(|label| label.contains("Streaming")),
-        "a Streaming status frame arrived: {labels:?}"
-    );
-    assert!(
-        saw_generating_pulse,
-        "a debug-severity pulse with the generating activity drove the LED"
-    );
-    socket.close().await;
-}
 
 #[tokio::test]
 async fn a_new_connection_receives_the_current_status_as_its_first_frame() {
@@ -127,7 +59,7 @@ async fn a_new_connection_receives_the_current_status_as_its_first_frame() {
 
 #[tokio::test]
 async fn status_updates_reach_connected_sessions_as_status_frames() {
-    let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+    let (url, _state_dir, state) = spawn_session_server("http://127.0.0.1:1").await;
     let (mut socket, _) = tokio_tungstenite::connect_async(&url)
         .await
         .expect("connect to /ws");
@@ -168,8 +100,40 @@ async fn status_updates_reach_connected_sessions_as_status_frames() {
 }
 
 #[tokio::test]
+async fn an_unknown_frame_type_is_refused_with_an_error_frame() {
+    let (url, _state_dir, _state) = spawn_session_server("http://127.0.0.1:1").await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("connect to /ws");
+    // The excised chat frame is now just an unknown type: the session
+    // answers with a refusal naming the two menu events and survives.
+    let stale = serde_json::json!({
+        "type": "chat",
+        "id": 7,
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "ping"}],
+    })
+    .to_string();
+    socket
+        .send(tungstenite::Message::Text(stale.into()))
+        .await
+        .expect("the frame is sent");
+    let reply = read_non_status_frame(&mut socket).await;
+    assert_eq!(reply["type"], "error");
+    assert_eq!(reply["id"], 7, "the refusal echoes the frame id");
+    let message = reply["message"]
+        .as_str()
+        .expect("the refusal names the accepted frame types");
+    assert!(
+        message.contains("select_model") && message.contains("switch_profile"),
+        "the refusal names the two menu events: {message}"
+    );
+    socket.close(None).await.expect("close the socket");
+}
+
+#[tokio::test]
 async fn a_new_session_receives_the_retained_status_and_catalog_snapshots() {
-    let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+    let (url, _state_dir, state) = spawn_session_server("http://127.0.0.1:1").await;
     // Both pushes land on the buses while nobody is connected, so only
     // the retained copies can deliver them to the socket below - the
     // contract's resend-on-reconnect for ephemeral frames.
@@ -221,7 +185,7 @@ async fn a_new_session_receives_the_retained_status_and_catalog_snapshots() {
 
 #[tokio::test]
 async fn a_new_session_receives_the_retained_workbench_snapshot() {
-    let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+    let (url, _state_dir, state) = spawn_session_server("http://127.0.0.1:1").await;
     // Both retained copies exist before anyone connects, so only the
     // connect-time sends can deliver them below - the boot-with-zero-
     // HTTP-fetches promise.
@@ -262,39 +226,6 @@ async fn a_new_session_receives_the_retained_workbench_snapshot() {
     socket.close(None).await.expect("close the socket");
 }
 
-#[tokio::test]
-async fn a_gateway_known_down_short_circuits_chat_with_an_error_frame() {
-    let (url, tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
-    state.health().publish(false);
-    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .expect("connect to /ws");
-    let frame = serde_json::json!({
-        "type": "chat",
-        "id": 7,
-        "model": "test-model",
-        "messages": [{"role": "user", "content": "ping"}],
-    })
-    .to_string();
-    socket
-        .send(tungstenite::Message::Text(frame.into()))
-        .await
-        .expect("the chat frame is sent");
-
-    let reply = read_non_status_frame(&mut socket).await;
-    assert_eq!(
-        reply,
-        serde_json::json!({"type": "error", "message": "Gateway unreachable", "id": 7}),
-        "the chat fails fast, with the request id echoed"
-    );
-    socket.close(None).await.expect("close the socket");
-    let raw = std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-    assert!(
-        raw.trim().is_empty(),
-        "no upstream attempt means no tape event"
-    );
-}
-
 // Un-ignored with the session rewrite: the flip below now waits for
 // the heartbeat's observed outage, so the recovery is always a real
 // down-to-up transition and the catalog push always happens; the
@@ -310,7 +241,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
             .with_state(Arc::clone(&healthy)),
     )
     .await;
-    let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+    let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     let heartbeat = spawn_heartbeat(
         state.gateway_client().clone(),
         state.push(),
@@ -361,39 +292,4 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
     );
     socket.close(None).await.expect("close the socket");
     heartbeat.shutdown().await;
-}
-
-#[tokio::test]
-async fn a_chat_reports_submitting_then_streaming() {
-    let base_url =
-        spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream))).await;
-    let (url, _tape_dir, _state) = spawn_chat_server(&base_url).await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .expect("connect to /ws");
-    send_chat(&mut socket).await;
-
-    let mut labels: Vec<String> = Vec::new();
-    loop {
-        let frame = read_frame(&mut socket).await;
-        match frame["type"].as_str() {
-            Some("status") => labels.push(
-                frame["label"]
-                    .as_str()
-                    .expect("a status frame carries a label")
-                    .to_string(),
-            ),
-            Some("done") => break,
-            _ => {}
-        }
-    }
-    assert!(
-        labels.iter().any(|label| label.contains("Submitting")),
-        "a Submitting status frame arrived: {labels:?}"
-    );
-    assert!(
-        labels.iter().any(|label| label.contains("Streaming")),
-        "a Streaming status frame arrived: {labels:?}"
-    );
-    socket.close(None).await.expect("close the socket");
 }

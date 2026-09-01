@@ -1,13 +1,12 @@
 //! PromptForge Workshop HTTP server.
 //!
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
-//! the session tape, and the axum router so `src/main.rs` stays a thin shell.
-//! Start at [`Config::load`] for configuration, [`Tape`] for the session
-//! tape, [`WorkshopObserver`] for the run event log, [`WaitRegistry`] and
-//! [`UserInputTool`] for agent input waits, [`AgentSessions`] for the
-//! agent-session registry behind `/agents/ws`, and [`router`] for the
-//! HTTP API; [`spawn`] runs the whole server in-process on its own thread
-//! for embedding binaries.
+//! and the axum router so `src/main.rs` stays a thin shell. Start at
+//! [`Config::load`] for configuration, [`WorkshopObserver`] for the run
+//! event log, [`WaitRegistry`] and [`UserInputTool`] for agent input
+//! waits, [`AgentSessions`] for the agent-session registry behind
+//! `/agents/ws`, and [`router`] for the HTTP API; [`spawn`] runs the whole
+//! server in-process on its own thread for embedding binaries.
 
 mod app;
 mod assets;
@@ -33,7 +32,6 @@ mod serve;
 mod session;
 mod session_agents;
 mod status;
-mod tape;
 mod workspace;
 
 // The release artifact verifier lives outside src/ so build.rs shares it
@@ -68,17 +66,16 @@ pub mod fixtures {
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
     AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL,
-    GatewayConfig, ServerConfig, TapeConfig,
+    GatewayConfig, ServerConfig,
 };
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use gateway::{
-    CacheEvent, CacheResponse, ChatStream, GatewayClient, GatewayError, GatewayResponse,
-    SsePayloadStream, SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
+    CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
+    SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
 pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
 pub use observer::WorkshopObserver;
-pub use protocol::{Activity, ChatRequest, InputFrame, InputResponse};
+pub use protocol::{Activity, InputFrame, InputResponse};
 pub use push::Push;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn, spawn_with_routes};
 pub use session_agents::AgentSessions;
-pub use tape::{Tape, TapeError, TapeEvent};
