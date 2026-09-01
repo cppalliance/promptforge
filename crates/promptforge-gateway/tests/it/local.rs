@@ -75,6 +75,7 @@ n_predict = 64
             )],
             None,
             &options,
+            |_delta| {},
         ),
     )
     .await

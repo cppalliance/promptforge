@@ -101,10 +101,12 @@ pub(crate) async fn run_prose_inference(
     let mut successful_tool_calls: usize = 0;
 
     for _ in 0..max_tool_iterations {
+        // The document-prompt loop consumes only the accumulated completion;
+        // live deltas have no consumer here, so the callback is a no-op.
         let completion = tokio::select! {
             biased;
             () = cancel::wait_cancelled() => Err(Error::Interrupted),
-            result = client.complete(conversation, tool_arg, completion_options) => result.map_err(Error::from),
+            result = client.complete(conversation, tool_arg, completion_options, |_| {}) => result.map_err(Error::from),
         };
         if let Err(Error::Interrupted) = &completion {
             return Err(Error::Interrupted);

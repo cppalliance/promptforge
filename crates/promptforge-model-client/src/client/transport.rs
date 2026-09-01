@@ -1,13 +1,15 @@
 //! The HTTP transport: the gateway client, request construction, bounded
-//! response reading, and environment loading.
+//! SSE response reading, and environment loading.
 
 use std::fmt;
 use std::num::NonZeroU64;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use promptforge_core_support::events::ClientTiming;
 use serde_json::Value;
 
-use super::{Completion, GatewayEndpoint, Message, SecretString, ToolSchema};
+use super::stream::{Applied, SseScanner, StreamAccumulator};
+use super::{Completion, GatewayEndpoint, Message, SecretString, StreamDelta, ToolSchema};
 use crate::model::{CompletionError, CompletionOptions};
 use crate::{Error, Result};
 
@@ -36,6 +38,10 @@ enum GatewayTransport {
 }
 
 /// Builds the completion request body.
+///
+/// Every request streams: `stream` is always true and
+/// `stream_options.include_usage` asks the backend for the final
+/// empty-choices usage chunk, so token accounting survives the SSE path.
 fn build_request_body(
     messages: &[Message],
     tools: Option<&[ToolSchema]>,
@@ -44,6 +50,8 @@ fn build_request_body(
     let mut body = serde_json::json!({
         "model": options.model,
         "messages": messages,
+        "stream": true,
+        "stream_options": { "include_usage": true },
     });
     if let Some(tools) = tools.filter(|tools| !tools.is_empty()) {
         let wrapped: Vec<Value> = tools
@@ -106,7 +114,7 @@ impl GatewayClient {
     /// );
     /// let options = CompletionOptions::new("analyst");
     /// let completion = client
-    ///     .complete(&[Message::user("hello")], None, &options)
+    ///     .complete(&[Message::user("hello")], None, &options, |_delta| {})
     ///     .await?;
     /// let _ = completion.result();
     /// # Ok(())
@@ -138,7 +146,7 @@ impl GatewayClient {
     /// let client = GatewayClient::disabled();
     /// let options = CompletionOptions::new("m");
     /// let error = client
-    ///     .complete(&[Message::user("hi")], None, &options)
+    ///     .complete(&[Message::user("hi")], None, &options, |_delta| {})
     ///     .await
     ///     .expect_err("a disabled client cannot complete");
     /// assert_eq!(error.kind(), CompletionErrorKind::Disabled);
@@ -204,7 +212,16 @@ impl GatewayClient {
         .map_err(CompletionError::from)
     }
 
-    /// Send a list of messages and return the model's outcome.
+    /// Send a list of messages and return the model's accumulated outcome.
+    ///
+    /// The one completion method, always streaming: the request asks for SSE
+    /// with `stream_options.include_usage`, deltas are accumulated into the
+    /// buffered body shape, and `on_delta` is invoked live with each
+    /// [`StreamDelta`] text or reasoning fragment (a caller with no use for
+    /// deltas passes a no-op closure). The returned [`Completion`] carries
+    /// the reassembled turn, the metadata parsed from the stream's summary
+    /// chunk, and a [`ClientTiming`](crate::ClientTiming) measured on this
+    /// client's own clock (TTFT, mean inter-token latency, end-to-end).
     ///
     /// When `tools` is `Some` and non-empty, each schema is wrapped into the
     /// `OpenAI` function shape and sent as the request's `tools` array (with
@@ -218,10 +235,14 @@ impl GatewayClient {
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
     /// (F11 - the full reachable set):
     /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
-    /// - `Transport` on a transport-layer failure (connection, timeout);
+    /// - `Transport` on a transport-layer failure (connection, timeout) or
+    ///   when the stream carries a mid-flight error envelope;
     /// - `Backend` when the gateway responds with a non-success status;
-    /// - `MalformedResponse` when the body exceeds the size cap or its shape is
-    ///   unusable (the JSON decode failure is retained as a private `#[source]`);
+    /// - `MalformedResponse` when the stream exceeds the size cap, a chunk's
+    ///   shape is unusable (the JSON decode failure is retained as a private
+    ///   `#[source]`), the stream ends without the `[DONE]` sentinel, or a
+    ///   tool-call batch is truncated by a `length`/`content_filter` finish
+    ///   reason (partial arguments must not execute);
     /// - `EmptyReply` when the turn has neither non-empty tool calls nor
     ///   non-empty text.
     pub async fn complete(
@@ -229,15 +250,20 @@ impl GatewayClient {
         messages: &[Message],
         tools: Option<&[ToolSchema]>,
         options: &CompletionOptions,
+        on_delta: impl Fn(StreamDelta),
     ) -> std::result::Result<Completion, CompletionError> {
         let GatewayTransport::Http(http) = &self.transport else {
             return Err(CompletionError::from(Error::GatewayDisabled));
         };
         let request_body = build_request_body(messages, tools, options);
 
-        let response = http
+        let started = Instant::now();
+        let mut response = http
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(self.key.expose())
+            // reqwest's whole-request timeout covers the body read, so the
+            // run's wall-clock cap bounds the entire stream, not just the
+            // connection.
             .timeout(self.request_timeout)
             .json(&request_body)
             .send()
@@ -245,8 +271,8 @@ impl GatewayClient {
             .map_err(Error::http)?;
 
         let status = response.status();
-        let raw_body = read_body_capped(response, self.max_response_bytes).await?;
         if !status.is_success() {
+            let raw_body = read_body_capped(response, self.max_response_bytes).await?;
             // F5: bound the body, then escape control characters so a hostile
             // payload cannot forge log lines. The escaped body is kept only for
             // the opt-in `CompletionError::backend_body` accessor, never the
@@ -259,14 +285,75 @@ impl GatewayClient {
             }));
         }
 
-        let response_body: Value = serde_json::from_slice(&raw_body).map_err(|error| {
-            // F11 / MODEL-009: retain the decode failure as a private `#[source]`
-            // cause rather than flattening it into the message string.
-            Error::MalformedResponseSource {
-                message: "completion response was not valid JSON".to_owned(),
-                source: Box::new(error),
+        let mut scanner = SseScanner::new();
+        let mut accumulator = StreamAccumulator::new();
+        let mut received: u64 = 0;
+        let mut first_delta: Option<Instant> = None;
+        let mut last_delta: Option<Instant> = None;
+        let mut delta_chunks: u32 = 0;
+        let mut done = false;
+        'read: while let Some(bytes) = response.chunk().await.map_err(Error::http)? {
+            received += bytes.len() as u64;
+            if received > self.max_response_bytes {
+                return Err(CompletionError::from(Error::MalformedResponse(format!(
+                    "response stream exceeds the {}-byte limit",
+                    self.max_response_bytes
+                ))));
             }
-        })?;
+            scanner.extend(&bytes);
+            while let Some(data) = scanner.next_data() {
+                match accumulator.apply(&data, &on_delta)? {
+                    Applied::Done => {
+                        done = true;
+                        break 'read;
+                    }
+                    Applied::Chunk { delta: true } => {
+                        let now = Instant::now();
+                        first_delta.get_or_insert(now);
+                        last_delta = Some(now);
+                        delta_chunks += 1;
+                    }
+                    Applied::Chunk { delta: false } => {}
+                }
+            }
+        }
+        // A stream that ends without the sentinel was cut off; its
+        // accumulation may be missing the tail, so it must never pass for a
+        // complete turn.
+        if !done {
+            return Err(CompletionError::from(Error::MalformedResponse(
+                "completion stream ended without the [DONE] sentinel".into(),
+            )));
+        }
+
+        // The truncation rule runs before normalization: a tool-call batch
+        // cut short by `length` or `content_filter` may hold partial JSON
+        // arguments, and partial arguments must not execute.
+        if accumulator.has_tool_calls()
+            && matches!(
+                accumulator.finish_reason(),
+                Some("length" | "content_filter")
+            )
+        {
+            let reason = accumulator.finish_reason().unwrap_or_default().to_owned();
+            return Err(CompletionError::from(Error::MalformedResponse(format!(
+                "tool-call batch truncated by finish_reason {reason:?}: \
+                 partial arguments must not execute"
+            ))));
+        }
+
+        let client_timing = ClientTiming {
+            ttft_ms: first_delta.map(|at| duration_ms(at.duration_since(started))),
+            mean_itl_ms: match (first_delta, last_delta) {
+                (Some(first), Some(last)) if delta_chunks >= 2 => {
+                    Some(duration_ms(last.duration_since(first)) / f64::from(delta_chunks - 1))
+                }
+                _ => None,
+            },
+            e2e_ms: duration_ms(started.elapsed()),
+        };
+
+        let response_body = accumulator.into_body();
         let turn = crate::normalize::normalize(&response_body)?;
         let metadata = crate::normalize::response_metadata(&response_body);
         Ok(Completion {
@@ -277,13 +364,16 @@ impl GatewayClient {
             usage: metadata.usage,
             llama_timings: metadata.llama_timings,
             vllm_metrics: metadata.vllm_metrics,
-            // Measured by the streaming transport's own clock; this buffered
-            // path has no per-token clock, so it records nothing.
-            client_timing: None,
+            client_timing: Some(client_timing),
             request_body,
             response_body,
         })
     }
+}
+
+/// A duration as fractional milliseconds.
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 /// Escapes control characters in a diagnostic body and bounds it to `max` chars.

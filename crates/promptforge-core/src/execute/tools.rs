@@ -98,8 +98,10 @@ pub(crate) async fn infer_round(
 ) -> Result<String, Error> {
     let completion_options = binding.completion_options();
     let conversation = [Message::user(prompt)];
+    // A nested infer round consumes only the accumulated completion; live
+    // deltas have no consumer here, so the callback is a no-op.
     let completion = match client
-        .complete(&conversation, None, &completion_options)
+        .complete(&conversation, None, &completion_options, |_| {})
         .await
     {
         Ok(completion) => completion,

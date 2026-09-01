@@ -35,6 +35,7 @@ async fn happy_path_through_the_real_client() {
             &[promptforge_core::client::Message::user("ping")],
             None,
             &options,
+            |_delta| {},
         ),
     )
     .await
@@ -697,6 +698,112 @@ async fn gemma_malformed_fence_yields_empty_content_and_gateway_warning() {
         "gateway_warning is always present on recovery: {message}"
     );
     assert!(message.get("tool_calls").is_none());
+    gateway.shutdown().await;
+}
+
+/// A `stream: true` request to a `gemma3_tool_code` model still gets tool
+/// calling: the gateway buffers one non-streaming upstream round trip
+/// (stripping `stream` and `stream_options`, injecting the guide), rewrites
+/// the fence, and re-emits the result as SSE chunks whose delta carries the
+/// indexed tool calls, closed by `[DONE]`.
+#[tokio::test]
+async fn gemma_stream_true_emulates_tool_calls_over_sse() {
+    let reply = gemma_reply_with_content("```tool_code\nsearch(query=\"a\")\n```");
+    let (gateway, recorder) = gemma_gateway(reply).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/chat/completions", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{ "role": "user", "content": "ping" }],
+                "stream": true,
+                "stream_options": { "include_usage": true },
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "search",
+                        "description": "search the web",
+                        "parameters": {
+                            "type": "object",
+                            "properties": { "query": { "type": "string" } },
+                            "required": ["query"]
+                        }
+                    }
+                }]
+            })),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
+
+    // The upstream saw one buffered request: no stream flag, no
+    // stream_options, no tools, and the guide prepended.
+    let seen = recorder.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1, "backend saw exactly one buffered request");
+    let upstream_body = &seen[0].body;
+    assert!(
+        upstream_body.get("stream").and_then(Value::as_bool) != Some(true),
+        "the upstream call is buffered: {upstream_body}"
+    );
+    assert!(
+        upstream_body.get("stream_options").is_none(),
+        "streaming-only options are stripped: {upstream_body}"
+    );
+    assert!(upstream_body.get("tools").is_none());
+    let guide = upstream_body
+        .pointer("/messages/0/content")
+        .and_then(Value::as_str)
+        .expect("guide content");
+    assert!(guide.contains("tool_code"), "guide injected: {guide}");
+
+    let body = text_within(response).await;
+    let data_lines: Vec<&str> = body
+        .lines()
+        .filter(|line| line.starts_with("data:"))
+        .collect();
+    assert_eq!(
+        data_lines.last().copied(),
+        Some("data: [DONE]"),
+        "the synthetic stream ends with the sentinel: {body}"
+    );
+    let chunk: Value = serde_json::from_str(data_lines[0].strip_prefix("data: ").unwrap()).unwrap();
+    assert_eq!(
+        chunk.get("model").and_then(Value::as_str),
+        Some("test-model")
+    );
+    let choice = &chunk["choices"][0];
+    assert_eq!(
+        choice.get("finish_reason").and_then(Value::as_str),
+        Some("tool_calls")
+    );
+    let calls = choice
+        .pointer("/delta/tool_calls")
+        .and_then(Value::as_array)
+        .expect("tool calls ride the delta");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].get("index").and_then(Value::as_u64),
+        Some(0),
+        "delta tool-call entries carry the fragment index"
+    );
+    assert_eq!(
+        calls[0].pointer("/function/name").and_then(Value::as_str),
+        Some("search")
+    );
+    assert_eq!(
+        calls[0]
+            .pointer("/function/arguments")
+            .and_then(Value::as_str),
+        Some("{\"query\":\"a\"}")
+    );
     gateway.shutdown().await;
 }
 

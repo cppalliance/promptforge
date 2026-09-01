@@ -18,6 +18,47 @@ async fn client_for(app: axum::Router) -> GatewayClient {
     )
 }
 
+/// Renders `events` as SSE `data:` lines closed by the `[DONE]` sentinel.
+fn sse_body(events: &[Value]) -> String {
+    let mut body = String::new();
+    for event in events {
+        body.push_str("data: ");
+        body.push_str(&event.to_string());
+        body.push_str("\n\n");
+    }
+    body.push_str("data: [DONE]\n\n");
+    body
+}
+
+/// A client pointed at a mock gateway that answers every completion with
+/// the given SSE body.
+async fn sse_client(body: String) -> GatewayClient {
+    use axum::Router;
+    use axum::routing::post;
+
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let body = body.clone();
+            async move {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    body,
+                )
+            }
+        }),
+    );
+    client_for(app).await
+}
+
+/// One streamed chunk carrying a content fragment.
+fn content_chunk(text: &str) -> Value {
+    serde_json::json!({
+        "model": "qwen3-30b",
+        "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": null }]
+    })
+}
+
 fn lookup_from<'a>(
     pairs: &'a [(&'a str, &'a str)],
 ) -> impl Fn(&str) -> std::result::Result<Option<String>, Error> + 'a {
@@ -194,7 +235,7 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     let client = client_for(app).await;
     let options = CompletionOptions::new("m");
     let err = client
-        .complete(&[Message::user("hi")], None, &options)
+        .complete(&[Message::user("hi")], None, &options, |_| {})
         .await
         .expect_err("a 502 must surface as a backend error");
 
@@ -266,13 +307,13 @@ fn gateway_endpoint_trims_trailing_slash_and_keeps_valid_urls() {
 }
 
 #[tokio::test]
-async fn complete_sends_completion_options_model_on_the_wire() {
+async fn complete_sends_completion_options_and_stream_flags_on_the_wire() {
     use std::sync::{Arc, Mutex};
 
     use axum::Router;
     use axum::extract::Json;
     use axum::routing::post;
-    use serde_json::{Value, json};
+    use serde_json::Value;
 
     let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&captured);
@@ -282,12 +323,15 @@ async fn complete_sends_completion_options_model_on_the_wire() {
             let slot = Arc::clone(&slot);
             async move {
                 *slot.lock().expect("capture lock") = Some(body);
-                Json(json!({
-                    "choices": [{
-                        "message": { "role": "assistant", "content": "ok" },
-                        "finish_reason": "stop"
-                    }]
-                }))
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    sse_body(&[
+                        content_chunk("ok"),
+                        serde_json::json!({
+                            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+                        }),
+                    ]),
+                )
             }
         }),
     );
@@ -299,7 +343,7 @@ async fn complete_sends_completion_options_model_on_the_wire() {
         thinking: Some(false),
     };
     client
-        .complete(&[Message::user("hi")], None, &options)
+        .complete(&[Message::user("hi")], None, &options, |_| {})
         .await
         .unwrap();
     let body = captured.lock().expect("capture lock").clone().unwrap();
@@ -307,31 +351,23 @@ async fn complete_sends_completion_options_model_on_the_wire() {
     assert_eq!(body["temperature"], 0.0);
     assert_eq!(body["max_tokens"], 128);
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    // The one completion method always streams and always asks for the
+    // final usage chunk.
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["stream_options"]["include_usage"], true);
 }
 
 #[tokio::test]
 async fn complete_hard_fails_on_empty_model_reply() {
-    use axum::Router;
-    use axum::extract::Json;
-    use axum::routing::post;
-    use serde_json::{Value, json};
-
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(|Json(_body): Json<Value>| async move {
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "reasoning_content": "ignored"
-                    },
-                    "finish_reason": "stop"
-                }]
-            }))
-        }),
-    );
-    let client = client_for(app).await;
+    // A stream that carries only reasoning and a stop finish has no
+    // product; the accumulated turn must fail exactly like the buffered
+    // equivalent, with the finish_reason surviving.
+    let client = sse_client(sse_body(&[
+        serde_json::json!({ "choices": [{ "index": 0,
+            "delta": { "reasoning_content": "ignored" } }] }),
+        serde_json::json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] }),
+    ]))
+    .await;
     let options = CompletionOptions {
         model: "m".into(),
         temperature: None,
@@ -339,7 +375,7 @@ async fn complete_hard_fails_on_empty_model_reply() {
         thinking: None,
     };
     let err = client
-        .complete(&[Message::user("hi")], None, &options)
+        .complete(&[Message::user("hi")], None, &options, |_| {})
         .await
         .expect_err("empty product must fail");
     assert_eq!(err.kind(), crate::model::CompletionErrorKind::EmptyReply);
@@ -379,19 +415,19 @@ async fn complete_on_a_disabled_client_is_a_disabled_error() {
     // F14: a disabled client never touches the network.
     let client = GatewayClient::disabled();
     let err = client
-        .complete(&[Message::user("hi")], None, &openai_options())
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("a disabled client cannot complete");
     assert_eq!(err.kind(), crate::model::CompletionErrorKind::Disabled);
 }
 
 #[tokio::test]
-async fn complete_refuses_a_success_body_over_the_size_cap() {
-    // F14 (body-size, success path): a 200 body larger than the cap is
-    // refused before decoding.
+async fn complete_refuses_a_success_stream_over_the_size_cap() {
+    // F14 (body-size, success path): a 200 stream larger than the cap is
+    // refused as the bytes arrive, before any further parsing.
     let base = spawn_raw_gateway(
         axum::http::StatusCode::OK,
-        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"a long reply\"}}]}",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"a long reply\"}}]}\n\n",
     )
     .await;
     let client = GatewayClient::new(
@@ -403,9 +439,9 @@ async fn complete_refuses_a_success_body_over_the_size_cap() {
         NonZeroU64::new(8).expect("non-zero cap"),
     );
     let err = client
-        .complete(&[Message::user("hi")], None, &openai_options())
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
-        .expect_err("an oversize body must be refused");
+        .expect_err("an oversize stream must be refused");
     assert_eq!(
         err.kind(),
         crate::model::CompletionErrorKind::MalformedResponse
@@ -430,7 +466,7 @@ async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
         NonZeroU64::new(8).expect("non-zero cap"),
     );
     let err = client
-        .complete(&[Message::user("hi")], None, &openai_options())
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
         .expect_err("an oversize error body must be refused");
     assert_eq!(
@@ -440,18 +476,19 @@ async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
 }
 
 #[tokio::test]
-async fn complete_refuses_malformed_successful_json() {
-    // F14: a 200 whose body is not valid JSON is MalformedResponse, and the
-    // decode failure is preserved as the error-chain source.
-    let base = spawn_raw_gateway(axum::http::StatusCode::OK, "{ not json").await;
+async fn complete_refuses_a_malformed_stream_chunk() {
+    // F14: a 200 whose stream carries an undecodable chunk is
+    // MalformedResponse, and the decode failure is preserved as the
+    // error-chain source.
+    let base = spawn_raw_gateway(axum::http::StatusCode::OK, "data: { not json\n\n").await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&base).expect("valid endpoint"),
         SecretString::new("tok").expect("non-empty test key"),
     );
     let err = client
-        .complete(&[Message::user("hi")], None, &openai_options())
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
-        .expect_err("undecodable body must fail");
+        .expect_err("undecodable chunk must fail");
     assert_eq!(
         err.kind(),
         crate::model::CompletionErrorKind::MalformedResponse
@@ -465,15 +502,225 @@ async fn complete_refuses_malformed_successful_json() {
 }
 
 #[tokio::test]
-async fn complete_refuses_malformed_tool_call_arguments_at_the_boundary() {
-    // F14: a well-formed HTTP 200 whose tool-call arguments are not a JSON
-    // object string is rejected at the client boundary, not passed on.
+async fn complete_refuses_malformed_tool_call_fragments_at_the_boundary() {
+    // F14: a well-formed HTTP 200 whose streamed tool-call fragment carries
+    // non-string arguments is rejected at the client boundary, not passed on.
+    let client = sse_client(sse_body(&[serde_json::json!({
+        "choices": [{ "index": 0, "delta": { "tool_calls": [{
+            "index": 0, "id": "c1", "type": "function",
+            "function": { "name": "t", "arguments": 123 }
+        }] } }]
+    })]))
+    .await;
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("malformed tool arguments must be rejected");
+    assert_eq!(
+        err.kind(),
+        crate::model::CompletionErrorKind::MalformedResponse
+    );
+}
+
+#[tokio::test]
+async fn streamed_text_usage_timings_and_client_timing_accumulate() {
+    // The llama.cpp streamed shape: content fragments, a finish chunk, and
+    // the include_usage summary chunk carrying usage plus timings. The
+    // accumulated completion must match the buffered equivalent while the
+    // deltas reach the callback in order, and the client's own clock must
+    // populate ClientTiming.
+    let client = sse_client(sse_body(&[
+        content_chunk("Hel"),
+        content_chunk("lo!"),
+        serde_json::json!({
+            "model": "qwen3-30b",
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+        }),
+        serde_json::json!({
+            "model": "qwen3-30b",
+            "choices": [],
+            "usage": { "completion_tokens": 3, "prompt_tokens": 7, "total_tokens": 10 },
+            "timings": {
+                "prompt_n": 7, "prompt_ms": 12.5, "prompt_per_second": 560.0,
+                "predicted_n": 3, "predicted_ms": 30.5, "predicted_per_second": 98.5
+            }
+        }),
+    ]))
+    .await;
+    let seen = std::sync::Mutex::new(Vec::new());
+    let completion = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |delta| {
+            seen.lock().expect("delta log").push(delta);
+        })
+        .await
+        .expect("a streamed text turn completes");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "Hello!"),
+        other => panic!("expected text, got {other:?}"),
+    }
+    assert_eq!(
+        *seen.lock().expect("delta log"),
+        vec![
+            StreamDelta::Text("Hel".to_owned()),
+            StreamDelta::Text("lo!".to_owned()),
+        ],
+        "each content fragment reaches the callback live, in order"
+    );
+    assert_eq!(completion.finish_reason(), Some("stop"));
+    assert_eq!(completion.model(), "qwen3-30b");
+    let usage = completion.usage().expect("usage from the final chunk");
+    assert_eq!(usage.total_tokens, 10);
+    let timings = completion
+        .llama_timings()
+        .expect("timings from the final chunk");
+    assert_eq!(timings.predicted_n, 3);
+    let timing = completion
+        .client_timing()
+        .expect("the streaming transport measures its own clock");
+    assert!(
+        timing.ttft_ms.is_some_and(|ttft| ttft >= 0.0),
+        "TTFT is measured once the first delta arrives: {timing:?}"
+    );
+    assert!(
+        timing.mean_itl_ms.is_some_and(|itl| itl >= 0.0),
+        "mean ITL is measured with two delta chunks: {timing:?}"
+    );
+    assert!(timing.e2e_ms >= 0.0);
+}
+
+#[tokio::test]
+async fn streamed_reasoning_stays_a_side_channel() {
+    let client = sse_client(sse_body(&[
+        serde_json::json!({ "choices": [{ "index": 0,
+            "delta": { "reasoning_content": "scratch" } }] }),
+        content_chunk("answer"),
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+        }),
+    ]))
+    .await;
+    let seen = std::sync::Mutex::new(Vec::new());
+    let completion = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |delta| {
+            seen.lock().expect("delta log").push(delta);
+        })
+        .await
+        .expect("reasoning plus text completes");
+    match completion.result() {
+        CompletionResult::Text(text) => {
+            assert_eq!(
+                text, "answer",
+                "reasoning is never promoted into the answer"
+            );
+        }
+        other => panic!("expected text, got {other:?}"),
+    }
+    assert_eq!(completion.reasoning_content(), Some("scratch"));
+    assert_eq!(
+        *seen.lock().expect("delta log"),
+        vec![
+            StreamDelta::Reasoning("scratch".to_owned()),
+            StreamDelta::Text("answer".to_owned()),
+        ],
+        "reasoning and text deltas arrive separated"
+    );
+}
+
+#[tokio::test]
+async fn streamed_tool_call_fragments_reassemble_into_the_batch() {
+    let client = sse_client(sse_body(&[
+        serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+            "index": 0, "id": "call_1", "type": "function",
+            "function": { "name": "web_search", "arguments": "{\"qu" }
+        }] } }] }),
+        serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+            "index": 0, "function": { "arguments": "ery\":\"rust\"}" }
+        }] } }] }),
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }]
+        }),
+    ]))
+    .await;
+    let completion = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("a streamed tool-call turn completes");
+    match completion.result() {
+        CompletionResult::ToolCalls(calls) => {
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].id(), "call_1");
+            assert_eq!(calls[0].name(), "web_search");
+            assert_eq!(
+                calls[0].arguments().to_json_string(),
+                "{\"query\":\"rust\"}",
+                "argument fragments buffer until the batch is whole"
+            );
+        }
+        other => panic!("expected tool calls, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn truncated_tool_call_batch_fails_the_completion() {
+    // A length or content_filter finish with tool calls means the batch may
+    // hold partial JSON arguments; the whole batch fails rather than
+    // executing a fragment.
+    for reason in ["length", "content_filter"] {
+        let client = sse_client(sse_body(&[
+            serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                "index": 0, "id": "c1", "type": "function",
+                "function": { "name": "t", "arguments": "{\"whole\":true}" }
+            }] } }] }),
+            serde_json::json!({
+                "choices": [{ "index": 0, "delta": {}, "finish_reason": reason }]
+            }),
+        ]))
+        .await;
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+            .await
+            .expect_err("a truncated tool-call batch must fail");
+        assert_eq!(
+            err.kind(),
+            crate::model::CompletionErrorKind::MalformedResponse,
+            "finish_reason {reason:?}"
+        );
+        assert!(
+            err.to_string().contains("truncated"),
+            "the error names the truncation: {err}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn truncated_text_still_returns_with_its_finish_reason() {
+    // The truncation rule fails tool-call batches only: partial TEXT is
+    // returned with finish_reason "length" so the caller can report it.
+    let client = sse_client(sse_body(&[
+        content_chunk("partial answ"),
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "length" }]
+        }),
+    ]))
+    .await;
+    let completion = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("truncated text is still a product");
+    match completion.result() {
+        CompletionResult::Text(text) => assert_eq!(text, "partial answ"),
+        other => panic!("expected text, got {other:?}"),
+    }
+    assert_eq!(completion.finish_reason(), Some("length"));
+}
+
+#[tokio::test]
+async fn stream_without_done_sentinel_is_malformed() {
+    // A stream cut off before [DONE] may be missing its tail; it must never
+    // pass for a complete turn.
     let base = spawn_raw_gateway(
         axum::http::StatusCode::OK,
-        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\
-             \"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\
-             \"function\":{\"name\":\"t\",\"arguments\":123}}]},\
-             \"finish_reason\":\"tool_calls\"}]}",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"half\"}}]}\n\n",
     )
     .await;
     let client = GatewayClient::new(
@@ -481,11 +728,38 @@ async fn complete_refuses_malformed_tool_call_arguments_at_the_boundary() {
         SecretString::new("tok").expect("non-empty test key"),
     );
     let err = client
-        .complete(&[Message::user("hi")], None, &openai_options())
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
         .await
-        .expect_err("malformed tool arguments must be rejected");
+        .expect_err("a truncated stream must fail");
     assert_eq!(
         err.kind(),
         crate::model::CompletionErrorKind::MalformedResponse
     );
+    assert!(
+        err.to_string().contains("[DONE]"),
+        "the error names the missing sentinel: {err}"
+    );
+}
+
+#[tokio::test]
+async fn mid_stream_error_envelope_is_a_transport_failure() {
+    // The gateway relays a mid-flight failure as a data: error envelope on
+    // an already-open 200 stream; the completion classifies it as a
+    // transport failure, never as model output.
+    let client = sse_client(sse_body(&[
+        content_chunk("par"),
+        serde_json::json!({ "error": {
+            "message": "upstream died", "type": "upstream", "code": "upstream_transport"
+        } }),
+    ]))
+    .await;
+    let err = client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect_err("an error envelope must fail the completion");
+    assert_eq!(err.kind(), crate::model::CompletionErrorKind::Transport);
+    let source = std::error::Error::source(&err)
+        .expect("the envelope message must ride as the cause")
+        .to_string();
+    assert!(source.contains("upstream died"), "cause: {source}");
 }

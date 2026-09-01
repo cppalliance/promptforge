@@ -19,7 +19,8 @@
 use serde_json::{Map, Value};
 
 use crate::error::GatewayError;
-use crate::wire::{ChatRequest, ChatResponse};
+use crate::upstream::StreamedChunks;
+use crate::wire::{ChatChunk, ChatChunkChoice, ChatRequest, ChatResponse};
 
 /// The `tool_dialect` config value selecting this dialect.
 pub(crate) use promptforge_gateway_routing::GEMMA3_TOOL_CODE;
@@ -104,6 +105,69 @@ pub(crate) fn apply_response(response: &mut ChatResponse, model: &str) {
                 message.insert("gateway_warning".to_owned(), Value::String(reason));
             }
         }
+    }
+}
+
+/// Re-emit a dialect-rewritten buffered response as a synthetic chunk
+/// stream, so the emulated dialect serves `stream: true` callers.
+///
+/// The tool-code fence can only be parsed from the whole reply, so the
+/// streaming path buffers one upstream round trip and re-emits the rewritten
+/// response: one chunk carries each choice's message as its delta (tool-call
+/// entries gain the fragment `index` streaming clients merge by), and a
+/// trailing empty-choices summary chunk carries the response's top-level
+/// `usage`/`timings`/`metrics` passthrough fields, so
+/// `stream_options.include_usage` semantics survive the buffered round trip.
+pub(crate) fn response_chunks(response: ChatResponse) -> StreamedChunks {
+    use futures_util::StreamExt as _;
+
+    let mut choices: Vec<ChatChunkChoice> = Vec::new();
+    for (position, choice) in response.choices.into_iter().enumerate() {
+        let Some(choice_object) = choice.as_object() else {
+            continue;
+        };
+        let index = choice_object
+            .get("index")
+            .and_then(Value::as_u64)
+            .and_then(|index| u32::try_from(index).ok())
+            .unwrap_or(u32::try_from(position).unwrap_or(u32::MAX));
+        let mut delta = choice_object.get("message").cloned().unwrap_or(Value::Null);
+        if let Some(calls) = delta.get_mut("tool_calls").and_then(Value::as_array_mut) {
+            for (call_index, call) in calls.iter_mut().enumerate() {
+                if let Some(call) = call.as_object_mut() {
+                    call.insert("index".to_owned(), Value::from(call_index));
+                }
+            }
+        }
+        let mut rest = Map::new();
+        if let Some(finish) = choice_object.get("finish_reason") {
+            rest.insert("finish_reason".to_owned(), finish.clone());
+        }
+        choices.push(ChatChunkChoice { index, delta, rest });
+    }
+    let mut chunks = vec![ChatChunk {
+        model: response.model.clone(),
+        choices,
+        rest: Map::new(),
+    }];
+    let mut summary = Map::new();
+    for key in ["usage", "timings", "metrics"] {
+        if let Some(section) = response.rest.get(key).filter(|section| !section.is_null()) {
+            summary.insert(key.to_owned(), section.clone());
+        }
+    }
+    if !summary.is_empty() {
+        chunks.push(ChatChunk {
+            model: response.model,
+            choices: Vec::new(),
+            rest: summary,
+        });
+    }
+    let items: Vec<_> = chunks.into_iter().map(Ok).collect();
+    StreamedChunks {
+        content_type: None,
+        cache_control: None,
+        chunks: futures_util::stream::iter(items).boxed(),
     }
 }
 
@@ -956,5 +1020,64 @@ mod tests {
         );
         assert!(message.get("tool_calls").is_none());
         assert!(message.get("gateway_warning").is_none());
+    }
+
+    #[tokio::test]
+    async fn response_chunks_stream_the_rewritten_message_and_summary() {
+        use futures_util::StreamExt as _;
+
+        // A fence-rewritten response converted for a stream: true caller. The
+        // delta must carry the tool calls with fragment indices, the finish
+        // reason must ride the chunk choice, and the top-level usage must
+        // arrive on a trailing empty-choices summary chunk.
+        let mut response = response_with_content("```tool_code\nsearch(query=\"a\")\n```");
+        response.rest.insert(
+            "usage".to_owned(),
+            serde_json::json!({ "prompt_tokens": 2, "completion_tokens": 5, "total_tokens": 7 }),
+        );
+        apply_response(&mut response, "m");
+        let mut streamed = response_chunks(response);
+        let mut chunks = Vec::new();
+        while let Some(item) = streamed.chunks.next().await {
+            chunks.push(item.expect("synthetic chunks never fail"));
+        }
+        assert_eq!(chunks.len(), 2, "one content chunk plus the summary");
+        let content = &chunks[0];
+        assert_eq!(content.choices.len(), 1);
+        assert_eq!(content.choices[0].index, 0);
+        assert_eq!(
+            content.choices[0]
+                .rest
+                .get("finish_reason")
+                .and_then(Value::as_str),
+            Some("tool_calls")
+        );
+        let calls = content.choices[0]
+            .delta
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .expect("tool calls ride the delta");
+        assert_eq!(
+            calls[0].get("index").and_then(Value::as_u64),
+            Some(0),
+            "each delta tool-call entry carries the fragment index"
+        );
+        assert_eq!(
+            calls[0].pointer("/function/name").and_then(Value::as_str),
+            Some("search")
+        );
+        let summary = &chunks[1];
+        assert!(
+            summary.choices.is_empty(),
+            "the summary chunk has no choices"
+        );
+        assert_eq!(
+            summary
+                .rest
+                .get("usage")
+                .and_then(|usage| usage.get("total_tokens"))
+                .and_then(Value::as_u64),
+            Some(7)
+        );
     }
 }

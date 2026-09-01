@@ -155,15 +155,24 @@ pub(crate) async fn spawn_backend(router: Router) -> SocketAddr {
     addr
 }
 
-/// A fake OpenAI backend that echoes the model and returns a canned reply.
+/// A fake OpenAI backend that echoes the model and returns a canned reply,
+/// speaking SSE when the request asks to stream and JSON otherwise.
 pub(crate) async fn fake_backend() -> SocketAddr {
-    async fn completions(Json(body): Json<Value>) -> Json<Value> {
+    async fn completions(Json(body): Json<Value>) -> axum::response::Response {
+        use axum::response::IntoResponse;
         let model = body
             .get("model")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        Json(canned_reply(&model))
+        if body.get("stream").and_then(Value::as_bool) == Some(true) {
+            return (
+                [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                canned_sse_reply(&model),
+            )
+                .into_response();
+        }
+        Json(canned_reply(&model)).into_response()
     }
     spawn_backend(Router::new().route("/chat/completions", post(completions))).await
 }
@@ -179,6 +188,32 @@ pub(crate) fn canned_reply(model: &str) -> Value {
             "finish_reason": "stop"
         }]
     })
+}
+
+/// The streamed form of [`canned_reply`]: two content chunks, the finish
+/// chunk, and the `[DONE]` sentinel.
+pub(crate) fn canned_sse_reply(model: &str) -> String {
+    let chunk = |delta: Value, finish: Value| {
+        serde_json::json!({
+            "id": "cmpl-test",
+            "object": "chat.completion.chunk",
+            "model": model,
+            "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }]
+        })
+    };
+    let events = [
+        chunk(serde_json::json!({ "content": "po" }), Value::Null),
+        chunk(serde_json::json!({ "content": "ng" }), Value::Null),
+        chunk(serde_json::json!({}), Value::String("stop".to_owned())),
+    ];
+    let mut body = String::new();
+    for event in &events {
+        body.push_str("data: ");
+        body.push_str(&event.to_string());
+        body.push_str("\n\n");
+    }
+    body.push_str("data: [DONE]\n\n");
+    body
 }
 
 /// One request as observed by the recording backend (IT-005/006).
