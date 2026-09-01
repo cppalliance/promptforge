@@ -32,6 +32,12 @@ pub(crate) fn routes(state: AppState) -> Router {
         DEFAULT_DEADLINE,
     )
     .route("/gateway/api/{*path}", any(gateway_forward))
+    // The config SPA assets, proxied same-origin so the panel iframe
+    // loads from the workshop's own origin instead of the gateway's
+    // port. A cross-origin iframe makes Chromium spawn renderer
+    // processes that flash a console window on some Windows configs.
+    .route("/gateway/config/", get(gateway_config_index))
+    .route("/gateway/config/{*path}", get(gateway_config_assets))
     .with_state(state)
 }
 
@@ -89,6 +95,44 @@ async fn gateway_origin(State(state): State<AppState>) -> Response {
         body.to_string(),
     )
         .into_response()
+}
+
+/// Proxies the config SPA's index page from the gateway so the panel
+/// iframe loads same-origin.
+async fn gateway_config_index(State(state): State<AppState>) -> Result<Response, AppError> {
+    proxy_config_asset(&state, "/config/").await
+}
+
+/// Proxies the config SPA's sub-assets (JS, CSS, icons) from the gateway.
+async fn gateway_config_assets(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Response, AppError> {
+    let path = format!("/config/{path}");
+    if path
+        .split('/')
+        .any(|segment| segment == "." || segment == ".." || segment.contains('\\'))
+    {
+        return Err(AppError::ForwardDenied);
+    }
+    proxy_config_asset(&state, &path).await
+}
+
+/// The shared proxy core: GET the gateway's config asset and relay it.
+async fn proxy_config_asset(state: &AppState, path: &str) -> Result<Response, AppError> {
+    let forwarded = state
+        .gateway_client()
+        .forward(reqwest::Method::GET, path, None)
+        .await
+        .map_err(AppError::Gateway)?;
+    let status = StatusCode::from_u16(forwarded.status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut builder = Response::builder().status(status);
+    if let Some(content_type) = &forwarded.content_type {
+        builder = builder.header(header::CONTENT_TYPE, content_type);
+    }
+    Ok(builder
+        .body(Body::from(forwarded.body))
+        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response()))
 }
 
 /// Forwards one allowlisted request to the gateway with the bearer key
