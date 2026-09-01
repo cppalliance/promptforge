@@ -641,10 +641,10 @@ Before you start a voice session, query the capability endpoint to check GPU ava
 curl "$GATEWAY/voice/capability"
 ````
 
-The response reports availability:
+The response reports GPU availability and whether an STT engine is provisioned and loaded in the active profile:
 
 ````json
-{"gpu": true}
+{"gpu": true, "engine": true}
 ````
 
 ### File Transcription API
