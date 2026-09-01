@@ -8,8 +8,8 @@
 // and PermanentTab dropping its title subscription (emitter delivery
 // stops after the root disposes). A final section drives WorkshopSocket
 // against a scripted fake WebSocket: emitter fan-out and unsubscribe, a
-// normal server close still reconnecting, and disposal settling pending
-// chats without a disconnect fan-out or reconnect.
+// normal server close still reconnecting, and disposal closing the
+// socket without a disconnect fan-out or reconnect.
 // Run: node test/disposable-adoption.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -266,7 +266,7 @@ root.dispose();
 // --- WorkshopSocket: emitter fan-out, reconnect, disposal -------------------
 // A scripted fake WebSocket drives the socket through open, a
 // server-initiated close, the reconnect that must follow it, and disposal,
-// which must settle pending chats without a disconnect fan-out or reconnect.
+// which must close the socket without a disconnect fan-out or reconnect.
 
 const fakeSockets = [];
 class FakeWebSocket {
@@ -337,42 +337,18 @@ check(
   statusOrder.join(",") === "first,second,second",
 );
 
-// A chat that already streamed content resolves when the server drops the
-// socket under it.
-let chat1Settled = false;
-const chat1 = socket
-  .streamChat({ messages: [] }, { onDelta: () => {} }, new AbortController().signal)
-  .then(() => {
-    chat1Settled = true;
-  });
-await flush();
-fakeSockets[0].message({ type: "delta", id: 1, content: "partial" });
-
 // A server-initiated close is a dropout: the disconnect fan-out fires and
 // the backoff opens a fresh socket - disposal must not have changed this.
 fakeSockets[0].serverClose();
-await chat1;
-check("a started chat resolves when the server closes under it", chat1Settled === true);
 check("a server-initiated close fires onDisconnect", disconnects === 1);
 await sleep(1200); // one full RECONNECT_INITIAL_MS backoff step
 check("a server-initiated close schedules a reconnect", fakeSockets.length === 2);
 
-// Disposal is not a dropout: pending chats settle, but there is no
+// Disposal is not a dropout: the socket closes, but there is no
 // disconnect fan-out and no reconnect.
 fakeSockets[1].open();
-let chat2Error = null;
-const chat2 = socket
-  .streamChat({ messages: [] }, { onDelta: () => {} }, new AbortController().signal)
-  .catch((error) => {
-    chat2Error = error;
-  });
 await flush();
 socket.dispose();
-await chat2;
-check(
-  "disposal rejects a not-yet-started chat instead of hanging it",
-  chat2Error instanceof Error,
-);
 check("disposal closes the underlying socket", fakeSockets[1].closed === true);
 check("disposal detaches onclose before closing", fakeSockets[1].onclose === null);
 check("disposal does not fire onDisconnect", disconnects === 1);

@@ -47,14 +47,6 @@ pub(crate) enum AppError {
     #[error(transparent)]
     Gateway(GatewayError),
 
-    /// A request body that should be JSON did not parse.
-    #[error("invalid chat request")]
-    BadRequest(#[source] serde_json::Error),
-
-    /// A buffered `/chat` request asked for a stream.
-    #[error("streaming moved to GET /ws; POST /chat is buffered only")]
-    StreamUnsupported,
-
     /// The request arrived from a cross-site browser context: a
     /// `Sec-Fetch-Site: cross-site` marking, a non-loopback `Host`
     /// (DNS rebinding), or a foreign WebSocket `Origin` (see
@@ -172,10 +164,7 @@ impl AppError {
     fn status(&self) -> StatusCode {
         match self {
             Self::GatewayUnreachable | Self::Gateway(_) => StatusCode::BAD_GATEWAY,
-            Self::BadRequest(_)
-            | Self::StreamUnsupported
-            | Self::NotADirectory
-            | Self::NotAFile => StatusCode::BAD_REQUEST,
+            Self::NotADirectory | Self::NotAFile => StatusCode::BAD_REQUEST,
             Self::OutsideGrants
             | Self::ForbiddenComponent
             | Self::CrossSite
@@ -198,8 +187,6 @@ impl AppError {
     fn code(&self) -> Option<&'static str> {
         match self {
             Self::GatewayUnreachable | Self::Gateway(_) => Some("gateway_unreachable"),
-            Self::BadRequest(_) => Some("bad_request"),
-            Self::StreamUnsupported => Some("stream_unsupported"),
             Self::CrossSite => Some("cross_site"),
             Self::NotJson => Some("not_json"),
             Self::ForwardDenied => Some("forward_denied"),
@@ -305,11 +292,6 @@ mod tests {
         io::Error::other("injected disk failure")
     }
 
-    /// A real serde failure with position detail, as `/chat` produces.
-    fn injected_serde() -> serde_json::Error {
-        serde_json::from_str::<serde_json::Value>("{").expect_err("malformed JSON must fail")
-    }
-
     #[test]
     fn gateway_failures_map_to_bad_gateway() {
         let unreachable = AppError::GatewayUnreachable;
@@ -318,16 +300,6 @@ mod tests {
         let transport = AppError::Gateway(GatewayError::Transport(Box::new(injected_io())));
         assert_eq!(transport.status(), StatusCode::BAD_GATEWAY);
         assert_eq!(transport.code(), Some("gateway_unreachable"));
-    }
-
-    #[test]
-    fn client_request_failures_map_to_bad_request() {
-        let bad = AppError::BadRequest(injected_serde());
-        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(bad.code(), Some("bad_request"));
-        let stream = AppError::StreamUnsupported;
-        assert_eq!(stream.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(stream.code(), Some("stream_unsupported"));
     }
 
     #[test]
@@ -508,10 +480,15 @@ mod tests {
     #[cfg(debug_assertions)]
     #[tokio::test]
     async fn debug_builds_leak_detail_into_the_live_envelope() {
-        let expected = format!("invalid chat request: {}", injected_serde());
-        let response = AppError::BadRequest(injected_serde()).into_response();
+        let response = AppError::ReadFile {
+            source: injected_io(),
+        }
+        .into_response();
         let body = body_bytes(response).await;
         let json: serde_json::Value = serde_json::from_slice(&body).expect("the envelope is JSON");
-        assert_eq!(json["error"]["message"], expected.as_str());
+        assert_eq!(
+            json["error"]["message"],
+            "file cannot be read: injected disk failure"
+        );
     }
 }

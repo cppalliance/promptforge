@@ -1,47 +1,30 @@
-// Minimal end-to-end core: boots the real bundle (dist/index.html +
-// dist/app.js) through the shared workbench fixture and proves the two
-// full-stack paths work - one chat round-trip (frame out on /ws, scripted
-// reply rendered into the history) and one voice take (interim lands in
-// the composer, the final replaces it). Per-feature slices of the old
-// monolithic smoke test live in the sibling tests under test/ (mount
-// structure, title bar, wire contract, status bar, voice behaviors,
-// disconnect and abort recovery). Run: node test/smoke.mjs (after
-// `npm run build`).
+// Bundle smoke test: dist/app.js boots against dist/index.html in jsdom -
+// the dock mounts the Workshop tree and the agent-session panel, the
+// status bar reads the boot push, and the agent panel opens its own
+// /agents/ws socket beside the workshop /ws connection.
+// Run: node test/smoke.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
-await bootWorkbench("smoke: boot, one chat round-trip, one voice take", async (ctx) => {
-  const { document, history, input, submitChat, startTake, failures } = ctx;
+await bootWorkbench("the bundled app boots the workbench", async (ctx) => {
+  const { document, sockets, statusText, failures } = ctx;
 
-  if (!document.querySelector("#dock .mur-app")) {
-    failures.push("the chat UI did not mount inside the dock");
+  if (!document.querySelector("#dock .workshop-tree")) {
+    failures.push("the Workshop tree did not mount in the dock");
   }
-
-  const request = await submitChat("Hello?");
-  if (!request) {
-    failures.push("no chat frame was sent on the /ws socket");
+  if (!document.querySelector("#dock .agent-panel")) {
+    failures.push("the agent-session panel did not mount in the dock");
   }
-  if (!history.textContent.includes("Hello back")) {
-    failures.push("the assistant reply did not render in the chat history");
+  if (statusText.textContent !== "Ready") {
+    failures.push(`the boot status push did not render: "${statusText.textContent}"`);
   }
-
-  // The take reads the composer's cursor when it starts, so stage the
-  // empty composer before the mic click.
-  input.value = "";
-  input.setSelectionRange(0, 0);
-  const takeSocket = await startTake();
-  if (!takeSocket) {
-    failures.push("the mic click did not open a /voice socket with a message listener");
-    return;
+  const agentSockets = sockets.filter((socket) => socket.url.endsWith("/agents/ws"));
+  if (agentSockets.length !== 1) {
+    failures.push(`the agent panel must open exactly one /agents/ws socket, saw ${agentSockets.length}`);
   }
-  takeSocket.onmessage({
-    data: JSON.stringify({ type: "interim", committed: "hello world", tentative: "" }),
-  });
-  if (input.value !== "hello world") {
-    failures.push(`the interim transcript did not land in the composer: "${input.value}"`);
+  const workshopSockets = sockets.filter(
+    (socket) => socket.url.endsWith("/ws") && !socket.url.endsWith("/agents/ws"),
+  );
+  if (workshopSockets.length !== 1) {
+    failures.push(`the app must open exactly one /ws socket, saw ${workshopSockets.length}`);
   }
-  takeSocket.onmessage({ data: JSON.stringify({ type: "final", text: "hello world" }) });
-  if (input.value !== "hello world") {
-    failures.push(`the final transcript did not land in the composer: "${input.value}"`);
-  }
-  takeSocket.onclose?.();
 });

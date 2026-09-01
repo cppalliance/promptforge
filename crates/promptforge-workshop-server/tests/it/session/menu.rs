@@ -1,6 +1,6 @@
-//! Model-menu behavior of the `/ws` chat socket: `select_model` and
-//! `switch_profile` orchestration, the switch progress ladder, the
-//! single-flight refusal, and menu events landing while a chat streams.
+//! Model-menu behavior of the `/ws` workshop socket: `select_model` and
+//! `switch_profile` orchestration, the switch progress ladder, and the
+//! single-flight refusal.
 
 use axum::Router;
 use axum::http::header;
@@ -11,9 +11,7 @@ use tokio_tungstenite::tungstenite;
 
 use crate::common::spawn_gateway;
 
-use super::{
-    frames_until, mock_models, send_tagged_chat, spawn_chat_server, spawn_indexed_drip_server,
-};
+use super::{frames_until, mock_models, spawn_session_server};
 
 /// Streams the full stage ladder then the terminal ready.
 async fn mock_switch_succeeds() -> Response {
@@ -67,7 +65,7 @@ fn profile_routes(active: &'static str) -> Router {
 
 #[tokio::test]
 async fn a_select_model_event_round_trips_and_refusals_answer_errors() {
-    let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+    let (url, _state_dir, state) = spawn_session_server("http://127.0.0.1:1").await;
     state
         .catalog()
         .publish(vec![serde_json::json!({"id": "test-model"})]);
@@ -129,7 +127,7 @@ async fn a_switch_profile_event_streams_progress_and_settles_the_menu() {
             .merge(profile_routes("beta")),
     )
     .await;
-    let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+    let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     // Readiness needs a non-empty catalog and reachability; seed both
     // so the settled snapshot recomputes chat_ready to true. The seed
     // matches the refetched catalog so the reconcile stays a no-op.
@@ -232,7 +230,7 @@ async fn a_failed_switch_restores_the_menu_and_reports_the_failure() {
             .merge(profile_routes("main")),
     )
     .await;
-    let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+    let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     state.catalog().publish(vec![serde_json::json!(
         {"id": "test-model", "object": "model", "owned_by": "promptforge"}
     )]);
@@ -298,7 +296,7 @@ async fn a_failed_switch_restores_the_menu_and_reports_the_failure() {
 
 #[tokio::test]
 async fn a_switch_while_one_runs_is_refused_with_an_error_frame() {
-    let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+    let (url, _state_dir, state) = spawn_session_server("http://127.0.0.1:1").await;
     state
         .menu()
         .begin_switch("running")
@@ -322,37 +320,5 @@ async fn a_switch_while_one_runs_is_refused_with_an_error_frame() {
             .contains("already in progress"),
         "the refusal names the single-flight rule: {refusal}"
     );
-    socket.close(None).await.expect("close the socket");
-}
-
-#[tokio::test]
-async fn a_menu_event_lands_and_answers_while_a_chat_streams() {
-    let (url, _tape_dir, state) = spawn_indexed_drip_server().await;
-    state
-        .catalog()
-        .publish(vec![serde_json::json!({"id": "test-model"})]);
-    let (mut socket, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .expect("connect to /ws");
-    send_tagged_chat(&mut socket, 1).await;
-    frames_until(&mut socket, |frame| frame["type"] == "delta").await;
-
-    let select = serde_json::json!({"type": "select_model", "model": "test-model"}).to_string();
-    socket
-        .send(tungstenite::Message::Text(select.into()))
-        .await
-        .expect("the select frame is sent");
-    let frames = frames_until(&mut socket, |frame| frame["type"] == "workbench").await;
-    assert!(
-        frames.iter().all(|frame| frame["type"] != "done"),
-        "the selection answered while the chat still streamed: {frames:?}"
-    );
-    assert_eq!(
-        frames.last().expect("the workbench push is last")["selected"],
-        "test-model"
-    );
-
-    // The chat is untouched by the menu event and streams to its done.
-    frames_until(&mut socket, |frame| frame["type"] == "done").await;
     socket.close(None).await.expect("close the socket");
 }

@@ -122,7 +122,7 @@ impl Drop for ServerHandle {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SpawnError {
-    /// The shared state (gateway client and tape) could not be built.
+    /// The shared state (the gateway client) could not be built.
     #[non_exhaustive]
     #[error("build shared state")]
     State(#[from] StateError),
@@ -141,9 +141,9 @@ pub enum SpawnError {
 /// server is accepting connections at [`ServerHandle::url`].
 ///
 /// # Errors
-/// Returns [`SpawnError::State`] if the shared state cannot be built (a bad
-/// tape path or whisper model), and [`SpawnError::Io`] if the bind fails or
-/// the server thread cannot be spawned.
+/// Returns [`SpawnError::State`] if the shared state cannot be built (an
+/// unbuildable gateway client), and [`SpawnError::Io`] if the bind fails
+/// or the server thread cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
     spawn_inner(config, SHUTDOWN_GRACE, Box::new(|_| axum::Router::new()))
 }
@@ -330,21 +330,18 @@ mod tests {
 
     use std::path::Path;
 
-    use crate::config::{AgentsConfig, GatewayConfig, ServerConfig, TapeConfig};
+    use crate::config::{AgentsConfig, GatewayConfig, ServerConfig};
 
-    fn test_config(bind: &str, tape_dir: &Path) -> Config {
+    fn test_config(bind: &str, state_dir: &Path) -> Config {
         Config {
             gateway: GatewayConfig {
                 base_url: "http://127.0.0.1:1".to_string(),
                 api_key: "test-key".to_string(),
             },
-            tape: TapeConfig {
-                path: tape_dir.join("tape.jsonl"),
-            },
             server: ServerConfig {
                 bind: bind.to_string(),
                 open_browser: false,
-                state_dir: tape_dir.to_path_buf(),
+                state_dir: state_dir.to_path_buf(),
             },
             agents: AgentsConfig::default(),
         }
@@ -396,7 +393,7 @@ mod tests {
     /// milliseconds instead of stalling the suite.
     const TEST_GRACE: Duration = Duration::from_millis(200);
 
-    /// Connects a WebSocket to the chat endpoint and returns it for the
+    /// Connects a WebSocket to the workshop socket and returns it for the
     /// caller to hold open.
     async fn hold_ws_open(
         url: &str,
@@ -424,7 +421,7 @@ mod tests {
             .expect("the raw connection opens");
         wedged
             .write_all(
-                b"POST /chat HTTP/1.1\r\nhost: 127.0.0.1\r\n\
+                b"POST /workspace/grant HTTP/1.1\r\nhost: 127.0.0.1\r\n\
                   content-type: application/json\r\ncontent-length: 64\r\n\r\n{",
             )
             .await
@@ -546,17 +543,6 @@ mod tests {
             .await
             .expect("the port is free after shutdown");
         drop(listener);
-    }
-
-    #[test]
-    fn an_unopenable_tape_fails_spawn_with_state_error() {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let config = test_config("127.0.0.1:0", &dir.path().join("missing"));
-        let error = spawn(config).expect_err("an unopenable tape must fail spawn");
-        assert!(
-            matches!(error, SpawnError::State(_)),
-            "expected State, got {error:?}"
-        );
     }
 
     #[test]

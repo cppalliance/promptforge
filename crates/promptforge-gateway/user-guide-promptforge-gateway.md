@@ -303,7 +303,7 @@ Omitting the `[workshop]` section runs the gateway headless with no workshop hos
 
 The workshop's client URL and bearer key derive from the boot `[server]` section. No credential is duplicated and none can drift. Set `open_browser` to open the system browser at the workshop URL once it is serving; a browser that fails to open is logged, never fatal.
 
-Session tapes default to `tape.jsonl`, anchored to the boot config's directory, never the process working directory. The `[workshop.stt]` section tunes push-to-talk transcription: `window_seconds` defaults to 15, `interval_ms` defaults to 500, and `vocabulary` lists domain terms whisper is biased toward. An empty list disables biasing. Both listeners answer `/health` and `/v1/models` independently.
+The `[workshop.stt]` section tunes push-to-talk transcription: `window_seconds` defaults to 15, `interval_ms` defaults to 500, and `vocabulary` lists domain terms whisper is biased toward. An empty list disables biasing. `[workshop.tape]` is accepted for compatibility and ignored: agent sessions persist their event logs under the workshop's state directory instead. Both listeners answer `/health` and `/v1/models` independently.
 
 ## Progress and Observability
 

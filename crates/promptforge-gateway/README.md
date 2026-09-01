@@ -141,11 +141,7 @@ entries above; the active profile enables them by catalog name.
 | `interval_ms` | `500` | Milliseconds between interim passes while a take is recording. |
 | `vocabulary` | `[]` | Domain terms whisper is biased toward. Empty disables biasing. |
 
-`[workshop.tape]` (optional) configures the session tape:
-
-| Field | Default | Meaning |
-|---|---|---|
-| `path` | `tape.jsonl` | Path of the JSONL tape file. A relative path resolves against the directory holding the boot config, never the process current directory; an absolute path is used unchanged. An absent `[workshop.tape]` anchors the default `tape.jsonl` the same way. |
+`[workshop.tape]` (optional) is accepted for compatibility and ignored: the workshop no longer records a session tape. Agent sessions persist their event logs as JSONL under the workshop's state directory (`sessions/` beside the boot config).
 
 ## Local model companions
 
@@ -182,7 +178,7 @@ There is no `[workshop.gateway]` sub-table. The hosted workshop reaches the gate
 
 ### Process-owned sections
 
-`[server]` and `[workshop]` are process-owned. Apply promotes edits to them to disk and answers `restart_required: true`; the running process keeps its booted listener, tape, and STT capture settings until restart. A profile switch never changes them, because profiles are checklists over the model catalog and carry no sections.
+`[server]` and `[workshop]` are process-owned. Apply promotes edits to them to disk and answers `restart_required: true`; the running process keeps its booted listener and STT capture settings until restart. A profile switch never changes them, because profiles are checklists over the model catalog and carry no sections.
 
 ## Minimum Rust Version
 

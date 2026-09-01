@@ -14,26 +14,7 @@
 //! side's tests. The wire shapes are additionally frozen end to end by the
 //! characterization tests in `tests/it`.
 //!
-//! # Inbound chat-socket frames
-//!
-//! `{"type":"chat","id":N,"model":"...","messages":[...]}` opens one
-//! streaming completion: [`ChatRequest`] carries the fields forwarded
-//! upstream, and the optional `id` names the chat on every frame of its
-//! reply. `{"type":"cancel","id":N}` tears down the in-flight chat with
-//! that id (the untagged chat when the id is absent): the upstream
-//! completion is dropped and the tape records the abandonment, while
-//! every other chat on the socket streams on. A cancel naming no live
-//! chat is ignored, because a cancel racing its own `done` is normal.
-//! A cancel gets no reply frame of any kind - no acknowledgment, and no
-//! terminal `done` or `error` for the chat it tore down - so the client
-//! settles the canceled chat locally when it sends the frame.
-//!
-//! A chat without an `id` occupies the single untagged slot, and a
-//! second untagged chat sent while one is live is refused with an
-//! id-less `error` frame. That refusal is indistinguishable on the wire
-//! from a terminal error of the live untagged chat - both are
-//! `{"type":"error","message":...}` with no `id` - so a client should
-//! never run a second untagged chat; tag every concurrent chat instead.
+//! # Inbound workshop-socket frames
 //!
 //! `{"type":"select_model","model":"..."}` selects the chat model: the
 //! menu validates the id against the retained catalog and publishes a
@@ -44,7 +25,7 @@
 //! settled menu publishes a final [`WorkbenchFrame`] and a
 //! [`CatalogFrame`]; a switch requested while one runs is refused with
 //! an `error` frame. Both events may carry an optional `id`, echoed on
-//! the `error` frame that refuses them, exactly as a chat's is.
+//! the `error` frame that refuses them.
 //!
 //! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
@@ -104,10 +85,9 @@
 //! revision against its own per-client cursor and sends everything past
 //! the cursor, so a missed wakeup is harmless because the next one
 //! delivers everything past the cursor. A durable frame that answers
-//! the connection's own request (the chat reply stream relayed from the
-//! gateway) is sent directly
-//! by the loop that owns the socket, which delivers exactly without any
-//! cursor - no shared state exists for a cursor to index.
+//! the connection's own request (a `launch` acknowledgment) is sent
+//! directly by the loop that owns the socket, which delivers exactly
+//! without any cursor - no shared state exists for a cursor to index.
 //!
 //! **Ephemeral** frames may drop under lag. They ride bounded channels
 //! (a broadcast where the state fans out); a client too slow to drain
@@ -118,16 +98,11 @@
 //!
 //! ## Classification
 //!
-//! Chat socket (`/ws`):
+//! Workshop socket (`/ws`):
 //!
-//! - [`DeltaFrame`] - durable. One chunk of a chat reply in flight; a
-//!   dropped chunk is a hole in the transcript no later frame repairs.
-//! - [`ReasoningFrame`] - durable. The same transcript stream on the
-//!   reasoning side channel; chunks are append-only and irreplaceable.
-//! - [`DoneFrame`] - durable. The stream's terminal marker; dropping it
-//!   leaves the client's chat in flight forever.
-//! - [`ErrorFrame`] - durable. A terminal transcript outcome like
-//!   `done`; dropping it leaves the chat unresolved.
+//! - [`ErrorFrame`] - durable on this socket. The direct reply refusing
+//!   a malformed frame or a menu event, sent by the loop that owns the
+//!   socket - the contract's no-cursor case.
 //! - [`StatusFrame`] - ephemeral. Every update is a complete snapshot of
 //!   the bar, so a lagging client loses nothing by skipping
 //!   intermediates, and the current status is resent on reconnect.
@@ -141,36 +116,7 @@
 //!   every new session, so the UI boots with zero HTTP state fetches -
 //!   is that resend promise, not a third delivery class.
 //!
-//! Chat replies multiplex on one socket, and their ordering promise is
-//! per chat: frames within one chat are strictly ordered - deltas in
-//! stream order, the terminal `done` or `error` after every delta of its
-//! chat - while distinct chats stream concurrently and interleave
-//! freely, demuxed by the echoed `id`. The interleaving changes nothing
-//! about the durable classification of the chat reply frames above.
-//!
 use serde::{Deserialize, Serialize};
-
-pub use promptforge_gateway_protocol::wire::ChatRequest;
-
-// --- Inbound: client to server -------------------------------------------
-
-/// Parses an inbound chat body into the shared wire request.
-///
-/// The workshop, not the client, chooses streaming (`/chat` is buffered,
-/// `/ws` streams), and the request forwarded upstream carries exactly
-/// `model` and `messages`: the frame envelope (`type`, `id`), any
-/// caller-sent `stream` flag, and every other field the gateway does not
-/// name are dropped here, before the request is relayed.
-pub(crate) fn parse_chat_request(
-    mut value: serde_json::Value,
-) -> Result<ChatRequest, serde_json::Error> {
-    if let Some(object) = value.as_object_mut() {
-        object.remove("stream");
-    }
-    let mut request: ChatRequest = serde_json::from_value(value)?;
-    request.rest.clear();
-    Ok(request)
-}
 
 // --- Agent-session frames --------------------------------------------------
 
@@ -423,7 +369,7 @@ pub enum Activity {
 }
 
 /// The serialized shape of one update on the socket: the update's fields
-/// flattened beside `"type": "status"`, matching the chat protocol's frame
+/// flattened beside `"type": "status"`, matching the workshop protocol's frame
 /// taxonomy.
 ///
 /// Delivery: ephemeral - every update is a complete snapshot, so a
@@ -454,8 +400,8 @@ impl CatalogPush {
     }
 }
 
-/// The serialized shape of a catalog push on the socket, matching the chat
-/// protocol's frame taxonomy.
+/// The serialized shape of a catalog push on the socket, matching the
+/// workshop protocol's frame taxonomy.
 ///
 /// Delivery: ephemeral - the newest push carries the whole catalog and
 /// supersedes every older one; the catalog is resent on reconnect.
@@ -501,7 +447,7 @@ impl WorkbenchSnapshot {
 }
 
 /// The serialized shape of a workbench push on the socket, matching the
-/// chat protocol's frame taxonomy. Absent options serialize as `null`,
+/// workshop protocol's frame taxonomy. Absent options serialize as `null`,
 /// never as omitted keys: every push is the complete menu state.
 ///
 /// Delivery: ephemeral - every push is a complete snapshot of the menu
@@ -518,92 +464,15 @@ pub(crate) struct WorkbenchFrame<'a> {
     chat_ready: bool,
 }
 
-/// One streamed answer-content chunk of a chat reply:
-/// `{"type":"delta","content":"..."}` plus the echoed request `id`.
-///
-/// Delivery: durable - a transcript chunk of a chat in flight; a dropped
-/// chunk is a hole in the reply no later frame repairs.
-#[derive(Debug, Serialize)]
-pub(crate) struct DeltaFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    content: String,
-    /// The request's `id`, echoed verbatim when it carried one and omitted
-    /// from the wire when it did not.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<serde_json::Value>,
-}
-
-impl DeltaFrame {
-    /// Builds a delta frame carrying `content`, echoing `id` when present.
-    pub(crate) fn new(content: String, id: Option<&serde_json::Value>) -> Self {
-        Self {
-            kind: "delta",
-            content,
-            id: id.cloned(),
-        }
-    }
-}
-
-/// One chunk of the model's reasoning side channel, rendered by the UI as
-/// the Thinking block: `{"type":"reasoning","content":"..."}` plus the
-/// echoed request `id`.
-///
-/// Delivery: durable - a transcript chunk on the reasoning side channel;
-/// chunks are append-only and irreplaceable.
-#[derive(Debug, Serialize)]
-pub(crate) struct ReasoningFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    content: String,
-    /// The request's `id`, echoed verbatim when it carried one and omitted
-    /// from the wire when it did not.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<serde_json::Value>,
-}
-
-impl ReasoningFrame {
-    /// Builds a reasoning frame carrying `content`, echoing `id` when
-    /// present.
-    pub(crate) fn new(content: String, id: Option<&serde_json::Value>) -> Self {
-        Self {
-            kind: "reasoning",
-            content,
-            id: id.cloned(),
-        }
-    }
-}
-
-/// The terminal frame of a completed chat stream: `{"type":"done"}` plus
-/// the echoed request `id`.
-///
-/// Delivery: durable - the stream's terminal marker; dropping it leaves
-/// the client's chat in flight forever.
-#[derive(Debug, Serialize)]
-pub(crate) struct DoneFrame {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    /// The request's `id`, echoed verbatim when it carried one and omitted
-    /// from the wire when it did not.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<serde_json::Value>,
-}
-
-impl DoneFrame {
-    /// Builds the terminal frame, echoing `id` when present.
-    pub(crate) fn new(id: Option<&serde_json::Value>) -> Self {
-        Self {
-            kind: "done",
-            id: id.cloned(),
-        }
-    }
-}
-
-/// A chat failure report - transport, mid-stream, or a declined stream:
+/// A failure report answered to one inbound frame - a malformed frame, a
+/// refused menu event, or an agent-session failure:
 /// `{"type":"error","message":"..."}` plus the echoed request `id`.
 ///
-/// Delivery: durable - a terminal transcript outcome; dropping it leaves
-/// the chat unresolved.
+/// Delivery: durable on the workshop socket - a direct per-request reply
+/// sent by the loop that owns the socket. The agent-session socket
+/// additionally pushes id-less error frames for session-level failures;
+/// that delivery is ephemeral and documented in the agent-session
+/// section above.
 #[derive(Debug, Serialize)]
 pub(crate) struct ErrorFrame {
     #[serde(rename = "type")]
@@ -658,7 +527,7 @@ mod tests {
                 "severity": "info",
                 "activity": "general",
             }),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
     }
 
@@ -706,7 +575,7 @@ mod tests {
                 "type": "models",
                 "models": [{"id": "test-model", "object": "model"}],
             }),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
     }
 
@@ -730,97 +599,8 @@ mod tests {
                 "selected": "claude-sonnet-4-6",
                 "chat_ready": true,
             }),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
-    }
-
-    #[test]
-    fn a_chat_request_round_trips_the_wire_shapes() {
-        // The `/ws` chat frame: `type` and `id` ride beside the request's
-        // own fields and are stripped by `parse_chat_request`.
-        let request = parse_chat_request(serde_json::json!({
-            "type": "chat",
-            "id": 7,
-            "model": "test-model",
-            "messages": [{"role": "user", "content": "ping"}],
-        }))
-        .expect("the chat frame parses");
-        assert_eq!(request.model, "test-model");
-        // The upstream body: exactly the two fields, nothing added.
-        assert_eq!(
-            serde_json::to_value(&request).expect("the request serializes"),
-            serde_json::json!({
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "ping"}],
-            })
-        );
-    }
-
-    #[test]
-    fn a_chat_request_drops_the_stream_flag_and_unnamed_fields() {
-        // A caller-sent `stream` flag is ignored even when it is not a
-        // boolean, and fields the gateway does not name never ride the
-        // shared wire type's passthrough into the relayed body.
-        let request = parse_chat_request(serde_json::json!({
-            "type": "chat",
-            "model": "test-model",
-            "messages": [{"role": "user", "content": "ping"}],
-            "stream": "yes",
-            "temperature": 0.5,
-        }))
-        .expect("a bogus stream flag is dropped, not an error");
-        assert!(!request.stream);
-        assert_eq!(
-            serde_json::to_value(&request).expect("the request serializes"),
-            serde_json::json!({
-                "model": "test-model",
-                "messages": [{"role": "user", "content": "ping"}],
-            })
-        );
-    }
-
-    #[test]
-    fn a_delta_frame_serializes_with_and_without_the_echoed_id() {
-        let untagged = serde_json::to_value(DeltaFrame::new("po".to_string(), None))
-            .expect("the frame serializes");
-        assert_eq!(
-            untagged,
-            serde_json::json!({"type": "delta", "content": "po"}),
-            "an absent id is omitted from the wire, not serialized as null"
-        );
-        let id = serde_json::json!(1);
-        let tagged = serde_json::to_value(DeltaFrame::new("po".to_string(), Some(&id)))
-            .expect("the frame serializes");
-        assert_eq!(
-            tagged,
-            serde_json::json!({"type": "delta", "content": "po", "id": 1})
-        );
-    }
-
-    #[test]
-    fn a_reasoning_frame_serializes_with_and_without_the_echoed_id() {
-        let untagged = serde_json::to_value(ReasoningFrame::new("hmm ".to_string(), None))
-            .expect("the frame serializes");
-        assert_eq!(
-            untagged,
-            serde_json::json!({"type": "reasoning", "content": "hmm "})
-        );
-        let id = serde_json::json!(1);
-        let tagged = serde_json::to_value(ReasoningFrame::new("hmm ".to_string(), Some(&id)))
-            .expect("the frame serializes");
-        assert_eq!(
-            tagged,
-            serde_json::json!({"type": "reasoning", "content": "hmm ", "id": 1})
-        );
-    }
-
-    #[test]
-    fn a_done_frame_serializes_with_and_without_the_echoed_id() {
-        let untagged = serde_json::to_value(DoneFrame::new(None)).expect("the frame serializes");
-        assert_eq!(untagged, serde_json::json!({"type": "done"}));
-        let id = serde_json::json!(2);
-        let tagged = serde_json::to_value(DoneFrame::new(Some(&id))).expect("the frame serializes");
-        assert_eq!(tagged, serde_json::json!({"type": "done", "id": 2}));
     }
 
     #[test]
@@ -833,7 +613,7 @@ mod tests {
         assert_eq!(
             frame,
             serde_json::json!({"type": "agents", "agents": ["chat", "research"]}),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
     }
 
@@ -919,7 +699,7 @@ mod tests {
         assert_eq!(
             frame,
             serde_json::json!({"type": "input_required", "token": "a1b2c3"}),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
     }
 
@@ -932,7 +712,7 @@ mod tests {
         assert_eq!(
             frame,
             serde_json::json!({"type": "input_cancelled", "token": "a1b2c3"}),
-            "the wire shape matches the chat protocol's frame taxonomy"
+            "the wire shape matches the workshop protocol's frame taxonomy"
         );
     }
 

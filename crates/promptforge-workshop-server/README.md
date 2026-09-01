@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway, a JSONL session tape, and workspace APIs. The gateway-owned `promptforge-stt` runtime attaches `/voice` when this server is embedded. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
+The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (chat runs through `.lua` agent programs over `workshop-agent`), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, and workspace APIs. The gateway-owned `promptforge-stt` runtime attaches `/voice` when this server is embedded. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
 
 ## Quick start
 
@@ -34,10 +34,9 @@ Every field of `workshop.toml`:
 | --- | --- | --- |
 | `gateway.base_url` | `http://127.0.0.1:8081` when empty | Base URL of the PromptForge gateway; an empty value (for example an unset `${PROMPTFORGE_GATEWAY_URL}`) falls back to the default |
 | `gateway.api_key` | (empty) | Bearer key for the gateway API; supports `${VAR}` interpolation; empty sends no `Authorization` header |
-| `tape.path` | `tape.jsonl` | Path of the JSONL session tape; one event per chat exchange |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
-| `server.state_dir` | the config file's directory | Directory holding the server's persistent state; agent session event logs live under `state_dir/sessions/` |
+| `server.state_dir` | the config file's directory | Directory holding the server's persistent state: agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written here |
 | `agents.path` | `agents/` beside the config file | Directory whose `.lua` files are the launchable agent programs; a missing directory offers no agents |
 
 ## Routes
@@ -47,13 +46,12 @@ Every field of `workshop.toml`:
 | `GET /health` | Health probe; answers `{"status":"serving"}` |
 | `GET /` | The chat UI (also `/app.js`, `/app.css`, `/style.css`, `/pcm-worklet.js`, served from `ui/dist/`: read from disk in debug builds, embedded in the binary in release builds) |
 | `GET /v1/models` | Proxies the gateway's model catalog verbatim; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
-| `POST /chat` | Buffered chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` is rejected with 400 - streaming lives on `/ws`; while the gateway is known down, answers 502 `gateway_unreachable` without attempting it |
-| `GET /ws` | WebSocket upgrade, one persistent socket for all downstream JSON: `{"type":"chat","id","model","messages"}` frames in (the optional `id` is echoed on the reply), `{"type":"delta","content"}` / `{"type":"done"}` / `{"type":"error","message"}` frames out, plus unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates and `{"type":"models","models":[...]}` catalog pushes when the gateway comes back after an outage |
+| `GET /ws` | WebSocket upgrade, one persistent socket for the workshop's downstream JSON: unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates, `{"type":"models","models":[...]}` catalog pushes, and `{"type":"workbench",...}` Model-menu snapshots out; `{"type":"select_model","model"}` and `{"type":"switch_profile","name"}` menu events in, refusals answered with `{"type":"error","message"}` frames |
 | `GET /agents/ws` | WebSocket upgrade for one agent session: the discovered agent list on connect, `{"type":"launch","agent"}` / `{"type":"attach","session"}` in (acknowledged with `{"type":"agent_session","session","agent"}`), then durable `{"type":"agent_event","index","event",...}` log entries, ephemeral `{"type":"agent_delta","kind","content","reply"}` streaming chunks, and the `input_required` / `input_cancelled` wait frames answered by `{"type":"input_response","token","text"}`; `{"type":"cancel"}` fires turn-cancel |
 
 ## Gateway resilience
 
-A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, chat over `/ws` is answered immediately with a `{"type":"error","message":"Gateway unreachable"}` frame (no upstream attempt, nothing taped), and `GET /v1/models` and `POST /chat` answer 502 `gateway_unreachable` instead of waiting on a dead connection. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. The server boots and serves the UI whether or not the gateway has ever answered.
+A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, `GET /v1/models` answers 502 `gateway_unreachable` instead of waiting on a dead connection, and the Model menu's `chat_ready` reads false. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. The server boots and serves the UI whether or not the gateway has ever answered.
 
 ## UI development
 
@@ -66,20 +64,20 @@ Two workflows:
 1. **Just cargo:** edit the TypeScript, then `cargo build` (or `cargo run -p promptforge-workshop-server`). The build script re-bundles whenever `ui/src/` or the static UI files change, and debug builds read `ui/dist/` from disk on every request.
 2. **esbuild watch:** run `npm run watch` in `ui/` in one terminal and `cargo run` in another. Edit, save, refresh the browser - no Rust recompile for UI changes.
 
-`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test`, which discovers every test under `ui/test/` plus any colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the chat UI mounts (run `npm run build` first).
+`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test`, which discovers every test under `ui/test/` plus any colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the workbench mounts (run `npm run build` first).
 
-The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`), driven by a WebSocket provider against `GET /ws` (one persistent socket, opened on load; chat frames carry an `id` the server echoes, and unsolicited status frames ride the same connection). Its styles are bundled by esbuild into `dist/app.css`; `ui/style.css` carries the workshop shell (sidebar, picker, voice UI, status bar) and overrides.
+The chat surface is the agent-session panel (`ui/src/ui/agent-session-view.ts`), rendered from the durable event stream over `GET /agents/ws`. [murm-ui](https://github.com/levmv/murm-ui) 0.2.0 stays vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`) as a utility dependency - the workshop tree's dropdown and icons come from it - and is never edited. `ui/style.css` carries the workshop shell (tree, panels, voice UI, status bar) and overrides.
 
 The status bar at the bottom of the window renders the observer's `{"type":"status",...}` frames (`ui/src/ui/status-bar.ts`): the label as the bar text, the description as the tooltip, error frames in a distinct color. Debug-severity frames are internal instrumentation and never touch the text. The right slot holds a `<progress>` bar while a frame carries progress, and an activity LED otherwise: a small circle that pulses green on gateway traffic and amber on voice activity (green wins when both coincide), lit for one pulse window per frame and faded by a CSS transition. The bar's colors, glow radii, and pulse window are CSS custom properties (`--led-green`, `--led-amber`, `--led-off`, `--led-glow-radius`, `--led-pulse-ms`, `--progress-fill`, `--progress-glow`, ...) at the top of `ui/style.css`.
 
 ## Skinning
 
-The whole UI skins from the `:root` block at the top of `ui/style.css` - every color, spacing step, radius, font, scrollbar metric, and the status bar's LED and progress effect is a CSS custom property there. The vendored murm-ui chat panel skins from the same block through a bridge in `ui/style.css` (the `.mur-app[data-theme="dark"]` rule, with a comment mapping each `--mur-*` variable to the workshop variable it follows).
+The whole UI skins from the `:root` block at the top of `ui/style.css` - every color, spacing step, radius, font, scrollbar metric, and the status bar's LED and progress effect is a CSS custom property there.
 
 Two ways to reskin:
 
 1. **Edit the block.** Change values in the `:root` block of `ui/style.css` and rebuild (`cargo build`; debug builds serve `ui/dist/` from disk). This is the path for changes you keep.
-2. **Override from an additional stylesheet.** Add a `<link>` after `/style.css` in `ui/index.html` and redeclare any variable on `:root`. Later declarations win the cascade, and because the murm-ui bridge dereferences the workshop variables at computed-value time, overriding e.g. `--bg` re-skins the chat panel too. To retune murm-ui-only knobs (`--mur-chat-form-width`, the shadows), target `.mur-app[data-theme="dark"]` in the same stylesheet.
+2. **Override from an additional stylesheet.** Add a `<link>` after `/style.css` in `ui/index.html` and redeclare any variable on `:root`. Later declarations win the cascade.
 
 The variables:
 
@@ -89,7 +87,6 @@ The variables:
 | `--bg-raised` | `#14161c` | Raised surfaces (cards, code blocks) |
 | `--bg-hover` | `#1a1d25` | Hover washes, user message bubble |
 | `--bg-sidebar` | `--bg-raised` | Sidebar background |
-| `--bg-composer` | `--bg` | Chat composer form |
 | `--text` | `#d6d9e0` | Body text (13:1 on `--bg`) |
 | `--text-muted` | `#8b90a0` | Dimmed text (6:1 on `--bg`; do not go dimmer, 4.5:1 is the floor) |
 | `--border` | `#262a33` | Hairline borders |

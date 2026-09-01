@@ -19,19 +19,17 @@ use crate::push::Push;
 use crate::routes;
 use crate::session_agents::{AgentSessions, SessionHost};
 use crate::status::StatusBus;
-use crate::tape::{Tape, TapeError};
 use crate::workspace::Workspace;
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
-/// Shared handler state: the authenticated gateway client, the session
-/// tape, the status, catalog, and menu buses, the process progress hub,
-/// the hosted workspace state, and the agent-session registry.
+/// Shared handler state: the authenticated gateway client, the status,
+/// catalog, and menu buses, the process progress hub, the hosted
+/// workspace state, and the agent-session registry.
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub(crate) gateway: GatewayClient,
-    pub(crate) tape: Arc<Tape>,
     pub(crate) status: StatusBus,
     pub(crate) progress: Arc<ProgressHub>,
     pub(crate) health: GatewayHealth,
@@ -46,21 +44,18 @@ impl AppState {
     /// Builds shared state from the loaded configuration.
     ///
     /// # Errors
-    /// Returns [`StateError::Gateway`] if the HTTP client cannot be built
-    /// and [`StateError::Tape`] if the session tape cannot be opened.
+    /// Returns [`StateError::Gateway`] if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
-        // The per-profile model memory lives beside the tape file; a bad
+        // The per-profile model memory lives in the state directory; a bad
         // or missing memory file costs the memory, never startup.
-        let state_dir = config.tape.path.parent();
-        if let Some(dir) = state_dir {
-            // A crash between an atomic write's temp file and its rename
-            // orphans the temp; boot is the one moment the directory is
-            // known and quiet, so it is swept here.
-            crate::atomic::sweep_orphaned_temps(dir);
-        }
-        let menu = MenuBus::new(catalog.clone(), state_dir);
+        let state_dir = &config.server.state_dir;
+        // A crash between an atomic write's temp file and its rename
+        // orphans the temp; boot is the one moment the directory is
+        // known and quiet, so it is swept here.
+        crate::atomic::sweep_orphaned_temps(state_dir);
+        let menu = MenuBus::new(catalog.clone(), Some(state_dir));
         let push = Push::new(status.clone(), catalog.clone(), menu.clone());
         // Startup phases are reported as they run; with no client connected
         // yet these land on an empty bus, ready for the first session.
@@ -71,7 +66,6 @@ impl AppState {
         );
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(StateError::Gateway)?;
-        let tape = Tape::open(&config.tape.path).map_err(StateError::Tape)?;
         let progress = Arc::new(ProgressHub::new());
         let backoff = ReconnectBackoff::new();
         let workspace = Workspace::new();
@@ -90,7 +84,6 @@ impl AppState {
         push.push_idle();
         Ok(Self {
             gateway,
-            tape: Arc::new(tape),
             status,
             progress,
             health: GatewayHealth::new(),
@@ -124,15 +117,10 @@ impl AppState {
         Push::new(self.status.clone(), self.catalog.clone(), self.menu.clone())
     }
 
-    /// The gateway client, shared with the chat WebSocket sessions.
+    /// The gateway client, shared with the heartbeat and the relay routes.
     #[must_use]
     pub fn gateway_client(&self) -> &GatewayClient {
         &self.gateway
-    }
-
-    /// The session tape, shared with the chat WebSocket sessions.
-    pub(crate) fn tape(&self) -> &Arc<Tape> {
-        &self.tape
     }
 
     /// Shared gateway reachability, published by the heartbeat; the
@@ -144,8 +132,8 @@ impl AppState {
     }
 
     /// The shared reconnect backoff: the heartbeat draws probe delays
-    /// from it while the gateway is down, and the chat paths reset it on
-    /// useful work - a delivered token or a successful completion.
+    /// from it while the gateway is down, and the agent sessions reset it
+    /// on useful work - a completed model reply.
     #[must_use]
     pub fn backoff(&self) -> &ReconnectBackoff {
         &self.backoff
@@ -192,11 +180,6 @@ pub enum StateError {
     #[non_exhaustive]
     #[error("build gateway client")]
     Gateway(#[source] GatewayError),
-
-    /// The session tape could not be opened.
-    #[non_exhaustive]
-    #[error("open session tape")]
-    Tape(#[source] TapeError),
 }
 
 /// Returns the workshop server router with every route mounted: each
@@ -252,40 +235,33 @@ pub(crate) mod fixtures {
     #[cfg(test)]
     use crate::app::AppState;
     #[cfg(test)]
-    use crate::config::{AgentsConfig, Config, GatewayConfig, ServerConfig, TapeConfig};
+    use crate::config::{AgentsConfig, Config, GatewayConfig, ServerConfig};
 
-    /// Builds a configuration pointing at `base_url`, taping to `tape_path`
-    /// and anchoring the state directory beside the tape.
+    /// Builds a configuration pointing at `base_url`, anchoring the state
+    /// directory at `state_dir`.
     #[cfg(test)]
-    pub(crate) fn config_for(base_url: &str, tape_path: &Path) -> Config {
-        let state_dir = tape_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
+    pub(crate) fn config_for(base_url: &str, state_dir: &Path) -> Config {
         Config {
             gateway: GatewayConfig {
                 base_url: base_url.to_string(),
                 api_key: "test-key".to_string(),
             },
-            tape: TapeConfig {
-                path: tape_path.to_path_buf(),
-            },
             server: ServerConfig {
-                state_dir,
+                state_dir: state_dir.to_path_buf(),
                 ..ServerConfig::default()
             },
             agents: AgentsConfig::default(),
         }
     }
 
-    /// Builds state whose tape lives in a fresh tempdir, returned alongside
-    /// so the directory outlives the test.
+    /// Builds state whose state directory is a fresh tempdir, returned
+    /// alongside so the directory outlives the test.
     #[cfg(test)]
     pub(crate) fn state_for(base_url: &str) -> (AppState, tempfile::TempDir) {
-        let tape_dir = tempfile::TempDir::new().expect("tempdir");
-        let config = config_for(base_url, &tape_dir.path().join("tape.jsonl"));
+        let state_dir = tempfile::TempDir::new().expect("tempdir");
+        let config = config_for(base_url, state_dir.path());
         let state = AppState::new(&config).expect("state builds in tests");
-        (state, tape_dir)
+        (state, state_dir)
     }
 
     /// Collects a response body already buffered in memory.
@@ -355,31 +331,17 @@ mod tests {
     }
 
     #[test]
-    fn startup_sweeps_orphaned_temp_files_beside_the_tape() {
+    fn startup_sweeps_orphaned_temp_files_from_the_state_directory() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         // Residue of a write that crashed between its temp file and its
         // rename in a previous run.
         let orphan = dir.path().join("workshop-state.json.42-7.pf-tmp");
         std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
-        let config = config_for("http://127.0.0.1:1", &dir.path().join("tape.jsonl"));
+        let config = config_for("http://127.0.0.1:1", dir.path());
         let _state = AppState::new(&config).expect("state builds");
         assert!(
             !orphan.exists(),
             "state construction sweeps orphaned temp files from the state directory"
-        );
-    }
-
-    #[test]
-    fn unopenable_tape_path_fails_state_construction() {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let config = config_for(
-            "http://127.0.0.1:1",
-            &dir.path().join("missing").join("tape.jsonl"),
-        );
-        let err = AppState::new(&config).expect_err("an unopenable tape must fail");
-        assert!(
-            matches!(err, StateError::Tape(_)),
-            "expected Tape, got {err:?}"
         );
     }
 }

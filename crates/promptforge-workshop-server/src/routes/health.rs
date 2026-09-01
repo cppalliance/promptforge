@@ -30,7 +30,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_returns_serving() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .uri("/health")
             .body(Body::empty())

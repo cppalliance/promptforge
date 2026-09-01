@@ -3,15 +3,15 @@
 //!
 //! One [`ReconnectBackoff`] is shared between the heartbeat (which draws
 //! a delay before each probe while the gateway is unreachable) and the
-//! chat paths (which record useful work - a delivered streaming token or
-//! a successful buffered completion). A gateway that connects but never
-//! delivers keeps escalating: answering the health probe is not useful
-//! work, so a flapping upstream cannot ride the connect/disconnect cycle
-//! back to the fast schedule (rqbit's anti-flap discipline). The delays
-//! are jittered so workshops restarted together do not probe in phase,
-//! and a total-delay budget bounds the retry campaign as a whole: once
-//! the cumulative delay handed out since the last useful work crosses
-//! it, [`ReconnectBackoff::next_delay`] answers `None` and the caller
+//! agent sessions (which record useful work - a completed model reply).
+//! A gateway that connects but never delivers keeps escalating:
+//! answering the health probe is not useful work, so a flapping
+//! upstream cannot ride the connect/disconnect cycle back to the fast
+//! schedule (rqbit's anti-flap discipline). The delays are jittered so
+//! workshops restarted together do not probe in phase, and a
+//! total-delay budget bounds the retry campaign as a whole: once the
+//! cumulative delay handed out since the last useful work crosses it,
+//! [`ReconnectBackoff::next_delay`] answers `None` and the caller
 //! stops reconnecting.
 
 use std::hash::{BuildHasher, Hasher};
@@ -39,7 +39,7 @@ const TOTAL_DELAY_BUDGET: Duration = Duration::from_secs(24 * 60 * 60);
 /// Shared reconnect-backoff state; clones feed one schedule.
 ///
 /// The heartbeat calls [`ReconnectBackoff::next_delay`] before each
-/// probe while the gateway reads unreachable; the chat paths call
+/// probe while the gateway reads unreachable; the agent sessions call
 /// `record_useful_work` when the gateway proves
 /// itself. Nothing else mutates the schedule - in particular, a probe
 /// that merely connects leaves it untouched.

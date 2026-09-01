@@ -64,7 +64,7 @@ mod tests {
     /// Asserts a static UI route answers 200 with the expected content type
     /// and a non-empty body.
     async fn assert_ui_asset(uri: &str, expected_content_type: &str) {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .uri(uri)
             .body(Body::empty())

@@ -21,7 +21,7 @@ use axum::routing::post;
 use serde_json::json;
 
 use promptforge_workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, TapeConfig, router,
+    AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router,
 };
 
 use crate::common::{JsonSocket, spawn_gateway};
@@ -91,9 +91,6 @@ async fn spawn_agent_server() -> (String, tempfile::TempDir, AppState) {
         gateway: GatewayConfig {
             base_url,
             api_key: "test-key".to_string(),
-        },
-        tape: TapeConfig {
-            path: dir.path().join("tape.jsonl"),
         },
         server: ServerConfig {
             state_dir: dir.path().to_path_buf(),

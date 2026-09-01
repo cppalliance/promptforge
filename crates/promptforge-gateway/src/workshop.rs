@@ -64,7 +64,7 @@ mod hosted {
     /// # Errors
     /// Returns a config-kind [`StartupError`] when the workshop bind is not
     /// a loopback address, and a workshop-kind one when the server itself
-    /// fails to start (a bad tape path, a taken port).
+    /// fails to start (an unbuildable client, a taken port).
     pub(crate) fn spawn_if_configured(
         config: &Config,
         config_path: &Path,
@@ -120,9 +120,9 @@ mod hosted {
     }
 
     /// Builds the workshop server's config from the gateway's boot config:
-    /// the gateway client derived from `[server]`, the tape, state, and
+    /// the gateway client derived from `[server]`, the state and
     /// agent-program paths anchored to the boot config's directory, and
-    /// `[workshop]`'s own listener and voice settings mirrored across.
+    /// `[workshop]`'s own listener settings mirrored across.
     fn ws_config(
         server: &ServerConfig,
         workshop: &WorkshopConfig,
@@ -134,9 +134,6 @@ mod hosted {
             gateway: promptforge_workshop_server::GatewayConfig {
                 base_url: client_url(server, bound),
                 api_key: server.api_key().expose().to_string(),
-            },
-            tape: promptforge_workshop_server::TapeConfig {
-                path: workshop.tape_path(boot_dir),
             },
             server: promptforge_workshop_server::ServerConfig {
                 bind: workshop.bind().to_string(),
@@ -193,7 +190,7 @@ mod hosted {
         }
 
         #[test]
-        fn ws_config_derives_the_client_and_anchors_the_tape() {
+        fn ws_config_derives_the_client_and_anchors_the_state_dir() {
             let config = config(
                 r#"
 config-version = 2
@@ -205,9 +202,6 @@ api_key = "boot-key"
 [workshop]
 bind = "127.0.0.1:7911"
 open_browser = true
-
-[workshop.tape]
-path = "tapes/session.jsonl"
 
 [workshop.stt]
 window_seconds = 8
@@ -231,11 +225,6 @@ vocabulary = ["MCP", "GGUF"]
                 "the workshop reuses the gateway bearer key"
             );
             assert_eq!(
-                ws.tape.path,
-                Path::new("/etc/pf").join("tapes").join("session.jsonl"),
-                "a relative tape path anchors to the boot config's directory"
-            );
-            assert_eq!(
                 ws.server.state_dir,
                 Path::new("/etc/pf"),
                 "the state dir defaults to the boot config's directory"
@@ -247,24 +236,6 @@ vocabulary = ["MCP", "GGUF"]
             );
             assert_eq!(ws.server.bind, "127.0.0.1:7911");
             assert!(ws.server.open_browser);
-        }
-
-        #[test]
-        fn an_absent_voice_section_maps_to_the_workshop_defaults() {
-            let config =
-                config("[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\n[workshop]\n");
-            let workshop = config.workshop().expect("workshop section present");
-            let ws = ws_config(
-                config.server(),
-                workshop,
-                Path::new("gateway.toml"),
-                bound("127.0.0.1:8081"),
-            );
-            assert_eq!(
-                ws.tape.path,
-                Path::new("").join("tape.jsonl"),
-                "an absent tape section anchors the default filename to the boot dir"
-            );
         }
 
         #[test]
@@ -313,7 +284,7 @@ vocabulary = ["MCP", "GGUF"]
         }
 
         /// An ephemeral workshop config; `open_browser` as given. The
-        /// tempdir anchors the tape path outside the source tree.
+        /// tempdir anchors the state directory outside the source tree.
         fn opener_fixture(
             tmp: &tempfile::TempDir,
             open_browser: &str,

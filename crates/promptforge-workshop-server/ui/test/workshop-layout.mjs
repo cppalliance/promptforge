@@ -25,7 +25,6 @@ const bundle = await esbuild.build({
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,
-        openAgentPanel,
         openInZone,
         panelIdFor,
         zoneOfPanel,
@@ -185,13 +184,25 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.window = window;
 globalThis.document = window.document;
 
+// The agent panel composes an AgentSocket on init; a scripted stand-in
+// that never opens keeps the panel inert - this test drives layout, not
+// the agent wire.
+globalThis.WebSocket = class {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  readyState = 0;
+  send() {}
+  close() {}
+};
+
 const bundlePath = path.join(os.tmpdir(), "promptforge-workshop-layout-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,
   themeDark,
   initZones,
-  openAgentPanel,
   openInZone,
   panelIdFor,
   zoneOfPanel,
@@ -255,12 +266,12 @@ check("empty storage has nothing to restore", restoreLayout(dock) === false);
 
 const treePanel = openInZone("tree", {});
 treePanel.group.api.setSize({ width: 280 });
-const chatPanel = openAgentPanel();
+const agentPanel = openInZone("agent", {});
 await flush();
 
-check("the default layout mounts tree and chat", dock.panels.length === 2);
+check("the default layout mounts tree and agent session", dock.panels.length === 2);
 check("main stays empty until a document opens", dock.groups.length === 2);
-check("the tree opens left, chat right", zoneOfPanel(treePanel) === "left" && zoneOfPanel(chatPanel) === "right");
+check("the tree opens left, agent right", zoneOfPanel(treePanel) === "left" && zoneOfPanel(agentPanel) === "right");
 
 // App placement: an editor opens into the main zone.
 const editorA = openInZone("editor", { path: FILE_A });
@@ -297,11 +308,11 @@ const dock2 = createDock(dockEl2);
 initZones(dock2);
 check("the persisted layout restores", restoreLayout(dock2) === true);
 await flush();
-check("the agent panel is restored through its factory", !!dock2.getPanel(chatPanel.id));
+check("the agent panel is restored through its factory", !!dock2.getPanel(agentPanel.id));
 check("the tree panel is restored through its factory", !!dock2.getPanel("tree"));
 check("the editor panel is restored through its factory", !!dock2.getPanel(editorAId));
 check("restored panels land in their zones",
-  zoneOfPanel(dock2.getPanel(chatPanel.id)) === "right" &&
+  zoneOfPanel(dock2.getPanel(agentPanel.id)) === "right" &&
     zoneOfPanel(dock2.getPanel("tree")) === "left" &&
     zoneOfPanel(dock2.getPanel(editorAId)) === "main");
 check("the restored editor mounted its surface",
@@ -380,7 +391,7 @@ window.localStorage.setItem(LAYOUT_STORAGE_KEY, "not json{");
 const dock3 = createDock(window.document.createElement("div"));
 initZones(dock3);
 check("corrupt storage fails the restore", restoreLayout(dock3) === false);
-openAgentPanel();
+openInZone("agent", {});
 openInZone("tree", {});
 check("the corrupt-storage fallback mounts the default layout", dock3.panels.length === 2);
 
@@ -412,7 +423,7 @@ window.localStorage.setItem(
 const dock5 = createDock(window.document.createElement("div"));
 initZones(dock5);
 check("an unloadable layout fails the restore", restoreLayout(dock5) === false);
-openAgentPanel();
+openInZone("agent", {});
 openInZone("tree", {});
 check("the unloadable-layout fallback mounts the default layout", dock5.panels.length === 2);
 window.localStorage.removeItem(LAYOUT_STORAGE_KEY);

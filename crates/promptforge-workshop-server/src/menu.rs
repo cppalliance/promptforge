@@ -1,6 +1,6 @@
 //! The server-owned Model menu: the workbench snapshot pushed to every
 //! `/ws` session as a `{"type":"workbench",...}` frame, its broadcast
-//! bus, and the per-profile model memory persisted beside the tape file.
+//! bus, and the per-profile model memory persisted in the state directory.
 //!
 //! The server owns all Model-menu state and the UI only renders it; in
 //! particular `chat_ready` is computed here - catalog non-empty, a model
@@ -32,8 +32,8 @@ use crate::protocol::WorkbenchSnapshot;
 /// heartbeat transitions, so a handful of slots is generous.
 const MENU_CHANNEL_CAPACITY: usize = 8;
 
-/// Name of the persisted server-state file, written in the directory
-/// holding the tape file.
+/// Name of the persisted server-state file, written in the server's
+/// state directory.
 const WORKSHOP_STATE_FILE: &str = "workshop-state.json";
 
 /// The shared menu bus: the Model-menu state, its mutators, and the

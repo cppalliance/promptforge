@@ -379,14 +379,11 @@ open_browser = false
 window_seconds = 15
 interval_ms = 500
 vocabulary = ["PromptForge", "WG21", "GGUF"]
-
-[workshop.tape]
-path = "tape.jsonl"
 ````
 
 The workshop binds `127.0.0.1:7910` by default. Set `open_browser = true` to open the system browser once the UI is serving. The workshop derives its gateway connection from `[server]`: same address, same API key. No credential is duplicated and none can drift.
 
-`[workshop.stt]` tunes live capture. `window_seconds` sets the seconds of trailing audio per interim pass (default 15). `interval_ms` sets the milliseconds between passes (default 500). `vocabulary` lists domain terms the transcriber is biased toward; an empty list disables biasing. `[workshop.tape]` enables session recording to a JSONL tape file (default `tape.jsonl`). Relative paths resolve from the config file's directory, never the process's current directory.
+`[workshop.stt]` tunes live capture. `window_seconds` sets the seconds of trailing audio per interim pass (default 15). `interval_ms` sets the milliseconds between passes (default 500). `vocabulary` lists domain terms the transcriber is biased toward; an empty list disables biasing. `[workshop.tape]` is accepted for compatibility and ignored: agent sessions persist their event logs under the workshop's state directory instead.
 
 ### Errors and Migration
 
@@ -1096,7 +1093,7 @@ Omitting the `[workshop]` section runs the gateway headless with no workshop hos
 
 The workshop's client URL and bearer key derive from the boot `[server]` section. No credential is duplicated and none can drift. Set `open_browser` to open the system browser at the workshop URL once it is serving; a browser that fails to open is logged, never fatal.
 
-Session tapes default to `tape.jsonl`, anchored to the boot config's directory, never the process working directory. The `[workshop.stt]` section tunes push-to-talk transcription: `window_seconds` defaults to 15, `interval_ms` defaults to 500, and `vocabulary` lists domain terms whisper is biased toward. An empty list disables biasing. Both listeners answer `/health` and `/v1/models` independently.
+The `[workshop.stt]` section tunes push-to-talk transcription: `window_seconds` defaults to 15, `interval_ms` defaults to 500, and `vocabulary` lists domain terms whisper is biased toward. An empty list disables biasing. `[workshop.tape]` is accepted for compatibility and ignored: agent sessions persist their event logs under the workshop's state directory instead. Both listeners answer `/health` and `/v1/models` independently.
 
 ### Progress and Observability
 

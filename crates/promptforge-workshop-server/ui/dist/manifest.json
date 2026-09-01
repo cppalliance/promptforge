@@ -1,7 +1,7 @@
 {
   "version": 1,
   "minified": true,
-  "inputHash": "b40af8bccbe4381bc8cd4f969e6352bc980274cc1092f0c0f35884600f2925c0",
+  "inputHash": "6da0e3cffd61bb3ed4463f6acbe670354b0ae9b030a368d311bc2f4988cdd4c9",
   "files": [
     "app.css",
     "app.js",

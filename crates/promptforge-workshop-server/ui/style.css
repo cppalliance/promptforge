@@ -9,18 +9,10 @@
    var() use carries a fallback, so deleting a variable degrades to the
    stock skin instead of breaking the property.
 
-   The murm-ui bridge (the .mur-app block after :root) maps the vendored
-   chat UI's --mur-* variables onto the workshop variables, so the chat
-   panel skins from the same block. It cannot live inside :root: murm-ui
-   declares its dark-theme variables on .mur-app[data-theme="dark"] itself,
-   and a custom property set on the element beats anything inherited from
-   :root. The bridge therefore repeats that selector; style.css loads after
-   the bundled app.css, so these declarations win the tie.
-
-   This file carries only the resets, the :root design tokens, the murm-ui
-   bridge, and the global scrollbars. Component rules live in per-component
-   CSS files colocated with their owning TS modules under src/, which
-   esbuild bundles into dist/app.css.
+   This file carries only the resets, the :root design tokens, and the
+   global scrollbars. Component rules live in per-component CSS files
+   colocated with their owning TS modules under src/, which esbuild
+   bundles into dist/app.css.
    ========================================================================== */
 
 :root {
@@ -28,7 +20,6 @@
   --bg: #0f0f0f; /* window background, chat background */
   --bg-raised: #1a1a1a; /* raised surfaces: status bar, cards */
   --bg-hover: #252525; /* hover washes and user message bubbles */
-  --bg-composer: var(--bg, #0f0f0f); /* the chat composer form */
 
   /* Text and borders */
   --text: #e8e8e8; /* 15:1 on --bg */
@@ -106,75 +97,6 @@
   --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
   --scrollbar-thumb: rgba(255, 255, 255, 0.16); /* translucent on any surface */
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
-}
-
-/* --------------------------------------------------------------------------
-   murm-ui skinning bridge. The vendored chat UI themes itself from --mur-*
-   variables (ui/src/chat/styles/base.css); mapping them here keeps the
-   whole UI skinned from the :root block above. Workshop var on the right,
-   murm-ui var on the left:
-
-     --mur-bg            <- --bg            chat background
-     --mur-surface       <- --bg-raised     code blocks, cards
-     --mur-surface-user  <- --bg-hover      user message bubble
-     --mur-hover-bg      <- --bg-hover      hover washes
-     --mur-text          <- --text
-     --mur-text-secondary <- --text
-     --mur-text-muted    <- --text-muted
-     --mur-inverse-text  <- --bg            icon on the accent send button
-     --mur-border        <- --border
-     --mur-primary       <- --accent        send button background
-     --mur-danger{,-text,-bg,-border,-hover-bg} <- --danger / --danger-text
-     --mur-success       <- --led-green
-     --mur-code-heading-bg <- --bg-hover
-     --mur-font          <- --font-prose
-
-   murm-ui's dark shadows and overlay scrims are palette-neutral black
-   alphas and are left as shipped. Only the dark theme is mapped: the
-   workshop's template always sets data-theme="dark" on .mur-app.
-   -------------------------------------------------------------------------- */
-.mur-app[data-theme="dark"] {
-  --mur-bg: var(--bg, #0f0f0f);
-  --mur-surface: var(--bg-raised, #1a1a1a);
-  --mur-surface-user: var(--bg-hover, #252525);
-  --mur-hover-bg: var(--bg-hover, #252525);
-  --mur-text: var(--text, #e8e8e8);
-  --mur-text-secondary: var(--text, #e8e8e8);
-  --mur-text-muted: var(--text-muted, #909090);
-  --mur-inverse-text: var(--bg, #0f0f0f);
-  --mur-border: var(--border, #2a2a2a);
-  --mur-primary: var(--accent, #e05a2b);
-  --mur-danger: var(--danger, #dc3545);
-  --mur-danger-text: var(--danger-text, #e4606d);
-  --mur-danger-bg: color-mix(in oklab, var(--danger, #dc3545) 20%, transparent);
-  --mur-danger-border: color-mix(in oklab, var(--danger, #dc3545) 38%, transparent);
-  --mur-danger-hover-bg: color-mix(in oklab, var(--danger, #dc3545) 14%, transparent);
-  --mur-success: var(--led-green, #28a745);
-  --mur-code-heading-bg: var(--bg-hover, #252525);
-  --mur-font: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
-  --mur-header-button-bg: color-mix(in oklab, var(--bg-raised, #1a1a1a) 82%, transparent);
-  --mur-header-title-bg: color-mix(in oklab, var(--bg-raised, #1a1a1a) 62%, transparent);
-
-  /* Composer growth cap: murm-ui defaults --mur-input-max-height to 200px,
-     which clips long voice transcripts; 40vh keeps them visible. It must be
-     declared on .mur-app, not :root, because murm-ui sets the variable on
-     .mur-app itself and an element-local declaration beats inheritance. */
-  --mur-input-max-height: 40vh;
-}
-
-/* murm-ui hardcodes `font-family: monospace` for code and tool chrome;
-   route those through --code-font so the skin owns the mono stack. These
-   selectors tie murm-ui's own, and this stylesheet loads later. */
-.mur-message code,
-.mur-code-language,
-.mur-block-tool {
-  font-family: var(--code-font, ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace);
-}
-
-/* The composer form floats over the chat on murm-ui's --mur-bg; give the
-   skin its own hook so the composer can differ from the chat background. */
-.mur-app .mur-chat-form {
-  background-color: var(--bg-composer, #0f0f0f);
 }
 
 * {

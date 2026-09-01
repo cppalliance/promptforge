@@ -25,9 +25,6 @@ pub const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081";
 pub struct Config {
     /// Connection settings for the PromptForge gateway.
     pub gateway: GatewayConfig,
-    /// Session tape settings.
-    #[serde(default)]
-    pub tape: TapeConfig,
     /// HTTP server settings.
     #[serde(default)]
     pub server: ServerConfig,
@@ -133,22 +130,6 @@ pub struct GatewayConfig {
     pub api_key: String,
 }
 
-/// Session tape settings.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-#[serde(default)]
-pub struct TapeConfig {
-    /// Path of the JSONL tape file.
-    pub path: PathBuf,
-}
-
-impl Default for TapeConfig {
-    fn default() -> Self {
-        Self {
-            path: PathBuf::from("tape.jsonl"),
-        }
-    }
-}
-
 /// HTTP server settings.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default)]
@@ -159,11 +140,11 @@ pub struct ServerConfig {
     /// once it is serving. The desktop shell sets up its own window and
     /// ignores this flag; it exists for the browser-tab frame.
     pub open_browser: bool,
-    /// Directory holding the server's persistent state; agent session
-    /// event logs live under `state_dir/sessions/`. Defaults to the
+    /// Directory holding the server's persistent state: agent session
+    /// event logs live under `state_dir/sessions/`, and the per-profile
+    /// model memory and boot orphan sweep anchor here. Defaults to the
     /// config file's own directory ([`Config::parse`] anchors the empty
-    /// default there), and this key becomes the state anchor that
-    /// outlives the tape.
+    /// default there).
     pub state_dir: PathBuf,
 }
 
@@ -335,14 +316,13 @@ api_key = "${PATH}"
     }
 
     #[test]
-    fn defaults_fill_tape_and_server() {
+    fn defaults_fill_server() {
         let raw = r#"
 [gateway]
 base_url = "http://127.0.0.1:8081"
 api_key = "k"
 "#;
         let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert_eq!(config.tape.path, PathBuf::from("tape.jsonl"));
         assert_eq!(config.server.bind, "127.0.0.1:7910");
     }
 
@@ -369,14 +349,10 @@ interim_model = "old.bin"
 base_url = "http://127.0.0.1:8081"
 api_key = "k"
 
-[tape]
-path = "session.jsonl"
-
 [server]
 bind = "127.0.0.1:9000"
 "#;
         let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert_eq!(config.tape.path, PathBuf::from("session.jsonl"));
         assert_eq!(config.server.bind, "127.0.0.1:9000");
     }
 

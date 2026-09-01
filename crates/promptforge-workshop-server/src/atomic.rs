@@ -4,9 +4,9 @@
 //! so a crash at any moment leaves either the old contents or the new,
 //! never a truncation. The startup sweep removes temp files orphaned by
 //! a crash between the write and the rename; it covers directories the
-//! server owns at boot (the state directory beside the tape file) -
-//! workspace grants are runtime-only, so a granted directory cannot be
-//! swept before it is granted.
+//! server owns at boot (the configured state directory) - workspace
+//! grants are runtime-only, so a granted directory cannot be swept
+//! before it is granted.
 
 use std::fs;
 use std::io::{self, Write as _};

@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn cross_site_requests_are_refused_and_health_stays_exempt() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let app = router(state);
         for path in ["/v1/models", "/ws", "/workspace/tree"] {
             let request = Request::builder()
@@ -215,7 +215,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dns_rebound_host_is_refused() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let app = router(state);
         // A rebound page's fetch arrives same-origin under Sec-Fetch with
         // any content type it likes; only Host betrays it.
@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_bodies_must_declare_json() {
-        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let app = router(state);
         let dir = tempfile::TempDir::new().expect("tempdir");
         let body = serde_json::json!({ "path": dir.path() }).to_string();
@@ -309,8 +309,8 @@ mod tests {
 
     #[tokio::test]
     async fn ws_upgrades_enforce_the_origin_allowlist() {
-        let tape_dir = tempfile::TempDir::new().expect("tempdir");
-        let mut config = config_for("http://127.0.0.1:1", &tape_dir.path().join("tape.jsonl"));
+        let state_dir = tempfile::TempDir::new().expect("tempdir");
+        let mut config = config_for("http://127.0.0.1:1", state_dir.path());
         config.server.bind = "127.0.0.1:0".to_string();
         let server = crate::serve::spawn(config).expect("server spawns");
         let url = server.url().to_string();

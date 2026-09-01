@@ -8,7 +8,6 @@ import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartIni
 
 import { Disposable } from "../../base/lifecycle";
 import { AgentPanel } from "./agent-panel";
-import { ChatPanel } from "./chat-panel";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
 import { WorkshopTreePanel, type TreeStatusSink } from "./workshop-panel";
@@ -54,13 +53,6 @@ export const PANEL_TYPES = {
     title: "Editor",
     tabComponent: undefined,
     factory: (): IContentRenderer => new EditorPanel(),
-  },
-  chat: {
-    type: "chat",
-    defaultZone: "right",
-    title: "Agent",
-    tabComponent: undefined,
-    factory: (): IContentRenderer => new ChatPanel(),
   },
   config: {
     type: "config",
