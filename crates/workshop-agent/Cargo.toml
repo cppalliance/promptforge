@@ -1,0 +1,27 @@
+[package]
+name = "workshop-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Workshop agent-program executor: run_agent drives .lua agent programs over the promptforge substrate"
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+mlua.workspace = true
+promptforge-core-support.workspace = true
+promptforge-lua.workspace = true
+promptforge-model-client.workspace = true
+promptforge-store.workspace = true
+promptforge-tools.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+
+[lints]
+workspace = true

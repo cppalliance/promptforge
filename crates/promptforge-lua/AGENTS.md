@@ -17,9 +17,9 @@ compiled `LuaProgram`.
   with the executor.
 - Hosts tool-dispatch support that executors invoke: `dispatch_tool` is the
   one shared dispatch body; executors call it, never duplicate it.
-- Most of the surface is `#[doc(hidden)]` cross-crate seam for
-  `promptforge-core`, not host API; it must not gain documented status
-  without a design change. `LuaProgram` is the exception: it is genuine API,
-  re-exported by core under its historical path.
+- Most of the surface is `#[doc(hidden)]` cross-crate seam for the executors
+  (`promptforge-core`, `workshop-agent`), not host API; it must not gain
+  documented status without a design change. `LuaProgram` is the exception:
+  it is genuine API, re-exported by core under its historical path.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

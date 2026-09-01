@@ -129,6 +129,7 @@ flowchart LR
 | [promptforge-web-search-service](crates/promptforge-web-search-service) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search-service.svg)](https://crates.io/crates/promptforge-web-search-service) |
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
+| [workshop-agent](crates/workshop-agent) | Workshop agent-program executor: `run_agent` drives `.lua` agent programs over the promptforge substrate | not published |
 | [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: chat relay, session tape, workspace API, and UI assets | not published |
 | [promptforge-workshop](crates/promptforge-workshop) | Workshop desktop app (Tauri): boots the gateway and opens the window | not published |
 

@@ -3670,3 +3670,28 @@ async fn a_document_prompt_without_tool_call_is_unaffected() {
         .expect("a prompt that never calls tool_call is unchanged");
     assert_eq!(out, "plain");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn models_chat_is_nil_in_a_section_vm() {
+    // The agent-only `models.chat` never exists in a section VM - not
+    // stubbed, simply absent - so a document prompt calling it fails with
+    // Lua's own undefined-value error, the mirror of an agent calling the
+    // absent `execute`. No typed error exists for the absence.
+    let md = "---\nname: chat\ndescription: d\npromptforge: 1\n---\n\n\
+        # Chat\n\n\
+        ## Only\n\n\
+        ```lua\nreturn models.chat({})\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("calling the absent models.chat must fail the section");
+    match &error {
+        Error::LuaRuntime { message, .. } => assert!(
+            message.contains("attempt to call a nil value") && message.contains("chat"),
+            "models.chat must fail as an undefined value, got: {message}"
+        ),
+        other => panic!("expected the plain undefined-value Lua failure, got {other:?}"),
+    }
+}
