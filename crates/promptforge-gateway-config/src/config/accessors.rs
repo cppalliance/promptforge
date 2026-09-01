@@ -1369,11 +1369,11 @@ impl LocalModelConfig {
     /// # vram_gb = 14
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.local_models()[0].vram_gb(), Some(14));
+    /// assert_eq!(config.local_models()[0].vram_gb(), Some(14.0));
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
-    pub fn vram_gb(&self) -> Option<u32> {
+    pub fn vram_gb(&self) -> Option<f64> {
         self.vram_gb
     }
 

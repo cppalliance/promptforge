@@ -154,3 +154,7 @@ user rule stated directly - "if app loses focus, menu should unpop"; the menu pr
 
 the report was produced during the architecture-rollout run but deliberately excluded from every plan commit as unrelated; at the end the user said "git add commit" so the analysis is preserved in the repo rather than lost as scratch. (user said)
 
+## 2026-09-01 Accept fractional `vram_gb` for local models
+
+no authoring intent in the chat - the commit was already HEAD when the session began (an upstream PR 10 cherry-pick); the intent (fractional VRAM budgets for local-model profiles) is inference from the subject, not chat evidence. (none; inferred)
+
