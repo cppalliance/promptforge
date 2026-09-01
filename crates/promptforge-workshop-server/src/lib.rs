@@ -3,9 +3,10 @@
 //! Holds the `workshop.toml` configuration, the PromptForge gateway client,
 //! the session tape, and the axum router so `src/main.rs` stays a thin shell.
 //! Start at [`Config::load`] for configuration, [`Tape`] for the session
-//! tape, [`WorkshopObserver`] for the run event log, and [`router`] for the
-//! HTTP API; [`spawn`] runs the whole server in-process on its own thread
-//! for embedding binaries.
+//! tape, [`WorkshopObserver`] for the run event log, [`WaitRegistry`] and
+//! [`UserInputTool`] for agent input waits, and [`router`] for the HTTP
+//! API; [`spawn`] runs the whole server in-process on its own thread for
+//! embedding binaries.
 
 mod app;
 mod assets;
@@ -19,6 +20,7 @@ mod error;
 mod gateway;
 mod gateway_progress;
 mod heartbeat;
+mod input;
 mod menu;
 mod observer;
 mod progress;
@@ -71,8 +73,9 @@ pub use gateway::{
     CacheEvent, CacheResponse, ChatStream, GatewayClient, GatewayError, GatewayResponse,
     SsePayloadStream, SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
+pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
 pub use observer::WorkshopObserver;
-pub use protocol::{Activity, ChatRequest};
+pub use protocol::{Activity, ChatRequest, InputFrame, InputResponse};
 pub use push::Push;
 pub use serve::{ServerHandle, SpawnError, Termination, spawn, spawn_with_routes};
 pub use tape::{Tape, TapeError, TapeEvent};
