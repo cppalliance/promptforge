@@ -118,12 +118,17 @@ fn current_windows_account(root: &Path) -> Result<String> {
 /// Removes inherited ACEs and grants the current account sole full control.
 #[cfg(windows)]
 fn set_owner_only_windows_dacl(root: &Path, account: &str) -> Result<()> {
-    let output = std::process::Command::new("icacls")
-        .arg(root)
+    let mut cmd = std::process::Command::new("icacls");
+    cmd.arg(root)
         .arg("/inheritance:r")
         .arg("/grant:r")
-        .arg(format!("{account}:(OI)(CI)F"))
-        .output()
+        .arg(format!("{account}:(OI)(CI)F"));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let output = cmd.output()
         .map_err(|source| LocalError::Io {
             operation: "run icacls to restrict cache DACL",
             path: root.to_owned(),
@@ -144,9 +149,14 @@ fn set_owner_only_windows_dacl(root: &Path, account: &str) -> Result<()> {
 /// Verifies no broad multi-user principal retains access after the restriction.
 #[cfg(windows)]
 fn verify_private_windows_dacl(root: &Path) -> Result<()> {
-    let output = std::process::Command::new("icacls")
-        .arg(root)
-        .output()
+    let mut cmd = std::process::Command::new("icacls");
+    cmd.arg(root);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let output = cmd.output()
         .map_err(|source| LocalError::Io {
             operation: "run icacls to verify cache DACL",
             path: root.to_owned(),
