@@ -181,41 +181,25 @@ dispatch({ type: "pf-bridge-ready" });
 await flush();
 check("a disposed bridge answers nothing", replies.length === repliesBefore);
 
-// --- The panel hosts the iframe at the gateway origin ----------------------------
+// --- The panel hosts the iframe same-origin through the workshop proxy ----------
 
 {
   const panel = new GatewayConfigPanel({
-    fetchOrigin: async () => GATEWAY_ORIGIN,
     workshopOrigin: WORKSHOP_ORIGIN,
   });
   panel.init({ params: {} });
-  await flush();
   const iframe = panel.element.querySelector("iframe");
-  check("the panel hosts an iframe once the origin resolves", iframe !== null);
+  check("the panel hosts an iframe immediately (no async origin probe)", iframe !== null);
   check(
-    "the iframe loads the config SPA in panel mode with the bridge origin pinned",
+    "the iframe loads the config SPA same-origin via the workshop proxy",
     iframe?.getAttribute("src") ===
-      `${GATEWAY_ORIGIN}/config/?mode=panel&bridge=${encodeURIComponent(WORKSHOP_ORIGIN)}`,
+      `/gateway/config/?mode=panel&bridge=${encodeURIComponent(WORKSHOP_ORIGIN)}`,
   );
   check(
     "the iframe sandbox grants scripts and same-origin only",
     iframe?.getAttribute("sandbox") === "allow-scripts allow-same-origin",
   );
   check("the iframe carries an accessible title", iframe?.getAttribute("title") === "Gateway Config");
-  panel.dispose();
-}
-
-// --- The panel reports an unknown origin instead of loading ----------------------
-
-{
-  const panel = new GatewayConfigPanel({ fetchOrigin: async () => null });
-  panel.init({ params: {} });
-  await flush();
-  const alert = panel.element.querySelector("[role='alert']");
-  check(
-    "an unknown gateway origin renders an alert, not an iframe",
-    alert !== null && panel.element.querySelector("iframe") === null,
-  );
   panel.dispose();
 }
 

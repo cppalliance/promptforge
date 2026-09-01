@@ -11,12 +11,9 @@ import "./gateway-config-panel.css";
 import type { GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 
 import { Disposable, toDisposable } from "../../base/lifecycle";
-import { fetchGatewayOrigin } from "../../services/gateway-config-api";
 
-/** Injectable seams for tests; production reads the server and window. */
+/** Injectable seams for tests. */
 export interface GatewayConfigPanelDeps {
-  /** The gateway-origin probe; the workshop server route in production. */
-  readonly fetchOrigin?: () => Promise<string | null>;
   /** The workshop's own origin; window.location.origin in production. */
   readonly workshopOrigin?: string;
 }
@@ -36,27 +33,18 @@ export class GatewayConfigPanel extends Disposable implements IContentRenderer {
   }
 
   init(_parameters: GroupPanelPartInitParameters): void {
-    const probe = this.deps.fetchOrigin ?? fetchGatewayOrigin;
-    void probe().then((origin) => {
-      if (this.disposed) {
-        return;
-      }
-      if (origin === null) {
-        this.showError("The gateway origin is unknown; the config panel cannot load.");
-        return;
-      }
-      const iframe = document.createElement("iframe");
-      iframe.className = "gateway-config-panel__frame";
-      iframe.title = "Gateway Config";
-      // Same-machine trusted content: allow-scripts runs the SPA and
-      // allow-same-origin keeps the iframe on its own gateway origin so
-      // its asset and module loads work. Nothing else is granted - no
-      // forms, popups, or top navigation.
-      iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
-      const workshopOrigin = this.deps.workshopOrigin ?? window.location.origin;
-      iframe.src = `${origin}/config/?mode=panel&bridge=${encodeURIComponent(workshopOrigin)}`;
-      this.element.replaceChildren(iframe);
-    });
+    const iframe = document.createElement("iframe");
+    iframe.className = "gateway-config-panel__frame";
+    iframe.title = "Gateway Config";
+    // The config SPA is proxied through the workshop server at
+    // /gateway/config/ so the iframe is same-origin (a cross-origin
+    // iframe to the gateway's port made Chromium spawn renderer
+    // processes that flashed a console window on Windows). allow-scripts
+    // runs the SPA; allow-same-origin keeps it on the workshop origin.
+    iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    const workshopOrigin = this.deps.workshopOrigin ?? window.location.origin;
+    iframe.src = `/gateway/config/?mode=panel&bridge=${encodeURIComponent(workshopOrigin)}`;
+    this.element.replaceChildren(iframe);
   }
 
   /** Paints a load failure as an alert bar; the panel stays open. */

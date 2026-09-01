@@ -29,19 +29,14 @@ await bootWorkbench("the Gateway Config menu item opens the panel", async ({ win
   }
 
   configItem.click();
-  // The panel resolves the gateway origin over fetch before the iframe
-  // mounts, so poll for it.
-  let iframe = null;
-  const deadline = Date.now() + 5000;
-  while (!iframe && Date.now() < deadline) {
-    iframe = document.querySelector(".gateway-config-panel__frame");
-    if (!iframe) await sleep(20);
-  }
+  // The panel mounts the iframe synchronously (no async origin probe).
+  await sleep(50);
+  const iframe = document.querySelector(".gateway-config-panel__frame");
   if (!iframe) {
     failures.push("activating Gateway Config never mounted the panel iframe");
     return;
   }
-  const expectedSrc = `http://127.0.0.1:8081/config/?mode=panel&bridge=${encodeURIComponent(
+  const expectedSrc = `/gateway/config/?mode=panel&bridge=${encodeURIComponent(
     window.location.origin,
   )}`;
   if (iframe.getAttribute("src") !== expectedSrc) {
