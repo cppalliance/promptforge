@@ -8,6 +8,7 @@ mod common;
 
 mod agents;
 mod chat;
+mod chat_gate;
 mod heartbeat;
 mod observer;
 mod ratchet;

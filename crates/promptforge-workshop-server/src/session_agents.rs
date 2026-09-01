@@ -72,6 +72,21 @@ const INPUT_CAPACITY: usize = 32;
 /// refusing it.
 const FALLBACK_CONTEXT: u32 = 8192;
 
+/// The built-in default agent's name: discovery always offers it, and a
+/// directory file named `chat.lua` shadows the embedded source.
+const BUILTIN_CHAT_NAME: &str = "chat";
+
+/// The committed built-in chat agent, embedded at compile time - the same
+/// shipped-asset pattern as the SPA `dist/` - so a fresh install has a
+/// working chat with no agents directory at all.
+const BUILTIN_CHAT_SOURCE: &str = include_str!("../agents/chat.lua");
+
+/// Capacity of a session's error broadcast. Session errors are rare
+/// one-off reports: a failed model round or a run that ended in error
+/// surfaces one frame each, and a receiver that lags misses only what
+/// the durable transcript already shows as a turn without a reply.
+const ERROR_CAPACITY: usize = 8;
+
 /// One live delta on a session's dedicated channel, stamped with the
 /// reply id of the durable event that will supersede it.
 #[derive(Debug, Clone)]
@@ -168,8 +183,11 @@ impl AgentSessions {
     }
 
     /// The launchable agent names: the `.lua` file stems under the
-    /// configured agents directory, sorted. A missing or unreadable
-    /// directory is an empty list - a state, not an error.
+    /// configured agents directory plus the built-in `chat`, sorted. The
+    /// built-in is always offered - a missing or unreadable directory
+    /// still lists it, so a fresh install always has a working chat - and
+    /// a directory file named `chat.lua` shadows the embedded source
+    /// rather than listing twice.
     #[must_use]
     pub fn discover(&self) -> Vec<String> {
         discover_agents(&self.inner.agents_dir)
@@ -204,7 +222,7 @@ impl AgentSessions {
         let Some(client) = self.inner.client.clone() else {
             return Err(LaunchRefusal::GatewayUnusable);
         };
-        let source = std::fs::read_to_string(self.inner.agents_dir.join(format!("{name}.lua")))
+        let source = agent_source(&self.inner.agents_dir, name)
             .map_err(|source| LaunchRefusal::SessionState { source })?;
         std::fs::create_dir_all(&self.inner.sessions_dir)
             .map_err(|source| LaunchRefusal::SessionState { source })?;
@@ -217,6 +235,7 @@ impl AgentSessions {
         let waits = Arc::new(WaitRegistry::new());
         let (input_frames, _) = broadcast::channel(INPUT_CAPACITY);
         let (deltas, _) = broadcast::channel(DELTA_CAPACITY);
+        let (errors, _) = broadcast::channel(ERROR_CAPACITY);
         let session = Arc::new(AgentSession {
             id: id.clone(),
             agent: name.to_owned(),
@@ -226,6 +245,7 @@ impl AgentSessions {
             waits,
             input_frames,
             deltas,
+            errors,
             cancel: Mutex::new(CancelHandle::new()),
             closing: AtomicBool::new(false),
         });
@@ -328,6 +348,11 @@ pub(crate) struct AgentSession {
     /// The dedicated live-delta channel; deltas never enter the event
     /// log.
     deltas: broadcast::Sender<AgentDelta>,
+    /// The session's error reports, forwarded to the SPA as `error`
+    /// frames: a failed model round the program survived, or a run that
+    /// ended in error. Ephemeral like the deltas - errors never enter
+    /// the event log.
+    errors: broadcast::Sender<String>,
     /// The retained cancel handle of the current run, swapped fresh at
     /// every (re)launch.
     cancel: Mutex<CancelHandle>,
@@ -350,6 +375,11 @@ impl AgentSession {
     /// Subscribes to the session's live deltas from this call on.
     pub(crate) fn subscribe_deltas(&self) -> broadcast::Receiver<AgentDelta> {
         self.deltas.subscribe()
+    }
+
+    /// Subscribes to the session's error reports from this call on.
+    pub(crate) fn subscribe_errors(&self) -> broadcast::Receiver<String> {
+        self.errors.subscribe()
     }
 
     /// Fires the current run's retained cancel handle: the turn dies as
@@ -400,10 +430,20 @@ struct SessionObserver {
     push: Push,
     /// Reset on completed replies: the gateway proved it answers.
     backoff: ReconnectBackoff,
+    /// Where a failed model round surfaces as a wire error frame.
+    errors: broadcast::Sender<String>,
 }
 
 impl Observer for SessionObserver {
     fn observe(&self, execution: &str, section: &str, event: Observation) {
+        // A failed model round is operator-visible: the program survives
+        // it (the built-in chat pcalls models.chat and returns to
+        // waiting), so the run never fails and only the session can tell
+        // the SPA. The observation carries no payload; the frame names
+        // the boundary that failed.
+        if matches!(event, Observation::ModelTurnFailed) {
+            let _ = self.errors.send(format!("{event} in agent `{section}`"));
+        }
         self.log.observe(execution, section, event);
     }
 
@@ -534,6 +574,7 @@ fn spawn_supervisor(
             rounds: Arc::clone(&session.rounds),
             push: host.push.clone(),
             backoff: host.backoff.clone(),
+            errors: session.errors.clone(),
         });
         let on_delta = delta_stamp(&session, &host.push);
         let ui = ui_provider(&host.menu, &host.workspace);
@@ -576,6 +617,9 @@ fn spawn_supervisor(
                         agent = %session.agent,
                         "agent run failed"
                     );
+                    // The terminal failure reaches the SPA too: the run
+                    // is gone, so no later frame can say what happened.
+                    let _ = session.errors.send(error.to_string());
                     host.push
                         .push_failure("Agent failed", error.to_string(), Activity::General);
                     break;
@@ -651,13 +695,14 @@ pub(crate) fn reply_stamp(kind: RuntimeEventKind, rounds_seen: &mut u64) -> Opti
     }
 }
 
-/// Lists the launchable agent names: the `.lua` file stems under `dir`,
-/// sorted. A missing or unreadable directory is an empty list.
+/// Lists the launchable agent names: the `.lua` file stems under `dir`
+/// plus the built-in `chat`, sorted. A missing or unreadable directory
+/// offers exactly the built-in, and a directory `chat.lua` lists once -
+/// it shadows the embedded source instead of duplicating the name.
 fn discover_agents(dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
@@ -669,8 +714,28 @@ fn discover_agents(dir: &Path) -> Vec<String> {
                 .map(str::to_owned)
         })
         .collect();
+    if !names.iter().any(|name| name == BUILTIN_CHAT_NAME) {
+        names.push(BUILTIN_CHAT_NAME.to_owned());
+    }
     names.sort();
     names
+}
+
+/// Reads the agent's program source: the directory file when it exists -
+/// a directory `chat.lua` shadows the built-in - else the embedded
+/// built-in for the `chat` name alone. Launch resolved `name` through
+/// discovery already, so a missing file for any other name is a real
+/// filesystem race, surfaced as the error it is; so is an existing
+/// `chat.lua` that cannot be read, because silently serving the built-in
+/// would mask the operator's own file.
+fn agent_source(dir: &Path, name: &str) -> io::Result<String> {
+    match std::fs::read_to_string(dir.join(format!("{name}.lua"))) {
+        Ok(source) => Ok(source),
+        Err(error) if name == BUILTIN_CHAT_NAME && error.kind() == io::ErrorKind::NotFound => {
+            Ok(BUILTIN_CHAT_SOURCE.to_owned())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// A fresh unguessable session id: 128 bits from the OS-seeded
@@ -791,13 +856,62 @@ mod tests {
         std::fs::create_dir(dir.path().join("nested.lua")).expect("seed a decoy directory");
         assert_eq!(
             discover_agents(dir.path()),
-            vec!["alpha".to_owned(), "zeta".to_owned()],
-            "discovery lists .lua file stems sorted and skips everything else"
+            vec!["alpha".to_owned(), "chat".to_owned(), "zeta".to_owned()],
+            "discovery lists .lua file stems plus the built-in chat, sorted, \
+             and skips everything else"
         );
         assert_eq!(
             discover_agents(&dir.path().join("missing")),
-            Vec::<String>::new(),
-            "a missing agents directory offers no agents rather than failing"
+            vec!["chat".to_owned()],
+            "a missing agents directory still offers the built-in chat rather than failing"
+        );
+    }
+
+    #[test]
+    fn the_built_in_chat_is_always_offered_and_a_dir_file_shadows_its_source() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        assert_eq!(
+            discover_agents(dir.path()),
+            vec!["chat".to_owned()],
+            "an empty agents directory still offers the built-in chat"
+        );
+        assert_eq!(
+            agent_source(dir.path(), "chat").expect("the built-in serves"),
+            BUILTIN_CHAT_SOURCE,
+            "with no directory file, the embedded source is what launches"
+        );
+
+        std::fs::write(dir.path().join("chat.lua"), "-- shadowed").expect("seed the shadow");
+        assert_eq!(
+            discover_agents(dir.path()),
+            vec!["chat".to_owned()],
+            "a directory chat.lua lists once, never beside the built-in"
+        );
+        assert_eq!(
+            agent_source(dir.path(), "chat").expect("the shadow reads"),
+            "-- shadowed",
+            "a directory chat.lua shadows the embedded source"
+        );
+
+        assert_eq!(
+            agent_source(dir.path(), "ghost")
+                .expect_err("only the built-in name falls back to embedded source")
+                .kind(),
+            io::ErrorKind::NotFound,
+            "a non-built-in name surfaces its filesystem error"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_chat_lua_surfaces_its_error_rather_than_the_built_in() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        // A directory named chat.lua cannot be read as a file on any
+        // platform, and its failure is never NotFound - the one kind
+        // that falls back to the embedded source.
+        std::fs::create_dir(dir.path().join("chat.lua")).expect("seed the unreadable shadow");
+        agent_source(dir.path(), "chat").expect_err(
+            "an existing chat.lua that cannot be read surfaces its error; \
+             silently serving the built-in would mask the operator's own file",
         );
     }
 

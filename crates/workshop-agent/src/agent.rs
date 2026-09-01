@@ -4,13 +4,14 @@
 //! a [`SectionVm`] built with the section construction sequence (harden,
 //! untrusted, host injection, store, log, var) minus the section control
 //! surface. The shared kernel is `models.infer` and `tool_call`; the
-//! agent-only `models.chat` is installed here and nowhere else; `execute`,
-//! `fanout`, and `jump` are absent, not stubbed, so touching them is an
-//! undefined-global failure. The driver is leaf dispatch only: it resumes
-//! the coroutine, validates each yield into a [`Request`], awaits exactly
-//! one future - the current request - and resumes with the answer. Tool
-//! dispatch goes through the shared [`dispatch_tool`] body; nothing here
-//! duplicates it. Before every resume the driver republishes the
+//! agent-only `models.chat`, `runtime.events()`, and `ui()` are installed
+//! here and nowhere else; `execute`, `fanout`, and `jump` are absent, not
+//! stubbed, so touching them is an undefined-global failure. The driver
+//! is leaf dispatch only: it resumes the coroutine, validates each yield
+//! into a [`Request`], awaits exactly one future - the current request -
+//! and resumes with the answer. Tool dispatch goes through the shared
+//! [`dispatch_tool`] body; nothing here duplicates it. Before every
+//! resume the driver republishes the
 //! `runtime.events()` length bound ([`EventsSnapshot::refresh`]) - the
 //! resume-refresh rule: appends land in the program's view only at
 //! host-call resumes, never mid-chunk, so reads between suspensions stay
@@ -25,6 +26,7 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use mlua::LuaSerdeExt as _;
 use promptforge_core_support::cancel;
 use promptforge_core_support::events::{CallMetrics, EventLog, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
@@ -124,14 +126,15 @@ impl From<LuaError> for AgentError {
 ///
 /// Agent-only host calls: `models.chat(messages, opts)` - one stateless
 /// tool-capable model round, streaming its deltas to
-/// [`AgentConfig::on_delta`] - and `runtime.events()` - a read-only indexed
+/// [`AgentConfig::on_delta`] - `runtime.events()` - a read-only indexed
 /// view over [`AgentConfig::event_log`] whose snapshot length bound
-/// refreshes at every host-call resume - with `ui()` installed by a later
-/// step. Shared kernel: `tool_call`, `store`, `var`, cancel checkpoints,
-/// `models.infer`. `execute()`, `fanout()`, and `jump()` do not exist
-/// here - absent, not stubbed. `run_agent` installs `config.cancel` as
-/// the task's cancel scope, so every suspended host call races
-/// cancellation through the shared dispatch.
+/// refreshes at every host-call resume - and `ui()` - a fresh host-state
+/// snapshot per call from [`AgentConfig::ui`], nil as a global when the
+/// host supplies no provider. Shared kernel: `tool_call`, `store`, `var`,
+/// cancel checkpoints, `models.infer`. `execute()`, `fanout()`, and
+/// `jump()` do not exist here - absent, not stubbed. `run_agent` installs
+/// `config.cancel` as the task's cancel scope, so every suspended host
+/// call races cancellation through the shared dispatch.
 ///
 /// Every tool in `tools` is registered by its wire name with no semantic
 /// resolution; every model in `models` is addressable by its catalog name
@@ -198,6 +201,7 @@ async fn drive(
         observer,
         event_log,
         on_delta,
+        ui,
         limits,
         ..
     } = config;
@@ -224,7 +228,7 @@ async fn drive(
     // exists - the section drivers' contract.
     vm.apply_lua_limits(limits.lua_memory_bytes, limits.lua_log_events)?;
     let (counts, events) =
-        match setup_agent_vm(&mut vm, store, &observer, &name, &tool_set, event_log) {
+        match setup_agent_vm(&mut vm, store, &observer, &name, &tool_set, event_log, ui) {
             Ok(installed) => installed,
             Err(error) => {
                 vm.teardown(observer.as_ref(), &name);
@@ -327,8 +331,11 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 /// injection, host APIs, the coroutine shims) minus the section control
 /// surface, plus the agent-only installs - the `models.chat` shim, the
 /// read-only `tools.calls` counter surface over the run's dispatch counts,
-/// and the `runtime.events()` view over the host's [`EventLog`]. Returns
-/// the counts the dispatches increment and, when a log was supplied, the
+/// the `runtime.events()` view over the host's [`EventLog`], and the
+/// `ui()` snapshot function when the host supplied a provider (each call
+/// invokes the provider and converts a fresh snapshot table, JSON nulls
+/// reading as nil; no provider means no `ui` global at all). Returns the
+/// counts the dispatches increment and, when a log was supplied, the
 /// driver's [`EventsSnapshot`] refresh handle.
 ///
 /// Absent, not stubbed: the shared shim prelude installs `execute` and
@@ -345,6 +352,7 @@ fn setup_agent_vm(
     name: &str,
     tool_set: &ToolSet,
     event_log: Option<Arc<dyn EventLog>>,
+    ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
 ) -> Result<(ToolCallCounts, Option<EventsSnapshot>), AgentError> {
     vm.inject_host_with_var("", &serde_json::json!({}), store, None, None, None)?;
     vm.install_host_apis(observer, name)?;
@@ -353,6 +361,17 @@ fn setup_agent_vm(
     let counts = vm.install_tool_call_counts(tool_set.bindings())?;
     let events = install_runtime_events(vm.lua(), event_log)?;
     let globals = vm.lua().globals();
+    if let Some(provider) = ui {
+        let install_failed = |error: mlua::Error| AgentError::Program {
+            message: "installing the `ui` host call in the agent VM failed".to_owned(),
+            source: Some(Box::new(error)),
+        };
+        let snapshot = vm
+            .lua()
+            .create_function(move |lua, ()| lua.to_value_with(&provider(), UI_SNAPSHOT_OPTIONS))
+            .map_err(install_failed)?;
+        globals.raw_set("ui", snapshot).map_err(install_failed)?;
+    }
     for global in ["execute", "fanout"] {
         globals
             .raw_set(global, mlua::Value::Nil)
@@ -363,6 +382,13 @@ fn setup_agent_vm(
     }
     Ok((counts, events))
 }
+
+/// `ui()` snapshot conversion: a JSON null field reads as nil in author
+/// code, never as the userdata NULL sentinel the serde bridge defaults
+/// to - an unset host field must simply be absent.
+const UI_SNAPSHOT_OPTIONS: mlua::serde::SerializeOptions = mlua::serde::SerializeOptions::new()
+    .serialize_none_to_null(false)
+    .serialize_unit_to_null(false);
 
 /// The borrowed run pieces every driver step reads.
 struct AgentRun<'a> {
@@ -986,6 +1012,62 @@ mod tests {
                 "an absent-global failure is a plain program error, never a typed variant: {error:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn ui_snapshots_are_fresh_per_call_and_json_nulls_read_nil() {
+        let store = StoreRef::memory();
+        let calls = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&calls);
+        let mut run_config = config();
+        run_config.ui = Some(Arc::new(move || {
+            let call = counter.fetch_add(1, Ordering::Relaxed) + 1;
+            serde_json::json!({
+                "selected_model": format!("m{call}"),
+                "workspace_root": serde_json::Value::Null,
+            })
+        }));
+        run_agent(
+            "local first = ui().selected_model\n\
+             local second = ui().selected_model\n\
+             local root = tostring(ui().workspace_root)\n\
+             store.write('ui.txt', first .. '|' .. second .. '|' .. root)",
+            &empty_tools(),
+            &ModelCatalog::empty(),
+            &store,
+            run_config,
+        )
+        .await
+        .expect("the ui probe agent runs");
+        assert_eq!(
+            store.read("ui.txt").expect("the probe wrote its readings"),
+            "m1|m2|nil",
+            "every ui() call invokes the provider afresh, and a JSON null field reads nil"
+        );
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            3,
+            "three ui() calls mean three provider invocations: no caching, no staleness"
+        );
+    }
+
+    #[tokio::test]
+    async fn ui_is_nil_without_a_provider() {
+        let store = StoreRef::memory();
+        run_agent(
+            "store.write('ui.txt', tostring(ui))",
+            &empty_tools(),
+            &ModelCatalog::empty(),
+            &store,
+            config(),
+        )
+        .await
+        .expect("the probe agent runs");
+        assert_eq!(
+            store.read("ui.txt").expect("the probe wrote its reading"),
+            "nil",
+            "no provider means no ui global at all - absent, not stubbed"
+        );
     }
 
     #[tokio::test]

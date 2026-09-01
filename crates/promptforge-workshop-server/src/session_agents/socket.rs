@@ -6,12 +6,14 @@
 //! `{"type":"attach","session":"..."}` to reattach to a running one -
 //! sessions outlive sockets, so a reconnect replays the persisted event
 //! log from index zero and re-announces every unresolved input wait.
-//! While attached, the loop streams three families: durable
+//! While attached, the loop streams four families: durable
 //! `agent_event` frames drained from the session's event log by a
 //! per-client cursor (the log's broadcast is only the wakeup, so a
 //! lagged receiver loses nothing), ephemeral `agent_delta` frames from
 //! the session's delta channel (drops repair via the superseding event),
-//! and the durable `input_required` / `input_cancelled` wait frames.
+//! the durable `input_required` / `input_cancelled` wait frames, and
+//! ephemeral `error` frames reporting a failed model round the program
+//! survived or a run that ended in error.
 //! `{"type":"input_response",...}` answers a wait and dispatches the
 //! turn (the Thinking status push); `{"type":"cancel"}` fires the
 //! session's turn-cancel - a stop reason, never an error, so nothing is
@@ -37,8 +39,8 @@ use crate::cross_site;
 use crate::error::AppError;
 use crate::input::{WaitError, deliver_input_response};
 use crate::protocol::{
-    Activity, AgentDeltaFrame, AgentEventFrame, AgentSessionFrame, AgentsFrame, InputFrame,
-    InputResponse,
+    Activity, AgentDeltaFrame, AgentEventFrame, AgentSessionFrame, AgentsFrame, ErrorFrame,
+    InputFrame, InputResponse,
 };
 use crate::session::{send_error, send_frame};
 
@@ -100,22 +102,40 @@ async fn run_socket(mut socket: WebSocket, state: AppState) {
     let mut attached: Option<Attached> = None;
     // The subscriptions ride beside the attachment (not inside it) so the
     // select! arms below can borrow them while the inbound arm borrows
-    // `attached`; attach() and the arms keep the four in step.
+    // `attached`; attach() and the arms keep them all in step.
     let mut events_rx: Option<broadcast::Receiver<RuntimeEvent>> = None;
     let mut deltas_rx: Option<broadcast::Receiver<AgentDelta>> = None;
     let mut input_rx: Option<broadcast::Receiver<InputFrame>> = None;
+    let mut errors_rx: Option<broadcast::Receiver<String>> = None;
 
     loop {
         tokio::select! {
-            // Biased, in this order: the wait frames are tiny and rare,
-            // so they never grow stale; inbound next keeps the socket
-            // read at all times, so a cancel lands while a stream runs
-            // hot; deltas before the event drain, so when a whole round
-            // sits queued the chunks flush before the durable event that
-            // supersedes them; the event drain last loses nothing,
-            // because the cursor delivers everything past it whenever it
-            // runs.
+            // Biased, in this order: error reports first - one-off and
+            // causally ahead of the wait that follows a failed round, so
+            // the error frame precedes the re-ask on the wire; the wait
+            // frames next, tiny and rare, so they never grow stale;
+            // inbound next keeps the socket read at all times, so a
+            // cancel lands while a stream runs hot; deltas before the
+            // event drain, so when a whole round sits queued the chunks
+            // flush before the durable event that supersedes them; the
+            // event drain last loses nothing, because the cursor
+            // delivers everything past it whenever it runs.
             biased;
+            // Session errors: ephemeral - a lagged receiver misses only
+            // what the durable transcript shows as a turn with no reply.
+            received = recv_or_pending(&mut errors_rx) => {
+                match received {
+                    Ok(message) => {
+                        if !send_frame(&mut socket, &ErrorFrame::new(message, None)).await {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::debug!(skipped, "agent error receiver lagged; reports dropped");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => errors_rx = None,
+                }
+            }
             // Durable wait frames: the registry retains unresolved waits,
             // so a lagged receiver repairs by re-announcing them.
             received = recv_or_pending(&mut input_rx) => {
@@ -141,7 +161,7 @@ async fn run_socket(mut socket: WebSocket, state: AppState) {
                         &state,
                         &text,
                         &mut attached,
-                        (&mut events_rx, &mut deltas_rx, &mut input_rx),
+                        (&mut events_rx, &mut deltas_rx, &mut input_rx, &mut errors_rx),
                         &mut socket,
                     )
                     .await;
@@ -194,12 +214,13 @@ async fn run_socket(mut socket: WebSocket, state: AppState) {
     // log and re-announces unresolved waits.
 }
 
-/// The three channel subscriptions an attachment holds, passed as one
+/// The four channel subscriptions an attachment holds, passed as one
 /// bundle so [`handle_frame`] can replace them atomically on attach.
 type Subscriptions<'a> = (
     &'a mut Option<broadcast::Receiver<RuntimeEvent>>,
     &'a mut Option<broadcast::Receiver<AgentDelta>>,
     &'a mut Option<broadcast::Receiver<InputFrame>>,
+    &'a mut Option<broadcast::Receiver<String>>,
 );
 
 /// Handles one inbound text frame. A `false` return means the client is
@@ -340,12 +361,13 @@ async fn handle_open(
 async fn attach(
     session: Arc<AgentSession>,
     attached: &mut Option<Attached>,
-    (events_rx, deltas_rx, input_rx): Subscriptions<'_>,
+    (events_rx, deltas_rx, input_rx, errors_rx): Subscriptions<'_>,
     socket: &mut WebSocket,
 ) -> bool {
     *events_rx = Some(session.log.subscribe());
     *deltas_rx = Some(session.subscribe_deltas());
     *input_rx = Some(session.input_frames.subscribe());
+    *errors_rx = Some(session.subscribe_errors());
     let acknowledgment = AgentSessionFrame::new(session.id.clone(), session.agent.clone());
     let mut state = Attached {
         session,

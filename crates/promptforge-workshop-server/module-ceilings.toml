@@ -83,8 +83,11 @@
 # pins - the same one-responsibility protocol module, more frames. Grew
 # again by the shared agent-frame fixture test, asserting the same JSON
 # (tests/fixtures/agent-frames.json) the SPA suite asserts from its
-# side - same responsibility, cross-suite drift coverage.
-"protocol.rs" = 1157
+# side - same responsibility, cross-suite drift coverage. Grew by the
+# module-doc classification of the agent-session error push (ephemeral
+# on that socket): the frame type existed, this documents its new
+# delivery path.
+"protocol.rs" = 1165
 # New module: the ProgressHub-to-status-bar renderer and its anti-flicker
 # state machine (show delay, minimum visible time, detach poll). Grew by
 # the lapsed-deadline detach poll (a past wake instant re-armed would spin
@@ -115,13 +118,24 @@
 # builders; roughly a third of the count is its in-file unit tests.
 # Grew by the review round's client-less launch refusal
 # (LaunchRefusal::GatewayUnusable and its ordering test) - same
-# responsibility, a closed silent-fallback hole.
-"session_agents.rs" = 946
+# responsibility, a closed silent-fallback hole. Grew by the embedded
+# built-in chat agent (always-discovered `chat`, dir-file shadowing,
+# the agent_source resolver) and the session error broadcast feeding
+# the SPA's error frames (a failed model round the program survived;
+# a run that ended in error) - discovery and lifecycle reporting, the
+# module's existing responsibilities, plus their unit tests. Grew by
+# the review round's unreadable-shadow test: an existing chat.lua that
+# cannot be read surfaces its error instead of silently serving the
+# embedded source.
+"session_agents.rs" = 1060
 # New module: the /agents/ws socket - one select! loop owning the
 # socket, the launch/attach/input_response/cancel frame handling, the
 # cursor-driven durable event drain, and the reconnect replay-and-resend
-# path.
-"session_agents/socket.rs" = 397
+# path. Grew by the session-error arm: the fourth subscription,
+# forwarding the session's error reports as id-less error frames ahead
+# of the wait frames - the same forwarding responsibility, one more
+# family.
+"session_agents/socket.rs" = 419
 "session/gateway_chat.rs" = 417
 "session/gateway_chat/delta.rs" = 92
 "session/gateway_chat/tape.rs" = 135
