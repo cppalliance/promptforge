@@ -1,0 +1,14 @@
+[package]
+name = "ui-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "Build-script helper that bundles a crate's ui/ sources with esbuild into OUT_DIR"
+
+[dependencies]
+
+[lints]
+workspace = true

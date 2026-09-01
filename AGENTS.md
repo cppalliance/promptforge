@@ -22,7 +22,8 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 Two products ship from this workspace: `promptforge-gateway.exe`, the lean server, and `promptforge-workshop.exe`, the batteries-included desktop app that boots the gateway in-process. The binary is the feature set; features are not product variants.
 
 - A Cargo feature exists only to gate a real constraint: a toolchain requirement (`cuda`) or a heavy native build (`local`). Do not add features that merely describe product shape.
-- `config-ui` is a default gateway feature and always present in the desktop build. The UI `dist/` artifacts are checked into the repo and verified in `build.rs`, so plain gateway builds need no Node 22; only UI development does. Keep the checked-in artifact fresh: `npm run package` in the UI directory after UI edits, before committing.
+- `cargo build` builds the gateway (the workspace default member); `cargo build -p promptforge-workshop` builds the desktop app.
+- `config-ui` is a default gateway feature and always present in the desktop build. The UI bundles are built by the crate build scripts into `OUT_DIR` with esbuild; nothing UI-built is checked into the repo, so every build needs Node 22 and one `npm ci` per `ui/` folder.
 - Never make `workshop` a default gateway feature. The desktop exe is the everything-build; the gateway stays the lean one. That asymmetry is the product boundary.
 - Keep `cargo check -p promptforge-gateway --no-default-features` green. Nobody ships that build, but it is the cheap gate that catches optional-feature types leaking into core paths.
 
@@ -43,6 +44,6 @@ Every platform or external-bug workaround carries its upstream issue URL inline,
 
 ## Verify
 
-- Rust: `cargo test` at the workspace root.
+- Rust: `cargo test` at the workspace root (covers the gateway, the default member; CI runs the full workspace).
 - UI: `npm run typecheck && npm test` in `crates/promptforge-workshop-server/ui`.
 - Config UI: `npm run typecheck && npm run build && npm test` in `crates/promptforge-gateway-config-ui/ui` (the test suite imports the built `dist/app.js`, so build first).

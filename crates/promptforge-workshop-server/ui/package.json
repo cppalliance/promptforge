@@ -9,7 +9,6 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "package": "node build.mjs --package",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit && node check-layers.mjs",
     "test": "node --test \"test/**/*.mjs\" \"src/**/*.test.mjs\""

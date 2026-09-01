@@ -11,20 +11,11 @@ The PromptForge gateway config UI: the embedded SPA assets and the esbuild build
 
 ## UI development
 
-The UI is TypeScript under `ui/src/`, bundled by esbuild into `ui/dist/app.js`. The bundled `ui/dist/` artifact is checked into the repository, so building the crate needs no Node.js - only changing the UI does. To work on the UI, Node.js >= 22 is required: run `npm ci` in `ui/` once per checkout. After that, debug `cargo build` runs the UI build itself (the crate's `build.rs` prefers `ui/node_modules/.bin/esbuild` and falls back to `npx esbuild`, which may download esbuild on first use). Without a local `ui/node_modules`, builds serve the checked-in artifact verbatim. `ui/node_modules/` is gitignored.
+The UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `ui-build` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.
 
-Two workflows:
+The workflow: edit the TypeScript, then `cargo build`. The build script re-bundles whenever `ui/src/` or the static UI files change - a build-script-only rerun, no Rust recompile - and debug builds read the bundle from disk on every request. `npm run build` and `npm run watch` in `ui/` still write `ui/dist/` in place, which nothing serves: that tree exists for the jsdom tests, which import the built bundle.
 
-1. **Just cargo:** edit the TypeScript, then `cargo build`. The build script re-bundles whenever `ui/src/` or the static UI files change, and debug builds read `ui/dist/` from disk on every request.
-2. **esbuild watch:** run `npm run watch` in `ui/` in one terminal and the gateway in another. Edit, save, refresh the browser - no Rust recompile for UI changes.
-
-`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test` over the colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the shell mounts (run `npm run build` first; a debug `cargo build` also produces `dist/`).
-
-## Release artifact verification
-
-Release builds embed a verified, minified artifact: `build.rs` checks `ui/dist/manifest.json` (schema version, minified flag, a sha256 over every build input, and the dist file list) and, when the manifest is absent or stale against the current sources, produces the artifact itself by running `node build.mjs --package` in `ui/` (the same command as `npm run package`) before verifying and embedding. A single `cargo build --release` is sufficient, including after UI edits and after a debug build wiped `ui/dist/`; the build fails with instructions only when the artifact cannot be produced (for example Node.js or `ui/node_modules` missing) or still does not verify. Because the artifact is checked in, crates.io consumers and fresh checkouts skip esbuild entirely in both profiles.
-
-The verifier lives in `build/manifest.rs`, shared with the test build through `#[path]`; its input-hash algorithm is mirrored exactly in `ui/manifest.mjs`, and the two files must change together.
+`npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test` over the colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the shell mounts (run `npm run build` first).
 
 ## Minimum Rust Version
 

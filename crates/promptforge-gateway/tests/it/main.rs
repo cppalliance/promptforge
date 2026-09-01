@@ -10,7 +10,7 @@
 //! The suite is split into cohesive area modules (IT-007): shared scaffolding
 //! lives in [`support`]; tests are grouped by surface into [`chat`],
 //! [`embeddings`], [`rerank`], [`web_search`], [`queue`], [`profiles`], and
-//! [`local`]. The `cuda` module holds the feature-gated live CUDA proof.
+//! [`local`]. The `cuda` module holds the opt-in live CUDA proof.
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,7 +22,7 @@ mod support;
 #[cfg(feature = "local")]
 mod cache;
 mod chat;
-#[cfg(feature = "llama-cuda")]
+#[cfg(feature = "local")]
 mod cuda;
 mod embeddings;
 #[cfg(feature = "local")]

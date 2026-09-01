@@ -11,6 +11,8 @@ api_key = "server-secret-value"
 
 [local]
 cache_dir = "/tmp/pf-cache"
+llama_backend = "cuda-blackwell"
+llama_server_path = "/opt/llama/llama-server.exe"
 
 [[dominion]]
 id = "gpu0"

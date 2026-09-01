@@ -134,11 +134,11 @@ pub fn configure_options(archs: &[String], nvcc: &Path) -> Vec<String> {
     options
 }
 
-/// Builds the configure and build invocations compiling `submodule` into
+/// Builds the configure and build invocations compiling `source` into
 /// `build_dir` as a Release `llama-server`.
 #[must_use]
 pub fn plan(
-    submodule: &Path,
+    source: &Path,
     build_dir: &Path,
     cmake: &Path,
     archs: &[String],
@@ -146,7 +146,7 @@ pub fn plan(
 ) -> (CommandRequest, CommandRequest) {
     let mut configure_args = vec![
         "-S".to_string(),
-        submodule.display().to_string(),
+        source.display().to_string(),
         "-B".to_string(),
         build_dir.display().to_string(),
     ];
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn plan_emits_exact_invocations() {
         let (configure, build) = plan(
-            Path::new("ws/third_party/llama.cpp"),
+            Path::new("ws/llama.cpp"),
             Path::new("out/llama-build"),
             Path::new("cmake"),
             &["120a-real".to_string()],
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(configure.program, PathBuf::from("cmake"));
         assert_eq!(
             configure.args[0..4],
-            ["-S", "ws/third_party/llama.cpp", "-B", "out/llama-build"]
+            ["-S", "ws/llama.cpp", "-B", "out/llama-build"]
         );
         assert!(configure.args.contains(&"-DGGML_CUDA=ON".to_string()));
         assert_eq!(

@@ -72,11 +72,11 @@ pub(crate) fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{HeaderMap, Request, StatusCode, header};
     use axum::response::{IntoResponse, Response};
     use axum::routing::get;
-    use axum::Router;
     use tower::ServiceExt;
 
     use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};

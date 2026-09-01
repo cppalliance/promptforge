@@ -11,7 +11,10 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
+  # Forks have no Pages site for this guide; skip the whole deployment
+  # there. The deploy job follows through its `needs: build`.
   build:
+    if: github.repository == 'cppalliance/promptforge'
     runs-on: ubuntu-latest
     env:
       MDBOOK_VERSION: 0.4.44

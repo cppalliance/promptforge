@@ -34,13 +34,6 @@ mod session_agents;
 mod status;
 mod workspace;
 
-// The release artifact verifier lives outside src/ so build.rs shares it
-// through the same `#[path]` mechanism; included here only to run its
-// tests under `cargo test`.
-#[cfg(test)]
-#[path = "../build/manifest.rs"]
-mod build_manifest;
-
 /// Crate-internal test seams, re-exported to the integration-test binary.
 /// The socket behavior tests drive the status, catalog, and menu buses,
 /// the health flag, the backoff, and the heartbeat directly, so those

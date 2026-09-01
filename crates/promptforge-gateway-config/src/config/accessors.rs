@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use super::{
-    Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
+    Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LlamaBackend, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, ProfileConfig, Protocol, QueuePolicy, SearchProvider,
     Secret, ServerConfig, SttModelConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
     WorkshopConfig,
@@ -483,6 +483,20 @@ impl LocalConfig {
     #[must_use]
     pub fn cache_dir(&self) -> Option<&str> {
         self.cache_dir.as_deref()
+    }
+
+    /// Returns the configured `llama-server` backend selection
+    /// (`llama_backend`, default `auto`). Consulted only on Windows x86-64.
+    #[must_use]
+    pub fn llama_backend(&self) -> LlamaBackend {
+        self.llama_backend
+    }
+
+    /// Returns the explicit `llama-server` executable path
+    /// (`llama_server_path`), when set.
+    #[must_use]
+    pub fn llama_server_path(&self) -> Option<&str> {
+        self.llama_server_path.as_deref()
     }
 }
 impl DominionConfig {

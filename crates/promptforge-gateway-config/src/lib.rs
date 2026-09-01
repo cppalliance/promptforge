@@ -53,7 +53,7 @@ mod shadow;
 pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
     Capabilities, Config, DominionConfig, DominionKind, DraftTokenMax, DraftTokenMaxError,
-    EndpointConfig, LocalConfig, LocalModelConfig, ModelConfig, ModelKind,
+    EndpointConfig, LlamaBackend, LocalConfig, LocalModelConfig, ModelConfig, ModelKind,
     MultimodalProjectorConfig, ProfileConfig, Protocol, QueuePolicy, RECOMMENDED_STT_MODELS,
     RecommendedSttModel, SearchProvider, Secret, ServerConfig, SpeculationType, SpeculativeConfig,
     SttModelConfig, SttRole, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,

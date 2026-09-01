@@ -10,10 +10,10 @@ use tempfile::TempDir;
 use promptforge_progress::{EventState, ProgressHub};
 
 use super::archive::{extract_archive_with_progress, safe_archive_path};
+use super::assets::ArchiveRef;
 use super::digest::file_digest;
 use super::download::{hub_bearer_token, is_huggingface_https};
 use super::progress::{DownloadProgress, TreeProgress};
-#[cfg(not(llama_cuda_embedded))]
 use super::verified::write_marker;
 use super::verified::{VerifyOutcome, blob_marker_path, verify_blob, verify_blob_with_progress};
 use super::*;
@@ -402,19 +402,43 @@ fn install_is_valid_detects_marker_drift() {
     let tree_sha = super::tree_digest(&install).expect("tree digest");
     let marker = install.join(INSTALL_MARKER);
 
+    let archives = [ArchiveRef {
+        archive_name: "a.zip",
+        url: "https://example.invalid/a.zip",
+        sha256: &archive_sha,
+        archive_kind: ArchiveKind::Zip,
+    }];
+    let asset = ServerAsset {
+        os: "test",
+        arch: "test",
+        backend: None,
+        platform: "test",
+        archives: &archives,
+        executable_name: "llama-server",
+    };
+    let wrong_sha = "b".repeat(64);
+    let wrong_archives = [ArchiveRef {
+        sha256: &wrong_sha,
+        ..archives[0]
+    }];
+    let wrong_asset = ServerAsset {
+        archives: &wrong_archives,
+        ..asset
+    };
+
     std::fs::write(&marker, format!("{archive_sha}\n{tree_sha}\n")).expect("write marker");
-    assert!(ArtifactStore::install_is_valid(&install, &archive_sha).expect("valid"));
+    assert!(ArtifactStore::install_is_valid(&install, &asset).expect("valid"));
     // Wrong recorded archive digest.
-    assert!(!ArtifactStore::install_is_valid(&install, &"b".repeat(64)).expect("check"));
+    assert!(!ArtifactStore::install_is_valid(&install, &wrong_asset).expect("check"));
     // Corrupt recorded tree digest.
     std::fs::write(&marker, format!("{archive_sha}\n{}\n", "0".repeat(64))).expect("rewrite");
-    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+    assert!(!ArtifactStore::install_is_valid(&install, &asset).expect("check"));
     // Malformed marker with an unexpected trailing line.
     std::fs::write(&marker, format!("{archive_sha}\n{tree_sha}\nextra\n")).expect("rewrite");
-    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+    assert!(!ArtifactStore::install_is_valid(&install, &asset).expect("check"));
     // Missing marker.
     std::fs::remove_file(&marker).expect("remove marker");
-    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+    assert!(!ArtifactStore::install_is_valid(&install, &asset).expect("check"));
 }
 
 #[test]
@@ -1176,23 +1200,31 @@ fn ensure_model_with_progress_fails_the_verify_leaf_on_a_bad_pin() {
     );
 }
 
-#[cfg(not(llama_cuda_embedded))]
 #[test]
 #[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
 fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
     // A warm cache - the archive blob with a current verified marker and a
     // valid install tree - runs no download, hash, or extraction, but every
     // stage leaf still reaches its terminal event.
-    let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host asset");
+    // An explicit backend keeps the test deterministic on GPU machines:
+    // provisioning must not probe nvidia-smi.
+    let asset = server_asset(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        LlamaBackend::Vulkan,
+        None,
+    )
+    .expect("host asset");
     let temp = TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path()).expect("store");
 
-    let archive = temp.path().join("downloads").join(asset.archive_name);
+    let archive_ref = &asset.archives[0];
+    let archive = temp.path().join("downloads").join(archive_ref.archive_name);
     std::fs::create_dir_all(archive.parent().expect("downloads parent")).expect("mkdir downloads");
     std::fs::write(&archive, b"mock-archive-bytes").expect("write archive");
     // A marker hit trusts the recorded digest plus size and mtime without
     // re-hashing, so the fixture can record the pinned digest directly.
-    write_marker(&blob_marker_path(&archive), &archive, asset.sha256).expect("write marker");
+    write_marker(&blob_marker_path(&archive), &archive, archive_ref.sha256).expect("write marker");
 
     let install = temp
         .path()
@@ -1201,18 +1233,27 @@ fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
     std::fs::create_dir_all(&install).expect("mkdir install");
     std::fs::write(install.join(asset.executable_name), b"mock-server").expect("write executable");
     let tree_digest = super::digest::tree_digest(&install).expect("tree digest");
-    std::fs::write(
-        install.join(INSTALL_MARKER),
-        format!("{}\n{tree_digest}\n", asset.sha256),
-    )
-    .expect("write install marker");
+    let mut marker_text = String::new();
+    for archive_ref in asset.archives {
+        marker_text.push_str(archive_ref.sha256);
+        marker_text.push('\n');
+    }
+    marker_text.push_str(&tree_digest);
+    marker_text.push('\n');
+    std::fs::write(install.join(INSTALL_MARKER), marker_text).expect("write install marker");
 
     let hub = Arc::new(ProgressHub::new());
     let tree = hub.operation();
     let server = tree.register("llama-server", 1.0);
 
     let provisioned = store
-        .provision_llama_server_with_progress(Some(&server))
+        .provision_llama_server_with_progress(
+            &ServerSelection {
+                server_path: None,
+                backend: LlamaBackend::Vulkan,
+            },
+            Some(&server),
+        )
         .expect("warm-cache provision");
     assert_eq!(provisioned.executable, install.join(asset.executable_name));
     assert!(provisioned.path_prefix.is_empty());
@@ -1233,6 +1274,41 @@ fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
         nodes.iter().all(|node| node.fraction == 1.0),
         "a valid install completes every stage without work: {nodes:?}"
     );
+}
+
+#[test]
+fn llama_server_path_from_the_config_wins_over_the_download() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let exe = temp.path().join("llama-server.exe");
+    std::fs::write(&exe, b"external").expect("write external server");
+    let selection = ServerSelection {
+        server_path: Some(exe.to_str().expect("utf8 path")),
+        backend: LlamaBackend::Auto,
+    };
+    let provisioned = store
+        .provision_llama_server_with_progress(&selection, None)
+        .expect("an explicit server path provisions without a download");
+    assert_eq!(provisioned.executable, exe);
+    assert!(
+        !temp.path().join("downloads").exists(),
+        "no download ran for an explicit path"
+    );
+}
+
+#[test]
+fn a_missing_llama_server_path_is_an_error() {
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let missing = temp.path().join("absent.exe");
+    let selection = ServerSelection {
+        server_path: Some(missing.to_str().expect("utf8 path")),
+        backend: LlamaBackend::Auto,
+    };
+    let error = store
+        .provision_llama_server_with_progress(&selection, None)
+        .expect_err("a missing explicit server must fail");
+    assert!(error.to_string().contains("llama_server_path"), "{error}");
 }
 
 #[test]

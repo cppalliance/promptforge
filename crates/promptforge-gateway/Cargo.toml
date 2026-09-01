@@ -76,11 +76,10 @@ config-ui = ["dep:promptforge-gateway-config-ui"]
 # stays empty so headless gateway builds never pull whisper, CUDA, or the
 # Node UI build into the graph.
 workshop = ["dep:promptforge-stt", "dep:promptforge-workshop-server", "dep:open"]
-# Compile the pinned llama.cpp submodule into an embedded, host-native CUDA
-# llama-server bundle during the Cargo build. Windows x86-64 with a CUDA
-# Toolkit >= 12.8 only; a no-op on every other target.
-llama-cuda = ["local", "promptforge-gateway-local/llama-cuda"]
-workshop-cuda = ["workshop", "llama-cuda", "promptforge-stt/cuda"]
+# The whisper CUDA backend for speech-to-text. Needs the CUDA Toolkit on the
+# build machine. Local inference CUDA is a run-time concern instead: the
+# gateway downloads a CUDA llama-server build (see promptforge-gateway-local).
+workshop-cuda = ["workshop", "promptforge-stt/cuda"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.
@@ -95,6 +94,14 @@ tower.workspace = true
 
 [lints]
 workspace = true
+
+# Release packaging through cargo-dist (see dist-workspace.toml): the
+# headless Linux gateway also serves the workshop web pages, so the release
+# build turns the workshop feature on; the sample systemd unit rides in the
+# archive.
+[package.metadata.dist]
+features = ["workshop"]
+include = ["packaging/promptforge-gateway.service"]
 
 [package.metadata.cargo-semver-checks.lints]
 workspace = true

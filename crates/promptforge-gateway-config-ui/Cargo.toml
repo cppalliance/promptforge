@@ -16,19 +16,14 @@ promptforge-gateway-loopback.workspace = true
 rust-embed.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
-sha2.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tower.workspace = true
 
-# The build script's release path verifies the packaged UI artifact
-# (build/manifest.rs): serde_json parses the manifest, sha2 recomputes the
-# input hash. Both are repeated in dev-dependencies so the verifier's unit
-# tests (included into the library under cfg(test)) link.
+# The build script bundles the UI with esbuild into OUT_DIR through the
+# shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
-serde_json.workspace = true
-sha2.workspace = true
+ui-build = { path = "../ui-build" }
 
 [lints]
 workspace = true

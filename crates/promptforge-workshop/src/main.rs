@@ -49,6 +49,9 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 type GatewaySlot = Mutex<Option<GatewayHandle>>;
 
 fn main() -> ExitCode {
+    if std::env::args_os().any(|arg| arg == "--version") {
+        return print_version();
+    }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -56,6 +59,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `promptforge-workshop --version`: print the version and exit, without
+/// booting the gateway or opening a window. The release workflows smoke-test
+/// the installed package with it. The release build is GUI-subsystem on
+/// Windows, but a piped or inherited stdout still carries the line.
+fn print_version() -> ExitCode {
+    println!("promptforge-workshop {}", env!("CARGO_PKG_VERSION"));
+    ExitCode::SUCCESS
 }
 
 fn run() -> anyhow::Result<()> {

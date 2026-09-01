@@ -46,18 +46,19 @@ test-fixtures = []
 [dev-dependencies]
 promptforge-workshop-server = { path = ".", features = ["test-fixtures"] }
 tempfile.workspace = true
-sha2.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 tower.workspace = true
 
-# The build script's release path verifies the packaged UI artifact
-# (build/manifest.rs): serde_json parses the manifest, sha2 recomputes the
-# input hash. sha2 is repeated in dev-dependencies so the verifier's unit
-# tests (compiled into the library under cfg(test)) link.
+# The build script bundles the UI with esbuild into OUT_DIR through the
+# shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
-serde_json.workspace = true
-sha2.workspace = true
+ui-build = { path = "../ui-build" }
 
 [lints]
 workspace = true
+
+# Not released through cargo-dist; the gateway is the only disted package
+# (see dist-workspace.toml).
+[package.metadata.dist]
+dist = false

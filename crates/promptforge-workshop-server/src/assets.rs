@@ -6,12 +6,12 @@ use axum::response::{IntoResponse, Response};
 
 use crate::error::AppError;
 
-/// The workshop UI assets under `ui/dist/`, written by the crate's build
-/// script (the esbuild bundle plus copies of the static files). Debug builds
-/// read the files from disk at request time, so UI edits need no Rust
+/// The workshop UI assets under `$OUT_DIR/ui-dist/`, written by the crate's
+/// build script (the esbuild bundle plus copies of the static files). Debug
+/// builds read the files from disk at request time, so UI edits need no Rust
 /// recompile; release builds embed them into the binary.
 #[derive(rust_embed::Embed)]
-#[folder = "ui/dist/"]
+#[folder = "$OUT_DIR/ui-dist/"]
 pub(crate) struct UiAssets;
 
 /// Serves one UI asset from [`UiAssets`] with the given content type.
@@ -44,13 +44,13 @@ mod tests {
 
     // These pin traversal parity between the two build profiles: release
     // misses the embed map by construction, while a debug build reads
-    // `ui/dist/` from disk at request time and must refuse names resolving
-    // outside it. That guarantee covers request-supplied names only:
-    // rust-embed 8.12.0 deliberately still serves an out-of-root symlink
-    // planted inside `ui/dist/`, a bypass outside the parity pinned here.
-    // Each target is this crate's own manifest - a file that exists on
-    // disk - so the debug path can only fail on containment, never on a
-    // missing file.
+    // `$OUT_DIR/ui-dist/` from disk at request time and must refuse names
+    // resolving outside it. That guarantee covers request-supplied names
+    // only: rust-embed 8.12.0 deliberately still serves an out-of-root
+    // symlink planted inside the asset root, a bypass outside the parity
+    // pinned here. The absolute target names this crate's own manifest - a
+    // file that exists on disk - so it can only fail on containment; the
+    // relative targets may also fail on absence.
 
     #[test]
     fn relative_traversal_answers_not_found() {

@@ -12,6 +12,7 @@ use promptforge_gateway::{ProfileName, ServeOptions, run};
 
 const USAGE: &str = concat!(
     "usage: promptforge-gateway serve [config.toml] [--profile NAME]\n",
+    "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable",
 );
 
@@ -30,6 +31,10 @@ fn main() -> ExitCode {
         Ok(options) => options,
         Err(ParseError::Help) => {
             println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Err(ParseError::Version) => {
+            println!("promptforge-gateway {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Err(ParseError::Usage(message)) => {
@@ -63,6 +68,8 @@ fn print_error_chain(error: &dyn std::error::Error) {
 enum ParseError {
     /// `-h`/`--help` was requested.
     Help,
+    /// `--version` was requested.
+    Version,
     /// The arguments were invalid; the string is the operator-facing reason.
     Usage(String),
 }
@@ -79,6 +86,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
 
     match args.next() {
         Some(command) if command == *"serve" => {}
+        Some(flag) if flag == *"--version" => return Err(ParseError::Version),
         Some(other) => {
             return Err(ParseError::Usage(format!(
                 "unknown command {}",
@@ -222,6 +230,12 @@ mod tests {
     fn help_is_recognized() {
         let error = parse_args(args(&["serve", "--help"])).unwrap_err();
         assert_eq!(error, ParseError::Help);
+    }
+
+    #[test]
+    fn version_is_recognized() {
+        let error = parse_args(args(&["--version"])).unwrap_err();
+        assert_eq!(error, ParseError::Version);
     }
 
     #[test]

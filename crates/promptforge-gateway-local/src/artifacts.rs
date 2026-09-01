@@ -3,9 +3,6 @@
 //! Downloads land under the operator cache (`~/.promptforge` by default). The
 //! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
-//! A `llama-cuda` Windows x86-64 build instead stages the embedded CUDA bundle
-//! produced by the build script (see `cuda_bundle`) and never falls back to
-//! the Vulkan archive.
 //!
 //! The module is split into cohesive units: `assets` (release table),
 //! `digest` (hashing + pin validation), `archive` (extraction),
@@ -14,12 +11,9 @@
 //! (verified-digest markers). This file owns `ArtifactStore`, the
 //! orchestration that ties them together.
 
-#[cfg(any(not(llama_cuda_embedded), test))]
 mod archive;
 mod assets;
 mod confine;
-#[cfg(any(llama_cuda_embedded, test))]
-pub mod cuda_bundle;
 mod digest;
 mod download;
 mod progress;
@@ -30,6 +24,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use promptforge_gateway_config::LlamaBackend;
 use promptforge_progress::ProgressHandle;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
@@ -38,16 +33,11 @@ use crate::error::LocalError;
 
 #[cfg(test)]
 use archive::extract_archive;
-#[cfg(not(llama_cuda_embedded))]
 use archive::extract_archive_with_progress;
-#[cfg(any(not(llama_cuda_embedded), test))]
 use archive::find_executable;
-#[cfg(not(llama_cuda_embedded))]
 use archive::require_executable;
-#[cfg(any(not(llama_cuda_embedded), test))]
 use assets::ArchiveKind;
 use assets::FileAsset;
-#[cfg(not(llama_cuda_embedded))]
 use assets::{LLAMA_RELEASE, ServerAsset, server_asset};
 use confine::validate_tree_path;
 use digest::{file_digest_with_progress, tree_digest};
@@ -91,9 +81,65 @@ type Result<T> = std::result::Result<T, LocalError>;
 pub(crate) struct ProvisionedServer {
     /// Absolute path of the `llama-server` executable.
     pub(crate) executable: PathBuf,
-    /// Child `PATH` prefix: the staged bundle directory, then the CUDA
-    /// Toolkit runtime directory. Empty for archive-installed servers.
+    /// Child `PATH` prefix. Empty: every managed install ships its runtime
+    /// DLLs beside the executable.
     pub(crate) path_prefix: Vec<PathBuf>,
+}
+
+/// How the `llama-server` executable is chosen, from the `[local]` config
+/// section.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ServerSelection<'a> {
+    /// `llama_server_path`: an explicit executable path that wins over the
+    /// `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed
+    /// download.
+    pub(crate) server_path: Option<&'a str>,
+    /// `llama_backend`: which build to download on Windows x86-64.
+    pub(crate) backend: LlamaBackend,
+}
+
+/// Validates an operator-supplied `llama-server` path (the config key or
+/// the environment variable) and returns it as the provisioned server. A
+/// set-but-missing path is an operator error and fails loud rather than
+/// falling through to the download.
+fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
+    let path = expand_tilde(value)?;
+    if !path.is_file() {
+        return Err(LocalError::InvalidSource {
+            value: path.display().to_string(),
+            reason: format!("{source} does not name an existing file"),
+        });
+    }
+    Ok(ProvisionedServer {
+        executable: path,
+        path_prefix: Vec::new(),
+    })
+}
+
+/// Queries the host's NVIDIA compute capabilities through `nvidia-smi`.
+/// Returns `None` when the driver or the tool is absent or fails; the
+/// caller falls back to the Vulkan build.
+fn nvidia_compute_caps() -> Option<Vec<(u64, u64)>> {
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=compute_cap", "--format=csv,noheader"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let caps: Vec<(u64, u64)> = stdout
+        .lines()
+        .filter_map(|line| {
+            let (major, minor) = line.trim().split_once('.')?;
+            Some((major.trim().parse().ok()?, minor.trim().parse().ok()?))
+        })
+        .collect();
+    if caps.is_empty() { None } else { Some(caps) }
 }
 
 /// Cache root plus HTTP client for provisioning local inference artifacts.
@@ -120,41 +166,51 @@ impl ArtifactStore {
         })
     }
 
-    /// Ensures the pinned GPU-capable `llama-server` for this host is installed,
-    /// reporting the download, verify, and extract stages into child leaves of
-    /// `progress`, when given.
-    ///
-    /// A CUDA-enabled Windows x86-64 build stages its embedded CUDA bundle and
-    /// propagates any validation or staging failure; it never silently falls
-    /// back to the Vulkan archive. Every other build keeps the archive path.
+    /// Resolves the `llama-server` executable for this host: the configured
+    /// `llama_server_path` first, then the `PROMPTFORGE_LLAMA_SERVER`
+    /// environment variable, then the managed download of the pinned build
+    /// for the selected backend, reporting the download, verify, and extract
+    /// stages into child leaves of `progress`, when given.
     ///
     /// # Errors
-    /// Returns a [`LocalError`] when the platform is unsupported or provisioning fails.
+    /// Returns a [`LocalError`] when an explicit path is invalid, the
+    /// platform is unsupported, or provisioning fails.
     pub(crate) fn provision_llama_server_with_progress(
         &self,
+        selection: &ServerSelection<'_>,
         progress: Option<&ProgressHandle>,
     ) -> Result<ProvisionedServer> {
-        #[cfg(llama_cuda_embedded)]
-        {
-            let staged = cuda_bundle::stage_embedded(&self.cache)?;
-            // The embedded bundle stages no download/verify/extract work.
-            if let Some(handle) = progress {
-                handle.complete();
-            }
-            Ok(ProvisionedServer {
-                executable: staged.executable,
-                path_prefix: staged.path_prefix,
-            })
+        if let Some(path) = selection.server_path {
+            return external_server(path, "[local] llama_server_path");
         }
-        #[cfg(not(llama_cuda_embedded))]
-        {
-            let asset = server_asset(std::env::consts::OS, std::env::consts::ARCH)?;
-            let executable = self.provision_server(asset, progress)?;
-            Ok(ProvisionedServer {
-                executable,
-                path_prefix: Vec::new(),
-            })
+        if let Some(value) = std::env::var_os("PROMPTFORGE_LLAMA_SERVER") {
+            return external_server(
+                &value.to_string_lossy(),
+                "the PROMPTFORGE_LLAMA_SERVER environment variable",
+            );
         }
+        // The GPU probe matters only for the Windows x86-64 `auto` pick;
+        // every other platform and every explicit backend already knows its
+        // row.
+        let gpus = if std::env::consts::OS == "windows"
+            && std::env::consts::ARCH == "x86_64"
+            && selection.backend == LlamaBackend::Auto
+        {
+            nvidia_compute_caps()
+        } else {
+            None
+        };
+        let asset = server_asset(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            selection.backend,
+            gpus.as_deref(),
+        )?;
+        let executable = self.provision_server(asset, progress)?;
+        Ok(ProvisionedServer {
+            executable,
+            path_prefix: Vec::new(),
+        })
     }
 
     /// Ensures a GGUF (or other blob) from `source` is available locally.
@@ -248,7 +304,6 @@ impl ArtifactStore {
         Ok(path)
     }
 
-    #[cfg(not(llama_cuda_embedded))]
     fn provision_server(
         &self,
         asset: ServerAsset<'_>,
@@ -257,50 +312,76 @@ impl ArtifactStore {
         let download = progress.map(|handle| handle.child("download", 4.0));
         let verify = progress.map(|handle| handle.child("verify", 1.0));
         let extract = progress.map(|handle| handle.child("extract", 1.0));
-        let archive = self.cache_path(Path::new("downloads").join(asset.archive_name))?;
-        let archive_asset = FileAsset {
-            name: asset.archive_name,
-            url: asset.url,
-            sha256: Some(asset.sha256),
-        };
-        self.ensure_blob_with_progress(
-            archive_asset,
-            &archive,
-            download.as_ref(),
-            verify.as_ref(),
-        )?;
+
+        // Download and verify every archive the asset needs. When a download
+        // fails and an older install is already in the cache, use the cached
+        // one with a warning instead of failing to start.
+        let mut downloaded = Vec::new();
+        for archive_ref in asset.archives {
+            let archive = self.cache_path(Path::new("downloads").join(archive_ref.archive_name))?;
+            let file_asset = FileAsset {
+                name: archive_ref.archive_name,
+                url: archive_ref.url,
+                sha256: Some(archive_ref.sha256),
+            };
+            if let Err(error) = self.ensure_blob_with_progress(
+                file_asset,
+                &archive,
+                download.as_ref(),
+                verify.as_ref(),
+            ) {
+                if let Some(executable) = self.cached_install_fallback(asset.executable_name)? {
+                    tracing::warn!(
+                        path = %executable.display(),
+                        "llama-server download failed ({error}); using the cached install"
+                    );
+                    return Ok(executable);
+                }
+                return Err(error);
+            }
+            downloaded.push(archive);
+        }
 
         let install = self.cache_path(
             Path::new("llama.cpp").join(format!("{LLAMA_RELEASE}-{}", asset.platform)),
         )?;
         let _lock = self.lock_artifact(&install)?;
         validate_cache_path(&self.cache, &install)?;
-        if Self::install_is_valid(&install, asset.sha256)? {
+        if Self::install_is_valid(&install, &asset)? {
             // A valid install skips extraction entirely.
             if let Some(handle) = &extract {
                 handle.complete();
             }
-            return find_executable(&install, asset.executable_name, asset.archive_name);
+            return find_executable(&install, asset.executable_name, asset.platform);
         }
-        self.ensure_blob(archive_asset, &archive)?;
-        validate_cache_path(&self.cache, &archive)?;
 
         remove_cache_entry(&self.cache, &install)?;
         let staging = part_path(&install);
         remove_cache_entry(&self.cache, &staging)?;
         ensure_cache_directory(&self.cache, &staging)?;
 
-        if let Err(error) =
-            extract_archive_with_progress(&archive, &staging, asset.archive_kind, extract.as_ref())
-        {
-            let _ignored = fs::remove_dir_all(&staging);
-            return Err(error);
+        // Every archive extracts into the same install folder (the generic
+        // CUDA asset pairs the server zip with its runtime zip).
+        for (archive, archive_ref) in downloaded.iter().zip(asset.archives.iter()) {
+            validate_cache_path(&self.cache, archive)?;
+            if let Err(error) = extract_archive_with_progress(
+                archive,
+                &staging,
+                archive_ref.archive_kind,
+                extract.as_ref(),
+            ) {
+                let _ignored = fs::remove_dir_all(&staging);
+                return Err(error);
+            }
         }
 
-        let staged_executable =
-            find_executable(&staging, asset.executable_name, asset.archive_name)?;
-        if asset.archive_kind == ArchiveKind::TarGz {
-            require_executable(&staged_executable, asset.archive_name)?;
+        let staged_executable = find_executable(&staging, asset.executable_name, asset.platform)?;
+        if asset
+            .archives
+            .iter()
+            .any(|archive_ref| archive_ref.archive_kind == ArchiveKind::TarGz)
+        {
+            require_executable(&staged_executable, asset.platform)?;
         }
         let relative_executable =
             staged_executable
@@ -313,15 +394,59 @@ impl ArtifactStore {
         let tree_sha256 = tree_digest(&staging)?;
         let marker = staging.join(INSTALL_MARKER);
         validate_cache_path(&self.cache, &marker)?;
-        write_synced(
-            &marker,
-            format!("{}\n{tree_sha256}\n", asset.sha256).as_bytes(),
-        )?;
+        // The marker records each archive's pin in table order, then the
+        // tree digest.
+        let mut marker_text = String::new();
+        for archive_ref in asset.archives {
+            marker_text.push_str(archive_ref.sha256);
+            marker_text.push('\n');
+        }
+        marker_text.push_str(&tree_sha256);
+        marker_text.push('\n');
+        write_synced(&marker, marker_text.as_bytes())?;
         rename_confined(&self.cache, &staging, &install)?;
         Ok(install.join(relative_executable))
     }
 
-    fn install_is_valid(install: &Path, archive_sha256: &str) -> Result<bool> {
+    /// Finds a usable older `llama-server` install in the cache: any install
+    /// directory whose own marker still verifies against its tree. Used when
+    /// a download fails, so a version bump plus a dead network does not stop
+    /// startup.
+    fn cached_install_fallback(&self, executable_name: &str) -> Result<Option<PathBuf>> {
+        let installs_dir = self.cache_path(Path::new("llama.cpp").to_path_buf())?;
+        let entries = match fs::read_dir(&installs_dir) {
+            Ok(entries) => entries,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => {
+                return Err(LocalError::Io {
+                    operation: "list llama.cpp installs",
+                    path: installs_dir,
+                    source,
+                });
+            }
+        };
+        for entry in entries {
+            let install = entry
+                .map_err(|source| LocalError::Io {
+                    operation: "read llama.cpp install entry",
+                    path: installs_dir.clone(),
+                    source,
+                })?
+                .path();
+            if !install.is_dir() || !Self::install_is_self_valid(&install)? {
+                continue;
+            }
+            if let Ok(executable) = find_executable(&install, executable_name, "cached install") {
+                return Ok(Some(executable));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Marker self-validity for the fallback scan: the recorded tree digest
+    /// (the marker's last line) still matches the install tree. The archive
+    /// pins above it are provenance for a build that is no longer the pin.
+    fn install_is_self_valid(install: &Path) -> Result<bool> {
         if !install.is_dir() {
             return Ok(false);
         }
@@ -338,22 +463,43 @@ impl ArtifactStore {
                 });
             }
         };
-        let mut lines = marker_text.lines();
-        let Some(recorded_archive) = lines.next() else {
+        let lines: Vec<&str> = marker_text.lines().collect();
+        let Some(recorded_tree) = lines.last() else {
             return Ok(false);
         };
-        let Some(recorded_tree) = lines.next() else {
-            return Ok(false);
-        };
-        if lines.next().is_some() || recorded_archive != archive_sha256 {
+        if lines.len() < 2 {
             return Ok(false);
         }
-        Ok(tree_digest(install)? == recorded_tree)
+        Ok(tree_digest(install)? == *recorded_tree)
     }
 
-    #[cfg(not(llama_cuda_embedded))]
-    fn ensure_blob(&self, asset: FileAsset<'_>, destination: &Path) -> Result<()> {
-        self.ensure_blob_with_progress(asset, destination, None, None)
+    fn install_is_valid(install: &Path, asset: &ServerAsset<'_>) -> Result<bool> {
+        if !install.is_dir() {
+            return Ok(false);
+        }
+        let marker = install.join(INSTALL_MARKER);
+        validate_tree_path(install, &marker)?;
+        let marker_text = match fs::read_to_string(&marker) {
+            Ok(text) => text,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(source) => {
+                return Err(LocalError::Io {
+                    operation: "read install marker",
+                    path: marker,
+                    source,
+                });
+            }
+        };
+        let lines: Vec<&str> = marker_text.lines().collect();
+        if lines.len() != asset.archives.len() + 1 {
+            return Ok(false);
+        }
+        for (recorded, archive_ref) in lines.iter().zip(asset.archives.iter()) {
+            if *recorded != archive_ref.sha256 {
+                return Ok(false);
+            }
+        }
+        Ok(tree_digest(install)? == lines[asset.archives.len()])
     }
 
     /// `ensure_blob` variant that reports the download and verify stages

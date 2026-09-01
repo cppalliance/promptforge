@@ -1,0 +1,275 @@
+name: Release Workshop
+
+# Builds the PromptForge Workshop desktop installers for Windows, macOS
+# (ARM and Intel), and Linux on a promptforge-workshop-v* tag, tests each
+# installer on a clean machine of the same kind, and publishes one GitHub
+# Release with all five installers and a SHA256SUMS file. A failed test
+# means no release.
+#
+# Signing is deliberately absent (nothing is signed today); the Windows and
+# macOS build jobs carry SIGNING markers where the certificate steps go.
+
+on:
+  push:
+    tags:
+      - "promptforge-workshop-v**[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-workshop-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # GitHub expressions have no .replace(); shell steps extract the version.
+  TAG_NAME: ${{ github.ref_name }}
+  # The repo's rust-toolchain.toml pins the MSRV for local builds; CI tests
+  # the current stable.
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runs-on: windows-latest
+            # Default features: the whisper CUDA backend, which needs the
+            # CUDA toolkit to compile (no GPU needed).
+            args: ""
+          - name: macos-arm
+            runs-on: macos-latest
+            args: "--target aarch64-apple-darwin --no-default-features"
+          - name: macos-intel
+            runs-on: macos-latest
+            args: "--target x86_64-apple-darwin --no-default-features"
+          - name: linux
+            runs-on: ubuntu-22.04
+            args: "--no-default-features"
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Add the Rust target
+        if: matrix.name != 'windows' && matrix.name != 'linux'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-workshop-server/ui
+        run: npm ci
+
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
+      # Jimver/cuda-toolkit's local installer crashes on windows-2022 with
+      # exit code 0xE0FF0009 (issues 382, 395, 436). The workaround from
+      # those issues: run the NVIDIA network installer directly.
+      - name: Install the CUDA toolkit
+        if: matrix.name == 'windows'
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          version="13.2.0"
+          short="13.2"
+          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
+          echo "Downloading CUDA $version network installer..."
+          curl -Lo cuda_installer.exe "$url"
+          echo "Installing CUDA $version (this takes ~20 minutes)..."
+          ./cuda_installer.exe -s -n
+          rm -f cuda_installer.exe
+          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
+          if [ ! -f "$cuda_path/bin/nvcc.exe" ]; then
+            echo "nvcc not found at $cuda_path, searching..."
+            find "C:/Program Files/NVIDIA GPU Computing Toolkit" -name nvcc.exe 2>/dev/null || true
+            exit 1
+          fi
+          echo "CUDA installed at $cuda_path"
+          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
+          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
+          echo "$cuda_path/bin" >> "$GITHUB_PATH"
+
+      - name: Install Tauri system packages
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # SIGNING (Windows): import the Authenticode certificate here once an
+      # EV/OV cert exists; tauri-action picks it up from the machine store.
+      # SIGNING (macOS): import the Developer ID certificate and pass
+      # APPLE_CERTIFICATE/APPLE_SIGNING_IDENTITY to tauri-action's env.
+
+      - name: Build the app
+        id: build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: crates/promptforge-workshop
+          args: ${{ matrix.args }}
+
+      - name: The built version matches the tag
+        shell: bash
+        run: |
+          version="${TAG_NAME#promptforge-workshop-v}"
+          built="${{ steps.build.outputs.appVersion }}"
+          if [ "$built" != "$version" ]; then
+            echo "tag version $version does not match the crate version $built"
+            exit 1
+          fi
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: workshop-${{ matrix.name }}
+          path: |
+            target/**/bundle/nsis/*.exe
+            target/**/bundle/dmg/*.dmg
+            target/**/bundle/deb/*.deb
+            target/**/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runs-on: windows-latest
+          - name: macos-arm
+            runs-on: macos-latest
+          - name: macos-intel
+            runs-on: macos-15-intel
+          - name: linux
+            runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Download the installers
+        uses: actions/download-artifact@v4
+        with:
+          name: workshop-${{ matrix.name }}
+          path: dist
+
+      - name: Install and check (Windows)
+        if: matrix.name == 'windows'
+        shell: powershell
+        run: |
+          $setup = Get-ChildItem -Recurse dist -Filter *-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw "no NSIS installer in the artifact" }
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $exe = @("$env:LOCALAPPDATA\Programs", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
+            ForEach-Object { Get-ChildItem $_ -Recurse -Filter PromptForge.exe -ErrorAction SilentlyContinue } |
+            Select-Object -First 1
+          if (-not $exe) { throw "PromptForge.exe not found after install" }
+          $output = & $exe.FullName --version | Out-String
+          $version = $env:TAG_NAME -replace '^promptforge-workshop-v', ''
+          if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
+          $output
+          Start-Process $exe.FullName
+          $page = $null
+          foreach ($i in 1..60) {
+            try { $page = Invoke-WebRequest -Uri "http://127.0.0.1:7910/" -UseBasicParsing -TimeoutSec 2; break } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $page) { throw "the workshop page never answered" }
+          if ($page.Content -notmatch "<title>PromptForge</title>") { throw "unexpected workshop page content" }
+          $js = Invoke-WebRequest -Uri "http://127.0.0.1:7910/app.js" -UseBasicParsing
+          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
+          if ($js.RawContentLength -gt 1800000) { throw "app.js is the unminified bundle ($($js.RawContentLength) bytes)" }
+          Get-Process PromptForge -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Install and check (macOS)
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
+        run: |
+          set -e
+          dmg=$(find dist -name "*.dmg" | head -1)
+          [ -n "$dmg" ] || { echo "no DMG in the artifact"; exit 1; }
+          hdiutil attach "$dmg" -nobrowse -quiet
+          cp -R "/Volumes/PromptForge/PromptForge.app" /tmp/PromptForge.app
+          hdiutil detach "/Volumes/PromptForge" -quiet
+          bin=$(find /tmp/PromptForge.app/Contents/MacOS -type f | head -1)
+          version="${TAG_NAME#promptforge-workshop-v}"
+          output=$("$bin" --version)
+          echo "$output" | grep -F "$version"
+          "$bin" &
+          app_pid=$!
+          trap 'kill $app_pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:7910/ -o /tmp/workshop.html; then break; fi
+            sleep 1
+          done
+          grep -F "<title>PromptForge</title>" /tmp/workshop.html
+          size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
+          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
+          [ "$size" -lt 1800000 ] || { echo "app.js is the unminified bundle ($size bytes)"; exit 1; }
+
+      - name: Install and check (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          deb=$(find dist -name "*.deb" | head -1)
+          [ -n "$deb" ] || { echo "no deb in the artifact"; exit 1; }
+          sudo dpkg -i "$deb" || sudo apt-get install -f -y
+          package=$(dpkg-deb -f "$deb" Package)
+          bin=$(dpkg -L "$package" | grep -E '/usr/bin/[^/]+$' | head -1)
+          [ -n "$bin" ] || { echo "no binary in the deb"; exit 1; }
+          version="${TAG_NAME#promptforge-workshop-v}"
+          output=$("$bin" --version)
+          echo "$output" | grep -F "$version"
+          # The AppImage is not installed; check it exists and runs --version.
+          appimage=$(find dist -name "*.AppImage" | head -1)
+          [ -n "$appimage" ] || { echo "no AppImage in the artifact"; exit 1; }
+          chmod +x "$appimage"
+          "$appimage" --version | grep -F "$version"
+          xvfb-run -a "$bin" &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:7910/ -o /tmp/workshop.html; then break; fi
+            sleep 1
+          done
+          grep -F "<title>PromptForge</title>" /tmp/workshop.html
+          size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
+          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
+          [ "$size" -lt 1800000 ] || { echo "app.js is the unminified bundle ($size bytes)"; exit 1; }
+          pkill -f "$(basename "$bin")" || true
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download every installer's artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: workshop-*
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          shopt -s globstar nullglob
+          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: PromptForge Workshop ${{ github.ref_name }}
+          files: |
+            dist/**/*.exe
+            dist/**/*.dmg
+            dist/**/*.deb
+            dist/**/*.AppImage
+            dist/SHA256SUMS

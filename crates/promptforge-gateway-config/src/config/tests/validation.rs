@@ -356,6 +356,53 @@ n_predict = 256
 }
 
 #[test]
+fn parses_local_backend_selection_and_server_path() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+llama_backend = "cuda-blackwell"
+llama_server_path = "/opt/llama/llama-server.exe"
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert_eq!(config.local.llama_backend(), LlamaBackend::CudaBlackwell);
+    assert_eq!(
+        config.local.llama_server_path(),
+        Some("/opt/llama/llama-server.exe")
+    );
+}
+
+#[test]
+fn local_backend_defaults_to_auto_with_no_path_override() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert_eq!(config.local.llama_backend(), LlamaBackend::Auto);
+    assert!(config.local.llama_server_path().is_none());
+}
+
+#[test]
+fn rejects_an_unknown_local_backend() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+llama_backend = "tensorrt"
+"#;
+    assert!(Config::from_toml_str(toml).is_err());
+}
+
+#[test]
 fn rejects_duplicate_name_across_remote_and_local() {
     let toml = r#"
 config-version = 2

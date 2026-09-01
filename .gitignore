@@ -8,10 +8,13 @@
 *.env
 # Voice test fixtures, downloaded out of band (see design-promptforge-workshop-1.md).
 /crates/promptforge-transcribe/tests/fixtures/
-# UI build pipeline: npm install target (dist/ is checked in so packaged
-# crates and Node-less checkouts build from the prebuilt artifact).
+# UI build pipeline: npm install target and the esbuild output. The build
+# scripts write the bundle to OUT_DIR; `npm run build`/`--watch` still write
+# dist/ in place for the jsdom tests, and none of it is tracked.
 /crates/promptforge-workshop-server/ui/node_modules/
 /crates/promptforge-gateway-config-ui/ui/node_modules/
+/crates/promptforge-workshop-server/ui/dist/
+/crates/promptforge-gateway-config-ui/ui/dist/
 # Workshop tape, written to the cwd when the server runs from the repo root.
 /tape.jsonl
 # tauri-build's generated ACL schemas, regenerated on every workshop build.
