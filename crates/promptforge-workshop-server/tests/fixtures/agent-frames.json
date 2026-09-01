@@ -1,0 +1,71 @@
+{
+  "agents": { "type": "agents", "agents": ["chat", "research"] },
+  "agent_session": { "type": "agent_session", "session": "a1b2", "agent": "chat" },
+  "agent_event_minimal": {
+    "type": "agent_event",
+    "index": 3,
+    "event": {
+      "kind": "user_message",
+      "section": "chat",
+      "chain_id": 0,
+      "depth": 0,
+      "turn": 0,
+      "content": "hi"
+    }
+  },
+  "agent_event_stamped": {
+    "type": "agent_event",
+    "index": 4,
+    "reply": 1,
+    "event": {
+      "kind": "agent_message",
+      "section": "chat",
+      "chain_id": 1,
+      "depth": 0,
+      "turn": 2,
+      "content": "hello",
+      "model": "llama-3",
+      "finish_reason": "stop",
+      "metrics": {
+        "usage": {
+          "prompt_tokens": 7,
+          "completion_tokens": 3,
+          "total_tokens": 10,
+          "cached_tokens": 2,
+          "reasoning_tokens": 1
+        },
+        "llama": {
+          "prompt_n": 7,
+          "prompt_ms": 12.5,
+          "prompt_per_second": 560.0,
+          "predicted_n": 3,
+          "predicted_ms": 30.5,
+          "predicted_per_second": 98.5,
+          "draft_n": 4,
+          "draft_n_accepted": 2
+        },
+        "vllm": {
+          "time_to_first_token_ms": 8.5,
+          "generation_time_ms": 22.5,
+          "queue_time_ms": 1.5,
+          "mean_itl_ms": 7.5,
+          "tokens_per_second": 133.5
+        },
+        "client": { "ttft_ms": 9.5, "mean_itl_ms": 8.25, "e2e_ms": 41.5 }
+      }
+    }
+  },
+  "agent_delta_text": { "type": "agent_delta", "kind": "text", "content": "po", "reply": 2 },
+  "agent_delta_reasoning": {
+    "type": "agent_delta",
+    "kind": "reasoning",
+    "content": "hmm",
+    "reply": 2
+  },
+  "input_required": { "type": "input_required", "token": "a1b2c3" },
+  "input_cancelled": { "type": "input_cancelled", "token": "a1b2c3" },
+  "input_response": { "type": "input_response", "token": "a1b2c3", "text": "two words" },
+  "launch": { "type": "launch", "agent": "chat" },
+  "attach": { "type": "attach", "session": "a1b2" },
+  "cancel": { "type": "cancel" }
+}
