@@ -44,6 +44,22 @@
 //! No inbound frame is pushed by the server, so none takes a delivery
 //! classification; the reply frames they trigger are classified below.
 //!
+//! # Agent-session input frames
+//!
+//! An agent session asks its operator for input through the Workshop's
+//! `user_input` tool. Three frames carry that conversation: the server
+//! pushes [`InputFrame::Required`] when a wait opens and
+//! [`InputFrame::Cancelled`] when one dies unresolved, and the client
+//! answers with an `input_response` frame parsed as [`InputResponse`].
+//! Both pushed frames are durable: the wait registry retains every
+//! unresolved wait and the session resends it on reconnect, so a push
+//! lost to a dead socket is repaired by the resent set - a live wait
+//! reappears, and a stale prompt is dropped because its token is absent.
+//! Cancellation is an explicit outcome, never silence: every path out of
+//! an unresolved wait pushes `input_cancelled` for its token. The session
+//! loops that route these frames arrive with agent sessions; the shapes
+//! and classification are pinned here first.
+//!
 //! # Delivery contract
 //!
 //! Every frame the server pushes carries exactly one of two delivery
@@ -100,7 +116,7 @@
 //! freely, demuxed by the echoed `id`. The interleaving changes nothing
 //! about the durable classification of the chat reply frames above.
 //!
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use promptforge_gateway_protocol::wire::ChatRequest;
 
@@ -122,6 +138,53 @@ pub(crate) fn parse_chat_request(
     let mut request: ChatRequest = serde_json::from_value(value)?;
     request.rest.clear();
     Ok(request)
+}
+
+// --- Agent-session input frames -------------------------------------------
+
+/// A pushed user-input lifecycle frame on an agent session's socket.
+///
+/// `{"type":"input_required","token":"..."}` announces an open wait: the
+/// SPA pins its input box to the token and answers with an
+/// `input_response` frame. `{"type":"input_cancelled","token":"..."}`
+/// announces a wait that died unresolved, so the SPA never holds a
+/// prompt against a dead token - cancellation is an outcome on the wire,
+/// never silence.
+///
+/// Delivery: durable - the [`WaitRegistry`](crate::WaitRegistry) retains
+/// every unresolved wait and the session resends it on reconnect, so a
+/// push lost to a dead socket is repaired by the resent set: a live wait
+/// reappears, and a cancelled one vanishes by its absence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type")]
+pub enum InputFrame {
+    /// A wait opened: the session wants operator input for `token`.
+    #[serde(rename = "input_required")]
+    Required {
+        /// The single-use wait token an `input_response` must echo.
+        token: String,
+    },
+    /// A wait died unresolved: the prompt for `token` is stale.
+    #[serde(rename = "input_cancelled")]
+    Cancelled {
+        /// The token whose wait is gone.
+        token: String,
+    },
+}
+
+/// The inbound answer to an [`InputFrame::Required`] prompt:
+/// `{"type":"input_response","token":"...","text":"..."}`.
+///
+/// The session routes on the envelope's `type` and deserializes the body
+/// with serde, which ignores the envelope tag itself. `text` is the
+/// operator's input, byte-exact as typed. Like every inbound frame it
+/// takes no delivery classification, because the server pushes none.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct InputResponse {
+    /// The wait token this response answers.
+    pub token: String,
+    /// The operator's text, byte-exact as typed.
+    pub text: String,
 }
 
 // --- Outbound: server to client ------------------------------------------
@@ -587,6 +650,48 @@ mod tests {
         let id = serde_json::json!(2);
         let tagged = serde_json::to_value(DoneFrame::new(Some(&id))).expect("the frame serializes");
         assert_eq!(tagged, serde_json::json!({"type": "done", "id": 2}));
+    }
+
+    #[test]
+    fn an_input_required_frame_serializes_with_its_token() {
+        let frame = serde_json::to_value(InputFrame::Required {
+            token: "a1b2c3".to_owned(),
+        })
+        .expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({"type": "input_required", "token": "a1b2c3"}),
+            "the wire shape matches the chat protocol's frame taxonomy"
+        );
+    }
+
+    #[test]
+    fn an_input_cancelled_frame_serializes_with_its_token() {
+        let frame = serde_json::to_value(InputFrame::Cancelled {
+            token: "a1b2c3".to_owned(),
+        })
+        .expect("the frame serializes");
+        assert_eq!(
+            frame,
+            serde_json::json!({"type": "input_cancelled", "token": "a1b2c3"}),
+            "the wire shape matches the chat protocol's frame taxonomy"
+        );
+    }
+
+    #[test]
+    fn an_input_response_parses_its_body_byte_exact_ignoring_the_envelope() {
+        let gnarly = "line1\r\nline2 \"quoted\" {\"text\":\"decoy\"} \\slash 🦀";
+        let response: InputResponse = serde_json::from_value(serde_json::json!({
+            "type": "input_response",
+            "token": "a1b2c3",
+            "text": gnarly,
+        }))
+        .expect("the frame parses with its envelope tag present");
+        assert_eq!(response.token, "a1b2c3");
+        assert_eq!(
+            response.text, gnarly,
+            "the operator's text survives the wire byte-exact"
+        );
     }
 
     #[test]

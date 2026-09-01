@@ -127,6 +127,10 @@ The variables:
 
 `WorkshopObserver` is the crate's append-only run event log. The `Observer` content hooks append runtime events (the write side), the `EventLog` trait serves indexed reads (the read side), and `subscribe()` broadcasts every appended entry live. Given a persist path it appends each event as one JSONL line behind a versioned header line; `load_from` replays such a file - refusing headers and lines it does not speak - and continues appending to it. A committed fixture in the crate's integration tests pins the version-1 file format against schema drift.
 
+## Agent input waits
+
+`WaitRegistry` holds an agent session's unresolved user-input waits behind single-use cryptographic tokens, retained across socket loss and resent on reconnect. `UserInputTool` is the Workshop's `user_input` tool - never advertised to a model - whose `call()` registers a wait, pushes the durable `input_required` frame itself, and suspends until `deliver_input_response` fires `on_user_input` byte-exact and completes the wait; its output is trusted, structured JSON (`text` byte-exact, `images` present and empty). A drop guard turns every dying wait into a durable `input_cancelled` frame, so a cancelled turn never leaks a wait or leaves a stale prompt.
+
 ## Minimum Rust Version
 
 Rust 1.89 or later.
