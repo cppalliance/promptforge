@@ -2,14 +2,15 @@
 // window-level postMessage bridge (src/ui/gateway-config-bridge.ts) and
 // the iframe host panel (src/ui/workshop/gateway-config-panel.ts).
 // Bundles the TS modules with esbuild and drives them in jsdom. Covers:
-// origin pinning (a message from a foreign origin is ignored and never
-// forwarded), the ready announcement answered with a context message
-// (theme + initial route) pinned to the gateway origin, the API-forward
-// round trip through a stubbed /gateway/api server route (bearer stays
-// server-side by construction - the browser never sees a key), the
-// transport-failure answer (status 0), action notifications landing on
-// the status bar stub, listener teardown on dispose, and the panel's
-// iframe address, sandbox, and origin-failure alert.
+// origin pinning (the iframe is proxied same-origin, so a message from
+// any foreign origin - the gateway's own port included - is ignored and
+// never forwarded), the ready announcement answered with a context
+// message (theme + initial route) pinned to the workshop origin, the
+// API-forward round trip through a stubbed /gateway/api server route
+// (bearer stays server-side by construction - the browser never sees a
+// key), the transport-failure answer (status 0), action notifications
+// landing on the status bar stub, listener teardown on dispose, and the
+// panel's iframe address, sandbox, and title.
 // Run: node test/gateway-config-bridge.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,12 +70,6 @@ async function flush(turns = 10) {
 const fetched = [];
 const fetchFn = async (url, init = {}) => {
   fetched.push({ url, init });
-  if (url === "/gateway/origin") {
-    return new Response(JSON.stringify({ origin: GATEWAY_ORIGIN }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }
   if (url === "/gateway/api/admin/status") {
     return new Response(JSON.stringify({ profile: "default", models: [] }), {
       status: 200,
@@ -104,7 +99,7 @@ const bridge = setupGatewayConfigBridge({
   reply: (_event, message, targetOrigin) => replies.push({ message, targetOrigin }),
 });
 
-function dispatch(data, origin = GATEWAY_ORIGIN) {
+function dispatch(data, origin = WORKSHOP_ORIGIN) {
   window.dispatchEvent(new window.MessageEvent("message", { data, origin }));
 }
 
@@ -115,6 +110,12 @@ await flush();
 check("a message from a foreign origin is never forwarded", proxyCalls().length === 0);
 check("a message from a foreign origin is never answered", replies.length === 0);
 
+// --- The gateway's own origin is foreign: the iframe is proxied same-origin ----
+
+dispatch({ type: "pf-bridge-ready" }, GATEWAY_ORIGIN);
+await flush();
+check("a ready announcement from the gateway origin is refused", replies.length === 0);
+
 // --- The ready announcement is answered with the pinned context ---------------
 
 dispatch({ type: "pf-bridge-ready" });
@@ -124,11 +125,11 @@ check(
   "the answer is a context message carrying theme and initial route",
   replies[0]?.message.type === "pf-context" &&
     replies[0]?.message.theme === "dark" &&
-    replies[0]?.message.route === "#/models",
+    replies[0]?.message.route === "#/local",
 );
 check(
-  "the context reply pins the gateway origin, never *",
-  replies[0]?.targetOrigin === GATEWAY_ORIGIN,
+  "the context reply pins the workshop origin, never *",
+  replies[0]?.targetOrigin === WORKSHOP_ORIGIN,
 );
 
 // --- The API-forward round trip -----------------------------------------------
@@ -148,7 +149,7 @@ check(
     apiReply.message.contentType === "application/json" &&
     apiReply.message.body.includes('"profile":"default"'),
 );
-check("the api reply pins the gateway origin", apiReply?.targetOrigin === GATEWAY_ORIGIN);
+check("the api reply pins the workshop origin", apiReply?.targetOrigin === WORKSHOP_ORIGIN);
 
 // --- A transport failure answers status 0 --------------------------------------
 

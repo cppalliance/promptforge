@@ -1,16 +1,17 @@
 // The Gateway Config panel: a Dockview panel hosting the gateway's
-// config SPA in an iframe at <gateway-origin>/config/?mode=panel. The
-// panel only hosts; all traffic between the iframe and the workshop
-// flows through the window-level bridge in gateway-config-bridge.ts.
-// The workshop's own origin rides along in the iframe URL's `bridge`
-// parameter, so the iframe can pin its postMessage targetOrigin to the
-// real parent instead of "*".
+// config SPA in an iframe at /gateway/config/?mode=panel, proxied
+// same-origin through the workshop server. The panel only hosts; all
+// traffic between the iframe and the workshop flows through the
+// window-level bridge in gateway-config-bridge.ts. The workshop's own
+// origin rides along in the iframe URL's `bridge` parameter, so the
+// iframe can pin its postMessage targetOrigin to the real parent
+// instead of "*".
 
 import "./gateway-config-panel.css";
 
 import type { GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 
-import { Disposable, toDisposable } from "../../base/lifecycle";
+import { Disposable } from "../../base/lifecycle";
 
 /** Injectable seams for tests. */
 export interface GatewayConfigPanelDeps {
@@ -20,16 +21,10 @@ export interface GatewayConfigPanelDeps {
 
 export class GatewayConfigPanel extends Disposable implements IContentRenderer {
   readonly element = document.createElement("div");
-  private disposed = false;
 
   constructor(private readonly deps: GatewayConfigPanelDeps = {}) {
     super();
     this.element.className = "gateway-config-panel";
-    this._register(
-      toDisposable(() => {
-        this.disposed = true;
-      }),
-    );
   }
 
   init(_parameters: GroupPanelPartInitParameters): void {
@@ -45,14 +40,5 @@ export class GatewayConfigPanel extends Disposable implements IContentRenderer {
     const workshopOrigin = this.deps.workshopOrigin ?? window.location.origin;
     iframe.src = `/gateway/config/?mode=panel&bridge=${encodeURIComponent(workshopOrigin)}`;
     this.element.replaceChildren(iframe);
-  }
-
-  /** Paints a load failure as an alert bar; the panel stays open. */
-  private showError(message: string): void {
-    const bar = document.createElement("p");
-    bar.className = "gateway-config-panel__error";
-    bar.setAttribute("role", "alert");
-    bar.textContent = message;
-    this.element.replaceChildren(bar);
   }
 }

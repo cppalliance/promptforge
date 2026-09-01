@@ -1,5 +1,4 @@
-// The workshop server's gateway-config surface: the gateway origin the
-// config panel's iframe URL is built from, and the narrow server-side
+// The workshop server's gateway-config surface: the narrow server-side
 // proxy (/gateway/api/{path}) that forwards the config UI's API calls
 // with the gateway bearer key attached. The key lives only in the
 // workshop server's process; neither the workshop page nor the iframe
@@ -31,25 +30,6 @@ export interface BridgeApiResult {
 }
 
 const defaultFetch: FetchLike = (input, init) => fetch(input, init);
-
-/**
- * Reads the gateway's origin from the workshop server. Any failure -
- * transport, a non-success status, a malformed body - reads as null:
- * without the origin the config panel simply cannot load, which the
- * panel reports itself.
- */
-export async function fetchGatewayOrigin(fetchFn: FetchLike = defaultFetch): Promise<string | null> {
-  try {
-    const response = await fetchFn("/gateway/origin");
-    if (!response.ok) {
-      return null;
-    }
-    const data = (await response.json()) as { origin?: unknown };
-    return typeof data.origin === "string" && data.origin !== "" ? data.origin : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Forwards one bridged API request through the workshop server's

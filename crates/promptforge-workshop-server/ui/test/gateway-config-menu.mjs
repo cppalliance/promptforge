@@ -1,9 +1,9 @@
 // Bundle-level test for the Gateway Config menu path: the Window menu
 // lists "Gateway Config" next to Workshop Panel, activating it opens a
-// dockview panel hosting the config SPA's iframe (address from the
-// server's /gateway/origin route, panel mode and the workshop's own
-// origin in the query), and a second activation focuses the existing
-// panel instead of opening another.
+// dockview panel hosting the config SPA's iframe (proxied same-origin
+// at /gateway/config/, panel mode and the workshop's own origin in the
+// query), and a second activation focuses the existing panel instead of
+// opening another.
 // Run: node test/gateway-config-menu.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
