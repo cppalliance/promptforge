@@ -1,0 +1,248 @@
+/* Styles for the agent-session surface: the agent menu and the session
+   view (agent-menu.ts and agent-session-view.ts import this file; esbuild
+   bundles it once into dist/app.css). Themed values come from the :root
+   tokens in style.css. */
+
+/* The panel container fills its dockview leaf; whichever child is not
+   hidden owns the space. */
+.agent-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #0f0f0f);
+  color: var(--text, #e8e8e8);
+  font-family: var(--font-prose, system-ui, sans-serif);
+}
+
+.agent-panel > [hidden] {
+  display: none;
+}
+
+/* --- The agent menu ----------------------------------------------------- */
+
+.agent-menu {
+  padding: var(--space-xl, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg, 12px);
+  overflow-y: auto;
+}
+
+.agent-menu__lead {
+  margin: 0;
+  color: var(--text-muted, #909090);
+}
+
+.agent-menu__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm, 6px);
+}
+
+.agent-menu__launch {
+  display: block;
+  inline-size: 100%;
+  min-height: 44px;
+  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  text-align: start;
+  font: inherit;
+  color: var(--text, #e8e8e8);
+  background: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+}
+
+.agent-menu__launch:hover:not(:disabled) {
+  background: var(--bg-hover, #252525);
+}
+
+.agent-menu__launch:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: 2px;
+}
+
+.agent-menu__launch:disabled {
+  color: var(--text-muted, #909090);
+  cursor: default;
+}
+
+.agent-menu__empty {
+  margin: 0;
+  color: var(--text-muted, #909090);
+}
+
+.agent-menu__error {
+  margin: 0;
+  color: var(--danger-text, #e4606d);
+}
+
+/* --- The session view ---------------------------------------------------- */
+
+.agent-session {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-session__feed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--space-lg, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 8px);
+}
+
+.agent-item {
+  max-inline-size: 100%;
+  border-radius: var(--radius, 8px);
+  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  overflow-wrap: anywhere;
+}
+
+.agent-item__meta {
+  margin: 0 0 var(--space-xs, 4px);
+  font-size: 12px;
+  color: var(--text-muted, #909090);
+}
+
+.agent-item__text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.agent-item--user {
+  align-self: flex-end;
+  background: var(--bg-hover, #252525);
+}
+
+.agent-item--reply {
+  align-self: stretch;
+}
+
+/* A pending item is coalesced deltas still streaming; the durable event
+   settles it. The muted tone marks the text as not yet final. */
+.agent-item--pending .agent-item__text {
+  color: var(--text-muted, #909090);
+}
+
+.agent-item--reasoning .agent-item__reasoning {
+  border-inline-start: 2px solid var(--border, #2a2a2a);
+  padding-inline-start: var(--space-lg, 12px);
+}
+
+.agent-item--reasoning summary {
+  cursor: pointer;
+  color: var(--text-muted, #909090);
+  font-size: 12px;
+}
+
+.agent-item--tool-call,
+.agent-item--tool-result {
+  background: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+}
+
+.agent-item__calls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs, 4px);
+}
+
+.agent-item__call {
+  display: flex;
+  gap: var(--space-md, 8px);
+  align-items: baseline;
+}
+
+.agent-item__call-name,
+.agent-item__call-args,
+.agent-item__output {
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.agent-item__call-args {
+  color: var(--text-muted, #909090);
+  overflow-wrap: anywhere;
+}
+
+.agent-item__output {
+  margin: 0;
+  max-block-size: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.agent-item--error {
+  border: 1px solid var(--danger-text, #e4606d);
+  color: var(--danger-text, #e4606d);
+}
+
+/* --- The input affordance ------------------------------------------------ */
+
+.agent-session__form {
+  flex: none;
+  display: flex;
+  gap: var(--space-md, 8px);
+  align-items: flex-end;
+  padding: var(--space-lg, 12px);
+  border-top: 1px solid var(--border, #2a2a2a);
+  background: var(--bg-composer, #0f0f0f);
+}
+
+.agent-session__input {
+  flex: 1;
+  min-inline-size: 0;
+  resize: none;
+  font: inherit;
+  color: var(--text, #e8e8e8);
+  background: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  padding: var(--space-md, 8px) var(--space-lg, 12px);
+}
+
+.agent-session__input:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: 1px;
+}
+
+.agent-session__input:disabled {
+  color: var(--text-muted, #909090);
+}
+
+.agent-session__send {
+  flex: none;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  font: inherit;
+  color: var(--text, #e8e8e8);
+  background: var(--accent, #e05a2b);
+  border: none;
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+}
+
+.agent-session__send:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: 2px;
+}
+
+.agent-session__send:disabled {
+  background: var(--bg-raised, #1a1a1a);
+  color: var(--text-muted, #909090);
+  cursor: default;
+}

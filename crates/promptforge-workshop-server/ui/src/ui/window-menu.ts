@@ -37,6 +37,7 @@ export interface WindowMenuCommands {
   readonly selectAll: () => void;
   readonly toggleWorkshopPanel: () => void;
   readonly openGatewayConfig: () => void;
+  readonly openAgentSession: () => void;
   readonly minimizeWindow: () => void;
   readonly toggleWindowMaximize: () => void;
   readonly showAbout: () => void;
@@ -45,12 +46,14 @@ export interface WindowMenuCommands {
 /**
  * The workshop surface the Window menu dispatches through: the Workshop
  * Panel item toggles the tree, sharing the Ctrl+B command from
- * workshop/shortcuts, and Gateway Config opens (or focuses) the
- * dockview panel hosting the gateway's config SPA.
+ * workshop/shortcuts, Gateway Config opens (or focuses) the dockview
+ * panel hosting the gateway's config SPA, and Agent Session opens (or
+ * focuses) the agent-session panel.
  */
 export interface WorkshopMenuCommands {
   readonly toggleWorkshopPanel: () => void;
   readonly openGatewayConfig: () => void;
+  readonly openAgentSession: () => void;
 }
 
 /**
@@ -164,6 +167,7 @@ function buildMenuItems(
   const windowItems: MenuItem[] = [
     { kind: "command", label: "Workshop Panel", shortcut: "Ctrl+B", run: commands.toggleWorkshopPanel },
     { kind: "command", label: "Gateway Config", run: commands.openGatewayConfig },
+    { kind: "command", label: "Agent Session", run: commands.openAgentSession },
     { kind: "separator" },
     { kind: "command", label: "Minimize", run: commands.minimizeWindow },
     { kind: "command", label: "Maximize/Restore", run: commands.toggleWindowMaximize },
@@ -257,6 +261,7 @@ export function setupWindowMenus(options: {
     selectAll: () => runEditCommand("selectAll"),
     toggleWorkshopPanel: () => options.workshop.toggleWorkshopPanel(),
     openGatewayConfig: () => options.workshop.openGatewayConfig(),
+    openAgentSession: () => options.workshop.openAgentSession(),
     minimizeWindow,
     toggleWindowMaximize,
     showAbout: showAboutDialog,

@@ -270,6 +270,12 @@ disposables.add(
       openGatewayConfig: () => {
         openInZone("config", {});
       },
+      // The agent-session panel is a singleton per window (agent windows
+      // are modal): reopening focuses the existing panel. The panel
+      // composes its own socket, service, menu, and session view.
+      openAgentSession: () => {
+        openInZone("agent", {});
+      },
     },
     modelMenu,
     profileMenu,
