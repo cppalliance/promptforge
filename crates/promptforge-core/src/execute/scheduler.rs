@@ -1459,10 +1459,10 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Dispatches a `tool_call` request: resolves the alias against the
-    /// section's effective scope, spawns the shared dispatch body onto the
-    /// answer channel, and parks the chain in the pending table. Every
-    /// dispatch failure - an out-of-scope alias, the counts install - is
-    /// the call's answer, resumed into the caller so an author `pcall` can
+    /// run's full bound tool catalog, spawns the shared dispatch body onto
+    /// the answer channel, and parks the chain in the pending table. Every
+    /// dispatch failure - an unbound alias, the counts install - is the
+    /// call's answer, resumed into the caller so an author `pcall` can
     /// catch it exactly as a tool failure.
     fn dispatch_tool_call(&mut self, id: ChainId, alias: &str, args: serde_json::Value) {
         match self.prepare_tool_call(id, alias, args) {
@@ -1478,8 +1478,10 @@ impl<'a> Scheduler<'a> {
     }
 
     /// The fallible half of tool-call dispatch: the alias resolved against
-    /// the section's effective scope (the same always-plus-added set the
-    /// prose loop advertises), the one-time counts install, and the spawned
+    /// the run's full bound tool catalog (the section's effective scope
+    /// shapes what the model is offered, and the author's own script is not
+    /// the model, so the scope does not gate it - the model-advertised set
+    /// stays section-scoped), the one-time counts install, and the spawned
     /// dispatch through the shared `dispatch_tool` body, classified by the
     /// binding's declared output kind at completion.
     fn prepare_tool_call(
@@ -1498,30 +1500,29 @@ impl<'a> Scheduler<'a> {
             ));
         }
         let tool_set = chain.ctx.tool_set_snapshot()?;
+        let Some(binding) = tool_set.binding(alias).cloned() else {
+            return Err(Error::UnboundToolCall {
+                name: alias.to_owned(),
+                bound: tool_set
+                    .bindings()
+                    .iter()
+                    .map(|binding| binding.alias().to_owned())
+                    .collect(),
+            });
+        };
         let ctx = chain.ctx.clone();
-        let (binding, counts) = {
+        let counts = {
             let frame = chain
                 .frame
                 .as_mut()
                 .ok_or(Error::Internal("a live chain holds its frame"))?;
             let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
-            let Some(binding) = effective
-                .iter()
-                .find(|binding| binding.alias() == alias)
-                .cloned()
-            else {
-                return Err(Error::OutOfScopeToolCall {
-                    name: alias.to_owned(),
-                    global_exists: tool_set.binding(alias).is_some(),
-                    in_scope: effective
-                        .iter()
-                        .map(|binding| binding.alias().to_owned())
-                        .collect(),
-                });
-            };
-            let counts = frame.script_call_counts(&ctx, &effective)?;
-            (binding, counts)
+            frame.script_call_counts(&ctx, &effective)?
         };
+        // The counts seed from the section's effective scope; a bound alias
+        // outside it must still be seeded here, because the shared dispatch
+        // body's increment errors on an unseeded alias.
+        counts.ensure(binding.alias())?;
         let observer = Arc::clone(chain.ctx.observer());
         let execution = chain.ctx.execution().to_owned();
         let section = chain.section_name().to_owned();

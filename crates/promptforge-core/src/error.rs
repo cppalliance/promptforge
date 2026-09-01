@@ -426,16 +426,36 @@ pub(crate) enum Error {
     #[error("tool-call loop did not converge")]
     ToolLoopExhausted,
 
-    /// The model (or Lua) referenced a tool outside the VM's scoped aliases.
+    /// The model referenced a tool outside the section's advertised scope.
+    ///
+    /// This is the model tool loop's error alone: a script `tool_call`
+    /// resolves against the run's full bound catalog and fails with
+    /// [`Error::UnboundToolCall`] instead.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
     #[non_exhaustive]
     OutOfScopeToolCall {
-        /// The alias or identifier the model/Lua code tried to use.
+        /// The alias or identifier the model tried to use.
         name: String,
         /// Whether the name exists in the prompt-wide `tools.bind` map.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,
+    },
+
+    /// A script `tool_call` referenced an alias with no binding in the run's
+    /// tool catalog.
+    ///
+    /// Script-initiated dispatch resolves against the run's full bound set,
+    /// not the section's advertised scope - the scope shapes what the model
+    /// is offered, and the author's own code is not the model - so this
+    /// error means the alias was never bound at all.
+    #[error("tool {name:?} is not bound in this run; bound aliases: {bound:?}")]
+    #[non_exhaustive]
+    UnboundToolCall {
+        /// The alias the script tried to dispatch.
+        name: String,
+        /// Every bound alias in the run's tool catalog.
+        bound: Vec<String>,
     },
 
     /// A model-facing section has non-empty prose but no `models.use` or

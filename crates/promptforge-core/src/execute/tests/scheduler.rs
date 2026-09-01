@@ -3325,6 +3325,17 @@ fn arm_tool_set(ctx: &RunContext, bindings: Vec<crate::lua::ToolBinding>) {
         .iter()
         .map(|binding| binding.alias().to_owned())
         .collect();
+    arm_tool_set_scoped(ctx, bindings, always);
+}
+
+/// Arms the run's shared tool set with `bindings` and exactly `always` as
+/// the prompt-wide scope, so a binding can sit in the document catalog
+/// without entering any section's effective scope.
+fn arm_tool_set_scoped(
+    ctx: &RunContext,
+    bindings: Vec<crate::lua::ToolBinding>,
+    always: Vec<String>,
+) {
     *ctx.tool_set()
         .lock()
         .expect("the tool set mutex is not poisoned") =
@@ -3362,7 +3373,10 @@ async fn a_script_tool_call_dispatches_and_resumes_as_a_string() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_with_an_unknown_alias_names_the_in_scope_set() {
+async fn a_script_tool_call_with_an_unbound_alias_names_the_bound_set() {
+    // Script-initiated resolution runs against the run's full bound
+    // catalog, so the unknown-alias error names that whole set, not the
+    // section's effective scope.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
@@ -3380,19 +3394,90 @@ async fn a_script_tool_call_with_an_unknown_alias_names_the_in_scope_set() {
     let error = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect_err("an out-of-scope alias fails the block");
+        .expect_err("an unbound alias fails the block");
     match &error {
-        Error::OutOfScopeToolCall {
-            name,
-            global_exists,
-            in_scope,
-        } => {
+        Error::UnboundToolCall { name, bound } => {
             assert_eq!(name, "missing");
-            assert!(!global_exists);
-            assert_eq!(in_scope, &["echo".to_owned()]);
+            assert_eq!(bound, &["echo".to_owned()]);
         }
-        other => panic!("expected the typed out-of-scope error, got {other:?}"),
+        other => panic!("expected the typed unbound-tool error, got {other:?}"),
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_reaches_a_bound_tool_outside_the_section_scope() {
+    // A tool bound in the document catalog but never scoped into the
+    // section (no `always`, no `tools.add`) still dispatches for a script:
+    // the scope shapes what the model is offered, and the author's own
+    // code is not the model. The count lands in the same shared map
+    // `tools.calls` reads.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local out = tool_call('echo', { value = 'hi' })\n\
+        return out .. '|' .. tostring(tools.calls.echo)\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set_scoped(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+        Vec::new(),
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a bound but unscoped alias dispatches for a script");
+    assert_eq!(out, "echoed: hi|1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_outside_the_scope_never_widens_the_advertised_set() {
+    // The widened script resolution must not leak into the model's offer:
+    // after a script dispatch of a bound-but-unscoped tool, the same
+    // section's prose round still advertises exactly the effective scope.
+    // (`declared_tools_are_not_injected_without_always_or_add` in
+    // tool_scoping.rs pins the same rule for a section with no script
+    // dispatch at all.)
+    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\ntool_call('hidden', { value = 'x' })\n```\n\n\
+        Say something.\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set_scoped(
+        &ctx,
+        vec![
+            crate::lua::ToolBinding::for_test("seen", "seen tool", Arc::new(EchoTool)),
+            crate::lua::ToolBinding::for_test("hidden", "hidden tool", Arc::new(EchoTool)),
+        ],
+        vec!["seen".to_owned()],
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("the prose round after the script dispatch succeeds");
+    assert_eq!(out, "prose answer");
+    let bodies = gateway.requests();
+    let advertised: Vec<String> = bodies[0]["tools"]
+        .as_array()
+        .expect("the prose round advertises the scoped set")
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        advertised,
+        vec!["seen".to_owned()],
+        "the model-advertised set stays section-scoped"
+    );
 }
 
 /// A tool that signals its start and then sleeps far past every deadline,

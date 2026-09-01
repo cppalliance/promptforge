@@ -890,10 +890,11 @@ impl SectionVm {
     }
 
     /// Installs `tools.calls` as a read-only Lua table backed by a fresh
-    /// [`ToolCallCounts`]. Each in-scope alias reads its live count; indexing
-    /// an unknown key is a hard error that names the bad key and lists the
-    /// in-scope set. When the key was declared by `tools.bind` but not added
-    /// to this section's scope, the diagnostic says so.
+    /// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing
+    /// an unseeded key is a hard error that names the bad key and lists the
+    /// seeded set. When the key was declared by `tools.bind` but never
+    /// seeded - neither scoped into the section nor dispatched by a script
+    /// `tool_call` - the diagnostic says so.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
     /// increment it.
