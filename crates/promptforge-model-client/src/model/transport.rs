@@ -161,8 +161,8 @@ async fn get_authed(
 /// # Examples
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
-/// use promptforge_gateway_client::model::fetch_model_catalog;
+/// # async fn run() -> Result<(), promptforge_model_client::model::CompletionError> {
+/// use promptforge_model_client::model::fetch_model_catalog;
 ///
 /// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
 /// println!("gateway offers {} models", catalog.models().len());
@@ -250,9 +250,9 @@ type ProgressStreamItem = std::result::Result<ProgressEvent, CompletionError>;
 /// # Examples
 ///
 /// ```no_run
-/// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
+/// # async fn run() -> Result<(), promptforge_model_client::model::CompletionError> {
 /// use futures_util::StreamExt;
-/// use promptforge_gateway_client::model::subscribe_progress;
+/// use promptforge_model_client::model::subscribe_progress;
 ///
 /// let events = subscribe_progress("http://127.0.0.1:8081", "secret-token").await?;
 /// futures_util::pin_mut!(events);

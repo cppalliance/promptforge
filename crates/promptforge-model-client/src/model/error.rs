@@ -9,7 +9,7 @@ use crate::Error;
 /// # Examples
 ///
 /// ```
-/// use promptforge_gateway_client::model::CompletionErrorKind;
+/// use promptforge_model_client::model::CompletionErrorKind;
 ///
 /// let kind = CompletionErrorKind::Backend;
 /// let retry_hint = match kind {
@@ -47,7 +47,7 @@ pub enum CompletionErrorKind {
 ///
 /// ```no_run
 /// # async fn run() {
-/// use promptforge_gateway_client::model::{fetch_model_catalog, CompletionErrorKind};
+/// use promptforge_model_client::model::{fetch_model_catalog, CompletionErrorKind};
 ///
 /// if let Err(error) = fetch_model_catalog("http://127.0.0.1:8081/v1", "tok").await {
 ///     if error.kind() == CompletionErrorKind::Backend {

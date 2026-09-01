@@ -43,7 +43,7 @@ pub(crate) use serde_json::json;
 
 pub(crate) use promptforge_core_support::observe::{Observation, Observer, detail};
 pub(crate) use promptforge_core_support::untrusted::GuardNonce;
-pub(crate) use promptforge_gateway_client::model::{
+pub(crate) use promptforge_model_client::model::{
     ModelBinding, ModelResolver, ModelSet, ModelView,
 };
 pub(crate) use promptforge_store::{StoreRef, WriteScope};

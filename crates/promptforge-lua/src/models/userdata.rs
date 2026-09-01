@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use mlua::{Lua, UserData, UserDataFields, UserDataMethods, Value};
 
-use promptforge_gateway_client::model::ModelBinding;
+use promptforge_model_client::model::ModelBinding;
 
 /// Host hook that runs `handle:infer` from Lua via the executor's shared
 /// context.
@@ -90,14 +90,14 @@ impl LuaModelHandle {
     /// Returns the frozen sampling temperature, when the bind declared one.
     ///
     /// The binding stores a validated
-    /// [`Temperature`](promptforge_gateway_client::model::Temperature); the
+    /// [`Temperature`](promptforge_model_client::model::Temperature); the
     /// raw `f64` is exposed only here, at the Lua presentation boundary.
     #[must_use]
     pub(crate) fn temperature(&self) -> Option<f64> {
         self.binding
             .invocation()
             .temperature
-            .map(promptforge_gateway_client::model::Temperature::get)
+            .map(promptforge_model_client::model::Temperature::get)
     }
 
     /// Returns the frozen max generation tokens, when the bind declared one.

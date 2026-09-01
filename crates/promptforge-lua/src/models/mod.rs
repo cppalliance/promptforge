@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table};
 
-use promptforge_gateway_client::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
+use promptforge_model_client::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
 
 use crate::{Error, Result};
 

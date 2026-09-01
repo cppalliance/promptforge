@@ -1,4 +1,4 @@
-# promptforge-gateway-client
+# promptforge-model-client
 
 This crate is the gateway's model client: the OpenAI-shaped chat-completions
 transport (`GatewayClient`), the wire types it exchanges, the model catalog and

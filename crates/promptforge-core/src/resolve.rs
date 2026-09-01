@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Lua, Scope};
-use promptforge_gateway_client::Error as GatewayClientError;
+use promptforge_model_client::Error as GatewayClientError;
 use promptforge_tool_picker::ToolId as PickerToolId;
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 

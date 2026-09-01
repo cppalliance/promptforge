@@ -2,7 +2,7 @@ use super::{
     Arc, Error, Function, Json, LocalTools, Lua, LuaToolHandle, MultiValue, Mutex, Result,
     ToolCallCounts, ToolRuntime, ToolSet, Value, Variadic, json, validate_alias,
 };
-use promptforge_gateway_client::client::ToolSchema;
+use promptforge_model_client::client::ToolSchema;
 
 /// Installs the read-only `tools.calls` counter table for declared aliases.
 ///

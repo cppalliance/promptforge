@@ -14,7 +14,6 @@ promptforge-core = { path = "crates/promptforge-core", version = "0.2.0" }
 promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.2.0" }
 promptforge-gateway = { path = "crates/promptforge-gateway", version = "0.2.0" }
 promptforge-gateway-build = { path = "crates/promptforge-gateway-build", version = "0.2.0" }
-promptforge-gateway-client = { path = "crates/promptforge-gateway-client", version = "0.2.0" }
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.2.0" }
 promptforge-gateway-config-ui = { path = "crates/promptforge-gateway-config-ui", version = "0.2.0" }
 promptforge-gateway-local = { path = "crates/promptforge-gateway-local", version = "0.2.0" }
@@ -22,6 +21,7 @@ promptforge-gateway-loopback = { path = "crates/promptforge-gateway-loopback", v
 promptforge-gateway-protocol = { path = "crates/promptforge-gateway-protocol", version = "0.2.0" }
 promptforge-gateway-routing = { path = "crates/promptforge-gateway-routing", version = "0.2.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
+promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.2.0" }
 promptforge-parser = { path = "crates/promptforge-parser", version = "0.2.0" }
 promptforge-progress = { path = "crates/promptforge-progress", version = "0.2.0" }
 promptforge-stt = { path = "crates/promptforge-stt", version = "0.2.0" }

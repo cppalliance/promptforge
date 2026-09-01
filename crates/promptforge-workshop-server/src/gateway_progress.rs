@@ -21,7 +21,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tokio::sync::oneshot;
 
-use promptforge_gateway_client::model::subscribe_progress;
+use promptforge_model_client::model::subscribe_progress;
 use promptforge_progress::{ProgressHub, RemoteOperation};
 
 use crate::heartbeat::GatewayHealth;

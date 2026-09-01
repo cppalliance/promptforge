@@ -11,7 +11,7 @@
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
-use promptforge_gateway_client::model::ModelBinding;
+use promptforge_model_client::model::ModelBinding;
 
 use crate::{
     Error, LuaFanoutResult, LuaModelHandle, Result, pack_sequence, resolve_section_target,
@@ -395,7 +395,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use promptforge_gateway_client::model::{ModelId, ModelInvocation};
+    use promptforge_model_client::model::{ModelId, ModelInvocation};
 
     fn test_binding() -> ModelBinding {
         ModelBinding::new(

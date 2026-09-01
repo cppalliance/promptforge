@@ -15,7 +15,7 @@ Lua runtime, the model catalog, and the run machinery.
   `WebSearch` provider is re-exported from `promptforge-web-search` under its
   historical path; this crate must not reacquire provider code.
 - The gateway model client (`GatewayClient`, the wire types, the model
-  catalog and binding vocabulary) lives in `promptforge-gateway-client`.
+  catalog and binding vocabulary) lives in `promptforge-model-client`.
   Compatibility re-exports under `promptforge_core::client` and
   `promptforge_core::model` follow the `tools` precedent: verbatim
   re-exports only, no new vocabulary.

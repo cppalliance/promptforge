@@ -207,8 +207,8 @@ fn execute_live_tool_binds(
         Arc::new(FixtureTool("fetch")),
     ];
     let catalog = ToolCatalog::new(&tools).expect("unique test catalog");
-    let models = |description: &str, _: &promptforge_gateway_client::model::ModelBindOpts| {
-        Err(promptforge_gateway_client::Error::ModelAbsent {
+    let models = |description: &str, _: &promptforge_model_client::model::ModelBindOpts| {
+        Err(promptforge_model_client::Error::ModelAbsent {
             capability: description.to_owned(),
         })
     };

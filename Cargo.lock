@@ -4563,8 +4563,8 @@ dependencies = [
  "axum",
  "mlua",
  "promptforge-core-support",
- "promptforge-gateway-client",
  "promptforge-lua",
+ "promptforge-model-client",
  "promptforge-parser",
  "promptforge-store",
  "promptforge-tool-picker",
@@ -4673,22 +4673,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-gateway-client"
-version = "0.2.0"
-dependencies = [
- "axum",
- "futures-util",
- "promptforge-progress",
- "promptforge-tool-picker",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "promptforge-gateway-config"
 version = "0.2.0"
 dependencies = [
@@ -4785,7 +4769,7 @@ dependencies = [
  "async-trait",
  "mlua",
  "promptforge-core-support",
- "promptforge-gateway-client",
+ "promptforge-model-client",
  "promptforge-store",
  "promptforge-tools",
  "serde_json",
@@ -4822,6 +4806,22 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "promptforge-model-client"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "promptforge-progress",
+ "promptforge-tool-picker",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
  "url",
 ]
 
@@ -5005,8 +5005,8 @@ dependencies = [
  "futures-util",
  "open",
  "percent-encoding",
- "promptforge-gateway-client",
  "promptforge-gateway-protocol",
+ "promptforge-model-client",
  "promptforge-progress",
  "promptforge-workshop-server",
  "reqwest 0.12.28",

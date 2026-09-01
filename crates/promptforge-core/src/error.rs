@@ -7,7 +7,7 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
-use promptforge_gateway_client::Error as GatewayClientError;
+use promptforge_model_client::Error as GatewayClientError;
 use promptforge_lua::Error as LuaError;
 use promptforge_parser::Error as ParserError;
 

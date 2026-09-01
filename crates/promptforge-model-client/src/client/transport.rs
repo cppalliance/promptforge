@@ -96,9 +96,9 @@ impl GatewayClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # async fn run() -> Result<(), promptforge_gateway_client::model::CompletionError> {
-    /// use promptforge_gateway_client::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
-    /// use promptforge_gateway_client::model::CompletionOptions;
+    /// # async fn run() -> Result<(), promptforge_model_client::model::CompletionError> {
+    /// use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
+    /// use promptforge_model_client::model::CompletionOptions;
     ///
     /// let client = GatewayClient::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
@@ -132,8 +132,8 @@ impl GatewayClient {
     ///
     /// ```
     /// # async fn run() {
-    /// use promptforge_gateway_client::client::{GatewayClient, Message};
-    /// use promptforge_gateway_client::model::{CompletionErrorKind, CompletionOptions};
+    /// use promptforge_model_client::client::{GatewayClient, Message};
+    /// use promptforge_model_client::model::{CompletionErrorKind, CompletionOptions};
     ///
     /// let client = GatewayClient::disabled();
     /// let options = CompletionOptions::new("m");
@@ -167,7 +167,7 @@ impl GatewayClient {
     /// use std::num::NonZeroU64;
     /// use std::time::Duration;
     ///
-    /// use promptforge_gateway_client::client::GatewayClient;
+    /// use promptforge_model_client::client::GatewayClient;
     ///
     /// let cap = NonZeroU64::new(1024 * 1024).ok_or("cap is non-zero")?;
     /// let client = GatewayClient::disabled().with_request_limits(Duration::from_secs(30), cap);
