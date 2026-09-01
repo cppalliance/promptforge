@@ -76,7 +76,10 @@
 "routes/chat.rs" = 46
 # New module: the gateway-config panel's origin probe and the
 # allowlisted key-attaching proxy the panel's postMessage bridge calls.
-"routes/gateway_config.rs" = 334
+# Grew by the same-origin config SPA proxy (the index and asset routes,
+# the shared `proxy_config_asset` relay, and the dot-segment refusal);
+# the growth commit missed this re-record, banked here at measured size.
+"routes/gateway_config.rs" = 390
 "routes/health.rs" = 50
 "routes/workspace.rs" = 20
 "serve.rs" = 566
