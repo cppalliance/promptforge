@@ -20,7 +20,9 @@ use axum::routing::post;
 use serde_json::{Value, json};
 
 use promptforge_core_support::cancel::CancelHandle;
-use promptforge_core_support::events::ToolCallEvent;
+use promptforge_core_support::events::{
+    CallMetrics, EventLog, RuntimeEvent, RuntimeEventKind, ToolCallEvent,
+};
 use promptforge_core_support::observe::{Observation, Observer};
 use promptforge_model_client::client::{GatewayClient, GatewayEndpoint, SecretString, StreamDelta};
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
@@ -28,7 +30,7 @@ use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
 
 use crate::agent::run_agent_with_client;
-use crate::{AgentConfig, AgentError, AgentLimits};
+use crate::{AgentConfig, AgentError, AgentLimits, run_agent};
 
 /// The execution id every fixture run reports under.
 const EXECUTION: &str = "agent-chat-test";
@@ -242,12 +244,14 @@ impl Drop for FixtureGateway {
     }
 }
 
-/// A minimal counting tool, registered under its wire name so a chat test
-/// can advertise it and prove the driver never executes what a round
-/// returns.
+/// A minimal counting tool, registered under its wire name, trusted or
+/// untrusted per construction: chat tests advertise it to prove the driver
+/// never executes what a round returns, and dispatch tests call it to prove
+/// the shared dispatch counts and wraps.
 struct FixtureTool {
     id: ToolId,
     wire_name: &'static str,
+    trusted: bool,
     calls: Arc<AtomicUsize>,
 }
 
@@ -275,19 +279,142 @@ impl Tool for FixtureTool {
 
     async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(ToolOutput::trusted("fixture output"))
+        Ok(if self.trusted {
+            ToolOutput::trusted("fixture output")
+        } else {
+            ToolOutput::untrusted("fixture output")
+        })
     }
 }
 
-/// Builds one fixture tool and the counter that proves whether it ran.
-fn fixture_tool(wire_name: &'static str) -> (Arc<dyn Tool>, Arc<AtomicUsize>) {
+/// Builds one fixture tool with the given trust and the counter that proves
+/// whether it ran.
+fn fixture_tool_with_trust(
+    wire_name: &'static str,
+    trusted: bool,
+) -> (Arc<dyn Tool>, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let tool = FixtureTool {
         id: ToolId::new("fixture", wire_name).expect("the fixture tool id is valid"),
         wire_name,
+        trusted,
         calls: Arc::clone(&calls),
     };
     (Arc::new(tool), calls)
+}
+
+/// Builds one trusted fixture tool and the counter that proves whether it
+/// ran.
+fn fixture_tool(wire_name: &'static str) -> (Arc<dyn Tool>, Arc<AtomicUsize>) {
+    fixture_tool_with_trust(wire_name, true)
+}
+
+/// A tool that signals when its call starts and then never completes, so
+/// only cancellation can end the dispatch.
+struct BlockingTool {
+    id: ToolId,
+    started: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl Tool for BlockingTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &'static str {
+        "blocking"
+    }
+
+    fn description(&self) -> &'static str {
+        "A fixture tool that never completes."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+
+    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
+}
+
+/// An [`Observer`] + [`EventLog`] fixture, the workshop observer's test
+/// stand-in: the program's own `log()` checkpoints append synchronously
+/// while the chunk runs (the [`Observation::Lua`] arm), completed replies
+/// append from the chat dispatch, and the log reads back through
+/// `runtime.events()`.
+#[derive(Default)]
+struct FixtureEventLog {
+    events: Mutex<Vec<RuntimeEvent>>,
+}
+
+impl FixtureEventLog {
+    fn push(&self, kind: RuntimeEventKind, content: &str, model: Option<&str>) {
+        self.events
+            .lock()
+            .expect("the fixture event log must not be poisoned")
+            .push(RuntimeEvent {
+                kind,
+                section: AGENT_NAME.to_owned(),
+                chain_id: 0,
+                depth: 0,
+                turn: 0,
+                content: content.to_owned(),
+                model: model.map(str::to_owned),
+                tool_call_id: None,
+                finish_reason: None,
+                metrics: None,
+            });
+    }
+}
+
+impl Observer for FixtureEventLog {
+    fn observe(&self, _execution: &str, _section: &str, event: Observation) {
+        // A `log()` checkpoint appends synchronously while the chunk runs -
+        // exactly the mid-chunk append the visibility test needs.
+        if let Observation::Lua(message) = event {
+            self.push(RuntimeEventKind::UserInput, &message, None);
+        }
+    }
+
+    fn on_assistant_reply(
+        &self,
+        _execution: &str,
+        _section: &str,
+        _chain_id: u32,
+        _depth: u32,
+        _turn: u32,
+        text: &str,
+        _finish_reason: Option<&str>,
+        model: &str,
+        _metrics: Option<&CallMetrics>,
+    ) {
+        self.push(RuntimeEventKind::AssistantReply, text, Some(model));
+    }
+}
+
+impl EventLog for FixtureEventLog {
+    fn len(&self) -> u64 {
+        u64::try_from(
+            self.events
+                .lock()
+                .expect("the fixture event log must not be poisoned")
+                .len(),
+        )
+        .expect("the fixture log length fits in u64")
+    }
+
+    fn get(&self, index: u64) -> Option<RuntimeEvent> {
+        let events = self
+            .events
+            .lock()
+            .expect("the fixture event log must not be poisoned");
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| events.get(index).cloned())
+    }
 }
 
 /// The fixture model catalog: two catalog models so an `opts.model`
@@ -975,4 +1102,167 @@ store.write('infer.txt', models.infer('hello'))
         run.gateway.requests()[0].get("tools").is_none(),
         "models.infer advertises no tools"
     );
+}
+
+#[tokio::test]
+async fn an_agent_tool_call_is_counted_and_wraps_untrusted_output() {
+    let (plain, plain_calls) = fixture_tool("plain");
+    let (tainted, tainted_calls) = fixture_tool_with_trust("tainted", false);
+    let tools = ToolCatalog::new(&[plain, tainted]).expect("the fixture catalog is valid");
+    let run = run_over_fixture(
+        r"
+store.write('count0.txt', tostring(tools.calls.plain))
+store.write('plain.txt', tool_call('plain', { value = 'hi' }))
+store.write('wrapped.txt', tool_call('tainted', { value = 'hi' }))
+store.write('counts.txt', tools.calls.plain .. ' ' .. tools.calls.tainted)
+local ok, err = pcall(function() return tool_call('ghost', {}) end)
+store.write('ghost_ok.txt', tostring(ok))
+store.write('ghost_err.txt', err)
+",
+        vec![text_body("fixture-model", "never fetched", "stop")],
+        tools,
+        config(),
+    )
+    .await;
+    run.result.as_ref().expect("the dispatch program completes");
+    assert_eq!(
+        run.read("count0.txt"),
+        "0",
+        "tools.calls starts at zero for every catalog alias"
+    );
+    assert_eq!(
+        run.read("plain.txt"),
+        "fixture output",
+        "a trusted tool's output resumes verbatim"
+    );
+    let wrapped = run.read("wrapped.txt");
+    assert!(
+        wrapped.contains("<untrusted_input_") && wrapped.contains("</untrusted_input_"),
+        "an untrusted tool's output must resume nonce-wrapped, got: {wrapped}"
+    );
+    assert!(
+        wrapped.contains("fixture output"),
+        "the wrapped block must still carry the tool output, got: {wrapped}"
+    );
+    assert_eq!(
+        run.read("counts.txt"),
+        "1 1",
+        "each dispatch increments its alias count, read back through tools.calls"
+    );
+    assert_eq!(plain_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(tainted_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(run.read("ghost_ok.txt"), "false");
+    assert!(
+        run.read("ghost_err.txt")
+            .contains("is not registered with this agent"),
+        "an unknown alias fails the call naming the miss: {}",
+        run.read("ghost_err.txt")
+    );
+    assert_eq!(
+        run.gateway.call_count(),
+        0,
+        "tool dispatch never touches the model"
+    );
+}
+
+#[tokio::test]
+async fn firing_cancel_interrupts_a_suspended_tool_call() {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let blocking: Arc<dyn Tool> = Arc::new(BlockingTool {
+        id: ToolId::new("fixture", "blocking").expect("the fixture tool id is valid"),
+        started: Arc::clone(&started),
+    });
+    let tools = ToolCatalog::new(&[blocking]).expect("the fixture catalog is valid");
+    let cancel = CancelHandle::new();
+    let fire = cancel.clone();
+    let mut config = config();
+    config.cancel = cancel;
+    let run = tokio::spawn(async move {
+        let store = StoreRef::memory();
+        run_agent(
+            "tool_call('blocking', {})",
+            &tools,
+            &fixture_models(),
+            &store,
+            config,
+        )
+        .await
+    });
+    // The tool signals once its call is in flight, so the cancel provably
+    // races a suspended dispatch, not a program that never reached it.
+    started.notified().await;
+    fire.cancel();
+    let result = run.await.expect("the run task joins");
+    assert!(
+        matches!(result, Err(AgentError::Interrupted)),
+        "a cancelled suspended tool call must interrupt the run, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn chat_turn_events_become_visible_after_the_next_resume_not_before() {
+    let log = Arc::new(FixtureEventLog::default());
+    let mut config = config_with(Arc::clone(&log) as Arc<dyn Observer>);
+    config.event_log = Some(Arc::clone(&log) as Arc<dyn EventLog>);
+    let run = run_over_fixture(
+        r#"
+models.use('test-model')
+local events = runtime.events()
+store.write('n0.txt', tostring(#events))
+log('poke')
+store.write('n1.txt', tostring(#events))
+models.chat({ { role = "user", content = "hi" } })
+store.write('n2.txt', tostring(#events))
+store.write('poke.txt', events[1].kind .. ' ' .. events[1].content)
+store.write('reply.txt', events[2].kind .. ' ' .. events[2].content .. ' ' .. events[2].model)
+"#,
+        vec![text_body("fixture-model", "Hello agent", "stop")],
+        no_tools(),
+        config,
+    )
+    .await;
+    run.result.as_ref().expect("the events program completes");
+    assert_eq!(run.read("n0.txt"), "0");
+    assert_eq!(
+        run.read("n1.txt"),
+        "0",
+        "an append landing mid-chunk (the log() poke) must stay invisible until a host-call resume"
+    );
+    assert_eq!(
+        run.read("n2.txt"),
+        "2",
+        "the poke and the chat reply must both become visible at the chat resume"
+    );
+    assert_eq!(
+        run.read("poke.txt"),
+        "user_message poke",
+        "entries convert with their pinned kind labels and byte-exact content"
+    );
+    assert_eq!(
+        run.read("reply.txt"),
+        "agent_message Hello agent fixture-model",
+        "the chat turn's reply event reads back with its model attribution"
+    );
+}
+
+#[tokio::test]
+async fn an_absent_event_log_yields_an_empty_table() {
+    let run = run_over_fixture(
+        r"
+local events = runtime.events()
+store.write('type.txt', type(events))
+store.write('len.txt', tostring(#events))
+store.write('first.txt', tostring(events[1] == nil))
+",
+        vec![text_body("fixture-model", "never fetched", "stop")],
+        no_tools(),
+        config(),
+    )
+    .await;
+    run.result
+        .as_ref()
+        .expect("the empty-events program completes");
+    assert_eq!(run.read("type.txt"), "table");
+    assert_eq!(run.read("len.txt"), "0");
+    assert_eq!(run.read("first.txt"), "true");
 }

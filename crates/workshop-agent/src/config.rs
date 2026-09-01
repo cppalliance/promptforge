@@ -36,7 +36,9 @@ pub struct AgentConfig {
     pub cancel: CancelHandle,
     /// The read-side history the agent builds context from, when the host
     /// supplies one. Consumed by the agent-only `runtime.events()` host
-    /// call, installed in a later step.
+    /// call: a read-only indexed view whose snapshot length bound refreshes
+    /// at every host-call resume. Absent, `runtime.events()` returns an
+    /// empty table.
     pub event_log: Option<Arc<dyn EventLog>>,
     /// The live streaming-delta callback, when the host supplies one.
     /// Forwarded by the agent-only `models.chat`, installed in a later
