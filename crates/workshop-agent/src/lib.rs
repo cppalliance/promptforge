@@ -7,14 +7,20 @@
 //! `promptforge-core-support`); neither depends on the other.
 //!
 //! An agent program is one long-running Lua chunk driven as a single
-//! coroutine. Its host surface is the shared kernel: `models.infer`,
-//! `tool_call`, `store`, `log`, `var`, and cooperative cancellation.
-//! `execute()`, `fanout()`, and `jump()` are absent - not stubbed - so an
-//! agent touching them fails as an undefined global, exactly as a document
-//! prompt touching the agent-only calls does.
+//! coroutine. Its host surface is the shared kernel - `models.infer`,
+//! `tool_call`, `store`, `log`, `var`, and cooperative cancellation - plus
+//! the agent-only `models.chat(messages, opts)`: one stateless
+//! tool-capable model round that streams deltas to the host and returns
+//! the reply or the unexecuted tool calls. `execute()`, `fanout()`, and
+//! `jump()` are absent - not stubbed - so an agent touching them fails as
+//! an undefined global, exactly as a document prompt touching the
+//! agent-only calls does.
 
 mod agent;
 mod config;
+
+#[cfg(test)]
+mod tests;
 
 pub use agent::{AgentError, run_agent};
 pub use config::{AgentConfig, AgentLimits};

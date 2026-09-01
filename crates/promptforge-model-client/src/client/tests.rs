@@ -114,6 +114,39 @@ fn from_env_missing_gateway_key() {
 }
 
 #[test]
+fn from_validated_parts_serializes_role_and_content_verbatim() {
+    // The agent-executor seam: a `system` role and a content-parts array must
+    // reach the wire exactly as validated, and the inherent constructors'
+    // string form must stay byte-identical to the pre-seam shape.
+    let parts = serde_json::json!([
+        { "type": "text", "text": "look at this" },
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } },
+    ]);
+    let multimodal = Message::from_validated_parts("user", parts.clone(), None, None);
+    assert_eq!(
+        serde_json::to_value(&multimodal).expect("a message must serialize"),
+        serde_json::json!({ "role": "user", "content": parts }),
+    );
+    assert_eq!(
+        multimodal.content(),
+        "",
+        "parts content has no text form; the accessor reports empty"
+    );
+    let system =
+        Message::from_validated_parts("system", Value::String("be terse".to_owned()), None, None);
+    assert_eq!(
+        serde_json::to_value(&system).expect("a message must serialize"),
+        serde_json::json!({ "role": "system", "content": "be terse" }),
+    );
+    assert_eq!(system.content(), "be terse");
+    assert_eq!(
+        serde_json::to_value(Message::user("hello")).expect("a message must serialize"),
+        serde_json::json!({ "role": "user", "content": "hello" }),
+        "the plain constructors keep their wire shape"
+    );
+}
+
+#[test]
 fn debug_redacts_the_bearer_key_and_never_leaks_it() {
     let client = GatewayClient::new(
         GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid test endpoint"),

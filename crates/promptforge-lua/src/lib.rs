@@ -112,7 +112,7 @@ mod protocol;
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
 // `LuaProgram` is the documented exception.
 #[doc(hidden)]
-pub use coro::{install_live_h1_shim_base, shim_live_h1_models};
+pub use coro::{install_agent_chat_shim, install_live_h1_shim_base, shim_live_h1_models};
 #[doc(hidden)]
 pub use dispatch::{ScriptReport, dispatch_tool};
 #[doc(hidden)]
@@ -125,7 +125,7 @@ pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
 #[doc(hidden)]
-pub use protocol::{Answer, Request, ToolCallOutcome, YieldParse};
+pub use protocol::{Answer, ChatResult, Request, ToolCallOutcome, YieldParse};
 #[doc(hidden)]
 pub use scope::{ToolCallCounts, ToolRuntime};
 #[doc(hidden)]

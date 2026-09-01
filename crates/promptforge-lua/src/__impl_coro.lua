@@ -69,6 +69,17 @@ local function tool_call(alias, args)
   return result
 end
 
+-- One stateless tool-capable model round. The host installs this as
+-- models.chat in agent VMs only; a section VM never sees it. Both
+-- arguments pass through unvalidated: the protocol parse owns the whole
+-- messages/opts validation, so every argument error surfaces at this call
+-- site (pcall-able) with no second validator anywhere.
+local function chat(messages, opts)
+  local ok, result = yield({ op = "chat", messages = messages, opts = opts })
+  if not ok then error(result, 0) end
+  return result
+end
+
 -- The section install passes the section's models table; the live H1 base
 -- install passes nil (H1's live models table exists only per block, wrapped
 -- by __impl_coro_h1.lua) and takes `infer`/`wrap_handle` from the return.
@@ -83,6 +94,7 @@ return {
   execute = execute_section,
   fanout = fanout_collection,
   tool_call = tool_call,
+  chat = chat,
   wrap_handle = wrap_handle,
   infer = infer,
 }
