@@ -41,11 +41,13 @@ pub struct AgentConfig {
     /// empty table.
     pub event_log: Option<Arc<dyn EventLog>>,
     /// The live streaming-delta callback, when the host supplies one.
-    /// Forwarded by the agent-only `models.chat`, installed in a later
-    /// step; deltas never ride the observer.
+    /// Forwarded by the agent-only `models.chat`; deltas never ride the
+    /// observer.
     pub on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
     /// The host-state snapshot provider behind the agent-only `ui()` host
-    /// call, installed in a later step. Absent means `ui` is nil.
+    /// call: every call invokes the provider and converts a fresh snapshot
+    /// table, JSON nulls reading as nil. Absent means `ui` is nil - the
+    /// global is not installed at all.
     pub ui: Option<Arc<dyn Fn() -> serde_json::Value + Send + Sync>>,
     /// Lua resource ceilings for the agent VM.
     pub limits: AgentLimits,

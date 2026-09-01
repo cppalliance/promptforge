@@ -125,8 +125,8 @@ async fn connect(base: &str) -> JsonSocket {
     let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
     assert_eq!(
         socket.recv_json().await,
-        json!({ "type": "agents", "agents": ["echo"] }),
-        "the connect-time push lists the discovered agents"
+        json!({ "type": "agents", "agents": ["chat", "echo"] }),
+        "the connect-time push lists the discovered agents plus the built-in chat"
     );
     socket
 }
@@ -148,7 +148,7 @@ async fn launch_echo(socket: &mut JsonSocket) -> String {
 
 /// Receives frames until the next `input_required` and returns its
 /// token, asserting no error frame slips through on the way.
-async fn next_wait_token(socket: &mut JsonSocket) -> String {
+pub(crate) async fn next_wait_token(socket: &mut JsonSocket) -> String {
     let frame = socket
         .recv_until(Duration::from_secs(10), |frame| {
             assert_ne!(
@@ -165,7 +165,7 @@ async fn next_wait_token(socket: &mut JsonSocket) -> String {
 }
 
 /// Answers the wait holding `token` with `text`.
-async fn answer(socket: &mut JsonSocket, token: &str, text: &str) {
+pub(crate) async fn answer(socket: &mut JsonSocket, token: &str, text: &str) {
     socket
         .send_json(&json!({ "type": "input_response", "token": token, "text": text }))
         .await;
@@ -176,16 +176,16 @@ async fn answer(socket: &mut JsonSocket, token: &str, text: &str) {
 /// tokens announced along the way (the next turn's `input_required` may
 /// hit the wire before the reply's own event frame - frame families
 /// promise order within themselves, not across each other).
-struct Turn {
-    deltas: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    waits: Vec<String>,
+pub(crate) struct Turn {
+    pub(crate) deltas: Vec<serde_json::Value>,
+    pub(crate) events: Vec<serde_json::Value>,
+    pub(crate) waits: Vec<String>,
 }
 
 /// Collects frames until the turn's `agent_message` event arrives,
 /// splitting deltas, durable events, and announced waits, and refusing
 /// error frames.
-async fn collect_turn(socket: &mut JsonSocket) -> Turn {
+pub(crate) async fn collect_turn(socket: &mut JsonSocket) -> Turn {
     let mut deltas = Vec::new();
     let mut events = Vec::new();
     let mut waits = Vec::new();
@@ -224,7 +224,7 @@ async fn collect_turn(socket: &mut JsonSocket) -> Turn {
 
 /// The wait token following `turn`: one already captured during the
 /// collection, else the next announced on the socket.
-async fn wait_after(socket: &mut JsonSocket, turn: &Turn) -> String {
+pub(crate) async fn wait_after(socket: &mut JsonSocket, turn: &Turn) -> String {
     match turn.waits.first() {
         Some(token) => token.clone(),
         None => next_wait_token(socket).await,
@@ -232,7 +232,7 @@ async fn wait_after(socket: &mut JsonSocket, turn: &Turn) -> String {
 }
 
 /// Concatenates the turn's text-delta contents.
-fn delta_text(turn: &Turn) -> String {
+pub(crate) fn delta_text(turn: &Turn) -> String {
     turn.deltas
         .iter()
         .filter(|delta| delta["kind"] == "text")
@@ -534,6 +534,55 @@ async fn teardown_cancels_pending_waits_and_leaks_none() {
         !state.agents().close(&session),
         "closing an already-closed session is a no-op"
     );
+    socket.close().await;
+}
+
+#[tokio::test]
+async fn a_terminal_agent_failure_reaches_the_socket_as_an_error_frame() {
+    let (base, dir, state) = spawn_agent_server().await;
+    // An agent that dies after its first input, so the socket is attached
+    // and subscribed long before the failure fires.
+    std::fs::write(
+        dir.path().join("agents").join("boom.lua"),
+        "tool_call('user_input', {})\nerror('kaboom')",
+    )
+    .expect("the boom agent writes");
+    let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;
+    assert_eq!(
+        socket.recv_json().await,
+        json!({ "type": "agents", "agents": ["boom", "chat", "echo"] }),
+        "the freshly written agent is discovered on this connect"
+    );
+    socket
+        .send_json(&json!({ "type": "launch", "agent": "boom" }))
+        .await;
+    let frame = socket.recv_json().await;
+    assert_eq!(frame["type"], "agent_session");
+    let session = frame["session"]
+        .as_str()
+        .expect("the acknowledgment carries the session id")
+        .to_owned();
+
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "go").await;
+    let error = socket
+        .recv_until(Duration::from_secs(10), |frame| frame["type"] == "error")
+        .await;
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("kaboom")),
+        "the run's own failure reaches the SPA as an error frame, not just \
+         the status bus: {error}"
+    );
+    // The failed run ends the session; the registry lets it go.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while state.agents().unresolved_waits(&session).is_some() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a failed run leaves the registry");
     socket.close().await;
 }
 

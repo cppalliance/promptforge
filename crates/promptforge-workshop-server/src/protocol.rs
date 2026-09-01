@@ -68,6 +68,14 @@
 //! coalescing (the cancelled round never settles, so its deltas fall to
 //! the round that eventually does), never a protocol violation.
 //!
+//! A session-level failure is pushed as an id-less [`ErrorFrame`]: a
+//! model round that failed while the program survived it (the built-in
+//! chat `pcall`s `models.chat` and returns to waiting), or a run that
+//! ended in error. Delivery on this socket: ephemeral - the reports ride
+//! a bounded broadcast beside the deltas and may drop under lag; the
+//! durable transcript already shows the failed turn as one without a
+//! reply, and terminal failures also land on the status bus.
+//!
 //! # Agent-session input frames
 //!
 //! An agent session asks its operator for input through the Workshop's
