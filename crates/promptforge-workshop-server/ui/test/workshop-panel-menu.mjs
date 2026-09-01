@@ -121,7 +121,7 @@ function rightClick(target) {
 }
 
 function menu() {
-  return window.document.querySelector(".mur-dropdown-menu");
+  return window.document.querySelector(".workshop-dropdown");
 }
 
 function rowByName(panel, name) {
@@ -160,11 +160,12 @@ await flush();
 
 {
   rightClick(rowByName(panelA, "project"));
-  const items = [...(menu()?.querySelectorAll(".mur-dropdown-item") ?? [])];
+  const items = [...(menu()?.querySelectorAll(".workshop-dropdown__item") ?? [])];
   check("right-clicking a root opens a one-item menu", items.length === 1);
   check(
     "the item is a danger-styled Remove from Workspace",
-    items[0]?.textContent === "Remove from Workspace" && items[0]?.classList.contains("mur-danger"),
+    items[0]?.textContent === "Remove from Workspace" &&
+      items[0]?.classList.contains("workshop-dropdown__item--danger"),
   );
   items[0].click();
   await flush();
@@ -191,7 +192,7 @@ await flush();
   // The missing root's row still offers Remove: revoke is the cleanup
   // path for roots deleted from disk.
   rightClick(rowByName(panelA, "gone"));
-  const items = [...(menu()?.querySelectorAll(".mur-dropdown-item") ?? [])];
+  const items = [...(menu()?.querySelectorAll(".workshop-dropdown__item") ?? [])];
   check("a missing root's context menu still offers Remove", items[0]?.textContent === "Remove from Workspace");
   items[0].click();
   await flush();
@@ -266,7 +267,7 @@ panelA.dispose();
 
   // Right-click on empty panel space (the panel element itself).
   rightClick(panelC.element);
-  const items = [...(menu()?.querySelectorAll(".mur-dropdown-item") ?? [])];
+  const items = [...(menu()?.querySelectorAll(".workshop-dropdown__item") ?? [])];
   check(
     "right-clicking empty space offers Add Folder to Workspace...",
     items.length === 1 && items[0]?.textContent === "Add Folder to Workspace...",

@@ -2,13 +2,9 @@
 
 These rules bind the embedded UI under `crates/promptforge-workshop-server/ui/`. The repo-root and server-crate AGENTS.md apply on top.
 
-## Vendored code is never edited
-
-`src/chat/` is vendored (see its PROVENANCE.md): no reformatting, no restructuring, no comment edits. It is an opaque dependency; preserving the upstream diff is worth more than any local improvement.
-
 ## One-way layer imports
 
-`ui` may import `services` may import `base`, never the reverse. `main.ts` is the composition root - it may import every layer, and nothing imports it. `chat/` is importable from `services` and `ui` as a dependency, never from `base`.
+`ui` may import `services` may import `base`, never the reverse. `main.ts` is the composition root - it may import every layer, and nothing imports it.
 
 - `base/`: generic, DOM-free, app-agnostic primitives.
 - `services/`: app-aware but DOM-free state and I/O.

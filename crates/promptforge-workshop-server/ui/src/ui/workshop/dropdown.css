@@ -1,0 +1,82 @@
+/* Styles for dropdown.ts, which imports this file; esbuild bundles it
+   into dist/app.css. Themed values come from the :root tokens in
+   style.css. Ported from the vendored murm-ui dropdown stylesheet onto
+   the workshop tokens; the danger hover keeps the neutral wash because
+   --danger-text is tuned to pass 4.5:1 on --bg-hover.
+
+   Derived from murm-ui 0.2.0 styles/dropdown.css, copyright (c) 2026
+   Lev Morozov, MIT License; the full notice is in ui/THIRD_PARTY_NOTICES.md. */
+
+.workshop-dropdown {
+  position: fixed;
+  z-index: 9999;
+  background-color: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
+  min-width: 160px;
+  padding: var(--space-xs, 4px);
+  display: flex;
+  flex-direction: column;
+  animation: workshop-dropdown-fade 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes workshop-dropdown-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workshop-dropdown {
+    animation: none;
+  }
+}
+
+.workshop-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md, 8px);
+  width: 100%;
+  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text, #e8e8e8);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+
+.workshop-dropdown__item:hover {
+  background-color: var(--bg-hover, #252525);
+}
+
+.workshop-dropdown__item:focus-visible {
+  outline: 1px solid var(--accent-dim, #b04722);
+  outline-offset: -1px;
+  background-color: var(--bg-hover, #252525);
+}
+
+.workshop-dropdown__item--danger {
+  color: var(--danger-text, #e4606d);
+}
+
+.workshop-dropdown__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}

@@ -30,7 +30,7 @@ async fn ui_app_js() -> Response {
 }
 
 /// Serves the stylesheet esbuild extracts from the bundle's CSS imports
-/// (the vendored murm-ui and dockview styles).
+/// (the dockview styles and the workshop components' colocated CSS).
 async fn ui_app_css() -> Response {
     assets::ui_asset("app.css", "text/css; charset=utf-8")
 }

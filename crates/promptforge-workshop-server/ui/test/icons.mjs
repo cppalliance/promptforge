@@ -1,10 +1,9 @@
-// Unit test for the lucide-backed icon strings (src/chat/utils/icons.ts).
+// Unit test for the lucide-backed icon strings (src/ui/workshop/icons.ts).
 // Bundles the module with esbuild, imports it via a data URL under jsdom
 // (lucide's createElement needs a document at module load), and asserts
 // every exported icon is a parseable inline SVG string carrying the
-// dimensions and stroke attributes the old hand-pasted constants had -
-// the vendored consumers assign these strings to innerHTML and their CSS
-// sizes against the width/height attributes.
+// dimensions and stroke attributes the tree panel's CSS sizes against -
+// the panel assigns these strings to innerHTML.
 // Run: node test/icons.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +17,7 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
 const result = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "chat", "utils", "icons.ts")],
+  entryPoints: [path.join(uiDir, "..", "src", "ui", "workshop", "icons.ts")],
   bundle: true,
   write: false,
   format: "esm",
@@ -34,27 +33,14 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Every export the vendored consumers import, with the pixel size the old
-// hand-pasted string carried.
+// Every export the tree panel imports, with its pixel size.
 const expectedSizes = {
-  ICON_COPY: 15,
-  ICON_CHECK: 15,
-  ICON_EDIT: 15,
-  ICON_SETTINGS: 20,
-  ICON_PAPERCLIP: 20,
-  ICON_CHEVRON: 14,
-  ICON_FORK: 15,
-  ICON_MORE_HORIZONTAL: 16,
-  ICON_MORE_VERTICAL: 16,
-  ICON_PIN: 15,
-  ICON_PIN_OFF: 15,
-  ICON_TRASH: 15,
   ICON_TRASH_2: 15,
   ICON_FOLDER_PLUS: 15,
 };
 
 check(
-  "the module exports exactly the icon names the consumers import",
+  "the module exports exactly the icon names the tree panel imports",
   Object.keys(icons).sort().join(",") === Object.keys(expectedSizes).sort().join(","),
 );
 
@@ -69,15 +55,13 @@ for (const [name, size] of Object.entries(expectedSizes)) {
   check(`${name} parses to a single svg element`, host.children.length === 1 && svg?.tagName.toLowerCase() === "svg");
   if (!svg || svg.tagName.toLowerCase() !== "svg") continue;
 
-  check(`${name} keeps the old paste's width of ${size}`, svg.getAttribute("width") === String(size));
-  check(`${name} keeps the old paste's height of ${size}`, svg.getAttribute("height") === String(size));
+  check(`${name} keeps its width of ${size}`, svg.getAttribute("width") === String(size));
+  check(`${name} keeps its height of ${size}`, svg.getAttribute("height") === String(size));
   check(`${name} keeps the 24-unit lucide viewBox`, svg.getAttribute("viewBox") === "0 0 24 24");
   check(`${name} is an outline icon with no fill`, svg.getAttribute("fill") === "none");
   check(`${name} keeps stroke-width 2`, svg.getAttribute("stroke-width") === "2");
   check(`${name} contains at least one drawing element`, svg.children.length > 0);
-
-  const expectedStroke = name === "ICON_CHECK" ? "var(--mur-success)" : "currentColor";
-  check(`${name} strokes with ${expectedStroke}`, svg.getAttribute("stroke") === expectedStroke);
+  check(`${name} strokes with currentColor`, svg.getAttribute("stroke") === "currentColor");
 }
 
 if (failures.length > 0) {

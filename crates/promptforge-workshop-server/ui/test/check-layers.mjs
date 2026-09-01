@@ -1,9 +1,9 @@
 // Unit test for the layer rule (check-layers.mjs checkImport). Imports the
 // rule module directly - it is dependency-free plain ESM, so no bundling is
 // needed - and pins the allow/deny matrix: base may import only base;
-// services may import base, services, and chat; ui may import everything
-// but the composition root; main.ts may import every layer and chat;
-// nothing may import main.ts; chat/ is never checked as an importer; a file
+// services may import base and services; ui may import everything
+// but the composition root; main.ts may import every layer;
+// nothing may import main.ts; a file
 // in no layer is flagged from either side. If checkImport regressed to
 // allow a reverse import, this test fails even though the conforming tree
 // keeps every wired walk green.
@@ -35,35 +35,29 @@ allowed(
   at("services", "workshop-socket.ts"),
   at("services", "protocol.ts"),
 );
-allowed(
-  "services imports chat",
-  at("services", "memory-storage.ts"),
-  at("chat", "core", "types.ts"),
-);
 allowed("ui imports base", at("ui", "status-bar.ts"), at("base", "lifecycle.ts"));
 allowed("ui imports services", at("ui", "status-bar.ts"), at("services", "protocol.ts"));
 allowed("ui imports ui", at("ui", "workshop", "zones.ts"), at("ui", "workshop", "panel-types.ts"));
-allowed("ui imports chat", at("ui", "workshop", "zones.ts"), at("chat", "utils", "uuid.ts"));
 allowed("main.ts imports base", at("main.ts"), at("base", "lifecycle.ts"));
 allowed("main.ts imports services", at("main.ts"), at("services", "workshop-socket.ts"));
 allowed("main.ts imports ui", at("main.ts"), at("ui", "window-chrome.ts"));
-allowed("main.ts imports chat", at("main.ts"), at("chat", "main.ts"));
 allowed(
   "an extensionless resolution classifies by its directory",
   at("services", "model-service.ts"),
   at("base", "event"),
-);
-allowed(
-  "chat is never checked as an importer",
-  at("chat", "core", "engine.ts"),
-  at("ui", "status-bar.ts"),
 );
 
 // --- Imports the rule denies -----------------------------------------------------
 
 denied("base may not import services", at("base", "lifecycle.ts"), at("services", "protocol.ts"));
 denied("base may not import ui", at("base", "lifecycle.ts"), at("ui", "status-bar.ts"));
-denied("base may not import chat", at("base", "lifecycle.ts"), at("chat", "core", "types.ts"));
+// The vendored chat/ tree was deleted with the murm-ui removal; a re-grown
+// chat/ directory sits in no layer until it is deliberately re-sanctioned.
+denied(
+  "the deleted chat/ tree is no longer a layer",
+  at("ui", "status-bar.ts"),
+  at("chat", "core", "types.ts"),
+);
 denied(
   "services may not import ui",
   at("services", "workshop-socket.ts"),

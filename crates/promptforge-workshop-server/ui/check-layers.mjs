@@ -1,6 +1,5 @@
 // The one definition site of the UI layer rule: ui may import services may
-// import base, never the reverse; chat/ is an opaque dependency importable
-// from services and ui, never from base; main.ts is the composition root -
+// import base, never the reverse; main.ts is the composition root -
 // it may import every layer, and nothing may import it. Consumed three ways
 // so both build paths and CI enforce the same rule: build.mjs wraps
 // checkImport in an esbuild onResolve plugin, build.rs spawns this file as a
@@ -14,9 +13,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "src");
-const chatDir = path.join(srcDir, "chat");
 
-const LAYERS = new Set(["base", "services", "ui", "chat"]);
+const LAYERS = new Set(["base", "services", "ui"]);
 
 // The layer a file belongs to, from its path relative to src/: "main" for
 // the composition root, a directory layer otherwise, null for a file
@@ -46,10 +44,6 @@ function describe(filePath) {
  */
 export function checkImport(importerPath, resolvedImportPath) {
   const importer = layerOf(importerPath);
-  // The vendored chat/ tree is opaque: never checked as an importer.
-  if (importer === "chat") {
-    return null;
-  }
   const imported = layerOf(resolvedImportPath);
   const from = describe(importerPath);
   const to = describe(resolvedImportPath);
@@ -69,7 +63,7 @@ export function checkImport(importerPath, resolvedImportPath) {
     return `${from} imports ${to}: base may import only base`;
   }
   if (importer === "services" && imported === "ui") {
-    return `${from} imports ${to}: services may import only base, services, and chat`;
+    return `${from} imports ${to}: services may import only base and services`;
   }
   return null;
 }
@@ -83,9 +77,7 @@ function walk(dir, files = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (full !== chatDir) {
-        walk(full, files);
-      }
+      walk(full, files);
     } else if (entry.name.endsWith(".ts")) {
       files.push(full);
     }
@@ -93,8 +85,8 @@ function walk(dir, files = []) {
   return files;
 }
 
-// The standalone walk: every workshop-owned .ts under src/ (chat/ excluded),
-// every relative import resolved and checked.
+// The standalone walk: every .ts under src/, every relative import
+// resolved and checked.
 function runWalk() {
   const violations = [];
   for (const file of walk(srcDir)) {
