@@ -62,14 +62,17 @@ end
     Ok(())
 }
 
-/// A VM's shared instruction-budget counter.
+/// A VM's shared instruction-hook state.
+///
+/// The hook exists for cooperative cancellation: its trip budget
+/// ([`HOOK_BUDGET`]) is effectively unlimited, so a long-running or infinite
+/// loop is legal and only the run's cancel flag aborts it.
 ///
 /// Instruction hooks are per-coroutine in PUC Lua: the hook installed on the
 /// main state at construction never fires inside a resumed coroutine, so
 /// every block coroutine receives the same hook (over the same counter) via
-/// [`install_on_thread`](Self::install_on_thread). One counter covers every
-/// program the VM runs, on the main state or on any thread, so splitting
-/// work across chunks cannot reset the budget.
+/// [`install_on_thread`](Self::install_on_thread), keeping every chunk the
+/// VM runs cancellable.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct InstructionBudget {
     fired: Arc<AtomicU64>,
@@ -91,7 +94,8 @@ impl InstructionBudget {
 }
 
 /// The every-Nth-instruction hook body shared by the main state and every
-/// block coroutine.
+/// block coroutine: the cancellation poll, plus a trip budget that is
+/// effectively unlimited ([`HOOK_BUDGET`]) and never fires in practice.
 fn budget_hook(
     fired: Arc<AtomicU64>,
 ) -> impl Fn(&Lua, &mlua::debug::Debug) -> mlua::Result<VmState> {
@@ -104,7 +108,7 @@ fn budget_hook(
                 "lua execution cancelled".to_string(),
             ));
         }
-        if fired.fetch_add(1, Ordering::Relaxed) >= HOOK_BUDGET {
+        if fired.fetch_add(1, Ordering::Relaxed) == HOOK_BUDGET {
             return Err(mlua::Error::RuntimeError(
                 crate::error::lua_quota::INSTRUCTION.to_string(),
             ));
@@ -113,7 +117,7 @@ fn budget_hook(
     }
 }
 
-/// Install an instruction-count hook that aborts a runaway block.
+/// Install the every-Nth-instruction hook that keeps a block cancellable.
 ///
 /// The hook covers the main state only; coroutines need
 /// [`InstructionBudget::install_on_thread`] with the returned counter.

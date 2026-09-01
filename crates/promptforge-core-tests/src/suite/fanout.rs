@@ -103,8 +103,9 @@ async fn fanout_store_writes_persist_across_arms() {
     // the scheduler "concurrent" means interleaving at I/O points, not
     // preemption, so the rendezvous completes only if the sibling arm gets the
     // driver's thread while the poller is suspended. A sequential driver never
-    // reaches two ready files and the poll spins until the instruction budget
-    // trips. The timeout is only a safety net; it is not the pass condition.
+    // reaches two ready files and the poll spins forever - no instruction
+    // ceiling ends it - so the timeout below is what turns that regression
+    // into a failure; the asserts, not the timeout, are the pass condition.
     let run = tokio::time::timeout(
         Duration::from_secs(30),
         run_fixture(

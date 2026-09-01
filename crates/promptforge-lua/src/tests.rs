@@ -1386,25 +1386,17 @@ fn section_vms_isolate_mutated_shared_globals() {
 }
 
 #[test]
-fn shared_program_consumes_the_later_phase_instruction_budget() {
-    // The replay shares the section VM's single instruction counter, so work
-    // the shared library does at load shrinks the budget left for chunks.
-    let work = program("for i = 1, 3000000 do local value = i end");
-    let vm = section_vm_with_shared(&work, "", &StoreRef::memory(), &null_observer(), "Test")
-        .expect("shared work must fit the budget");
-
-    let error = run_scalar(&vm, &work, &NullObserver::default(), "Test")
-        .expect_err("the prologue must exhaust the budget left by shared execution");
-    // LUA-002: an exhausted instruction budget is the typed quota error.
-    assert!(
-        matches!(
-            error,
-            Error::LuaQuota {
-                resource: "instruction"
-            }
-        ),
-        "instruction exhaustion must surface as a typed LuaQuota: {error:?}"
-    );
+fn a_loop_exceeding_the_old_instruction_budget_completes() {
+    // The instruction trip limit is gone: a block that runs far past the old
+    // ~1e7-instruction ceiling (10_000 instructions per hook firing, 1_000
+    // firings) completes instead of tripping a quota error. The hook still
+    // fires throughout, polling the cancel flag.
+    let out = run(
+        "local n = 0\nfor i = 1, 8000000 do n = n + 1 end\nreturn n",
+        "",
+    )
+    .expect("a loop past the old instruction budget must complete");
+    assert_eq!(out.returned.as_deref(), Some("8000000"));
 }
 
 #[test]
@@ -1435,6 +1427,35 @@ fn shared_replay_consumes_the_configured_log_budget() {
             }
         ),
         "log-budget exhaustion must surface as a typed LuaQuota: {error:?}"
+    );
+    vm.teardown(&NullObserver::default(), "Budget");
+}
+
+#[test]
+fn the_memory_budget_error_stays_reachable() {
+    // The instruction trip limit is gone, but the heap ceiling still refuses
+    // a block that allocates past the memory budget `apply_lua_limits` set.
+    let mut vm = SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Budget")
+        .expect("VM builds");
+    vm.apply_lua_limits(4 * 1024 * 1024, DEFAULT_LUA_LOG_EVENTS)
+        .expect("limits apply");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host injects");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Budget")
+        .expect("host APIs must install");
+    let error = run_scalar(
+        &vm,
+        &program(
+            "local t = {}\nlocal i = 1\nwhile true do t[i] = string.rep('x', 16384) i = i + 1 end",
+        ),
+        &NullObserver::default(),
+        "Budget",
+    )
+    .expect_err("allocation past the heap ceiling must fail");
+    assert!(
+        lua_error_message(&error).contains("memory"),
+        "the memory ceiling must surface its refusal: {error:?}"
     );
     vm.teardown(&NullObserver::default(), "Budget");
 }
@@ -1916,9 +1937,10 @@ async fn long_running_lua_block_cancels_cooperatively() {
     use promptforge_core_support::cancel::{self, CancelHandle};
     use std::time::{Duration, Instant};
 
-    // An unbounded loop that, without cooperative cancellation, would run to
-    // the instruction budget. With the cancel flag set, the very first
-    // instruction-hook firing aborts it and maps to `Error::Interrupted`.
+    // An unbounded loop that, without cooperative cancellation, would run
+    // forever: no instruction ceiling ends it. With the cancel flag set, the
+    // very first instruction-hook firing aborts it and maps to
+    // `Error::Interrupted`.
     let program = LuaProgram::compile(
         "local n = 0\nwhile true do n = n + 1 end",
         "cancel loop",
@@ -2262,9 +2284,47 @@ fn dangerous_globals_absent() {
     assert_eq!(out.returned.as_deref(), Some("nil,nil,nil,nil"));
 }
 
-#[test]
-fn instruction_budget_aborts_runaway() {
-    assert!(run("while true do end", "").is_err());
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pre_cancelled_run_aborts_a_tight_loop_promptly() {
+    use promptforge_core_support::cancel::{self, CancelHandle};
+    use std::time::{Duration, Instant};
+
+    // No instruction ceiling aborts a runaway block anymore; the cancel flag,
+    // polled by the instruction hook, is the kill switch. With the flag set
+    // before the chunk starts, the first hook firing inside a tight
+    // `while true do end` aborts it within a bounded wall-clock.
+    let handle = CancelHandle::new();
+    handle.cancel();
+
+    let start = Instant::now();
+    let outcome = cancel::scope(handle, async {
+        tokio::task::block_in_place(|| {
+            let mut vm =
+                SectionVm::new(&test_nonce(), EXECUTION, &NullObserver::default(), "Loop")?;
+            vm.inject_host("", &json!({}), &StoreRef::memory(), None)?;
+            let observer = null_observer();
+            vm.install_host_apis(&observer, "Loop")?;
+            let result = run_scalar(
+                &vm,
+                &program("while true do end"),
+                &NullObserver::default(),
+                "Loop",
+            );
+            vm.teardown(&NullObserver::default(), "Loop");
+            result
+        })
+    })
+    .await;
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "a cancelled tight loop must abort within a bounded wall-clock, took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        matches!(outcome, Err(Error::Interrupted)),
+        "expected Interrupted, got {outcome:?}"
+    );
 }
 
 #[test]
