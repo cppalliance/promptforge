@@ -60,6 +60,12 @@
 "lib.rs" = 80
 "main.rs" = 47
 "menu.rs" = 926
+# New module: the run event log (WorkshopObserver) - Observer write side,
+# EventLog read side, subscribe() broadcast, and versioned JSONL
+# persistence with load_from replay; roughly half the count is its
+# in-file unit tests, including the review round's persistence-robustness
+# pins (CRLF endings load, unknown event kinds refuse to load).
+"observer.rs" = 878
 "protocol.rs" = 738
 # New module: the ProgressHub-to-status-bar renderer and its anti-flicker
 # state machine (show delay, minimum visible time, detach poll). Grew by

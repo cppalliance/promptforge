@@ -5009,6 +5009,7 @@ dependencies = [
  "futures-util",
  "open",
  "percent-encoding",
+ "promptforge-core-support",
  "promptforge-gateway-protocol",
  "promptforge-model-client",
  "promptforge-progress",
