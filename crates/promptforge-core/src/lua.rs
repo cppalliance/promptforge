@@ -5,7 +5,8 @@
 //! functions are available; the raw input `args` string and the runtime `sys`
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
-//! files; and an instruction-count hook aborts a runaway block.
+//! files; and an every-Nth-instruction hook polls the run's cancel flag, so
+//! even an unbounded loop aborts promptly once the host cancels.
 //!
 //! The implementation lives in the `promptforge-lua` crate and is re-exported
 //! here unchanged, so existing `promptforge_core::lua::*` paths keep working.

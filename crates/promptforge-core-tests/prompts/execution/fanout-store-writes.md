@@ -21,8 +21,8 @@ return tostring(#files) .. ":" .. table.concat(replies, ",")
 -- Each poll iteration yields through `execute`, giving the sibling arm its
 -- I/O points: under the scheduler "concurrent" means interleaving at yield
 -- points, not preemption. A sequential driver (arm 2 starting only after
--- arm 1 finishes) never reaches two ready files, and the loop spins until
--- the instruction budget trips.
+-- arm 1 finishes) never reaches two ready files, and the loop spins
+-- forever: no instruction ceiling ends it; the test's timeout bounds it.
 store.write("ready-" .. sys.index .. ".md", "1")
 while #store.glob("ready-*.md") < 2 do
   execute("## Yield")

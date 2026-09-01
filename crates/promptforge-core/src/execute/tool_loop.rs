@@ -205,9 +205,9 @@ pub(crate) async fn run_prose_inference(
                                 ));
                             };
                             // The handler is synchronous Lua on this thread, so
-                            // there is no future to race against cancellation; a
-                            // stuck handler is bounded by the VM's instruction
-                            // budget instead.
+                            // there is no future to race against cancellation;
+                            // the VM's instruction hook polls the cancel flag,
+                            // so a stuck handler still aborts on cancellation.
                             let call_result = local(&call.name, call.arguments.clone());
                             observer.observe(
                                 execution,

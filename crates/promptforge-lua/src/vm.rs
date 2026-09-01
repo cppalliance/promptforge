@@ -39,8 +39,8 @@ pub(crate) fn pack_sequence<T: mlua::IntoLua>(
 /// alias globals, and only then walk the section's blocks with
 /// [`start_block_coro`](Self::start_block_coro). [`bind_reply`](Self::bind_reply) inserts
 /// the model reply into the same environment between chunks. A single
-/// instruction counter covers every program run by this VM, so splitting
-/// work across chunks cannot reset the budget.
+/// instruction hook covers every program run by this VM, on the main state
+/// and on every block coroutine, so cancellation reaches any chunk.
 ///
 /// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
 /// hardening, host injection, instruction accounting, and report delivery on
@@ -207,7 +207,7 @@ impl SectionVm {
     /// Creates a hardened section VM.
     ///
     /// Construction installs only the sandbox, the default resource ceilings,
-    /// the instruction budget, and `untrusted` (wrapping under the run's
+    /// the instruction hook, and `untrusted` (wrapping under the run's
     /// `nonce`). Everything else - the run's
     /// limits, the host values, the persistent host APIs, the control
     /// globals, the shared-library replay, and the captured alias globals -
@@ -720,8 +720,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, execution
-    /// fails, the shared instruction budget is exhausted, or the program
-    /// returns a non-scalar value.
+    /// fails, or the program returns a non-scalar value.
     ///
     /// `#[doc(hidden)]`: a cross-crate seam for `promptforge-core`'s executor
     /// tests, not host API.
@@ -1263,9 +1262,9 @@ pub(crate) struct LuaOutcome {
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`
-/// cannot be bridged, the chunk fails to run (including hitting the instruction
-/// budget or a failing `store` op, which raises a Lua error), or it returns a
-/// value that cannot be rendered as a result string.
+/// cannot be bridged, the chunk fails to run (including a failing `store` op,
+/// which raises a Lua error), or it returns a value that cannot be rendered
+/// as a result string.
 #[cfg(test)]
 pub(crate) fn run_chunk(
     source: &str,

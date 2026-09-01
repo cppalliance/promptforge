@@ -5,7 +5,8 @@
 //! functions are available; the raw input `args` string and the runtime `sys`
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
-//! files; and an instruction-count hook aborts a runaway block.
+//! files; and an every-Nth-instruction hook polls the run's cancel flag, so
+//! even an unbounded loop aborts promptly once the host cancels.
 //! Direct `print` and `warn` are unavailable. A persistent `log(message)`
 //! callback accepts one bounded, single-line UTF-8 string and reports it
 //! through the run's [`Observer`] as `Lua: <message>`.
@@ -58,8 +59,13 @@ pub use crate::error::{Error, SharedSource};
 
 /// How many instructions between hook firings.
 pub(crate) const HOOK_INTERVAL: u32 = 10_000;
-/// Maximum number of hook firings before a block is aborted (~1e7 instructions).
-pub(crate) const HOOK_BUDGET: u64 = 1_000;
+/// Hook-firing trip budget, effectively unlimited.
+///
+/// Long-running and infinite loops are legal: no instruction ceiling aborts a
+/// block, so the hook's job is the cancellation poll and the run's
+/// `CancelHandle` is the kill switch for a runaway loop. The typed quota
+/// errors remain for the memory and log budgets.
+pub(crate) const HOOK_BUDGET: u64 = u64::MAX;
 /// Maximum number of Unicode scalar values accepted by `log`.
 pub(crate) const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 /// Default per-VM Lua heap ceiling, matching the executor's `RunLimits`.

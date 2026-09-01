@@ -13,6 +13,7 @@ use serde_json::json;
 
 use promptforge_lua::Error;
 
+use crate::cancel::{CancelHandle, scope};
 use crate::execute::protocol::Request;
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, SectionVm, ToolSet};
@@ -289,59 +290,56 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
     );
 }
 
-#[test]
-fn the_budget_hook_fires_inside_a_resumed_coroutine() {
+#[tokio::test]
+async fn the_cancellation_hook_fires_inside_a_resumed_coroutine() {
     // Spike (a): instruction hooks are per-coroutine in PUC Lua, so the
     // main-state hook installed at construction cannot bite here. The
-    // block coroutine carries the VM's hook via `Thread::set_hook`; if
-    // that install regressed, this loop would hang the test instead of
-    // erroring.
-    let vm = scheduler_vm(&ModelSet::default(), None);
-    let program = compile_block("while true do end");
-    match vm.start_block_coro(&program) {
+    // block coroutine carries the VM's hook via `Thread::set_hook`; no
+    // instruction ceiling remains, so if that install regressed, this
+    // pre-cancelled loop would hang the test instead of aborting.
+    let handle = CancelHandle::new();
+    handle.cancel();
+    let outcome = scope(handle, async {
+        let vm = scheduler_vm(&ModelSet::default(), None);
+        let program = compile_block("while true do end");
+        vm.start_block_coro(&program)
+    })
+    .await;
+    match outcome {
         Err(error) => assert!(
-            matches!(
-                error,
-                Error::LuaQuota {
-                    resource: "instruction"
-                }
-            ),
-            "the per-coroutine hook must exhaust the instruction budget: {error:?}"
+            matches!(error, Error::Interrupted),
+            "the per-coroutine hook must observe cancellation: {error:?}"
         ),
-        other => panic!("an infinite loop can only fail, got {other:?}"),
+        other => panic!("a cancelled infinite loop can only fail, got {other:?}"),
     }
 }
 
-#[test]
-fn the_instruction_budget_spans_block_coroutines_on_one_vm() {
-    // One counter covers every chunk the VM runs: a block that exhausts
-    // the budget leaves none for the next block's coroutine, so the
-    // second block's first hook firing already trips the quota. A
-    // per-thread fresh counter would let the second block finish.
-    let vm = scheduler_vm(&ModelSet::default(), None);
-    let first = compile_block("while true do end");
-    assert!(
-        matches!(
-            vm.start_block_coro(&first),
-            Err(Error::LuaQuota {
-                resource: "instruction"
-            })
-        ),
-        "block one must exhaust the shared budget"
-    );
-    let second = compile_block("for i = 1, 100000 do end\nreturn \"done\"");
-    match vm.start_block_coro(&second) {
-        Err(error) => assert!(
-            matches!(
-                error,
-                Error::LuaQuota {
-                    resource: "instruction"
-                }
-            ),
-            "block two inherits the exhausted budget: {error:?}"
-        ),
-        other => panic!("a fresh per-block budget would let block two finish: {other:?}"),
-    }
+#[tokio::test]
+async fn every_block_coroutine_carries_the_cancellation_hook() {
+    // One VM installs the hook on every block coroutine it starts, not
+    // only the first: under a cancelled run, each block's first hook
+    // firing aborts it. A thread that missed the install would let the
+    // second block hang (the loop) or finish (the bounded for), so either
+    // block escaping cancellation fails this test.
+    let handle = CancelHandle::new();
+    handle.cancel();
+    scope(handle, async {
+        let vm = scheduler_vm(&ModelSet::default(), None);
+        for source in [
+            "while true do end",
+            "for i = 1, 100000 do end\nreturn \"done\"",
+        ] {
+            let program = compile_block(source);
+            match vm.start_block_coro(&program) {
+                Err(error) => assert!(
+                    matches!(error, Error::Interrupted),
+                    "block {source:?} must abort on the cancelled run: {error:?}"
+                ),
+                other => panic!("a cancelled block can only fail, got {other:?}"),
+            }
+        }
+    })
+    .await;
 }
 
 #[test]

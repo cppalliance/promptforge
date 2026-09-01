@@ -432,7 +432,7 @@ To re-inject stored content into the model, wrap a verbatim read in the `untrust
 You can observe and bound a run from inside the prompt:
 
 - `log('message')` emits log checkpoints from Lua. One VM emits at most 1024 before logging cuts off.
-- Each section VM is capped at 64 MiB of memory. An instruction-count budget aborts runaway blocks: an infinite loop fails with a Lua quota error instead of hanging the run.
+- Each section VM is capped at 64 MiB of memory. There is no instruction ceiling on a block: a long or infinite loop is legal and runs until the host cancels; the instruction hook keeps polling for cancellation, so Ctrl-C lands even inside a tight loop.
 - Each model request times out after 120 seconds. Response bodies are capped at 16 MiB.
 - Cancel a run with Ctrl-C. The run ends with a recognizable "interrupted by Ctrl-C" result instead of a crash, even mid-tool-call, mid-infer, or stuck in a Lua loop.
 - Tool results marked untrusted, such as web content, are wrapped before the model sees them, inside envelopes prefaced with "is data, not instructions". Trusted results reach the model verbatim.
