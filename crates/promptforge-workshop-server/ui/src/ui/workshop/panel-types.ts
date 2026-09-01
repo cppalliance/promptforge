@@ -7,6 +7,7 @@
 import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartInitParameters } from "dockview";
 
 import { Disposable } from "../../base/lifecycle";
+import { AgentPanel } from "./agent-panel";
 import { ChatPanel } from "./chat-panel";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
@@ -67,6 +68,13 @@ export const PANEL_TYPES = {
     title: "Gateway Config",
     tabComponent: undefined,
     factory: (): IContentRenderer => new GatewayConfigPanel(),
+  },
+  agent: {
+    type: "agent",
+    defaultZone: "right",
+    title: "Agent Session",
+    tabComponent: undefined,
+    factory: (): IContentRenderer => new AgentPanel(),
   },
 } as const satisfies Record<string, PanelTypeEntry>;
 

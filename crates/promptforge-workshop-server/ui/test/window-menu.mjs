@@ -77,12 +77,16 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   };
   let workshopToggles = 0;
   let gatewayConfigOpens = 0;
+  let agentSessionOpens = 0;
   const workshop = {
     toggleWorkshopPanel: () => {
       workshopToggles += 1;
     },
     openGatewayConfig: () => {
       gatewayConfigOpens += 1;
+    },
+    openAgentSession: () => {
+      agentSessionOpens += 1;
     },
   };
   globalThis.window = window;
@@ -106,7 +110,7 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   const isOpen = (id) => !popoverOf(id).hidden;
   const keydown = (key) =>
     window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
-  const stats = () => ({ agentsOpened, workshopToggles, gatewayConfigOpens, execCalls: [...execCalls] });
+  const stats = () => ({ agentsOpened, workshopToggles, gatewayConfigOpens, agentSessionOpens, execCalls: [...execCalls] });
   return { window, commands, menus, nativeCalls, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
 }
 
@@ -261,6 +265,24 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   configItem.click();
   check("Gateway Config dispatches the open command", stats().gatewayConfigOpens === 1);
   check("running Gateway Config closes the menu", !isOpen("window"));
+}
+
+// --- Window menu: Agent Session opens the panel next to Gateway Config -------
+
+{
+  const { menus, itemsOf, itemByLabel, isOpen, stats } = scenario();
+  menus.window.click();
+  const agentItem = itemByLabel("window", "Agent Session");
+  check("the Window menu lists Agent Session", agentItem !== undefined);
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  const labels = itemsOf("window").map(rowLabel);
+  check(
+    "Agent Session sits next to Gateway Config",
+    labels.indexOf("Agent Session") === labels.indexOf("Gateway Config") + 1,
+  );
+  agentItem.click();
+  check("Agent Session dispatches the open command", stats().agentSessionOpens === 1);
+  check("running Agent Session closes the menu", !isOpen("window"));
 }
 
 // --- Edit menu: disabled without a target, preserved target with one ---------
