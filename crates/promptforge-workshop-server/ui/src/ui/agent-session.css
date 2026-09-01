@@ -246,3 +246,25 @@
   color: var(--text-muted, #909090);
   cursor: default;
 }
+
+/* The push-to-talk mic: an icon button the size of the send button, in
+   the raised tone so the accent stays on Send. voice.css paints the
+   hover glow and the recording fill over it. */
+.agent-session__mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  padding: 0;
+  color: var(--text, #e8e8e8);
+  background: var(--bg-raised, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+}
+
+.agent-session__mic:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: 2px;
+}

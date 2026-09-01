@@ -1,30 +1,26 @@
 /* Styles for voice.ts, which imports this file; esbuild bundles it into
    dist/app.css. Themed values come from the :root tokens in style.css.
-
-   Bundle-order-sensitive: several rules here tie murm-ui's own composer
-   rules on specificity and win only by coming later in the cascade, so
-   this file must land after the chat styles main.ts imports first. Rule
-   order within this file is load-bearing too: the recording rules tie the
-   hover-glow rule on specificity and must stay after it. */
-
-/* Hover glow: icon buttons trade murm-ui's background wash
-   for a 1px accent ring plus a soft bloom. */
-.mur-form-icon-btn:hover:not(:disabled),
-.voice-mic:hover {
-  background-color: transparent;
-  box-shadow:
-    0 0 0 1px var(--hover-glow, #e05a2b),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #e05a2b) 40%, transparent);
-}
+   The host form (agent-session.css) sizes and colors the mic button under
+   its own class; these rules add only what recording changes, and win
+   over the host's tie-specificity rules because agent-session-view.ts
+   imports its own stylesheet before voice.ts. Rule order within this file
+   is load-bearing too: the recording rules tie the hover-glow rule on
+   specificity and must stay after it. */
 
 .voice-mic {
   flex: none;
 }
 
-/* Recording mic: a steady danger fill with a matching ring and bloom.
-   The hover form needs :not(:disabled) to match the glow rule's specificity -
-   the mic also carries mur-form-icon-btn, whose hover would otherwise
-   outrank this and strip the fill. */
+/* Hover glow: a 1px accent ring plus a soft bloom. */
+.voice-mic:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--hover-glow, #e05a2b),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #e05a2b) 40%, transparent);
+}
+
+/* Recording mic: a steady danger fill with a matching ring and bloom. The
+   hover form needs :not(:disabled) to match the glow rule's specificity,
+   or the glow would strip the fill on hover. */
 .voice-mic--recording {
   color: var(--on-danger, #ffffff);
   background: var(--danger, #dc3545);
@@ -43,25 +39,8 @@
     0 0 8px color-mix(in oklab, var(--danger, #dc3545) 70%, transparent);
 }
 
-/* Send button hover: accent glow in both normal and generating states. */
-.mur-action-btn:hover:not(:disabled) {
-  box-shadow:
-    0 0 0 1px var(--hover-glow, #e05a2b),
-    0 0 4px color-mix(in oklab, var(--hover-glow, #e05a2b) 40%, transparent);
-}
-
-/* Composer overlap fix: make the form container participate in the column
-   flex flow so the scroll area shrinks to accommodate it. The embedded
-   workshop mode only - murm-ui's standalone keeps absolute positioning. */
-.mur-app-embedded .mur-chat-form-container {
-  position: relative;
-}
-
-.mur-app-embedded.mur-chat-empty .mur-chat-form-container {
-  bottom: auto;
-  transform: none;
-}
-
-.mur-app-embedded .mur-chat-history {
-  padding-bottom: 1rem;
+/* The input during a take: readOnly against typing while the transcript
+   splices in, so an inset danger ring says why the keys do nothing. */
+.voice-input--recording {
+  box-shadow: inset 0 0 0 1px var(--danger, #dc3545);
 }

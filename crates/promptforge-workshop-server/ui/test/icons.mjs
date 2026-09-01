@@ -33,14 +33,15 @@ function check(name, condition) {
   if (!condition) failures.push(name);
 }
 
-// Every export the tree panel imports, with its pixel size.
+// Every export the workbench panels import, with its pixel size.
 const expectedSizes = {
   ICON_TRASH_2: 15,
   ICON_FOLDER_PLUS: 15,
+  ICON_MIC: 16,
 };
 
 check(
-  "the module exports exactly the icon names the tree panel imports",
+  "the module exports exactly the icon names the panels import",
   Object.keys(icons).sort().join(",") === Object.keys(expectedSizes).sort().join(","),
 );
 
