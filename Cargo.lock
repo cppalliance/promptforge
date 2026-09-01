@@ -4583,6 +4583,8 @@ name = "promptforge-core-support"
 version = "0.2.0"
 dependencies = [
  "rand 0.9.5",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-util",
 ]
