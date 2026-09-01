@@ -252,13 +252,39 @@ impl Drop for Gateway {
     }
 }
 
+/// Renders `content` as the SSE completion stream the always-streaming client
+/// consumes: one content chunk, a stop-finish chunk, and the `[DONE]` sentinel.
+fn sse_text_completion(content: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let events = [
+        json!({
+            "object": "chat.completion.chunk",
+            "choices": [{ "index": 0, "delta": { "content": content } }]
+        }),
+        json!({
+            "object": "chat.completion.chunk",
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+        }),
+    ];
+    let mut body = String::new();
+    for event in &events {
+        body.push_str("data: ");
+        body.push_str(&event.to_string());
+        body.push_str("\n\n");
+    }
+    body.push_str("data: [DONE]\n\n");
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+        body,
+    )
+        .into_response()
+}
+
 /// A gateway that answers every request with the same assistant message, so a
 /// prose section takes exactly one model round trip.
 async fn spawn_text_gateway() -> Gateway {
-    async fn completions(Json(_body): Json<Value>) -> Json<Value> {
-        Json(json!({
-            "choices": [{ "message": { "role": "assistant", "content": "spoken" } }]
-        }))
+    async fn completions(Json(_body): Json<Value>) -> axum::response::Response {
+        sse_text_completion("spoken")
     }
 
     let router = Router::new().route("/v1/chat/completions", post(completions));

@@ -18,8 +18,8 @@ use tempfile::TempDir;
 use tokio::sync::Notify;
 
 use super::{
-    Gateway, PromptForgeServer, call, server, server_with, speaking_server_with, structured_of,
-    text_of,
+    Gateway, PromptForgeServer, call, server, server_with, speaking_server_with,
+    sse_text_completion, structured_of, text_of,
 };
 
 /// A gateway that answers nothing until `release` is signalled, which is how a
@@ -30,9 +30,7 @@ async fn spawn_gated_gateway(release: Arc<Notify>) -> Gateway {
         let release = Arc::clone(&release);
         async move {
             release.notified().await;
-            Json(json!({
-                "choices": [{ "message": { "role": "assistant", "content": "eventually" } }]
-            }))
+            sse_text_completion("eventually")
         }
     };
 
