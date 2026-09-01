@@ -46,8 +46,9 @@ tauri-build.workspace = true
 
 [features]
 # CUDA by default: the desktop app is voice-capable out of the box, at the
-# cost of requiring the NVIDIA CUDA toolkit to build. A machine without it
-# builds with --no-default-features (voice then stays off at runtime).
+# cost of requiring the NVIDIA CUDA toolkit to build (the whisper CUDA
+# backend). A machine without it builds with --no-default-features (voice
+# then stays off at runtime).
 default = ["cuda"]
 cuda = ["promptforge-gateway/workshop-cuda"]
 

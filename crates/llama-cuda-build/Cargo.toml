@@ -1,0 +1,30 @@
+[package]
+name = "llama-cuda-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "Builds the CUDA llama-server release zip from a llama.cpp checkout (Windows x64)"
+
+[[bin]]
+name = "llama-cuda-build"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+# zip's deflate-flate2 enables flate2 with default features off; this direct
+# dependency selects the pure-Rust backend so the crate also builds alone.
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use promptforge_stt::{SttRuntime, SttState};
-use promptforge_workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
+use promptforge_workshop_server::{
+    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle,
+};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};

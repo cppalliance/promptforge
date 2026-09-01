@@ -19,7 +19,7 @@ use promptforge_gateway_routing::queue::DominionQueue;
 use promptforge_gateway_routing::{Endpoint, Model, dominion_queues};
 use promptforge_progress::ProgressHandle;
 
-use crate::artifacts::{self, ArtifactStore, ProvisionedServer};
+use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
 use crate::dialect::resolve_local_dialect;
 use crate::error::LocalError;
 use crate::launch_templates::resolve_chat_template_file;
@@ -255,6 +255,31 @@ enum StartPolicy {
     KeepReady,
 }
 
+/// Resolves the cache root, builds the store, and provisions the pinned
+/// `llama-server` per the `[local]` selection (explicit path, environment
+/// variable, or the managed backend download).
+fn provision_server(
+    config: &Config,
+    progress: Option<&ProgressHandle>,
+    provision: impl FnOnce(
+        &ArtifactStore,
+        &ServerSelection<'_>,
+        Option<&ProgressHandle>,
+    ) -> Result<ProvisionedServer, LocalError>,
+) -> Result<(ArtifactStore, ProvisionedServer), LocalError> {
+    let cache_root = resolve_cache_root(config.local().cache_dir())?;
+    tracing::info!(path = %cache_root.display(), "local model cache");
+    let store = ArtifactStore::new(cache_root)?;
+    let selection = ServerSelection {
+        server_path: config.local().llama_server_path(),
+        backend: config.local().llama_backend(),
+    };
+    let server_tree = progress.map(|handle| handle.child("llama-server", 1.0));
+    let server = provision(&store, &selection, server_tree.as_ref())?;
+    tracing::info!(path = %server.executable.display(), "provisioned llama-server");
+    Ok((store, server))
+}
+
 /// Shared body of [`LocalRuntime::start`] with the two externalities - the
 /// pinned-server provision and the child spawn - injectable, so a test can
 /// drive a start over a mock layout.
@@ -263,6 +288,7 @@ fn start_impl(
     progress: Option<&ProgressHandle>,
     provision: impl FnOnce(
         &ArtifactStore,
+        &ServerSelection<'_>,
         Option<&ProgressHandle>,
     ) -> Result<ProvisionedServer, LocalError>,
     spawn: impl Fn(
@@ -286,12 +312,7 @@ fn start_impl(
         });
     }
 
-    let cache_root = resolve_cache_root(config.local().cache_dir())?;
-    tracing::info!(path = %cache_root.display(), "local model cache");
-    let store = ArtifactStore::new(cache_root)?;
-    let server_tree = progress.map(|handle| handle.child("llama-server", 1.0));
-    let server = provision(&store, server_tree.as_ref())?;
-    tracing::info!(path = %server.executable.display(), "provisioned llama-server");
+    let (store, server) = provision_server(config, progress, provision)?;
 
     let interrupted = startup_interrupt_flag();
     let dominion_queues = dominion_queues(config);
@@ -911,7 +932,7 @@ context = 512
         let error = start_impl(
             &config,
             Some(&parent),
-            |_store, server| {
+            |_store, _selection, server| {
                 // An already-staged server has no download/verify/extract work.
                 if let Some(handle) = server {
                     handle.complete();

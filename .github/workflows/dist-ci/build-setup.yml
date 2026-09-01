@@ -1,0 +1,14 @@
+# Injected into cargo-dist's build-local-artifacts job (github-build-setup
+# in dist-workspace.toml). The gateway build bundles the two web UIs with
+# esbuild, which needs Node 22 and the npm installs. Keep in sync with the
+# setup steps in ci.yml. Every step needs a `name`, and only
+# name/uses/with/run survive the cargo-dist template, so the npm paths go
+# through --prefix rather than working-directory.
+- name: Set up Node.js 22
+  uses: actions/setup-node@v4
+  with:
+    node-version: 22
+- name: Install UI dependencies
+  run: npm ci --prefix crates/promptforge-workshop-server/ui
+- name: Install config UI dependencies
+  run: npm ci --prefix crates/promptforge-gateway-config-ui/ui

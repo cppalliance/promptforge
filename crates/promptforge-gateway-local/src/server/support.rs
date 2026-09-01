@@ -76,10 +76,9 @@ const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 /// processes. Non-Windows is a documented no-op: a `nice` port would need
 /// libc or `pre_exec` unsafe and is deferred.
 ///
-/// When the request carries a `path_prefix` (a staged CUDA bundle), the
-/// child's `PATH` is set to the prefix entries followed by the inherited
-/// ones. Only the child environment is touched; this process's environment is
-/// never mutated.
+/// When the request carries a `path_prefix`, the child's `PATH` is set to
+/// the prefix entries followed by the inherited ones. Only the child
+/// environment is touched; this process's environment is never mutated.
 ///
 /// # Errors
 /// Returns [`LocalError::Spawn`] when the prefixed `PATH` value cannot be

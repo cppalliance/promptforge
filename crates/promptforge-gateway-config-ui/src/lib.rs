@@ -11,20 +11,13 @@
 //! crate (re-exported here), so headless gateway builds carry the same
 //! wall without compiling this crate's asset machinery.
 //!
-//! Debug builds read `ui/dist/` from disk at request time, so UI edits
-//! need no Rust recompile; release builds embed the packaged, verified
-//! artifact into the binary. The crate's build script produces `ui/dist/`
-//! in both profiles.
+//! Debug builds read the bundle from `$OUT_DIR/ui-dist/` at request time,
+//! so UI edits need no Rust recompile; release builds embed the bundle
+//! into the binary. The crate's build script produces the bundle in both
+//! profiles.
 
 mod assets;
 mod routes;
 
 pub use promptforge_gateway_loopback::require_loopback;
 pub use routes::routes;
-
-// The release artifact verifier lives outside src/ so build.rs shares it
-// through the same `#[path]` mechanism; included here only to run its
-// tests under `cargo test`.
-#[cfg(test)]
-#[path = "../build/manifest.rs"]
-mod build_manifest;

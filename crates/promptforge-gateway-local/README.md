@@ -8,9 +8,8 @@ respawn, HF metadata sidecars, the blob cache store behind the gateway's
 route (files under the cache's `models/` tree no loaded `[[local_model]]`
 entry references), the bounded GGUF header parser behind the gateway's
 `GET /admin/model-info` route (architecture, layer count, parameter count,
-and optional `tokenizer.chat_template` - never tensor data), the twelve-family
-bundled chat-template catalog with hash-first known overrides, and CUDA bundle
-staging.
+and optional `tokenizer.chat_template` - never tensor data), and the
+twelve-family bundled chat-template catalog with hash-first known overrides.
 
 Chat launches keep `--jinja` enabled and resolve templates in this order:
 an explicit custom file, an explicit `builtin:<family>` asset staged under
@@ -26,11 +25,9 @@ entries, and `shutdown` tears every child down deterministically. The crate
 contains no HTTP routing and no profile-switch orchestration; those live in
 the gateway.
 
-One feature flag exists:
+The crate has no feature flags.
 
-- `llama-cuda` - on a native Windows x86-64 build with CUDA Toolkit >= 12.8,
-  compiles the pinned llama.cpp submodule during the Cargo build and embeds
-  the resulting bundle for runtime staging. A no-op on every other target.
-
-Runtime code never compiles native dependencies; it only verifies, stages,
-and launches build-produced bundles.
+Runtime code never compiles native dependencies; it only downloads,
+verifies, stages, and launches pinned `llama-server` archives. The CUDA
+build for Blackwell GPUs is compiled on GitHub by the `llama-cuda-build`
+tool and downloaded like any other archive.

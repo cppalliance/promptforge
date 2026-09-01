@@ -68,7 +68,7 @@ mod tests {
     }
 
     /// Asserts a static UI route answers 200 with the expected content
-    /// type and a non-empty body. Debug test builds serve `ui/dist/` from
+    /// type and a non-empty body. Debug test builds serve the bundle from
     /// disk, so this also pins that the build script produced the assets.
     async fn assert_ui_asset(uri: &str, expected_content_type: &str) {
         let response = get_as_loopback(uri).await;

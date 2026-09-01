@@ -1,0 +1,168 @@
+name: llama-cuda-blackwell
+
+# Builds the Blackwell CUDA llama-server release zip on a GitHub-hosted
+# Windows computer (no GPU needed to compile), smoke-tests it on our
+# self-hosted GPU computer, and publishes a GitHub Release the gateway
+# downloads at run time (the `cuda-blackwell` row in
+# crates/promptforge-gateway-local/src/artifacts/assets.rs).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: llama.cpp release tag to build (for example b10082)
+        required: true
+        default: "b10082"
+  push:
+    branches: [master]
+    paths: [crates/llama-cuda-build/**]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llama-cuda-blackwell-${{ inputs.tag || 'b10082' }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || 'b10082' }}
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check out llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ env.TAG }}
+          path: llama.cpp
+
+      # Jimver/cuda-toolkit's local installer crashes on windows-2022 with
+      # exit code 0xE0FF0009 (issues 382, 395, 436). The workaround from
+      # those issues: run the NVIDIA network installer directly. The `-s`
+      # and `-n` flags mean silent and install-all; `-n` avoids sub-package
+      # naming differences between toolkit versions.
+      - name: Install the CUDA toolkit
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          version="13.2.0"
+          short="13.2"
+          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
+          echo "Downloading CUDA $version network installer..."
+          curl -Lo cuda_installer.exe "$url"
+          echo "Installing CUDA $version (this takes ~20 minutes)..."
+          ./cuda_installer.exe -s -n
+          rm -f cuda_installer.exe
+          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
+          if [ ! -f "$cuda_path/bin/nvcc.exe" ]; then
+            echo "nvcc not found at $cuda_path, searching..."
+            find "C:/Program Files/NVIDIA GPU Computing Toolkit" -name nvcc.exe 2>/dev/null || true
+            exit 1
+          fi
+          echo "CUDA installed at $cuda_path"
+          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
+          # MSBuild's CUDA targets look for the versioned variable first.
+          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
+          echo "$cuda_path/bin" >> "$GITHUB_PATH"
+
+      - name: Build the release zip
+        run: cargo run --locked -p llama-cuda-build -- --source llama.cpp --tag ${{ env.TAG }} --arch 120a-real --no-smoke --out dist/
+
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cuda-blackwell-${{ env.TAG }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/llama-cuda-manifest.json
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: [self-hosted, windows, cuda]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # The gateway's default features build the config UI with esbuild.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-workshop-server/ui
+        run: npm ci
+
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
+      - name: Download the build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llama-cuda-blackwell-${{ env.TAG }}
+          path: dist
+
+      - name: Verify the checksum and unpack
+        shell: powershell
+        run: |
+          $zip = Get-ChildItem dist/*.zip | Select-Object -First 1
+          $recorded = (Get-Content "$($zip.FullName).sha256" -Raw).Split(' ')[0].Trim()
+          $actual = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($recorded -ne $actual) { throw "sha256 mismatch for $($zip.Name): recorded $recorded, got $actual" }
+          Expand-Archive -Path $zip.FullName -DestinationPath dist\server -Force
+          if (-not (Test-Path dist\server\llama-server.exe)) { throw "llama-server.exe missing from the zip" }
+
+      - name: Smoke test lists a CUDA device
+        shell: powershell
+        run: |
+          $output = & dist\server\llama-server.exe --list-devices 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "llama-server --list-devices exited $LASTEXITCODE`n$output" }
+          if ($output -notmatch "CUDA") { throw "no CUDA device in --list-devices output`n$output" }
+          $output
+
+      # The full live CUDA test (multi-gigabyte model downloads, completions)
+      # is opt-in from a developer machine; the release smoke only verifies
+      # the built binary sees CUDA devices, which the step above covers.
+
+  publish:
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llama-cuda-blackwell-${{ env.TAG }}
+          path: dist
+
+      - name: Assemble SHA256SUMS
+        working-directory: dist
+        run: cp llama-server-cuda-blackwell-*.zip.sha256 SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llama-cuda-blackwell-${{ env.TAG }}
+          name: llama-cuda-blackwell-${{ env.TAG }}
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS
+            dist/llama-cuda-manifest.json

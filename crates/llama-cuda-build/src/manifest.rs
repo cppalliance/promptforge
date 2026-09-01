@@ -6,18 +6,20 @@ use anyhow::Context as _;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
-/// Bundle format version embedded in every manifest.
-pub const BUNDLE_FORMAT_VERSION: u32 = 1;
+/// Bundle format version embedded in every manifest. Version 2 bundles the
+/// CUDA runtime DLLs into the zip (version 1 kept them external).
+pub const BUNDLE_FORMAT_VERSION: u32 = 2;
 
-/// Linkage policy: project libraries static, CUDA Toolkit runtime external.
-pub const LINKAGE_POLICY: &str = "static-project-external-cuda";
+/// Linkage policy: project libraries static, CUDA runtime DLLs bundled, so
+/// the end user needs only the NVIDIA driver.
+pub const LINKAGE_POLICY: &str = "static-project-bundled-cuda";
 
 /// Identity of the pinned llama.cpp source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceIdentity {
-    /// Repository URL the submodule is added from.
+    /// Repository URL the checkout comes from.
     pub url: String,
-    /// Exact commit the submodule is checked out at.
+    /// Exact commit the checkout is at.
     pub commit: String,
 }
 
@@ -66,7 +68,8 @@ pub struct Manifest {
     pub cmake_options: Vec<String>,
     /// Linkage policy; see [`LINKAGE_POLICY`].
     pub linkage: String,
-    /// External DLL names the runtime host must provide, sorted.
+    /// External DLL names the runtime host must provide (Windows system
+    /// DLLs only; the CUDA runtime ships in the bundle), sorted.
     pub external_dlls: Vec<String>,
     /// Runtime files in the bundle, sorted by name.
     pub files: Vec<BundleFile>,
@@ -143,7 +146,7 @@ mod tests {
         let rendered = sample().render().unwrap();
         assert!(rendered.ends_with("}\n"));
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-        assert_eq!(parsed["bundle_format_version"], 1);
+        assert_eq!(parsed["bundle_format_version"], 2);
         assert_eq!(
             parsed["source"]["commit"],
             "fb0e6b621917488d623437349fb5361e0ac21c70"

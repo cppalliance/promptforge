@@ -38,3 +38,8 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
+
+# Not released through cargo-dist; the gateway is the only disted package
+# (see dist-workspace.toml).
+[package.metadata.dist]
+dist = false

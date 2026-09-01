@@ -108,7 +108,7 @@ fn record_bind_binding(
         return Err(mlua::Error::external("duplicate model alias"));
     }
     let selection = match resolver.resolve(description, opts) {
-        Ok(sel) => sel,
+        Ok(found) => found,
         Err(error) => {
             record_callback_error(errors, Error::from(error))?;
             return Err(mlua::Error::external("model capability resolution failed"));

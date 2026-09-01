@@ -24,7 +24,7 @@ test("the bundled stylesheet defines the design tokens and layer order", async (
   );
   assert.match(
     css,
-    /textarea\.input\s*\{[^}]*height:\s*auto[^}]*border-radius:\s*0\.75rem/,
+    /textarea\.input\s*\{[^}]*height:\s*auto[^}]*border-radius:\s*0?\.75rem/,
     "multiline inputs keep the rounded rectangle radius and natural height",
   );
   assert.match(

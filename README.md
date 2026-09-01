@@ -55,18 +55,6 @@ promptforge-gateway serve gateway.toml --profile main &
 promptforge run prompts/hello.md
 ```
 
-Building from source:
-
-```bash
-git clone git@github.com:cppalliance/promptforge.git
-cd promptforge
-cargo build
-```
-
-A full workspace build includes the Workshop desktop app, whose default `cuda` feature compiles the pinned llama.cpp submodule into an embedded CUDA `llama-server` and enables the whisper CUDA backend. That path needs the submodule checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and an NVIDIA GPU; without them, build the desktop app with `cargo build -p promptforge-workshop --no-default-features` (STT uses its CPU backend and local inference keeps the Vulkan archive path). See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
-
-The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
-
 Two processes: the gateway holds the vendor credential; the client points at it.
 
 ```bash
@@ -83,6 +71,57 @@ Interactive prompt work against an already-running gateway:
 ```bash
 cargo run -p promptforge-dev -- prompts/greet.md "world" --watch
 ```
+
+## Build from source
+
+Every build needs Rust 1.89 or later and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so run `npm ci` once in each `ui/` folder after cloning:
+
+```bash
+git clone git@github.com:cppalliance/promptforge.git
+cd promptforge
+npm ci --prefix crates/promptforge-workshop-server/ui
+npm ci --prefix crates/promptforge-gateway-config-ui/ui
+```
+
+`cargo build` builds the gateway, the default workspace member. `cargo build -p promptforge-workshop` builds the desktop app. See the [promptforge-gateway README](crates/promptforge-gateway/README.md) for the feature details.
+
+### Ubuntu 22.04
+
+```bash
+sudo apt install build-essential pkg-config cmake clang libclang-dev
+# only for the desktop app (promptforge-workshop):
+sudo apt install libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+```bash
+cargo build
+cargo build -p promptforge-workshop --no-default-features
+```
+
+### macOS
+
+```bash
+xcode-select --install
+brew install cmake node
+```
+
+```bash
+cargo build
+cargo build -p promptforge-workshop --no-default-features
+```
+
+### Windows
+
+Install Visual Studio with the "Desktop development with C++" workload, CMake, and Node.js 22. The CUDA toolkit is needed only for the whisper CUDA feature, which the workshop enables by default on Windows.
+
+```bash
+cargo build
+cargo build -p promptforge-workshop
+```
+
+On a machine without the CUDA toolkit, build the desktop app with `--no-default-features`: speech-to-text then uses its CPU backend and local inference keeps the managed `llama-server` download.
+
+The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
 ![Gloves and sparks](images/banner-04.png)
 
@@ -111,7 +150,7 @@ flowchart LR
 | [promptforge-core-support](crates/promptforge-core-support) | Shared host-support primitives: untrusted guards, cooperative cancellation, run observation | [![Crates.io](https://img.shields.io/crates/v/promptforge-core-support.svg)](https://crates.io/crates/promptforge-core-support) |
 | [promptforge-cli](crates/promptforge-cli) | `promptforge run` command-line binary | [![Crates.io](https://img.shields.io/crates/v/promptforge-cli.svg)](https://crates.io/crates/promptforge-cli) |
 | [promptforge-gateway](crates/promptforge-gateway) | Inference gateway with model catalog and credential isolation | [![Crates.io](https://img.shields.io/crates/v/promptforge-gateway.svg)](https://crates.io/crates/promptforge-gateway) |
-| [promptforge-gateway-build](crates/promptforge-gateway-build) | Build-time compiler for the gateway's embedded CUDA `llama-server` bundle | not published |
+| [llama-cuda-build](crates/llama-cuda-build) | Command-line builder of the CUDA `llama-server` release zip; runs on the GitHub build machine | not published |
 | [promptforge-model-client](crates/promptforge-model-client) | Gateway model client: OpenAI-shaped completions transport, wire types, model catalog and binding vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-model-client.svg)](https://crates.io/crates/promptforge-model-client) |
 | [promptforge-gateway-local](crates/promptforge-gateway-local) | Gateway-owned local inference: GGUF provisioning, artifact store, managed `llama-server` lifecycle | [![Crates.io](https://img.shields.io/crates/v/promptforge-gateway-local.svg)](https://crates.io/crates/promptforge-gateway-local) |
 | [promptforge-gateway-protocol](crates/promptforge-gateway-protocol) | OpenAI wire protocol and upstream abstraction for the gateway | [![Crates.io](https://img.shields.io/crates/v/promptforge-gateway-protocol.svg)](https://crates.io/crates/promptforge-gateway-protocol) |
@@ -138,6 +177,8 @@ flowchart LR
 - [PromptForge User Guide](https://cppalliance.github.io/promptforge/) - full documentation
 - [User Guide](guide/promptforge-user-guide.md) - progressive tutorial for writing prompts
 - [design-core.md](design/design-core.md) - core design notes
+
+Build the guide locally with `mdbook build guide`.
 
 ![Filing cabinets](images/banner-06.png)
 

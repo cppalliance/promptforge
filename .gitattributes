@@ -1,5 +1,13 @@
-# The UI artifact verifier hashes ui/ source bytes; CRLF conversion on
-# Windows checkouts would stale the checked-in dist/ manifest.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.ico binary
+*.icns binary
+*.gguf binary
+*.bin binary
+# The UI sources are bundled by esbuild; CRLF conversion on Windows
+# checkouts would change bundle bytes between platforms.
 crates/promptforge-gateway-config-ui/ui/** text eol=lf
 crates/promptforge-workshop-server/ui/** text eol=lf
 # Images are not text; the blanket rules above must not convert them.

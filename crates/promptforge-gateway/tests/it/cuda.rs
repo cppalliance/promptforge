@@ -1,13 +1,15 @@
-//! Live CUDA proof: an opt-in end-to-end run of the embedded CUDA
-//! `llama-server` bundle with an MTP drafter and a multimodal projector on
-//! real hardware.
+//! Live CUDA proof: an opt-in end-to-end run of a CUDA `llama-server` with
+//! an MTP drafter and a multimodal projector on real hardware.
 //!
 //! The test is `#[ignore]`d and additionally opt-in: even when forced with
 //! `--ignored`, it prints a skip notice and returns `Ok` unless
-//! `PROMPTFORGE_LIVE_CUDA=1` is set. Run it with:
+//! `PROMPTFORGE_LIVE_CUDA=1` is set. `PROMPTFORGE_LLAMA_SERVER` names the
+//! CUDA `llama-server.exe` under test (for example one unpacked from the
+//! `llama-cuda-blackwell` release); without it the gateway's managed
+//! download decides the backend. Run it with:
 //!
 //! ```text
-//! cargo test -p promptforge-gateway --features llama-cuda -- --ignored live_cuda
+//! cargo test -p promptforge-gateway -- --ignored live_cuda
 //! ```
 
 use std::net::SocketAddr;
@@ -126,7 +128,7 @@ fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 }
 
 /// Runs the real provisioning path (`ensure_model` for the main model and
-/// both companions, plus embedded-bundle staging) and returns the assembled
+/// both companions, plus server resolution) and returns the assembled
 /// gateway and the wall-clock cost.
 ///
 /// A timeout panics but cannot cancel the blocking task; when it eventually
@@ -173,11 +175,24 @@ async fn diagnostics_until(gateway: &Gateway, predicate: impl Fn(&str) -> bool) 
     }
 }
 
-/// The staged `llama-server.exe`, asserting it came from the embedded CUDA
-/// bundle: the bundle staging path installs under a `cuda-*` directory,
-/// while the archive path would have fetched into `downloads/` and installed
-/// under a release-platform directory.
+/// The `llama-server.exe` under test. With `PROMPTFORGE_LLAMA_SERVER` set
+/// (the release workflow's smoke job points it at the freshly built binary),
+/// the gateway runs exactly that executable and stages nothing; without it,
+/// the managed download must have installed one into the cache.
 fn staged_cuda_executable(cache: &Path) -> PathBuf {
+    if let Some(path) = std::env::var_os("PROMPTFORGE_LLAMA_SERVER") {
+        let executable = PathBuf::from(path);
+        assert!(
+            executable.is_file(),
+            "PROMPTFORGE_LLAMA_SERVER names no file at {}",
+            executable.display()
+        );
+        assert!(
+            !cache.join("llama.cpp").exists(),
+            "an external llama-server must stage nothing into the cache"
+        );
+        return executable;
+    }
     let installs: Vec<PathBuf> = std::fs::read_dir(cache.join("llama.cpp"))
         .expect("llama.cpp cache dir exists")
         .map(|entry| entry.expect("read install entry").path())
@@ -190,13 +205,9 @@ fn staged_cuda_executable(cache: &Path) -> PathBuf {
     let install = &installs[0];
     let name = install.file_name().expect("install dir name");
     assert!(
-        name.to_string_lossy().starts_with("cuda-"),
-        "the staged server must come from the embedded CUDA bundle, got {}",
+        name.to_string_lossy().contains("cuda"),
+        "the staged server must be a CUDA build, got {}",
         install.display()
-    );
-    assert!(
-        !cache.join("downloads").exists(),
-        "a downloaded server archive must not exist in a CUDA build"
     );
     let executable = install.join("llama-server.exe");
     assert!(
@@ -379,13 +390,13 @@ async fn prove_image_completion(client: &reqwest::Client, addr: SocketAddr) {
     );
 }
 
-/// Phases 2 through 5: embedded-bundle staging, CUDA device report, GPU
-/// offload of both models, and verified digest markers.
+/// Phases 2 through 5: server staging, CUDA device report, GPU offload of
+/// both models, and verified digest markers.
 async fn prove_staging_offload_and_pins(gateway: &Gateway, cache: &Path) {
     let staged = staged_cuda_executable(cache);
-    eprintln!("staged embedded-bundle server at {}", staged.display());
+    eprintln!("staged CUDA server at {}", staged.display());
 
-    // The pinned server (third_party/llama.cpp @ fb0e6b6) never emits the
+    // The pinned server (llama.cpp b10082) never emits the
     // legacy `ggml_cuda_init` banner through llama-server's log path; the
     // device report is the per-model `llama_prepare_model_devices` line and
     // the offload evidence is one `offloaded n/n` line per model, so two
@@ -500,16 +511,16 @@ fn test_image_data_url() -> String {
     format!("data:image/png;base64,{}", base64_encode(&png_bytes))
 }
 
-/// Live end-to-end proof on a CUDA host: provisioning, embedded-bundle
-/// staging, CUDA device report, GPU offload of both models, digest markers,
-/// MTP acceptance, cache reuse, a tool call, and a projector completion.
+/// Live end-to-end proof on a CUDA host: provisioning, server staging, CUDA
+/// device report, GPU offload of both models, digest markers, MTP
+/// acceptance, cache reuse, a tool call, and a projector completion.
 #[tokio::test]
-#[ignore = "requires a Windows CUDA Toolkit, an NVIDIA GPU, and multi-gigabyte model downloads; set PROMPTFORGE_LIVE_CUDA=1 to opt in"]
+#[ignore = "requires an NVIDIA GPU and multi-gigabyte model downloads; set PROMPTFORGE_LIVE_CUDA=1 to opt in"]
 async fn live_cuda_mtp_multimodal_end_to_end() {
     if std::env::var_os(LIVE_ENV).is_none() {
         eprintln!(
-            "skipping: set {LIVE_ENV}=1 to run (needs a Windows CUDA Toolkit, an NVIDIA GPU, \
-             and multi-gigabyte model downloads)"
+            "skipping: set {LIVE_ENV}=1 to run (needs an NVIDIA GPU and multi-gigabyte \
+             model downloads)"
         );
         return;
     }

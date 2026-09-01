@@ -65,6 +65,16 @@ The boot config's `[server]` section is required and has no defaults. Both field
 
 Like `[workshop]`, the section is process-owned: a pending edit that changes it is promoted to disk on Apply but takes effect only on restart, reported as `restart_required` in the apply response.
 
+## The `[local]` section
+
+| Field | Default | Meaning |
+|---|---|---|
+| `cache_dir` | `~/.promptforge` | Root directory for GGUF files and the pinned `llama-server` installs. |
+| `llama_backend` | `"auto"` | Which `llama-server` build to download on Windows x86-64: `auto` picks from the host's GPUs (Blackwell gets the PromptForge CUDA build, any other NVIDIA GPU the upstream CUDA 13 build, anything else Vulkan); `cuda-blackwell`, `cuda`, and `vulkan` force the row. Consulted only on Windows x86-64. |
+| `llama_server_path` | none | Explicit `llama-server` executable path, skipping the managed download entirely. |
+
+The `llama-server` executable resolves in a fixed order: `llama_server_path` from the config, then the `PROMPTFORGE_LLAMA_SERVER` environment variable, then the managed download under the cache directory. Both CUDA builds ship their runtime DLLs, so the host needs only the NVIDIA driver. When a download fails and an older install is already in the cache, the gateway uses the cached one and logs a warning rather than failing to start.
+
 ## Hosting the workshop
 
 Built with the `workshop` feature, the gateway can host the PromptForge Workshop UI server on a second, loopback-only listener in the same process. Hosting is switched on by a `[workshop]` section in the boot config; without the section (or without the feature) the gateway runs headless.
@@ -73,32 +83,15 @@ Built with the `workshop` feature, the gateway can host the PromptForge Workshop
 cargo build -p promptforge-gateway --features workshop
 ```
 
-Six feature flags exist:
+Five feature flags exist:
 
 - `local` (default) - compiles in gateway-owned local inference via the `promptforge-gateway-local` crate: GGUF provisioning, managed `llama-server` children, the blob cache behind the `/v1/cache` routes, the `GET /admin/orphans` listing of cache files no loaded `[[local_model]]` entry references (sizes from the filesystem, digests only from cache sidecars - multi-gigabyte blobs are never re-hashed), the `GET /admin/model-info?path=` GGUF-header readout of a cache file's architecture, layer count, and parameter count (the `path` must stay inside the artifact cache; only the header is read, never tensor data), and the bearer-authenticated `GET /admin/chat-templates` catalog used by the Config UI. A `--no-default-features` build is headless of local inference: it links neither the archive/extraction stack nor a blocking HTTP client, and it refuses a configuration declaring `[[local_model]]` at startup and on profile switch.
 - `web-search` (default) - compiles in the Brave-powered `POST /v1/tools/web_search` tool service via the `promptforge-web-search-service` crate. A `--no-default-features` build omits the route entirely.
 - `workshop` - compiles the hosted workshop and gateway-owned `promptforge-stt` runtime, including `/voice` on the workshop listener and `/v1/audio/transcriptions` on the gateway listener.
-- `config-ui` (default) - compiles in the embedded config SPA via the `promptforge-gateway-config-ui` crate and serves it at `/config/` on the gateway's own port (no second listener); `GET /config` redirects to `/config/`. The routes are loopback-only and carry no bearer auth (the SPA shell holds no secrets); Node/esbuild and `rust-embed` enter the build only with this feature, so a default build needs Node 22 on the build machine and a `--no-default-features` build needs no Node at all. Regardless of the feature, the admin config endpoints (config read/write, env, pending state, apply/revert, orphans, system, model-info, chat templates, the HF proxy, profile create/delete, reveal) sit behind the shared loopback wall from the always-on `promptforge-gateway-loopback` crate: a non-loopback peer gets 403 before bearer auth even runs.
-- `llama-cuda` - implies `local`; on a native Windows x86-64 build with CUDA Toolkit >= 12.8, compiles the pinned `third_party/llama.cpp` submodule during the Cargo build into a Release `llama-server` for the build machine's visible GPUs, and embeds the resulting bundle (manifest plus runtime files) into the gateway binary. A no-op on every other target, where the platform backend archive path is unchanged.
-- `workshop-cuda` - implies `workshop` and `llama-cuda`, and enables `promptforge-stt/cuda`.
+- `config-ui` (default) - compiles in the embedded config SPA via the `promptforge-gateway-config-ui` crate and serves it at `/config/` on the gateway's own port (no second listener); `GET /config` redirects to `/config/`. The routes are loopback-only and carry no bearer auth (the SPA shell holds no secrets); Node/esbuild and `rust-embed` enter the build only with this feature: Node 22 is needed on the build machine for the UI bundle's esbuild step, not for Rust itself, and a `--no-default-features` build needs no Node at all. Regardless of the feature, the admin config endpoints (config read/write, env, pending state, apply/revert, orphans, system, model-info, chat templates, the HF proxy, profile create/delete, reveal) sit behind the shared loopback wall from the always-on `promptforge-gateway-loopback` crate: a non-loopback peer gets 403 before bearer auth even runs.
+- `workshop-cuda` - implies `workshop` and enables `promptforge-stt/cuda`: the whisper CUDA backend for speech-to-text, which needs the CUDA Toolkit on the build machine. Local inference CUDA is a run-time concern instead: on Windows the gateway downloads a CUDA `llama-server` build when the host GPU calls for it (see below).
 
 The workshop's toolchain stays opt-in: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
-
-### CUDA llama-server builds
-
-A `llama-cuda` build needs three things on the build machine: the pinned llama.cpp sources checked out (`git submodule update --init`), a Windows x86-64 host with CUDA Toolkit >= 12.8, and the NVIDIA GPUs the server should run on. The build detects every visible GPU's compute capability and compiles only those architectures; cross-compilation is rejected.
-
-All native compilation happens during the Cargo build: the `promptforge-gateway-local` crate's build script (backed by the `promptforge-gateway-build` crate) compiles the submodule into a Release `llama-server`, records a versioned manifest (source commit, tool identities, architectures, per-file SHA-256), and embeds the manifest and runtime files into the gateway binary. At runtime the gateway never invokes a compiler or build tool: it validates the embedded payload against the manifest, checks that the host provides the declared CUDA Toolkit runtime DLLs, and atomically stages the files into the operator cache. A valid matching installation is reused without restaging, and a CUDA build never silently falls back to the Vulkan archive.
-
-Build failures surface as Cargo build errors from the build script. Staging failures surface at gateway startup as a provisioning error naming the validation that failed (tampered payload, target mismatch, missing toolkit DLL). Embedding hosts can also read a bounded, credential-redacted tail of each child's captured stdout/stderr through `Gateway::local_diagnostics` - for example to confirm the child reported a CUDA device and offloaded its layers to the GPU.
-
-On a suitable host, the ignored live integration test proves the whole path (embedded-bundle staging, CUDA device report, GPU-layer offload, digest pins, MTP acceptance, cache reuse, a tool call, and a projector completion):
-
-```bash
-cargo test -p promptforge-gateway --features llama-cuda -- --ignored live_cuda   # needs PROMPTFORGE_LIVE_CUDA=1
-```
-
-Without `llama-cuda`, the Windows/Linux Vulkan and macOS Metal archive provisioning path is unchanged.
 
 ### The `[workshop]` section
 

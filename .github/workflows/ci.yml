@@ -12,6 +12,10 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # RUSTUP_TOOLCHAIN outranks the repo's rust-toolchain.toml (pinned to the
+    # MSRV for local builds); this job means to test stable.
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +80,21 @@ jobs:
       - name: Test (gateway)
         run: cargo test --locked -p promptforge-gateway --features workshop
 
+      # No build step may write into the repository (the UI bundles build
+      # into OUT_DIR now); catch a regression here rather than in a diff.
+      - name: Clean tree
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the build dirtied the repository:"
+            git status --porcelain
+            exit 1
+          fi
+
   check-workshop:
     runs-on: windows-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v4
 
@@ -112,10 +129,64 @@ jobs:
       - name: Test (workshop)
         run: cargo test --locked -p promptforge-workshop -p promptforge-workshop-server --no-default-features
 
-  # The UI build is its own job: it typechecks, tests, and packages the
-  # versioned ui/dist artifact that release builds of promptforge-workshop-server
-  # verify and embed (the debug-profile cargo jobs above still drive the UI
-  # build in place through the crate's build script, hence their npm ci).
+      - name: Clean tree
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the build dirtied the repository:"
+            git status --porcelain
+            exit 1
+          fi
+
+  # First Linux build of the desktop app: compile-only, against the Tauri
+  # system packages a Linux developer installs per the README. Catches the
+  # missing-system-package class of failure the Windows-only job cannot see.
+  check-workshop-linux:
+    runs-on: ubuntu-22.04
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Tauri system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-workshop-server/ui
+        run: npm ci
+
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
+      - name: Build (workshop, Linux)
+        run: cargo build --locked -p promptforge-workshop --no-default-features
+
+      - name: Clean tree
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the build dirtied the repository:"
+            git status --porcelain
+            exit 1
+          fi
+
+  # The UI build is its own job: typecheck, bundle, and test. The cargo
+  # jobs drive the same bundle through the crates' build scripts, hence
+  # their npm ci.
   ui:
     runs-on: ubuntu-latest
     steps:
@@ -141,16 +212,6 @@ jobs:
         working-directory: crates/promptforge-workshop-server/ui
         run: npm test
 
-      - name: Package the UI artifact
-        working-directory: crates/promptforge-workshop-server/ui
-        run: npm run package
-
-      - name: Upload the UI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: promptforge-workshop-ui-dist
-          path: crates/promptforge-workshop-server/ui/dist/
-
       - name: Install config UI dependencies
         working-directory: crates/promptforge-gateway-config-ui/ui
         run: npm ci
@@ -167,18 +228,10 @@ jobs:
         working-directory: crates/promptforge-gateway-config-ui/ui
         run: npm test
 
-      - name: Package the config UI artifact
-        working-directory: crates/promptforge-gateway-config-ui/ui
-        run: npm run package
-
-      - name: Upload the config UI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: promptforge-gateway-config-ui-dist
-          path: crates/promptforge-gateway-config-ui/ui/dist/
-
   msrv:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.89.0
     steps:
       - uses: actions/checkout@v4
 
@@ -218,6 +271,8 @@ jobs:
 
   supply-chain:
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v4
 

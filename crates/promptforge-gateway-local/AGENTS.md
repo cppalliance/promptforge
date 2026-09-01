@@ -2,7 +2,7 @@
 
 This crate owns gateway-owned local inference: the shared artifact store, GGUF
 provisioning, dialect probing, the managed `llama-server` child lifecycle,
-sidecars, the blob cache store, and CUDA bundle staging. `promptforge-stt`
+sidecars, and the blob cache store. `promptforge-stt`
 reuses the public `ArtifactStore` for speech-model provisioning.
 
 ## Rules
@@ -12,12 +12,9 @@ reuses the public `ArtifactStore` for speech-model provisioning.
   keeps `run_switch`, the `/v1/cache` HTTP adapter, and the routing table.
 - The runtime never compiles native dependencies and never invokes CMake,
   NVCC, MSBuild, Git, PowerShell, or any other build tool. Native compilation
-  belongs to the Cargo build (`build.rs` plus the `promptforge-gateway-build`
-  crate) or to packaging; runtime code may only verify, stage, and launch
-  build-produced native bundles.
-- The `llama-cuda` feature embeds a build-produced CUDA `llama-server` bundle
-  through the generated `llama_cuda_bundle` module. Runtime code consumes the
-  embedded manifest and bytes; it never rebuilds or patches them.
+  belongs to the `llama-cuda-build` tool running on a build machine or to
+  packaging; runtime code may only download, verify, stage, and launch
+  pinned, checksummed archives.
 - Shared vocabulary comes from below: wire types, `Upstream`, and
   `http_util` from `promptforge-gateway-protocol`; `Model`, `Endpoint`, and
   the dominion queues from `promptforge-gateway-routing`. This crate never

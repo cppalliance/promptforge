@@ -315,7 +315,35 @@ pub struct DominionConfig {
     vram_gb: Option<u32>,
 }
 
-/// Settings under `[local]` for artifact cache paths.
+/// The `llama-server` build the gateway downloads for local inference on
+/// Windows x86-64. Every other platform has exactly one build, so this
+/// setting is consulted there only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LlamaBackend {
+    /// Pick from the host's GPUs: a Blackwell (compute capability 12.x) gets
+    /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream
+    /// CUDA build, and anything else gets Vulkan.
+    #[default]
+    Auto,
+    /// The PromptForge Blackwell build (`llama-cuda-blackwell` release).
+    CudaBlackwell,
+    /// The upstream llama.cpp CUDA 13 build.
+    Cuda,
+    /// The upstream llama.cpp Vulkan build.
+    Vulkan,
+}
+
+impl LlamaBackend {
+    /// True for the default (`auto`), so serialization can omit it.
+    #[must_use]
+    pub fn is_auto(&self) -> bool {
+        *self == LlamaBackend::Auto
+    }
+}
+
+/// Settings under `[local]` for artifact cache paths and the `llama-server`
+/// backend.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -327,6 +355,15 @@ pub struct LocalConfig {
     /// `<cache_dir>/llama.cpp`.
     #[serde(default)]
     cache_dir: Option<String>,
+    /// Which `llama-server` build to download on Windows x86-64. Defaults
+    /// to `auto` (pick from the host's GPUs).
+    #[serde(default, skip_serializing_if = "LlamaBackend::is_auto")]
+    llama_backend: LlamaBackend,
+    /// Explicit `llama-server` executable path. Wins over the
+    /// `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed
+    /// download.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    llama_server_path: Option<String>,
 }
 
 /// One local generative model declared as `[[local_model]]`.

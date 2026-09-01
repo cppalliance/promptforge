@@ -1,0 +1,42 @@
+[workspace]
+# Only the gateway is released through cargo-dist (Linux installers); the
+# workshop desktop app has its own workflow (release-workshop.yml).
+members = ["cargo:crates/promptforge-gateway"]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell"]
+# Target platforms to build apps for (Rust target-triple syntax): Linux
+# only, Intel/AMD and ARM 64-bit. Windows and macOS users get the gateway
+# inside the workshop installer.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+# Where to host releases
+hosting = "github"
+# Only promptforge-gateway-v* tags start a release.
+tag-namespace = "promptforge-gateway-v"
+# The gateway build compiles the two web UIs with esbuild, so the build
+# machines need Node 22 and the npm installs first.
+github-build-setup = "dist-ci/build-setup.yml"
+# Validate the release plan on pull requests without building anything.
+pr-run-mode = "plan"
+# The release gate: install and run the built archive on a clean machine
+# before the GitHub Release is created. github-release = "announce" defers
+# the release creation to the announce step, which needs the gate, so a
+# failed test means no release. (Safe here because no package-manager
+# publish jobs reference the release URL.)
+host-jobs = ["./gateway-release-test"]
+github-release = "announce"
+# NOTE: cargo-dist's generated announce job does not check the host-job's
+# result, so .github/workflows/promptforge-gateway-v-release.yml carries a
+# hand-edit adding `needs.custom-gateway-release-test.result == 'success'`
+# to the announce condition. Re-apply it after every `cargo dist generate`.
+
+# Build aarch64 on a native ARM runner: the gateway compiles C dependencies
+# (vendored Lua, onig, ring), which cross-compilers mishandle.
+[dist.github-custom-runners]
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"

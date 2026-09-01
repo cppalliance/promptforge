@@ -11,16 +11,11 @@ Gateway-hosted speech-to-text lifecycle and HTTP routes live in
 
 - Runtime and serve paths never compile native dependencies and never
   invoke CMake, NVCC, MSBuild, Git, PowerShell, or any other build tool.
-  Native compilation belongs to the Cargo build (the local crate's
-  `build.rs` plus the `promptforge-gateway-build` crate) or to packaging;
-  runtime code may only verify, stage, and launch build-produced native
-  bundles.
-- The `llama-cuda` feature forwards to `promptforge-gateway-local`, which
-  embeds the build-produced CUDA `llama-server` bundle through the generated
-  `llama_cuda_bundle` module. Runtime code consumes the embedded manifest
-  and bytes; it never rebuilds or patches them.
-- Build-time logic lives in `promptforge-gateway-build`, not in the gateway
-  library, so the runtime crate carries no build-tool code paths.
+  Native compilation belongs to the `llama-cuda-build` tool on a build
+  machine or to packaging; runtime code may only download, verify, stage,
+  and launch pinned, checksummed archives.
+- The CUDA `llama-server` is a managed download produced by the
+  `llama-cuda-build` release workflow, never a Cargo build product.
 - The `local` feature is additive and defaults on; `--no-default-features`
   must keep compiling as a headless gateway without the local crate and its
   archive/blocking-HTTP dependencies.
