@@ -7,6 +7,7 @@
 import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartInitParameters } from "dockview";
 
 import { Disposable } from "../../base/lifecycle";
+import type { VoiceStatus } from "../voice";
 import { AgentPanel } from "./agent-panel";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
@@ -16,10 +17,11 @@ import type { ZoneName } from "./zones";
 /**
  * The composition-root services a panel factory may consume. main.ts
  * passes them through Dockview's createComponent seam, since panel
- * params hold only serializable identity.
+ * params hold only serializable identity. The status bar serves both
+ * the tree's action outcomes and the agent session's voice reports.
  */
 export interface PanelServices {
-  readonly statusBar: TreeStatusSink;
+  readonly statusBar: TreeStatusSink & VoiceStatus;
 }
 
 /** One panel kind's static registration. */
@@ -66,7 +68,7 @@ export const PANEL_TYPES = {
     defaultZone: "right",
     title: "Agent Session",
     tabComponent: undefined,
-    factory: (): IContentRenderer => new AgentPanel(),
+    factory: (services?: PanelServices): IContentRenderer => new AgentPanel(services?.statusBar),
   },
 } as const satisfies Record<string, PanelTypeEntry>;
 

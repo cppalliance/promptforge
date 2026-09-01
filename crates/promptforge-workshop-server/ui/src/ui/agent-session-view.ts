@@ -5,11 +5,29 @@
 // the repaint starts, and everything before it (the settled history) is
 // never rebuilt. Every content string is untrusted model-, tool-, or
 // user-authored data and lands through textContent, never markup.
+//
+// Voice dictation mounts on the same input: a push-to-talk mic beside the
+// send button drives voice.ts, which splices the transcript into the box
+// at the cursor. The mic stays visible and clickable whatever the state,
+// so a click while blocked names the blocker on the status bar (a probe
+// still in flight, a failed probe, no GPU, no provisioned speech models,
+// or no wait pinned) instead of the control silently disappearing. A take follows
+// the wait it dictates into: when the pinned wait dies - spent by a send,
+// cancelled by the server, or reset by a new session - the live take is
+// discarded, because a take that cannot be sent is a trap.
 
 import "./agent-session.css";
 
 import { Disposable } from "../base/lifecycle";
 import type { AgentSessionService, TranscriptItem } from "../services/agent-session";
+import {
+  setupVoice,
+  voiceCapability,
+  type VoiceCapability,
+  type VoiceHandle,
+  type VoiceStatus,
+} from "./voice";
+import { ICON_MIC } from "./workshop/icons";
 
 /** One painted feed row, kept for the identity diff. */
 interface RenderedRow {
@@ -121,16 +139,24 @@ function renderItem(item: TranscriptItem): HTMLLIElement {
 /**
  * The session surface: the transcript feed over the input form. The
  * input enables only while a wait is pinned; submitting answers the wait
- * through the service and clears the box on a successful send.
+ * through the service and clears the box on a successful send. The
+ * status sink receives voice's local messages and REC badge state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
   private readonly feed: HTMLOListElement;
   private readonly input: HTMLTextAreaElement;
+  private readonly mic: HTMLButtonElement;
   private readonly send: HTMLButtonElement;
+  private readonly voice: VoiceHandle;
   private rendered: RenderedRow[] = [];
+  /** The capability probe's answer; undefined while it is in flight. */
+  private capability: VoiceCapability | null | undefined;
 
-  constructor(private readonly service: AgentSessionService) {
+  constructor(
+    private readonly service: AgentSessionService,
+    status: VoiceStatus,
+  ) {
     super();
     this.element = document.createElement("section");
     this.element.className = "agent-session";
@@ -149,11 +175,19 @@ export class AgentSessionView extends Disposable {
     this.input.className = "agent-session__input";
     this.input.rows = 1;
     this.input.setAttribute("aria-label", "Message");
+    this.mic = document.createElement("button");
+    this.mic.type = "button";
+    this.mic.className = "agent-session__mic voice-mic";
+    this.mic.title = "Push to talk";
+    this.mic.setAttribute("aria-label", "Push to talk");
+    this.mic.setAttribute("aria-pressed", "false");
+    // A static lucide string, not data: the only markup this view writes.
+    this.mic.innerHTML = ICON_MIC;
     this.send = document.createElement("button");
     this.send.type = "submit";
     this.send.className = "agent-session__send";
     this.send.textContent = "Send";
-    form.append(this.input, this.send);
+    form.append(this.input, this.mic, this.send);
     this.element.append(this.feed, form);
 
     // Element-owned listeners die with the elements; only service
@@ -172,9 +206,49 @@ export class AgentSessionView extends Disposable {
     });
 
     this._register(this.service.onDidChangeTranscript(() => this.renderFeed()));
-    this._register(this.service.onDidChangePendingInput(() => this.renderInputState()));
+    // Discard before repaint: the take lifts the input's readOnly, and the
+    // repaint then disables the box against the dead wait.
+    this._register(
+      this.service.onDidChangePendingInput((token) => {
+        if (token === null) {
+          this.voice.discardIfRecording();
+        }
+        this.renderInputState();
+      }),
+    );
     this.renderFeed();
     this.renderInputState();
+
+    // The voice control over the mic and input; registered so disposing
+    // the view unwires the mic and discards a live take. The blocker
+    // names the first reason a take cannot start, capability before the
+    // wait. The probe resolves after mount; a click that beats it is
+    // refused, because a server with no engine still accepts /voice and
+    // answers an empty final, so an unchecked take would record for
+    // nothing.
+    this.voice = this._register(
+      setupVoice({ mic: this.mic, input: this.input }, status, () => {
+        if (this.capability === undefined) {
+          return "Voice dictation is still checking what this server can do; try again in a moment.";
+        }
+        if (this.capability === null) {
+          return "Voice dictation is unavailable: the server's capability probe failed.";
+        }
+        if (!this.capability.gpu) {
+          return "Voice dictation needs a GPU this server doesn't have.";
+        }
+        if (!this.capability.engine) {
+          return "No speech models are provisioned in the active profile.";
+        }
+        if (this.service.pendingInputToken === null) {
+          return "The agent isn't asking for input; the mic opens when it does.";
+        }
+        return null;
+      }),
+    );
+    void voiceCapability().then((answer) => {
+      this.capability = answer;
+    });
   }
 
   /**
@@ -218,14 +292,18 @@ export class AgentSessionView extends Disposable {
    * Answers the pending wait with the box's text, byte-exact - never
    * trimmed, because the wire contract is what the operator typed. An
    * empty box sends nothing; a failed send keeps the text for the retry.
+   * A send ends a live take: what the operator sees in the box, interim
+   * transcript included, is what goes; the take's polished final is
+   * discarded rather than landing in a box that already sent.
    */
   private submit(): void {
     const text = this.input.value;
     if (text === "" || this.service.pendingInputToken === null) {
       return;
     }
-    if (this.service.respond(text)) {
-      this.input.value = "";
-    }
+    // Read before discarding: the discard restores the box to its
+    // pre-take text, and the send carries what was showing.
+    this.voice.discardIfRecording();
+    this.input.value = this.service.respond(text) ? "" : text;
   }
 }

@@ -2,7 +2,7 @@
 // the jsdom boot that smoke.mjs originally built inline, extracted so every
 // per-feature slice boots the exact same way. bootWorkbench(name, run)
 // loads dist/index.html into jsdom, stands in fakes for the APIs jsdom
-// lacks (WebSocket, fetch, layout metrics), imports the bundled
+// lacks (WebSocket, audio capture, fetch, layout metrics), imports the bundled
 // dist/app.js, waits for the app to settle, then runs `run` under the
 // shared disposable-leak check and reports the verdict through the
 // process exit code. Run after `npm run build`.
@@ -102,15 +102,54 @@ export async function bootWorkbench(name, run) {
   }
   globalThis.WebSocket = FakeWebSocket;
 
+  // Voice capture stubs: jsdom has no audio stack, so the mic button's
+  // getUserMedia/AudioContext path is scripted to succeed. The bundle
+  // reads the globals.
+  const fakeAudioStream = { getTracks: () => [{ stop() {} }] };
+  globalThis.navigator.mediaDevices = {
+    getUserMedia: () => Promise.resolve(fakeAudioStream),
+  };
+  class FakeAudioContext {
+    constructor() {
+      this.destination = {};
+      this.audioWorklet = { addModule: () => Promise.resolve() };
+    }
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    close() {
+      return Promise.resolve();
+    }
+  }
+  class FakeAudioWorkletNode {
+    constructor() {
+      this.port = { onmessage: null };
+    }
+    connect() {}
+    disconnect() {}
+  }
+  window.AudioContext = FakeAudioContext;
+  globalThis.AudioContext = FakeAudioContext;
+  globalThis.AudioWorkletNode = FakeAudioWorkletNode;
+
   // The workbench state (models, profiles, selection) arrives only over
   // the socket, so a booted workbench fetches nothing but the Workshop
-  // tree's roots listing (answered empty: no grants yet). Any other
-  // fetch - including the retired /v1/models and /profiles boot fetches -
-  // rejects the test.
+  // tree's roots listing (answered empty: no grants yet) and the agent
+  // session's voice capability probe (answered fully capable, so a test
+  // can start a take). Any other fetch - including the retired /v1/models
+  // and /profiles boot fetches - rejects the test.
   globalThis.fetch = (url) => {
     if (url === "/workspace/tree") {
       return Promise.resolve(
         new Response(JSON.stringify({ path: null, entries: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+    if (url === "/voice/capability") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ gpu: true, engine: true }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
@@ -207,6 +246,10 @@ export async function bootWorkbench(name, run) {
   // agent panel's /agents/ws connection.
   const wsSocket = () =>
     sockets.filter((socket) => socket.url.endsWith("/ws") && !socket.url.endsWith("/agents/ws")).at(-1);
+  // The agent panel's session socket, and the per-take /voice sockets the
+  // mic opens.
+  const agentsSocket = () => sockets.filter((socket) => socket.url.endsWith("/agents/ws")).at(-1);
+  const voiceSockets = () => sockets.filter((socket) => socket.url.endsWith("/voice"));
 
   // The fake socket flips to OPEN on a 0ms timer, and the app can boot
   // during the bundle import's own microtask drain - before any macrotask
@@ -261,6 +304,13 @@ export async function bootWorkbench(name, run) {
     });
   }
 
+  // Pushes one frame down the agent panel's /agents/ws socket, as the
+  // server's agent route would: a session acknowledgment, an event, a
+  // wait announcement.
+  function emitAgent(frame) {
+    agentsSocket()?.onmessage?.({ data: JSON.stringify(frame) });
+  }
+
   // The server pushes the retained status, the model catalog, and a
   // workbench snapshot on connect, in that order (session.rs) - the app
   // makes no HTTP state fetches at boot. Mirror all three pushes here:
@@ -278,6 +328,9 @@ export async function bootWorkbench(name, run) {
     sockets,
     FakeWebSocket,
     wsSocket,
+    agentsSocket,
+    voiceSockets,
+    emitAgent,
     agentPanel,
     statusBar,
     statusText,

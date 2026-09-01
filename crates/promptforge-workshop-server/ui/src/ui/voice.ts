@@ -10,17 +10,23 @@
 // releases readOnly; consecutive takes compose because the cursor position
 // is captured fresh each time.
 
-// Bundle-order-sensitive: voice.css overrides murm-ui composer rules at
-// equal specificity, so it must land after the chat styles that main.ts
-// imports first (esbuild emits CSS in module-graph order).
 import "./voice.css";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
-import type { StatusBar } from "./status-bar";
 
 export interface VoiceElements {
   mic: HTMLButtonElement;
   input: HTMLTextAreaElement;
+}
+
+/**
+ * The status-bar slice voice paints: local messages (blockers, capture
+ * failures, an empty take) and the REC badge. `StatusBar` satisfies it
+ * structurally; tests hand in a recording fake.
+ */
+export interface VoiceStatus {
+  showLocal(label: string, severity: "info" | "error"): void;
+  setRecording(on: boolean): void;
 }
 
 /**
@@ -92,13 +98,18 @@ interface StreamTracker {
 
 export function setupVoice(
   elements: VoiceElements,
-  statusBar: StatusBar,
+  statusBar: VoiceStatus,
   blocked: VoiceBlocker,
 ): VoiceHandle {
   const { mic, input } = elements;
   let voice: VoiceSession | null = null;
   let suppressReplies = false;
   let take: TakeState | null = null;
+  // A stopped take's socket while its final is still in flight. The take
+  // (and the input's readOnly) stays open until that final lands, the
+  // socket drops, or a discard closes it; without this handle a discard
+  // in the stop window would see no session and leave the input locked.
+  let pendingFinal: WebSocket | null = null;
 
   function setRecording(next: boolean): void {
     mic.classList.toggle("voice-mic--recording", next);
@@ -106,11 +117,9 @@ export function setupVoice(
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
-  // Programmatic value sets don't fire the textarea's "input" event, which
-  // is what murm-ui's Input listens to for growing the composer and
-  // re-enabling submit. Every voice-driven rewrite goes through it so the
-  // canonical resizer runs; a local inline-height resizer would pin an
-  // explicit height and disable the CSS field-sizing the app relies on.
+  // Programmatic value sets don't fire the textarea's "input" event, so
+  // every voice-driven rewrite dispatches it: dictation behaves like typing
+  // to whatever listens on the input.
   function notifyInput(): void {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }
@@ -143,7 +152,7 @@ export function setupVoice(
     input.setSelectionRange(cursorPos, cursorPos);
     take = null;
     input.readOnly = false;
-    input.classList.remove("mur-chat-input--recording");
+    input.classList.remove("voice-input--recording");
     notifyInput();
   }
 
@@ -154,7 +163,7 @@ export function setupVoice(
     input.setSelectionRange(cursorPos, cursorPos);
     take = null;
     input.readOnly = false;
-    input.classList.remove("mur-chat-input--recording");
+    input.classList.remove("voice-input--recording");
     notifyInput();
   }
 
@@ -231,7 +240,7 @@ export function setupVoice(
       suffix: value.slice(end),
     };
     input.readOnly = true;
-    input.classList.add("mur-chat-input--recording");
+    input.classList.add("voice-input--recording");
   }
 
   async function startVoice(): Promise<void> {
@@ -286,6 +295,9 @@ export function setupVoice(
       const generation: StreamTracker = { current: null };
       ws.addEventListener("message", (event) => {
         if (handleVoiceMessage(event.data, generation)) {
+          if (pendingFinal === ws) {
+            pendingFinal = null;
+          }
           ws!.close();
         }
       });
@@ -297,6 +309,12 @@ export function setupVoice(
           if (take) finishTake("");
           releaseAudio(session);
           statusBar.showLocal("The voice connection dropped.", "error");
+        } else if (pendingFinal === ws) {
+          // Dropped, or the stop deadline closed it, before the final
+          // landed: the take ends as a live drop does, on the pre-take text.
+          pendingFinal = null;
+          finishTake("");
+          statusBar.showLocal("The voice connection dropped before the final transcript.", "error");
         }
       });
       source.connect(node);
@@ -334,6 +352,7 @@ export function setupVoice(
     const { ws } = session;
     if (ws.readyState === WebSocket.OPEN) {
       ws.send("stop");
+      pendingFinal = ws;
       // The final whisper pass can take 30+ seconds on CPU; give it time.
       // The message listener closes the socket when the final reply arrives.
       const deadline = setTimeout(() => {
@@ -356,13 +375,25 @@ export function setupVoice(
     }
   }
 
+  // Ends a take that is still open: recording, or stopped with its final
+  // in flight. Either way the socket closes, a late reply is ignored, and
+  // the input returns to its pre-take text with readOnly lifted.
   function discardIfRecording(): void {
     const session = voice;
-    if (!session) return;
+    const awaited = pendingFinal;
+    if (!session && !awaited) return;
     suppressReplies = true;
     voice = null;
-    releaseAudio(session);
-    session.ws.close();
+    pendingFinal = null;
+    if (session) {
+      releaseAudio(session);
+      session.ws.close();
+    }
+    // A new take may have started while the previous stop's final was
+    // still in flight; both sockets go.
+    if (awaited) {
+      awaited.close();
+    }
     discardTake();
     setRecording(false);
     statusBar.setRecording(false);
