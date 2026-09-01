@@ -480,6 +480,54 @@ impl Tool for UntrustedEchoTool {
     }
 }
 
+/// A tool returning a JSON object as text, bound structured in scheduler
+/// fixtures so a script `tool_call` resumes it as a Lua table.
+struct StructuredFixtureTool {
+    /// The exact output text; valid JSON for the happy path, garbage for
+    /// the invalid-JSON tool-error path.
+    body: &'static str,
+    /// Whether the output is trusted. An untrusted output is nonce-wrapped
+    /// before the structured classification, so even valid JSON fails the
+    /// parse - the ordering that restricts structured output to trusted
+    /// tools.
+    trusted: bool,
+}
+
+#[async_trait::async_trait]
+impl Tool for StructuredFixtureTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "structured").expect("valid id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn wire_name(&self) -> &str {
+        "structured"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "Return a structured payload."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+        Ok(if self.trusted {
+            ToolOutput::trusted(self.body)
+        } else {
+            ToolOutput::untrusted(self.body)
+        })
+    }
+}
+
 /// A tool whose every call fails, standing in for a tool that hits a broken
 /// backend, so a test can observe what the loop reports on its way out.
 struct FailingTool;
@@ -1073,6 +1121,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             model_description: Some("bind override".to_owned()),
             tool: Arc::new(EchoTool),
             conflicts: Vec::new(),
+            output_kind: crate::lua::ToolOutputKind::Plain,
         }],
         Vec::new(),
     );

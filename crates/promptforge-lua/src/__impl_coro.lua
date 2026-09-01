@@ -60,6 +60,15 @@ local function fanout_collection(worker, collection)
   return result
 end
 
+-- Suspending dispatch of a bound tool. The driver resumes the result by
+-- the binding's declared output kind: a plain binding's text as a string,
+-- a structured binding's JSON output as a table.
+local function tool_call(alias, args)
+  local ok, result = yield({ op = "tool_call", alias = alias, args = args })
+  if not ok then error(result, 0) end
+  return result
+end
+
 -- The section install passes the section's models table; the live H1 base
 -- install passes nil (H1's live models table exists only per block, wrapped
 -- by __impl_coro_h1.lua) and takes `infer`/`wrap_handle` from the return.
@@ -73,6 +82,7 @@ end
 return {
   execute = execute_section,
   fanout = fanout_collection,
+  tool_call = tool_call,
   wrap_handle = wrap_handle,
   infer = infer,
 }

@@ -3314,3 +3314,359 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
         "the unknown answer is a loud invariant failure: {error}"
     );
 }
+
+// --- Script-initiated tool_call dispatch ---
+
+/// Arms the run's shared tool set with `bindings`, every alias in the
+/// prompt-wide `always` scope, so a section's effective scope carries them
+/// without an H1 pass.
+fn arm_tool_set(ctx: &RunContext, bindings: Vec<crate::lua::ToolBinding>) {
+    let always = bindings
+        .iter()
+        .map(|binding| binding.alias().to_owned())
+        .collect();
+    *ctx.tool_set()
+        .lock()
+        .expect("the tool set mutex is not poisoned") =
+        crate::lua::ToolSet::for_test(bindings, always);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_dispatches_and_resumes_as_a_string() {
+    // The whole script path in one pass: the shim yields, the scheduler
+    // dispatches the bound tool, the plain binding resumes as a Lua
+    // string, and the counts land in the same `tools.calls` table the
+    // prose loop feeds.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local out = tool_call('echo', { value = 'hi' })\n\
+        return out .. '|' .. tostring(tools.calls.echo)\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the script dispatch succeeds");
+    assert_eq!(out, "echoed: hi|1");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_with_an_unknown_alias_names_the_in_scope_set() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tool_call('missing', {})\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+    );
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("an out-of-scope alias fails the block");
+    match &error {
+        Error::OutOfScopeToolCall {
+            name,
+            global_exists,
+            in_scope,
+        } => {
+            assert_eq!(name, "missing");
+            assert!(!global_exists);
+            assert_eq!(in_scope, &["echo".to_owned()]);
+        }
+        other => panic!("expected the typed out-of-scope error, got {other:?}"),
+    }
+}
+
+/// A tool that signals its start and then sleeps far past every deadline,
+/// so the cancellation test fires only once the dispatch is in flight.
+struct SignallingSlowTool {
+    started: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Tool for SignallingSlowTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "slow").expect("valid id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn wire_name(&self) -> &str {
+        "slow"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "a deliberately slow tool"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        json!({ "type": "object", "properties": {} })
+    }
+
+    async fn call(
+        &self,
+        _args: serde_json::Value,
+    ) -> std::result::Result<crate::tools::ToolOutput, crate::tools::ToolError> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(crate::tools::ToolOutput::trusted("too late"))
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancellation_interrupts_a_slow_script_tool_call() {
+    use crate::cancel::{self, CancelHandle};
+
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tool_call('slow', {})\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let started = Arc::new(AtomicUsize::new(0));
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "slow",
+            "slow tool",
+            Arc::new(SignallingSlowTool {
+                started: Arc::clone(&started),
+            }),
+        )],
+    );
+    let cancel = CancelHandle::new();
+    let canceller = cancel.clone();
+    let observed = Arc::clone(&started);
+    tokio::spawn(async move {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while observed.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        canceller.cancel();
+    });
+
+    let start = std::time::Instant::now();
+    let result = cancel::scope(cancel, async { Scheduler::new(&ctx, None).drive().await }).await;
+
+    assert!(
+        matches!(result, Err(Error::Interrupted)),
+        "cancelling a suspended tool_call must interrupt the run, got {result:?}"
+    );
+    assert_eq!(
+        started.load(Ordering::SeqCst),
+        1,
+        "the cancellation must land after the tool call was in flight"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(5),
+        "the slow tool must not hold the run, took {:?}",
+        start.elapsed()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_untrusted_script_tool_call_result_is_nonce_wrapped() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tool_call('fetch', { value = 'hi' })\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "fetch",
+            "untrusted echo tool",
+            Arc::new(UntrustedEchoTool),
+        )],
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the untrusted dispatch succeeds");
+    assert!(
+        out.contains("<untrusted_input_") && out.contains("</untrusted_input_"),
+        "the script must receive the nonce-wrapped envelope, got: {out}"
+    );
+    assert!(
+        out.contains("echoed: hi"),
+        "the wrapped block must still carry the tool output, got: {out}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_structured_binding_resumes_as_a_lua_table() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local r = tool_call('form', {})\n\
+        return r.text .. '|' .. tostring(#r.images)\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let mut binding = crate::lua::ToolBinding::for_test(
+        "form",
+        "structured fixture",
+        Arc::new(StructuredFixtureTool {
+            body: "{\"text\":\"typed\",\"images\":[]}",
+            trusted: true,
+        }),
+    );
+    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    arm_tool_set(&ctx, vec![binding]);
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the structured dispatch succeeds");
+    assert_eq!(out, "typed|0");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tool_call('form', {})\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let mut binding = crate::lua::ToolBinding::for_test(
+        "form",
+        "structured fixture",
+        Arc::new(StructuredFixtureTool {
+            body: "not json",
+            trusted: true,
+        }),
+    );
+    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    arm_tool_set(&ctx, vec![binding]);
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("invalid structured output fails the call");
+    match &error {
+        Error::Tool { message, .. } => {
+            assert!(
+                message.contains("returned invalid JSON"),
+                "the tool error names the invalid JSON, got: {message}"
+            );
+        }
+        other => panic!("expected the typed tool error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_untrusted_structured_output_is_wrapped_before_classification() {
+    // The untrusted nonce wrap precedes the structured JSON parse, so an
+    // untrusted binding's valid JSON still fails the call: this ordering is
+    // what restricts structured output to trusted tools. If classification
+    // ever ran on the raw output, this test would resume a table and fail.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn tool_call('form', {})\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    let mut binding = crate::lua::ToolBinding::for_test(
+        "form",
+        "structured fixture",
+        Arc::new(StructuredFixtureTool {
+            body: "{\"text\":\"typed\"}",
+            trusted: false,
+        }),
+    );
+    binding.output_kind = crate::lua::ToolOutputKind::Structured;
+    arm_tool_set(&ctx, vec![binding]);
+    let error = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect_err("untrusted structured output fails the call");
+    match &error {
+        Error::Tool { message, .. } => {
+            assert!(
+                message.contains("returned invalid JSON"),
+                "the wrap must precede the parse, got: {message}"
+            );
+        }
+        other => panic!("expected the typed tool error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tool_call_before_prose_keeps_the_model_install() {
+    // The one-time section scope install is shared between the first prose
+    // block and the first script dispatch: a script `tool_call` that runs
+    // first must not swallow the prose path's model resolution.
+    let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\ntool_call('echo', { value = 'x' })\n```\n\n\
+        Say something.\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+    );
+    let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
+        .drive()
+        .await
+        .expect("prose after a script dispatch still resolves the model");
+    assert_eq!(out, "prose answer");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_document_prompt_without_tool_call_is_unaffected() {
+    // Bindings installed, shim present, `tool_call` never called: the
+    // section runs exactly as before the dispatch arm existed.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\nreturn 'plain'\n```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("a prompt that never calls tool_call is unchanged");
+    assert_eq!(out, "plain");
+}

@@ -82,6 +82,7 @@ mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
 pub(crate) use coro::{install_shim_prelude, wrap_shimmed_handle};
+mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod host;
@@ -107,15 +108,18 @@ mod protocol;
 #[doc(hidden)]
 pub use coro::{install_live_h1_shim_base, shim_live_h1_models};
 #[doc(hidden)]
+pub use dispatch::{ScriptReport, dispatch_tool};
+#[doc(hidden)]
 pub use handles::{
-    Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolResolver, ToolSet, ToolView,
+    Conflict, LuaBlockResult, LuaFanoutResult, ToolBinding, ToolOutputKind, ToolResolver, ToolSet,
+    ToolView,
 };
 #[doc(hidden)]
 pub use live::LiveBindingProducer;
 #[doc(hidden)]
 pub use models::ModelRuntime;
 #[doc(hidden)]
-pub use protocol::{Answer, Request, YieldParse};
+pub use protocol::{Answer, Request, ToolCallOutcome, YieldParse};
 #[doc(hidden)]
 pub use scope::{ToolCallCounts, ToolRuntime};
 #[doc(hidden)]

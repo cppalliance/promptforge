@@ -156,6 +156,21 @@ fn fanout_yields_a_well_formed_request() {
 }
 
 #[test]
+fn tool_call_yields_a_well_formed_request() {
+    // The tool_call shim installs in section VMs through the same setup
+    // path as the other suspending calls; its yield parses into the
+    // protocol's ToolCall variant with the author's args as JSON.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    match yielded_request(&vm, r#"return tool_call("echo", { value = "hi" })"#) {
+        Request::ToolCall { alias, args } => {
+            assert_eq!(alias, "echo");
+            assert_eq!(args, json!({ "value": "hi" }));
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
 fn handle_infer_yields_the_inner_handle() {
     let vm = scheduler_vm(&test_models(), None);
     let request = yielded_request(

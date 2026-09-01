@@ -11,11 +11,14 @@
 //! here unchanged, so existing `promptforge_core::lua::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
-    CoroStep, LiveBindingProducer, LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm,
-    ToolBinding, ToolCallCounts, ToolResolver, ToolSet, ToolView, current_tool_bindings,
-    enrich_sys_model, enrich_sys_reply_finish_reason, install_live_h1_shim_base,
+    CoroStep, LiveBindingProducer, LuaBlockResult, LuaFanoutResult, LuaProgram, ScriptReport,
+    SectionVm, ToolBinding, ToolCallCounts, ToolResolver, ToolSet, ToolView, current_tool_bindings,
+    dispatch_tool, enrich_sys_model, enrich_sys_reply_finish_reason, install_live_h1_shim_base,
     resolve_model_binding, shim_live_h1_models,
 };
+
+#[cfg(test)]
+pub(crate) use promptforge_lua::ToolOutputKind;
 
 #[cfg(test)]
 pub(crate) use promptforge_lua::{Conflict, ToolRuntime};

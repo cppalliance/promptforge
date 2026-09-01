@@ -61,6 +61,23 @@ impl PartialEq for Conflict {
 
 impl Eq for Conflict {}
 
+/// How a bound tool's output resumes into Lua at the `tool_call` boundary.
+///
+/// Declared on the binding, not the tool implementation, so a host decides
+/// per binding how scripts receive the output. Every existing tool is
+/// [`Plain`](ToolOutputKind::Plain); the model tool loop never consults the
+/// kind (its results always ride the conversation as text).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolOutputKind {
+    /// The output text resumes as a Lua string - every existing tool,
+    /// unchanged behavior.
+    #[default]
+    Plain,
+    /// The output text is JSON, parsed at dispatch and resumed as a Lua
+    /// table through the serde boundary; invalid JSON is the tool's error.
+    Structured,
+}
+
 /// One prompt-local alias bound to one stable live tool identity, carrying
 /// the resolved implementation attached at bind time.
 ///
@@ -88,6 +105,9 @@ pub struct ToolBinding {
     /// Binding records, never fails: a clash errors only when both halves
     /// enter one model-visible scope.
     pub conflicts: Vec<Conflict>,
+    /// How a script-initiated `tool_call` resumes this binding's output;
+    /// the model tool loop ignores it.
+    pub output_kind: ToolOutputKind,
 }
 
 /// Equality is keyed on the binding's data (alias, capability text, stable
@@ -100,6 +120,7 @@ impl PartialEq for ToolBinding {
             && self.id == other.id
             && self.model_description == other.model_description
             && self.conflicts == other.conflicts
+            && self.output_kind == other.output_kind
     }
 }
 
@@ -115,6 +136,7 @@ impl std::fmt::Debug for ToolBinding {
             .field("id", &self.id)
             .field("model_description", &self.model_description)
             .field("conflicts", &self.conflicts)
+            .field("output_kind", &self.output_kind)
             .finish_non_exhaustive()
     }
 }
@@ -135,6 +157,7 @@ impl ToolBinding {
             model_description: None,
             tool,
             conflicts: Vec::new(),
+            output_kind: ToolOutputKind::default(),
         }
     }
 

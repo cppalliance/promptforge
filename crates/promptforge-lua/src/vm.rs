@@ -586,8 +586,8 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `handle:infer`,
-    /// `execute`) and marks the VM so the captured model alias globals
-    /// install as shim-wrapped proxies.
+    /// `execute`, `fanout`, `tool_call`) and marks the VM so the captured
+    /// model alias globals install as shim-wrapped proxies.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.

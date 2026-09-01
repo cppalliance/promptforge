@@ -20,6 +20,7 @@ promptforge-store.workspace = true
 promptforge-tools.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true

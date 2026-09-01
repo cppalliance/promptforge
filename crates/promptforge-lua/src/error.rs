@@ -124,6 +124,17 @@ pub enum Error {
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
+    /// A dispatched tool's own failure, retaining the tool's typed error as
+    /// the private `#[source]` cause rather than flattening it to a string.
+    #[error("{message}")]
+    Tool {
+        /// The tool failure's rendered message.
+        message: String,
+        /// The tool's typed error, kept as the cause.
+        #[source]
+        source: BoxedSource,
+    },
+
     /// An internal runtime invariant was violated (a state the surrounding code
     /// has already guaranteed cannot occur). Surfaced as a concrete error rather
     /// than silently skipping work, so an impossible state cannot masquerade as a
@@ -293,6 +304,15 @@ impl Error {
     /// `#[source]` cause (F4) rather than flattening it to a string.
     pub(crate) fn lua(source: mlua::Error) -> Error {
         Error::LuaRuntime {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
+    }
+
+    /// Wrap a tool failure as [`Error::Tool`], preserving the tool's own
+    /// error as the `#[source]` cause rather than discarding it.
+    pub(crate) fn tool(source: promptforge_tools::ToolError) -> Error {
+        Error::Tool {
             message: source.to_string(),
             source: Box::new(source),
         }

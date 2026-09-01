@@ -2,7 +2,7 @@
 //! suspending host calls.
 //!
 //! Yield cannot cross the C boundary, so `models.infer`, `handle:infer`,
-//! `execute`, and `fanout` are Lua shims (source in `__impl_coro.lua` beside this
+//! `execute`, `fanout`, and `tool_call` are Lua shims (source in `__impl_coro.lua` beside this
 //! file) that `coroutine.yield` a request table and interpret the two
 //! resume values as the `(ok, result)` envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
@@ -62,8 +62,8 @@ static H1_SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = Lazy
 /// validation. The `models` table is passed to the shim chunk as an
 /// argument, so the chunk never reads a global; the chunk shims
 /// `models.infer` and wraps the `models.use`/`models.get` returns, and the
-/// `execute`/`fanout` shims and `wrap_handle` come back for the host to
-/// install.
+/// `execute`/`fanout`/`tool_call` shims and `wrap_handle` come back for the
+/// host to install.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -88,6 +88,10 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
     globals.raw_set("execute", execute).map_err(Error::lua)?;
     let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
+    let tool_call: Function = shims.raw_get("tool_call").map_err(Error::lua)?;
+    globals
+        .raw_set("tool_call", tool_call)
+        .map_err(Error::lua)?;
     let wrap_handle: Function = shims.raw_get("wrap_handle").map_err(Error::lua)?;
     lua.set_named_registry_value(WRAP_HANDLE_REGISTRY, wrap_handle)
         .map_err(Error::lua)?;

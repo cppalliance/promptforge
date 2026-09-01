@@ -10,4 +10,4 @@
 //! produced by the Lua side) and is re-exported here unchanged, so existing
 //! `crate::execute::protocol::*` paths keep working.
 
-pub(crate) use promptforge_lua::{Answer, Request, YieldParse};
+pub(crate) use promptforge_lua::{Answer, Request, ToolCallOutcome, YieldParse};
