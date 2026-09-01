@@ -14,15 +14,14 @@ import { writeManifest } from "./manifest.mjs";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
 const srcDir = path.join(uiDir, "src");
-const chatDir = path.join(srcDir, "chat");
 
 // Mirrored in ../build/manifest.rs.
 const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js", "icons/promptforge-icon-1.png"];
 
 // The layer rule (defined once, in check-layers.mjs) enforced while
 // bundling, so `esbuild.build` and watch mode fail on a violating import.
-// Only relative imports from workshop-owned files under src/ are checked;
-// package imports and the vendored chat/ tree are exempt.
+// Only relative imports from files under src/ are checked; package
+// imports are exempt.
 const layerCheckPlugin = {
   name: "check-layers",
   setup(build) {
@@ -34,7 +33,7 @@ const layerCheckPlugin = {
         return null;
       }
       const importer = path.resolve(args.importer);
-      if (!importer.startsWith(srcDir + path.sep) || importer.startsWith(chatDir + path.sep)) {
+      if (!importer.startsWith(srcDir + path.sep)) {
         return null;
       }
       const violation = checkImport(importer, path.resolve(args.resolveDir, args.path));

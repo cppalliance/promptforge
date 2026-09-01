@@ -13,11 +13,11 @@
 import type { IContentRenderer } from "dockview";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { showDropdown } from "../../chat/components/dropdown";
-import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "../../chat/utils/icons";
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
 import { grantPath, WORKSPACE_CHANGED_EVENT } from "../workspace-drops";
+import { DropdownMenu } from "./dropdown";
 import { showPanelDialog } from "./editor-dialog";
+import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "./icons";
 import { openInZone } from "./zones";
 
 /** The status-bar surface the panel paints action outcomes onto. */
@@ -39,8 +39,10 @@ const CHEVRON_SVG =
 export class WorkshopTreePanel implements IContentRenderer {
   readonly element = document.createElement("div");
   private readonly list = document.createElement("ul");
+  // The panel's context menus, at most one open at a time.
+  private readonly dropdown = new DropdownMenu();
   // The current menu's 0x0 fixed-position anchor under the cursor, so
-  // the shared dropdown helper can anchor a context menu at the pointer.
+  // the dropdown can anchor a context menu at the pointer.
   private pointerAnchor: HTMLElement | null = null;
   // The open Add Folder dialog, dismissed with the panel.
   private dialog: { dispose(): void } | null = null;
@@ -69,9 +71,8 @@ export class WorkshopTreePanel implements IContentRenderer {
         return;
       }
       event.preventDefault();
-      showDropdown(this.menuAnchor(event, this.element), [
+      this.dropdown.show(this.menuAnchor(event, this.element), [
         {
-          id: "workspace-add",
           label: "Add Folder to Workspace...",
           iconHtml: ICON_FOLDER_PLUS,
           onClick: () => {
@@ -88,6 +89,7 @@ export class WorkshopTreePanel implements IContentRenderer {
 
   dispose(): void {
     window.removeEventListener(WORKSPACE_CHANGED_EVENT, this.onWorkspaceChanged);
+    this.dropdown.dispose();
     this.dialog?.dispose();
     this.dialog = null;
     this.pointerAnchor?.remove();
@@ -163,9 +165,8 @@ export class WorkshopTreePanel implements IContentRenderer {
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        showDropdown(this.menuAnchor(event, row), [
+        this.dropdown.show(this.menuAnchor(event, row), [
           {
-            id: "workspace-remove",
             label: "Remove from Workspace",
             iconHtml: ICON_TRASH_2,
             danger: true,
@@ -274,9 +275,9 @@ export class WorkshopTreePanel implements IContentRenderer {
     if (event.clientX === 0 && event.clientY === 0) {
       return fallback;
     }
-    // A fresh anchor per menu: reusing one element would make the shared
-    // dropdown helper read the next right-click as a same-trigger toggle
-    // and close the menu it should be opening.
+    // A fresh anchor per menu: reusing one element would make the
+    // dropdown read the next right-click as a same-trigger toggle and
+    // close the menu it should be opening.
     this.pointerAnchor?.remove();
     const anchor = document.createElement("span");
     anchor.style.cssText =
