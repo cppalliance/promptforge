@@ -24,14 +24,14 @@ use std::sync::atomic::AtomicU32;
 
 use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
-use crate::lua::{SectionVm, ToolCallCounts, install_live_h1_shim_base};
+use crate::lua::{SectionVm, ToolBinding, ToolCallCounts, install_live_h1_shim_base};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::WriteScope;
 use crate::{Error, Result};
 
-use super::block_walk::{run_live_h1_prose, run_section_prose};
+use super::block_walk::{install_section_scope, run_live_h1_prose, run_section_prose};
 use super::context::RunContext;
 use super::engine::{list_items_from_visible, visible_sections};
 use super::section_vm::{VmSeed, setup_section_vm};
@@ -405,6 +405,44 @@ impl SectionContext {
     /// `reply` global after each of the scheduler's Lua blocks.
     pub(crate) fn reply(&self) -> Option<String> {
         self.reply.clone()
+    }
+
+    /// The frame's tool-call counts for a script-initiated dispatch,
+    /// running the same one-time scope install the first prose block
+    /// performs (the counts and the Lua `tools.calls` table, the model
+    /// freeze, the `sys.model` enrichment), then seeding any alias the
+    /// effective scope has gained since. The returned handle shares the
+    /// installed counts, so the dispatch task increments them off the
+    /// driver thread.
+    ///
+    /// # Errors
+    /// Returns the [`Error`](crate::Error) of the scope install or the
+    /// alias seeding.
+    pub(crate) fn script_call_counts(
+        &mut self,
+        ctx: &RunContext,
+        effective: &[ToolBinding],
+    ) -> Result<ToolCallCounts> {
+        let Self {
+            vm,
+            sys,
+            counts,
+            completion_options,
+            ..
+        } = self;
+        let Some(vm) = vm.as_ref() else {
+            return Err(Error::Internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
+        install_section_scope(vm, ctx, sys, counts, completion_options, effective)?;
+        let counts = counts
+            .as_ref()
+            .ok_or(Error::Internal("the scope install seeds the counts"))?;
+        for binding in effective {
+            counts.ensure(binding.alias())?;
+        }
+        Ok(counts.clone())
     }
 
     /// Reads the VM's `reply` global back into the frame's slot and returns

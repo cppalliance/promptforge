@@ -2,6 +2,7 @@ use super::{
     Arc, Conflict, Error, Lua, LuaToolHandle, ModelResolver, ModelSet, MultiValue, Mutex, Result,
     ToolBinding, ToolCatalog, ToolResolver, ToolSet, install_live_models,
 };
+use crate::handles::ToolOutputKind;
 
 /// Records the first concrete callback error, preserving its typed cause.
 fn record_callback_error(errors: &Mutex<Option<Error>>, error: Error) -> mlua::Result<()> {
@@ -261,6 +262,9 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope>(
                     model_description,
                     tool,
                     conflicts,
+                    // Author-bound live tools resume as strings; structured
+                    // output is a host-constructed binding's opt-in.
+                    output_kind: ToolOutputKind::Plain,
                 });
                 Ok(handle)
             },

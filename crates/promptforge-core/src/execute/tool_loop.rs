@@ -6,10 +6,10 @@ use std::sync::atomic::AtomicU32;
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
-use crate::lua::ToolCallCounts;
+use crate::lua::{ToolCallCounts, dispatch_tool};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
-use crate::tools::{ToolId, ToolOutput};
+use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 
@@ -191,11 +191,11 @@ pub(crate) async fn run_prose_inference(
                             in_scope,
                         });
                     };
-                    if let Some(counts) = counts {
-                        counts.increment(&call.name)?;
-                    }
-                    let output = match target {
+                    let result = match target {
                         DispatchTarget::Local => {
+                            if let Some(counts) = counts {
+                                counts.increment(&call.name)?;
+                            }
                             // Local tools are Lua functions on the section VM;
                             // they carry no attached implementation.
                             let Some(local) = local_dispatch else {
@@ -219,51 +219,33 @@ pub(crate) async fn run_prose_inference(
                                 },
                             );
                             // The prompt author wrote the handler, so its output
-                            // is trusted.
-                            ToolOutput::trusted(call_result?)
+                            // is trusted and appends verbatim.
+                            call_result?
                         }
                         DispatchTarget::Bound(binding) => {
                             // The implementation was attached at bind time, so
-                            // dispatch never consults the catalog.
-                            let tool = binding.tool();
-                            // Race the tool call against cancellation so a slow or stuck
-                            // tool cannot hold the run past a Ctrl-C. On cancel the tool
-                            // future is dropped and the run ends promptly.
-                            let call_result = tokio::select! {
-                                biased;
-                                () = cancel::wait_cancelled() => {
-                                    observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                                    return Err(Error::Interrupted);
-                                }
-                                result = tool.call(call.arguments.clone()) => result,
-                            };
-                            observer.observe(
+                            // dispatch never consults the catalog. The shared
+                            // dispatch body owns the cancel race, the counts
+                            // increment, the untrusted wrap, and the observer
+                            // events, so this loop and the scheduler's
+                            // `tool_call` arm cannot drift. Model-initiated
+                            // calls pass no script report: their results ride
+                            // the conversation echo below.
+                            dispatch_tool(
+                                binding,
+                                call.arguments.clone(),
+                                counts,
+                                nonce,
+                                observer,
                                 execution,
                                 section,
-                                if call_result.is_ok() {
-                                    detail::TOOL_CALL_SUCCEEDED
-                                } else {
-                                    detail::TOOL_CALL_FAILED
-                                },
-                            );
-                            call_result.map_err(Error::tool)?
+                                None,
+                            )
+                            .await
+                            .map_err(Error::from)?
                         }
                     };
                     successful_tool_calls += 1;
-                    // Trust travels with the output: an untrusted result is
-                    // nonce-wrapped before it can reach the next model turn. Every
-                    // wrap in the run shares the run's nonce, so identical content
-                    // yields a byte-identical envelope and KV-cache prefixes stay
-                    // shared across rounds and fanout arms; the `<`-escaping is
-                    // what actually blocks a forged close tag, so the reuse costs
-                    // nothing.
-                    let result = match output.trust() {
-                        crate::tools::OutputTrust::Trusted => output.text().to_owned(),
-                        // `OutputTrust` is `#[non_exhaustive]` in the contract
-                        // crate: an unknown future variant takes the safe path
-                        // and is nonce-wrapped as untrusted.
-                        _ => nonce.wrap(output.text()),
-                    };
                     results.push((call.id.clone(), result));
                 }
 

@@ -2,19 +2,20 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer`, `handle:infer`, `execute`,
-//! `fanout`) is a Lua-side shim that yields a request table; the driver
-//! validates the yield into a [`Request`], dispatches it, and resumes the
-//! coroutine with the `(ok, result)` envelope rendered from an [`Answer`].
-//! The two enums are the audit surface: what a script can cause the host to
-//! do is one short read, and each variant's fields are the compiler-checked
-//! per-message contract.
+//! `fanout`, `tool_call`) is a Lua-side shim that yields a request table;
+//! the driver validates the yield into a [`Request`], dispatches it, and
+//! resumes the coroutine with the `(ok, result)` envelope rendered from an
+//! [`Answer`]. The two enums are the audit surface: what a script can cause
+//! the host to do is one short read, and each variant's fields are the
+//! compiler-checked per-message contract.
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
 use promptforge_model_client::model::ModelBinding;
 
 use crate::{
-    Error, LuaFanoutResult, LuaModelHandle, Result, pack_sequence, resolve_section_target,
+    Error, LuaFanoutResult, LuaModelHandle, Result, ToolOutputKind, pack_sequence,
+    resolve_section_target,
 };
 
 /// The fixed failure for a yield that is not a well-formed request table.
@@ -153,6 +154,15 @@ pub enum Request {
         /// The caller's `var` snapshot; each arm seeds from its own clone.
         var: serde_json::Value,
     },
+    /// `tool_call(alias, args)`: suspending dispatch of a bound tool
+    /// through the shared dispatch function.
+    ToolCall {
+        /// The author-supplied prompt-local tool alias.
+        alias: String,
+        /// The author-supplied JSON arguments; an absent or nil `args`
+        /// parses as the empty object.
+        args: serde_json::Value,
+    },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     // The fields are read only by this module's own tests; production parses
     // them for strict validation and never reads them until the variant
@@ -200,6 +210,9 @@ impl Request {
                 Answer::Execute(Err(error))
             }),
             "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
+            "tool_call" => classify(parse_tool_call(lua, table), |error| {
+                Answer::ToolCallResult(Err(error))
+            }),
             "mcp" => match parse_mcp(lua, table) {
                 Ok(request) => YieldParse::Request(request),
                 Err(_) => YieldParse::Malformed(direct_yield_error()),
@@ -279,6 +292,32 @@ fn parse_fanout(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, 
     Ok(Request::Fanout { worker, items, var })
 }
 
+/// Parses a `tool_call` request: the author-supplied `alias` and `args`.
+///
+/// An absent or nil `args` parses as the empty object (the empty-argument
+/// call every tool accepts). A non-table or JSON-unrepresentable `args` is
+/// the call's error, framed exactly as the other author-argument failures,
+/// so an author `pcall` catches it at the call site.
+fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let alias = call_string(table, "alias")?;
+    let args = match table.raw_get::<Value>("args") {
+        Ok(Value::Nil) => serde_json::Value::Object(serde_json::Map::new()),
+        Ok(Value::Table(_)) => json_field(lua, table, "args").map_err(|_| {
+            FieldFailure::Call(Error::Lua(
+                "args must be a JSON-representable table".to_owned(),
+            ))
+        })?,
+        Ok(other) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "args must be a table, got {}",
+                other.type_name()
+            ))));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    Ok(Request::ToolCall { alias, args })
+}
+
 /// Parses a reserved `mcp` request. No call surface produces one, so every
 /// field is shim-internal by construction.
 fn parse_mcp(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
@@ -301,6 +340,46 @@ pub enum YieldParse {
     /// Not a well-formed request table: a hand-rolled or corrupted yield,
     /// failing the block with the fixed direct-yield message.
     Malformed(Error),
+}
+
+/// One dispatched `tool_call`'s successful output, classified by the
+/// binding's declared [`ToolOutputKind`] so the envelope resumes the right
+/// Lua shape: a plain binding's text resumes as a Lua string, a structured
+/// binding's parsed JSON resumes as a Lua table through the serde boundary.
+/// Scripts never see a JSON codec; the host performs the one conversion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolCallOutcome {
+    /// A plain binding's output text, resumed as a Lua string - every
+    /// existing tool, byte-identical to the tool loop's echo.
+    Plain(String),
+    /// A structured binding's parsed JSON output, resumed as a Lua table.
+    Structured(serde_json::Value),
+}
+
+impl ToolCallOutcome {
+    /// Classifies one dispatched tool's output text by the binding's
+    /// declared output kind.
+    ///
+    /// Plain output passes through untouched. Structured output must parse
+    /// as JSON - the untrusted nonce wrap is a string mechanism, so a
+    /// structured binding whose output was wrapped fails here too, keeping
+    /// structured output effectively restricted to trusted tools.
+    ///
+    /// # Errors
+    /// Returns [`Error::Tool`] when a structured binding's output is not
+    /// valid JSON, retaining the parse failure as the cause.
+    pub fn from_dispatch(kind: ToolOutputKind, alias: &str, text: String) -> Result<Self> {
+        match kind {
+            ToolOutputKind::Plain => Ok(ToolCallOutcome::Plain(text)),
+            ToolOutputKind::Structured => match serde_json::from_str(&text) {
+                Ok(json) => Ok(ToolCallOutcome::Structured(json)),
+                Err(error) => Err(Error::Tool {
+                    message: format!("structured tool {alias:?} returned invalid JSON"),
+                    source: Box::new(error),
+                }),
+            },
+        }
+    }
 }
 
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
@@ -328,6 +407,8 @@ pub enum Answer<E> {
     Execute(std::result::Result<String, E>),
     /// The ordered arm results for a `fanout` request, in collection order.
     Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
+    /// The classified output for a `tool_call` request.
+    ToolCallResult(std::result::Result<ToolCallOutcome, E>),
 }
 
 impl<E> Answer<E> {
@@ -337,6 +418,7 @@ impl<E> Answer<E> {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),
             Answer::Execute(result) => Answer::Execute(result.map_err(map)),
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
+            Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
         }
     }
 }
@@ -356,10 +438,22 @@ impl<E: std::fmt::Display> Answer<E> {
     /// created on `lua`.
     pub fn into_envelope(self, lua: &Lua) -> mlua::Result<(MultiValue, Option<E>)> {
         match self {
-            Answer::Infer(Ok(text)) | Answer::Execute(Ok(text)) => {
+            Answer::Infer(Ok(text))
+            | Answer::Execute(Ok(text))
+            | Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(text))) => {
                 let text = lua.create_string(&text)?;
                 Ok((
                     MultiValue::from_vec(vec![Value::Boolean(true), Value::String(text)]),
+                    None,
+                ))
+            }
+            Answer::ToolCallResult(Ok(ToolCallOutcome::Structured(json))) => {
+                // The one serde-boundary conversion: the parsed JSON output
+                // becomes the resumed Lua value, so the shim hands the
+                // script a table with no codec in author reach.
+                let value = lua.to_value(&json)?;
+                Ok((
+                    MultiValue::from_vec(vec![Value::Boolean(true), value]),
                     None,
                 ))
             }
@@ -376,7 +470,8 @@ impl<E: std::fmt::Display> Answer<E> {
             }
             Answer::Infer(Err(error))
             | Answer::Execute(Err(error))
-            | Answer::Fanout(Err(error)) => {
+            | Answer::Fanout(Err(error))
+            | Answer::ToolCallResult(Err(error)) => {
                 let message = lua.create_string(error.to_string())?;
                 Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::String(message)]),
@@ -546,6 +641,173 @@ mod tests {
                 assert_eq!(var, json!({ "k": 1 }));
             }
             other => panic!("expected a fanout request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_parses_alias_and_args() {
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", "echo").expect("raw_set");
+        let args = lua.create_table().expect("table creation cannot fail");
+        args.raw_set("value", "hi").expect("raw_set");
+        table.raw_set("args", args).expect("raw_set");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::ToolCall { alias, args } => {
+                assert_eq!(alias, "echo");
+                assert_eq!(args, json!({ "value": "hi" }));
+            }
+            other => panic!("expected a tool_call request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_without_args_parses_the_empty_object() {
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", "echo").expect("raw_set");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::ToolCall { args, .. } => assert_eq!(args, json!({})),
+            other => panic!("expected a tool_call request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_with_a_non_string_alias_is_the_calls_error() {
+        // The author-facing argument error rides back as the call's answer,
+        // framed byte-identically with the other author-argument failures.
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", 42).expect("raw_set");
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "alias must be a string, got integer");
+            }
+            other => panic!("expected the alias call error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_with_a_non_table_args_is_the_calls_error() {
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", "echo").expect("raw_set");
+        table.raw_set("args", 42).expect("raw_set");
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "args must be a table, got integer");
+            }
+            other => panic!("expected the args call error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_with_an_unrepresentable_args_table_is_the_calls_error() {
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        table.raw_set("alias", "echo").expect("raw_set");
+        let args = lua.create_table().expect("table creation cannot fail");
+        let member = lua
+            .create_function(|_, ()| Ok(()))
+            .expect("function creation cannot fail");
+        args.raw_set("f", member).expect("raw_set");
+        table.raw_set("args", args).expect("raw_set");
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "args must be a JSON-representable table");
+            }
+            other => panic!("expected the args call error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_ok_plain_tool_call_answer_round_trips_as_a_string() {
+        let lua = Lua::new();
+        let (envelope, retained) =
+            Answer::<Error>::ToolCallResult(Ok(ToolCallOutcome::Plain("echoed: hi".to_owned())))
+                .into_envelope(&lua)
+                .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, result) = echo_through_lua(&lua, envelope);
+        assert!(ok);
+        let Value::String(text) = result else {
+            panic!("expected a string result, got {result:?}");
+        };
+        assert_eq!(text.to_str().expect("the text is UTF-8"), "echoed: hi");
+    }
+
+    #[test]
+    fn an_ok_structured_tool_call_answer_round_trips_as_a_table() {
+        let lua = Lua::new();
+        let outcome = ToolCallOutcome::Structured(json!({ "text": "typed", "images": [] }));
+        let (envelope, retained) = Answer::<Error>::ToolCallResult(Ok(outcome))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, text, images_len): (bool, String, i64) = lua
+            .load("local ok, result = ...; return ok, result.text, #result.images")
+            .call(envelope)
+            .expect("the table reads back through Lua");
+        assert!(ok);
+        assert_eq!(text, "typed");
+        assert_eq!(images_len, 0);
+    }
+
+    #[test]
+    fn an_err_tool_call_answer_round_trips_and_retains_the_typed_error() {
+        let lua = Lua::new();
+        let (envelope, retained) = Answer::ToolCallResult(Err(Error::Interrupted))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        match retained {
+            Some(Error::Interrupted) => {}
+            other => panic!("expected the retained Interrupted error, got {other:?}"),
+        }
+        let (ok, result) = echo_through_lua(&lua, envelope);
+        assert!(!ok);
+        let Value::String(message) = result else {
+            panic!("expected a string message, got {result:?}");
+        };
+        assert_eq!(
+            message.to_str().expect("the message is UTF-8"),
+            "interrupted by Ctrl-C"
+        );
+    }
+
+    #[test]
+    fn from_dispatch_classifies_by_the_declared_output_kind() {
+        use crate::ToolOutputKind;
+
+        // Plain output passes through untouched.
+        match ToolCallOutcome::from_dispatch(ToolOutputKind::Plain, "echo", "raw".to_owned()) {
+            Ok(ToolCallOutcome::Plain(text)) => assert_eq!(text, "raw"),
+            other => panic!("expected the plain passthrough, got {other:?}"),
+        }
+        // Structured output parses as JSON.
+        match ToolCallOutcome::from_dispatch(
+            ToolOutputKind::Structured,
+            "form",
+            "{\"text\":\"hi\"}".to_owned(),
+        ) {
+            Ok(ToolCallOutcome::Structured(json)) => assert_eq!(json, json!({ "text": "hi" })),
+            other => panic!("expected the structured parse, got {other:?}"),
+        }
+        // Invalid JSON from a structured binding is the tool's error.
+        match ToolCallOutcome::from_dispatch(
+            ToolOutputKind::Structured,
+            "form",
+            "not json".to_owned(),
+        ) {
+            Err(Error::Tool { message, source }) => {
+                assert_eq!(message, "structured tool \"form\" returned invalid JSON");
+                assert!(
+                    source.downcast_ref::<serde_json::Error>().is_some(),
+                    "the parse failure must survive as the cause"
+                );
+            }
+            other => panic!("expected the typed tool error, got {other:?}"),
         }
     }
 

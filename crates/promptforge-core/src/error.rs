@@ -511,15 +511,6 @@ impl Error {
             source: Box::new(source),
         }
     }
-
-    /// Wrap a tool failure, preserving the tool's own error as the `#[source]`
-    /// cause rather than discarding it.
-    pub(crate) fn tool(source: crate::tools::ToolError) -> Error {
-        Error::Tool {
-            message: source.to_string(),
-            source: Box::new(source),
-        }
-    }
 }
 
 impl From<crate::subst::SubstitutionError> for Error {
@@ -641,6 +632,7 @@ impl From<LuaError> for Error {
             },
             LuaError::LuaQuota { resource } => Error::LuaQuota { resource },
             LuaError::Interrupted => Error::Interrupted,
+            LuaError::Tool { message, source } => Error::Tool { message, source },
             LuaError::Internal(message) => Error::Internal(message),
             LuaError::DuplicateAlias { alias } => Error::DuplicateAlias { alias },
             LuaError::PickedToolNotLive { alias, id } => Error::PickedToolNotLive { alias, id },

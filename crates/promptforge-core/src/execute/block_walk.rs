@@ -139,6 +139,40 @@ pub(crate) async fn run_live_h1_prose(
     Ok(())
 }
 
+/// Installs the section's one-time tool-call counts and model resolution,
+/// gated on the counts slot: the first consumer - the section's first prose
+/// block or its first script-initiated `tool_call` - performs the install,
+/// and every later call is a no-op. The counts install backs the Lua
+/// `tools.calls` table; the model resolution freezes the section's binding,
+/// enriches `sys.model`, and fills the completion options the prose loop
+/// uses.
+///
+/// # Errors
+/// Returns the [`Error`] of the counts install, the model resolution, or
+/// the `sys` re-seal.
+pub(crate) fn install_section_scope(
+    vm: &SectionVm,
+    ctx: &RunContext,
+    sys: &mut serde_json::Value,
+    counts: &mut Option<ToolCallCounts>,
+    completion_options: &mut Option<CompletionOptions>,
+    effective_bindings: &[ToolBinding],
+) -> Result<()> {
+    if counts.is_some() {
+        return Ok(());
+    }
+    *counts = Some(vm.install_tool_call_counts(effective_bindings)?);
+    let resolved_model = crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
+    if let Some(binding) = resolved_model.as_ref() {
+        let current = vm.current_sys(sys)?;
+        let enriched = crate::lua::enrich_sys_model(&current, binding);
+        vm.re_seal_sys(&enriched)?;
+        *sys = enriched;
+        *completion_options = Some(binding.completion_options());
+    }
+    Ok(())
+}
+
 /// Runs one section-mode prose block: the per-block scope rebuild, the
 /// one-time counts and model install, substitution, the tool loop, and the
 /// reply/`sys` roll-forward.
@@ -178,17 +212,14 @@ pub(crate) async fn run_section_prose(
 ) -> Result<()> {
     let tool_set = ctx.tool_set_snapshot()?;
     let effective_bindings = current_tool_bindings(&tool_set, &vm.tool_runtime)?;
-    if counts.is_none() {
-        *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
-        let resolved_model = crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
-        if let Some(binding) = resolved_model.as_ref() {
-            let current = vm.current_sys(sys)?;
-            let enriched = crate::lua::enrich_sys_model(&current, binding);
-            vm.re_seal_sys(&enriched)?;
-            *sys = enriched;
-            *completion_options = Some(binding.completion_options());
-        }
-    }
+    install_section_scope(
+        vm,
+        ctx,
+        sys,
+        counts,
+        completion_options,
+        &effective_bindings,
+    )?;
     let local_schemas = vm.local_tool_schemas()?;
     // Seed aliases added since the first prose block (via `tools.add` or
     // `tools.add_local`) so the tool loop can count their calls; `ensure`

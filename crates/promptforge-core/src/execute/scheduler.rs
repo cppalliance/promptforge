@@ -54,7 +54,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use mlua::Thread;
 use tokio::sync::mpsc;
@@ -64,8 +64,8 @@ use crate::client::GatewayClient;
 use crate::fanout;
 use crate::fanout::ArmFinalizer;
 use crate::lua::{
-    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, resolve_model_binding,
-    shim_live_h1_models,
+    CoroStep, LuaBlockResult, LuaFanoutResult, LuaProgram, ScriptReport, SectionVm,
+    current_tool_bindings, dispatch_tool, resolve_model_binding, shim_live_h1_models,
 };
 use crate::model::ModelBinding;
 use crate::observe::detail;
@@ -78,7 +78,7 @@ use super::engine::{
     JumpTarget, home_without, resolve_jump_target, section_position, visible_sections,
 };
 use super::gateway::{GatewaySource, ResolutionContext};
-use super::protocol::{Answer, Request, YieldParse};
+use super::protocol::{Answer, Request, ToolCallOutcome, YieldParse};
 use super::section_context::SectionContext;
 use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, next_id, now_rfc3339_checked};
 use super::tools::infer_round;
@@ -1367,6 +1367,10 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_fanout(id, &worker, &items, &var);
                 Ok(())
             }
+            Request::ToolCall { alias, args } => {
+                self.dispatch_tool_call(id, &alias, args);
+                Ok(())
+            }
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
         }
     }
@@ -1443,6 +1447,118 @@ impl<'a> Scheduler<'a> {
             // A send fails only when the driver is gone (a cancelled run);
             // the answer is then moot.
             let _ = tx.send((request_id, Answer::Infer(result)));
+        });
+        Ok((request_id, task))
+    }
+
+    /// Dispatches a `tool_call` request: resolves the alias against the
+    /// section's effective scope, spawns the shared dispatch body onto the
+    /// answer channel, and parks the chain in the pending table. Every
+    /// dispatch failure - an out-of-scope alias, the counts install - is
+    /// the call's answer, resumed into the caller so an author `pcall` can
+    /// catch it exactly as a tool failure.
+    fn dispatch_tool_call(&mut self, id: ChainId, alias: &str, args: serde_json::Value) {
+        match self.prepare_tool_call(id, alias, args) {
+            Ok((request_id, task)) => {
+                self.io_tasks.insert(request_id, task.abort_handle());
+                self.pending.insert(request_id, id);
+            }
+            Err(error) => {
+                self.chains[id.index()].incoming = Some(Answer::ToolCallResult(Err(error)));
+                self.ready.push_back(id);
+            }
+        }
+    }
+
+    /// The fallible half of tool-call dispatch: the alias resolved against
+    /// the section's effective scope (the same always-plus-added set the
+    /// prose loop advertises), the one-time counts install, and the spawned
+    /// dispatch through the shared `dispatch_tool` body, classified by the
+    /// binding's declared output kind at completion.
+    fn prepare_tool_call(
+        &mut self,
+        id: ChainId,
+        alias: &str,
+        args: serde_json::Value,
+    ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
+        let chain = &mut self.chains[id.index()];
+        if chain.h1.is_some() {
+            // Unreachable: section VMs alone install the `tool_call` shim,
+            // the H1 VM never does, and stripped coroutines make a
+            // hand-rolled yield impossible.
+            return Err(Error::Internal(
+                "the live H1 pass cannot dispatch a tool_call request",
+            ));
+        }
+        let tool_set = chain.ctx.tool_set_snapshot()?;
+        let ctx = chain.ctx.clone();
+        let (binding, counts) = {
+            let frame = chain
+                .frame
+                .as_mut()
+                .ok_or(Error::Internal("a live chain holds its frame"))?;
+            let effective = current_tool_bindings(&tool_set, &frame.vm()?.tool_runtime)?;
+            let Some(binding) = effective
+                .iter()
+                .find(|binding| binding.alias() == alias)
+                .cloned()
+            else {
+                return Err(Error::OutOfScopeToolCall {
+                    name: alias.to_owned(),
+                    global_exists: tool_set.binding(alias).is_some(),
+                    in_scope: effective
+                        .iter()
+                        .map(|binding| binding.alias().to_owned())
+                        .collect(),
+                });
+            };
+            let counts = frame.script_call_counts(&ctx, &effective)?;
+            (binding, counts)
+        };
+        let observer = Arc::clone(chain.ctx.observer());
+        let execution = chain.ctx.execution().to_owned();
+        let section = chain.section_name().to_owned();
+        let nonce = chain.ctx.nonce().clone();
+        let report = ScriptReport {
+            chain_id: id.0,
+            // The execute depth is capped at MAX_EXECUTE_DEPTH, far inside
+            // u32; the saturation is a defensive no-op.
+            depth: u32::try_from(chain.execute_depth).unwrap_or(u32::MAX),
+            turn: chain.ctx.turns().load(Ordering::Relaxed),
+        };
+        let output_kind = binding.output_kind;
+        let request_id = RequestId(self.next_request);
+        self.next_request += 1;
+        let tx = self.answer_tx.clone();
+        // A spawned task does not inherit the cancel task-local; the
+        // current handle rides into the task explicitly so the shared
+        // dispatch body's cancel race stays armed there. The driver also
+        // aborts the task handle on cancellation, so both paths end a slow
+        // tool promptly.
+        let cancel = cancel::current();
+        let task = tokio::spawn(async move {
+            let result = cancel::maybe_scope(cancel, async {
+                match dispatch_tool(
+                    &binding,
+                    args,
+                    Some(&counts),
+                    &nonce,
+                    observer.as_ref(),
+                    &execution,
+                    &section,
+                    Some(report),
+                )
+                .await
+                {
+                    Ok(text) => ToolCallOutcome::from_dispatch(output_kind, binding.alias(), text)
+                        .map_err(Error::from),
+                    Err(error) => Err(Error::from(error)),
+                }
+            })
+            .await;
+            // A send fails only when the driver is gone (a cancelled run);
+            // the answer is then moot.
+            let _ = tx.send((request_id, Answer::ToolCallResult(result)));
         });
         Ok((request_id, task))
     }
