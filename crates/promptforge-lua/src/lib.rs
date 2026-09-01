@@ -107,6 +107,7 @@ mod scope;
 pub(crate) use handles::{LuaToolHandle, resolve_section_target};
 mod models;
 mod protocol;
+mod runtime_events;
 
 // The executor-facing surface: every item `promptforge-core` names crosses
 // here. These are `#[doc(hidden)]` cross-crate seams, not host API;
@@ -126,6 +127,8 @@ pub use live::LiveBindingProducer;
 pub use models::ModelRuntime;
 #[doc(hidden)]
 pub use protocol::{Answer, ChatResult, Request, ToolCallOutcome, YieldParse};
+#[doc(hidden)]
+pub use runtime_events::{EventsSnapshot, install_runtime_events};
 #[doc(hidden)]
 pub use scope::{ToolCallCounts, ToolRuntime};
 #[doc(hidden)]

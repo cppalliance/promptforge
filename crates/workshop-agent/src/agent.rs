@@ -10,7 +10,11 @@
 //! the coroutine, validates each yield into a [`Request`], awaits exactly
 //! one future - the current request - and resumes with the answer. Tool
 //! dispatch goes through the shared [`dispatch_tool`] body; nothing here
-//! duplicates it.
+//! duplicates it. Before every resume the driver republishes the
+//! `runtime.events()` length bound ([`EventsSnapshot::refresh`]) - the
+//! resume-refresh rule: appends land in the program's view only at
+//! host-call resumes, never mid-chunk, so reads between suspensions stay
+//! deterministic.
 //!
 //! `run_agent` installs [`AgentConfig::cancel`] as the task's cancel scope:
 //! suspended host calls race cancellation, and running Lua observes the
@@ -22,14 +26,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use promptforge_core_support::cancel;
-use promptforge_core_support::events::{CallMetrics, ToolCallEvent};
+use promptforge_core_support::events::{CallMetrics, EventLog, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
 use promptforge_core_support::untrusted::GuardNonce;
 use promptforge_lua::{
-    Answer, ChatResult, CoroStep, Error as LuaError, LuaBlockResult, LuaProgram, Request,
-    ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome, ToolOutputKind, ToolSet,
-    YieldParse, current_tool_bindings, dispatch_tool, install_agent_chat_shim,
-    resolve_model_binding,
+    Answer, ChatResult, CoroStep, Error as LuaError, EventsSnapshot, LuaBlockResult, LuaProgram,
+    Request, ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome, ToolOutputKind,
+    ToolSet, YieldParse, current_tool_bindings, dispatch_tool, install_agent_chat_shim,
+    install_runtime_events, resolve_model_binding,
 };
 use promptforge_model_client::client::{
     Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
@@ -120,12 +124,14 @@ impl From<LuaError> for AgentError {
 ///
 /// Agent-only host calls: `models.chat(messages, opts)` - one stateless
 /// tool-capable model round, streaming its deltas to
-/// [`AgentConfig::on_delta`] - with `runtime.events()` and `ui()` installed
-/// by later steps. Shared kernel: `tool_call`, `store`, `var`, cancel
-/// checkpoints, `models.infer`. `execute()`, `fanout()`, and `jump()` do
-/// not exist here - absent, not stubbed. `run_agent` installs
-/// `config.cancel` as the task's cancel scope, so every suspended host call
-/// races cancellation through the shared dispatch.
+/// [`AgentConfig::on_delta`] - and `runtime.events()` - a read-only indexed
+/// view over [`AgentConfig::event_log`] whose snapshot length bound
+/// refreshes at every host-call resume - with `ui()` installed by a later
+/// step. Shared kernel: `tool_call`, `store`, `var`, cancel checkpoints,
+/// `models.infer`. `execute()`, `fanout()`, and `jump()` do not exist
+/// here - absent, not stubbed. `run_agent` installs `config.cancel` as
+/// the task's cancel scope, so every suspended host call races
+/// cancellation through the shared dispatch.
 ///
 /// Every tool in `tools` is registered by its wire name with no semantic
 /// resolution; every model in `models` is addressable by its catalog name
@@ -177,6 +183,7 @@ async fn drive(
         name,
         execution,
         observer,
+        event_log,
         on_delta,
         limits,
         ..
@@ -203,16 +210,21 @@ async fn drive(
     // A limits failure propagates bare, before any teardown observation
     // exists - the section drivers' contract.
     vm.apply_lua_limits(limits.lua_memory_bytes, limits.lua_log_events)?;
-    if let Err(error) = setup_agent_vm(&mut vm, store, &observer, &name) {
-        vm.teardown(observer.as_ref(), &name);
-        return Err(error);
-    }
+    let (counts, events) =
+        match setup_agent_vm(&mut vm, store, &observer, &name, &tool_set, event_log) {
+            Ok(installed) => installed,
+            Err(error) => {
+                vm.teardown(observer.as_ref(), &name);
+                return Err(error);
+            }
+        };
     let run = AgentRun {
         vm: &vm,
         program: &program,
         tool_set: &tool_set,
         model_view: Mutex::new(model_set),
-        counts: ToolCallCounts::new(tool_set.bindings().iter().map(|b| b.alias().to_owned())),
+        counts,
+        events,
         nonce: &nonce,
         observer: &observer,
         execution: &execution,
@@ -293,7 +305,11 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 
 /// The agent VM's setup sequence: the section construction reused (host
 /// injection, host APIs, the coroutine shims) minus the section control
-/// surface, plus the agent-only `models.chat` shim.
+/// surface, plus the agent-only installs - the `models.chat` shim, the
+/// read-only `tools.calls` counter surface over the run's dispatch counts,
+/// and the `runtime.events()` view over the host's [`EventLog`]. Returns
+/// the counts the dispatches increment and, when a log was supplied, the
+/// driver's [`EventsSnapshot`] refresh handle.
 ///
 /// Absent, not stubbed: the shared shim prelude installs `execute` and
 /// `fanout` for section VMs, but the agent kernel is `models.infer` and
@@ -307,11 +323,15 @@ fn setup_agent_vm(
     store: &StoreRef,
     observer: &Arc<dyn Observer>,
     name: &str,
-) -> Result<(), AgentError> {
+    tool_set: &ToolSet,
+    event_log: Option<Arc<dyn EventLog>>,
+) -> Result<(ToolCallCounts, Option<EventsSnapshot>), AgentError> {
     vm.inject_host_with_var("", &serde_json::json!({}), store, None, None, None)?;
     vm.install_host_apis(observer, name)?;
     vm.install_coro_shims()?;
     install_agent_chat_shim(vm.lua())?;
+    let counts = vm.install_tool_call_counts(tool_set.bindings())?;
+    let events = install_runtime_events(vm.lua(), event_log)?;
     let globals = vm.lua().globals();
     for global in ["execute", "fanout"] {
         globals
@@ -321,7 +341,7 @@ fn setup_agent_vm(
                 source: Some(Box::new(error)),
             })?;
     }
-    Ok(())
+    Ok((counts, events))
 }
 
 /// The borrowed run pieces every driver step reads.
@@ -335,8 +355,13 @@ struct AgentRun<'a> {
     /// The frozen model bindings behind `models.use`/`models.get`, read
     /// through the `ModelView` impl on the mutex.
     model_view: Mutex<ModelSet>,
-    /// Per-alias dispatch counts, seeded with every catalog alias.
+    /// Per-alias dispatch counts, seeded with every catalog alias and read
+    /// back by the program through the `tools.calls` table.
     counts: ToolCallCounts,
+    /// The driver side of the `runtime.events()` view, when the host
+    /// supplied an [`EventLog`]: its length bound is refreshed at every
+    /// host-call resume.
+    events: Option<EventsSnapshot>,
     /// The run's untrusted-wrap nonce.
     nonce: &'a GuardNonce,
     /// The run's reporting sink.
@@ -375,6 +400,16 @@ impl AgentRun<'_> {
         *slot = Some(client.clone());
         Ok(client)
     }
+
+    /// Applies the resume-refresh rule: republishes the events snapshot's
+    /// length bound, so appends that landed while the program was
+    /// suspended - or synchronously from a host callback while it ran -
+    /// become visible exactly at the resume this call precedes.
+    fn refresh_events(&self) {
+        if let Some(events) = &self.events {
+            events.refresh();
+        }
+    }
 }
 
 /// Drives the program coroutine to its end: resume, validate the yield,
@@ -397,17 +432,21 @@ async fn drive_program(run: &AgentRun<'_>) -> Result<(), AgentError> {
                 step = match run.vm.request_from_yield(&values) {
                     YieldParse::Request(request) => {
                         let answer = dispatch(run, request).await?;
+                        run.refresh_events();
                         run.vm
                             .resume_block_coro_answer(run.program, &thread, answer)?
                     }
                     // An argument-validation failure is the call's answer:
                     // the shim raises it at the call site, so an author
                     // `pcall` catches it.
-                    YieldParse::Call(answer) => run.vm.resume_block_coro_answer(
-                        run.program,
-                        &thread,
-                        answer.map_error(AgentError::from),
-                    )?,
+                    YieldParse::Call(answer) => {
+                        run.refresh_events();
+                        run.vm.resume_block_coro_answer(
+                            run.program,
+                            &thread,
+                            answer.map_error(AgentError::from),
+                        )?
+                    }
                     YieldParse::Malformed(error) => return Err(error.into()),
                 };
             }
