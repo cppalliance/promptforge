@@ -14,6 +14,10 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 futures-util.workspace = true
+# The canonical metrics vocabulary (Usage, LlamaTimings, VllmMetrics,
+# ClientTiming, CallMetrics) this crate parses response bodies into and
+# re-exports.
+promptforge-core-support.workspace = true
 # The serde feature decodes the gateway's progress event stream.
 promptforge-progress = { workspace = true, features = ["serde"] }
 promptforge-tool-picker.workspace = true
@@ -21,6 +25,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 url.workspace = true
 
 [dev-dependencies]

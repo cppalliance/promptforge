@@ -268,10 +268,18 @@ impl GatewayClient {
             }
         })?;
         let turn = crate::normalize::normalize(&response_body)?;
+        let metadata = crate::normalize::response_metadata(&response_body);
         Ok(Completion {
             result: turn.outcome,
             finish_reason: turn.finish_reason,
             reasoning_content: turn.reasoning_content,
+            model: metadata.model,
+            usage: metadata.usage,
+            llama_timings: metadata.llama_timings,
+            vllm_metrics: metadata.vllm_metrics,
+            // Measured by the streaming transport's own clock; this buffered
+            // path has no per-token clock, so it records nothing.
+            client_timing: None,
             request_body,
             response_body,
         })

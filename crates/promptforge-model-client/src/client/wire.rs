@@ -1,6 +1,7 @@
 //! Wire types for the chat-completions protocol: messages, tool schemas,
 //! tool calls, and completion results.
 
+use promptforge_core_support::events::{ClientTiming, LlamaTimings, Usage, VllmMetrics};
 use serde_json::Value;
 
 /// A single chat message.
@@ -349,10 +350,13 @@ pub enum CompletionResult {
 ///
 /// [`CompletionResult`] remains the decision the tool loop matches on.
 /// `finish_reason` and `reasoning_content` ride beside it so observers can
-/// report payload-free signals without reading the raw bodies. The fields are
-/// `#[doc(hidden)]` cross-crate seams for the executor's tool loop and the
-/// opt-in debug-capture seam; they are not part of the public host API, which
-/// reads through the accessor methods.
+/// report payload-free signals without reading the raw bodies, and the call
+/// metadata - the serving model plus the canonical metrics vocabulary
+/// re-exported at the crate root ([`Usage`], [`LlamaTimings`],
+/// [`VllmMetrics`], [`ClientTiming`]) - rides along for attribution and
+/// accounting. The fields are `#[doc(hidden)]` cross-crate seams for the
+/// executor's tool loop and the opt-in debug-capture seam; they are not part
+/// of the public host API, which reads through the accessor methods.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Completion {
@@ -365,6 +369,23 @@ pub struct Completion {
     /// The message's reasoning side channel, when the backend supplied one.
     #[doc(hidden)]
     pub reasoning_content: Option<String>,
+    /// The model that served the call, empty when the body named none.
+    #[doc(hidden)]
+    pub model: String,
+    /// Token accounting, when the backend reported `usage`.
+    #[doc(hidden)]
+    pub usage: Option<Usage>,
+    /// llama.cpp's `timings` extension, when that backend served the call.
+    #[doc(hidden)]
+    pub llama_timings: Option<LlamaTimings>,
+    /// vLLM's `metrics` extension, when that backend served the call.
+    #[doc(hidden)]
+    pub vllm_metrics: Option<VllmMetrics>,
+    /// Timing measured by this client's own clock, when the transport
+    /// measured one. The buffered transport has no per-token clock and
+    /// records `None`; the streaming transport populates it.
+    #[doc(hidden)]
+    pub client_timing: Option<ClientTiming>,
     /// The JSON body sent to the gateway.
     #[doc(hidden)]
     pub request_body: Value,
@@ -391,5 +412,39 @@ impl Completion {
     #[must_use]
     pub fn reasoning_content(&self) -> Option<&str> {
         self.reasoning_content.as_deref()
+    }
+
+    /// Returns the model that served the call, as the backend named it in the
+    /// response body (empty when the body named none).
+    #[must_use]
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    /// Returns the backend's token accounting, when it reported `usage`.
+    #[must_use]
+    pub fn usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
+    }
+
+    /// Returns llama.cpp's `timings` for the call, when that backend served
+    /// it.
+    #[must_use]
+    pub fn llama_timings(&self) -> Option<&LlamaTimings> {
+        self.llama_timings.as_ref()
+    }
+
+    /// Returns vLLM's per-request `metrics`, when that backend served the
+    /// call.
+    #[must_use]
+    pub fn vllm_metrics(&self) -> Option<&VllmMetrics> {
+        self.vllm_metrics.as_ref()
+    }
+
+    /// Returns the timing this client measured on its own clock, when the
+    /// transport measured one.
+    #[must_use]
+    pub fn client_timing(&self) -> Option<&ClientTiming> {
+        self.client_timing.as_ref()
     }
 }
