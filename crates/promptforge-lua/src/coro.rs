@@ -29,6 +29,12 @@ const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
 /// captured model alias globals (which install last) wrap too.
 const WRAP_HANDLE_REGISTRY: &str = "promptforge.impl_coro.wrap_handle";
 
+/// The registry key for the shim's `chat`, stashed by the prelude install so
+/// an agent host can install it as `models.chat`. The registry is host-side
+/// only: a section VM's `models.chat` stays nil because nothing ever reads
+/// this stash there.
+const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
+
 /// The registry key for the shim's `infer`, stashed by the live H1 base
 /// install so each H1 block's fresh live models table can be wrapped.
 const INFER_REGISTRY: &str = "promptforge.impl_coro.infer";
@@ -95,10 +101,32 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
     let wrap_handle: Function = shims.raw_get("wrap_handle").map_err(Error::lua)?;
     lua.set_named_registry_value(WRAP_HANDLE_REGISTRY, wrap_handle)
         .map_err(Error::lua)?;
+    let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;
+    lua.set_named_registry_value(CHAT_REGISTRY, chat)
+        .map_err(Error::lua)?;
     globals
         .raw_set("coroutine", Value::Nil)
         .map_err(Error::lua)?;
     Ok(())
+}
+
+/// Installs the agent-only `models.chat` yield shim on a VM whose shim
+/// prelude already ran ([`install_shim_prelude`] stashed the shim in the
+/// registry).
+///
+/// The agent executor is the only caller: `models.chat` never exists in a
+/// section VM - not stubbed, simply absent - so a document prompt calling
+/// it fails as an undefined global.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM, the `models` table is absent, or the install fails.
+pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
+    let chat: Function = lua
+        .named_registry_value(CHAT_REGISTRY)
+        .map_err(Error::lua)?;
+    let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
+    models.raw_set("chat", chat).map_err(Error::lua)
 }
 
 /// Installs the live H1 shim base: the coroutine standard library for the

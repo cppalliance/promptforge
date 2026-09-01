@@ -3,7 +3,8 @@
 //! An agent program is one Lua chunk run as one coroutine on an agent VM -
 //! a [`SectionVm`] built with the section construction sequence (harden,
 //! untrusted, host injection, store, log, var) minus the section control
-//! surface. The shared kernel is `models.infer` and `tool_call`; `execute`,
+//! surface. The shared kernel is `models.infer` and `tool_call`; the
+//! agent-only `models.chat` is installed here and nowhere else; `execute`,
 //! `fanout`, and `jump` are absent, not stubbed, so touching them is an
 //! undefined-global failure. The driver is leaf dispatch only: it resumes
 //! the coroutine, validates each yield into a [`Request`], awaits exactly
@@ -21,15 +22,21 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use promptforge_core_support::cancel;
+use promptforge_core_support::events::{CallMetrics, ToolCallEvent};
 use promptforge_core_support::observe::{Observer, detail};
 use promptforge_core_support::untrusted::GuardNonce;
 use promptforge_lua::{
-    Answer, CoroStep, Error as LuaError, LuaBlockResult, LuaProgram, Request, ScriptReport,
-    SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome, ToolOutputKind, ToolSet, YieldParse,
-    current_tool_bindings, dispatch_tool, resolve_model_binding,
+    Answer, ChatResult, CoroStep, Error as LuaError, LuaBlockResult, LuaProgram, Request,
+    ScriptReport, SectionVm, ToolBinding, ToolCallCounts, ToolCallOutcome, ToolOutputKind, ToolSet,
+    YieldParse, current_tool_bindings, dispatch_tool, install_agent_chat_shim,
+    resolve_model_binding,
 };
-use promptforge_model_client::client::{CompletionResult, GatewayClient, Message};
-use promptforge_model_client::model::{ModelBinding, ModelCatalog, ModelInvocation, ModelSet};
+use promptforge_model_client::client::{
+    Completion, CompletionResult, GatewayClient, Message, StreamDelta, ToolSchema,
+};
+use promptforge_model_client::model::{
+    ModelBinding, ModelCatalog, ModelInvocation, ModelSet, ModelView,
+};
 use promptforge_store::StoreRef;
 use promptforge_tools::ToolCatalog;
 
@@ -111,10 +118,12 @@ impl From<LuaError> for AgentError {
 
 /// Runs a `.lua` agent program in an agent VM.
 ///
-/// Agent-only host calls (`models.chat`, `runtime.events()`, `ui()`) are
-/// installed by later steps. Shared kernel: `tool_call`, `store`, `var`,
-/// cancel checkpoints, `models.infer`. `execute()`, `fanout()`, and
-/// `jump()` do not exist here - absent, not stubbed. `run_agent` installs
+/// Agent-only host calls: `models.chat(messages, opts)` - one stateless
+/// tool-capable model round, streaming its deltas to
+/// [`AgentConfig::on_delta`] - with `runtime.events()` and `ui()` installed
+/// by later steps. Shared kernel: `tool_call`, `store`, `var`, cancel
+/// checkpoints, `models.infer`. `execute()`, `fanout()`, and `jump()` do
+/// not exist here - absent, not stubbed. `run_agent` installs
 /// `config.cancel` as the task's cancel scope, so every suspended host call
 /// races cancellation through the shared dispatch.
 ///
@@ -168,6 +177,7 @@ async fn drive(
         name,
         execution,
         observer,
+        on_delta,
         limits,
         ..
     } = config;
@@ -209,6 +219,7 @@ async fn drive(
         name: &name,
         turns: AtomicU32::new(0),
         client: Mutex::new(client),
+        on_delta,
     };
     // The whole agent program is one chunk; the driver owns its observation
     // boundaries, exactly as core's scheduler owns a block's.
@@ -282,14 +293,15 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 
 /// The agent VM's setup sequence: the section construction reused (host
 /// injection, host APIs, the coroutine shims) minus the section control
-/// surface.
+/// surface, plus the agent-only `models.chat` shim.
 ///
 /// Absent, not stubbed: the shared shim prelude installs `execute` and
 /// `fanout` for section VMs, but the agent kernel is `models.infer` and
 /// `tool_call` alone, so both globals are removed here, before any author
 /// code runs - an agent touching them fails as an undefined global. `jump`
 /// is never installed at all: the scheduler control-global install is
-/// skipped outright.
+/// skipped outright. `models.chat` is the mirror image: installed here and
+/// never in a section VM.
 fn setup_agent_vm(
     vm: &mut SectionVm,
     store: &StoreRef,
@@ -299,6 +311,7 @@ fn setup_agent_vm(
     vm.inject_host_with_var("", &serde_json::json!({}), store, None, None, None)?;
     vm.install_host_apis(observer, name)?;
     vm.install_coro_shims()?;
+    install_agent_chat_shim(vm.lua())?;
     let globals = vm.lua().globals();
     for global in ["execute", "fanout"] {
         globals
@@ -338,6 +351,9 @@ struct AgentRun<'a> {
     /// from the environment on first inference. Locked briefly and never
     /// across an await.
     client: Mutex<Option<GatewayClient>>,
+    /// The host's live streaming-delta callback; `models.chat` forwards
+    /// every [`StreamDelta`] to it. Deltas never ride the observer.
+    on_delta: Option<Arc<dyn Fn(StreamDelta) + Send + Sync>>,
 }
 
 impl AgentRun<'_> {
@@ -414,6 +430,14 @@ async fn dispatch(run: &AgentRun<'_>, request: Request) -> Result<Answer<AgentEr
         Request::ToolCall { alias, args } => match dispatch_tool_call(run, &alias, args).await {
             Err(AgentError::Interrupted) => Err(AgentError::Interrupted),
             outcome => Ok(Answer::ToolCallResult(outcome)),
+        },
+        Request::Chat {
+            messages,
+            model,
+            tools,
+        } => match dispatch_chat(run, &messages, model, &tools).await {
+            Err(AgentError::Interrupted) => Err(AgentError::Interrupted),
+            outcome => Ok(Answer::Chat(outcome.map(Box::new))),
         },
         // Unreachable: the execute/fanout shims are removed from the agent
         // VM before author code runs, no shim produces an mcp request, and
@@ -502,6 +526,252 @@ async fn dispatch_infer(
             source: None,
         }),
     }
+}
+
+/// One `models.chat` round: one stateless tool-capable gateway call over
+/// the program-built message list, streaming deltas to the host's
+/// callback, raced against cancellation.
+///
+/// The binding is `opts.model` (a catalog model name) or the program's
+/// `models.use` selection; the advertised tools are exactly `opts.tools`
+/// (default none - the driver adds nothing, so a host-primitive tool is
+/// never advertised). A completed round fires `on_thinking` when the model
+/// thought, then `on_assistant_reply` or `on_assistant_tool_calls`, each
+/// with model and metrics; requested tool calls resume unexecuted -
+/// dispatching them is the program's decision, taken on their presence,
+/// never on `finish_reason`. The model client fails the batch when
+/// `length` or `content_filter` truncates a tool-call round, and that
+/// failure rides back as this call's answer.
+async fn dispatch_chat(
+    run: &AgentRun<'_>,
+    messages: &serde_json::Value,
+    model: Option<String>,
+    tools: &[String],
+) -> Result<ChatResult, AgentError> {
+    let binding = match model {
+        Some(name) => ModelView::binding(&run.model_view, &name)
+            .map_err(|error| AgentError::Program {
+                message: error.to_string(),
+                source: Some(Box::new(error)),
+            })?
+            .ok_or_else(|| AgentError::Program {
+                message: format!("model {name:?} is not in this agent's catalog"),
+                source: None,
+            })?,
+        None => {
+            resolve_model_binding(&run.model_view, &run.vm.model_runtime)?.ok_or_else(|| {
+                AgentError::Program {
+                    message: "no model is selected: pass opts.model or call models.use(...) \
+                              before models.chat"
+                        .to_owned(),
+                    source: None,
+                }
+            })?
+        }
+    };
+    let schemas = advertised_schemas(run, tools)?;
+    let conversation = wire_messages(messages)?;
+    let client = run.client()?;
+    let options = binding.completion_options();
+    let tool_arg = if schemas.is_empty() {
+        None
+    } else {
+        Some(schemas.as_slice())
+    };
+    // The one future the driver awaits, raced against the installed cancel
+    // scope. Deltas forward live to the host's callback as they stream;
+    // they never enter the observer.
+    let completion = tokio::select! {
+        biased;
+        () = cancel::wait_cancelled() => return Err(AgentError::Interrupted),
+        completion = client.complete(&conversation, tool_arg, &options, |delta| {
+            if let Some(on_delta) = &run.on_delta {
+                on_delta(delta);
+            }
+        }) => completion,
+    };
+    let completion = match completion {
+        Ok(completion) => completion,
+        Err(error) => {
+            run.observer
+                .observe(run.execution, run.name, detail::MODEL_TURN_FAILED);
+            return Err(AgentError::Model {
+                message: error.to_string(),
+                source: Box::new(error),
+            });
+        }
+    };
+    chat_round_result(run, completion)
+}
+
+/// Applies one completed chat round: counts the turn, reports the
+/// operational boundary, fires the content events - thinking first, then
+/// the reply or the unexecuted tool-call batch, each with model and
+/// metrics - and shapes the [`ChatResult`] the program resumes with.
+fn chat_round_result(run: &AgentRun<'_>, completion: Completion) -> Result<ChatResult, AgentError> {
+    let turn = run.turns.fetch_add(1, Ordering::Relaxed) + 1;
+    run.observer
+        .observe(run.execution, run.name, detail::MODEL_TURN_COMPLETED);
+    let metrics = call_metrics(&completion);
+    let model_name = completion.model().to_owned();
+    if let Some(thinking) = completion
+        .reasoning_content()
+        .filter(|text| !text.is_empty())
+    {
+        run.observer
+            .on_thinking(run.execution, run.name, 0, 0, turn, &model_name, thinking);
+    }
+    let finish_reason = completion.finish_reason().map(str::to_owned);
+    match completion.result {
+        CompletionResult::Text(text) => {
+            if finish_reason.as_deref() == Some("length") {
+                run.observer
+                    .observe(run.execution, run.name, detail::MODEL_TURN_TRUNCATED);
+            }
+            run.observer.on_assistant_reply(
+                run.execution,
+                run.name,
+                0,
+                0,
+                turn,
+                &text,
+                finish_reason.as_deref(),
+                &model_name,
+                metrics.as_ref(),
+            );
+            Ok(ChatResult {
+                reply: Some(text),
+                tool_calls: None,
+                finish_reason,
+                model: model_name,
+                metrics,
+            })
+        }
+        CompletionResult::ToolCalls(calls) => {
+            let events: Vec<ToolCallEvent> = calls
+                .into_iter()
+                .map(|call| ToolCallEvent {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                })
+                .collect();
+            run.observer.on_assistant_tool_calls(
+                run.execution,
+                run.name,
+                0,
+                0,
+                turn,
+                &model_name,
+                &events,
+            );
+            Ok(ChatResult {
+                reply: None,
+                tool_calls: Some(events),
+                finish_reason,
+                model: model_name,
+                metrics,
+            })
+        }
+        // `CompletionResult` is `#[non_exhaustive]` across the crate seam:
+        // an unrecognized future outcome cannot be resumed into the program.
+        _ => Err(AgentError::Program {
+            message: "model chat received an unrecognized completion outcome".to_owned(),
+            source: None,
+        }),
+    }
+}
+
+/// Builds the advertised tool schemas for one chat round: exactly the
+/// `opts.tools` aliases, resolved against the agent's effective scope, in
+/// the author's order. The driver never adds to the set.
+fn advertised_schemas(run: &AgentRun<'_>, tools: &[String]) -> Result<Vec<ToolSchema>, AgentError> {
+    if tools.is_empty() {
+        return Ok(Vec::new());
+    }
+    let effective = current_tool_bindings(run.tool_set, &run.vm.tool_runtime)?;
+    let mut schemas = Vec::with_capacity(tools.len());
+    for alias in tools {
+        let Some(binding) = effective.iter().find(|binding| binding.alias() == alias) else {
+            let in_scope: Vec<&str> = effective.iter().map(ToolBinding::alias).collect();
+            return Err(AgentError::Program {
+                message: format!(
+                    "tool alias {alias:?} is not registered with this agent; in scope: {in_scope:?}"
+                ),
+                source: None,
+            });
+        };
+        let description = binding
+            .model_description()
+            .unwrap_or_else(|| binding.tool().description())
+            .to_owned();
+        let schema = ToolSchema::new(
+            binding.alias().to_owned(),
+            description,
+            binding.tool().parameters_schema(),
+        )
+        .map_err(|error| AgentError::Program {
+            message: format!("tool alias {alias:?} cannot be advertised to the model"),
+            source: Some(Box::new(error)),
+        })?;
+        schemas.push(schema);
+    }
+    Ok(schemas)
+}
+
+/// Converts the protocol-validated message array into the client's wire
+/// messages. The protocol parse validated the shape once - roles, content,
+/// tool ids - so a violation here is a driver invariant failure, never an
+/// author-facing error, and no second validator exists to drift. Each
+/// entry contributes exactly the four fields the wire message carries
+/// (`role`, `content`, `tool_call_id`, `tool_calls`); other entry fields
+/// are dropped.
+fn wire_messages(messages: &serde_json::Value) -> Result<Vec<Message>, AgentError> {
+    const VALIDATED: &str = "a chat request reaching dispatch carries protocol-validated messages";
+    let entries = messages.as_array().ok_or(AgentError::Internal(VALIDATED))?;
+    entries
+        .iter()
+        .map(|entry| {
+            let role = entry
+                .get("role")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(AgentError::Internal(VALIDATED))?;
+            let content = entry
+                .get("content")
+                .cloned()
+                .ok_or(AgentError::Internal(VALIDATED))?;
+            let tool_call_id = entry
+                .get("tool_call_id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let tool_calls = entry
+                .get("tool_calls")
+                .and_then(serde_json::Value::as_array)
+                .cloned();
+            Ok(Message::from_validated_parts(
+                role,
+                content,
+                tool_call_id,
+                tool_calls,
+            ))
+        })
+        .collect()
+}
+
+/// Assembles the round's [`CallMetrics`] from everything the completion
+/// measured, or `None` when nothing was measured.
+fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
+    let metrics = CallMetrics {
+        usage: completion.usage().cloned(),
+        llama: completion.llama_timings().cloned(),
+        vllm: completion.vllm_metrics().cloned(),
+        client: completion.client_timing().cloned(),
+    };
+    let measured = metrics.usage.is_some()
+        || metrics.llama.is_some()
+        || metrics.vllm.is_some()
+        || metrics.client.is_some();
+    measured.then_some(metrics)
 }
 
 /// One `tool_call` dispatch: the alias resolved against the agent's

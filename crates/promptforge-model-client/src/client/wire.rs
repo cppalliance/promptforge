@@ -17,8 +17,11 @@ use serde_json::Value;
 pub struct Message {
     /// The role: `system`, `user`, `assistant`, or `tool`.
     pub(crate) role: String,
-    /// The message text.
-    pub(crate) content: String,
+    /// The message content, serialized into the request verbatim: a JSON
+    /// string for a plain text message (every inherent constructor), or an
+    /// OpenAI content-parts array for a multimodal message built through
+    /// [`Message::from_validated_parts`].
+    pub(crate) content: Value,
     /// For a `tool` message, the id of the tool call this result answers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tool_call_id: Option<String>,
@@ -44,7 +47,7 @@ impl Message {
     pub fn user(content: impl Into<String>) -> Message {
         Message {
             role: "user".into(),
-            content: content.into(),
+            content: Value::String(content.into()),
             tool_call_id: None,
             tool_calls: None,
         }
@@ -57,7 +60,7 @@ impl Message {
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Message {
         Message {
             role: "tool".into(),
-            content: content.into(),
+            content: Value::String(content.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
         }
@@ -68,9 +71,35 @@ impl Message {
     pub fn assistant(content: impl Into<String>) -> Message {
         Message {
             role: "assistant".into(),
-            content: content.into(),
+            content: Value::String(content.into()),
             tool_call_id: None,
             tool_calls: None,
+        }
+    }
+
+    /// Constructs a message from parts a caller has already validated.
+    ///
+    /// `role` is one of the wire roles (`system`, `user`, `assistant`,
+    /// `tool`). `content` is the raw wire content value - a string for a
+    /// plain message or an OpenAI content-parts array for a multimodal one -
+    /// and serializes into the request verbatim.
+    ///
+    /// `#[doc(hidden)]`: a cross-crate seam for the agent executor, whose
+    /// protocol layer validates author-built message tables once and hands
+    /// the validated parts here; not host API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_validated_parts(
+        role: impl Into<String>,
+        content: Value,
+        tool_call_id: Option<String>,
+        tool_calls: Option<Vec<Value>>,
+    ) -> Message {
+        Message {
+            role: role.into(),
+            content,
+            tool_call_id,
+            tool_calls,
         }
     }
 
@@ -86,7 +115,7 @@ impl Message {
     pub fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
         Message {
             role: "assistant".into(),
-            content: String::new(),
+            content: Value::String(String::new()),
             tool_call_id: None,
             tool_calls: Some(raw_tool_calls),
         }
@@ -98,10 +127,12 @@ impl Message {
         &self.role
     }
 
-    /// Returns the message text.
+    /// Returns the message text, or `""` when the content is a
+    /// content-parts array rather than a string (only
+    /// [`Message::from_validated_parts`] builds that form).
     #[must_use]
     pub fn content(&self) -> &str {
-        &self.content
+        self.content.as_str().unwrap_or("")
     }
 }
 

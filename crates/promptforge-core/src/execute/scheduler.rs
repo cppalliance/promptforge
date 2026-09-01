@@ -1371,6 +1371,13 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_tool_call(id, &alias, args);
                 Ok(())
             }
+            // Unreachable: no section VM installs the models.chat shim, and
+            // stripped coroutines make a hand-rolled yield fail validation
+            // before dispatch - the mirror of the agent driver's guards for
+            // the section-only requests.
+            Request::Chat { .. } => Err(Error::Internal(
+                "a section VM cannot yield a chat request: the models.chat shim is never installed",
+            )),
             Request::Mcp { .. } => Err(Error::from(Request::mcp_reserved())),
         }
     }

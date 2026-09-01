@@ -19,7 +19,8 @@ adapter over the tool picker.
   into those types and never defines a parallel metrics type; the
   core-support dependency exists for exactly this vocabulary.
 - The `#[doc(hidden)]` items and `pub` fields marked as cross-crate seams are
-  how `promptforge-core` reaches previously `pub(crate)` internals; they are
-  not host API and must not gain documented status without a design change.
+  how the executors (`promptforge-core`, `workshop-agent`) reach internals
+  kept out of the host API; they are not host API and must not gain
+  documented status without a design change.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

@@ -2,15 +2,17 @@
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
 //! A suspending host call (`models.infer`, `handle:infer`, `execute`,
-//! `fanout`, `tool_call`) is a Lua-side shim that yields a request table;
-//! the driver validates the yield into a [`Request`], dispatches it, and
-//! resumes the coroutine with the `(ok, result)` envelope rendered from an
-//! [`Answer`]. The two enums are the audit surface: what a script can cause
-//! the host to do is one short read, and each variant's fields are the
-//! compiler-checked per-message contract.
+//! `fanout`, `tool_call`, the agent-only `models.chat`) is a Lua-side shim
+//! that yields a request table; the driver validates the yield into a
+//! [`Request`], dispatches it, and resumes the coroutine with the
+//! `(ok, result)` envelope rendered from an [`Answer`]. The two enums are
+//! the audit surface: what a script can cause the host to do is one short
+//! read, and each variant's fields are the compiler-checked per-message
+//! contract.
 
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 
+use promptforge_core_support::events::{CallMetrics, ToolCallEvent};
 use promptforge_model_client::model::ModelBinding;
 
 use crate::{
@@ -163,6 +165,25 @@ pub enum Request {
         /// parses as the empty object.
         args: serde_json::Value,
     },
+    /// `models.chat(messages, opts)`: one stateless tool-capable model
+    /// round over an agent-built message list. Agent VMs alone install the
+    /// shim; core's scheduler carries an unreachable internal-invariant
+    /// guard for the arm its exhaustive match forces.
+    Chat {
+        /// The validated message array. Each entry carries a known role
+        /// (`system`, `user`, `assistant`, `tool`) and a `content` that is
+        /// a string or a non-empty content-parts array (known part types:
+        /// `text`, `image_url`); tool entries carry a string
+        /// `tool_call_id`. Validation lives here, in the protocol parse,
+        /// once - the driver converts without re-checking.
+        messages: serde_json::Value,
+        /// `opts.model`: the catalog model to use for this round, or
+        /// `None` for the program's current `models.use` selection.
+        model: Option<String>,
+        /// `opts.tools`: the tool aliases to advertise for exactly this
+        /// round. Defaults to none; the driver never adds to it.
+        tools: Vec<String>,
+    },
     /// Reserved. Never dispatched: receiving one is a typed protocol error.
     // The fields are read only by this module's own tests; production parses
     // them for strict validation and never reads them until the variant
@@ -213,6 +234,7 @@ impl Request {
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
             }),
+            "chat" => classify(parse_chat(lua, table), |error| Answer::Chat(Err(error))),
             "mcp" => match parse_mcp(lua, table) {
                 Ok(request) => YieldParse::Request(request),
                 Err(_) => YieldParse::Malformed(direct_yield_error()),
@@ -327,6 +349,231 @@ fn parse_mcp(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, Fie
     Ok(Request::Mcp { server, tool, args })
 }
 
+/// The message roles the chat protocol accepts.
+const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
+
+/// The content-part types the chat protocol accepts (the Multimodal
+/// contract: text parts and data-URI image parts).
+const CHAT_PART_TYPES: [&str; 2] = ["text", "image_url"];
+
+/// Frames one chat author-argument failure as the call's error.
+fn chat_error(message: impl Into<String>) -> FieldFailure {
+    FieldFailure::Call(Error::Lua(message.into()))
+}
+
+/// Parses a `chat` request: the author-supplied `messages` list and the
+/// optional `opts` table carrying `model` and `tools`.
+///
+/// The whole messages/opts validation lives here, once - the driver
+/// converts the validated array without re-checking. Every author-argument
+/// failure is the call's error, raised at the `models.chat` call site so a
+/// program `pcall` catches it.
+fn parse_chat(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+    let messages = match table.raw_get::<Value>("messages") {
+        Ok(value @ Value::Table(_)) => lua
+            .from_value::<serde_json::Value>(value)
+            .map_err(|_| chat_error("messages must be a JSON-representable table"))?,
+        Ok(other) => {
+            return Err(chat_error(format!(
+                "messages must be a table of message tables, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    validate_messages(&messages)?;
+    let (model, tools) = parse_chat_opts(table)?;
+    Ok(Request::Chat {
+        messages,
+        model,
+        tools,
+    })
+}
+
+/// Validates the converted message array once, at the protocol boundary:
+/// known roles; `content` a string or a non-empty content-parts array with
+/// known part types; tool entries carry a string `tool_call_id`; a present
+/// `tool_calls` is an array. The empty list is rejected, and every error
+/// names the offending 1-based index (the list is Lua-authored). The
+/// validation is deliberately shallow: `content` and `tool_calls`
+/// internals pass to the wire unread, while entry fields beyond the four
+/// the wire message carries (`role`, `content`, `tool_call_id`,
+/// `tool_calls`) are accepted here and dropped at the driver's wire
+/// conversion.
+fn validate_messages(messages: &serde_json::Value) -> std::result::Result<(), FieldFailure> {
+    let entries = match messages {
+        serde_json::Value::Array(entries) => entries,
+        // An empty Lua table converts ambiguously (array or object); both
+        // empty shapes are the same authoring error, named the same way.
+        serde_json::Value::Object(map) if map.is_empty() => {
+            return Err(chat_error("messages must not be empty"));
+        }
+        _ => return Err(chat_error("messages must be an array of message tables")),
+    };
+    if entries.is_empty() {
+        return Err(chat_error("messages must not be empty"));
+    }
+    for (position, entry) in entries.iter().enumerate() {
+        // The list is Lua-authored, so errors name Lua's 1-based index.
+        let index = position + 1;
+        let serde_json::Value::Object(entry) = entry else {
+            return Err(chat_error(format!(
+                "messages[{index}] must be a message table"
+            )));
+        };
+        let role = match entry.get("role") {
+            Some(serde_json::Value::String(role)) => role.as_str(),
+            _ => {
+                return Err(chat_error(format!(
+                    "messages[{index}] role must be a string, one of: {}",
+                    CHAT_ROLES.join(", ")
+                )));
+            }
+        };
+        if !CHAT_ROLES.contains(&role) {
+            return Err(chat_error(format!(
+                "messages[{index}] role {role:?} is unknown; known roles: {}",
+                CHAT_ROLES.join(", ")
+            )));
+        }
+        match entry.get("content") {
+            Some(serde_json::Value::String(_)) => {}
+            Some(serde_json::Value::Array(parts)) if !parts.is_empty() => {
+                validate_content_parts(index, parts)?;
+            }
+            _ => {
+                return Err(chat_error(format!(
+                    "messages[{index}] content must be a string or a non-empty \
+                     array of content parts"
+                )));
+            }
+        }
+        if role == "tool"
+            && !matches!(
+                entry.get("tool_call_id"),
+                Some(serde_json::Value::String(_))
+            )
+        {
+            return Err(chat_error(format!(
+                "messages[{index}] is a tool message and must carry a string tool_call_id"
+            )));
+        }
+        if let Some(calls) = entry.get("tool_calls")
+            && !calls.is_array()
+        {
+            return Err(chat_error(format!(
+                "messages[{index}] tool_calls must be an array"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Shallow-validates one message's content-parts array: each part is a
+/// table whose `type` names a known part kind. Part internals pass through
+/// to the wire unread.
+fn validate_content_parts(
+    index: usize,
+    parts: &[serde_json::Value],
+) -> std::result::Result<(), FieldFailure> {
+    for (part_position, part) in parts.iter().enumerate() {
+        let part_index = part_position + 1;
+        let serde_json::Value::Object(part) = part else {
+            return Err(chat_error(format!(
+                "messages[{index}] content part {part_index} must be a table \
+                 with a string type field"
+            )));
+        };
+        match part.get("type") {
+            Some(serde_json::Value::String(kind)) if CHAT_PART_TYPES.contains(&kind.as_str()) => {}
+            Some(serde_json::Value::String(kind)) => {
+                return Err(chat_error(format!(
+                    "messages[{index}] content part {part_index} has unknown type \
+                     {kind:?}; known types: {}",
+                    CHAT_PART_TYPES.join(", ")
+                )));
+            }
+            _ => {
+                return Err(chat_error(format!(
+                    "messages[{index}] content part {part_index} must be a table \
+                     with a string type field"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parses the optional `opts` table: `model` (an optional catalog model
+/// name) and `tools` (the aliases to advertise this round; default none).
+fn parse_chat_opts(
+    table: &mlua::Table,
+) -> std::result::Result<(Option<String>, Vec<String>), FieldFailure> {
+    let opts = match table.raw_get::<Value>("opts") {
+        Ok(Value::Nil) => return Ok((None, Vec::new())),
+        Ok(Value::Table(opts)) => opts,
+        Ok(other) => {
+            return Err(chat_error(format!(
+                "opts must be a table, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let model = match opts.raw_get::<Value>("model") {
+        Ok(Value::Nil) => None,
+        Ok(Value::String(name)) => Some(
+            name.to_str()
+                .map_err(|_| chat_error("opts.model must be a valid UTF-8 string"))?
+                .to_owned(),
+        ),
+        Ok(other) => {
+            return Err(chat_error(format!(
+                "opts.model must be a string, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    let tools = match opts.raw_get::<Value>("tools") {
+        Ok(Value::Nil) => Vec::new(),
+        Ok(Value::Table(aliases)) => {
+            let mut tools = Vec::new();
+            for (position, alias) in aliases.sequence_values::<Value>().enumerate() {
+                let alias_index = position + 1;
+                match alias {
+                    Ok(Value::String(alias)) => tools.push(
+                        alias
+                            .to_str()
+                            .map_err(|_| {
+                                chat_error(format!(
+                                    "opts.tools[{alias_index}] must be a valid UTF-8 string"
+                                ))
+                            })?
+                            .to_owned(),
+                    ),
+                    Ok(other) => {
+                        return Err(chat_error(format!(
+                            "opts.tools[{alias_index}] must be a string tool alias, got {}",
+                            other.type_name()
+                        )));
+                    }
+                    Err(_) => return Err(FieldFailure::Malformed),
+                }
+            }
+            tools
+        }
+        Ok(other) => {
+            return Err(chat_error(format!(
+                "opts.tools must be an array of tool alias strings, got {}",
+                other.type_name()
+            )));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
+    Ok((model, tools))
+}
+
 /// How one yielded value parsed at the resume boundary.
 #[derive(Debug)]
 pub enum YieldParse {
@@ -382,6 +629,65 @@ impl ToolCallOutcome {
     }
 }
 
+/// One completed `models.chat` round, resumed into the agent program as a
+/// plain result table.
+///
+/// Exactly one of `reply` and `tool_calls` is present: the round produced
+/// text or requested tools, never both. Agents branch on the presence of
+/// `tool_calls`, never on `finish_reason` - backends routinely finish
+/// tool-call rounds with `stop`. Absent optional fields are simply never
+/// set on the resumed table, so they read back as nil.
+// No `Eq`: `metrics` carries `f64` timings transitively.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatResult {
+    /// The completed reply text, when the round produced text.
+    pub reply: Option<String>,
+    /// The tool calls the model requested, unexecuted, when it requested
+    /// any.
+    pub tool_calls: Option<Vec<ToolCallEvent>>,
+    /// The provider's finish reason, when it sent one.
+    pub finish_reason: Option<String>,
+    /// The model that served the round, as the response body named it
+    /// (empty when the body named none).
+    pub model: String,
+    /// Everything measured about the round.
+    pub metrics: Option<CallMetrics>,
+}
+
+/// Renders one [`ChatResult`] as the plain Lua result table.
+///
+/// Absent optional fields are never set, so they resume as nil and
+/// `result.tool_calls` presence-branching works; mapping them through the
+/// serde boundary would resume mlua's non-nil null sentinel instead. Each
+/// call's `arguments` and the `metrics` sections cross the serde boundary
+/// as tables (the metrics types skip absent sections in serialization, so
+/// no null enters them).
+fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table()?;
+    if let Some(reply) = result.reply {
+        table.raw_set("reply", reply)?;
+    }
+    if let Some(calls) = result.tool_calls {
+        let sequence = lua.create_table_with_capacity(calls.len(), 0)?;
+        for (position, call) in calls.into_iter().enumerate() {
+            let entry = lua.create_table()?;
+            entry.raw_set("id", call.id)?;
+            entry.raw_set("name", call.name)?;
+            entry.raw_set("arguments", lua.to_value(&call.arguments)?)?;
+            sequence.raw_set(position + 1, entry)?;
+        }
+        table.raw_set("tool_calls", sequence)?;
+    }
+    if let Some(finish_reason) = result.finish_reason {
+        table.raw_set("finish_reason", finish_reason)?;
+    }
+    table.raw_set("model", result.model)?;
+    if let Some(metrics) = result.metrics {
+        table.raw_set("metrics", lua.to_value(&metrics)?)?;
+    }
+    Ok(table)
+}
+
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
 /// at resume time.
 ///
@@ -407,6 +713,9 @@ pub enum Answer<E> {
     Execute(std::result::Result<String, E>),
     /// The ordered arm results for a `fanout` request, in collection order.
     Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
+    /// The classified output for a `chat` request. Boxed so the metrics-heavy
+    /// [`ChatResult`] does not size every answer the non-chat paths move.
+    Chat(std::result::Result<Box<ChatResult>, E>),
     /// The classified output for a `tool_call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
 }
@@ -419,6 +728,7 @@ impl<E> Answer<E> {
             Answer::Execute(result) => Answer::Execute(result.map_err(map)),
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
+            Answer::Chat(result) => Answer::Chat(result.map_err(map)),
         }
     }
 }
@@ -468,10 +778,18 @@ impl<E: std::fmt::Display> Answer<E> {
                     None,
                 ))
             }
+            Answer::Chat(Ok(result)) => {
+                let table = chat_result_table(lua, *result)?;
+                Ok((
+                    MultiValue::from_vec(vec![Value::Boolean(true), Value::Table(table)]),
+                    None,
+                ))
+            }
             Answer::Infer(Err(error))
             | Answer::Execute(Err(error))
             | Answer::Fanout(Err(error))
-            | Answer::ToolCallResult(Err(error)) => {
+            | Answer::ToolCallResult(Err(error))
+            | Answer::Chat(Err(error)) => {
                 let message = lua.create_string(error.to_string())?;
                 Ok((
                     MultiValue::from_vec(vec![Value::Boolean(false), Value::String(message)]),
@@ -809,6 +1127,324 @@ mod tests {
             }
             other => panic!("expected the typed tool error, got {other:?}"),
         }
+    }
+
+    /// Evaluates a Lua table constructor, so chat tests build author-shaped
+    /// message and opts tables from the exact source an author would write.
+    fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
+        lua.load(source)
+            .eval()
+            .expect("test table source evaluates")
+    }
+
+    fn chat_request(lua: &Lua, messages: &str, opts: Option<&str>) -> mlua::Table {
+        let table = request_table(lua, "chat");
+        table
+            .raw_set("messages", lua_table(lua, messages))
+            .expect("raw_set");
+        if let Some(opts) = opts {
+            table
+                .raw_set("opts", lua_table(lua, opts))
+                .expect("raw_set");
+        }
+        table
+    }
+
+    fn expect_chat_call_error(parse: YieldParse, expected: &str) {
+        match parse {
+            YieldParse::Call(Answer::Chat(Err(Error::Lua(message)))) => {
+                assert_eq!(message, expected);
+            }
+            other => panic!("expected the chat call error {expected:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_parses_messages_model_and_tools() {
+        let lua = Lua::new();
+        let table = chat_request(
+            &lua,
+            r#"{
+                { role = "system", content = "be terse" },
+                { role = "user", content = {
+                    { type = "text", text = "look" },
+                    { type = "image_url", image_url = { url = "data:image/png;base64,AA" } },
+                } },
+                { role = "assistant", content = "", tool_calls = {
+                    { id = "call_1" },
+                } },
+                { role = "tool", content = "result", tool_call_id = "call_1" },
+            }"#,
+            Some(r#"{ model = "fast", tools = { "echo", "search" } }"#),
+        );
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Chat {
+                messages,
+                model,
+                tools,
+            } => {
+                assert_eq!(model.as_deref(), Some("fast"));
+                assert_eq!(tools, vec!["echo".to_owned(), "search".to_owned()]);
+                let entries = messages.as_array().expect("messages parse as an array");
+                assert_eq!(entries.len(), 4);
+                assert_eq!(entries[0]["role"], json!("system"));
+                assert_eq!(
+                    entries[1]["content"][0],
+                    json!({ "type": "text", "text": "look" }),
+                    "content parts must survive the conversion verbatim"
+                );
+                assert_eq!(entries[3]["tool_call_id"], json!("call_1"));
+            }
+            other => panic!("expected a chat request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_without_opts_defaults_to_no_model_and_no_tools() {
+        let lua = Lua::new();
+        let table = chat_request(&lua, r#"{ { role = "user", content = "hi" } }"#, None);
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::Chat { model, tools, .. } => {
+                assert_eq!(model, None);
+                assert_eq!(
+                    tools,
+                    Vec::<String>::new(),
+                    "the advertised set defaults to none"
+                );
+            }
+            other => panic!("expected a chat request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_message_validation_names_the_offending_index() {
+        let lua = Lua::new();
+        let cases: [(&str, &str); 8] = [
+            ("{}", "messages must not be empty"),
+            (
+                r#"{ "not a table" }"#,
+                "messages[1] must be a message table",
+            ),
+            (
+                r#"{ { role = "user", content = "ok" }, { role = "wizard", content = "x" } }"#,
+                "messages[2] role \"wizard\" is unknown; known roles: system, user, assistant, tool",
+            ),
+            (
+                r#"{ { content = "no role" } }"#,
+                "messages[1] role must be a string, one of: system, user, assistant, tool",
+            ),
+            (
+                r#"{ { role = "user" } }"#,
+                "messages[1] content must be a string or a non-empty array of content parts",
+            ),
+            (
+                r#"{ { role = "user", content = { "bare string part" } } }"#,
+                "messages[1] content part 1 must be a table with a string type field",
+            ),
+            (
+                r#"{ { role = "user", content = { { type = "text", text = "ok" }, { type = "video" } } } }"#,
+                "messages[1] content part 2 has unknown type \"video\"; known types: text, image_url",
+            ),
+            (
+                r#"{ { role = "user", content = "ok" }, { role = "tool", content = "r" } }"#,
+                "messages[2] is a tool message and must carry a string tool_call_id",
+            ),
+        ];
+        for (messages, expected) in cases {
+            let table = chat_request(&lua, messages, None);
+            expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), expected);
+        }
+        // A non-table messages argument, absent included, is the call's error.
+        let missing = request_table(&lua, "chat");
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(missing)),
+            "messages must be a table of message tables, got nil",
+        );
+        let numeric = request_table(&lua, "chat");
+        numeric.raw_set("messages", 42).expect("raw_set");
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(numeric)),
+            "messages must be a table of message tables, got integer",
+        );
+        // A present tool_calls of the wrong shape is rejected in place.
+        let table = chat_request(
+            &lua,
+            r#"{ { role = "assistant", content = "", tool_calls = "raw" } }"#,
+            None,
+        );
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(table)),
+            "messages[1] tool_calls must be an array",
+        );
+    }
+
+    #[test]
+    fn chat_opts_validation_is_the_calls_error() {
+        let lua = Lua::new();
+        let valid = r#"{ { role = "user", content = "hi" } }"#;
+        let non_table = request_table(&lua, "chat");
+        non_table
+            .raw_set("messages", lua_table(&lua, valid))
+            .expect("raw_set");
+        non_table.raw_set("opts", "loud").expect("raw_set");
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(non_table)),
+            "opts must be a table, got string",
+        );
+        let bad_model = chat_request(&lua, valid, Some("{ model = 42 }"));
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(bad_model)),
+            "opts.model must be a string, got integer",
+        );
+        let bad_tools = chat_request(&lua, valid, Some(r#"{ tools = "echo" }"#));
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(bad_tools)),
+            "opts.tools must be an array of tool alias strings, got string",
+        );
+        let bad_alias = chat_request(&lua, valid, Some(r#"{ tools = { "echo", 7 } }"#));
+        expect_chat_call_error(
+            Request::from_yield(&lua, &Value::Table(bad_alias)),
+            "opts.tools[2] must be a string tool alias, got integer",
+        );
+    }
+
+    #[test]
+    fn an_ok_chat_reply_answer_resumes_as_a_table_with_nil_tool_calls() {
+        use promptforge_core_support::events::{ClientTiming, Usage};
+
+        let lua = Lua::new();
+        let result = ChatResult {
+            reply: Some("hello there".to_owned()),
+            tool_calls: None,
+            finish_reason: Some("stop".to_owned()),
+            model: "fixture-model".to_owned(),
+            metrics: Some(CallMetrics {
+                usage: Some(Usage {
+                    prompt_tokens: 7,
+                    completion_tokens: 3,
+                    total_tokens: 10,
+                    cached_tokens: None,
+                    reasoning_tokens: None,
+                }),
+                llama: None,
+                vllm: None,
+                client: Some(ClientTiming {
+                    ttft_ms: Some(9.5),
+                    mean_itl_ms: None,
+                    e2e_ms: 41.5,
+                }),
+            }),
+        };
+        let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        // Presence-branching is the agent contract: absent fields must read
+        // back as true Lua nil, never a serde null sentinel.
+        let (ok, reply, tools_nil, finish, model, total, llama_nil, e2e): (
+            bool,
+            String,
+            bool,
+            String,
+            String,
+            i64,
+            bool,
+            f64,
+        ) = lua
+            .load(
+                "local ok, r = ...; \
+                 return ok, r.reply, r.tool_calls == nil, r.finish_reason, r.model, \
+                 r.metrics.usage.total_tokens, r.metrics.llama == nil, r.metrics.client.e2e_ms",
+            )
+            .call(envelope)
+            .expect("the result table reads back through Lua");
+        assert!(ok);
+        assert_eq!(reply, "hello there");
+        assert!(
+            tools_nil,
+            "an absent tool_calls must be nil, not a null sentinel"
+        );
+        assert_eq!(finish, "stop");
+        assert_eq!(model, "fixture-model");
+        assert_eq!(total, 10);
+        assert!(llama_nil, "an absent metrics section must be nil");
+        assert!((e2e - 41.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn an_ok_chat_tool_calls_answer_resumes_with_presence_and_arguments() {
+        let lua = Lua::new();
+        let result = ChatResult {
+            reply: None,
+            tool_calls: Some(vec![
+                ToolCallEvent {
+                    id: "call_1".to_owned(),
+                    name: "echo".to_owned(),
+                    arguments: json!({ "value": "hi" }),
+                },
+                ToolCallEvent {
+                    id: "call_2".to_owned(),
+                    name: "search".to_owned(),
+                    arguments: json!({ "query": "rust" }),
+                },
+            ]),
+            finish_reason: Some("tool_calls".to_owned()),
+            model: "fixture-model".to_owned(),
+            metrics: None,
+        };
+        let (envelope, retained) = Answer::<Error>::Chat(Ok(Box::new(result)))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        assert!(retained.is_none());
+        let (ok, reply_nil, len, id, name, value, second, metrics_nil): (
+            bool,
+            bool,
+            i64,
+            String,
+            String,
+            String,
+            String,
+            bool,
+        ) = lua
+            .load(
+                "local ok, r = ...; \
+                 return ok, r.reply == nil, #r.tool_calls, r.tool_calls[1].id, \
+                 r.tool_calls[1].name, r.tool_calls[1].arguments.value, \
+                 r.tool_calls[2].arguments.query, r.metrics == nil",
+            )
+            .call(envelope)
+            .expect("the result table reads back through Lua");
+        assert!(ok);
+        assert!(reply_nil, "a tool-calls round has no reply");
+        assert_eq!(len, 2);
+        assert_eq!(id, "call_1");
+        assert_eq!(name, "echo");
+        assert_eq!(value, "hi");
+        assert_eq!(second, "rust");
+        assert!(metrics_nil);
+    }
+
+    #[test]
+    fn an_err_chat_answer_round_trips_and_retains_the_typed_error() {
+        let lua = Lua::new();
+        let (envelope, retained) = Answer::Chat(Err(Error::Interrupted))
+            .into_envelope(&lua)
+            .expect("the envelope renders");
+        match retained {
+            Some(Error::Interrupted) => {}
+            other => panic!("expected the retained Interrupted error, got {other:?}"),
+        }
+        let (ok, result) = echo_through_lua(&lua, envelope);
+        assert!(!ok);
+        let Value::String(message) = result else {
+            panic!("expected a string message, got {result:?}");
+        };
+        assert_eq!(
+            message.to_str().expect("the message is UTF-8"),
+            "interrupted by Ctrl-C"
+        );
     }
 
     #[test]
