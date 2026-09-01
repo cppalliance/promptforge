@@ -28,9 +28,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
 - A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
 - A90. Runtime-agnostic contract crates own shared vocabulary; providers and lifecycle crates depend inward.
-- A91. Human boot config, machine state, view layout, and append-only tape remain separate stores.
 - A92. Workshop sessions own transport and multiplexing; chat execution stays behind a replaceable adapter.
-- A93. Operation-scoped progress trees attach to a process hub; owners schedule, producers report, renderers format.
 - A94. Config writes enter validated persistent shadows; only Apply promotes them and Revert removes them.
 - A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
 - A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
@@ -39,6 +37,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A99. Cancellation flows to descendants; child cancellation never affects ancestors or siblings.
 - A100. Embedded pages navigate in place only within their exact boot origin.
 - A101. Desktop capabilities are granted per window and origin, with least privilege.
+- A102. Pipelines and agents are separate executors that install only their own host calls.
+- A103. The event log is lossless history; agents deliberately project it into model context.
 
 ## Principles
 
