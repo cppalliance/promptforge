@@ -4817,6 +4817,7 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "futures-util",
+ "promptforge-core-support",
  "promptforge-progress",
  "promptforge-tool-picker",
  "reqwest 0.12.28",
@@ -4824,6 +4825,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "url",
 ]
 

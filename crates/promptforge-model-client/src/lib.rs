@@ -10,6 +10,12 @@
 //! [`model::ModelBinding`]/[`model::ModelSet`]/[`model::ModelView`] types a
 //! host resolves and freezes model selections through.
 //!
+//! The metrics vocabulary ([`Usage`], [`LlamaTimings`], [`VllmMetrics`],
+//! [`ClientTiming`], [`CallMetrics`]) is canonical in
+//! `promptforge-core-support` and re-exported here: the client parses each
+//! response body's call metadata into it, and [`client::Completion`] carries
+//! the result.
+//!
 //! The crate contains no prompt parser, no Lua runtime, and no executor; it is
 //! the gateway's model client only, never a universal client.
 
@@ -21,3 +27,7 @@ mod normalize;
 #[doc(hidden)]
 pub use crate::error::Error;
 pub(crate) use crate::error::Result;
+
+pub use promptforge_core_support::events::{
+    CallMetrics, ClientTiming, LlamaTimings, Usage, VllmMetrics,
+};

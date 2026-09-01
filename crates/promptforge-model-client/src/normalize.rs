@@ -9,7 +9,15 @@
 //! at least one successful tool dispatch - but normalization always raises
 //! and lets the loop decide. Reasoning fields are a side channel only and
 //! are never promoted into the answer.
+//!
+//! Beside the strict turn parse, [`response_metadata`] leniently parses the
+//! body's call metadata - the serving `model`, `usage` token accounting,
+//! llama.cpp's `timings` extension, and vLLM's `metrics` extension - into the
+//! canonical `promptforge-core-support` vocabulary. Metadata never fails a
+//! completion: a malformed section degrades to `None` with a warning.
 
+use promptforge_core_support::events::{LlamaTimings, Usage, VllmMetrics};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::client::{CompletionResult, ToolCall};
@@ -290,6 +298,162 @@ pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
         }
     }
     Ok(None)
+}
+
+/// Call metadata parsed from a chat-completions body: the serving model and
+/// every metrics family the backend reported.
+///
+/// Parsing is infallible by design. The turn outcome has its own strict
+/// parser ([`normalize`]); metadata must never fail a completion whose turn
+/// was usable, so each family degrades to `None` independently.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ResponseMetadata {
+    /// The model that served the call, or empty when the body named none.
+    pub(crate) model: String,
+    /// Token accounting, when the backend reported `usage`.
+    pub(crate) usage: Option<Usage>,
+    /// llama.cpp's `timings` extension, when that backend served the call.
+    pub(crate) llama_timings: Option<LlamaTimings>,
+    /// vLLM's `metrics` extension, when that backend served the call.
+    pub(crate) vllm_metrics: Option<VllmMetrics>,
+}
+
+/// Parses the serving model and every metrics family from a response body.
+///
+/// An absent or JSON-null section is `None` with no complaint; a present
+/// section that does not parse degrades to `None` with a `tracing` warning
+/// naming the section, so a backend with a broken metrics extension still
+/// completes the call.
+pub(crate) fn response_metadata(body: &Value) -> ResponseMetadata {
+    ResponseMetadata {
+        model: parse_model(body),
+        usage: parse_section(body, "usage", parse_usage),
+        llama_timings: parse_section(body, "timings", parse_llama_timings),
+        vllm_metrics: parse_section(body, "metrics", parse_vllm_metrics),
+    }
+}
+
+/// The serving model from the body's top-level `model` field.
+///
+/// Every OpenAI-shaped backend names the model in its response, so a missing
+/// or non-string value is anomalous: it warns and records an empty string,
+/// never fails the call.
+fn parse_model(body: &Value) -> String {
+    if let Some(Value::String(model)) = body.get("model") {
+        model.clone()
+    } else {
+        tracing::warn!("completion response named no string `model`; recorded as empty");
+        String::new()
+    }
+}
+
+/// Parses one top-level metadata section leniently.
+///
+/// Absent or JSON-null is `None` silently - a frontier body has no `timings`
+/// and that is not a defect. A present section that fails `parse` degrades to
+/// `None` with a warning naming the section and the parse failure.
+fn parse_section<T>(
+    body: &Value,
+    key: &str,
+    parse: impl FnOnce(&Value) -> std::result::Result<T, serde_json::Error>,
+) -> Option<T> {
+    match body.get(key) {
+        None | Some(Value::Null) => None,
+        Some(value) => match parse(value) {
+            Ok(parsed) => Some(parsed),
+            Err(error) => {
+                tracing::warn!("malformed `{key}` in completion response ignored: {error}");
+                None
+            }
+        },
+    }
+}
+
+/// The wire shape of the `usage` object: the flat core every backend sends,
+/// plus the nested detail objects frontier backends and vLLM add.
+#[derive(Deserialize)]
+struct WireUsage {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
+    #[serde(default)]
+    prompt_tokens_details: Option<WirePromptTokensDetails>,
+    #[serde(default)]
+    completion_tokens_details: Option<WireCompletionTokensDetails>,
+}
+
+/// The nested `prompt_tokens_details` object carrying the cache detail.
+#[derive(Deserialize)]
+struct WirePromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u32>,
+}
+
+/// The nested `completion_tokens_details` object carrying the reasoning
+/// detail.
+#[derive(Deserialize)]
+struct WireCompletionTokensDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u32>,
+}
+
+/// Parses the `usage` object, flattening the nested detail fields into the
+/// canonical [`Usage`] shape.
+fn parse_usage(value: &Value) -> std::result::Result<Usage, serde_json::Error> {
+    let wire = WireUsage::deserialize(value)?;
+    Ok(Usage {
+        prompt_tokens: wire.prompt_tokens,
+        completion_tokens: wire.completion_tokens,
+        total_tokens: wire.total_tokens,
+        cached_tokens: wire
+            .prompt_tokens_details
+            .and_then(|details| details.cached_tokens),
+        reasoning_tokens: wire
+            .completion_tokens_details
+            .and_then(|details| details.reasoning_tokens),
+    })
+}
+
+/// The wire shape of llama.cpp's top-level `timings` extension.
+///
+/// The draft counters appear only when a speculative-decoding draft model
+/// ran, so an absent counter means zero drafted tokens, not an unknown; the
+/// per-token rates the server also sends are derivable and ignored.
+#[derive(Deserialize)]
+struct WireLlamaTimings {
+    prompt_n: u32,
+    prompt_ms: f64,
+    prompt_per_second: f64,
+    predicted_n: u32,
+    predicted_ms: f64,
+    predicted_per_second: f64,
+    #[serde(default)]
+    draft_n: u32,
+    #[serde(default)]
+    draft_n_accepted: u32,
+}
+
+/// Parses llama.cpp's `timings` object into the canonical [`LlamaTimings`].
+fn parse_llama_timings(value: &Value) -> std::result::Result<LlamaTimings, serde_json::Error> {
+    let wire = WireLlamaTimings::deserialize(value)?;
+    Ok(LlamaTimings {
+        prompt_n: wire.prompt_n,
+        prompt_ms: wire.prompt_ms,
+        prompt_per_second: wire.prompt_per_second,
+        predicted_n: wire.predicted_n,
+        predicted_ms: wire.predicted_ms,
+        predicted_per_second: wire.predicted_per_second,
+        draft_n: wire.draft_n,
+        draft_n_accepted: wire.draft_n_accepted,
+    })
+}
+
+/// Parses vLLM's `metrics` object into the canonical [`VllmMetrics`].
+///
+/// The canonical type is its own wire shape: every field is optional because
+/// vLLM omits what it did not measure, and unknown keys are ignored.
+fn parse_vllm_metrics(value: &Value) -> std::result::Result<VllmMetrics, serde_json::Error> {
+    VllmMetrics::deserialize(value)
 }
 
 #[cfg(test)]
@@ -716,5 +880,319 @@ mod tests {
                 panic!("OpenAI normalizer must not parse content fences")
             }
         }
+    }
+
+    /// Counts WARN-level tracing events while `f` runs, so the tests can pin
+    /// both halves of the degrade policy: malformed sections warn, and
+    /// well-formed or absent sections stay silent.
+    fn with_warn_count<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct WarnCounter(Arc<AtomicUsize>);
+
+        impl tracing::Subscriber for WarnCounter {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, event: &tracing::Event<'_>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    self.0.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let result = tracing::subscriber::with_default(WarnCounter(Arc::clone(&count)), f);
+        let warnings = count.load(Ordering::SeqCst);
+        (result, warnings)
+    }
+
+    /// One assistant text choice, shared by the metadata fixture bodies.
+    fn reply_choice() -> Value {
+        serde_json::json!([{
+            "index": 0,
+            "message": { "role": "assistant", "content": "hi" },
+            "finish_reason": "stop"
+        }])
+    }
+
+    #[test]
+    fn llama_body_parses_model_usage_and_timings() {
+        let body = serde_json::json!({
+            "id": "chatcmpl-llama",
+            "object": "chat.completion",
+            "created": 1_726_000_000_u64,
+            "model": "qwen3-30b",
+            "choices": reply_choice(),
+            "usage": { "completion_tokens": 3, "prompt_tokens": 7, "total_tokens": 10 },
+            "timings": {
+                "prompt_n": 7,
+                "prompt_ms": 12.5,
+                "prompt_per_token_ms": 1.75,
+                "prompt_per_second": 560.0,
+                "predicted_n": 3,
+                "predicted_ms": 30.5,
+                "predicted_per_token_ms": 10.25,
+                "predicted_per_second": 98.5,
+                "draft_n": 4,
+                "draft_n_accepted": 2
+            }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 0, "a well-formed body must not warn");
+        assert_eq!(metadata.model, "qwen3-30b");
+        assert_eq!(
+            metadata.usage,
+            Some(Usage {
+                prompt_tokens: 7,
+                completion_tokens: 3,
+                total_tokens: 10,
+                cached_tokens: None,
+                reasoning_tokens: None,
+            }),
+            "flat llama.cpp usage carries no detail fields"
+        );
+        assert_eq!(
+            metadata.llama_timings,
+            Some(LlamaTimings {
+                prompt_n: 7,
+                prompt_ms: 12.5,
+                prompt_per_second: 560.0,
+                predicted_n: 3,
+                predicted_ms: 30.5,
+                predicted_per_second: 98.5,
+                draft_n: 4,
+                draft_n_accepted: 2,
+            })
+        );
+        assert_eq!(metadata.vllm_metrics, None);
+    }
+
+    #[test]
+    fn llama_timings_without_draft_counters_default_to_zero() {
+        // Without a configured draft model llama.cpp omits the draft
+        // counters entirely; zero drafted tokens is the truthful reading,
+        // so the common non-speculative body must not degrade to None.
+        let body = serde_json::json!({
+            "model": "qwen3-30b",
+            "choices": reply_choice(),
+            "timings": {
+                "prompt_n": 7,
+                "prompt_ms": 12.5,
+                "prompt_per_second": 560.0,
+                "predicted_n": 3,
+                "predicted_ms": 30.5,
+                "predicted_per_second": 98.5
+            }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 0);
+        let timings = metadata.llama_timings.unwrap();
+        assert_eq!(timings.draft_n, 0);
+        assert_eq!(timings.draft_n_accepted, 0);
+    }
+
+    #[test]
+    fn vllm_body_parses_metrics_and_cached_tokens() {
+        let body = serde_json::json!({
+            "id": "chatcmpl-vllm",
+            "object": "chat.completion",
+            "model": "meta-llama/Llama-3.1-8B-Instruct",
+            "choices": reply_choice(),
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 5,
+                "total_tokens": 25,
+                "prompt_tokens_details": { "cached_tokens": 16 }
+            },
+            "metrics": {
+                "time_to_first_token_ms": 8.5,
+                "generation_time_ms": 22.5,
+                "queue_time_ms": 1.5,
+                "mean_itl_ms": 7.5,
+                "tokens_per_second": 133.5
+            }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 0, "a well-formed body must not warn");
+        assert_eq!(metadata.model, "meta-llama/Llama-3.1-8B-Instruct");
+        assert_eq!(
+            metadata.usage,
+            Some(Usage {
+                prompt_tokens: 20,
+                completion_tokens: 5,
+                total_tokens: 25,
+                cached_tokens: Some(16),
+                reasoning_tokens: None,
+            }),
+            "the prompt_tokens_details cache detail must flatten into usage"
+        );
+        assert_eq!(metadata.llama_timings, None);
+        assert_eq!(
+            metadata.vllm_metrics,
+            Some(VllmMetrics {
+                time_to_first_token_ms: Some(8.5),
+                generation_time_ms: Some(22.5),
+                queue_time_ms: Some(1.5),
+                mean_itl_ms: Some(7.5),
+                tokens_per_second: Some(133.5),
+            })
+        );
+    }
+
+    #[test]
+    fn vllm_metrics_omit_what_was_not_measured() {
+        let body = serde_json::json!({
+            "model": "m",
+            "choices": reply_choice(),
+            "metrics": { "time_to_first_token_ms": 8.5 }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 0);
+        assert_eq!(
+            metadata.vllm_metrics,
+            Some(VllmMetrics {
+                time_to_first_token_ms: Some(8.5),
+                generation_time_ms: None,
+                queue_time_ms: None,
+                mean_itl_ms: None,
+                tokens_per_second: None,
+            }),
+            "fields vLLM did not measure stay None inside a parsed section"
+        );
+    }
+
+    #[test]
+    fn frontier_body_parses_usage_detail_fields() {
+        let body = serde_json::json!({
+            "id": "chatcmpl-frontier",
+            "object": "chat.completion",
+            "model": "gpt-5.2",
+            "choices": reply_choice(),
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "total_tokens": 140,
+                "prompt_tokens_details": { "cached_tokens": 64, "audio_tokens": 0 },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 25,
+                    "audio_tokens": 0,
+                    "accepted_prediction_tokens": 0,
+                    "rejected_prediction_tokens": 0
+                }
+            }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 0, "a well-formed body must not warn");
+        assert_eq!(metadata.model, "gpt-5.2");
+        assert_eq!(
+            metadata.usage,
+            Some(Usage {
+                prompt_tokens: 100,
+                completion_tokens: 40,
+                total_tokens: 140,
+                cached_tokens: Some(64),
+                reasoning_tokens: Some(25),
+            })
+        );
+        assert_eq!(
+            metadata.llama_timings, None,
+            "frontier bodies have no timings"
+        );
+        assert_eq!(
+            metadata.vllm_metrics, None,
+            "frontier bodies have no metrics"
+        );
+    }
+
+    #[test]
+    fn absent_metadata_sections_are_none_without_warning() {
+        let bare = serde_json::json!({ "model": "m", "choices": reply_choice() });
+        let with_nulls = serde_json::json!({
+            "model": "m",
+            "choices": reply_choice(),
+            "usage": null,
+            "timings": null,
+            "metrics": null
+        });
+
+        for body in [bare, with_nulls] {
+            let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+            assert_eq!(warnings, 0, "absence is normal, never a warning: {body}");
+            assert_eq!(metadata.model, "m");
+            assert_eq!(metadata.usage, None);
+            assert_eq!(metadata.llama_timings, None);
+            assert_eq!(metadata.vllm_metrics, None);
+        }
+    }
+
+    #[test]
+    fn malformed_metadata_degrades_to_none_with_a_warning() {
+        // The deliberate degrade path: every section malformed at once, each
+        // one warning and dropping to None, and the call still succeeds.
+        let body = serde_json::json!({
+            "model": 7,
+            "choices": reply_choice(),
+            "usage": { "prompt_tokens": "seven" },
+            "timings": { "prompt_n": 7 },
+            "metrics": ["not", "an", "object"]
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(metadata.model, "", "a non-string model records as empty");
+        assert_eq!(metadata.usage, None, "non-numeric token counts degrade");
+        assert_eq!(
+            metadata.llama_timings, None,
+            "timings missing required fields degrade"
+        );
+        assert_eq!(metadata.vllm_metrics, None, "a non-object metrics degrades");
+        assert_eq!(warnings, 4, "each malformed section warns exactly once");
+    }
+
+    #[test]
+    fn metadata_sections_degrade_independently() {
+        let body = serde_json::json!({
+            "model": "qwen3-30b",
+            "choices": reply_choice(),
+            "usage": "broken",
+            "timings": {
+                "prompt_n": 7,
+                "prompt_ms": 12.5,
+                "prompt_per_second": 560.0,
+                "predicted_n": 3,
+                "predicted_ms": 30.5,
+                "predicted_per_second": 98.5
+            }
+        });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(warnings, 1, "only the broken section warns");
+        assert_eq!(metadata.usage, None);
+        assert!(
+            metadata.llama_timings.is_some(),
+            "a malformed sibling section must not take timings down with it"
+        );
+    }
+
+    #[test]
+    fn missing_model_records_empty_and_warns() {
+        let body = serde_json::json!({ "choices": reply_choice() });
+
+        let (metadata, warnings) = with_warn_count(|| response_metadata(&body));
+        assert_eq!(metadata.model, "");
+        assert_eq!(warnings, 1, "an OpenAI-shaped body without a model warns");
     }
 }
