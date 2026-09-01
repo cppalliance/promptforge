@@ -8588,6 +8588,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
+name = "workshop-agent"
+version = "0.2.0"
+dependencies = [
+ "mlua",
+ "promptforge-core-support",
+ "promptforge-lua",
+ "promptforge-model-client",
+ "promptforge-store",
+ "promptforge-tools",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "wrapcenum-derive"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
