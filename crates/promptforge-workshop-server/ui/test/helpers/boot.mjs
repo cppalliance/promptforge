@@ -104,22 +104,13 @@ export async function bootWorkbench(name, run) {
 
   // The workbench state (models, profiles, selection) arrives only over
   // the socket, so a booted workbench fetches nothing but the Workshop
-  // tree's roots listing (answered empty: no grants yet) and the Gateway
-  // Config panel's origin probe when that panel opens. Any other fetch -
-  // including the retired /v1/models and /profiles boot fetches - rejects
-  // the test.
+  // tree's roots listing (answered empty: no grants yet). Any other
+  // fetch - including the retired /v1/models and /profiles boot fetches -
+  // rejects the test.
   globalThis.fetch = (url) => {
     if (url === "/workspace/tree") {
       return Promise.resolve(
         new Response(JSON.stringify({ path: null, entries: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    }
-    if (url === "/gateway/origin") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ origin: "http://127.0.0.1:8081" }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),

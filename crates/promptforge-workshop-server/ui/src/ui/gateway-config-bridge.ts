@@ -1,20 +1,16 @@
 // The workshop side of the config panel's postMessage bridge. The
-// gateway config UI runs in an iframe on the gateway's origin (a
-// different port), so this window-level listener is its only path to
-// the workshop: API-forward requests go through the workshop server's
-// key-attaching proxy, action notifications land on the status bar, and
-// the ready announcement is answered with a context message (theme and
-// initial route). Origins are pinned in both directions: a message is
-// handled only when event.origin equals the gateway origin the server
-// reported, and every reply is posted with that exact origin as its
-// targetOrigin - never "*".
+// gateway config UI runs in an iframe proxied through the workshop
+// server at /gateway/config/, so the frame shares the workshop's own
+// origin; this window-level listener is its only path to the workshop:
+// API-forward requests go through the workshop server's key-attaching
+// proxy, action notifications land on the status bar, and the ready
+// announcement is answered with a context message (theme and initial
+// route). Origins are pinned in both directions: a message is handled
+// only when event.origin equals the workshop's own origin, and every
+// reply is posted with that exact origin as its targetOrigin - never "*".
 
 import { toDisposable, type IDisposable } from "../base/lifecycle";
-import {
-  fetchGatewayOrigin,
-  forwardGatewayRequest,
-  type FetchLike,
-} from "../services/gateway-config-api";
+import { forwardGatewayRequest, type FetchLike } from "../services/gateway-config-api";
 
 /** The status surface the panel's action notifications land on. */
 export interface BridgeStatusSink {
@@ -26,14 +22,14 @@ export interface BridgeStatusSink {
 export interface GatewayConfigBridgeOptions {
   /** Where action notifications (apply, revert, download-started) land. */
   readonly statusBar: BridgeStatusSink;
-  /** Transport for the origin probe and the proxy; the global fetch in production. */
+  /** Transport for the API-forward proxy; the global fetch in production. */
   readonly fetchFn?: FetchLike;
   /** The window whose message events carry the bridge; the global one in production. */
   readonly win?: Pick<Window, "addEventListener" | "removeEventListener">;
   /**
    * Reply seam: posts `message` back to the event's source window at
    * `targetOrigin`. Tests substitute a recorder; production posts to
-   * event.source with the pinned gateway origin.
+   * event.source with the pinned workshop origin.
    */
   readonly reply?: (event: MessageEvent, message: unknown, targetOrigin: string) => void;
 }
@@ -46,14 +42,14 @@ const ACTION_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** The context handed to the iframe once it announces itself. */
-const PANEL_CONTEXT = { type: "pf-context", theme: "dark", route: "#/models" } as const;
+const PANEL_CONTEXT = { type: "pf-context", theme: "dark", route: "#/local" } as const;
 
 /**
  * Installs the window-level message listener that serves the config
- * panel's iframe. The gateway origin resolves lazily on the first
- * message - a workshop that never opens the panel never dials the
- * server - and a failed probe retries on the next message. The returned
- * dispose() detaches the listener.
+ * panel's iframe. The iframe is proxied same-origin through the
+ * workshop server, so messages are accepted from - and replies pinned
+ * to - the workshop's own origin. The returned dispose() detaches the
+ * listener.
  */
 export function setupGatewayConfigBridge(options: GatewayConfigBridgeOptions): IDisposable {
   const win = options.win ?? window;
@@ -62,18 +58,13 @@ export function setupGatewayConfigBridge(options: GatewayConfigBridgeOptions): I
     ((event: MessageEvent, message: unknown, targetOrigin: string): void => {
       (event.source as Window | null)?.postMessage(message, targetOrigin);
     });
-  let originProbe: Promise<string | null> | null = null;
+  // The panel iframe is served through the workshop's own proxy, so the
+  // one legitimate sender shares this window's origin; anything else -
+  // the gateway's own port included - is foreign.
+  const origin = window.location.origin;
 
   const onMessage = (event: MessageEvent): void => {
     void (async () => {
-      originProbe ??= fetchGatewayOrigin(options.fetchFn);
-      const origin = await originProbe;
-      if (origin === null) {
-        // The probe failed; retry on the next message instead of
-        // wedging the bridge for the page's lifetime.
-        originProbe = null;
-        return;
-      }
       if (event.origin !== origin) {
         return; // Not the config panel; every foreign message is dropped.
       }
