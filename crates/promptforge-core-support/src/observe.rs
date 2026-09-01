@@ -2,20 +2,31 @@
 //!
 //! [`Observer`] receives a borrowed `(execution, section)` pair and one typed
 //! [`Observation`] at operational boundaries. The observation is the complete
-//! trace record. Fixed runtime observations carry no raw prompt prose, model
-//! input or output, tool arguments or results, store paths or contents,
-//! credentials, or fetched content. Reports are synchronous and never consulted
-//! for a decision. [`NullObserver`] provides silence without a second execution
-//! path.
+//! lifecycle trace record. Fixed runtime observations carry no raw prompt
+//! prose, model input or output, tool arguments or results, store paths or
+//! contents, credentials, or fetched content. Reports are synchronous and
+//! never consulted for a decision. [`NullObserver`] provides silence without a
+//! second execution path.
+//!
+//! The `on_*` content methods are the second reporting family: default-body
+//! hooks carrying completed content events - assistant replies, tool-call
+//! batches, tool results, thinking, and user input - as untrusted payloads
+//! with their [`CallMetrics`]. A content report records what happened, never
+//! assembled framing: no system prompts, no injected files, no tool schemas.
+//! Like [`observe`](Observer::observe), content reports are write-only and
+//! never read back; the read-side history a host may keep is the separate
+//! [`EventLog`](crate::events::EventLog).
 //!
 //! # Sensitivity of metadata
-//! The variant *identity* of a fixed [`Observation`] is safe, but three inputs
+//! The variant *identity* of a fixed [`Observation`] is safe, but four inputs
 //! are author-controlled and must be treated as potentially sensitive untrusted
 //! metadata, not as safe fixed vocabulary:
 //! - `execution` - a caller-chosen run identifier;
 //! - `section` - the prompt's H2 heading text, authored in the prompt file;
 //! - [`Observation::Lua`] and [`Observation::Other`] messages - a validated Lua
-//!   `log(message)` checkpoint and the forward-compatible escape hatch.
+//!   `log(message)` checkpoint and the forward-compatible escape hatch;
+//! - every `on_*` content payload - text, arguments, and results are model-,
+//!   tool-, or user-authored.
 //!
 //! An [`Observer`] that persists or forwards reports owns treating `execution`,
 //! `section`, and any message-carrying variant as untrusted: they can echo
@@ -24,6 +35,8 @@
 //! paths, or store contents in a `log(message)`.
 
 use std::fmt;
+
+use crate::events::{CallMetrics, ToolCallEvent};
 
 /// One typed operational observation emitted by the runtime.
 ///
@@ -361,6 +374,11 @@ pub mod detail {
 /// discarding all of them must leave outputs, errors, ordering, and side effects
 /// unchanged.
 ///
+/// The `on_*` content methods have default bodies that discard the report, so
+/// an implementation pays only for the hooks it overrides and [`NullObserver`]
+/// pays nothing. Every rule above applies to them unchanged: synchronous,
+/// non-blocking, non-panicking, write-only, never read back.
+///
 /// # Examples
 /// ```
 /// use std::sync::atomic::{AtomicUsize, Ordering};
@@ -410,6 +428,105 @@ pub trait Observer: Send + Sync {
     /// }
     /// ```
     fn observe(&self, execution: &str, section: &str, event: Observation);
+
+    /// Reports one completed assistant reply.
+    ///
+    /// `text` is untrusted model output. `finish_reason` is the provider's
+    /// stop label when it sent one, `model` names the model that produced
+    /// the reply, and `metrics` carries whatever the call measured. The
+    /// default body discards the report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_assistant_reply(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        text: &str,
+        finish_reason: Option<&str>,
+        model: &str,
+        metrics: Option<&CallMetrics>,
+    ) {
+    }
+
+    /// Reports one batch of tool calls the model requested, unexecuted.
+    ///
+    /// `calls` carries untrusted model-authored names and arguments; `model`
+    /// names the model that requested them. The default body discards the
+    /// report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_assistant_tool_calls(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        model: &str,
+        calls: &[ToolCallEvent],
+    ) {
+    }
+
+    /// Reports the result of one dispatched tool call.
+    ///
+    /// `content` is untrusted tool output for the call named by
+    /// `tool_call_id` and `alias`; `trusted` says whether the dispatch
+    /// treated the tool as trusted (its output not nonce-wrapped). The
+    /// default body discards the report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_tool_result(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        tool_call_id: &str,
+        alias: &str,
+        content: &str,
+        trusted: bool,
+    ) {
+    }
+
+    /// Reports one completed block of model thinking.
+    ///
+    /// `text` is untrusted model output; `model` names the model that
+    /// produced it. The default body discards the report.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a content report names its full run coordinates in one call"
+    )]
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_thinking(
+        &self,
+        execution: &str,
+        section: &str,
+        chain_id: u32,
+        depth: u32,
+        turn: u32,
+        model: &str,
+        text: &str,
+    ) {
+    }
+
+    /// Reports text the user supplied, byte-exact.
+    ///
+    /// `text` is untrusted user input. The default body discards the report.
+    #[expect(unused_variables, reason = "the default body discards the report")]
+    fn on_user_input(&self, execution: &str, section: &str, text: &str) {}
 }
 
 /// An [`Observer`] that discards every observation.
@@ -485,6 +602,51 @@ mod tests {
 
         let observer: &dyn Observer = &NullObserver;
         observer.observe("example-run", "Gather", Observation::SectionFinished);
+    }
+
+    #[test]
+    fn null_observer_inherits_content_method_defaults() {
+        // NullObserver implements only `observe`; every content method must
+        // keep its default body, or this stops compiling and every existing
+        // Observer implementation breaks with it. The calls go through `dyn`
+        // to also pin dyn compatibility of the widened trait.
+        let metrics = CallMetrics {
+            usage: None,
+            llama: None,
+            vllm: None,
+            client: None,
+        };
+        let calls = [ToolCallEvent {
+            id: "call_1".to_owned(),
+            name: "read_file".to_owned(),
+            arguments: serde_json::json!({ "path": "notes.txt" }),
+        }];
+        let observer: &dyn Observer = &NullObserver;
+        observer.on_assistant_reply(
+            "example-run",
+            "chat",
+            0,
+            0,
+            1,
+            "reply text",
+            Some("stop"),
+            "llama-3",
+            Some(&metrics),
+        );
+        observer.on_assistant_tool_calls("example-run", "chat", 0, 0, 1, "llama-3", &calls);
+        observer.on_tool_result(
+            "example-run",
+            "chat",
+            0,
+            0,
+            1,
+            "call_1",
+            "read_file",
+            "file contents",
+            false,
+        );
+        observer.on_thinking("example-run", "chat", 0, 0, 1, "llama-3", "thinking text");
+        observer.on_user_input("example-run", "chat", "hello");
     }
 
     #[test]
