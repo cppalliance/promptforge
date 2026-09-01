@@ -1,3 +1,9 @@
+// Release builds are a GUI app: no console window when launched from the
+// installer. Debug builds keep the console so the eprintln diagnostics show.
+// The tradeoff: in release those diagnostics (boot errors, the first-run
+// config notice) have nowhere to print.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
