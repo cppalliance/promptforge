@@ -1165,6 +1165,71 @@ store.write('ghost_err.txt', err)
     );
 }
 
+/// A trusted tool declaring structured output: its JSON must resume into
+/// the program as a table, not a string.
+struct StructuredTool {
+    id: ToolId,
+}
+
+#[async_trait::async_trait]
+impl Tool for StructuredTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &'static str {
+        "structured"
+    }
+
+    fn description(&self) -> &'static str {
+        "A fixture tool with structured output."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+
+    fn structured_output(&self) -> bool {
+        true
+    }
+
+    async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted(
+            json!({ "text": "typed", "images": [] }).to_string(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn a_structured_tool_resumes_as_a_table() {
+    let structured: Arc<dyn Tool> = Arc::new(StructuredTool {
+        id: ToolId::new("fixture", "structured").expect("the fixture tool id is valid"),
+    });
+    let tools = ToolCatalog::new(&[structured]).expect("the fixture catalog is valid");
+    let run = run_over_fixture(
+        r"
+local result = tool_call('structured', {})
+store.write('type.txt', type(result))
+store.write('text.txt', result.text)
+store.write('images.txt', tostring(#result.images))
+",
+        vec![text_body("fixture-model", "never fetched", "stop")],
+        tools,
+        config(),
+    )
+    .await;
+    run.result
+        .as_ref()
+        .expect("the structured program completes");
+    assert_eq!(
+        run.read("type.txt"),
+        "table",
+        "a structured_output tool binds structured and resumes as a Lua table"
+    );
+    assert_eq!(run.read("text.txt"), "typed");
+    assert_eq!(run.read("images.txt"), "0");
+}
+
 #[tokio::test]
 async fn firing_cancel_interrupts_a_suspended_tool_call() {
     let started = Arc::new(tokio::sync::Notify::new());

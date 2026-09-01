@@ -77,7 +77,11 @@
 # in-file unit tests, including the review round's persistence-robustness
 # pins (CRLF endings load, unknown event kinds refuse to load).
 "observer.rs" = 878
-"protocol.rs" = 738
+# Grew by the agent-session frame family: the agents list, the
+# launch/attach acknowledgment, the indexed durable agent_event frame,
+# the reply-stamped ephemeral agent_delta frame, and their wire-shape
+# pins - the same one-responsibility protocol module, more frames.
+"protocol.rs" = 958
 # New module: the ProgressHub-to-status-bar renderer and its anti-flicker
 # state machine (show delay, minimum visible time, detach poll). Grew by
 # the lapsed-deadline detach poll (a past wake instant re-armed would spin
@@ -101,6 +105,20 @@
 "routes/workspace.rs" = 20
 "serve.rs" = 566
 "session.rs" = 341
+# New module: the agent-session registry (the documented carve-out from
+# the no-session-registry socket rule: sessions outlive sockets) -
+# discovery, launch, the per-session supervisor with turn-cancel
+# relaunch, the reply-id round counter, and the ui/model-catalog/client
+# builders; roughly a third of the count is its in-file unit tests.
+# Grew by the review round's client-less launch refusal
+# (LaunchRefusal::GatewayUnusable and its ordering test) - same
+# responsibility, a closed silent-fallback hole.
+"session_agents.rs" = 946
+# New module: the /agents/ws socket - one select! loop owning the
+# socket, the launch/attach/input_response/cancel frame handling, the
+# cursor-driven durable event drain, and the reconnect replay-and-resend
+# path.
+"session_agents/socket.rs" = 397
 "session/gateway_chat.rs" = 417
 "session/gateway_chat/delta.rs" = 92
 "session/gateway_chat/tape.rs" = 135

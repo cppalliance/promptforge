@@ -330,7 +330,7 @@ mod tests {
 
     use std::path::Path;
 
-    use crate::config::{GatewayConfig, ServerConfig, TapeConfig};
+    use crate::config::{AgentsConfig, GatewayConfig, ServerConfig, TapeConfig};
 
     fn test_config(bind: &str, tape_dir: &Path) -> Config {
         Config {
@@ -344,7 +344,9 @@ mod tests {
             server: ServerConfig {
                 bind: bind.to_string(),
                 open_browser: false,
+                state_dir: tape_dir.to_path_buf(),
             },
+            agents: AgentsConfig::default(),
         }
     }
 

@@ -24,5 +24,5 @@ mod config;
 #[cfg(test)]
 mod tests;
 
-pub use agent::{AgentError, run_agent};
+pub use agent::{AgentError, run_agent, run_agent_with_client};
 pub use config::{AgentConfig, AgentLimits};

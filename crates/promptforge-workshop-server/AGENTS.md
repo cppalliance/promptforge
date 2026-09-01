@@ -15,6 +15,8 @@ Degrade-not-crash features (voice provisioning, gateway outages) are zone two by
 
 One task owns each socket: a single `select!` loop reads and writes the same socket handle. No outbox channel, no writer task, no session registry. Durable messages deliver via `Notify` plus a per-client cursor and coalesce; ephemeral messages go through a bounded broadcast and drop on lag. Malformed inbound frames are logged and skipped, or close the connection with a policy code - never a panic. Each endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists - never share hypothetical reuse. The session owns transport and multiplexing, not chat execution: direct gateway execution is the current adapter, not the session architecture.
 
+Carve-out: agent sessions (`session_agents`) keep a session registry, because agent sessions survive socket disconnect by design - sockets attach and detach, reconnect replays the persisted event log and re-announces unresolved waits. The no-session-registry rule governed per-request relay work, where every held resource belonged to one socket; it stands for every other endpoint.
+
 ## Delivery contract
 
 Every pushed message type is classified in the protocol module as durable or ephemeral; no message type ships unclassified. Durable state is recoverable from retained state or a cursor, and consumers tolerate duplicate delivery. Ephemeral snapshots may coalesce or drop under lag; the latest complete snapshot is resent on reconnect.

@@ -156,8 +156,21 @@ pub async fn run_agent(
 }
 
 /// [`run_agent`] with an explicit gateway client instead of the lazy
-/// environment resolution: the crate's own test seam.
-pub(crate) async fn run_agent_with_client(
+/// environment resolution.
+///
+/// This is the host-injection seam: a host that already knows its gateway
+/// (the Workshop reads one from `workshop.toml`) passes the client it
+/// built, so the agent's model calls reach the configured gateway rather
+/// than whatever `PROMPTFORGE_GATEWAY_URL` names. `None` falls back to
+/// the environment resolution, making this a strict superset of
+/// [`run_agent`].
+///
+/// # Errors
+/// Exactly [`run_agent`]'s: [`AgentError::Interrupted`] on a fired cancel
+/// handle, [`AgentError::Program`] when the program fails,
+/// [`AgentError::Model`] when a model call fails, and
+/// [`AgentError::Internal`] on a violated driver invariant.
+pub async fn run_agent_with_client(
     source: &str,
     tools: &ToolCatalog,
     models: &ModelCatalog,
@@ -251,10 +264,13 @@ async fn drive(
 }
 
 /// Registers every catalog tool by its wire name, with no semantic
-/// resolution: one plain binding per tool, every alias in scope (the
+/// resolution: one binding per tool, every alias in scope (the
 /// `always` list), so `tool_call` reaches the whole catalog. Wire names are
 /// assumed unique within one agent catalog; on a collision the first
-/// binding wins alias lookup.
+/// binding wins alias lookup. A tool declaring
+/// [`structured_output`](promptforge_tools::Tool::structured_output) binds
+/// with the structured output kind, so its JSON output resumes into the
+/// program as a table; everything else stays plain text.
 fn agent_tool_set(catalog: &ToolCatalog) -> ToolSet {
     let bindings: Vec<ToolBinding> = catalog
         .tools()
@@ -266,7 +282,11 @@ fn agent_tool_set(catalog: &ToolCatalog) -> ToolSet {
             model_description: None,
             tool: Arc::clone(tool),
             conflicts: Vec::new(),
-            output_kind: ToolOutputKind::Plain,
+            output_kind: if tool.structured_output() {
+                ToolOutputKind::Structured
+            } else {
+                ToolOutputKind::Plain
+            },
         })
         .collect();
     let always = bindings

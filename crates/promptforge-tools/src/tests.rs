@@ -139,6 +139,17 @@ fn descriptor_surface_preserves_identity_description_and_schema() {
 }
 
 #[test]
+fn structured_output_defaults_to_plain_text() {
+    // Every existing implementation predates the method, so the default
+    // must be plain text; a structured tool opts in explicitly.
+    let tool = FixtureTool;
+    assert!(
+        !tool.structured_output(),
+        "a tool that does not declare structured output stays plain text"
+    );
+}
+
+#[test]
 fn catalog_lookup_uses_stable_identity_not_wire_name() {
     let tool: Arc<dyn Tool> = Arc::new(FixtureTool);
     let catalog = ToolCatalog::new(std::slice::from_ref(&tool)).expect("unique catalog");

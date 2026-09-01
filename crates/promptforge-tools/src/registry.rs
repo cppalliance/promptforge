@@ -276,6 +276,20 @@ pub trait Tool: Send + Sync {
     /// accepts.
     fn parameters_schema(&self) -> serde_json::Value;
 
+    /// Whether [`call`](Tool::call) output is structured JSON rather than
+    /// plain text.
+    ///
+    /// A structured tool's output text is one JSON value, and an executor
+    /// that supports structured results resumes it into the script as data
+    /// (for example, a Lua table) instead of a string. The default is
+    /// `false`: plain text. Structured output is honored for trusted
+    /// output only - an untrusted result is nonce-wrapped before any
+    /// parse, so the wrapped text no longer parses as JSON and the call
+    /// fails rather than smuggling attacker-shaped data past the guard.
+    fn structured_output(&self) -> bool {
+        false
+    }
+
     /// Execute the tool with the given JSON arguments and return its output.
     ///
     /// The returned [`ToolOutput`] carries its own

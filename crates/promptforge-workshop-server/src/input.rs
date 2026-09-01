@@ -389,6 +389,14 @@ impl Tool for UserInputTool {
         serde_json::json!({ "type": "object", "properties": {} })
     }
 
+    /// Structured: the JSON object resumes into Lua as a table
+    /// (`result.text`, `result.images`), which is safe here because the
+    /// output is trusted - the untrusted wrap that would break a JSON
+    /// parse never applies.
+    fn structured_output(&self) -> bool {
+        true
+    }
+
     /// Opens a wait, announces it, and suspends until it resolves.
     ///
     /// Arguments are ignored: the tool takes none. On cancellation - the
@@ -565,6 +573,15 @@ mod tests {
         assert!(
             !rendered.contains(&token),
             "a token in a log would let the log's reader answer the prompt"
+        );
+    }
+
+    #[test]
+    fn the_tool_declares_structured_output() {
+        let (tool, _registry, _frames) = tool_fixture();
+        assert!(
+            tool.structured_output(),
+            "user_input must bind structured so its JSON resumes as a Lua table"
         );
     }
 

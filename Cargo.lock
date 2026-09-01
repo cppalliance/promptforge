@@ -5014,6 +5014,7 @@ dependencies = [
  "promptforge-gateway-protocol",
  "promptforge-model-client",
  "promptforge-progress",
+ "promptforge-store",
  "promptforge-tools",
  "promptforge-workshop-server",
  "rand 0.9.5",
@@ -5033,6 +5034,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "workshop-agent",
 ]
 
 [[package]]

@@ -515,16 +515,33 @@ mod tests {
         let base_url = spawn_mock_gateway().await;
         let gateway = GatewayClient::new(&base_url, "test-key").expect("client builds in tests");
         let catalog = CatalogBus::new();
+        let status = StatusBus::new();
+        let menu = crate::menu::MenuBus::new(catalog.clone(), None);
+        let backoff = crate::backoff::ReconnectBackoff::new();
+        let workspace = Workspace::new();
+        let agents = crate::session_agents::AgentSessions::new(
+            std::path::PathBuf::new(),
+            std::path::PathBuf::new(),
+            None,
+            crate::session_agents::SessionHost {
+                push: crate::push::Push::new(status.clone(), catalog.clone(), menu.clone()),
+                backoff: backoff.clone(),
+                menu: menu.clone(),
+                workspace: workspace.clone(),
+                catalog: catalog.clone(),
+            },
+        );
         let state = AppState {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
-            status: StatusBus::new(),
+            status,
             progress: Arc::new(promptforge_progress::ProgressHub::new()),
             health: GatewayHealth::new(),
-            backoff: crate::backoff::ReconnectBackoff::new(),
-            menu: crate::menu::MenuBus::new(catalog.clone(), None),
+            backoff,
+            menu,
             catalog,
-            workspace: Workspace::new(),
+            workspace,
+            agents,
         };
         let response = router(state)
             .oneshot(chat_request())

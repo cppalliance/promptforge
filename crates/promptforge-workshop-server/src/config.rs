@@ -31,6 +31,9 @@ pub struct Config {
     /// HTTP server settings.
     #[serde(default)]
     pub server: ServerConfig,
+    /// Agent-program discovery settings.
+    #[serde(default)]
+    pub agents: AgentsConfig,
 }
 
 impl Config {
@@ -93,7 +96,30 @@ impl Config {
         if config.gateway.base_url.is_empty() {
             config.gateway.base_url = DEFAULT_GATEWAY_BASE_URL.to_string();
         }
+        // The path-shaped defaults anchor beside the config file. A config
+        // parsed from a string has no file, so the anchor degrades to the
+        // working directory.
+        let anchor = path
+            .and_then(Path::parent)
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        config.anchor_path_defaults(anchor);
         Ok(config)
+    }
+
+    /// Replaces the empty path-shaped defaults with paths anchored at
+    /// `anchor`: an empty `server.state_dir` becomes `anchor` itself, and
+    /// an empty `agents.path` becomes `agents/` under it. Explicit
+    /// (non-empty) values are kept verbatim. Parsing applies this with the
+    /// config file's directory; a host that builds a [`Config`] in code
+    /// applies it with its own anchor to get the same defaults.
+    pub fn anchor_path_defaults(&mut self, anchor: &Path) {
+        if self.server.state_dir.as_os_str().is_empty() {
+            self.server.state_dir = anchor.to_path_buf();
+        }
+        if self.agents.path.as_os_str().is_empty() {
+            self.agents.path = anchor.join("agents");
+        }
     }
 }
 
@@ -133,6 +159,12 @@ pub struct ServerConfig {
     /// once it is serving. The desktop shell sets up its own window and
     /// ignores this flag; it exists for the browser-tab frame.
     pub open_browser: bool,
+    /// Directory holding the server's persistent state; agent session
+    /// event logs live under `state_dir/sessions/`. Defaults to the
+    /// config file's own directory ([`Config::parse`] anchors the empty
+    /// default there), and this key becomes the state anchor that
+    /// outlives the tape.
+    pub state_dir: PathBuf,
 }
 
 impl Default for ServerConfig {
@@ -140,6 +172,26 @@ impl Default for ServerConfig {
         Self {
             bind: crate::DEFAULT_ADDR.to_string(),
             open_browser: false,
+            state_dir: PathBuf::new(),
+        }
+    }
+}
+
+/// Agent-program discovery settings.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct AgentsConfig {
+    /// Directory whose `.lua` files are the launchable agent programs.
+    /// Defaults to `agents/` beside the config file ([`Config::parse`]
+    /// anchors the empty default there). A missing directory means no
+    /// agents are offered - a state, not an error.
+    pub path: PathBuf,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::new(),
         }
     }
 }
@@ -326,6 +378,57 @@ bind = "127.0.0.1:9000"
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert_eq!(config.tape.path, PathBuf::from("session.jsonl"));
         assert_eq!(config.server.bind, "127.0.0.1:9000");
+    }
+
+    #[test]
+    fn path_defaults_anchor_beside_the_config_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("workshop.toml");
+        std::fs::write(
+            &path,
+            "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
+        )
+        .expect("write fixture");
+        let config = Config::load(&path).expect("fixture loads");
+        assert_eq!(
+            config.server.state_dir,
+            dir.path(),
+            "an absent state_dir is the config file's directory"
+        );
+        assert_eq!(
+            config.agents.path,
+            dir.path().join("agents"),
+            "an absent agents path is agents/ beside the config file"
+        );
+
+        // Without a file, the anchor degrades to the working directory.
+        let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"k\"\n";
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.server.state_dir, PathBuf::from("."));
+        assert_eq!(config.agents.path, Path::new(".").join("agents"));
+    }
+
+    #[test]
+    fn explicit_state_dir_and_agents_path_are_kept_verbatim() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("workshop.toml");
+        std::fs::write(
+            &path,
+            "[gateway]\nbase_url = \"http://x\"\napi_key = \"k\"\n\n\
+             [server]\nstate_dir = \"state\"\n\n[agents]\npath = \"my-agents\"\n",
+        )
+        .expect("write fixture");
+        let config = Config::load(&path).expect("fixture loads");
+        assert_eq!(
+            config.server.state_dir,
+            PathBuf::from("state"),
+            "an explicit state_dir is not re-anchored"
+        );
+        assert_eq!(
+            config.agents.path,
+            PathBuf::from("my-agents"),
+            "an explicit agents path is not re-anchored"
+        );
     }
 
     #[test]
