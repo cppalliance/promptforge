@@ -103,7 +103,7 @@ pub(super) fn production_command(request: &SpawnRequest<'_>) -> Result<Command> 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS);
+        command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS | crate::CREATE_NO_WINDOW);
     }
     Ok(command)
 }

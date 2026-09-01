@@ -16,6 +16,11 @@
 //! The crate contains no HTTP routing and no error envelopes; those live in
 //! the gateway crate.
 
+/// Windows `CREATE_NO_WINDOW` flag: suppresses console windows for child
+/// processes spawned from a GUI-subsystem parent.
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 pub mod artifacts;
 pub mod cache;
 pub mod chat_templates;
