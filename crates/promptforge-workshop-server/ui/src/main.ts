@@ -12,6 +12,7 @@ import { StatusBar } from "./ui/status-bar";
 import { setupWindowChrome } from "./ui/window-chrome";
 import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/window-menu";
 import { setupWorkspaceDrops } from "./ui/workspace-drops";
+import { restoreZoom } from "./ui/zoom";
 import { restoreLayout, startLayoutPersistence } from "./ui/workshop/layout-persistence";
 import { createPanelComponent, createPanelTabComponent } from "./ui/workshop/panel-types";
 import { installShortcuts, toggleWorkshopPanel } from "./ui/workshop/shortcuts";
@@ -33,6 +34,9 @@ const statusBar = disposables.add(new StatusBar(statusBarRoot));
 // The custom title bar stays hidden in a plain browser; it only appears
 // when the desktop shell sets its initialization flag.
 disposables.add(setupWindowChrome());
+// Native webview zoom does not persist across sessions, so the stored
+// factor is re-applied on every boot.
+restoreZoom();
 // Native Explorer drops arrive as a typed event from the desktop shell;
 // each path becomes a workspace grant. Inert in a plain browser.
 disposables.add(setupWorkspaceDrops(statusBar));
