@@ -52,6 +52,12 @@ jobs:
           ref: ${{ env.WHISPER_TAG }}
           path: whisper.cpp
 
+      - name: Clean staging directories
+        run: |
+          cmake -E remove_directory stage
+          cmake -E remove_directory package
+          cmake -E remove_directory dist
+
       - name: Configure Windows CUDA
         if: matrix.platform == 'windows-x86_64-cuda'
         run: >-
