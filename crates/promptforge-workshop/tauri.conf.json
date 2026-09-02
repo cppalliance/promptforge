@@ -8,6 +8,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis", "dmg", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",
@@ -20,6 +21,17 @@
       "webviewInstallMode": {
         "type": "embedBootstrapper",
         "silent": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/cppalliance/promptforge/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU3QUNCQ0M4Mzk4M0YwMEEKUldRSzhJTTV5THlzNXpnRXFQellRelNSNm1rTWJiNkNLL0FoL3Y4UFdLeGxRajJJTG96RGFNNEwK",
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
