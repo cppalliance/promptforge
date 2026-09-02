@@ -11,39 +11,24 @@ When the user says `promptforge <name> [input]`:
    cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main
    ```
    Wait for the line containing "serving" before proceeding.
-2. **MCP server.** Call `GetMcpTools(server: "user-promptforge")`. If status is not `ready`, check terminals for a running `promptforge-mcp-server`. If absent, start one in a background terminal from the repo root:
+2. **Run.** From the repo root, call the CLI against the prompt file under `prompts/`:
    ```
-   cargo run -p promptforge-mcp-server -- serve local/mcp-service.toml
+   cargo run -p promptforge-cli -- run prompts/<name>.md [input]
    ```
-   Wait for the line containing "serving", then re-check `GetMcpTools` until status is `ready`.
-3. **Discovery (once per session).** Call `GetMcpTools(server: "user-promptforge")` to learn the tool schemas. Then call `list_prompts` to get prompt names and their input/output metadata. Both stay in context for the session. Only re-call `list_prompts` if the user says something changed.
-4. **Call.** Call `run_prompt` with the name from the user's command. Map the user's input to `run_prompt` parameters based on what `list_prompts` reported about the prompt. Do not explore the filesystem, pre-validate, or check whether the prompt exists. Call it. Report whatever comes back.
+   Report whatever comes back. Do not explore the filesystem, pre-validate, or check whether the prompt exists.
 
-Steps 1-3 are one-time. Subsequent `promptforge <name> [input]` calls go straight to step 4.
+Step 1 is one-time. Subsequent `promptforge <name> [input]` calls go straight to step 2.
 
 **NEVER read, open, cat, or load any `.env` file into context.** These files contain secrets. The servers load them at startup - the agent must not.
 
 Secrets live in name-matched `.env` files next to their `.toml` configs in `local/`:
 - Gateway: `local/gateway.env` (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, `PROMPTFORGE_GATEWAY_API_KEY`). The gateway loads at most two env files: the profile's (`local/profiles/main.env`) then the boot file's (`local/gateway.env`); the process environment wins over both, and included files' env files are never loaded.
-- MCP server: `local/mcp-service.env` (`PROMPTFORGE_MCP_SERVER_API_KEY`, `PROMPTFORGE_GATEWAY_API_KEY`). Flat - one toml, one env file, no chain.
 
 ## Components
 
 | Component | Command | Env file | Default bind |
 |---|---|---|---|
 | Gateway | `cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main` | `local/profiles/main.env`, then `local/gateway.env` (process env wins) | `127.0.0.1:8081` |
-| MCP Server | `cargo run -p promptforge-mcp-server -- serve local/mcp-service.toml` | `local/mcp-service.env` (flat, one file) | `127.0.0.1:9310` |
-
-Start the gateway first. The MCP server calls through it.
-
-## `local/mcp-service.toml` (MCP server config)
-
-The MCP server config lives at `local/mcp-service.toml` (gitignored). It serves the directory named in `[paths].prompts`.
-
-- `[catalog]` required: `include` globs relative to `[paths].prompts`. Without it the server finds zero prompts.
-- `[tools]` defaults to nothing enabled (true sandbox). Enable per prompt needs.
-- `[prompts.NAME]` optional: per-prompt overrides (`enabled = false`).
-- Full schema: `design/design-mcp-server.md`
 
 ## `local/gateway.toml` (gateway config)
 

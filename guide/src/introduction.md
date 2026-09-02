@@ -14,10 +14,8 @@ Each chapter is the user guide for one component of the workspace:
 - [Speech-to-Text](stt.md) - the `promptforge-stt` speech-to-text component.
 - [Gateway](gateway.md) - the model backend server: chat completion routing, credentials, and the model catalog.
 - [Writing Prompts](prompts.md) - the `promptforge-core` library: prompt file format, Lua scripting, models, tools, fanout, store, and errors.
-- [MCP Server](mcp-server.md) - serving prompts as MCP tools for agentic harnesses like Cursor and Claude Code.
 - [Tool Picker](tool-picker.md) - semantic tool resolution using an embedded embedding model.
 - [Web Fetch](webfetch.md) - the built-in web fetch tool: page retrieval, readable-content extraction, SSRF guards.
-- [Development Runner](dev-runner.md) - the interactive development runner: watch mode, store dump inspection, raw trace capture.
 
 ## How to read this guide
 

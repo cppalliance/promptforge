@@ -15,7 +15,6 @@ A runtime that executes AI prompt pipelines defined in a single markdown file. T
 - 🔧 **Lua control** - bind tools and models, compute values, write the store, fan out work
 - 🌐 **Tools that ship** - local `web_fetch`, gateway-backed `web_search`, semantic capability binding
 - 🔌 **Inference gateway** - OpenAI-shaped chat, bearer auth, catalog at `GET /v1/models`
-- 🛰️ **MCP server** - run prompts from an agentic harness over streamable HTTP or stdio
 
 ![Android heads](images/banner-02.png)
 
@@ -64,12 +63,6 @@ cargo run -p promptforge-gateway -- serve gateway.toml --profile main &
 
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
 cargo run -p promptforge-cli -- run prompts/hello.md
-```
-
-Interactive prompt work against an already-running gateway:
-
-```bash
-cargo run -p promptforge-dev -- prompts/greet.md "world" --watch
 ```
 
 ## Build from source
@@ -154,7 +147,6 @@ flowchart LR
 | [promptforge-gateway-protocol](crates/promptforge-gateway-protocol) | OpenAI wire protocol and upstream abstraction for the gateway | [![Crates.io](https://img.shields.io/crates/v/promptforge-gateway-protocol.svg)](https://crates.io/crates/promptforge-gateway-protocol) |
 | [promptforge-gateway-routing](crates/promptforge-gateway-routing) | Routing vocabulary for the gateway: `Model`/`Endpoint` table entries and dominion admission queues | [![Crates.io](https://img.shields.io/crates/v/promptforge-gateway-routing.svg)](https://crates.io/crates/promptforge-gateway-routing) |
 | [promptforge-lua](crates/promptforge-lua) | Sandboxed Lua runtime: the section VM, coroutine protocol, and host surface | [![Crates.io](https://img.shields.io/crates/v/promptforge-lua.svg)](https://crates.io/crates/promptforge-lua) |
-| [promptforge-mcp-server](crates/promptforge-mcp-server) | MCP server for agentic harnesses (Cursor, Claude Code) | [![Crates.io](https://img.shields.io/crates/v/promptforge-mcp-server.svg)](https://crates.io/crates/promptforge-mcp-server) |
 | [promptforge-parser](crates/promptforge-parser) | Prompt document parser: frontmatter, section tree, exact `lua` fence splitting, `ParseError` vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-parser.svg)](https://crates.io/crates/promptforge-parser) |
 | [promptforge-progress](crates/promptforge-progress) | Progress vocabulary: operation-scoped weighted trees, process hub, coalesced events, remote import | not published |
 | [promptforge-stt](crates/promptforge-stt) | Gateway-owned STT runtime: artifact provisioning, engine lifecycle, `/stt`, and OpenAI transcription | not published |
@@ -164,7 +156,6 @@ flowchart LR
 | [promptforge-webfetch](crates/promptforge-webfetch) | SSRF-safe web fetch tool for model-supplied URLs | [![Crates.io](https://img.shields.io/crates/v/promptforge-webfetch.svg)](https://crates.io/crates/promptforge-webfetch) |
 | [promptforge-web-search](crates/promptforge-web-search) | Web search tool proxying through the gateway with credential isolation | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search.svg)](https://crates.io/crates/promptforge-web-search) |
 | [promptforge-web-search-service](crates/promptforge-web-search-service) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search-service.svg)](https://crates.io/crates/promptforge-web-search-service) |
-| [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
 | [whisper-ffi](crates/whisper-ffi) | Runtime-loaded safe wrapper over PromptForge's pinned whisper.cpp C API | not published |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
 | [workshop-agent](crates/workshop-agent) | Workshop agent-program executor: `run_agent` drives `.lua` agent programs over the promptforge substrate | not published |

@@ -7,7 +7,5 @@
 - [Speech-to-Text](stt.md)
 - [Gateway](gateway.md)
 - [Writing Prompts](prompts.md)
-- [MCP Server](mcp-server.md)
 - [Tool Picker](tool-picker.md)
 - [Web Fetch](webfetch.md)
-- [Development Runner](dev-runner.md)

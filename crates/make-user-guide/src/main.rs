@@ -19,15 +19,10 @@ const GUIDES: &[(&str, &str)] = &[
     ("promptforge-gateway", "user-guide-promptforge-gateway.md"),
     ("promptforge-core", "user-guide-promptforge-core.md"),
     (
-        "promptforge-mcp-server",
-        "user-guide-promptforge-mcp-server.md",
-    ),
-    (
         "promptforge-tool-picker",
         "user-guide-promptforge-tool-picker.md",
     ),
     ("promptforge-webfetch", "user-guide-promptforge-webfetch.md"),
-    ("promptforge-dev", "user-guide-promptforge-dev.md"),
 ];
 
 fn main() {
