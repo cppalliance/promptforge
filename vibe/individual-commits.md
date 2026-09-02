@@ -162,3 +162,7 @@ no authoring intent in the chat - the commit was already HEAD when the session b
 
 a public function's doc comment linked a private item, which CI denies; backticks over widening visibility - the safer one-line fix that doesn't change the API surface. (user said "fix it", assistant reasoned the choice)
 
+## 2026-09-02 Document WebView2 unsafe call invariants
+
+a restarted CI run exposed a Windows-only clippy failure blocking the v0.2.0 release; safety comments document the unsafe COM call invariants, satisfying the lint gate without touching working interop code. (assistant reasoned, autonomous CI fix)
+
