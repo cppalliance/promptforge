@@ -31,7 +31,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A92. Workshop sessions own transport and multiplexing; chat execution stays behind a replaceable adapter.
 - A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
 - A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
-- A97. Per-crate guides are source truth; mdBook and flat guides assemble them without duplicate narratives.
 - A98. Publishable crates have registry-resolvable dependency closure and release in dependency order.
 - A99. Cancellation flows to descendants; child cancellation never affects ancestors or siblings.
 - A100. Embedded pages navigate in place only within their exact boot origin.
@@ -40,6 +39,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A103. The event log is lossless history; agents deliberately project it into model context.
 - A104. Builds never write generated products into tracked source paths.
 - A105. Model-authored markup is sanitized at the final DOM insertion boundary.
+- A106. Mutable release channels identify an exact source commit and skip unchanged builds.
 
 ## Principles
 
