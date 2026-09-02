@@ -14,8 +14,32 @@
 }
 
 .about-dialog {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-md);
+  min-width: 320px;
   padding: var(--space-xl);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.about-dialog__title,
+.about-dialog__line {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.about-dialog__check,
+.about-dialog__close {
+  min-height: 26px;
+  padding: 0 var(--space-md);
+  color: var(--text);
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.about-dialog__check:disabled {
+  color: var(--text-tertiary);
 }

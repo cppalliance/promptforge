@@ -21,8 +21,9 @@ import "./window-menu.css";
 
 import type { Event } from "../base/event";
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
-import { showAboutDialog } from "./about-dialog";
 import type { CatalogModel } from "../services/protocol";
+import type { UpdateService } from "../services/update-service";
+import { showAboutDialog } from "./about-dialog";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
 import { resetZoom, zoomIn, zoomOut } from "./zoom";
 
@@ -220,6 +221,8 @@ export function setupWindowMenus(options: {
   readonly modelMenu?: ModelMenuService;
   /** The gateway-profile state the Model menu's Profiles section reads. */
   readonly profileMenu?: ProfileMenuService;
+  /** Desktop update state shown by the About dialog. */
+  readonly updates?: UpdateService;
 }): WindowMenuCommands & IDisposable {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
   if (!navElement) {
@@ -275,7 +278,7 @@ export function setupWindowMenus(options: {
     zoomIn,
     zoomOut,
     resetZoom,
-    showAbout: showAboutDialog,
+    showAbout: () => showAboutDialog(options.updates),
   };
 
   const items = buildMenuItems(commands, hasEditTarget);

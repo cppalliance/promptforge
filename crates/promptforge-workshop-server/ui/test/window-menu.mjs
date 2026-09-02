@@ -652,8 +652,10 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     const text = dialog.textContent;
     check(
       "the dialog names product, version, and license",
-      text.includes("PromptForge") && text.includes("0.1.0") && text.includes("BSL-1.0"),
+      text.includes("PromptForge") && text.includes("0.2.0") && text.includes("BSL-1.0"),
     );
+    const update = dialog.querySelector(".about-dialog__check");
+    check("the dialog carries the desktop update control", update?.disabled === true);
     const close = dialog.querySelector(".about-dialog__close");
     check("focus moves into the dialog", window.document.activeElement === close);
     window.document.dispatchEvent(

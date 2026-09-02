@@ -1,0 +1,86 @@
+.update-banner {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: calc(22px + var(--space-lg));
+  z-index: 190;
+  width: min(360px, calc(100vw - 2 * var(--space-lg)));
+  padding: var(--space-lg);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.update-banner[hidden],
+.update-screen[hidden] {
+  display: none;
+}
+
+.update-banner p {
+  margin: var(--space-sm) 0 var(--space-lg);
+  color: var(--text-muted);
+}
+
+.update-banner__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.update-banner button,
+.update-screen button {
+  min-height: 26px;
+  padding: 0 var(--space-md);
+  color: var(--text);
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.update-banner__primary {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.update-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.update-screen__panel {
+  width: min(560px, calc(100vw - 2 * var(--space-xl)));
+  padding: var(--space-xl);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.update-screen__panel h2 {
+  margin: 0 0 var(--space-md);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.update-screen__panel progress {
+  width: 100%;
+  height: 4px;
+  margin: var(--space-md) 0;
+  accent-color: var(--accent);
+}
+
+.update-screen__panel details {
+  margin: var(--space-md) 0;
+  color: var(--text-muted);
+}
+
+.update-screen__panel pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
