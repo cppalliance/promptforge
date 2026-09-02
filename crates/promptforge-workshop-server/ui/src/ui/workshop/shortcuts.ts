@@ -5,11 +5,12 @@
 // workspace-level actions only: Ctrl+S save the active editor, Ctrl+W
 // close it (prompting on unsaved changes), Ctrl+B toggle the Workshop
 // tree, Ctrl+Tab / Ctrl+Shift+Tab cycle the editors, Ctrl+Shift+F focus
-// the tree.
+// the tree, Ctrl+= / Ctrl+- / Ctrl+0 zoom the window.
 
 import type { DockviewApi, IDockviewPanel } from "dockview";
 
 import { toDisposable, type IDisposable } from "../../base/lifecycle";
+import { resetZoom, zoomIn, zoomOut } from "../zoom";
 import { EditorPanel } from "./editor-panel";
 import { WorkshopTreePanel } from "./workshop-panel";
 import { openInZone, panelIdFor } from "./zones";
@@ -100,6 +101,24 @@ export function installShortcuts(dock: DockviewApi): IDisposable {
     if (event.key === "Tab") {
       event.preventDefault();
       cycleEditor(dock, event.shiftKey ? -1 : 1);
+      return;
+    }
+    // Zoom binds run before the Shift gate below: Ctrl+Shift+= reports
+    // "+" for the same physical key Ctrl+= reports "=" for, and both are
+    // the conventional zoom-in chord.
+    if (event.key === "=" || event.key === "+") {
+      event.preventDefault();
+      zoomIn();
+      return;
+    }
+    if (event.key === "-") {
+      event.preventDefault();
+      zoomOut();
+      return;
+    }
+    if (event.key === "0") {
+      event.preventDefault();
+      resetZoom();
       return;
     }
     const key = event.key.toLowerCase();

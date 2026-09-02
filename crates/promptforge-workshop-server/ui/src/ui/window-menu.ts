@@ -24,6 +24,7 @@ import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecyc
 import { showAboutDialog } from "./about-dialog";
 import type { CatalogModel } from "../services/protocol";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
+import { resetZoom, zoomIn, zoomOut } from "./zoom";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
 export interface WindowMenuCommands {
@@ -40,6 +41,9 @@ export interface WindowMenuCommands {
   readonly openAgentSession: () => void;
   readonly minimizeWindow: () => void;
   readonly toggleWindowMaximize: () => void;
+  readonly zoomIn: () => void;
+  readonly zoomOut: () => void;
+  readonly resetZoom: () => void;
   readonly showAbout: () => void;
 }
 
@@ -169,6 +173,10 @@ function buildMenuItems(
     { kind: "command", label: "Gateway Config", run: commands.openGatewayConfig },
     { kind: "command", label: "Agent Session", run: commands.openAgentSession },
     { kind: "separator" },
+    { kind: "command", label: "Zoom In", shortcut: "Ctrl+=", run: commands.zoomIn },
+    { kind: "command", label: "Zoom Out", shortcut: "Ctrl+-", run: commands.zoomOut },
+    { kind: "command", label: "Reset Zoom", shortcut: "Ctrl+0", run: commands.resetZoom },
+    { kind: "separator" },
     { kind: "command", label: "Minimize", run: commands.minimizeWindow },
     { kind: "command", label: "Maximize/Restore", run: commands.toggleWindowMaximize },
   ];
@@ -264,6 +272,9 @@ export function setupWindowMenus(options: {
     openAgentSession: () => options.workshop.openAgentSession(),
     minimizeWindow,
     toggleWindowMaximize,
+    zoomIn,
+    zoomOut,
+    resetZoom,
     showAbout: showAboutDialog,
   };
 
