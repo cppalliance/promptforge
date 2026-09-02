@@ -16,9 +16,9 @@
   display: flex;
   align-items: stretch;
   height: var(--titlebar-height, 40px);
-  background: var(--titlebar-bg, #0f0f0f);
-  border-bottom: 1px solid var(--titlebar-divider, #2a2a2a);
-  color: var(--titlebar-foreground, #e8e8e8);
+  background: var(--titlebar-bg, #181818);
+  border-bottom: 1px solid var(--titlebar-divider, color-mix(in srgb, #F0F0F0 12%, transparent));
+  color: var(--titlebar-foreground, #F0F0F0);
   font-size: var(--titlebar-font-size, 13px);
   line-height: 1;
   user-select: none;
@@ -68,7 +68,7 @@
   padding: 0;
   background: none;
   border: none;
-  color: var(--titlebar-glyph, #909090);
+  color: var(--titlebar-glyph, color-mix(in srgb, #F0F0F0 74%, transparent));
   cursor: pointer;
   user-select: none;
 }
@@ -80,7 +80,7 @@
 
 .window-titlebar__control--minimize:hover,
 .window-titlebar__control--maximize:hover {
-  background: var(--titlebar-hover, #252525);
+  background: var(--titlebar-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .window-titlebar__control--close:hover {

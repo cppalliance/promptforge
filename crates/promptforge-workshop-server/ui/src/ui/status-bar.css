@@ -14,11 +14,11 @@
   align-items: center;
   gap: var(--status-bar-gap, 12px);
   padding-inline: var(--status-bar-padding-inline, 12px);
-  background: var(--status-bar-bg, #1a1a1a);
-  border-top: 1px solid var(--border, #2a2a2a);
-  font-size: 13px;
+  background: var(--status-bar-bg, #141414);
+  border-top: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  font-size: var(--font-size-base, 13px);
   line-height: 1.4;
-  color: var(--status-bar-text, #909090);
+  color: var(--status-bar-text, color-mix(in srgb, #F0F0F0 74%, transparent));
   user-select: none;
 }
 
@@ -37,7 +37,7 @@
 .status-bar__right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1, 4px);
 }
 
 /* The LED indicators group: swapped out as one unit whenever the progress

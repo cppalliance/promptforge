@@ -32,8 +32,8 @@
   overflow: auto;
   padding: var(--space-xs, 4px) 0;
   font-family: var(--font-prose, system-ui, sans-serif);
-  font-size: 13px;
-  color: var(--text, #e8e8e8);
+  font-size: var(--font-size-base, 13px);
+  color: var(--text, #F0F0F0);
 }
 
 /* The panel header holds the Add Folder icon button. */
@@ -41,7 +41,7 @@
   display: flex;
   justify-content: flex-end;
   padding: 0 var(--space-xs, 4px) var(--space-xs, 4px);
-  border-bottom: 1px solid var(--border, #2a2a2a);
+  border-bottom: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
 }
 
 .workshop-tree__add {
@@ -50,15 +50,15 @@
   justify-content: center;
   padding: var(--space-xs, 4px);
   border: none;
-  border-radius: var(--radius, 8px);
+  border-radius: var(--radius, 6px);
   background: none;
-  color: var(--text-muted, #909090);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
   cursor: pointer;
 }
 
 .workshop-tree__add:hover {
-  background: var(--bg-hover, #252525);
-  color: var(--text, #e8e8e8);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  color: var(--text, #F0F0F0);
 }
 
 .workshop-tree__add:focus-visible {
@@ -92,7 +92,7 @@
 }
 
 .workshop-tree__row:hover {
-  background: var(--bg-hover, #252525);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .workshop-tree__row:focus-visible {
@@ -107,7 +107,7 @@
 
 .workshop-tree__chevron {
   flex: none;
-  color: var(--text-muted, #909090);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .workshop-tree__row[aria-expanded="true"] .workshop-tree__chevron {
@@ -134,15 +134,15 @@
 
 .workshop-tree__missing {
   flex: none;
-  font-size: 11px;
+  font-size: var(--font-size-xs, 11px);
   color: var(--danger-text, #e4606d);
 }
 
 .workshop-tree__empty,
 .workshop-tree__error {
   margin: var(--space-md, 8px);
-  font-size: 12px;
-  color: var(--text-muted, #909090);
+  font-size: var(--font-size-sm, 12px);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .workshop-tree__error {
@@ -166,22 +166,22 @@
   min-width: 260px;
   max-width: 90%;
   padding: var(--space-xl, 16px);
-  background: var(--bg-raised, #1a1a1a);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg-raised, #141414);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
 }
 
 .workspace-add__title {
   margin: 0 0 var(--space-md, 8px);
-  font-size: 14px;
+  font-size: var(--font-size-lg, 14px);
   font-weight: 600;
-  color: var(--text, #e8e8e8);
+  color: var(--text, #F0F0F0);
 }
 
 .workspace-add__line {
   margin: 0 0 var(--space-lg, 12px);
-  font-size: 13px;
-  color: var(--text-muted, #909090);
+  font-size: var(--font-size-base, 13px);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .workspace-add__field {
@@ -192,18 +192,18 @@
 }
 
 .workspace-add__label {
-  font-size: 12px;
-  color: var(--text-muted, #909090);
+  font-size: var(--font-size-sm, 12px);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .workspace-add__input {
   padding: var(--space-sm, 6px) var(--space-md, 8px);
-  background: var(--bg, #0f0f0f);
-  color: var(--text, #e8e8e8);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg, #181818);
+  color: var(--text, #F0F0F0);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-base, 13px);
 }
 
 .workspace-add__input:focus-visible {
@@ -219,17 +219,17 @@
 
 .workspace-add__button {
   padding: var(--space-sm, 6px) var(--space-lg, 12px);
-  background: var(--bg, #0f0f0f);
-  color: var(--text, #e8e8e8);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg, #181818);
+  color: var(--text, #F0F0F0);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-base, 13px);
   cursor: pointer;
 }
 
 .workspace-add__button:hover {
-  background: var(--bg-hover, #252525);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .workspace-add__button:disabled {
@@ -238,7 +238,7 @@
 }
 
 .workspace-add__button:disabled:hover {
-  background: var(--bg, #0f0f0f);
+  background: var(--bg, #181818);
 }
 
 .workspace-add__button:focus-visible {
@@ -252,5 +252,5 @@
   align-items: center;
   justify-content: center;
   color: var(--danger-text, #e4606d);
-  font-size: 12px;
+  font-size: var(--font-size-sm, 12px);
 }
