@@ -4,11 +4,13 @@ import { createDockview, themeDark } from "dockview";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService } from "./services/model-service";
+import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { setupGatewayConfigBridge } from "./ui/gateway-config-bridge";
 import { markdownReady } from "./ui/markdown-render";
 import { StatusBar } from "./ui/status-bar";
+import { UpdateView } from "./ui/update-view";
 import { setupWindowChrome } from "./ui/window-chrome";
 import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/window-menu";
 import { setupWorkspaceDrops } from "./ui/workspace-drops";
@@ -38,6 +40,9 @@ if (!statusBarRoot) {
   throw new Error("DOM Error: .status-bar not found in the page.");
 }
 const statusBar = disposables.add(new StatusBar(statusBarRoot));
+const updates = disposables.add(new UpdateService());
+disposables.add(new UpdateView(updates));
+updates.startAutoCheck();
 // The custom title bar stays hidden in a plain browser; it only appears
 // when the desktop shell sets its initialization flag.
 disposables.add(setupWindowChrome());
@@ -190,6 +195,7 @@ disposables.add(
     },
     modelMenu,
     profileMenu,
+    updates,
   }),
 );
 

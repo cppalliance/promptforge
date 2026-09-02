@@ -30,6 +30,10 @@ The generated config leaves `workshop.open_browser` off. Setting it in a boot co
 
 The desktop build has no native-backend feature flags. At run time the artifact store downloads the pinned whisper.cpp bundle for the host - CUDA on Windows, Metal on Apple Silicon, and CPU on the other supported targets - alongside the managed `llama-server`.
 
+## Updates
+
+The installed desktop app checks the latest GitHub Release after startup. Signed updater bundles are verified with the public key embedded in `tauri.conf.json`; the matching private key exists only in the release workflow secrets. Help > About PromptForge also provides a manual check.
+
 ## Minimum Rust Version
 
 Rust 1.89 or later.
