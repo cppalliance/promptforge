@@ -1,0 +1,27 @@
+/* The token ring gauge (token-ring.ts imports this file; esbuild
+   bundles it into dist/app.css). Geometry (radii, stroke width, dash
+   math) lives in the TS; these rules cover only paint and size. Themed
+   values come from the :root tokens in style.css; every var() carries
+   a fallback so a deleted token degrades instead of breaking. */
+
+.token-ring {
+  display: block;
+  inline-size: var(--token-ring-size, 16px);
+  block-size: var(--token-ring-size, 16px);
+}
+
+.token-ring-background,
+.token-ring-progress {
+  fill: none;
+}
+
+.token-ring-background {
+  stroke: var(--token-ring-track, color-mix(in srgb, #F0F0F0 8%, transparent));
+}
+
+.token-ring-progress {
+  stroke: var(--token-ring-fill, color-mix(in srgb, #F0F0F0 74%, transparent));
+  /* SVG arcs start at three o'clock; rotate so the fill grows from twelve. */
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
