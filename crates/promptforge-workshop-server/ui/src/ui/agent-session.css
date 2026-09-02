@@ -181,31 +181,9 @@
   border: 1px solid var(--border, #2a2a2a);
 }
 
-.agent-item__calls {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1, 4px);
-}
-
-.agent-item__call {
-  display: flex;
-  gap: var(--space-2, 8px);
-  align-items: baseline;
-}
-
-.agent-item__call-name,
-.agent-item__call-args,
 .agent-item__output {
   font-family: var(--code-font, ui-monospace, monospace);
   font-size: var(--font-size-sm, 12px);
-}
-
-.agent-item__call-args {
-  color: var(--text-muted, #909090);
-  overflow-wrap: anywhere;
 }
 
 .agent-item__output {
