@@ -11,7 +11,7 @@ on:
         required: true
         default: "b4938"
   push:
-    branches: [master, whisper-shared-lib]
+    branches: [master]
     paths:
       - ".github/workflows/whisper-lib.yml"
       - "crates/whisper-ffi/**"
@@ -222,6 +222,7 @@ jobs:
 
   publish:
     needs: build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
