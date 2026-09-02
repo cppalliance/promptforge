@@ -118,9 +118,18 @@ jobs:
           New-Item -ItemType Directory -Path package, dist -Force | Out-Null
           Get-ChildItem stage -Recurse -Filter *.dll |
             ForEach-Object { Copy-Item $_.FullName package -Force }
+          $cudaBin = if ($env:CUDA_PATH) {
+            Join-Path $env:CUDA_PATH "bin"
+          } else {
+            $compiler = Get-Content build\CMakeCache.txt |
+              Where-Object { $_ -like "CMAKE_CUDA_COMPILER:FILEPATH=*" } |
+              Select-Object -First 1
+            if (-not $compiler) { throw "CMake did not record its CUDA compiler" }
+            Split-Path ($compiler -split "=", 2)[1] -Parent
+          }
           @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll") |
             ForEach-Object {
-              Get-ChildItem "$env:CUDA_PATH\bin" -Filter $_ |
+              Get-ChildItem $cudaBin -Filter $_ |
                 ForEach-Object { Copy-Item $_.FullName package -Force }
             }
           Copy-Item whisper.cpp\include\whisper.h package
