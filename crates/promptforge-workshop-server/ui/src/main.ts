@@ -7,6 +7,7 @@ import { ModelService } from "./services/model-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
 import { setupGatewayConfigBridge } from "./ui/gateway-config-bridge";
+import { markdownReady } from "./ui/markdown-render";
 import { StatusBar } from "./ui/status-bar";
 import { setupWindowChrome } from "./ui/window-chrome";
 import { setupWindowMenus, type ModelMenuService, type ProfileMenuService } from "./ui/window-menu";
@@ -60,6 +61,14 @@ disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // to its reconnecting state until the observer speaks again.
 disposables.add(workshopSocket.onDisconnect(() => statusBar.reset()));
 workshopSocket.connect();
+
+// Code blocks in the agent feed highlight through Shiki, whose init is
+// async; awaiting it here means the first painted message is never the
+// degraded unhighlighted render. A failed init must not block the boot -
+// the renderer degrades to plain <pre><code> blocks instead.
+await markdownReady.catch((error: unknown) => {
+  console.error("markdown highlighting failed to initialize; code blocks render unhighlighted:", error);
+});
 
 // Panels are created through the workshop registry: each component name
 // maps to a factory in panel-types, and openInZone places panels by zone
