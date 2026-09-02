@@ -24,6 +24,9 @@ tag-namespace = "promptforge-gateway-v"
 github-build-setup = "dist-ci/build-setup.yml"
 # Validate the release plan on pull requests without building anything.
 pr-run-mode = "plan"
+# The generated release workflow carries the custom release-test condition
+# below, so cargo-dist must preserve that intentional CI customization.
+allow-dirty = ["ci"]
 # The release gate: install and run the built archive on a clean machine
 # before the GitHub Release is created. github-release = "announce" defers
 # the release creation to the announce step, which needs the gate, so a
