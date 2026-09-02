@@ -1,10 +1,10 @@
 //! Dynamic library ownership and symbol resolution.
 
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::CStr;
 use std::fmt;
 use std::io;
 use std::path::Path;
-use std::ptr::{self, NonNull};
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 use crate::WhisperError;
@@ -23,7 +23,6 @@ pub(crate) struct Functions {
     print_system_info: raw::PrintSystemInfo,
     pub(crate) free: raw::Free,
     pub(crate) free_state: raw::FreeState,
-    log_set: raw::LogSet,
 }
 
 impl Functions {
@@ -68,7 +67,6 @@ impl Functions {
             )?,
             free: load_symbol(library, b"whisper_free\0", "whisper_free")?,
             free_state: load_symbol(library, b"whisper_free_state\0", "whisper_free_state")?,
-            log_set: load_symbol(library, b"whisper_log_set\0", "whisper_log_set")?,
         })
     }
 }
@@ -131,18 +129,6 @@ impl WhisperLibrary {
         })
     }
 
-    /// Routes whisper.cpp log records through `tracing`.
-    ///
-    /// The callback is process-global inside this loaded whisper runtime and
-    /// remains valid for the life of the Rust binary.
-    pub fn install_logging_hooks(&self) {
-        // SAFETY: log_callback has the exact ggml callback ABI and a null user
-        // pointer because the callback captures no external state.
-        unsafe {
-            (self.inner.functions.log_set)(Some(log_callback), ptr::null_mut());
-        }
-    }
-
     /// Returns whisper.cpp's native system-information line.
     ///
     /// # Errors
@@ -190,25 +176,6 @@ fn open_library(path: &Path) -> Result<libloading::Library, io::Error> {
     // SAFETY: LibraryInner retains the handle for at least as long as every
     // copied symbol and every native context using those symbols.
     unsafe { libloading::Library::new(path) }.map_err(io::Error::other)
-}
-
-unsafe extern "C" fn log_callback(level: c_int, text: *const c_char, _user_data: *mut c_void) {
-    if text.is_null() {
-        return;
-    }
-    // SAFETY: ggml invokes the callback with a null-terminated string that
-    // remains valid for the duration of the callback.
-    let message = unsafe { CStr::from_ptr(text) }.to_string_lossy();
-    let message = message.trim_end();
-    if message.is_empty() {
-        return;
-    }
-    match level {
-        0 | 1 => tracing::debug!(target: "whisper_cpp", "{message}"),
-        2 => tracing::info!(target: "whisper_cpp", "{message}"),
-        3 => tracing::warn!(target: "whisper_cpp", "{message}"),
-        _ => tracing::error!(target: "whisper_cpp", "{message}"),
-    }
 }
 
 pub(crate) fn system_info_has_gpu(info: &str) -> bool {

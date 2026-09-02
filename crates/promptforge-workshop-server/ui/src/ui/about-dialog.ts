@@ -64,6 +64,9 @@ export function showAboutDialog(updates?: UpdateService): IDisposable {
     if (!snapshot || snapshot.phase === "browser") {
       check.textContent = "Desktop updates unavailable";
       check.disabled = true;
+    } else if (snapshot.phase === "unsupported") {
+      check.textContent = "Updates are managed by your package manager";
+      check.disabled = true;
     } else if (snapshot.phase === "checking") {
       check.textContent = "Checking for updates...";
       check.disabled = true;

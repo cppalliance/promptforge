@@ -39,7 +39,9 @@ use archive::find_executable;
 use archive::require_executable;
 use assets::ArchiveKind;
 use assets::FileAsset;
-use assets::{LLAMA_RELEASE, ServerAsset, WHISPER_RELEASE, server_asset, whisper_asset};
+use assets::{
+    LLAMA_RELEASE, ServerAsset, WHISPER_RELEASE, WhisperAsset, server_asset, whisper_asset,
+};
 use confine::validate_tree_path;
 use digest::{file_digest_with_progress, tree_digest};
 use verified::{
@@ -94,6 +96,21 @@ struct InstallAsset<'a> {
     platform: &'a str,
     archives: &'a [assets::ArchiveRef<'a>],
     required_name: &'a str,
+    allow_cached_fallback: bool,
+}
+
+fn whisper_install_asset<'a>(
+    asset: WhisperAsset<'a>,
+    archives: &'a [assets::ArchiveRef<'a>],
+) -> InstallAsset<'a> {
+    InstallAsset {
+        family: "whisper.cpp",
+        release: WHISPER_RELEASE,
+        platform: asset.platform,
+        archives,
+        required_name: asset.library_name,
+        allow_cached_fallback: false,
+    }
 }
 
 /// How the `llama-server` executable is chosen, from the `[local]` config
@@ -236,16 +253,7 @@ impl ArtifactStore {
     pub fn provision_whisper_library(&self, progress: Option<&ProgressHandle>) -> Result<PathBuf> {
         let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH)?;
         let archives = [asset.archive];
-        self.provision_install(
-            InstallAsset {
-                family: "whisper.cpp",
-                release: WHISPER_RELEASE,
-                platform: asset.platform,
-                archives: &archives,
-                required_name: asset.library_name,
-            },
-            progress,
-        )
+        self.provision_install(whisper_install_asset(asset, &archives), progress)
     }
 
     /// Ensures a GGUF (or other blob) from `source` is available locally.
@@ -351,6 +359,7 @@ impl ArtifactStore {
                 platform: asset.platform,
                 archives: asset.archives,
                 required_name: asset.executable_name,
+                allow_cached_fallback: true,
             },
             progress,
         )
@@ -382,8 +391,9 @@ impl ArtifactStore {
                 download.as_ref(),
                 verify.as_ref(),
             ) {
-                if let Some(cached) =
-                    self.cached_install_fallback(asset.family, asset.required_name)?
+                if asset.allow_cached_fallback
+                    && let Some(cached) =
+                        self.cached_install_fallback(asset.family, asset.required_name)?
                 {
                     tracing::warn!(
                         path = %cached.display(),

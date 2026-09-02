@@ -144,6 +144,3 @@ pub(crate) type FullGetSegmentTextFromState =
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;
 pub(crate) type Free = unsafe extern "C" fn(*mut Context);
 pub(crate) type FreeState = unsafe extern "C" fn(*mut State);
-
-pub(crate) type LogCallback = unsafe extern "C" fn(c_int, *const c_char, *mut c_void);
-pub(crate) type LogSet = unsafe extern "C" fn(Option<LogCallback>, *mut c_void);

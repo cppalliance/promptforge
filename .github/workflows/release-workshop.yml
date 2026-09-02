@@ -288,7 +288,11 @@ jobs:
         working-directory: dist
         run: |
           shopt -s globstar nullglob
-          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage **/*.app.tar.gz > SHA256SUMS
+          files=(**/*.exe **/*.dmg **/*.deb **/*.AppImage **/*.app.tar.gz)
+          for file in "${files[@]}"; do
+            digest=$(sha256sum "$file" | cut -d ' ' -f 1)
+            printf '%s  %s\n' "$digest" "$(basename "$file")"
+          done | sort -k 2 > SHA256SUMS
           cat SHA256SUMS
 
       - name: Assemble latest.json
@@ -346,7 +350,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: PromptForge Workshop ${{ github.ref_name }}
-          make_latest: true
+          make_latest: false
           files: |
             dist/**/*.exe
             dist/**/*.dmg
@@ -356,3 +360,18 @@ jobs:
             dist/**/*.app.tar.gz
             dist/SHA256SUMS
             dist/latest.json
+
+      - name: Publish the stable updater pointer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view promptforge-workshop-latest >/dev/null 2>&1; then
+            gh release upload promptforge-workshop-latest dist/latest.json --clobber
+          else
+            gh release create promptforge-workshop-latest \
+              --target "$GITHUB_SHA" \
+              --title "PromptForge Workshop updater" \
+              --notes "Stable updater manifest for the latest tested Workshop release." \
+              --latest=false \
+              dist/latest.json
+          fi

@@ -49,6 +49,7 @@ await assertNoLeaks(lifecycle, async () => {
   };
   const service = new UpdateService({
     desktop: true,
+    supported: async () => true,
     currentVersion: async () => "0.2.0",
     check: async () => update,
     relaunch: async () => {
@@ -70,6 +71,22 @@ await assertNoLeaks(lifecycle, async () => {
   service.dispose();
   await Promise.resolve();
   check("disposing closes the native update handle", closed === 1);
+
+  let checked = 0;
+  const deb = new UpdateService({
+    desktop: true,
+    supported: async () => false,
+    currentVersion: async () => "0.2.0",
+    check: async () => {
+      checked += 1;
+      return null;
+    },
+    relaunch: async () => undefined,
+  });
+  await deb.checkNow();
+  check("package-managed Linux disables in-app updates", deb.snapshot.phase === "unsupported");
+  check("an unsupported package never checks the updater endpoint", checked === 0);
+  deb.dispose();
 });
 
 if (failures.length) {

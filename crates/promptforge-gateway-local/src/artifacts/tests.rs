@@ -1332,6 +1332,18 @@ fn provision_whisper_library_reuses_a_verified_install() {
 }
 
 #[test]
+fn whisper_installs_never_fall_back_to_an_older_abi() {
+    let asset =
+        whisper_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host whisper asset");
+    let archives = [asset.archive];
+    let install = whisper_install_asset(asset, &archives);
+    assert!(
+        !install.allow_cached_fallback,
+        "an older self-consistent install may not match the pinned FFI layout"
+    );
+}
+
+#[test]
 fn llama_server_path_from_the_config_wins_over_the_download() {
     let temp = TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path()).expect("store");
