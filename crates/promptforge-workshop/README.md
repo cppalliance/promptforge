@@ -26,9 +26,9 @@ The shell always boots the `default` profile. Development against an external ga
 
 The generated config leaves `workshop.open_browser` off. Setting it in a boot config the shell loads opens a browser tab in addition to the desktop window, because the gateway honors the flag wherever it runs; the flag is meant for running the gateway (or the standalone `promptforge-workshop-server`) without the shell.
 
-## Features
+## Native runtimes
 
-- `cuda` (default) - forwards to the gateway's `workshop-cuda`, which enables `promptforge-stt/cuda`, the whisper engine's CUDA backend. Building with it requires a Windows x86-64 host with the CUDA Toolkit. On a machine without it, build with `--no-default-features`: STT uses its CPU backend. Local inference is unaffected either way: the gateway downloads the right `llama-server` build for the host GPU at run time.
+The desktop build has no native-backend feature flags. At run time the artifact store downloads the pinned whisper.cpp bundle for the host - CUDA on Windows, Metal on Apple Silicon, and CPU on the other supported targets - alongside the managed `llama-server`.
 
 ## Minimum Rust Version
 

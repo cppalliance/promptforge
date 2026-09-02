@@ -46,8 +46,11 @@ pub fn routes(stt: SttState, push: Push) -> Router {
 }
 
 async fn capability(State(state): State<RouteState>) -> impl IntoResponse {
-    let gpu = promptforge_transcribe::gpu_transcription_available();
-    let engine = state.stt.is_active();
+    let engine = state.stt.engine();
+    let gpu = engine
+        .as_ref()
+        .is_some_and(|engine| engine.gpu_transcription_available());
+    let engine = engine.is_some();
     (
         [(header::CONTENT_TYPE, "application/json")],
         format!(r#"{{"gpu":{gpu},"engine":{engine}}}"#),

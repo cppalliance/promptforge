@@ -13,14 +13,12 @@ promptforge-progress.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-whisper-rs = { workspace = true, features = ["tracing_backend"] }
+whisper-ffi.workspace = true
 # Optional: only the test-fixtures feature decodes the WAV voice fixtures.
 hound = { workspace = true, optional = true }
 
 [features]
 default = []
-# GPU transcription: forwards to whisper-rs's CUDA backend and nothing else.
-cuda = ["whisper-rs/cuda"]
 # Compiles the crate-internal test fixtures and re-exports them to consumers'
 # integration-test binaries; enabled for every test build by the self
 # dev-dependency below, never by production consumers.

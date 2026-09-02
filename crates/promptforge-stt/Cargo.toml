@@ -25,7 +25,6 @@ tracing.workspace = true
 
 [features]
 default = []
-cuda = ["promptforge-transcribe/cuda"]
 test-fixtures = ["promptforge-transcribe/test-fixtures"]
 
 [dev-dependencies]

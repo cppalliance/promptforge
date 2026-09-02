@@ -1277,6 +1277,61 @@ fn provision_server_completes_download_verify_extract_leaves_on_a_warm_cache() {
 }
 
 #[test]
+#[expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
+fn provision_whisper_library_reuses_a_verified_install() {
+    let asset =
+        whisper_asset(std::env::consts::OS, std::env::consts::ARCH).expect("host whisper asset");
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+
+    let archive = temp
+        .path()
+        .join("downloads")
+        .join(asset.archive.archive_name);
+    std::fs::create_dir_all(archive.parent().expect("downloads parent")).expect("mkdir downloads");
+    std::fs::write(&archive, b"mock-archive-bytes").expect("write archive");
+    write_marker(&blob_marker_path(&archive), &archive, asset.archive.sha256)
+        .expect("write marker");
+
+    let install = temp
+        .path()
+        .join("whisper.cpp")
+        .join(format!("{WHISPER_RELEASE}-{}", asset.platform));
+    std::fs::create_dir_all(&install).expect("mkdir install");
+    std::fs::write(install.join(asset.library_name), b"mock-library").expect("write library");
+    let tree_digest = super::digest::tree_digest(&install).expect("tree digest");
+    std::fs::write(
+        install.join(INSTALL_MARKER),
+        format!("{}\n{tree_digest}\n", asset.archive.sha256),
+    )
+    .expect("write install marker");
+
+    let hub = Arc::new(ProgressHub::new());
+    let tree = hub.operation();
+    let whisper = tree.register("whisper-library", 1.0);
+    let provisioned = store
+        .provision_whisper_library(Some(&whisper))
+        .expect("warm-cache provision");
+    assert_eq!(provisioned, install.join(asset.library_name));
+
+    let nodes = &hub.snapshot()[0].nodes;
+    let paths: Vec<&str> = nodes.iter().map(|node| node.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "whisper-library",
+            "whisper-library/download",
+            "whisper-library/verify",
+            "whisper-library/extract",
+        ]
+    );
+    assert!(
+        nodes.iter().all(|node| node.fraction == 1.0),
+        "a verified whisper install completes every stage: {nodes:?}"
+    );
+}
+
+#[test]
 fn llama_server_path_from_the_config_wins_over_the_download() {
     let temp = TempDir::new().expect("tempdir");
     let store = ArtifactStore::new(temp.path()).expect("store");

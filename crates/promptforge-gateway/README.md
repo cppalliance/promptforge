@@ -83,15 +83,14 @@ Built with the `workshop` feature, the gateway can host the PromptForge Workshop
 cargo build -p promptforge-gateway --features workshop
 ```
 
-Five feature flags exist:
+Four feature flags exist:
 
 - `local` (default) - compiles in gateway-owned local inference via the `promptforge-gateway-local` crate: GGUF provisioning, managed `llama-server` children, the blob cache behind the `/v1/cache` routes, the `GET /admin/orphans` listing of cache files no loaded `[[local_model]]` entry references (sizes from the filesystem, digests only from cache sidecars - multi-gigabyte blobs are never re-hashed), the `GET /admin/model-info?path=` GGUF-header readout of a cache file's architecture, layer count, and parameter count (the `path` must stay inside the artifact cache; only the header is read, never tensor data), and the bearer-authenticated `GET /admin/chat-templates` catalog used by the Config UI. A `--no-default-features` build is headless of local inference: it links neither the archive/extraction stack nor a blocking HTTP client, and it refuses a configuration declaring `[[local_model]]` at startup and on profile switch.
 - `web-search` (default) - compiles in the Brave-powered `POST /v1/tools/web_search` tool service via the `promptforge-web-search-service` crate. A `--no-default-features` build omits the route entirely.
 - `workshop` - compiles the hosted workshop and gateway-owned `promptforge-stt` runtime, including `/stt` on the workshop listener and `/v1/audio/transcriptions` on the gateway listener.
 - `config-ui` (default) - compiles in the embedded config SPA via the `promptforge-gateway-config-ui` crate and serves it at `/config/` on the gateway's own port (no second listener); `GET /config` redirects to `/config/`. The routes are loopback-only and carry no bearer auth (the SPA shell holds no secrets); Node/esbuild and `rust-embed` enter the build only with this feature: Node 22 is needed on the build machine for the UI bundle's esbuild step, not for Rust itself, and a `--no-default-features` build needs no Node at all. Regardless of the feature, the admin config endpoints (config read/write, env, pending state, apply/revert, orphans, system, model-info, chat templates, the HF proxy, profile create/delete, reveal) sit behind the shared loopback wall from the always-on `promptforge-gateway-loopback` crate: a non-loopback peer gets 403 before bearer auth even runs.
-- `workshop-cuda` - implies `workshop` and enables `promptforge-stt/cuda`: the whisper CUDA backend for speech-to-text, which needs the CUDA Toolkit on the build machine. Local inference CUDA is a run-time concern instead: on Windows the gateway downloads a CUDA `llama-server` build when the host GPU calls for it (see below).
 
-The workshop's toolchain stays opt-in: Node/esbuild (the workshop UI bundle) and whisper enter the gateway build only with `--features workshop`.
+The workshop's toolchain stays opt-in: Node/esbuild enters the gateway build only with `--features workshop`. The speech runtime itself is a pinned managed download selected for the host at run time.
 
 ### The `[workshop]` section
 

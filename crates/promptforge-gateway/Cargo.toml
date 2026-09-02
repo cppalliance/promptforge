@@ -73,13 +73,9 @@ web-search = ["dep:promptforge-web-search-service"]
 # pipeline; --no-default-features builds skip the SPA crate entirely.
 config-ui = ["dep:promptforge-gateway-config-ui"]
 # Host the workshop UI server on a second loopback listener. The default
-# stays empty so headless gateway builds never pull whisper, CUDA, or the
+# stays empty so headless gateway builds never pull speech-to-text or the
 # Node UI build into the graph.
 workshop = ["dep:promptforge-stt", "dep:promptforge-workshop-server", "dep:open"]
-# The whisper CUDA backend for speech-to-text. Needs the CUDA Toolkit on the
-# build machine. Local inference CUDA is a run-time concern instead: the
-# gateway downloads a CUDA llama-server build (see promptforge-gateway-local).
-workshop-cuda = ["workshop", "promptforge-stt/cuda"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.

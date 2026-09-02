@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use promptforge_progress::ProgressHandle;
+use whisper_ffi::WhisperLibrary;
 
 use crate::SAMPLE_RATE;
 use crate::error::TranscribeError;
@@ -14,6 +15,8 @@ use crate::worker::Transcriber;
 /// configuration type, so the engine never depends back on its host.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EngineConfig {
+    /// Path to the provisioned whisper.cpp shared library.
+    pub library: PathBuf,
     /// Path to the GGML/GGUF whisper model for interim (streaming)
     /// transcription.
     pub interim_model: PathBuf,
@@ -38,6 +41,7 @@ pub struct EngineConfig {
 pub struct SttEngine {
     transcriber: Transcriber,
     final_pass: Option<FinalTranscriber>,
+    gpu_available: bool,
     window_samples: usize,
     interval: Duration,
 }
@@ -48,9 +52,10 @@ impl SttEngine {
     ///
     /// # Errors
     /// Returns [`TranscribeError::InvalidConfig`] when the window or interval
-    /// is zero, [`TranscribeError::LoadModel`] when a model file cannot be
-    /// loaded, and [`TranscribeError::SpawnWorker`] when a worker thread
-    /// cannot be started.
+    /// is zero, [`TranscribeError::LoadLibrary`] when the provisioned runtime
+    /// cannot be opened, [`TranscribeError::LoadModel`] when a model file
+    /// cannot be loaded, and [`TranscribeError::SpawnWorker`] when a worker
+    /// thread cannot be started.
     pub fn new(config: &EngineConfig) -> Result<Self, TranscribeError> {
         Self::new_with_progress(config, None)
     }
@@ -63,9 +68,10 @@ impl SttEngine {
     ///
     /// # Errors
     /// Returns [`TranscribeError::InvalidConfig`] when the window or interval
-    /// is zero, [`TranscribeError::LoadModel`] when a model file cannot be
-    /// loaded, and [`TranscribeError::SpawnWorker`] when a worker thread
-    /// cannot be started.
+    /// is zero, [`TranscribeError::LoadLibrary`] when the provisioned runtime
+    /// cannot be opened, [`TranscribeError::LoadModel`] when a model file
+    /// cannot be loaded, and [`TranscribeError::SpawnWorker`] when a worker
+    /// thread cannot be started.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "the caller hands its leaf handle to the engine, which registers per-model children on it"
@@ -74,7 +80,6 @@ impl SttEngine {
         config: &EngineConfig,
         progress: Option<ProgressHandle>,
     ) -> Result<Self, TranscribeError> {
-        whisper_rs::install_logging_hooks();
         if config.window_seconds == 0 {
             return Err(TranscribeError::InvalidConfig(
                 "stt.window_seconds must be at least 1".to_string(),
@@ -93,6 +98,21 @@ impl SttEngine {
                 "stt.window_seconds is too large".to_string(),
             ));
         };
+        require_model_file(&config.interim_model)?;
+        if let Some(final_model) = &config.final_model {
+            require_model_file(final_model)?;
+        }
+        let library = WhisperLibrary::load(&config.library).map_err(|source| {
+            TranscribeError::LoadLibrary {
+                path: config.library.clone(),
+                source: Box::new(source),
+            }
+        })?;
+        library.install_logging_hooks();
+        let gpu_available = library.gpu_available().unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not inspect whisper GPU support");
+            false
+        });
         let interim_progress = progress.as_ref().map(|handle| handle.child("interim", 1.0));
         let final_progress = match (&config.final_model, &progress) {
             (Some(_), Some(handle)) => Some(handle.child("final", 1.0)),
@@ -100,11 +120,16 @@ impl SttEngine {
         };
         // Both workers prewarm and load concurrently; the waits below only
         // collect the outcomes, with the interim outcome reported first.
-        let (transcriber, interim_init) =
-            Transcriber::spawn(&config.interim_model, &config.vocabulary, interim_progress)?;
+        let (transcriber, interim_init) = Transcriber::spawn(
+            library.clone(),
+            &config.interim_model,
+            &config.vocabulary,
+            interim_progress,
+        )?;
         let final_spawned = match &config.final_model {
             None => None,
             Some(final_model) => Some(FinalTranscriber::spawn(
+                library,
                 final_model,
                 &config.vocabulary,
                 final_progress,
@@ -125,6 +150,7 @@ impl SttEngine {
         Ok(Self {
             transcriber,
             final_pass,
+            gpu_available,
             window_samples,
             interval: Duration::from_millis(config.interval_ms),
         })
@@ -137,6 +163,12 @@ impl SttEngine {
     #[must_use]
     pub fn has_final_pass(&self) -> bool {
         self.final_pass.is_some()
+    }
+
+    /// Whether the loaded whisper.cpp runtime reports CUDA or Metal support.
+    #[must_use]
+    pub fn gpu_transcription_available(&self) -> bool {
+        self.gpu_available
     }
 
     /// Whether the final pass is absent. A test seam for the host's startup
@@ -226,6 +258,21 @@ impl SttEngine {
     }
 }
 
+fn require_model_file(path: &std::path::Path) -> Result<(), TranscribeError> {
+    let metadata = std::fs::metadata(path).map_err(|source| TranscribeError::LoadModel {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+    if metadata.is_file() {
+        Ok(())
+    } else {
+        Err(TranscribeError::LoadModel {
+            path: path.to_path_buf(),
+            source: Box::new(std::io::Error::other("model path is not a file")),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +283,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn transcribes_known_speech_fixture() {
         let config = EngineConfig {
+            library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
             window_seconds: 12,
             interval_ms: 500,
@@ -269,6 +317,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn missing_final_model_fails_engine_construction() {
         let config = EngineConfig {
+            library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
             final_model: Some(PathBuf::from("definitely-missing-final-model.bin")),
             window_seconds: 12,
@@ -291,6 +340,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_pass_entry_points_are_no_ops_without_a_final_model() {
         let config = EngineConfig {
+            library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
             window_seconds: 12,
             interval_ms: 500,

@@ -24,8 +24,6 @@ pub use error::TranscribeError;
 pub use segment::Segmenter;
 pub use slot::SttSlot;
 
-use std::path::Path;
-
 /// PCM sample rate the streaming wire format and whisper both require.
 pub const SAMPLE_RATE: usize = 16_000;
 
@@ -86,32 +84,6 @@ pub fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
 
-/// Returns true when STT can run on the GPU: the build
-/// carries the CUDA backend and an NVIDIA driver is present. Without both,
-/// whisper falls back to a CPU pass slow enough that the UI hides the mic
-/// rather than offering a take that stalls for half a minute.
-#[must_use]
-pub fn gpu_transcription_available() -> bool {
-    cfg!(feature = "cuda") && gpu_driver_present()
-}
-
-/// The CUDA driver library ships with every NVIDIA display driver.
-#[cfg(target_os = "windows")]
-fn gpu_driver_present() -> bool {
-    Path::new(r"C:\Windows\System32\nvcuda.dll").exists()
-}
-
-/// The primary NVIDIA device node exists once the driver is loaded.
-#[cfg(target_os = "linux")]
-fn gpu_driver_present() -> bool {
-    Path::new("/dev/nvidia0").exists()
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
-fn gpu_driver_present() -> bool {
-    false
-}
-
 /// Shared fixtures for the transcription tests: a small GGML whisper model
 /// and a 16 kHz mono WAV of known speech, both downloaded out of band (the
 /// URLs are recorded in the design log) and gitignored. Gated on the
@@ -152,7 +124,8 @@ pub mod fixtures {
     /// and the destination directory.
     #[must_use]
     pub fn require_model() -> PathBuf {
-        let path = model_path();
+        let path =
+            std::env::var_os("PROMPTFORGE_WHISPER_MODEL").map_or_else(model_path, PathBuf::from);
         assert!(
             path.is_file(),
             "test model missing: download ggml-tiny.en.bin from \
@@ -163,6 +136,44 @@ pub mod fixtures {
         path
     }
 
+    /// Path to the packaged whisper.cpp shared-library test fixture.
+    ///
+    /// # Panics
+    /// Panics when `PROMPTFORGE_WHISPER_LIBRARY` is unset or does not name a
+    /// file.
+    #[must_use]
+    pub fn require_library() -> PathBuf {
+        let path = std::env::var_os("PROMPTFORGE_WHISPER_LIBRARY")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        assert!(
+            path.is_file(),
+            "set PROMPTFORGE_WHISPER_LIBRARY to the packaged whisper shared library"
+        );
+        path
+    }
+
+    /// Loads the packaged whisper.cpp test library.
+    ///
+    /// # Panics
+    /// Panics when the fixture is absent or the platform loader rejects it.
+    #[must_use]
+    pub fn require_loaded_library() -> whisper_ffi::WhisperLibrary {
+        whisper_ffi::WhisperLibrary::load(&require_library()).expect("whisper test library loads")
+    }
+
+    /// Loads the packaged test library and tiny-model context.
+    ///
+    /// # Panics
+    /// Panics when either fixture is absent or whisper rejects the model.
+    #[must_use]
+    pub fn require_context() -> (whisper_ffi::WhisperLibrary, whisper_ffi::WhisperContext) {
+        let library = require_loaded_library();
+        let context = whisper_ffi::WhisperContext::new(&library, &require_model())
+            .expect("fixture model loads");
+        (library, context)
+    }
+
     /// Decodes `jfk.wav` (16 kHz mono s16 PCM, "ask not what your country
     /// can do for you") into f32 samples for the wire format.
     ///
@@ -171,7 +182,8 @@ pub mod fixtures {
     /// PCM.
     #[must_use]
     pub fn jfk_samples() -> Vec<f32> {
-        let path = fixture_dir().join("jfk.wav");
+        let path = std::env::var_os("PROMPTFORGE_WHISPER_AUDIO")
+            .map_or_else(|| fixture_dir().join("jfk.wav"), PathBuf::from);
         let mut reader =
             hound::WavReader::open(&path).expect("jfk.wav fixture exists beside the test model");
         let spec = reader.spec();
@@ -182,23 +194,16 @@ pub mod fixtures {
             .samples::<i16>()
             .collect::<Result<_, _>>()
             .expect("fixture decodes as s16 PCM");
-        let mut floats = vec![0.0; samples.len()];
-        whisper_rs::convert_integer_to_float_audio(&samples, &mut floats)
-            .expect("s16 to f32 conversion cannot fail");
-        floats
+        samples
+            .into_iter()
+            .map(|sample| f32::from(sample) / 32_768.0)
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn no_cuda_build_means_no_gpu_transcription() {
-        if !cfg!(feature = "cuda") {
-            assert!(!gpu_transcription_available());
-        }
-    }
 
     #[test]
     fn rms_of_silence_is_zero() {
