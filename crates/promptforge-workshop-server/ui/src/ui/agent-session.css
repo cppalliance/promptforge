@@ -258,7 +258,7 @@
 }
 
 /* The push-to-talk mic: an icon button the size of the send button, in
-   the raised tone so the accent stays on Send. voice.css paints the
+   the raised tone so the accent stays on Send. stt.css paints the
    hover glow and the recording fill over it. */
 .agent-session__mic {
   display: inline-flex;

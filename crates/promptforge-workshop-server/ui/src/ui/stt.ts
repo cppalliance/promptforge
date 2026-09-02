@@ -1,4 +1,4 @@
-// Push-to-talk voice capture over the /voice WebSocket: binary f32 PCM at
+// Push-to-talk dictation over the /stt WebSocket: binary f32 PCM at
 // 16 kHz mono in, "start"/"stop" control words, and JSON text frames out.
 // The server answers each "start" with a `stream` frame announcing the
 // take's generation and tags every interim/final frame with it; frames
@@ -10,21 +10,21 @@
 // releases readOnly; consecutive takes compose because the cursor position
 // is captured fresh each time.
 
-import "./voice.css";
+import "./stt.css";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 
-export interface VoiceElements {
+export interface SttElements {
   mic: HTMLButtonElement;
   input: HTMLTextAreaElement;
 }
 
 /**
- * The status-bar slice voice paints: local messages (blockers, capture
+ * The status-bar slice dictation paints: local messages (blockers, capture
  * failures, an empty take) and the REC badge. `StatusBar` satisfies it
  * structurally; tests hand in a recording fake.
  */
-export interface VoiceStatus {
+export interface SttStatus {
   showLocal(label: string, severity: "info" | "error"): void;
   setRecording(on: boolean): void;
 }
@@ -35,15 +35,15 @@ export interface VoiceStatus {
  * visible and clickable even when blocked, so the click can name the
  * blocker on the status bar instead of the control silently disappearing.
  */
-export type VoiceBlocker = () => string | null;
+export type SttBlocker = () => string | null;
 
-/** The per-tab voice control; dispose() unwires the mic and discards a live take. */
-export interface VoiceHandle extends IDisposable {
+/** The per-tab dictation control; dispose() unwires the mic and discards a live take. */
+export interface SttHandle extends IDisposable {
   discardIfRecording(): void;
 }
 
-/** The server's voice capability answer: what dictation can do here. */
-export interface VoiceCapability {
+/** The server's STT capability answer: what dictation can do here. */
+export interface SttCapability {
   /** Whether transcription can run on the GPU. */
   gpu: boolean;
   /** Whether an STT engine is provisioned and loaded in the active profile. */
@@ -51,12 +51,12 @@ export interface VoiceCapability {
 }
 
 /**
- * Asks the server what voice can do here. Any failure - transport, status,
+ * Asks the server what dictation can do here. Any failure - transport, status,
  * or a malformed body - answers null, which the caller treats as blocked.
  */
-export async function voiceCapability(): Promise<VoiceCapability | null> {
+export async function sttCapability(): Promise<SttCapability | null> {
   try {
-    const response = await fetch("/voice/capability");
+    const response = await fetch("/stt/capability");
     if (!response.ok) {
       return null;
     }
@@ -75,7 +75,7 @@ export async function voiceCapability(): Promise<VoiceCapability | null> {
   }
 }
 
-interface VoiceSession {
+interface SttSession {
   ws: WebSocket;
   ctx: AudioContext;
   source: MediaStreamAudioSourceNode;
@@ -90,19 +90,19 @@ interface TakeState {
 
 // One socket's announced stream generation (services/protocol.ts
 // StreamFrame), null until the server's announcement arrives. Tracked per
-// socket because each take opens its own /voice connection and the server
+// socket because each take opens its own /stt connection and the server
 // counts generations per connection.
 interface StreamTracker {
   current: number | null;
 }
 
-export function setupVoice(
-  elements: VoiceElements,
-  statusBar: VoiceStatus,
-  blocked: VoiceBlocker,
-): VoiceHandle {
+export function setupStt(
+  elements: SttElements,
+  statusBar: SttStatus,
+  blocked: SttBlocker,
+): SttHandle {
   const { mic, input } = elements;
-  let voice: VoiceSession | null = null;
+  let active: SttSession | null = null;
   let suppressReplies = false;
   let take: TakeState | null = null;
   // A stopped take's socket while its final is still in flight. The take
@@ -112,13 +112,13 @@ export function setupVoice(
   let pendingFinal: WebSocket | null = null;
 
   function setRecording(next: boolean): void {
-    mic.classList.toggle("voice-mic--recording", next);
+    mic.classList.toggle("stt-mic--recording", next);
     mic.setAttribute("aria-pressed", String(next));
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
   // Programmatic value sets don't fire the textarea's "input" event, so
-  // every voice-driven rewrite dispatches it: dictation behaves like typing
+  // every dictation-driven rewrite dispatches it: dictation behaves like typing
   // to whatever listens on the input.
   function notifyInput(): void {
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -134,7 +134,7 @@ export function setupVoice(
 
   // Tears down a session's audio half. The socket half is closed by the
   // caller, after any in-flight "stop" reply has had a chance to arrive.
-  function releaseAudio(session: VoiceSession): void {
+  function releaseAudio(session: SttSession): void {
     session.node.port.onmessage = null;
     session.source.disconnect();
     session.node.disconnect();
@@ -152,7 +152,7 @@ export function setupVoice(
     input.setSelectionRange(cursorPos, cursorPos);
     take = null;
     input.readOnly = false;
-    input.classList.remove("voice-input--recording");
+    input.classList.remove("stt-input--recording");
     notifyInput();
   }
 
@@ -163,13 +163,13 @@ export function setupVoice(
     input.setSelectionRange(cursorPos, cursorPos);
     take = null;
     input.readOnly = false;
-    input.classList.remove("voice-input--recording");
+    input.classList.remove("stt-input--recording");
     notifyInput();
   }
 
   // Handles one server text message. Returns true when the take is over and
   // the socket should close.
-  function handleVoiceMessage(data: unknown, stream: StreamTracker): boolean {
+  function handleSttMessage(data: unknown, stream: StreamTracker): boolean {
     if (suppressReplies) return true;
     if (typeof data !== "string") {
       return true;
@@ -240,12 +240,12 @@ export function setupVoice(
       suffix: value.slice(end),
     };
     input.readOnly = true;
-    input.classList.add("voice-input--recording");
+    input.classList.add("stt-input--recording");
   }
 
-  async function startVoice(): Promise<void> {
+  async function startStt(): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.WebSocket) {
-      statusBar.showLocal("Voice capture is not available in this browser.", "error");
+      statusBar.showLocal("Dictation is not available in this browser.", "error");
       return;
     }
     let stream: MediaStream;
@@ -270,12 +270,12 @@ export function setupVoice(
     let ctx: AudioContext | undefined;
     try {
       ws = new WebSocket(
-        `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/voice`,
+        `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/stt`,
       );
       ws.binaryType = "arraybuffer";
       await new Promise<void>((resolve, reject) => {
         ws!.addEventListener("open", () => resolve(), { once: true });
-        ws!.addEventListener("error", () => reject(new Error("the /voice socket failed to open")), {
+        ws!.addEventListener("error", () => reject(new Error("the /stt socket failed to open")), {
           once: true,
         });
       });
@@ -285,16 +285,16 @@ export function setupVoice(
       await ctx.audioWorklet.addModule("/pcm-worklet.js");
       const source = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, "pcm-capture");
-      const session: VoiceSession = { ws, ctx, source, node, stream };
+      const session: SttSession = { ws, ctx, source, node, stream };
       suppressReplies = false;
       node.port.onmessage = (event) => {
-        if (voice === session && ws!.readyState === WebSocket.OPEN) {
+        if (active === session && ws!.readyState === WebSocket.OPEN) {
           ws!.send(event.data);
         }
       };
       const generation: StreamTracker = { current: null };
       ws.addEventListener("message", (event) => {
-        if (handleVoiceMessage(event.data, generation)) {
+        if (handleSttMessage(event.data, generation)) {
           if (pendingFinal === ws) {
             pendingFinal = null;
           }
@@ -302,26 +302,26 @@ export function setupVoice(
         }
       });
       ws.addEventListener("close", () => {
-        if (voice === session) {
-          voice = null;
+        if (active === session) {
+          active = null;
           setRecording(false);
           statusBar.setRecording(false);
           if (take) finishTake("");
           releaseAudio(session);
-          statusBar.showLocal("The voice connection dropped.", "error");
+          statusBar.showLocal("The dictation connection dropped.", "error");
         } else if (pendingFinal === ws) {
           // Dropped, or the stop deadline closed it, before the final
           // landed: the take ends as a live drop does, on the pre-take text.
           pendingFinal = null;
           finishTake("");
-          statusBar.showLocal("The voice connection dropped before the final transcript.", "error");
+          statusBar.showLocal("The dictation connection dropped before the final transcript.", "error");
         }
       });
       source.connect(node);
       // The worklet renders silence, so reaching the destination is safe and
       // keeps the graph pulling on every engine.
       node.connect(ctx.destination);
-      voice = session;
+      active = session;
       beginTake();
       ws.send("start");
       setRecording(true);
@@ -336,13 +336,13 @@ export function setupVoice(
       if (ctx) {
         ctx.close().catch(() => {});
       }
-      statusBar.showLocal(`Voice capture failed: ${(error as Error).message || error}`, "error");
+      statusBar.showLocal(`Dictation failed: ${(error as Error).message || error}`, "error");
     }
   }
 
-  function stopVoice(): void {
-    const session = voice;
-    voice = null;
+  function stopStt(): void {
+    const session = active;
+    active = null;
     setRecording(false);
     statusBar.setRecording(false);
     if (!session) {
@@ -379,11 +379,11 @@ export function setupVoice(
   // in flight. Either way the socket closes, a late reply is ignored, and
   // the input returns to its pre-take text with readOnly lifted.
   function discardIfRecording(): void {
-    const session = voice;
+    const session = active;
     const awaited = pendingFinal;
     if (!session && !awaited) return;
     suppressReplies = true;
-    voice = null;
+    active = null;
     pendingFinal = null;
     if (session) {
       releaseAudio(session);
@@ -400,8 +400,8 @@ export function setupVoice(
   }
 
   const onMicClick = (): void => {
-    if (voice) {
-      stopVoice();
+    if (active) {
+      stopStt();
       return;
     }
     const reason = blocked();
@@ -409,7 +409,7 @@ export function setupVoice(
       statusBar.showLocal(reason, "info");
       return;
     }
-    void startVoice();
+    void startStt();
   };
   mic.addEventListener("click", onMicClick);
 

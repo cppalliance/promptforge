@@ -410,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn wav_decode_accepts_the_voice_wire_sample_rate() {
+    fn wav_decode_accepts_the_stt_wire_sample_rate() {
         let (samples, duration) = decode_wav(&wav(&[0, i16::MAX])).expect("WAV decodes");
         assert_eq!(samples.len(), 2);
         assert!(samples[1] > 0.99);

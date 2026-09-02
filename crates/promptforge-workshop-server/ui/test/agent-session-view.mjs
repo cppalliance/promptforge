@@ -52,8 +52,8 @@ globalThis.window = window;
 globalThis.document = window.document;
 globalThis.Event = window.Event;
 globalThis.KeyboardEvent = window.KeyboardEvent;
-// The view probes voice capability on mount; this suite is not about
-// voice (test/agent-voice.mjs is), so the probe fails and the mic stays
+// The view probes STT capability on mount; this suite is not about
+// dictation (test/agent-stt.mjs is), so the probe fails and the mic stays
 // gated. Any other fetch is a regression.
 globalThis.fetch = (url) =>
   Promise.reject(new Error(`unexpected fetch in the agent-session-view test: ${url}`));
@@ -118,7 +118,7 @@ function makeWire() {
   };
 }
 
-// Voice's status sink: this suite never records, so nothing lands here.
+// Dictation's status sink: this suite never records, so nothing lands here.
 const silentStatus = { showLocal() {}, setRecording() {} };
 
 function harness() {

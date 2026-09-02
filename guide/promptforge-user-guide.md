@@ -551,7 +551,7 @@ Every failure produces a specific, actionable message. A digest mismatch shows t
 
 ## Speech-to-Text User Guide
 
-The PromptForge gateway has a built-in speech-to-text runtime. It gives you two things at once: a live voice channel that streams interim transcripts while you speak, and an OpenAI-compatible file transcription endpoint that your existing client code can call without changes. Models are pinned by digest, provisioned automatically, and loaded only for the profile you select. This guide shows you how to configure the runtime, transcribe audio files, and run live voice sessions. When you finish, you will have a transcription service you can configure, call, and observe.
+The PromptForge gateway has a built-in speech-to-text runtime. It gives you two things at once: a live dictation channel that streams interim transcripts while you speak, and an OpenAI-compatible file transcription endpoint that your existing client code can call without changes. Models are pinned by digest, provisioned automatically, and loaded only for the profile you select. This guide shows you how to configure the runtime, transcribe audio files, and run live dictation sessions. When you finish, you will have a transcription service you can configure, call, and observe.
 
 ### What This Is
 
@@ -563,11 +563,11 @@ You interact with the runtime in two ways. You stream microphone audio over a We
 
 The gateway exposes three endpoints:
 
-- `GET /voice` - a WebSocket endpoint for live, streaming speech-to-text. Workshop clients use this persistent socket for voice interaction. Any WebSocket client can use it.
+- `GET /stt` - a WebSocket endpoint for live, streaming speech-to-text. Workshop clients use this persistent socket for dictation. Any WebSocket client can use it.
 - `POST /v1/audio/transcriptions` - an OpenAI-compatible multipart endpoint for file transcription. Existing OpenAI client tooling works against it without modification.
-- `GET /voice/capability` - a JSON probe that reports whether GPU-accelerated transcription is available.
+- `GET /stt/capability` - a JSON probe that reports whether GPU-accelerated transcription is available.
 
-Use `/voice` when you speak to the gateway in real time. Use `/v1/audio/transcriptions` when you have an audio file.
+Use `/stt` when you speak to the gateway in real time. Use `/v1/audio/transcriptions` when you have an audio file.
 
 ### Configuration and Runtime Lifecycle
 
@@ -632,10 +632,10 @@ Two configurations are rejected. A profile with a final model but no interim mod
 
 GPU-accelerated transcription through CUDA is a build-time feature. The `promptforge-workshop` desktop build enables it by default. A gateway build opts in with the `workshop-cuda` feature, which turns on the `promptforge-stt` crate's `cuda` feature.
 
-Before you start a voice session, query the capability endpoint to check GPU availability:
+Before you start a dictation session, query the capability endpoint to check GPU availability:
 
 ````bash
-curl "$GATEWAY/voice/capability"
+curl "$GATEWAY/stt/capability"
 ````
 
 The response reports GPU availability and whether an STT engine is provisioned and loaded in the active profile:
@@ -711,13 +711,13 @@ audio must be 16 kHz mono, got 44100 Hz and 2 channels
 
 Missing fields, invalid field values, unsupported response formats, bad WAV data, and inference failures each produce a distinct, identifiable error.
 
-### Voice Session Basics
+### Dictation Session Basics
 
-A live voice session runs over the `/voice` WebSocket. You open one connection, then run one or more push-to-talk takes on it.
+A live dictation session runs over the `/stt` WebSocket. You open one connection, then run one or more push-to-talk takes on it.
 
 The flow for one take:
 
-1. Open a WebSocket connection to `/voice`.
+1. Open a WebSocket connection to `/stt`.
 2. Send the text message `start` to begin a take.
 3. Receive a `stream` announcement frame. It carries a generation number that identifies the take.
 4. Send audio as binary WebSocket frames: 16 kHz mono little-endian 32-bit float PCM, 4 bytes per sample.
@@ -729,7 +729,7 @@ Control messages are bare words, not JSON. Committed text is append-only: once w
 
 You can run multiple takes on one connection without reconnecting. State resets between takes. Send `start` again mid-connection to restart with an incremented generation. Generation counters are per-connection: a new connection starts numbering at 1.
 
-### Voice Wire Protocol
+### Dictation Wire Protocol
 
 The wire contract, by example. You send bare control words and binary audio:
 
@@ -784,7 +784,7 @@ If the engine is swapped mid-stream, for example by a profile switch, the curren
 
 During a take, the gateway pushes live status updates to the workshop activity feed: "Listening...", "Transcribing...", and "Finalizing transcript...". Transcription failures produce visible failure notifications ("Transcription failed") in the feed rather than silent drops.
 
-The `/voice` endpoint accepts connections only from native clients (no `Origin` header) or allowed loopback origins. Cross-site requests are rejected. A foreign origin is refused with HTTP 403 at upgrade time, before any session starts.
+The `/stt` endpoint accepts connections only from native clients (no `Origin` header) or allowed loopback origins. Cross-site requests are rejected. A foreign origin is refused with HTTP 403 at upgrade time, before any session starts.
 
 ---
 

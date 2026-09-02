@@ -125,7 +125,7 @@ export class StatusBar extends Disposable {
     }, this.pulseMs());
   }
 
-  /** Shows a locally-originated message (e.g. voice capture errors). The next observer frame overwrites it. */
+  /** Shows a locally-originated message (e.g. dictation errors). The next observer frame overwrites it. */
   showLocal(label: string, severity: "info" | "error"): void {
     this.text.textContent = label;
     this.root.title = "";

@@ -8,8 +8,8 @@
 // renderMarkdown, whose DOMPurify pass is the last step before the DOM;
 // user text, tool output, and errors land through textContent.
 //
-// Voice dictation mounts on the same input: a push-to-talk mic beside the
-// send button drives voice.ts, which splices the transcript into the box
+// Dictation mounts on the same input: a push-to-talk mic beside the
+// send button drives stt.ts, which splices the transcript into the box
 // at the cursor. The mic stays visible and clickable whatever the state,
 // so a click while blocked names the blocker on the status bar (a probe
 // still in flight, a failed probe, no GPU, no provisioned speech models,
@@ -29,12 +29,12 @@ import type {
 import { renderMarkdown } from "./markdown-render";
 import { ToolCallCard } from "./tool-call-card";
 import {
-  setupVoice,
-  voiceCapability,
-  type VoiceCapability,
-  type VoiceHandle,
-  type VoiceStatus,
-} from "./voice";
+  setupStt,
+  sttCapability,
+  type SttCapability,
+  type SttHandle,
+  type SttStatus,
+} from "./stt";
 import { ICON_MIC } from "./workshop/icons";
 
 /** One painted feed row, kept for the identity diff. */
@@ -171,7 +171,7 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
  * The session surface: the transcript feed over the input form. The
  * input enables only while a wait is pinned; submitting answers the wait
  * through the service and clears the box on a successful send. The
- * status sink receives voice's local messages and REC badge state.
+ * status sink receives dictation's local messages and REC badge state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
@@ -179,14 +179,14 @@ export class AgentSessionView extends Disposable {
   private readonly input: HTMLTextAreaElement;
   private readonly mic: HTMLButtonElement;
   private readonly send: HTMLButtonElement;
-  private readonly voice: VoiceHandle;
+  private readonly stt: SttHandle;
   private rendered: RenderedRow[] = [];
   /** The capability probe's answer; undefined while it is in flight. */
-  private capability: VoiceCapability | null | undefined;
+  private capability: SttCapability | null | undefined;
 
   constructor(
     private readonly service: AgentSessionService,
-    status: VoiceStatus,
+    status: SttStatus,
   ) {
     super();
     this.element = document.createElement("section");
@@ -208,7 +208,7 @@ export class AgentSessionView extends Disposable {
     this.input.setAttribute("aria-label", "Message");
     this.mic = document.createElement("button");
     this.mic.type = "button";
-    this.mic.className = "agent-session__mic voice-mic";
+    this.mic.className = "agent-session__mic stt-mic";
     this.mic.title = "Push to talk";
     this.mic.setAttribute("aria-label", "Push to talk");
     this.mic.setAttribute("aria-pressed", "false");
@@ -242,7 +242,7 @@ export class AgentSessionView extends Disposable {
     this._register(
       this.service.onDidChangePendingInput((token) => {
         if (token === null) {
-          this.voice.discardIfRecording();
+          this.stt.discardIfRecording();
         }
         this.renderInputState();
       }),
@@ -250,23 +250,23 @@ export class AgentSessionView extends Disposable {
     this.renderFeed();
     this.renderInputState();
 
-    // The voice control over the mic and input; registered so disposing
+    // The dictation control over the mic and input; registered so disposing
     // the view unwires the mic and discards a live take. The blocker
     // names the first reason a take cannot start, capability before the
     // wait. The probe resolves after mount; a click that beats it is
-    // refused, because a server with no engine still accepts /voice and
+    // refused, because a server with no engine still accepts /stt and
     // answers an empty final, so an unchecked take would record for
     // nothing.
-    this.voice = this._register(
-      setupVoice({ mic: this.mic, input: this.input }, status, () => {
+    this.stt = this._register(
+      setupStt({ mic: this.mic, input: this.input }, status, () => {
         if (this.capability === undefined) {
-          return "Voice dictation is still checking what this server can do; try again in a moment.";
+          return "Dictation is still checking what this server can do; try again in a moment.";
         }
         if (this.capability === null) {
-          return "Voice dictation is unavailable: the server's capability probe failed.";
+          return "Dictation is unavailable: the server's capability probe failed.";
         }
         if (!this.capability.gpu) {
-          return "Voice dictation needs a GPU this server doesn't have.";
+          return "Dictation needs a GPU this server doesn't have.";
         }
         if (!this.capability.engine) {
           return "No speech models are provisioned in the active profile.";
@@ -277,7 +277,7 @@ export class AgentSessionView extends Disposable {
         return null;
       }),
     );
-    void voiceCapability().then((answer) => {
+    void sttCapability().then((answer) => {
       this.capability = answer;
     });
   }
@@ -343,7 +343,7 @@ export class AgentSessionView extends Disposable {
     }
     // Read before discarding: the discard restores the box to its
     // pre-take text, and the send carries what was showing.
-    this.voice.discardIfRecording();
+    this.stt.discardIfRecording();
     this.input.value = this.service.respond(text) ? "" : text;
   }
 }

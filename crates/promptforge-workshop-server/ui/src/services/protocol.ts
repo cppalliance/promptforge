@@ -1,7 +1,7 @@
 // The pure wire types of the workshop protocol: the JSON frame and payload
-// shapes exchanged with the server over /ws, /agents/ws, /voice, and
+// shapes exchanged with the server over /ws, /agents/ws, /stt, and
 // /v1/models. Types only - the socket logic that sends and routes these
-// frames stays in workshop-socket.ts, agent-socket.ts, and ui/voice.ts. The
+// frames stays in workshop-socket.ts, agent-socket.ts, and ui/stt.ts. The
 // Rust half of this contract is
 // crates/promptforge-workshop-server/src/protocol.rs; the two files
 // cross-cite each other so a shape change touches both or neither. The
@@ -253,7 +253,7 @@ export interface AgentCancelFrame {
 }
 
 /**
- * The /voice announcement that a `start` began a new stream generation,
+ * The /stt announcement that a `start` began a new stream generation,
  * sent before any of that generation's interim or final frames.
  * Generations count from 1 per connection; the client tracks the current
  * one and discards frames a stop/restart race left behind from a
@@ -265,7 +265,7 @@ export interface StreamFrame {
 }
 
 /**
- * One interim transcription push on /voice: the take's crystallized
+ * One interim transcription push on /stt: the take's crystallized
  * committed prefix (append-only within a take) plus the interim model's
  * decode of the audio past it, tagged with the take's stream generation.
  */
@@ -277,7 +277,7 @@ export interface InterimFrame {
 }
 
 /**
- * The take's single stop reply on /voice: the assembled transcript plus
+ * The take's single stop reply on /stt: the assembled transcript plus
  * the total PCM frames received since the take's start, tagged with the
  * take's stream generation.
  */

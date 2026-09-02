@@ -9,7 +9,7 @@ The process has two zones with opposite failure postures. The boundary: config l
 - Zone one (construction/startup): return rich errors to the host. This crate is embeddable, so it never panics for configuration, binding, asset, or initialization failures; a misconfigured process must not limp into serving, but the host decides how the failure surfaces. Binary entry points may convert a returned error to a failing exit status.
 - Zone two (steady state): never panic, and never `unwrap` anything a client sent. Errors are values: error frames, 4xx/5xx responses, status-bus reports, or logged degradation. A lock poisoned by a panicking peer recovers the value rather than wedging the process.
 
-Degrade-not-crash features (voice provisioning, gateway outages) are zone two by definition: absence of a capability is a state, not an error.
+Degrade-not-crash features (STT provisioning, gateway outages) are zone two by definition: absence of a capability is a state, not an error.
 
 ## WebSocket session model
 
@@ -55,4 +55,4 @@ No content hashes in asset filenames and no cache headers: the workshop UI is a 
 
 ## Transcription boundary
 
-The gateway owns STT through `promptforge-stt`: artifact provisioning, engine construction and teardown, the `/voice` WebSocket, and OpenAI multipart transcription all stay outside this crate. This crate supplies the Workshop listener, status bus, and cross-site guard that the gateway-owned voice routes attach to through `spawn_with_routes`. It never depends on `promptforge-transcribe` or holds whisper model state.
+The gateway owns STT through `promptforge-stt`: artifact provisioning, engine construction and teardown, the `/stt` WebSocket, and OpenAI multipart transcription all stay outside this crate. This crate supplies the Workshop listener, status bus, and cross-site guard that the gateway-owned STT routes attach to through `spawn_with_routes`. It never depends on `promptforge-transcribe` or holds whisper model state.

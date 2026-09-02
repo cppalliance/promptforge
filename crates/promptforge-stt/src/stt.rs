@@ -1,4 +1,4 @@
-//! The `/voice` WebSocket endpoint with its existing streaming wire contract.
+//! The `/stt` WebSocket endpoint with its existing streaming wire contract.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -21,31 +21,31 @@ use crate::runtime::SttState;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
-const VOICE_START: &str = "start";
-const VOICE_STOP: &str = "stop";
+const STT_START: &str = "start";
+const STT_STOP: &str = "stop";
 
 #[derive(Debug, Clone)]
-struct VoiceState {
+struct RouteState {
     stt: SttState,
     push: Push,
 }
 
-/// Builds the workshop-listener voice routes.
+/// Builds the workshop-listener STT routes.
 ///
-/// The routes preserve `/voice` and `/voice/capability`. The shared workshop
+/// The routes serve `/stt` and `/stt/capability`. The shared workshop
 /// cross-site guard protects both routes, and the upgrade performs the
 /// existing explicit Origin check as a second WebSocket-specific layer.
 pub fn routes(stt: SttState, push: Push) -> Router {
     Router::new()
-        .route("/voice/capability", get(capability))
-        .route("/voice", get(upgrade))
+        .route("/stt/capability", get(capability))
+        .route("/stt", get(upgrade))
         .route_layer(axum::middleware::from_fn(
             promptforge_workshop_server::cross_site_guard,
         ))
-        .with_state(VoiceState { stt, push })
+        .with_state(RouteState { stt, push })
 }
 
-async fn capability(State(state): State<VoiceState>) -> impl IntoResponse {
+async fn capability(State(state): State<RouteState>) -> impl IntoResponse {
     let gpu = promptforge_transcribe::gpu_transcription_available();
     let engine = state.stt.is_active();
     (
@@ -55,7 +55,7 @@ async fn capability(State(state): State<VoiceState>) -> impl IntoResponse {
 }
 
 async fn upgrade(
-    State(state): State<VoiceState>,
+    State(state): State<RouteState>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -420,7 +420,7 @@ fn begin_take(
         "a push-to-talk take is recording",
         Activity::General,
     );
-    tracing::info!(session, "voice capture started");
+    tracing::info!(session, "stt capture started");
     take
 }
 
@@ -460,7 +460,7 @@ struct SessionClose {
 impl Drop for SessionClose {
     fn drop(&mut self) {
         self.push.push_idle();
-        tracing::info!(session = self.session, "voice session closed");
+        tracing::info!(session = self.session, "stt session closed");
     }
 }
 
@@ -511,7 +511,7 @@ impl SessionAudio {
 
 async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
     let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-    tracing::info!(session, "voice session opened");
+    tracing::info!(session, "stt session opened");
     let _closed = SessionClose {
         session,
         push: push.clone(),
@@ -547,7 +547,7 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                     audio.receive(&payload, engine.as_deref(), &push);
                 }
                 Some(Ok(Message::Text(text))) => match text.as_str() {
-                    VOICE_START => {
+                    STT_START => {
                         audio.frames = 0;
                         audio.last_mic_pulse = None;
                         generation += 1;
@@ -564,7 +564,7 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                             &push,
                         );
                     }
-                    VOICE_STOP => {
+                    STT_STOP => {
                         take = None;
                         push.push_status_update(
                             "Finalizing transcript...",
@@ -579,7 +579,7 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                             &push,
                         )
                         .await;
-                        tracing::info!(session, frames = audio.frames, "voice capture stopped");
+                        tracing::info!(session, frames = audio.frames, "stt capture stopped");
                         if !send_frame(
                             &mut socket,
                             &FinalFrame::new(text, audio.frames, generation),
@@ -590,12 +590,12 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                         }
                         push.push_idle();
                     }
-                    _ => tracing::debug!(session, "ignoring an unknown voice control message"),
+                    _ => tracing::debug!(session, "ignoring an unknown stt control message"),
                 },
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Err(error)) => {
-                    tracing::warn!(session, %error, "voice session socket failed");
+                    tracing::warn!(session, %error, "stt session socket failed");
                     break;
                 }
             },
@@ -654,9 +654,9 @@ mod tests {
     }
 
     #[test]
-    fn the_voice_control_messages_are_bare_words() {
-        assert_eq!(VOICE_START, "start");
-        assert_eq!(VOICE_STOP, "stop");
+    fn the_stt_control_messages_are_bare_words() {
+        assert_eq!(STT_START, "start");
+        assert_eq!(STT_STOP, "stop");
     }
 
     #[test]

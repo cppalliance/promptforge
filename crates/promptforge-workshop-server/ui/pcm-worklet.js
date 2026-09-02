@@ -1,7 +1,7 @@
 "use strict";
 
 // Ships each mono f32 PCM block to the page, which forwards it over the
-// /voice WebSocket. Runs on the audio rendering thread inside an
+// /stt WebSocket. Runs on the audio rendering thread inside an
 // AudioContext constructed at 16 kHz, so blocks arrive already resampled.
 class PcmCaptureProcessor extends AudioWorkletProcessor {
   process(inputs) {

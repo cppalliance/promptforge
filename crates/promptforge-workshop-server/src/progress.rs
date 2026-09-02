@@ -6,7 +6,7 @@
 //! [`SHOW_DELAY`], stays up at least [`MIN_VISIBLE`] once shown, and
 //! displays the monotonic aggregate from [`ProgressMeter`]: the bar never
 //! flashes for sub-second work, never resets mid-operation, and never
-//! steps backward. Status texts ("Voice ready", failures) stay explicit
+//! steps backward. Status texts ("Listening...", failures) stay explicit
 //! push calls in the subsystems that own them; the trees own only
 //! fractional progress. When the hub's last tree detaches, the renderer
 //! returns the bar to rest with [`Push::push_idle`].
