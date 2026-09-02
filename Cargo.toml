@@ -37,6 +37,7 @@ promptforge-transcribe = { path = "crates/promptforge-transcribe", version = "0.
 promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.2.0" }
 promptforge-web-search-service = { path = "crates/promptforge-web-search-service", version = "0.2.0" }
 promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "0.2.0" }
+whisper-ffi = { path = "crates/whisper-ffi", version = "0.2.0" }
 workshop-agent = { path = "crates/workshop-agent", version = "0.2.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -110,10 +111,8 @@ tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 indicatif = "0.18"
-# Safe bindings to whisper.cpp; the C++ core is built from source by
-# whisper-rs-sys (cmake + MSVC required). Enable promptforge-stt's `cuda`
-# feature to build with GPU acceleration (needs the CUDA Toolkit).
-whisper-rs = "0.16"
+# Loads the packaged whisper.cpp runtime without linking it into Cargo builds.
+libloading = "0.8"
 # WAV parsing for STT uploads and transcription test fixtures.
 hound = "3.5"
 socket2 = { version = "0.6", features = ["all"] }

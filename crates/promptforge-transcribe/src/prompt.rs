@@ -1,6 +1,6 @@
 //! Whisper conditioning prompts: glossary fitting and transcript tails.
 
-use whisper_rs::WhisperContext;
+use whisper_ffi::WhisperContext;
 
 use crate::{MAX_PROMPT_CHARS, MAX_PROMPT_TOKENS};
 
@@ -48,12 +48,8 @@ pub(crate) fn glossary_prompt(vocabulary: &[String]) -> Option<String> {
 /// when tokenization fails (for example on null bytes, though callers
 /// strip those first).
 ///
-/// whisper-rs's `tokenize` cannot be asked "does this fit in N tokens":
-/// the underlying `whisper_tokenize` reports overflow by returning the
-/// required count, which the wrapper then passes to `Vec::set_len` on a
-/// buffer of only `max_tokens` capacity. Tokenizing with one slot per byte
-/// (an upper bound on the token count) and reading the real length
-/// sidesteps the overflow path entirely.
+/// Tokenizing with one slot per byte - an upper bound on the token count -
+/// means the native buffer always has enough capacity.
 fn token_count(ctx: &WhisperContext, text: &str) -> usize {
     ctx.tokenize(text, text.len().max(1))
         .map_or(usize::MAX, |tokens| tokens.len())
@@ -123,8 +119,6 @@ pub(super) fn final_prompt(
 
 #[cfg(test)]
 mod tests {
-    use whisper_rs::WhisperContextParameters;
-
     use super::*;
 
     use crate::{GLOSSARY_TOKEN_BUDGET, fixtures};
@@ -171,11 +165,7 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn fit_glossary_keeps_a_vocabulary_that_fits() {
-        let ctx = WhisperContext::new_with_params(
-            fixtures::require_model(),
-            WhisperContextParameters::default(),
-        )
-        .expect("fixture model loads");
+        let (_library, ctx) = fixtures::require_context();
         let vocabulary: Vec<String> = ["MCP", "GGUF", "Lua"].map(str::to_string).into();
         let fitted =
             fit_glossary(&ctx, &vocabulary, GLOSSARY_TOKEN_BUDGET).expect("a short glossary fits");
@@ -185,11 +175,7 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn fit_glossary_drops_terms_from_the_end_to_fit() {
-        let ctx = WhisperContext::new_with_params(
-            fixtures::require_model(),
-            WhisperContextParameters::default(),
-        )
-        .expect("fixture model loads");
+        let (_library, ctx) = fixtures::require_context();
         let mut vocabulary: Vec<String> = ["MCP".to_string()].into();
         for index in 0..200 {
             vocabulary.push(format!("internationalization{index}"));
@@ -219,11 +205,7 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_prompt_without_a_glossary_matches_sanitize() {
-        let ctx = WhisperContext::new_with_params(
-            fixtures::require_model(),
-            WhisperContextParameters::default(),
-        )
-        .expect("fixture model loads");
+        let (_library, ctx) = fixtures::require_context();
         let transcript = "the quick brown fox ".repeat(100);
         assert_eq!(
             final_prompt(&ctx, None, &transcript),
@@ -234,11 +216,7 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_prompt_prepends_the_glossary_and_caps_tokens() {
-        let ctx = WhisperContext::new_with_params(
-            fixtures::require_model(),
-            WhisperContextParameters::default(),
-        )
-        .expect("fixture model loads");
+        let (_library, ctx) = fixtures::require_context();
         let glossary = "Glossary: MCP, GGUF, Lua.";
         assert_eq!(
             final_prompt(&ctx, Some(glossary), ""),

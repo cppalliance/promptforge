@@ -1,8 +1,9 @@
-//! Pinned `llama-server` binaries and GGUF cache for gateway-owned local inference.
+//! Pinned native runtimes and GGUF cache for gateway-owned local inference.
 //!
 //! Downloads land under the operator cache (`~/.promptforge` by default). The
 //! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
+//! Speech-to-text uses a separately pinned whisper.cpp shared-library bundle.
 //!
 //! The module is split into cohesive units: `assets` (release table),
 //! `digest` (hashing + pin validation), `archive` (extraction),
@@ -38,7 +39,7 @@ use archive::find_executable;
 use archive::require_executable;
 use assets::ArchiveKind;
 use assets::FileAsset;
-use assets::{LLAMA_RELEASE, ServerAsset, server_asset};
+use assets::{LLAMA_RELEASE, ServerAsset, WHISPER_RELEASE, server_asset, whisper_asset};
 use confine::validate_tree_path;
 use digest::{file_digest_with_progress, tree_digest};
 use verified::{
@@ -84,6 +85,15 @@ pub(crate) struct ProvisionedServer {
     /// Child `PATH` prefix. Empty: every managed install ships its runtime
     /// DLLs beside the executable.
     pub(crate) path_prefix: Vec<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InstallAsset<'a> {
+    family: &'a str,
+    release: &'a str,
+    platform: &'a str,
+    archives: &'a [assets::ArchiveRef<'a>],
+    required_name: &'a str,
 }
 
 /// How the `llama-server` executable is chosen, from the `[local]` config
@@ -213,6 +223,31 @@ impl ArtifactStore {
         })
     }
 
+    /// Provisions the pinned whisper.cpp runtime for this host and returns
+    /// the shared library path.
+    ///
+    /// The archive is downloaded, digest-verified, and extracted under the
+    /// artifact cache. Its sibling ggml and GPU runtime libraries stay beside
+    /// the returned file for the platform loader.
+    ///
+    /// # Errors
+    /// Returns a [`LocalError`] when the platform is unsupported or download,
+    /// verification, extraction, or cache publication fails.
+    pub fn provision_whisper_library(&self, progress: Option<&ProgressHandle>) -> Result<PathBuf> {
+        let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+        let archives = [asset.archive];
+        self.provision_install(
+            InstallAsset {
+                family: "whisper.cpp",
+                release: WHISPER_RELEASE,
+                platform: asset.platform,
+                archives: &archives,
+                required_name: asset.library_name,
+            },
+            progress,
+        )
+    }
+
     /// Ensures a GGUF (or other blob) from `source` is available locally.
     ///
     /// `source` is either an `http(s)://` URL or a filesystem path (`~` expanded).
@@ -309,6 +344,23 @@ impl ArtifactStore {
         asset: ServerAsset<'_>,
         progress: Option<&ProgressHandle>,
     ) -> Result<PathBuf> {
+        self.provision_install(
+            InstallAsset {
+                family: "llama.cpp",
+                release: LLAMA_RELEASE,
+                platform: asset.platform,
+                archives: asset.archives,
+                required_name: asset.executable_name,
+            },
+            progress,
+        )
+    }
+
+    fn provision_install(
+        &self,
+        asset: InstallAsset<'_>,
+        progress: Option<&ProgressHandle>,
+    ) -> Result<PathBuf> {
         let download = progress.map(|handle| handle.child("download", 4.0));
         let verify = progress.map(|handle| handle.child("verify", 1.0));
         let extract = progress.map(|handle| handle.child("extract", 1.0));
@@ -330,12 +382,15 @@ impl ArtifactStore {
                 download.as_ref(),
                 verify.as_ref(),
             ) {
-                if let Some(executable) = self.cached_install_fallback(asset.executable_name)? {
+                if let Some(cached) =
+                    self.cached_install_fallback(asset.family, asset.required_name)?
+                {
                     tracing::warn!(
-                        path = %executable.display(),
-                        "llama-server download failed ({error}); using the cached install"
+                        path = %cached.display(),
+                        family = asset.family,
+                        "runtime download failed ({error}); using the cached install"
                     );
-                    return Ok(executable);
+                    return Ok(cached);
                 }
                 return Err(error);
             }
@@ -343,16 +398,16 @@ impl ArtifactStore {
         }
 
         let install = self.cache_path(
-            Path::new("llama.cpp").join(format!("{LLAMA_RELEASE}-{}", asset.platform)),
+            Path::new(asset.family).join(format!("{}-{}", asset.release, asset.platform)),
         )?;
         let _lock = self.lock_artifact(&install)?;
         validate_cache_path(&self.cache, &install)?;
-        if Self::install_is_valid(&install, &asset)? {
+        if Self::install_pins_are_valid(&install, asset.archives)? {
             // A valid install skips extraction entirely.
             if let Some(handle) = &extract {
                 handle.complete();
             }
-            return find_executable(&install, asset.executable_name, asset.platform);
+            return find_executable(&install, asset.required_name, asset.platform);
         }
 
         remove_cache_entry(&self.cache, &install)?;
@@ -375,7 +430,7 @@ impl ArtifactStore {
             }
         }
 
-        let staged_executable = find_executable(&staging, asset.executable_name, asset.platform)?;
+        let staged_executable = find_executable(&staging, asset.required_name, asset.platform)?;
         if asset
             .archives
             .iter()
@@ -408,18 +463,21 @@ impl ArtifactStore {
         Ok(install.join(relative_executable))
     }
 
-    /// Finds a usable older `llama-server` install in the cache: any install
-    /// directory whose own marker still verifies against its tree. Used when
-    /// a download fails, so a version bump plus a dead network does not stop
-    /// startup.
-    fn cached_install_fallback(&self, executable_name: &str) -> Result<Option<PathBuf>> {
-        let installs_dir = self.cache_path(Path::new("llama.cpp").to_path_buf())?;
+    /// Finds a usable older runtime install in `family`: any install whose
+    /// marker still verifies against its tree. Used when a version bump lands
+    /// while the network is unavailable.
+    fn cached_install_fallback(
+        &self,
+        family: &str,
+        required_name: &str,
+    ) -> Result<Option<PathBuf>> {
+        let installs_dir = self.cache_path(Path::new(family).to_path_buf())?;
         let entries = match fs::read_dir(&installs_dir) {
             Ok(entries) => entries,
             Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(source) => {
                 return Err(LocalError::Io {
-                    operation: "list llama.cpp installs",
+                    operation: "list runtime installs",
                     path: installs_dir,
                     source,
                 });
@@ -428,7 +486,7 @@ impl ArtifactStore {
         for entry in entries {
             let install = entry
                 .map_err(|source| LocalError::Io {
-                    operation: "read llama.cpp install entry",
+                    operation: "read runtime install entry",
                     path: installs_dir.clone(),
                     source,
                 })?
@@ -436,7 +494,7 @@ impl ArtifactStore {
             if !install.is_dir() || !Self::install_is_self_valid(&install)? {
                 continue;
             }
-            if let Ok(executable) = find_executable(&install, executable_name, "cached install") {
+            if let Ok(executable) = find_executable(&install, required_name, "cached install") {
                 return Ok(Some(executable));
             }
         }
@@ -473,7 +531,12 @@ impl ArtifactStore {
         Ok(tree_digest(install)? == *recorded_tree)
     }
 
+    #[cfg(test)]
     fn install_is_valid(install: &Path, asset: &ServerAsset<'_>) -> Result<bool> {
+        Self::install_pins_are_valid(install, asset.archives)
+    }
+
+    fn install_pins_are_valid(install: &Path, archives: &[assets::ArchiveRef<'_>]) -> Result<bool> {
         if !install.is_dir() {
             return Ok(false);
         }
@@ -491,15 +554,15 @@ impl ArtifactStore {
             }
         };
         let lines: Vec<&str> = marker_text.lines().collect();
-        if lines.len() != asset.archives.len() + 1 {
+        if lines.len() != archives.len() + 1 {
             return Ok(false);
         }
-        for (recorded, archive_ref) in lines.iter().zip(asset.archives.iter()) {
+        for (recorded, archive_ref) in lines.iter().zip(archives) {
             if *recorded != archive_ref.sha256 {
                 return Ok(false);
             }
         }
-        Ok(tree_digest(install)? == lines[asset.archives.len()])
+        Ok(tree_digest(install)? == lines[archives.len()])
     }
 
     /// `ensure_blob` variant that reports the download and verify stages

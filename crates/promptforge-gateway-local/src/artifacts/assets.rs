@@ -7,6 +7,8 @@ use crate::error::LocalError;
 
 /// The `llama.cpp` release tag every managed `llama-server` build is pinned to.
 pub(super) const LLAMA_RELEASE: &str = "b10082";
+/// The whisper.cpp release tag every managed shared library is pinned to.
+pub(super) const WHISPER_RELEASE: &str = "b4938";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArchiveKind {
@@ -46,6 +48,79 @@ pub(super) struct ServerAsset<'a> {
     pub(super) archives: &'a [ArchiveRef<'a>],
     pub(super) executable_name: &'a str,
 }
+
+/// A pinned whisper.cpp runtime archive and its loadable library.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct WhisperAsset<'a> {
+    pub(super) os: &'a str,
+    pub(super) arch: &'a str,
+    pub(super) platform: &'a str,
+    pub(super) archive: ArchiveRef<'a>,
+    pub(super) library_name: &'a str,
+}
+
+const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
+    WhisperAsset {
+        os: "windows",
+        arch: "x86_64",
+        platform: "windows-x86_64-cuda",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip",
+            sha256: "f1bc54d7288e21ee826ccb5767249836b780fc316bec4a0374873e73163dae12",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "whisper.dll",
+    },
+    WhisperAsset {
+        os: "macos",
+        arch: "aarch64",
+        platform: "macos-aarch64-metal",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-macos-aarch64-metal.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-macos-aarch64-metal.zip",
+            sha256: "2315c758f1a7a0a8a98e887d1b49b2418c1e95e75e12dd063472d855bfbe2f78",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "libwhisper.dylib",
+    },
+    WhisperAsset {
+        os: "macos",
+        arch: "x86_64",
+        platform: "macos-x86_64",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-macos-x86_64.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-macos-x86_64.zip",
+            sha256: "425664a05f844683bc1c9c26c52311cfc6546b9f72f3ce8fd4f096c5e93df22b",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "libwhisper.dylib",
+    },
+    WhisperAsset {
+        os: "linux",
+        arch: "x86_64",
+        platform: "linux-x86_64",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-linux-x86_64.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64.zip",
+            sha256: "0dc1a6adc29bfaecb6c2c8c8fc9ec2f903b25e6bfadd67bbdb239521f9101155",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "libwhisper.so",
+    },
+    WhisperAsset {
+        os: "linux",
+        arch: "aarch64",
+        platform: "linux-aarch64",
+        archive: ArchiveRef {
+            archive_name: "whisper-b4938-linux-aarch64.zip",
+            url: "https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-linux-aarch64.zip",
+            sha256: "1400ed00171e15596838ce839e5e90fab176f8653ead5b940dfda36bc5e68fc3",
+            archive_kind: ArchiveKind::Zip,
+        },
+        library_name: "libwhisper.so",
+    },
+];
 
 const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
     os: "windows",
@@ -199,6 +274,21 @@ fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {
     }
 }
 
+/// Selects the pinned whisper.cpp runtime for `(os, arch)`.
+///
+/// # Errors
+/// Returns [`LocalError::UnsupportedPlatform`] when no asset matches the host.
+pub(super) fn whisper_asset(os: &str, arch: &str) -> Result<WhisperAsset<'static>> {
+    WHISPER_ASSETS
+        .iter()
+        .copied()
+        .find(|asset| asset.os == os && asset.arch == arch)
+        .ok_or_else(|| LocalError::UnsupportedPlatform {
+            os: os.to_owned(),
+            arch: arch.to_owned(),
+        })
+}
+
 /// Selects the pinned GPU-capable `llama-server` asset for `(os, arch)`.
 ///
 /// `backend` (the `[local] llama_backend` setting) and `gpus` (the probed
@@ -283,5 +373,35 @@ mod tests {
     #[test]
     fn unsupported_platforms_are_an_error() {
         assert!(server_asset("freebsd", "x86_64", LlamaBackend::Auto, None).is_err());
+    }
+
+    #[test]
+    fn whisper_assets_cover_the_five_release_platforms() {
+        for (os, arch, library) in [
+            ("windows", "x86_64", "whisper.dll"),
+            ("macos", "aarch64", "libwhisper.dylib"),
+            ("macos", "x86_64", "libwhisper.dylib"),
+            ("linux", "x86_64", "libwhisper.so"),
+            ("linux", "aarch64", "libwhisper.so"),
+        ] {
+            let asset = whisper_asset(os, arch).expect("supported whisper platform");
+            assert_eq!(asset.library_name, library);
+            assert_eq!(asset.archive.archive_kind, ArchiveKind::Zip);
+            assert_eq!(asset.archive.sha256.len(), 64);
+            assert!(
+                asset
+                    .archive
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            );
+            assert!(
+                asset
+                    .archive
+                    .url
+                    .contains("/releases/download/whisper-lib-b4938/")
+            );
+        }
+        assert!(whisper_asset("freebsd", "x86_64").is_err());
     }
 }

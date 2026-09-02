@@ -112,14 +112,12 @@ cargo build -p promptforge-workshop --no-default-features
 
 ### Windows
 
-Install Visual Studio with the "Desktop development with C++" workload, CMake, and Node.js 22. The CUDA toolkit is needed only for the whisper CUDA feature, which the workshop enables by default on Windows.
+Install Visual Studio with the "Desktop development with C++" workload and Node.js 22. PromptForge downloads its pinned CUDA-enabled whisper.cpp runtime on first use, so building the workshop needs neither CMake nor the CUDA toolkit.
 
 ```bash
 cargo build
 cargo build -p promptforge-workshop
 ```
-
-On a machine without the CUDA toolkit, build the desktop app with `--no-default-features`: speech-to-text then uses its CPU backend and local inference keeps the managed `llama-server` download.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
@@ -167,6 +165,7 @@ flowchart LR
 | [promptforge-web-search](crates/promptforge-web-search) | Web search tool proxying through the gateway with credential isolation | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search.svg)](https://crates.io/crates/promptforge-web-search) |
 | [promptforge-web-search-service](crates/promptforge-web-search-service) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search-service.svg)](https://crates.io/crates/promptforge-web-search-service) |
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
+| [whisper-ffi](crates/whisper-ffi) | Runtime-loaded safe wrapper over PromptForge's pinned whisper.cpp C API | not published |
 | [promptforge-transcribe](crates/promptforge-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
 | [workshop-agent](crates/workshop-agent) | Workshop agent-program executor: `run_agent` drives `.lua` agent programs over the promptforge substrate | not published |
 | [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: agent sessions, model catalog passthrough, workspace API, and UI assets | not published |

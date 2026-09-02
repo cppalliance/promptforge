@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::Path;
 
 use promptforge_progress::ProgressHandle;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_ffi::{FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState};
 
 use crate::MAX_PROMPT_TOKENS;
 use crate::error::TranscribeError;
@@ -37,6 +37,7 @@ impl Transcriber {
     /// started. A model load failure arrives on the returned channel as
     /// [`TranscribeError::LoadModel`].
     pub(super) fn spawn(
+        library: WhisperLibrary,
         model_path: &Path,
         vocabulary: &[String],
         progress: Option<ProgressHandle>,
@@ -48,7 +49,16 @@ impl Transcriber {
         let vocabulary = vocabulary.to_vec();
         let worker = std::thread::Builder::new()
             .name("whisper-transcribe".to_string())
-            .spawn(move || worker_loop(&path, &vocabulary, progress.as_ref(), &job_rx, &init_tx))
+            .spawn(move || {
+                worker_loop(
+                    &library,
+                    &path,
+                    &vocabulary,
+                    progress.as_ref(),
+                    &job_rx,
+                    &init_tx,
+                );
+            })
             .map_err(TranscribeError::SpawnWorker)?;
         Ok((
             Self {
@@ -86,13 +96,14 @@ impl Drop for Transcriber {
 /// The worker thread's body: load the model, fit the glossary prompt, then
 /// transcribe jobs in arrival order until every sender is dropped.
 fn worker_loop(
+    library: &WhisperLibrary,
     path: &Path,
     vocabulary: &[String],
     progress: Option<&ProgressHandle>,
     job_rx: &std::sync::mpsc::Receiver<Job>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
 ) {
-    let Some((ctx, mut state)) = load_state(path, progress, init_tx) else {
+    let Some((ctx, mut state)) = load_state(library, path, progress, init_tx) else {
         return;
     };
     // The interim pass carries no transcript, so the glossary gets the full
@@ -114,11 +125,12 @@ fn worker_loop(
 /// `init_tx` (which the spawner blocks on). Returns `None` after reporting a
 /// failure, or when the spawner is already gone.
 pub(super) fn load_state(
+    library: &WhisperLibrary,
     path: &Path,
     progress: Option<&ProgressHandle>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
-) -> Option<(WhisperContext, whisper_rs::WhisperState)> {
-    let loaded = load_context(path, progress);
+) -> Option<(WhisperContext, WhisperState)> {
+    let loaded = load_context(library, path, progress);
     match loaded {
         Ok(pair) => {
             let _ = init_tx.send(Ok(()));
@@ -135,18 +147,17 @@ pub(super) fn load_state(
 /// byte-counted prewarm and the indeterminate whisper/CUDA init report as
 /// sibling leaves under `progress`.
 fn load_context(
+    library: &WhisperLibrary,
     path: &Path,
     progress: Option<&ProgressHandle>,
-) -> Result<(WhisperContext, whisper_rs::WhisperState), TranscribeError> {
+) -> Result<(WhisperContext, WhisperState), TranscribeError> {
     let prewarm_leaf = progress.map(|handle| handle.child("prewarm", 1.0));
     prewarm(path, prewarm_leaf.as_ref())?;
     let init_leaf = progress.map(|handle| handle.child("init", 1.0));
-    let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default()).map_err(
-        |source| TranscribeError::LoadModel {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        },
-    )?;
+    let ctx = WhisperContext::new(library, path).map_err(|source| TranscribeError::LoadModel {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
     let state = ctx
         .create_state()
         .map_err(|source| TranscribeError::LoadModel {
@@ -197,13 +208,15 @@ fn prewarm(path: &Path, progress: Option<&ProgressHandle>) -> Result<(), Transcr
 /// decoder on the take's transcript so far; `single_segment` forces the
 /// whole buffer into one decoding pass (the interim sliding-window case).
 pub(super) fn transcribe_blocking(
-    state: &mut whisper_rs::WhisperState,
+    state: &mut WhisperState,
     samples: &[f32],
     prompt: Option<&str>,
     single_segment: bool,
 ) -> Result<String, TranscribeError> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some("en"));
+    params
+        .set_language(Some("en"))
+        .map_err(|source| TranscribeError::Inference(Box::new(source)))?;
     params.set_translate(false);
     // Decoder state never carries across passes: conditioning travels only
     // through the explicit prompt, or a hallucination would compound.
@@ -219,16 +232,18 @@ pub(super) fn transcribe_blocking(
     if let Some(prompt) = prompt {
         let prompt = sanitize_prompt(prompt);
         if !prompt.is_empty() {
-            params.set_initial_prompt(&prompt);
+            params
+                .set_initial_prompt(&prompt)
+                .map_err(|source| TranscribeError::Inference(Box::new(source)))?;
         }
     }
     state
-        .full(params, samples)
+        .full(&params, samples)
         .map_err(|source| TranscribeError::Inference(Box::new(source)))?;
     let mut text = String::new();
-    for segment in state.as_iter() {
-        let piece = segment
-            .to_str_lossy()
+    for segment in 0..state.segment_count() {
+        let piece = state
+            .segment_text(segment)
             .map_err(|source| TranscribeError::Inference(Box::new(source)))?;
         text.push_str(&piece);
     }

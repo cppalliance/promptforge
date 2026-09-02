@@ -6,6 +6,17 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TranscribeError {
+    /// The provisioned whisper.cpp shared library could not be loaded.
+    #[non_exhaustive]
+    #[error("load whisper library {}", path.display())]
+    LoadLibrary {
+        /// Shared library path passed to the platform loader.
+        path: PathBuf,
+        /// The underlying loader or symbol-resolution error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// The whisper model file could not be loaded.
     #[non_exhaustive]
     #[error("load whisper model {}", path.display())]

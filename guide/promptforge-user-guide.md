@@ -630,7 +630,7 @@ Two configurations are rejected. A profile with a final model but no interim mod
 
 ### GPU Acceleration
 
-GPU-accelerated transcription through CUDA is a build-time feature. The `promptforge-workshop` desktop build enables it by default. A gateway build opts in with the `workshop-cuda` feature, which turns on the `promptforge-stt` crate's `cuda` feature.
+GPU acceleration is selected at run time from the managed whisper.cpp bundle. Windows x86-64 uses the pinned CUDA build, Apple Silicon uses Metal, and other supported targets use the pinned CPU build. Cargo builds need no CUDA toolkit or whisper.cpp toolchain.
 
 Before you start a dictation session, query the capability endpoint to check GPU availability:
 

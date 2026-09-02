@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use promptforge_progress::ProgressHandle;
-use whisper_rs::WhisperContext;
+use whisper_ffi::{WhisperContext, WhisperLibrary, WhisperState};
 
 use crate::error::TranscribeError;
 use crate::prompt::{final_prompt, fit_glossary};
@@ -18,7 +18,7 @@ use crate::{GLOSSARY_TOKEN_BUDGET, MIN_WINDOW_SAMPLES, is_silence};
 #[derive(Debug)]
 pub(crate) struct FinalPass {
     ctx: WhisperContext,
-    state: whisper_rs::WhisperState,
+    state: WhisperState,
     /// The fitted glossary prompt, `None` when no vocabulary is configured.
     glossary: Option<String>,
     /// Every segment transcript so far, joined by single spaces.
@@ -35,12 +35,13 @@ impl FinalPass {
     /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
     /// loaded.
     fn load(
+        library: &WhisperLibrary,
         path: &Path,
         vocabulary: &[String],
         progress: Option<&ProgressHandle>,
     ) -> Result<Self, TranscribeError> {
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
-        let Some((ctx, state)) = load_state(path, progress, &init_tx) else {
+        let Some((ctx, state)) = load_state(library, path, progress, &init_tx) else {
             return match init_rx.recv() {
                 Ok(Err(error)) => Err(error),
                 // `load_state` reports every outcome on the channel before
@@ -157,6 +158,7 @@ impl FinalTranscriber {
     /// started. A model load failure arrives on the returned channel as
     /// [`TranscribeError::LoadModel`].
     pub(super) fn spawn(
+        library: WhisperLibrary,
         model_path: &Path,
         vocabulary: &[String],
         progress: Option<ProgressHandle>,
@@ -169,7 +171,14 @@ impl FinalTranscriber {
         let worker = std::thread::Builder::new()
             .name("whisper-final".to_string())
             .spawn(move || {
-                final_worker_loop(&path, &vocabulary, progress.as_ref(), &job_rx, &init_tx);
+                final_worker_loop(
+                    &library,
+                    &path,
+                    &vocabulary,
+                    progress.as_ref(),
+                    &job_rx,
+                    &init_tx,
+                );
             })
             .map_err(TranscribeError::SpawnWorker)?;
         Ok((
@@ -248,13 +257,14 @@ impl Drop for FinalTranscriber {
 /// The final-pass worker's body: load the model, then process takes' jobs in
 /// arrival order until every sender is dropped.
 fn final_worker_loop(
+    library: &WhisperLibrary,
     path: &Path,
     vocabulary: &[String],
     progress: Option<&ProgressHandle>,
     job_rx: &std::sync::mpsc::Receiver<FinalJob>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
 ) {
-    let mut pass = match FinalPass::load(path, vocabulary, progress) {
+    let mut pass = match FinalPass::load(library, path, vocabulary, progress) {
         Ok(pass) => {
             let _ = init_tx.send(Ok(()));
             pass
@@ -324,7 +334,8 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_biases_segments_with_the_glossary() {
         let vocabulary: Vec<String> = ["MCP", "GGUF"].map(str::to_string).into();
-        let mut pass = FinalPass::load(&fixtures::require_model(), &vocabulary, None)
+        let library = fixtures::require_loaded_library();
+        let mut pass = FinalPass::load(&library, &fixtures::require_model(), &vocabulary, None)
             .expect("final pass loads the fixture model");
         let first = pass
             .transcribe_segment(&fixtures::jfk_samples())
@@ -362,6 +373,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_submit_reports_the_segment_on_the_take_channel() {
         let config = EngineConfig {
+            library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
             final_model: Some(fixtures::require_model()),
             window_seconds: 12,
@@ -408,6 +420,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_finish_with_a_silent_tail_returns_empty_after_draining() {
         let config = EngineConfig {
+            library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
             final_model: Some(fixtures::require_model()),
             window_seconds: 12,
@@ -443,7 +456,8 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_conditions_each_segment_on_the_accumulated_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model(), &[], None)
+        let library = fixtures::require_loaded_library();
+        let mut pass = FinalPass::load(&library, &fixtures::require_model(), &[], None)
             .expect("final pass loads the fixture model");
         let jfk = fixtures::jfk_samples();
 
@@ -495,7 +509,8 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_reset_forgets_the_accumulated_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model(), &[], None)
+        let library = fixtures::require_loaded_library();
+        let mut pass = FinalPass::load(&library, &fixtures::require_model(), &[], None)
             .expect("final pass loads the fixture model");
         let jfk = fixtures::jfk_samples();
 
@@ -526,7 +541,8 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn standalone_transcription_does_not_change_the_streaming_take() {
-        let mut pass = FinalPass::load(&fixtures::require_model(), &[], None)
+        let library = fixtures::require_loaded_library();
+        let mut pass = FinalPass::load(&library, &fixtures::require_model(), &[], None)
             .expect("final pass loads the fixture model");
         let jfk = fixtures::jfk_samples();
         let _first = pass
@@ -550,7 +566,8 @@ mod tests {
     #[test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_skips_silence_without_touching_the_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model(), &[], None)
+        let library = fixtures::require_loaded_library();
+        let mut pass = FinalPass::load(&library, &fixtures::require_model(), &[], None)
             .expect("final pass loads the fixture model");
         let segment = pass
             .transcribe_segment(&vec![0.0; SAMPLE_RATE * 2])

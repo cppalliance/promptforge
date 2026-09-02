@@ -115,10 +115,11 @@ impl SttRuntime {
     /// endpoint's degraded stop fallback.
     ///
     /// # Errors
-    /// Returns [`SttRuntimeError::Artifact`] when download or digest
-    /// verification fails, [`SttRuntimeError::MissingInterim`] when a final
-    /// model has no interim partner, or [`SttRuntimeError::Engine`] when
-    /// whisper cannot load the provisioned pair.
+    /// Returns [`SttRuntimeError::WhisperLibrary`] or
+    /// [`SttRuntimeError::Artifact`] when runtime or model provisioning fails,
+    /// [`SttRuntimeError::MissingInterim`] when a final model has no interim
+    /// partner, or [`SttRuntimeError::Engine`] when whisper cannot load the
+    /// provisioned pair.
     pub fn start(
         config: &Config,
         state: SttState,
@@ -130,6 +131,10 @@ impl SttRuntime {
         let cache = promptforge_gateway_local::resolve_cache_root(config.local().cache_dir())
             .map_err(SttRuntimeError::Store)?;
         let store = ArtifactStore::new(cache).map_err(SttRuntimeError::Store)?;
+        let library_progress = progress.map(|handle| handle.child("whisper-library", 1.0));
+        let library = store
+            .provision_whisper_library(library_progress.as_ref())
+            .map_err(SttRuntimeError::WhisperLibrary)?;
         let models = provision_models(config, &store, progress)?;
         let Some((interim_name, interim_path)) = models.interim else {
             return Err(SttRuntimeError::MissingInterim);
@@ -139,7 +144,8 @@ impl SttRuntime {
             .and_then(promptforge_gateway_config::WorkshopConfig::stt)
             .cloned()
             .unwrap_or_default();
-        let engine_config = engine_config(&capture, interim_path, models.final_model.as_ref());
+        let engine_config =
+            engine_config(&capture, library, interim_path, models.final_model.as_ref());
         let engine = SttEngine::new_with_progress(
             &engine_config,
             progress.map(|handle| handle.child("engine", 1.0)),
@@ -222,10 +228,12 @@ fn provision_models(
 
 fn engine_config(
     capture: &WorkshopSttConfig,
+    library: PathBuf,
     interim_model: PathBuf,
     final_model: Option<&(String, PathBuf)>,
 ) -> EngineConfig {
     EngineConfig {
+        library,
         interim_model,
         final_model: final_model.map(|(_, path)| path.clone()),
         vocabulary: capture.vocabulary().to_vec(),
@@ -242,6 +250,11 @@ pub enum SttRuntimeError {
     #[non_exhaustive]
     #[error("open STT artifact store")]
     Store(#[source] promptforge_gateway_local::LocalError),
+
+    /// The platform whisper.cpp runtime could not be provisioned.
+    #[non_exhaustive]
+    #[error("provision whisper library")]
+    WhisperLibrary(#[source] promptforge_gateway_local::LocalError),
 
     /// One model could not be provisioned.
     #[non_exhaustive]

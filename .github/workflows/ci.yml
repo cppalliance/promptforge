@@ -41,44 +41,22 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
-      # promptforge-gateway, promptforge-transcribe, and promptforge-stt are
-      # excluded from blanket commands: --all-features would enable their cuda
-      # features, which need a CUDA Toolkit these runners do not have. Their
-      # non-CUDA surfaces are exercised by the dedicated steps below.
+      # The desktop packages stay in their platform jobs because Linux needs
+      # Tauri system libraries. All gateway and STT features are pure Rust
+      # now that whisper.cpp is loaded from a managed runtime artifact.
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt --all-features
+        run: cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt --doc
+        run: cargo test --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt
-
-      # The transcription engine and STT runtime without their cuda features:
-      # whisper then builds its CPU backend, which needs no toolkit.
-      - name: Clippy (transcribe + stt)
-        run: cargo clippy -p promptforge-transcribe -p promptforge-stt --all-targets -- -D warnings
-
-      - name: Test (transcribe + stt)
-        run: cargo test --locked -p promptforge-transcribe -p promptforge-stt
-
-      - name: Docs (transcribe + stt)
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps -p promptforge-transcribe -p promptforge-stt
-
-      # The workshop feature hosts the ws-server UI; its build script bundles
-      # the UI with esbuild, which needs the node_modules installed above.
-      - name: Clippy (gateway)
-        run: cargo clippy -p promptforge-gateway --all-targets --features workshop -- -D warnings
-
-      - name: Test (gateway)
-        run: cargo test --locked -p promptforge-gateway --features workshop
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server
 
       # No build step may write into the repository (the UI bundles build
       # into OUT_DIR now); catch a regression here rather than in a diff.
@@ -114,20 +92,16 @@ jobs:
         run: npm ci
 
       # promptforge-workshop pins the gateway's config-ui feature, so its
-      # build script needs the config UI's node_modules even with
-      # --no-default-features.
+      # build script needs the config UI's node_modules.
       - name: Install config UI dependencies
         working-directory: crates/promptforge-gateway-config-ui/ui
         run: npm ci
 
-      # --no-default-features: the desktop crate defaults to the cuda
-      # feature, and windows-latest has no CUDA toolkit; CI builds the
-      # CPU-only whisper path instead.
       - name: Clippy (workshop)
-        run: cargo clippy -p promptforge-workshop -p promptforge-workshop-server --all-targets --no-default-features -- -D warnings
+        run: cargo clippy -p promptforge-workshop -p promptforge-workshop-server --all-targets -- -D warnings
 
       - name: Test (workshop)
-        run: cargo test --locked -p promptforge-workshop -p promptforge-workshop-server --no-default-features
+        run: cargo test --locked -p promptforge-workshop -p promptforge-workshop-server
 
       - name: Clean tree
         shell: bash
@@ -173,7 +147,7 @@ jobs:
         run: npm ci
 
       - name: Build (workshop, Linux)
-        run: cargo build --locked -p promptforge-workshop --no-default-features
+        run: cargo build --locked -p promptforge-workshop
 
       - name: Clean tree
         shell: bash
@@ -256,18 +230,8 @@ jobs:
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt --all-features
-          cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --exclude promptforge-gateway --exclude promptforge-transcribe --exclude promptforge-stt --all-features
-
-      - name: Build and test gateway on MSRV
-        run: |
-          cargo build --locked -p promptforge-gateway --features workshop
-          cargo test --locked -p promptforge-gateway --features workshop
-
-      - name: Build and test transcribe + stt on MSRV
-        run: |
-          cargo build --locked -p promptforge-transcribe -p promptforge-stt
-          cargo test --locked -p promptforge-transcribe -p promptforge-stt
+          cargo build --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
+          cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
 
   supply-chain:
     runs-on: ubuntu-latest

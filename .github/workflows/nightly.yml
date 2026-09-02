@@ -120,15 +120,15 @@ jobs:
             suffix: win-x64
           - name: macos-arm
             runs-on: macos-latest
-            args: "--target aarch64-apple-darwin -- --no-default-features"
+            args: "--target aarch64-apple-darwin"
             suffix: macos-arm64
           - name: macos-intel
             runs-on: macos-latest
-            args: "--target x86_64-apple-darwin -- --no-default-features"
+            args: "--target x86_64-apple-darwin"
             suffix: macos-x64
           - name: linux
             runs-on: ubuntu-22.04
-            args: "-- --no-default-features"
+            args: ""
             suffix: linux-x64
     runs-on: ${{ matrix.runs-on }}
     steps:
@@ -139,20 +139,6 @@ jobs:
       - name: Add the Rust target
         if: matrix.name != 'windows' && matrix.name != 'linux'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-
-      # whisper.cpp uses std::filesystem which requires macOS 10.15+.
-      # Env vars set via GITHUB_ENV don't reliably reach whisper-rs-sys's
-      # cmake build (tauri-action's process chain may not inherit them).
-      # .cargo/config.toml's [env] section is read directly by Cargo and
-      # passed to every build script, bypassing the inheritance chain.
-      - name: Set macOS deployment target
-        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
-        run: |
-          mkdir -p .cargo
-          cat >> .cargo/config.toml << 'EOF'
-          [env]
-          MACOSX_DEPLOYMENT_TARGET = "10.15"
-          EOF
 
       - uses: actions/setup-node@v4
         with:
@@ -165,30 +151,6 @@ jobs:
       - name: Install config UI dependencies
         working-directory: crates/promptforge-gateway-config-ui/ui
         run: npm ci
-
-      - name: Install the CUDA toolkit
-        if: matrix.name == 'windows'
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          version="13.2.0"
-          short="13.2"
-          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
-          echo "Downloading CUDA $version network installer..."
-          curl -Lo cuda_installer.exe "$url"
-          echo "Installing CUDA $version (this takes ~20 minutes)..."
-          ./cuda_installer.exe -s -n
-          rm -f cuda_installer.exe
-          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
-          if [ ! -f "$cuda_path/bin/nvcc.exe" ]; then
-            echo "nvcc not found at $cuda_path, searching..."
-            find "C:/Program Files/NVIDIA GPU Computing Toolkit" -name nvcc.exe 2>/dev/null || true
-            exit 1
-          fi
-          echo "CUDA installed at $cuda_path"
-          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
-          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
-          echo "$cuda_path/bin" >> "$GITHUB_PATH"
 
       - name: Install Tauri system packages
         if: matrix.name == 'linux'
