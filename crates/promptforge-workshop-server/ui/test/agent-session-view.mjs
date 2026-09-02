@@ -1,10 +1,11 @@
 // The agent-session view (src/ui/agent-session-view.ts) in jsdom, driven
 // through the real AgentSessionService over a scripted wire: durable
-// events paint semantic feed rows (user text, model-labelled replies,
-// collapsible reasoning, tool rows, tool output, error rows); streaming
-// deltas paint a pending row the durable event settles, with the settled
-// history never rebuilt; the input pins to the pending wait, answers it
-// byte-exact, and returns to disabled. Run: node test/agent-session-view.mjs
+// events paint semantic feed rows (user text, model-labelled replies as
+// sanitized markdown, collapsible reasoning, collapsible tool cards,
+// tool output, error rows); streaming deltas paint a pending row the
+// durable event settles, with the settled history never rebuilt; the
+// input pins to the pending wait, answers it byte-exact, and returns to
+// disabled. Run: node test/agent-session-view.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -150,6 +151,10 @@ await assertNoLeaks(lifecycle, () => {
       reply: 1,
     });
     wire.fire.event("tool_call_update", "the file body", { tool_call_id: "call_1" });
+    wire.fire.event("agent_message", "**bold** `code` <script>alert(1)</script>", {
+      model: "llama-3",
+      reply: 2,
+    });
 
     const [user, reply, reasoning, toolCall, toolResult] = rows();
     check(
@@ -163,30 +168,48 @@ await assertNoLeaks(lifecycle, () => {
         user?.querySelector(".agent-item__text")?.textContent === "hi <b>there</b>",
     );
     check(
-      "a reply row carries its model label",
+      "a reply row carries its model label and renders markdown",
       reply?.classList.contains("agent-item--reply") === true &&
         reply.querySelector(".agent-item__meta")?.textContent === "llama-3" &&
-        reply.querySelector(".agent-item__text")?.textContent === "hello back",
+        reply.querySelector(".markdown-content")?.textContent === "hello back",
     );
     const details = reasoning?.querySelector("details.agent-item__reasoning");
     check(
       "a thought paints a collapsible reasoning block naming its model",
       details !== null &&
         details?.querySelector("summary")?.textContent === "Reasoning (llama-3)" &&
-        details?.querySelector(".agent-item__text")?.textContent === "step one",
+        details?.querySelector(".markdown-content")?.textContent === "step one",
     );
     check("a settled reasoning block is collapsed", details?.open === false);
-    const callRows = [...(toolCall?.querySelectorAll(".agent-item__call") ?? [])];
+    const card = toolCall?.querySelector("details.tool-call-card");
     check(
-      "a tool-call batch paints one row per call with name and arguments",
-      callRows.length === 1 &&
-        callRows[0].querySelector(".agent-item__call-name")?.textContent === "read" &&
-        callRows[0].querySelector(".agent-item__call-args")?.textContent === '{"path":"a"}',
+      "a tool-call batch paints a card naming the tool with a call-count badge",
+      card !== null &&
+        card?.querySelector(".tool-call-card__name")?.textContent === "read" &&
+        card?.querySelector(".tool-call-card__count")?.textContent === "1",
+    );
+    check(
+      "the card body renders the call's arguments",
+      card?.querySelector(".tool-call-card__args")?.textContent?.includes('{"path":"a"}') === true,
+    );
+    check(
+      "a card whose result already landed starts collapsed",
+      card?.open === false && card?.classList.contains("tool-call-card--running") === false,
     );
     check(
       "a tool result paints its call id and preformatted output",
       toolResult?.querySelector(".agent-item__meta")?.textContent === "Tool result (call_1)" &&
         toolResult?.querySelector("pre.agent-item__output")?.textContent === "the file body",
+    );
+    const markdownRow = rows()[5];
+    check(
+      "a reply renders its markdown formatting, not the raw source",
+      markdownRow?.querySelector(".markdown-content strong")?.textContent === "bold" &&
+        markdownRow?.querySelector(".markdown-content code")?.textContent === "code",
+    );
+    check(
+      "model-authored markup is sanitized before it lands",
+      markdownRow?.querySelector("script") === null,
     );
     dispose();
   }
@@ -205,7 +228,7 @@ await assertNoLeaks(lifecycle, () => {
       rows().length === 2 &&
         pendingReasoning?.classList.contains("agent-item--pending") === true &&
         pendingReasoning.querySelector("details")?.open === true &&
-        pendingReasoning.querySelector(".agent-item__text")?.textContent === "let me think",
+        pendingReasoning.querySelector(".markdown-content")?.textContent === "let me think",
     );
     wire.fire.event("agent_thought", "let me think", { model: "m", reply: 0 });
     wire.fire.delta("text", "the ans", 0);
@@ -214,7 +237,7 @@ await assertNoLeaks(lifecycle, () => {
       "text deltas paint one pending reply after the settled thought",
       rows().length === 3 &&
         rows()[2]?.classList.contains("agent-item--pending") === true &&
-        rows()[2]?.querySelector(".agent-item__text")?.textContent === "the answer",
+        rows()[2]?.querySelector(".markdown-content")?.textContent === "the answer",
     );
     wire.fire.event("agent_message", "the answer", { model: "m", reply: 0 });
     check(
@@ -226,6 +249,51 @@ await assertNoLeaks(lifecycle, () => {
     check(
       "settled history is never rebuilt: the user row is the same node",
       rows()[0] === userRow,
+    );
+    dispose();
+  }
+
+  // --- Tool cards open while running and collapse when the result lands ------
+
+  {
+    const { wire, rows, dispose } = harness();
+    wire.fire.event("tool_call", '[{"id":"call_9","name":"read","arguments":{"path":"a"}}]', {
+      model: "m",
+      reply: 0,
+    });
+    const cardRow = rows()[0];
+    const card = cardRow?.querySelector("details.tool-call-card");
+    check(
+      "a tool card auto-opens while its call is running",
+      card?.open === true && card.classList.contains("tool-call-card--running"),
+    );
+    wire.fire.event("tool_call_update", "the file body", { tool_call_id: "call_9" });
+    check(
+      "the landing result collapses the card without rebuilding its row",
+      rows()[0] === cardRow &&
+        rows().length === 2 &&
+        card?.open === false &&
+        card.classList.contains("tool-call-card--running") === false,
+    );
+    check(
+      "the result still paints its own row",
+      rows()[1]?.querySelector("pre.agent-item__output")?.textContent === "the file body",
+    );
+    dispose();
+  }
+
+  // --- An unparsed tool-call batch paints its raw text in a card -------------
+
+  {
+    const { wire, rows, dispose } = harness();
+    wire.fire.event("tool_call", "not json at all", { model: "m", reply: 0 });
+    const card = rows()[0]?.querySelector("details.tool-call-card");
+    check(
+      "an unparsed batch paints a collapsed card carrying its raw text",
+      card !== null &&
+        card?.querySelector(".tool-call-card__raw")?.textContent === "not json at all" &&
+        card?.open === false &&
+        card?.classList.contains("tool-call-card--running") === false,
     );
     dispose();
   }

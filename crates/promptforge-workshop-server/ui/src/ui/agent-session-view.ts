@@ -4,7 +4,9 @@
 // objects when they change, so the first non-identical index marks where
 // the repaint starts, and everything before it (the settled history) is
 // never rebuilt. Every content string is untrusted model-, tool-, or
-// user-authored data and lands through textContent, never markup.
+// user-authored data: reply and reasoning markdown renders through
+// renderMarkdown, whose DOMPurify pass is the last step before the DOM;
+// user text, tool output, and errors land through textContent.
 //
 // Voice dictation mounts on the same input: a push-to-talk mic beside the
 // send button drives voice.ts, which splices the transcript into the box
@@ -19,7 +21,13 @@
 import "./agent-session.css";
 
 import { Disposable } from "../base/lifecycle";
-import type { AgentSessionService, TranscriptItem } from "../services/agent-session";
+import type {
+  AgentSessionService,
+  ToolCallItem,
+  TranscriptItem,
+} from "../services/agent-session";
+import { renderMarkdown } from "./markdown-render";
+import { ToolCallCard } from "./tool-call-card";
 import {
   setupVoice,
   voiceCapability,
@@ -33,6 +41,13 @@ import { ICON_MIC } from "./workshop/icons";
 interface RenderedRow {
   readonly item: TranscriptItem;
   readonly row: HTMLLIElement;
+  /**
+   * The row's tool card, when it paints one. A landing tool result
+   * appends a new item rather than replacing the call item, so the
+   * card's row survives the prefix diff and each repaint re-drives the
+   * card's running state.
+   */
+  readonly card?: ToolCallCard;
 }
 
 /** The muted origin line above a row's content. */
@@ -51,8 +66,45 @@ function textBlock(text: string): HTMLParagraphElement {
   return block;
 }
 
+/** The ids of every tool result in the transcript, for matching calls to outcomes. */
+function toolResultIds(items: readonly TranscriptItem[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item.kind === "tool-result" && item.toolCallId !== null && item.toolCallId !== "") {
+      ids.add(item.toolCallId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * True while a tool-call batch awaits its outcome: a batch runs until a
+ * tool-result whose toolCallId matches one of its calls lands. Calls
+ * without ids (an entry parsed with no string id, or an unparsed batch)
+ * can never match, so they have nothing to await.
+ */
+function isToolCallRunning(item: ToolCallItem, resultIds: ReadonlySet<string>): boolean {
+  let trackable = false;
+  for (const call of item.calls) {
+    if (call.id === "") {
+      continue;
+    }
+    if (resultIds.has(call.id)) {
+      return false;
+    }
+    trackable = true;
+  }
+  return trackable;
+}
+
+/** One rendered transcript item: its feed row plus its live tool card, when any. */
+interface PaintedItem {
+  readonly row: HTMLLIElement;
+  readonly card?: ToolCallCard;
+}
+
 /** Renders one transcript item as a feed row. */
-function renderItem(item: TranscriptItem): HTMLLIElement {
+function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): PaintedItem {
   const row = document.createElement("li");
   row.className = `agent-item agent-item--${item.kind}`;
   switch (item.kind) {
@@ -67,7 +119,7 @@ function renderItem(item: TranscriptItem): HTMLLIElement {
       if (item.model !== null) {
         row.appendChild(metaLine(item.model));
       }
-      row.appendChild(textBlock(item.text));
+      row.appendChild(renderMarkdown(item.text, { streaming: item.pending }));
       break;
     }
     case "reasoning": {
@@ -81,36 +133,15 @@ function renderItem(item: TranscriptItem): HTMLLIElement {
       block.open = item.pending;
       const summary = document.createElement("summary");
       summary.textContent = item.model === null ? "Reasoning" : `Reasoning (${item.model})`;
-      block.append(summary, textBlock(item.text));
+      block.append(summary, renderMarkdown(item.text, { streaming: item.pending }));
       row.appendChild(block);
       break;
     }
     case "tool-call": {
       row.appendChild(metaLine(item.model === null ? "Tool call" : `Tool call (${item.model})`));
-      if (item.calls.length === 0) {
-        // The batch JSON did not parse; the raw content still renders.
-        row.appendChild(textBlock(item.text));
-        break;
-      }
-      const calls = document.createElement("ul");
-      calls.className = "agent-item__calls";
-      for (const call of item.calls) {
-        const entry = document.createElement("li");
-        entry.className = "agent-item__call";
-        const name = document.createElement("code");
-        name.className = "agent-item__call-name";
-        name.textContent = call.name;
-        entry.appendChild(name);
-        if (call.args !== "") {
-          const args = document.createElement("code");
-          args.className = "agent-item__call-args";
-          args.textContent = call.args;
-          entry.appendChild(args);
-        }
-        calls.appendChild(entry);
-      }
-      row.appendChild(calls);
-      break;
+      const card = new ToolCallCard(item, { running: isToolCallRunning(item, resultIds) });
+      row.appendChild(card.element);
+      return { row, card };
     }
     case "tool-result": {
       row.appendChild(
@@ -133,7 +164,7 @@ function renderItem(item: TranscriptItem): HTMLLIElement {
       break;
     }
   }
-  return row;
+  return { row };
 }
 
 /**
@@ -270,10 +301,19 @@ export class AgentSessionView extends Disposable {
     for (const stale of this.rendered.splice(first)) {
       stale.row.remove();
     }
+    const resultIds = toolResultIds(items);
+    // A result that just landed leaves its call item's identity alone,
+    // so surviving cards are re-driven here; setRunning is a no-op on an
+    // unchanged state, so a card the operator opened is never slammed.
+    for (const painted of this.rendered) {
+      if (painted.card !== undefined && painted.item.kind === "tool-call") {
+        painted.card.setRunning(isToolCallRunning(painted.item, resultIds));
+      }
+    }
     for (const item of items.slice(first)) {
-      const row = renderItem(item);
-      this.feed.appendChild(row);
-      this.rendered.push({ item, row });
+      const painted = renderItem(item, resultIds);
+      this.feed.appendChild(painted.row);
+      this.rendered.push({ item, row: painted.row, card: painted.card });
     }
     this.feed.scrollTop = this.feed.scrollHeight;
   }
