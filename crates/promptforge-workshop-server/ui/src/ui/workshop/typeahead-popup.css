@@ -1,0 +1,55 @@
+/* TypeaheadPopup (src/ui/workshop/typeahead-popup.ts): the floating
+   @-mention suggestion list. The suggestion plugin's managed mount
+   appends the popup to document.body and writes position, left, and top
+   inline from the cursor rect (Floating UI), so this file owns only the
+   surface and the list. Themed values come from the :root tokens in
+   style.css, each with a fallback so a missing token degrades instead of
+   breaking the property. */
+
+.typeahead-popup {
+  position: absolute; /* a pre-mount default; mount() overwrites it inline */
+  z-index: 9999;
+  min-inline-size: 180px;
+  max-inline-size: 320px;
+  padding: var(--space-1, 4px);
+  background: var(--bg-elevated, #181818);
+  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  border-radius: var(--radius, 6px);
+  box-shadow: var(
+    --shadow-popup,
+    0 3px 8px rgb(0 0 0 / 12%),
+    0 2px 5px rgb(0 0 0 / 12%),
+    0 1px 1px rgb(0 0 0 / 12%)
+  );
+  font-size: var(--font-size-base, 13px);
+  line-height: var(--line-height-base, 18px);
+  letter-spacing: var(--letter-spacing-base, -0.08px);
+  color: var(--text, #F0F0F0);
+}
+
+/* A no-match query hides the popup while the session stays alive. */
+.typeahead-popup[hidden] {
+  display: none;
+}
+
+.typeahead-popup__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.typeahead-popup__item {
+  padding-block: var(--space-1, 4px);
+  padding-inline: var(--space-2, 8px);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The keyboard highlight; the rows are not focusable (the editor keeps
+   focus), so aria-selected on the option is the state of record. */
+.typeahead-popup__item--selected {
+  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
+}

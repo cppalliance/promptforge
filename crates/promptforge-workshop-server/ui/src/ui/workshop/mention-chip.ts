@@ -11,9 +11,27 @@
 
 import { Mention } from "@tiptap/extension-mention";
 import type { MentionNodeAttrs } from "@tiptap/extension-mention";
+import { PluginKey } from "@tiptap/pm/state";
 import { File, X, createElement } from "lucide";
+import { mentionTypeaheadItems, renderMentionTypeahead } from "./typeahead-popup";
 
 const ICON_SIZE_PX = 12;
+
+/** The slice of the suggestion session state read outside the popup. */
+interface MentionSuggestionState {
+  readonly active: boolean;
+}
+
+/**
+ * The plugin key of the mention suggestion session. The prompt input's
+ * Enter handling reads it to yield while the typeahead is open:
+ * editorProps handlers run before state plugins, so without the state
+ * check a submitting Enter would fire instead of the typeahead's
+ * selection.
+ */
+export const MentionSuggestionPluginKey = new PluginKey<MentionSuggestionState>(
+  "mentionNodeSuggestion",
+);
 
 /**
  * The configured mention extension: upstream Mention renamed to
@@ -84,8 +102,10 @@ export const MentionChip = Mention.extend({
 }).configure({
   suggestion: {
     char: "@",
-    // Seam for the typeahead step: `items` and `render` (the popup's
-    // onStart/onUpdate/onKeyDown/onExit lifecycle) attach here. The
-    // defaults (no items, no renderer) keep the trigger inert until then.
+    // A named key instead of the extension's anonymous default, so the
+    // prompt input can read the session state through it.
+    pluginKey: MentionSuggestionPluginKey,
+    items: ({ query }) => mentionTypeaheadItems(query),
+    render: renderMentionTypeahead,
   },
 });
