@@ -106,17 +106,17 @@ export function installShortcuts(dock: DockviewApi): IDisposable {
     // Zoom binds run before the Shift gate below: Ctrl+Shift+= reports
     // "+" for the same physical key Ctrl+= reports "=" for, and both are
     // the conventional zoom-in chord.
-    if (event.key === "=" || event.key === "+") {
+    if (event.code === "Equal" || event.key === "=" || event.key === "+") {
       event.preventDefault();
       zoomIn();
       return;
     }
-    if (event.key === "-") {
+    if (event.code === "Minus" || event.key === "-") {
       event.preventDefault();
       zoomOut();
       return;
     }
-    if (event.key === "0") {
+    if (event.code === "Digit0" || event.key === "0") {
       event.preventDefault();
       resetZoom();
       return;

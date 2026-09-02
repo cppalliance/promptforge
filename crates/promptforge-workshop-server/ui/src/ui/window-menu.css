@@ -6,14 +6,18 @@
   position: relative; /* popover positioning context */
   flex: none;
   display: flex;
-  align-items: stretch;
+  align-items: center;
 }
 
 .window-titlebar__menu {
-  padding: 0 var(--space-lg, 12px);
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-md);
   background: none;
   border: none;
-  color: var(--titlebar-foreground, #F0F0F0);
+  border-radius: 5px;
+  color: var(--titlebar-foreground);
   font: inherit;
   cursor: pointer;
   user-select: none;
@@ -21,28 +25,36 @@
 
 .window-titlebar__menu:hover,
 .window-titlebar__menu[aria-expanded="true"] {
-  background: var(--titlebar-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--titlebar-hover);
 }
 
 .window-titlebar__menu:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #e05a2b);
-  outline-offset: -1px;
+  outline: none;
+  background: var(--titlebar-hover);
 }
 
 /* Menu popovers: slightly raised near-black surfaces below the bar,
    absolutely positioned so they never participate in layout. Rows are
    compact - label left, shortcut right in muted text - and the purple
    accent is reserved for the focus/selection ring. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .window-titlebar__popover {
   position: absolute;
   top: 100%;
   z-index: 100;
-  min-width: var(--titlebar-popover-min-width, 200px);
-  padding: var(--space-xs, 4px) 0;
-  background: var(--bg-raised, #141414);
-  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  border-radius: var(--radius, 6px);
-  box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
+  display: flex;
+  flex-direction: column;
+  min-width: var(--titlebar-popover-min-width);
+  padding: var(--space-xs) 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--titlebar-popover-shadow);
+  animation: fadeIn 0.083s linear;
 }
 
 .window-titlebar__popover[hidden] {
@@ -52,31 +64,33 @@
 .window-titlebar__item {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-xl, 16px);
-  width: 100%;
-  padding: var(--space-xs, 4px) var(--space-lg, 12px);
+  align-items: center;
+  gap: var(--space-xl);
+  height: 2em;
+  padding: 0 8px;
+  margin: 0 4px;
+  border-radius: 4px;
   background: none;
   border: none;
-  color: var(--text, #F0F0F0);
+  color: var(--text);
   font: inherit;
   text-align: left;
+  white-space: nowrap;
   cursor: pointer;
   user-select: none;
 }
 
 .window-titlebar__item:hover {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--bg-hover);
 }
 
 .window-titlebar__item:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #e05a2b);
-  outline-offset: -1px;
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  outline: none;
+  background: var(--bg-hover);
 }
 
 .window-titlebar__item[aria-disabled="true"] {
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
   cursor: default;
 }
 
@@ -85,8 +99,8 @@
 }
 
 .window-titlebar__shortcut {
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
-  font-size: var(--font-size-sm, 12px);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
 }
 
 /* Checkable rows (the Model menu): a fixed-width check column keeps the
@@ -98,17 +112,17 @@
 .window-titlebar__item-check {
   width: 1.2em;
   flex: none;
-  color: var(--accent, #e05a2b);
+  color: var(--accent);
 }
 
 /* The pending mark: an ellipsis on the profile a switch is loading,
    muted where the settled check is accented. */
 .window-titlebar__item-check--pending {
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
 }
 
 .window-titlebar__separator {
   height: 1px;
-  margin: var(--space-xs, 4px) 0;
-  background: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  margin: 5px 0;
+  background: var(--border);
 }

@@ -1,10 +1,8 @@
 // Global window zoom: the Ctrl+= / Ctrl+- / Ctrl+0 keybindings and the
 // Window menu's zoom entries all dispatch through these functions, so
-// every surface shares one factor. On desktop the native webview zooms,
-// which scales the whole coordinate system and keeps fixed-position
-// overlays anchored; in a plain browser CSS zoom on the root element is
-// the degraded fallback. The factor persists to localStorage and is
-// restored at boot, since native webview zoom does not survive a restart.
+// every surface shares one factor. Desktop uses WebView2's viewport-aware
+// zoom; Dockview's resize animation is disabled in zones.css so its
+// dividers settle in the same paint. Browser mode uses CSS zoom.
 
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
@@ -16,8 +14,7 @@ const ZOOM_MAX = 2.0;
 const ZOOM_STEP = 0.1;
 const ZOOM_DEFAULT = 1.0;
 
-// The native webview has no synchronous zoom getter, so the last applied
-// factor is tracked here; restoreZoom() re-syncs it from storage at boot.
+// The last applied factor is tracked here and restored from storage at boot.
 let currentZoom = ZOOM_DEFAULT;
 
 /** The current zoom factor; 1.0 is 100%. */
@@ -34,8 +31,6 @@ function applyToWindow(factor: number): void {
       });
     return;
   }
-  // CSS zoom mispositions fixed-position overlays unless body establishes
-  // a positioning context (https://github.com/floating-ui/floating-ui/issues/3032).
   document.body.style.position = "relative";
   document.documentElement.style.zoom = String(factor);
 }

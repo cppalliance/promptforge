@@ -1,41 +1,30 @@
 /* PromptInput (src/ui/prompt-input.ts): the framed rich-text prompt box.
-   The container carries the frame (fill, border, radius); the inner
-   ProseMirror contenteditable carries the type and the JS-driven height,
-   clamped between the min/max tokens. Every value comes from the skin's
-   design tokens with a fallback, so a missing token degrades to these
-   defaults instead of breaking the property. */
+   The agent-session card carries the frame; the inner ProseMirror
+   contenteditable carries the type and the JS-driven height, clamped
+   between the min/max tokens. */
 
 .prompt-input {
-  background: var(--prompt-input-bg, color-mix(in srgb, #F0F0F0 6%, transparent));
-  border: 1px solid var(--prompt-input-border, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-radius: var(--prompt-input-radius, 6px);
-  transition: border-color var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
-}
-
-.prompt-input:focus-within {
-  border-color: var(--prompt-input-border-focus, color-mix(in srgb, #F0F0F0 12%, transparent));
+  transition: border-color var(--duration-fast) var(--ease-out-cubic);
 }
 
 .prompt-input__editor {
-  min-block-size: var(--prompt-input-min-height, 36px);
-  max-block-size: var(--prompt-input-max-height, 200px);
+  min-block-size: var(--prompt-input-min-height);
+  max-block-size: var(--prompt-input-max-height);
   overflow-y: auto;
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
-  font-size: var(--font-size-base, 13px);
-  line-height: var(--line-height-base, 18px);
-  letter-spacing: var(--letter-spacing-base, -0.08px);
-  color: var(--text, #F0F0F0);
+  padding: 0;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
 }
 
 .prompt-input__editor:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: -2px;
+  outline: none;
 }
 
 /* Non-editable is the contenteditable equivalent of disabled. */
 .prompt-input__editor[contenteditable="false"] {
-  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
+  color: var(--text);
 }
 
 /* The global reset does not zero paragraph margins; inside the editor a
@@ -51,7 +40,8 @@
   float: inline-start;
   block-size: 0;
   pointer-events: none;
-  color: var(--text-quaternary, color-mix(in srgb, #F0F0F0 36%, transparent));
+  color: var(--input-placeholder);
+  opacity: 0.5;
 }
 
 /* MentionChip (src/ui/workshop/mention-chip.ts): the inline pill for an
@@ -60,15 +50,15 @@
 .mention-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1, 4px);
-  block-size: var(--height-xs, 20px);
+  gap: var(--space-1);
+  block-size: var(--height-xs);
   max-inline-size: 240px;
-  padding-inline: var(--space-1-5, 6px);
-  border-radius: var(--radius-sm, 4px);
-  background: var(--mention-bg, color-mix(in srgb, #81A1C1 12%, transparent));
-  color: var(--mention-text, #81A1C1);
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-sm, 16px);
+  padding-inline: var(--space-1-5);
+  border-radius: var(--radius-sm);
+  background: var(--mention-bg);
+  color: var(--mention-text);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
   white-space: nowrap;
 }
 
@@ -90,12 +80,12 @@
   flex: none;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
+  transition: opacity var(--duration-fast) var(--ease-out-cubic);
 }
 
 .mention-chip:hover .mention-chip__remove,
@@ -104,11 +94,11 @@
 }
 
 .mention-chip__remove:hover {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--bg-hover);
 }
 
 .mention-chip__remove:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--bg-hover);
   opacity: 1;
 }

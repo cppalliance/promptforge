@@ -285,6 +285,24 @@ check(
   agentTab.classList.contains("dv-default-tab") &&
     agentTab.querySelector(".dv-default-tab-action") !== null,
 );
+agentTab.dispatchEvent(
+  new window.MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: 40,
+    clientY: 30,
+  }),
+);
+const agentTabMenu = window.document.querySelector(".workshop-dropdown");
+const agentTabMenuLabels = [...(agentTabMenu?.querySelectorAll(".workshop-dropdown__label") ?? [])]
+  .map((label) => label.textContent)
+  .join(",");
+check(
+  "right-clicking an agent tab opens the SPA context menu",
+  agentTabMenuLabels === "Close,Close Others",
+);
+window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+check("an outside pointer closes the agent tab menu", !window.document.querySelector(".workshop-dropdown"));
 treePanel.api.setTitle("Renamed");
 check(
   "the permanent tab follows title changes",
@@ -300,6 +318,17 @@ check(
   "reopening the agent session activates the same panel",
   openInZone("agent", {}) === agentPanel && dock.panels.length === 2,
 );
+const secondAgent = openInZone("agent", { instance: "second" });
+check("an agent instance keys to its own panel", panelIdFor("agent", { instance: "second" }) === "agent:second");
+check(
+  "a new agent instance opens a distinct panel in the right zone",
+  secondAgent !== agentPanel &&
+    dock.panels.length === 3 &&
+    zoneOfPanel(secondAgent) === "right",
+);
+dock.removePanel(secondAgent);
+await flush();
+check("closing the second agent restores the original panel count", dock.panels.length === 2);
 
 // --- The tree requests paths, never file contents ---------------------------
 

@@ -1,17 +1,12 @@
-/* The agent toolbar (agent-toolbar.ts imports this file; esbuild
-   bundles it into dist/app.css). Layout only - the children carry their
-   own trigger and gauge styles. Themed values come from the :root
-   tokens in style.css; every var() carries a fallback so a deleted
-   token degrades instead of breaking. */
-
 .agent-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-1, 4px);
-  block-size: var(--height-base, 28px);
+  gap: 0.55rem;
+  min-block-size: var(--height-base);
+  padding: 0;
+  border-block-start: none;
 }
 
-/* The ring pins to the trailing edge; the chip and picker lead. */
 .agent-toolbar > .token-ring {
   margin-inline-start: auto;
 }

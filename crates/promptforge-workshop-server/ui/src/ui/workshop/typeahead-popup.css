@@ -11,20 +11,15 @@
   z-index: 9999;
   min-inline-size: 180px;
   max-inline-size: 320px;
-  padding: var(--space-1, 4px);
-  background: var(--bg-elevated, #181818);
-  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-radius: var(--radius, 6px);
-  box-shadow: var(
-    --shadow-popup,
-    0 3px 8px rgb(0 0 0 / 12%),
-    0 2px 5px rgb(0 0 0 / 12%),
-    0 1px 1px rgb(0 0 0 / 12%)
-  );
-  font-size: var(--font-size-base, 13px);
-  line-height: var(--line-height-base, 18px);
-  letter-spacing: var(--letter-spacing-base, -0.08px);
-  color: var(--text, #F0F0F0);
+  padding: var(--space-1);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-popup);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
 }
 
 /* A no-match query hides the popup while the session stays alive. */
@@ -39,9 +34,9 @@
 }
 
 .typeahead-popup__item {
-  padding-block: var(--space-1, 4px);
-  padding-inline: var(--space-2, 8px);
-  border-radius: var(--radius-sm, 4px);
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -51,5 +46,5 @@
 /* The keyboard highlight; the rows are not focusable (the editor keeps
    focus), so aria-selected on the option is the state of record. */
 .typeahead-popup__item--selected {
-  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
+  background: var(--bg-card);
 }

@@ -9,9 +9,9 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #181818);
-  color: var(--text, #F0F0F0);
-  font-family: var(--font-prose, system-ui, sans-serif);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-prose);
 }
 
 .agent-panel > [hidden] {
@@ -21,16 +21,17 @@
 /* --- The agent menu ----------------------------------------------------- */
 
 .agent-menu {
-  padding: var(--space-4, 16px);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
+  gap: var(--space-3);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .agent-menu__lead {
   margin: 0;
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
 }
 
 .agent-menu__list {
@@ -39,46 +40,46 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1-5, 6px);
+  gap: var(--space-1-5);
 }
 
 .agent-menu__launch {
   display: block;
   inline-size: 100%;
-  min-height: var(--space-11, 44px);
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
+  min-height: var(--space-11);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
   text-align: start;
   font: inherit;
-  color: var(--text, #F0F0F0);
-  background: var(--bg-raised, #141414);
-  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  border-radius: var(--radius, 6px);
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
 .agent-menu__launch:hover:not(:disabled) {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--bg-hover);
 }
 
 .agent-menu__launch:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
+  background: var(--bg-hover);
 }
 
 .agent-menu__launch:disabled {
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
   cursor: default;
 }
 
 .agent-menu__empty {
   margin: 0;
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
 }
 
 .agent-menu__error {
   margin: 0;
-  color: var(--danger-text, #e4606d);
+  color: var(--danger-text);
 }
 
 /* --- The session view ---------------------------------------------------- */
@@ -94,27 +95,33 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   list-style: none;
   margin: 0;
-  padding: var(--space-3, 12px);
+  padding-block: var(--space-3);
+  padding-inline: var(--feed-padding-inline);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
+  gap: var(--feed-row-gap);
+  inline-size: 100%;
+  max-inline-size: var(--agent-max-width);
+  margin-inline: auto;
+  box-sizing: border-box;
 }
 
 .agent-item {
   max-inline-size: 100%;
-  border-radius: var(--radius, 6px);
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
+  border-radius: var(--radius);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
   overflow-wrap: anywhere;
 }
 
 .agent-item__meta {
-  margin-block: 0 var(--space-1, 4px);
+  margin-block: 0 var(--space-1);
   margin-inline: 0;
-  font-size: var(--font-size-sm, 12px);
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
 }
 
 .agent-item__text {
@@ -125,18 +132,22 @@
 /* Single-column feed: the inline-start accent bar, not alignment, marks
    a user message. */
 .agent-item--user {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-inline-start: 2px solid var(--accent-dim, #b04722);
+  align-self: flex-end;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--bubble-radius);
+  min-inline-size: 150px;
+  max-inline-size: 85%;
 }
 
 .agent-item--reply {
-  align-self: stretch;
+  padding-inline: var(--assistant-inset);
 }
 
 /* A pending item is coalesced deltas still streaming; the durable event
    settles it. The muted tone marks the text as not yet final. */
 .agent-item--pending .agent-item__text {
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
 }
 
 /* Streaming caret on the live tail of the last pending row. The
@@ -147,10 +158,10 @@
   display: inline-block;
   inline-size: 2px;
   block-size: 1em;
-  margin-inline-start: var(--space-1, 4px);
+  margin-inline-start: var(--space-1);
   vertical-align: text-bottom;
-  background: var(--text, #F0F0F0);
-  animation: agent-session-caret-blink calc(var(--duration-slow, 200ms) * 5) linear infinite;
+  background: var(--text);
+  animation: agent-session-caret-blink calc(var(--duration-slow) * 5) linear infinite;
 }
 
 @keyframes agent-session-caret-blink {
@@ -165,25 +176,26 @@
 }
 
 .agent-item--reasoning .agent-item__reasoning {
-  border-inline-start: 2px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  padding-inline-start: var(--space-3, 12px);
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: var(--space-3);
 }
 
 .agent-item--reasoning summary {
   cursor: pointer;
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
-  font-size: var(--font-size-sm, 12px);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .agent-item--tool-call,
 .agent-item--tool-result {
-  background: var(--bg-raised, #141414);
-  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  padding-inline: var(--assistant-inset);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
 }
 
 .agent-item__output {
-  font-family: var(--code-font, ui-monospace, monospace);
-  font-size: var(--font-size-sm, 12px);
+  font-family: var(--code-font);
+  font-size: var(--font-size-sm);
 }
 
 .agent-item__output {
@@ -194,20 +206,36 @@
 }
 
 .agent-item--error {
-  border: 1px solid var(--danger-text, #e4606d);
-  color: var(--danger-text, #e4606d);
+  border: 1px solid var(--danger-text);
+  color: var(--danger-text);
 }
 
 /* --- The input affordance ------------------------------------------------ */
 
-.agent-session__bar {
+.agent-session__outer {
   flex: none;
+  padding-inline: var(--agent-outer-padding);
+  padding-block-end: var(--agent-outer-padding);
+  inline-size: 100%;
+  max-inline-size: var(--agent-max-width);
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+
+.agent-session__bar {
   display: flex;
-  gap: var(--space-2, 8px);
-  align-items: flex-end;
-  padding: var(--space-3, 12px);
-  border-top: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  background: var(--bg, #181818);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-2-5) var(--space-1-5);
+  background: var(--prompt-input-bg);
+  border: 1px solid var(--prompt-input-border);
+  border-radius: var(--agent-card-radius);
+  overflow: hidden;
+}
+
+.agent-session__bar:focus-within {
+  border-color: var(--prompt-input-border-focus);
 }
 
 /* The prompt box owns the row's remaining width; its frame and type
@@ -218,27 +246,28 @@
 }
 
 .agent-session__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  min-inline-size: var(--space-11, 44px);
-  min-block-size: var(--space-11, 44px);
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
-  font: inherit;
-  color: var(--text, #F0F0F0);
-  background: var(--accent, #e05a2b);
+  inline-size: var(--height-xs);
+  block-size: var(--height-xs);
+  padding: 0;
+  color: var(--cursor-editor);
+  background: var(--cursor-icon-secondary);
   border: none;
-  border-radius: var(--radius, 6px);
+  border-radius: var(--radius-full);
   cursor: pointer;
 }
 
 .agent-session__send:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
+  background: var(--cursor-icon-primary);
 }
 
 .agent-session__send:disabled {
-  background: var(--bg-raised, #141414);
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  background: var(--border-subtle);
+  color: var(--text-tertiary);
   cursor: default;
 }
 
@@ -249,17 +278,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-inline-size: var(--space-11, 44px);
-  min-block-size: var(--space-11, 44px);
+  min-inline-size: var(--height-base);
+  min-block-size: var(--height-base);
   padding: 0;
-  color: var(--text, #F0F0F0);
-  background: var(--bg-raised, #141414);
-  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  border-radius: var(--radius, 6px);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  opacity: 0.5;
+}
+
+.agent-session__mic:hover {
+  opacity: 0.8;
 }
 
 .agent-session__mic:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
+  opacity: 0.8;
 }

@@ -30,7 +30,8 @@ use anyhow::Context as _;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
     COREWEBVIEW2_PERMISSION_STATE_ALLOW, ICoreWebView2, ICoreWebView2File,
-    ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2WebMessageReceivedEventArgs,
+    ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Settings3,
+    ICoreWebView2WebMessageReceivedEventArgs,
     ICoreWebView2WebMessageReceivedEventArgs2,
 };
 use webview2_com::{PermissionRequestedEventHandler, WebMessageReceivedEventHandler, take_pwstr};
@@ -74,9 +75,19 @@ fn attach_handlers(
     // called on the webview's own thread (with_webview guarantees it), and
     // the generated out-param write is valid by construction.
     let core = unsafe { controller.CoreWebView2()? };
+    disable_browser_accelerator_keys(&core)?;
     attach_drop_bridge(&core, window)?;
     attach_permission_grant(&core)?;
     Ok(())
+}
+
+/// WebView2's built-in keyboard shortcuts (Ctrl+=, Ctrl+-, F5, Ctrl+U,
+/// etc.) race the app's JS keydown handler. Disabling them here makes
+/// the JS handler in shortcuts.ts the sole zoom path.
+fn disable_browser_accelerator_keys(core: &ICoreWebView2) -> windows_core::Result<()> {
+    let settings = unsafe { core.Settings()? };
+    let settings3: ICoreWebView2Settings3 = settings.cast()?;
+    unsafe { settings3.SetAreBrowserAcceleratorKeysEnabled(false) }
 }
 
 /// The drop half: forward the real OS paths of a `workspace-drop`

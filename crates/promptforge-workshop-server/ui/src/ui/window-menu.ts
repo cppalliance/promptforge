@@ -51,8 +51,8 @@ export interface WindowMenuCommands {
  * The workshop surface the Window menu dispatches through: the Workshop
  * Panel item toggles the tree, sharing the Ctrl+B command from
  * workshop/shortcuts, Gateway Config opens (or focuses) the dockview
- * panel hosting the gateway's config SPA, and Agent Session opens (or
- * focuses) the agent-session panel.
+ * panel hosting the gateway's config SPA, and New Agent opens (or
+ * focuses) the agent-session panel and starts a fresh session.
  */
 export interface WorkshopMenuCommands {
   readonly toggleWorkshopPanel: () => void;
@@ -171,7 +171,7 @@ function buildMenuItems(
   const windowItems: MenuItem[] = [
     { kind: "command", label: "Workshop Panel", shortcut: "Ctrl+B", run: commands.toggleWorkshopPanel },
     { kind: "command", label: "Gateway Config", run: commands.openGatewayConfig },
-    { kind: "command", label: "Agent Session", run: commands.openAgentSession },
+    { kind: "command", label: "New Agent", run: commands.openAgentSession },
     { kind: "separator" },
     { kind: "command", label: "Zoom In", shortcut: "Ctrl+=", run: commands.zoomIn },
     { kind: "command", label: "Zoom Out", shortcut: "Ctrl+-", run: commands.zoomOut },
@@ -519,6 +519,7 @@ export function setupWindowMenus(options: {
     // Align the popover under its button; absolute positioning keeps the
     // bar's layout unchanged.
     handle.popover.style.left = `${handle.button.offsetLeft}px`;
+    handle.popover.style.top = `${handle.button.offsetTop + handle.button.offsetHeight}px`;
     handle.popover.hidden = false;
     handle.button.setAttribute("aria-expanded", "true");
     openId = id;

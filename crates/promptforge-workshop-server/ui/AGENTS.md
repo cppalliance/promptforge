@@ -22,3 +22,12 @@ Shared state lives in a service class with a change emitter, constructed once at
 - Tests live colocated next to their source (`*.test.mjs`) or under `test/`.
 - Test names are plain English sentences describing the behavior under test, not the function under test.
 - Tests that construct disposables run under `test/helpers/leak-check.mjs`: a test that leaks an undisposed `DisposableStore` fails.
+
+## Cursor visual parity
+
+- Cursor Dark is the visual specification for workshop chrome and agent controls. Copy exact values and structure from Cursor's installed source and `cursor-dark-color-theme.json`; never approximate from a screenshot or substitute a similar token.
+- Do not mix Cursor surfaces. The workshop agent panel targets Cursor's workspace-sidebar agent in `.part.auxiliarybar`, including `.composer-bar` and `.ai-input-full-input-box`, not the Glass Agents Window or editor-tab agent.
+- Use the matching token system: VS Code theme tokens for workbench chrome, Cursor design tokens for Cursor-native agent controls. Preserve Cursor's original `color-mix()` formulas; never encode premultiplied RGB as straight-alpha hex.
+- Before claiming parity, compare PromptForge and Cursor at 100% zoom for the same surface and state. If no visual comparison is available, say that verification is pending.
+- Cursor menus and controls define focus through state backgrounds, opacity, or underlines. Focus frames are globally suppressed; never add an outline, ring, or focus-like box-shadow unless the matching Cursor control visibly has one.
+- Keep source-text tests synchronized with copied values. Tests must pin the Cursor value or structure, not a previous PromptForge approximation.

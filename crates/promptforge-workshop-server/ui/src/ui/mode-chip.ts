@@ -8,9 +8,11 @@ import "./mode-chip.css";
 
 import {
   Bug,
-  CircleQuestionMark,
+  ChevronDown,
   Infinity as InfinityIcon,
   ListTodo,
+  MessageSquare,
+  Orbit,
   createElement,
 } from "lucide";
 import type { IconNode } from "lucide";
@@ -21,9 +23,10 @@ import type { DropdownItem } from "./workshop/dropdown";
 /** The agent interaction modes, keyed by display label. */
 export const UNIFIED_MODES = {
   Agent: "agent",
-  Ask: "ask",
   Plan: "plan",
   Debug: "debug",
+  Multitask: "multitask",
+  Ask: "ask",
 } as const;
 
 /** An agent interaction mode. */
@@ -35,14 +38,15 @@ export const AGENT_MODE_CHANGED_EVENT = "agent-mode-changed";
 // The labels in menu order, derived from UNIFIED_MODES so the dropdown
 // can never drift from the mode set. Object.keys hides the literal key
 // type; the cast restores it.
-const MODE_LABELS = Object.keys(UNIFIED_MODES) as (keyof typeof UNIFIED_MODES)[];
+const MODE_LABELS = ["Agent", "Plan", "Debug", "Multitask", "Ask"] as const;
 
 /** Display labels by mode value: the inverse of UNIFIED_MODES. */
 const MODE_LABEL_BY_MODE: Record<UnifiedMode, string> = {
   [UNIFIED_MODES.Agent]: "Agent",
-  [UNIFIED_MODES.Ask]: "Ask",
   [UNIFIED_MODES.Plan]: "Plan",
   [UNIFIED_MODES.Debug]: "Debug",
+  [UNIFIED_MODES.Multitask]: "Multitask",
+  [UNIFIED_MODES.Ask]: "Ask",
 };
 
 const svg = (icon: IconNode, size: number): string =>
@@ -51,10 +55,13 @@ const svg = (icon: IconNode, size: number): string =>
 /** Mode glyphs, rendered once at module load (the icons.ts pattern). */
 const MODE_ICON_HTML: Record<UnifiedMode, string> = {
   [UNIFIED_MODES.Agent]: svg(InfinityIcon, 14),
-  [UNIFIED_MODES.Ask]: svg(CircleQuestionMark, 14),
   [UNIFIED_MODES.Plan]: svg(ListTodo, 14),
   [UNIFIED_MODES.Debug]: svg(Bug, 14),
+  [UNIFIED_MODES.Multitask]: svg(Orbit, 14),
+  [UNIFIED_MODES.Ask]: svg(MessageSquare, 14),
 };
+
+const CHEVRON_HTML = svg(ChevronDown, 12);
 
 /**
  * The chip trigger plus its dropdown. Disposable: dispose() closes an
@@ -80,7 +87,11 @@ export class ModeChip extends Disposable {
     this.iconSlot.setAttribute("aria-hidden", "true");
     this.labelSlot = document.createElement("span");
     this.labelSlot.className = "mode-chip__label";
-    this.element.append(this.iconSlot, this.labelSlot);
+    const chevron = document.createElement("span");
+    chevron.className = "mode-chip__chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.innerHTML = CHEVRON_HTML;
+    this.element.append(this.iconSlot, this.labelSlot, chevron);
 
     this.dropdown = this._register(new DropdownMenu());
 
@@ -104,6 +115,7 @@ export class ModeChip extends Disposable {
       return {
         label,
         iconHtml: MODE_ICON_HTML[mode],
+        selected: mode === this.current,
         onClick: () => this.select(mode),
       };
     });
@@ -126,5 +138,6 @@ export class ModeChip extends Disposable {
     // The icon HTML is this module's own static string, never input.
     this.iconSlot.innerHTML = MODE_ICON_HTML[this.current];
     this.labelSlot.textContent = MODE_LABEL_BY_MODE[this.current];
+    this.element.dataset["mode"] = this.current;
   }
 }

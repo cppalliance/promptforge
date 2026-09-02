@@ -116,7 +116,7 @@ export class PromptInput extends Disposable implements SttInputTarget {
           undoRedo: false,
         }),
         Placeholder.configure({
-          placeholder: options.placeholder ?? "Message the agent",
+          placeholder: options.placeholder ?? "Plan, Build, / for skills, @ for context",
           // The gated (non-editable) box still carries its placeholder,
           // same as a disabled textarea: the gate's "the agent is
           // working" message IS the non-editable state.
@@ -180,7 +180,8 @@ export class PromptInput extends Disposable implements SttInputTarget {
         this.editor.destroy();
       }),
     );
-    this.syncHeight();
+    const initialMeasure = window.requestAnimationFrame(() => this.syncHeight());
+    this._register(toDisposable(() => window.cancelAnimationFrame(initialMeasure)));
   }
 
   /** The prompt as plain text: paragraphs and hard breaks as single newlines. */

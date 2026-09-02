@@ -82,9 +82,9 @@
 	body {
 		min-height: 100vh;
 		min-height: 100svh;
-		background: var(--bg-primary, #0F0F0F);
-		color: var(--text-primary, #E8E8E8);
-		font-family: var(--font, system-ui, sans-serif);
+		background: var(--bg-primary);
+		color: var(--text-primary);
+		font-family: var(--font);
 		font-size: 0.8125rem;
 	}
 
@@ -97,15 +97,15 @@
 	pre,
 	kbd,
 	samp {
-		font-family: var(--font-mono, ui-monospace, monospace);
+		font-family: var(--font-mono);
 	}
 
 	a {
-		color: var(--accent-hover, #F07030);
+		color: var(--accent-hover);
 	}
 
 	:focus-visible {
-		outline: 2px solid var(--accent, #E05A2B);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 

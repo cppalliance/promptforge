@@ -4,10 +4,10 @@
    token degrades to these defaults instead of breaking the property. */
 
 .markdown-content {
-  font-size: var(--font-size-base, 13px);
-  line-height: var(--line-height-base, 18px);
-  letter-spacing: var(--letter-spacing-base, -0.08px);
-  color: var(--text, #F0F0F0);
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-lg);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--text);
   overflow-wrap: break-word;
 }
 
@@ -20,7 +20,7 @@
 }
 
 .markdown-content p {
-  margin-block: var(--space-2, 8px);
+  margin-block: var(--space-2);
 }
 
 .markdown-content h1,
@@ -29,45 +29,45 @@
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  margin-block: var(--space-3, 12px) var(--space-2, 8px);
-  font-weight: var(--font-weight-semibold, 590);
-  line-height: var(--line-height-lg, 22px);
+  margin-block: var(--space-3) var(--space-2);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-lg);
 }
 
 .markdown-content h1 {
-  font-size: var(--font-size-lg, 14px);
+  font-size: var(--font-size-lg);
 }
 
 .markdown-content h2 {
-  font-size: var(--font-size-lg, 14px);
+  font-size: var(--font-size-lg);
 }
 
 .markdown-content h3,
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-size: var(--font-size-base, 13px);
+  font-size: var(--font-size-base);
 }
 
 /* Inline code; the pre rule below undoes the pill inside fenced blocks. */
 .markdown-content code {
-  font-family: var(--code-font, ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace);
-  font-size: var(--font-size-sm, 12px);
-  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
-  border-radius: var(--radius-sm, 4px);
+  font-family: var(--code-font);
+  font-size: var(--font-size-sm);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
   padding-block: 1px;
-  padding-inline: var(--space-1, 4px);
+  padding-inline: var(--space-1);
 }
 
 /* Fenced blocks, highlighted (Shiki's pre carries inline colors from the
    theme) or not (the degraded path's plain pre). */
 .markdown-content pre {
-  margin-block: var(--space-2, 8px);
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
-  background: var(--syntax-bg, #181818);
-  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-radius: var(--radius, 6px);
+  margin-block: var(--space-2);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
+  background: var(--syntax-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
   overflow-x: auto;
 }
 
@@ -76,12 +76,12 @@
   border-radius: 0;
   padding-block: 0;
   padding-inline: 0;
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-base, 18px);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
 }
 
 .markdown-content a {
-  color: var(--syntax-link, #87C3FF);
+  color: var(--syntax-link);
   text-decoration: none;
 }
 
@@ -90,44 +90,44 @@
 }
 
 .markdown-content a:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
+  text-decoration: underline;
 }
 
 .markdown-content ul,
 .markdown-content ol {
-  margin-block: var(--space-2, 8px);
-  padding-inline-start: var(--space-5, 20px);
+  margin-block: var(--space-2);
+  padding-inline-start: var(--space-5);
 }
 
 .markdown-content li {
-  margin-block: var(--space-1, 4px);
+  margin-block: var(--space-1);
 }
 
 .markdown-content blockquote {
-  margin-block: var(--space-2, 8px);
+  margin-block: var(--space-2);
   margin-inline: 0;
-  padding-inline-start: var(--space-3, 12px);
-  border-inline-start: 2px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--border);
+  color: var(--text-muted);
 }
 
 .markdown-content table {
-  margin-block: var(--space-2, 8px);
+  margin-block: var(--space-2);
   border-collapse: collapse;
 }
 
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  padding-block: var(--space-1, 4px);
-  padding-inline: var(--space-2, 8px);
+  border: 1px solid var(--border-subtle);
+  padding-block: var(--space-1);
+  padding-inline: var(--space-2);
   text-align: start;
 }
 
 .markdown-content th {
-  font-weight: var(--font-weight-semibold, 590);
-  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
+  font-weight: var(--font-weight-semibold);
+  background: var(--bg-card);
 }
 
 /* height: auto keeps the =WxH attribute ratio when max-inline-size
@@ -139,6 +139,6 @@
 
 .markdown-content hr {
   border: none;
-  border-block-start: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  margin-block: var(--space-3, 12px);
+  border-block-start: 1px solid var(--border);
+  margin-block: var(--space-3);
 }

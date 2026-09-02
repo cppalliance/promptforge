@@ -1,24 +1,24 @@
 /* The mode selector chip trigger (mode-chip.ts imports this file;
    esbuild bundles it into dist/app.css). The dropdown it opens is
    styled by workshop/dropdown.css; these rules cover only the trigger.
-   Themed values come from the :root tokens in style.css; every var()
-   carries a fallback so a deleted token degrades instead of breaking. */
+   Themed values come from the :root tokens in style.css. */
 
 .mode-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1-5, 6px);
-  block-size: var(--height-sm, 24px);
+  gap: var(--space-1-5);
+  block-size: var(--height-sm);
   padding-block: 0;
-  padding-inline: var(--space-2, 8px);
+  padding-inline: var(--space-2);
   font: inherit;
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-sm, 16px);
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
-  background: transparent;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--cursor-text-primary);
+  background: var(--cursor-bg-secondary);
   border: none;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-full);
   cursor: pointer;
+  opacity: 0.8;
   white-space: nowrap;
 }
 
@@ -26,16 +26,15 @@
    on the trigger while its menu is up. */
 .mode-chip:hover,
 .mode-chip[aria-expanded="true"] {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
-  color: var(--text, #F0F0F0);
+  opacity: 1;
 }
 
 .mode-chip:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
 }
 
-.mode-chip__icon {
+.mode-chip__icon,
+.mode-chip__chevron {
   display: flex;
   align-items: center;
   justify-content: center;

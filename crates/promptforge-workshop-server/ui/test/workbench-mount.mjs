@@ -26,13 +26,18 @@ await bootWorkbench("the bundled app mounts the whole workbench", async (ctx) =>
   if (!agentPanel) {
     failures.push("the agent-session panel did not mount in the dock");
   } else {
-    const menu = agentPanel.querySelector(".agent-menu");
+    const contextMenu = new document.defaultView.MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    agentPanel.dispatchEvent(contextMenu);
+    if (!contextMenu.defaultPrevented) {
+      failures.push("the workshop did not suppress the native WebView context menu");
+    }
     const view = agentPanel.querySelector(".agent-session");
-    if (!menu) failures.push("the agent menu did not mount inside the agent panel");
-    if (menu?.hidden) failures.push("the agent menu must show before a session is acknowledged");
     if (!view) failures.push("the agent-session view did not mount inside the agent panel");
-    if (view && !view.hidden) {
-      failures.push("the session view must stay hidden until a session is acknowledged");
+    if (view?.hidden) {
+      failures.push("the session view must be visible immediately (auto-launch skips the menu)");
     }
     const input = view?.querySelector(".prompt-input__editor");
     if (!input) {

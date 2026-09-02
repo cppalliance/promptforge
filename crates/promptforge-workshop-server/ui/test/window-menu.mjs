@@ -267,22 +267,22 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
   check("running Gateway Config closes the menu", !isOpen("window"));
 }
 
-// --- Window menu: Agent Session opens the panel next to Gateway Config -------
+// --- Window menu: New Agent opens the panel next to Gateway Config -----------
 
 {
   const { menus, itemsOf, itemByLabel, isOpen, stats } = scenario();
   menus.window.click();
-  const agentItem = itemByLabel("window", "Agent Session");
-  check("the Window menu lists Agent Session", agentItem !== undefined);
+  const agentItem = itemByLabel("window", "New Agent");
+  check("the Window menu lists New Agent", agentItem !== undefined);
   const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
   const labels = itemsOf("window").map(rowLabel);
   check(
-    "Agent Session sits next to Gateway Config",
-    labels.indexOf("Agent Session") === labels.indexOf("Gateway Config") + 1,
+    "New Agent sits next to Gateway Config",
+    labels.indexOf("New Agent") === labels.indexOf("Gateway Config") + 1,
   );
   agentItem.click();
-  check("Agent Session dispatches the open command", stats().agentSessionOpens === 1);
-  check("running Agent Session closes the menu", !isOpen("window"));
+  check("New Agent dispatches the open command", stats().agentSessionOpens === 1);
+  check("running New Agent closes the menu", !isOpen("window"));
 }
 
 // --- Edit menu: disabled without a target, preserved target with one ---------

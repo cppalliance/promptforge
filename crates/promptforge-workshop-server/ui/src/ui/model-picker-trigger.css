@@ -7,17 +7,17 @@
 .model-picker-trigger {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1, 4px);
-  block-size: var(--model-trigger-height, 24px);
+  gap: var(--space-1);
+  block-size: var(--model-trigger-height);
   padding-block: 0;
-  padding-inline: var(--space-2, 8px);
+  padding-inline: var(--space-2);
   font: inherit;
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-sm, 16px);
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: var(--model-trigger-radius, 9999px);
+  border-radius: var(--model-trigger-radius);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -26,13 +26,13 @@
    on the trigger while its menu is up. */
 .model-picker-trigger:hover,
 .model-picker-trigger[aria-expanded="true"] {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
-  color: var(--text, #F0F0F0);
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .model-picker-trigger:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 2px;
+  outline: none;
+  background: var(--cursor-bg-secondary);
 }
 
 /* Long model ids truncate instead of stretching the toolbar. */
