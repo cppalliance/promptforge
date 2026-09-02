@@ -13,6 +13,7 @@ import { Editor } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Disposable, toDisposable } from "../base/lifecycle";
+import { MentionChip } from "./workshop/mention-chip";
 
 // The fallbacks mirror the token defaults in style.css; they apply when
 // the skin is absent (tests) or the token is deleted.
@@ -93,6 +94,10 @@ export class PromptInput extends Disposable {
         Placeholder.configure({
           placeholder: options.placeholder ?? "Message the agent",
         }),
+        // Inline mention pills (@-referenced files). The suggestion
+        // trigger is inert until the typeahead step supplies items and a
+        // popup renderer; the chip NodeView is live now.
+        MentionChip,
       ],
       content: options.content ?? "",
       editorProps: {

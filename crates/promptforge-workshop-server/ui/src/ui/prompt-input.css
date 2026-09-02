@@ -53,3 +53,62 @@
   pointer-events: none;
   color: var(--text-quaternary, color-mix(in srgb, #F0F0F0 36%, transparent));
 }
+
+/* MentionChip (src/ui/workshop/mention-chip.ts): the inline pill for an
+   @-referenced file. The label truncates against the chip's max width;
+   the remove button stays quiet until the chip is hovered or focused. */
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  block-size: var(--height-xs, 20px);
+  max-inline-size: 240px;
+  padding-inline: var(--space-1-5, 6px);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--mention-bg, color-mix(in srgb, #81A1C1 12%, transparent));
+  color: var(--mention-text, #81A1C1);
+  font-size: var(--font-size-sm, 12px);
+  line-height: var(--line-height-sm, 16px);
+  white-space: nowrap;
+}
+
+.mention-chip__icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.mention-chip__label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
+}
+
+.mention-chip:hover .mention-chip__remove,
+.mention-chip:focus-within .mention-chip__remove {
+  opacity: 1;
+}
+
+.mention-chip__remove:hover {
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+}
+
+.mention-chip__remove:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: -2px;
+  opacity: 1;
+}
