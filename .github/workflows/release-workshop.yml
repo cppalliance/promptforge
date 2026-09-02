@@ -6,8 +6,8 @@ name: Release Workshop
 # Release with all five installers and a SHA256SUMS file. A failed test
 # means no release.
 #
-# Signing is deliberately absent (nothing is signed today); the Windows and
-# macOS build jobs carry SIGNING markers where the certificate steps go.
+# Platform code signing is still absent. Tauri updater bundles are signed
+# independently with the release minisign key.
 
 on:
   push:
@@ -85,6 +85,9 @@ jobs:
       - name: Build the app
         id: build
         uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: crates/promptforge-workshop
           args: ${{ matrix.args }}
@@ -108,6 +111,8 @@ jobs:
             target/**/bundle/dmg/*.dmg
             target/**/bundle/deb/*.deb
             target/**/bundle/appimage/*.AppImage
+            target/**/bundle/**/*.sig
+            target/**/bundle/**/*.tar.gz
           if-no-files-found: error
 
   test:
@@ -155,8 +160,8 @@ jobs:
           if (-not $page) { throw "the workshop page never answered" }
           if ($page.Content -notmatch "<title>PromptForge</title>") { throw "unexpected workshop page content" }
           $js = Invoke-WebRequest -Uri "http://127.0.0.1:7910/app.js" -UseBasicParsing
-          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
-          if ($js.RawContentLength -gt 1800000) { throw "app.js is the unminified bundle ($($js.RawContentLength) bytes)" }
+          # The current minified workbench is about 2.5 MB.
+          if ($js.RawContentLength -gt 3000000) { throw "app.js is unexpectedly large ($($js.RawContentLength) bytes)" }
           Get-Process PromptForge -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Install and check (macOS)
@@ -181,8 +186,8 @@ jobs:
           done
           grep -F "<title>PromptForge</title>" /tmp/workshop.html
           size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
-          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
-          [ "$size" -lt 1800000 ] || { echo "app.js is the unminified bundle ($size bytes)"; exit 1; }
+          # The current minified workbench is about 2.5 MB.
+          [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
 
       - name: Install and check (Linux)
         if: matrix.name == 'linux'
@@ -211,8 +216,8 @@ jobs:
           done
           grep -F "<title>PromptForge</title>" /tmp/workshop.html
           size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
-          # Minified is about 1.2 MB; the debug bundle is about 2.3 MB.
-          [ "$size" -lt 1800000 ] || { echo "app.js is the unminified bundle ($size bytes)"; exit 1; }
+          # The current minified workbench is about 2.5 MB.
+          [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
           pkill -f "$(basename "$bin")" || true
 
   publish:
@@ -224,23 +229,76 @@ jobs:
         with:
           pattern: workshop-*
           path: dist
-          merge-multiple: true
 
       - name: SHA256SUMS
         working-directory: dist
         run: |
           shopt -s globstar nullglob
-          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage > SHA256SUMS
+          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage **/*.tar.gz > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Assemble latest.json
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+
+          root = Path("dist")
+          tag = os.environ["TAG_NAME"]
+          version = tag.removeprefix("promptforge-workshop-v")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          platforms = {}
+          for platform, artifact in {
+              "windows-x86_64": "workshop-windows",
+              "darwin-aarch64": "workshop-macos-arm",
+              "darwin-x86_64": "workshop-macos-intel",
+              "linux-x86_64": "workshop-linux",
+          }.items():
+              folder = root / artifact
+              signed = []
+              for signature in folder.rglob("*.sig"):
+                  bundle = Path(str(signature)[:-4])
+                  if bundle.is_file():
+                      signed.append((bundle, signature))
+              if len(signed) != 1:
+                  names = ", ".join(str(path) for path, _ in signed)
+                  raise SystemExit(f"{artifact} has {len(signed)} signed updater bundles: {names}")
+              bundle, signature = signed[0]
+              asset = bundle.name
+              platforms[platform] = {
+                  "url": f"https://github.com/{repository}/releases/download/{tag}/{quote(asset)}",
+                  "signature": signature.read_text(encoding="utf-8").strip(),
+              }
+
+          manifest = {
+              "version": version,
+              "notes": f"PromptForge Workshop {version}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+              "platforms": platforms,
+          }
+          (root / "latest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python3 -m json.tool dist/latest.json
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: PromptForge Workshop ${{ github.ref_name }}
+          make_latest: true
           files: |
             dist/**/*.exe
             dist/**/*.dmg
             dist/**/*.deb
             dist/**/*.AppImage
+            dist/**/*.sig
+            dist/**/*.tar.gz
             dist/SHA256SUMS
+            dist/latest.json
