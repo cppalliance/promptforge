@@ -1,0 +1,244 @@
+name: whisper shared libraries
+
+# Builds one runtime-loadable whisper.cpp bundle per supported desktop
+# platform. The archives contain libwhisper plus every sibling ggml runtime
+# library it needs, so PromptForge hosts need no compiler or native SDK.
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_tag:
+        description: whisper.cpp release tag to build
+        required: true
+        default: "b4938"
+  push:
+    branches: [master, whisper-shared-lib]
+    paths:
+      - ".github/workflows/whisper-lib.yml"
+      - "crates/whisper-ffi/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whisper-lib-${{ inputs.whisper_tag || 'b4938' }}
+  cancel-in-progress: false
+
+env:
+  WHISPER_TAG: ${{ inputs.whisper_tag || 'b4938' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64-cuda
+            runs-on: windows-2022
+          - platform: macos-aarch64-metal
+            runs-on: macos-latest
+          - platform: macos-x86_64
+            runs-on: macos-15-intel
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+          - platform: linux-aarch64
+            runs-on: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out whisper.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ env.WHISPER_TAG }}
+          path: whisper.cpp
+
+      # Jimver/cuda-toolkit's local installer crashes on windows-2022 with
+      # exit code 0xE0FF0009. Use NVIDIA's network installer, as in the
+      # llama-cuda-blackwell workflow.
+      - name: Install the CUDA toolkit
+        if: matrix.platform == 'windows-x86_64-cuda'
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          version="13.2.0"
+          short="13.2"
+          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
+          curl -Lo cuda_installer.exe "$url"
+          ./cuda_installer.exe -s -n
+          rm -f cuda_installer.exe
+          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
+          test -f "$cuda_path/bin/nvcc.exe"
+          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
+          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
+          echo "$cuda_path/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Windows CUDA
+        if: matrix.platform == 'windows-x86_64-cuda'
+        run: >-
+          cmake -S whisper.cpp -B build -A x64
+          -DBUILD_SHARED_LIBS=ON
+          -DGGML_CUDA=ON
+          -DGGML_NATIVE=OFF
+          -DWHISPER_BUILD_EXAMPLES=OFF
+          -DWHISPER_BUILD_TESTS=OFF
+
+      - name: Configure macOS ARM
+        if: matrix.platform == 'macos-aarch64-metal'
+        run: >-
+          cmake -S whisper.cpp -B build
+          -DBUILD_SHARED_LIBS=ON
+          -DGGML_METAL=ON
+          -DGGML_METAL_EMBED_LIBRARY=ON
+          -DGGML_NATIVE=OFF
+          -DWHISPER_BUILD_EXAMPLES=OFF
+          -DWHISPER_BUILD_TESTS=OFF
+          -DCMAKE_OSX_ARCHITECTURES=aarch64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+          -DCMAKE_INSTALL_RPATH=@loader_path
+
+      - name: Configure macOS Intel
+        if: matrix.platform == 'macos-x86_64'
+        run: >-
+          cmake -S whisper.cpp -B build
+          -DBUILD_SHARED_LIBS=ON
+          -DGGML_METAL=OFF
+          -DGGML_NATIVE=OFF
+          -DWHISPER_BUILD_EXAMPLES=OFF
+          -DWHISPER_BUILD_TESTS=OFF
+          -DCMAKE_OSX_ARCHITECTURES=x86_64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+          -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+          -DCMAKE_INSTALL_RPATH=@loader_path
+
+      - name: Configure Linux
+        if: startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          cmake -S whisper.cpp -B build \
+            -DBUILD_SHARED_LIBS=ON \
+            -DGGML_NATIVE=OFF \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            '-DCMAKE_INSTALL_RPATH=$ORIGIN'
+
+      - name: Build and install
+        run: cmake --build build --config Release --parallel
+
+      - name: Install to staging
+        run: cmake --install build --config Release --prefix stage
+
+      - name: Package Windows runtime
+        if: matrix.platform == 'windows-x86_64-cuda'
+        shell: powershell
+        run: |
+          $archive = "whisper-$env:WHISPER_TAG-${{ matrix.platform }}.zip"
+          New-Item -ItemType Directory -Path package, dist -Force | Out-Null
+          Get-ChildItem stage -Recurse -Filter *.dll |
+            ForEach-Object { Copy-Item $_.FullName package -Force }
+          @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll") |
+            ForEach-Object {
+              Get-ChildItem "$env:CUDA_PATH\bin" -Filter $_ |
+                ForEach-Object { Copy-Item $_.FullName package -Force }
+            }
+          Copy-Item whisper.cpp\include\whisper.h package
+          Copy-Item whisper.cpp\LICENSE package
+          if (-not (Test-Path package\whisper.dll)) { throw "whisper.dll missing from install" }
+          Compress-Archive -Path package\* -DestinationPath "dist\$archive"
+          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Set-Content -NoNewline "dist\$archive.sha256"
+
+      - name: Package Unix runtime
+        if: matrix.platform != 'windows-x86_64-cuda'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="whisper-${WHISPER_TAG}-${{ matrix.platform }}.zip"
+          mkdir -p package dist
+          while IFS= read -r library; do
+            cp -L "$library" "package/$(basename "$library")"
+          done < <(find stage -type f -o -type l | grep -E 'lib(whisper|ggml).*\.(dylib|so)(\..*)?$')
+          cp whisper.cpp/include/whisper.h whisper.cpp/LICENSE package/
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            test -f package/libwhisper.dylib
+          else
+            test -f package/libwhisper.so
+          fi
+          (
+            cd package
+            zip -9 "../dist/$archive" ./*
+          )
+          (
+            cd dist
+            sha256sum "$archive" > "$archive.sha256"
+          )
+
+      - name: Smoke-load Windows runtime
+        if: matrix.platform == 'windows-x86_64-cuda'
+        shell: powershell
+        run: |
+          $package = (Resolve-Path package).Path
+          @"
+          import ctypes
+          import os
+          os.add_dll_directory(r"$package")
+          whisper = ctypes.CDLL(r"$package\whisper.dll")
+          whisper.whisper_print_system_info.restype = ctypes.c_char_p
+          print(whisper.whisper_print_system_info().decode())
+          "@ | python -
+
+      - name: Smoke-load Unix runtime
+        if: matrix.platform != 'windows-x86_64-cuda'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            library="$PWD/package/libwhisper.dylib"
+          else
+            library="$PWD/package/libwhisper.so"
+          fi
+          LIBRARY="$library" python3 - <<'PY'
+          import ctypes
+          import os
+          whisper = ctypes.CDLL(os.environ["LIBRARY"])
+          whisper.whisper_print_system_info.restype = ctypes.c_char_p
+          print(whisper.whisper_print_system_info().decode())
+          PY
+
+      - name: Upload the platform archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-${{ matrix.platform }}-${{ env.WHISPER_TAG }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download every platform archive
+        uses: actions/download-artifact@v4
+        with:
+          pattern: whisper-*-${{ env.WHISPER_TAG }}
+          path: dist
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS
+        working-directory: dist
+        run: sha256sum *.zip > SHA256SUMS
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: whisper-lib-${{ env.WHISPER_TAG }}
+          name: whisper-lib-${{ env.WHISPER_TAG }}
+          make_latest: false
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS
