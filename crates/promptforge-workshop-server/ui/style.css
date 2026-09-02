@@ -177,10 +177,6 @@
   --led-lens-highlight: rgba(255, 255, 255, 0.18);
   --led-lens-shadow: rgba(0, 0, 0, 0.45);
 
-  /* Status bar REC badge */
-  --rec-idle: #552222;
-  --rec-active: #ff0000;
-
   /* Window title bar (custom Windows chrome) */
   --titlebar-height: 40px;
   --titlebar-bg: var(--bg, #181818);
