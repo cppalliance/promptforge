@@ -9,6 +9,10 @@
    var() use carries a fallback, so deleting a variable degrades to the
    stock skin instead of breaking the property.
 
+   The surface, text, border, spacing, radius, shadow, and motion values
+   mirror Cursor's dark theme (extracted from its workbench tokens); the
+   accent stays the workshop orange.
+
    This file carries only the resets, the :root design tokens, and the
    global scrollbars. Component rules live in per-component CSS files
    colocated with their owning TS modules under src/, which esbuild
@@ -17,39 +21,139 @@
 
 :root {
   /* Surfaces */
-  --bg: #0f0f0f; /* window background, chat background */
-  --bg-raised: #1a1a1a; /* raised surfaces: status bar, cards */
-  --bg-hover: #252525; /* hover washes and user message bubbles */
+  --bg: #181818; /* window background, chat background */
+  --bg-raised: #141414; /* raised surfaces: status bar, cards */
+  --bg-hover: color-mix(in srgb, #F0F0F0 8%, transparent); /* hover washes and user message bubbles */
+  --bg-card: color-mix(in srgb, #F0F0F0 6%, transparent); /* card fills over --bg */
+  --bg-input: #181818; /* input well backgrounds */
+  --bg-elevated: #181818; /* elevated overlay surfaces */
 
-  /* Text and borders */
-  --text: #e8e8e8; /* 15:1 on --bg */
-  --text-muted: #909090; /* 6.0:1 on --bg, 4.8:1 on --bg-hover; #888888 would fail 4.5:1 on hovered surfaces */
-  --border: #2a2a2a;
+  /* Text and borders (opacity tiers over the dark surfaces) */
+  --text: #F0F0F0; /* 15.8:1 on --bg */
+  --text-muted: color-mix(in srgb, #F0F0F0 74%, transparent); /* ~9:1 on --bg */
+  --text-tertiary: color-mix(in srgb, #F0F0F0 60%, transparent); /* ~4.2:1 on --bg: secondary content only, never primary meaning */
+  --text-quaternary: color-mix(in srgb, #F0F0F0 36%, transparent); /* de-emphasized hints */
+  --border: color-mix(in srgb, #F0F0F0 12%, transparent);
+  --border-subtle: color-mix(in srgb, #F0F0F0 8%, transparent);
 
   /* Accent and semantics */
   --accent: #e05a2b; /* primary action (send button) */
-  --accent-dim: #b04722; /* focus borders; 3.4:1 on --bg, 3.1:1 on --bg-raised */
+  --accent-dim: #b04722; /* focus borders; 3.2:1 on --bg, 3.3:1 on --bg-raised */
   --danger: #dc3545; /* recording background, non-text danger accents */
-  --danger-text: #e4606d; /* --danger lightened past 4.5:1 on every surface (4.5:1 on --bg-hover) */
+  --danger-text: #e4606d; /* --danger lightened past 4.5:1 on the dark surfaces (5.2:1 on --bg) */
   --on-danger: #ffffff; /* icon or text on a --danger fill (recording mic) */
   --hover-glow: var(--accent, #e05a2b); /* ring and bloom on hover */
+  --color-red: #FC6B83;
+  --color-green: #3FA266;
+  --color-yellow: #F1B467;
+  --color-cyan: #81A1C1;
+  --color-blue: #7BAFE9;
+  --color-purple: #9386F2;
 
   /* Type */
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --code-font: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+  --line-height-xs: 14px;
+  --line-height-sm: 16px;
+  --line-height-base: 18px;
+  --line-height-lg: 22px;
+  --letter-spacing-base: -0.08px;
+  --letter-spacing-lg: -0.15px;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 590;
 
-  /* Spacing scale and radius (shell chrome) */
-  --space-xs: 4px;
-  --space-sm: 6px;
-  --space-md: 8px;
-  --space-lg: 12px;
-  --space-xl: 16px;
-  --radius: 8px;
+  /* Spacing scale (4px base unit) */
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-9: 36px;
+  --space-10: 40px;
+  --space-11: 44px;
+  --space-12: 48px;
+  --space-13: 52px;
+  --space-14: 56px;
+  --space-15: 60px;
+  --space-16: 64px;
+  --space-17: 68px;
+  --space-18: 72px;
+  --space-19: 76px;
+  --space-20: 80px;
+  /* Legacy aliases: existing component CSS keeps working unchanged */
+  --space-xs: var(--space-1, 4px); /* 4px */
+  --space-sm: var(--space-1-5, 6px); /* 6px */
+  --space-md: var(--space-2, 8px); /* 8px */
+  --space-lg: var(--space-3, 12px); /* 12px */
+  --space-xl: var(--space-4, 16px); /* 16px */
+
+  /* Radius */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Control heights */
+  --height-xs: 20px;
+  --height-sm: 24px;
+  --height-base: 28px;
+  --height-lg: 32px;
+
+  /* Shadows */
+  --shadow-primary: color-mix(in srgb, #000 20%, transparent);
+  --shadow-secondary: color-mix(in srgb, var(--shadow-primary, color-mix(in srgb, #000 20%, transparent)) 60%, transparent);
+  --shadow-tertiary: color-mix(in srgb, var(--shadow-primary, color-mix(in srgb, #000 20%, transparent)) 30%, transparent);
+  --shadow-popup: 0 3px 8px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent)), 0 2px 5px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent)), 0 1px 1px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent));
+
+  /* Syntax highlighting (code blocks) */
+  --syntax-bg: #181818;
+  --syntax-fg: #D6D6DD;
+  --syntax-keyword: #82D2CE;
+  --syntax-string: #E394DC;
+  --syntax-function: #EFB080;
+  --syntax-number: #EBC88C;
+  --syntax-comment: #E4E4E45E;
+  --syntax-constant: #F8C762;
+  --syntax-link: #87C3FF;
+
+  /* Motion */
+  --duration-instant: 50ms;
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 200ms;
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Component tokens (consumed by the agent-window components) */
+  --mention-bg: color-mix(in srgb, #81A1C1 12%, transparent);
+  --mention-text: #81A1C1;
+  --tool-card-bg: var(--bg, #181818);
+  --tool-card-border: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  --tool-card-header-height: 28px;
+  --prompt-input-bg: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
+  --prompt-input-border: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  --prompt-input-border-focus: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  --prompt-input-min-height: 36px;
+  --prompt-input-max-height: 200px;
+  --prompt-input-radius: 6px;
+  --model-trigger-height: 24px;
+  --model-trigger-radius: 9999px;
+  --token-ring-track: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  --token-ring-fill: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 
   /* Status bar */
   --status-bar-height: 28px;
-  --status-bar-bg: var(--bg-raised, #1a1a1a);
-  --status-bar-text: var(--text-muted, #909090);
+  --status-bar-bg: var(--bg-raised, #141414);
+  --status-bar-text: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
   --status-bar-text-error: var(--danger-text, #e4606d);
   --status-bar-padding-inline: var(--space-lg, 12px);
   --status-bar-gap: var(--space-lg, 12px);
@@ -79,12 +183,12 @@
 
   /* Window title bar (custom Windows chrome) */
   --titlebar-height: 40px;
-  --titlebar-bg: var(--bg, #0f0f0f);
-  --titlebar-foreground: var(--text, #e8e8e8);
-  --titlebar-divider: var(--border, #2a2a2a); /* the one-pixel lower edge */
+  --titlebar-bg: var(--bg, #181818);
+  --titlebar-foreground: var(--text, #F0F0F0);
+  --titlebar-divider: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent)); /* the one-pixel lower edge */
   --titlebar-accent: var(--accent, #e05a2b); /* focus/selection states only */
-  --titlebar-glyph: var(--text-muted, #909090); /* window-control SVG strokes */
-  --titlebar-hover: var(--bg-hover, #252525); /* neutral wash: menus, Minimize, Maximize */
+  --titlebar-glyph: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent)); /* window-control SVG strokes */
+  --titlebar-hover: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent)); /* neutral wash: menus, Minimize, Maximize */
   --titlebar-control-width: 46px;
   --titlebar-close-hover: var(--danger, #dc3545);
   --titlebar-close-glyph-hover: var(--on-danger, #ffffff);
@@ -142,8 +246,8 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg, #0f0f0f);
-  color: var(--text, #e8e8e8);
+  background: var(--bg, #181818);
+  color: var(--text, #F0F0F0);
   font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 14px;
   line-height: 1.55;
