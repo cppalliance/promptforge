@@ -96,6 +96,7 @@ jobs:
         shell: bash
         run: |
           version="${TAG_NAME#promptforge-workshop-v}"
+          version="${version%%-test*}"
           built="${{ steps.build.outputs.appVersion }}"
           if [ "$built" != "$version" ]; then
             echo "tag version $version does not match the crate version $built"
@@ -150,8 +151,22 @@ jobs:
           if (-not $exe) { throw "PromptForge.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
           $version = $env:TAG_NAME -replace '^promptforge-workshop-v', ''
+          $version = $version -replace '-test.*$', ''
           if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
           $output
+          $configDir = Join-Path $env:USERPROFILE ".promptforge"
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          @'
+          config-version = 2
+          [server]
+          bind = "127.0.0.1:8081"
+          api_key = "release-smoke"
+          [workshop]
+          bind = "127.0.0.1:7910"
+          [[profile]]
+          name = "default"
+          models = []
+          '@ | Set-Content (Join-Path $configDir "gateway.toml")
           Start-Process $exe.FullName
           $page = $null
           foreach ($i in 1..60) {
@@ -175,8 +190,21 @@ jobs:
           hdiutil detach "/Volumes/PromptForge" -quiet
           bin=$(find /tmp/PromptForge.app/Contents/MacOS -type f | head -1)
           version="${TAG_NAME#promptforge-workshop-v}"
+          version="${version%%-test*}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
+          mkdir -p "$HOME/.promptforge"
+          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
+          config-version = 2
+          [server]
+          bind = "127.0.0.1:8081"
+          api_key = "release-smoke"
+          [workshop]
+          bind = "127.0.0.1:7910"
+          [[profile]]
+          name = "default"
+          models = []
+          EOF
           "$bin" &
           app_pid=$!
           trap 'kill $app_pid 2>/dev/null || true' EXIT
@@ -202,6 +230,7 @@ jobs:
           bin=$(dpkg -L "$package" | grep -E '/usr/bin/[^/]+$' | head -1)
           [ -n "$bin" ] || { echo "no binary in the deb"; exit 1; }
           version="${TAG_NAME#promptforge-workshop-v}"
+          version="${version%%-test*}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           # The AppImage is not installed; check it exists and runs --version.
@@ -209,6 +238,18 @@ jobs:
           [ -n "$appimage" ] || { echo "no AppImage in the artifact"; exit 1; }
           chmod +x "$appimage"
           "$appimage" --version | grep -F "$version"
+          mkdir -p "$HOME/.promptforge"
+          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
+          config-version = 2
+          [server]
+          bind = "127.0.0.1:8081"
+          api_key = "release-smoke"
+          [workshop]
+          bind = "127.0.0.1:7910"
+          [[profile]]
+          name = "default"
+          models = []
+          EOF
           xvfb-run -a "$bin" &
           for i in $(seq 1 60); do
             if curl -sf http://127.0.0.1:7910/ -o /tmp/workshop.html; then break; fi
@@ -249,7 +290,7 @@ jobs:
 
           root = Path("dist")
           tag = os.environ["TAG_NAME"]
-          version = tag.removeprefix("promptforge-workshop-v")
+          version = tag.removeprefix("promptforge-workshop-v").split("-test", 1)[0]
           repository = os.environ["GITHUB_REPOSITORY"]
           platforms = {}
           for platform, artifact in {
