@@ -108,3 +108,4 @@
 - [2026-08-31-6-tauri-migration-for-workshop] desktop lifecycle ownership: The shell creates the gateway and window together and shuts the gateway down exactly once on app exit.
 - [2026-08-31-7-interactive-webhook-tool] claim-once jobs: Future background work should buffer completions behind claim-once handles and one wait-any primitive.
 - [2026-09-01-1-build-simplification] product release lanes: Gateway, Workshop, and native accelerator artifacts release independently on platform-appropriate lanes.
+- [2026-09-02-1-workshop-agent-window-clone] reference-derived presentation: Visual parity values need source citations and measured layout composition, not token resemblance alone.
