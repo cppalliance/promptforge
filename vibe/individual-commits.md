@@ -158,3 +158,7 @@ the report was produced during the architecture-rollout run but deliberately exc
 
 no authoring intent in the chat - the commit was already HEAD when the session began (an upstream PR 10 cherry-pick); the intent (fractional VRAM budgets for local-model profiles) is inference from the subject, not chat evidence. (none; inferred)
 
+## 2026-09-01 Fix rustdoc CI: replace private-item doc link with plain backticks
+
+a public function's doc comment linked a private item, which CI denies; backticks over widening visibility - the safer one-line fix that doesn't change the API surface. (user said "fix it", assistant reasoned the choice)
+
