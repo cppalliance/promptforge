@@ -1,0 +1,259 @@
+name: Nightly
+
+# Phase 1 (fork testing): triggered on push and dispatch so we iterate
+# fast. Phase 2 (upstream): swap the trigger to schedule + fork guard.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+env:
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  # Exit early when master hasn't moved since the last nightly.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.compare.outputs.should-build }}
+      short-sha: ${{ steps.compare.outputs.short-sha }}
+      date: ${{ steps.compare.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: compare
+        run: |
+          nightly_sha=$(git rev-parse nightly^{} 2>/dev/null || echo "none")
+          head_sha=$(git rev-parse HEAD)
+          short=$(echo "$head_sha" | head -c 7)
+          date=$(date -u +%Y-%m-%d)
+          echo "short-sha=$short" >> "$GITHUB_OUTPUT"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          if [ "$nightly_sha" = "$head_sha" ]; then
+            echo "No new commits since the last nightly ($short), skipping."
+            echo "should-build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commits: nightly was $nightly_sha, HEAD is $head_sha"
+            echo "should-build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # -- Gateway: Linux x86_64 and aarch64 --------------------------------
+
+  gateway-x64:
+    needs: check
+    if: needs.check.outputs.should-build == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      ARTIFACT: promptforge-gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install UI dependencies
+        run: |
+          npm ci --prefix crates/promptforge-workshop-server/ui
+          npm ci --prefix crates/promptforge-gateway-config-ui/ui
+      - name: Build
+        run: cargo build --release --locked -p promptforge-gateway --features workshop
+      - name: Package
+        run: |
+          mkdir -p "$ARTIFACT"
+          cp target/release/promptforge-gateway "$ARTIFACT/"
+          tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}.tar.gz
+
+  gateway-arm64:
+    needs: check
+    if: needs.check.outputs.should-build == 'true'
+    runs-on: ubuntu-22.04-arm
+    env:
+      ARTIFACT: promptforge-gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install UI dependencies
+        run: |
+          npm ci --prefix crates/promptforge-workshop-server/ui
+          npm ci --prefix crates/promptforge-gateway-config-ui/ui
+      - name: Build
+        run: cargo build --release --locked -p promptforge-gateway --features workshop
+      - name: Package
+        run: |
+          mkdir -p "$ARTIFACT"
+          cp target/release/promptforge-gateway "$ARTIFACT/"
+          tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}.tar.gz
+
+  # -- Workshop: Windows, macOS ARM, macOS Intel, Linux ------------------
+
+  workshop:
+    needs: check
+    if: needs.check.outputs.should-build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            runs-on: windows-latest
+            args: ""
+            suffix: win-x64
+          - name: macos-arm
+            runs-on: macos-latest
+            args: "--target aarch64-apple-darwin -- --no-default-features"
+            suffix: macos-arm64
+          - name: macos-intel
+            runs-on: macos-latest
+            args: "--target x86_64-apple-darwin -- --no-default-features"
+            suffix: macos-x64
+          - name: linux
+            runs-on: ubuntu-22.04
+            args: "-- --no-default-features"
+            suffix: linux-x64
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Add the Rust target
+        if: matrix.name != 'windows' && matrix.name != 'linux'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # whisper.cpp uses std::filesystem which requires macOS 10.15+.
+      # Env vars set via GITHUB_ENV don't reliably reach whisper-rs-sys's
+      # cmake build (tauri-action's process chain may not inherit them).
+      # .cargo/config.toml's [env] section is read directly by Cargo and
+      # passed to every build script, bypassing the inheritance chain.
+      - name: Set macOS deployment target
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << 'EOF'
+          [env]
+          MACOSX_DEPLOYMENT_TARGET = "10.15"
+          EOF
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-workshop-server/ui
+        run: npm ci
+
+      - name: Install config UI dependencies
+        working-directory: crates/promptforge-gateway-config-ui/ui
+        run: npm ci
+
+      - name: Install the CUDA toolkit
+        if: matrix.name == 'windows'
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          version="13.2.0"
+          short="13.2"
+          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
+          echo "Downloading CUDA $version network installer..."
+          curl -Lo cuda_installer.exe "$url"
+          echo "Installing CUDA $version (this takes ~20 minutes)..."
+          ./cuda_installer.exe -s -n
+          rm -f cuda_installer.exe
+          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
+          if [ ! -f "$cuda_path/bin/nvcc.exe" ]; then
+            echo "nvcc not found at $cuda_path, searching..."
+            find "C:/Program Files/NVIDIA GPU Computing Toolkit" -name nvcc.exe 2>/dev/null || true
+            exit 1
+          fi
+          echo "CUDA installed at $cuda_path"
+          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
+          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
+          echo "$cuda_path/bin" >> "$GITHUB_PATH"
+
+      - name: Install Tauri system packages
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: crates/promptforge-workshop
+          args: ${{ matrix.args }}
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: workshop-nightly-${{ matrix.suffix }}
+          path: |
+            target/**/bundle/nsis/*.exe
+            target/**/bundle/dmg/*.dmg
+            target/**/bundle/deb/*.deb
+            target/**/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  # -- Publish: rolling nightly release ----------------------------------
+
+  publish:
+    needs: [check, gateway-x64, gateway-arm64, workshop]
+    if: needs.check.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      DATE: ${{ needs.check.outputs.date }}
+      SHORT_SHA: ${{ needs.check.outputs.short-sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find dist -type f | sort
+
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          shopt -s globstar nullglob
+          sha256sum **/*.tar.gz **/*.exe **/*.dmg **/*.deb **/*.AppImage 2>/dev/null > SHA256SUMS || true
+          cat SHA256SUMS
+
+      - name: Delete the previous nightly release
+        run: gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the nightly release
+        run: |
+          shopt -s globstar nullglob
+          gh release create nightly \
+            --title "Nightly ($DATE, $SHORT_SHA)" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --notes "Automated nightly build from master at $SHORT_SHA ($DATE). Not a stable release." \
+            dist/**/*.tar.gz dist/**/*.exe dist/**/*.dmg dist/**/*.deb dist/**/*.AppImage dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
