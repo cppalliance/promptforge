@@ -113,3 +113,4 @@
 - [2026-09-02-2-workshop-cursor-parity] single shortcut authority: When the app owns a shortcut, the embedded browser must not race it with a native accelerator.
 - [2026-09-02-3-whisper-shared-lib] signed update chain: Desktop updates require signed platform artifacts and a signed manifest before install and relaunch.
 - [2026-09-02-4-evergreen-links-and-version] evergreen alias: Stable download aliases may move only by repointing to already-versioned release artifacts.
+- [2026-09-02-5-crate-taxonomy-rename] facade purity: The integrator-facing promptforge crate should expose documented re-exports and contain no implementation logic.
