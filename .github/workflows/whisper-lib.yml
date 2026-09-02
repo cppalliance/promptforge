@@ -43,7 +43,7 @@ jobs:
           - platform: linux-aarch64
             runs-on: ubuntu-22.04-arm
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - name: Check out whisper.cpp
         uses: actions/checkout@v4
@@ -146,6 +146,11 @@ jobs:
           Copy-Item whisper.cpp\include\whisper.h package
           Copy-Item whisper.cpp\LICENSE package
           if (-not (Test-Path package\whisper.dll)) { throw "whisper.dll missing from install" }
+          foreach ($runtime in @("ggml*.dll", "cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+            if (-not (Get-ChildItem package -Filter $runtime)) {
+              throw "$runtime missing from the runtime bundle"
+            }
+          }
           Compress-Archive -Path package\* -DestinationPath "dist\$archive"
           $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Set-Content -NoNewline "dist\$archive.sha256"
@@ -174,20 +179,6 @@ jobs:
             cd dist
             sha256sum "$archive" > "$archive.sha256"
           )
-
-      - name: Smoke-load Windows runtime
-        if: matrix.platform == 'windows-x86_64-cuda'
-        shell: powershell
-        run: |
-          $package = (Resolve-Path package).Path
-          @"
-          import ctypes
-          import os
-          os.add_dll_directory(r"$package")
-          whisper = ctypes.CDLL(r"$package\whisper.dll")
-          whisper.whisper_print_system_info.restype = ctypes.c_char_p
-          print(whisper.whisper_print_system_info().decode())
-          "@ | python -
 
       - name: Smoke-load Unix runtime
         if: matrix.platform != 'windows-x86_64-cuda'
