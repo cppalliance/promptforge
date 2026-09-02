@@ -3,7 +3,7 @@
 // `cargo build` (through the ui-build helper); this script exists for the
 // fast iteration workflow (`npm run watch` rebuilds on save without a Rust
 // recompile) and for the jsdom tests that import the built dist/app.js.
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -12,6 +12,20 @@ import { checkImport } from "./check-layers.mjs";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
 const srcDir = path.join(uiDir, "src");
+
+// The crate version (workspace [workspace.package] version), baked into the
+// bundle as __APP_VERSION__ for the About dialog. A missing or unparsable
+// workspace manifest falls back to the source's "dev" default.
+async function crateVersion() {
+  try {
+    const manifest = await readFile(path.join(uiDir, "..", "..", "..", "Cargo.toml"), "utf8");
+    return /^version\s*=\s*"([^"]+)"/m.exec(manifest)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const version = await crateVersion();
 
 // Mirrored in the ui-build crate's WORKSHOP_STATIC_FILES.
 const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js", "icons/promptforge-icon-1.png"];
@@ -53,6 +67,7 @@ const options = {
   outfile: path.join(distDir, "app.js"),
   logLevel: "info",
   plugins: [layerCheckPlugin],
+  ...(version !== null && { define: { __APP_VERSION__: JSON.stringify(version) } }),
 };
 
 // dist/ is rebuilt from scratch so removed assets never linger.

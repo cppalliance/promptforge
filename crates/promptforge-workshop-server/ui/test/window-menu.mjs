@@ -36,6 +36,9 @@ async function bundle(entry) {
     // The modules under test import their colocated CSS; strip it - the
     // test drives only the JS, and jsdom applies no stylesheets anyway.
     loader: { ".css": "empty" },
+    // Stands in for the build-time crate-version define (build.mjs and
+    // the crate's build.rs): the About dialog must render this value.
+    define: { __APP_VERSION__: JSON.stringify("0.0.0-test") },
     alias: {
       "@tauri-apps/api/window": path.join(uiDir, "helpers", "tauri-window-stub.mjs"),
     },
@@ -652,7 +655,11 @@ function scenario({ desktop = true, modelMenu, profileMenu } = {}) {
     const text = dialog.textContent;
     check(
       "the dialog names product, version, and license",
-      text.includes("PromptForge") && text.includes("0.2.0") && text.includes("BSL-1.0"),
+      text.includes("PromptForge") && text.includes("0.0.0-test") && text.includes("BSL-1.0"),
+    );
+    check(
+      "the version line renders the build-time define",
+      dialog.querySelector(".about-dialog__line").textContent === "Version 0.0.0-test",
     );
     const update = dialog.querySelector(".about-dialog__check");
     check("the dialog carries the desktop update control", update?.disabled === true);

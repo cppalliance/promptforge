@@ -351,7 +351,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: PromptForge Workshop ${{ github.ref_name }}
-          make_latest: false
+          make_latest: true
           files: |
             dist/**/*.exe
             dist/**/*.dmg
@@ -362,18 +362,41 @@ jobs:
             dist/SHA256SUMS
             dist/latest.json
 
+      - name: Stage version-free installer names
+        shell: bash
+        run: |
+          set -e
+          # Copies, not moves, staged after "Publish the release": the
+          # versioned release keeps its versioned asset names, and the
+          # evergreen names live only on the rolling latest release.
+          mkdir -p dist/evergreen
+          copy_one() {
+            local pattern="$1" target="$2"
+            local source
+            source=$(find dist -path "*/$pattern" | head -1)
+            [ -n "$source" ] || { echo "no installer matches $pattern"; exit 1; }
+            cp "$source" "dist/evergreen/$target"
+          }
+          copy_one "workshop-windows/*-setup.exe" PromptForge-setup.exe
+          copy_one "workshop-macos-arm/*.dmg" PromptForge-arm64.dmg
+          copy_one "workshop-macos-intel/*.dmg" PromptForge-x64.dmg
+          copy_one "workshop-linux/*.deb" PromptForge.deb
+          copy_one "workshop-linux/*.AppImage" PromptForge.AppImage
+          ls -l dist/evergreen
+
       - name: Publish the stable updater pointer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           if gh release view promptforge-workshop-latest >/dev/null 2>&1; then
-            gh release upload promptforge-workshop-latest dist/latest.json --clobber
+            gh release upload promptforge-workshop-latest \
+              dist/latest.json dist/evergreen/* --clobber
           else
             gh release create promptforge-workshop-latest \
               --target "$GITHUB_SHA" \
               --title "PromptForge Workshop updater" \
               --notes "Stable updater manifest for the latest tested Workshop release." \
               --latest=false \
-              dist/latest.json
+              dist/latest.json dist/evergreen/*
           fi
