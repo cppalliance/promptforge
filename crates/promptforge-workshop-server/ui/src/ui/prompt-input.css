@@ -1,0 +1,55 @@
+/* PromptInput (src/ui/prompt-input.ts): the framed rich-text prompt box.
+   The container carries the frame (fill, border, radius); the inner
+   ProseMirror contenteditable carries the type and the JS-driven height,
+   clamped between the min/max tokens. Every value comes from the skin's
+   design tokens with a fallback, so a missing token degrades to these
+   defaults instead of breaking the property. */
+
+.prompt-input {
+  background: var(--prompt-input-bg, color-mix(in srgb, #F0F0F0 6%, transparent));
+  border: 1px solid var(--prompt-input-border, color-mix(in srgb, #F0F0F0 8%, transparent));
+  border-radius: var(--prompt-input-radius, 6px);
+  transition: border-color var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
+}
+
+.prompt-input:focus-within {
+  border-color: var(--prompt-input-border-focus, color-mix(in srgb, #F0F0F0 12%, transparent));
+}
+
+.prompt-input__editor {
+  min-block-size: var(--prompt-input-min-height, 36px);
+  max-block-size: var(--prompt-input-max-height, 200px);
+  overflow-y: auto;
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
+  font-size: var(--font-size-base, 13px);
+  line-height: var(--line-height-base, 18px);
+  letter-spacing: var(--letter-spacing-base, -0.08px);
+  color: var(--text, #F0F0F0);
+}
+
+.prompt-input__editor:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: -2px;
+}
+
+/* Non-editable is the contenteditable equivalent of disabled. */
+.prompt-input__editor[contenteditable="false"] {
+  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
+}
+
+/* The global reset does not zero paragraph margins; inside the editor a
+   paragraph per newline must not add leading. */
+.prompt-input__editor p {
+  margin: 0;
+}
+
+/* The Placeholder extension marks an empty document's paragraph with
+   is-editor-empty and a data-placeholder attribute; the text is CSS-only. */
+.prompt-input__editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: inline-start;
+  block-size: 0;
+  pointer-events: none;
+  color: var(--text-quaternary, color-mix(in srgb, #F0F0F0 36%, transparent));
+}
