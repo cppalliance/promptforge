@@ -132,9 +132,6 @@ const WINDOWS_X86_64_CUDA: ServerAsset<'static> = ServerAsset {
 // workflow from `crates/llama-cuda-build`. The zip ships the CUDA runtime
 // DLLs, so the host needs only the NVIDIA driver.
 //
-// The sha256 pin is filled in when the first llama-cuda-blackwell-b10082
-// release is published; until then the row is fail-closed (the pin can
-// never match, so the download is refused rather than trusted).
 const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {
     os: "windows",
     arch: "x86_64",
@@ -143,7 +140,7 @@ const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {
     archives: &[ArchiveRef {
         archive_name: "llama-server-cuda-blackwell-b10082-win-x64.zip",
         url: "https://github.com/cppalliance/promptforge/releases/download/llama-cuda-blackwell-b10082/llama-server-cuda-blackwell-b10082-win-x64.zip",
-        sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        sha256: "adcdadfc2e3494171ab913671669c6e0008ecead01e04b38dc48b840683493ed",
         archive_kind: ArchiveKind::Zip,
     }],
     executable_name: "llama-server.exe",
