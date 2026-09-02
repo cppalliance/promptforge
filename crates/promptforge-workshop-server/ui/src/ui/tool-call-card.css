@@ -1,0 +1,163 @@
+/* Tool call card (src/ui/tool-call-card.ts): a <details>/<summary> card
+   for one tool-call batch - status dot, semibold tool name, and a
+   call-count badge in the header; highlighted argument JSON and the
+   matched result <pre> in the body. Every value comes from the skin's
+   design tokens with a fallback, so a missing token degrades to these
+   defaults instead of breaking the property. */
+
+.tool-call-card {
+  background: var(--tool-card-bg, #181818);
+  border: 1px solid var(--tool-card-border, color-mix(in srgb, #F0F0F0 8%, transparent));
+  border-radius: var(--radius, 6px);
+  font-size: var(--font-size-sm, 12px);
+  line-height: var(--line-height-sm, 16px);
+  color: var(--text, #F0F0F0);
+  /* Clips the header wash to the card's radius; the summary's focus
+     outline draws inside (negative offset) so it survives the clip. */
+  overflow: hidden;
+}
+
+.tool-call-card__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-block-size: var(--tool-card-header-height, 28px);
+  padding-block: 0;
+  padding-inline: var(--space-2, 8px) var(--space-3, 12px);
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+}
+
+.tool-call-card__summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Disclosure chevron; rotates open when the card expands. */
+.tool-call-card__summary::before {
+  content: "›";
+  flex: none;
+  font-size: var(--font-size-base, 13px);
+  line-height: 1;
+  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
+  transition: transform var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
+}
+
+.tool-call-card[open] > .tool-call-card__summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-call-card__summary:hover {
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+}
+
+.tool-call-card__summary:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: -2px;
+}
+
+/* Settled state: a quiet green dot. */
+.tool-call-card__status {
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--radius-full, 9999px);
+  background: var(--color-green, #3FA266);
+}
+
+/* Running state: a pulsing yellow dot. The period derives from the slow
+   duration token; the pulse is decorative, so reduced motion drops it. */
+.tool-call-card--running .tool-call-card__status {
+  background: var(--color-yellow, #F1B467);
+  animation: tool-call-card-pulse calc(var(--duration-slow, 200ms) * 6) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1)) infinite;
+}
+
+@keyframes tool-call-card-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-call-card--running .tool-call-card__status {
+    animation: none;
+  }
+}
+
+.tool-call-card__name {
+  font-weight: var(--font-weight-semibold, 590);
+  color: var(--text, #F0F0F0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-card__count {
+  flex: none;
+  min-inline-size: 16px;
+  padding-block: 0;
+  padding-inline: var(--space-1, 4px);
+  border-radius: var(--radius-full, 9999px);
+  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
+  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
+  font-size: var(--font-size-xs, 11px);
+  line-height: var(--line-height-sm, 16px);
+  text-align: center;
+}
+
+/* Screen-reader-only text: the status dot is color- and motion-only, so
+   the state also exists as words ("Running" / "Completed"). */
+.tool-call-card__sr {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tool-call-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  border-block-start: 1px solid var(--tool-card-border, color-mix(in srgb, #F0F0F0 8%, transparent));
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
+}
+
+.tool-call-card__call-name {
+  margin: 0;
+  font-weight: var(--font-weight-semibold, 590);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+}
+
+/* Shiki's pre carries inline colors from the theme; the plain-fallback
+   pre and the raw/result blocks pick up the same shape from here. */
+.tool-call-card__args pre,
+.tool-call-card__raw,
+.tool-call-card__result {
+  margin: 0;
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
+  background: var(--syntax-bg, #181818);
+  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  border-radius: var(--radius, 6px);
+  overflow-x: auto;
+  font-family: var(--code-font, ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace);
+  font-size: var(--font-size-sm, 12px);
+  line-height: var(--line-height-base, 18px);
+}
+
+/* The result block scrolls instead of growing the feed row. */
+.tool-call-card__result {
+  max-block-size: 12rem;
+  overflow: auto;
+}
