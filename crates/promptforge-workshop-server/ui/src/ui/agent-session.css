@@ -21,10 +21,10 @@
 /* --- The agent menu ----------------------------------------------------- */
 
 .agent-menu {
-  padding: var(--space-xl, 16px);
+  padding: var(--space-4, 16px);
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg, 12px);
+  gap: var(--space-3, 12px);
   overflow-y: auto;
 }
 
@@ -39,14 +39,15 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm, 6px);
+  gap: var(--space-1-5, 6px);
 }
 
 .agent-menu__launch {
   display: block;
   inline-size: 100%;
   min-height: 44px;
-  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
   text-align: start;
   font: inherit;
   color: var(--text, #e8e8e8);
@@ -95,22 +96,24 @@
   overflow-y: auto;
   list-style: none;
   margin: 0;
-  padding: var(--space-lg, 12px);
+  padding: var(--space-3, 12px);
   display: flex;
   flex-direction: column;
-  gap: var(--space-md, 8px);
+  gap: var(--space-2, 8px);
 }
 
 .agent-item {
   max-inline-size: 100%;
   border-radius: var(--radius, 8px);
-  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
   overflow-wrap: anywhere;
 }
 
 .agent-item__meta {
-  margin: 0 0 var(--space-xs, 4px);
-  font-size: 12px;
+  margin-block: 0 var(--space-1, 4px);
+  margin-inline: 0;
+  font-size: var(--font-size-sm, 12px);
   color: var(--text-muted, #909090);
 }
 
@@ -119,9 +122,11 @@
   white-space: pre-wrap;
 }
 
+/* Single-column feed: the inline-start accent bar, not alignment, marks
+   a user message. */
 .agent-item--user {
-  align-self: flex-end;
   background: var(--bg-hover, #252525);
+  border-inline-start: 2px solid var(--accent-dim, #b04722);
 }
 
 .agent-item--reply {
@@ -134,15 +139,40 @@
   color: var(--text-muted, #909090);
 }
 
+/* Streaming caret on the live tail of the last pending row. The
+   .markdown-content containers arrive with the feed integration; until
+   then no markup matches this selector and the rule stays inert. */
+.agent-item--pending:last-child .markdown-content > :last-child::after {
+  content: "";
+  display: inline-block;
+  inline-size: 2px;
+  block-size: 1em;
+  margin-inline-start: var(--space-1, 4px);
+  vertical-align: text-bottom;
+  background: var(--text, #F0F0F0);
+  animation: agent-session-caret-blink calc(var(--duration-slow, 200ms) * 5) linear infinite;
+}
+
+@keyframes agent-session-caret-blink {
+  0%, 49.9% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-item--pending:last-child .markdown-content > :last-child::after {
+    animation: none;
+  }
+}
+
 .agent-item--reasoning .agent-item__reasoning {
   border-inline-start: 2px solid var(--border, #2a2a2a);
-  padding-inline-start: var(--space-lg, 12px);
+  padding-inline-start: var(--space-3, 12px);
 }
 
 .agent-item--reasoning summary {
   cursor: pointer;
   color: var(--text-muted, #909090);
-  font-size: 12px;
+  font-size: var(--font-size-sm, 12px);
 }
 
 .agent-item--tool-call,
@@ -157,12 +187,12 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs, 4px);
+  gap: var(--space-1, 4px);
 }
 
 .agent-item__call {
   display: flex;
-  gap: var(--space-md, 8px);
+  gap: var(--space-2, 8px);
   align-items: baseline;
 }
 
@@ -170,7 +200,7 @@
 .agent-item__call-args,
 .agent-item__output {
   font-family: var(--code-font, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--font-size-sm, 12px);
 }
 
 .agent-item__call-args {
@@ -195,9 +225,9 @@
 .agent-session__form {
   flex: none;
   display: flex;
-  gap: var(--space-md, 8px);
+  gap: var(--space-2, 8px);
   align-items: flex-end;
-  padding: var(--space-lg, 12px);
+  padding: var(--space-3, 12px);
   border-top: 1px solid var(--border, #2a2a2a);
   background: var(--bg-composer, #0f0f0f);
 }
@@ -211,7 +241,8 @@
   background: var(--bg-raised, #1a1a1a);
   border: 1px solid var(--border, #2a2a2a);
   border-radius: var(--radius, 8px);
-  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
 }
 
 .agent-session__input:focus-visible {
@@ -227,7 +258,8 @@
   flex: none;
   min-inline-size: 44px;
   min-block-size: 44px;
-  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  padding-block: var(--space-2, 8px);
+  padding-inline: var(--space-3, 12px);
   font: inherit;
   color: var(--text, #e8e8e8);
   background: var(--accent, #e05a2b);
