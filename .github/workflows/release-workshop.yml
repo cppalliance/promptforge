@@ -1,4 +1,5 @@
 name: Release Workshop
+run-name: PromptForge Workshop ${{ github.ref_name }}
 
 # Builds the PromptForge Workshop desktop installers for Windows, macOS
 # (ARM and Intel), and Linux on a promptforge-workshop-v* tag, tests each
@@ -364,6 +365,7 @@ jobs:
       - name: Publish the stable updater pointer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if gh release view promptforge-workshop-latest >/dev/null 2>&1; then
             gh release upload promptforge-workshop-latest dist/latest.json --clobber
