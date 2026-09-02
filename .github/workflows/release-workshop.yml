@@ -41,13 +41,13 @@ jobs:
             args: ""
           - name: macos-arm
             runs-on: macos-latest
-            args: "--target aarch64-apple-darwin --no-default-features"
+            args: "--target aarch64-apple-darwin -- --no-default-features"
           - name: macos-intel
             runs-on: macos-latest
-            args: "--target x86_64-apple-darwin --no-default-features"
+            args: "--target x86_64-apple-darwin -- --no-default-features"
           - name: linux
             runs-on: ubuntu-22.04
-            args: "--no-default-features"
+            args: "-- --no-default-features"
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +60,20 @@ jobs:
       - name: Add the Rust target
         if: matrix.name != 'windows' && matrix.name != 'linux'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # whisper.cpp uses std::filesystem which requires macOS 10.15+.
+      # Env vars set via GITHUB_ENV don't reliably reach whisper-rs-sys's
+      # cmake build (tauri-action's process chain may not inherit them).
+      # .cargo/config.toml's [env] section is read directly by Cargo and
+      # passed to every build script, bypassing the inheritance chain.
+      - name: Set macOS deployment target
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << 'EOF'
+          [env]
+          MACOSX_DEPLOYMENT_TARGET = "10.15"
+          EOF
 
       - uses: actions/setup-node@v4
         with:
