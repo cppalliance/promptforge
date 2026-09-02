@@ -31,8 +31,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE,
     COREWEBVIEW2_PERMISSION_STATE_ALLOW, ICoreWebView2, ICoreWebView2File,
     ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Settings3,
-    ICoreWebView2WebMessageReceivedEventArgs,
-    ICoreWebView2WebMessageReceivedEventArgs2,
+    ICoreWebView2WebMessageReceivedEventArgs, ICoreWebView2WebMessageReceivedEventArgs2,
 };
 use webview2_com::{PermissionRequestedEventHandler, WebMessageReceivedEventHandler, take_pwstr};
 use windows_core::{Interface as _, PWSTR};
