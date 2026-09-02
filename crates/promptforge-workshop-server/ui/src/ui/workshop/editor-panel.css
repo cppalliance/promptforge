@@ -26,10 +26,10 @@
 .editor-panel__error {
   margin: 0;
   padding: var(--space-sm, 6px) var(--space-lg, 12px);
-  font-size: 12px;
+  font-size: var(--font-size-sm, 12px);
   color: var(--danger-text, #e4606d);
-  background: var(--bg-raised, #1a1a1a);
-  border-bottom: 1px solid var(--border, #2a2a2a);
+  background: var(--bg-raised, #141414);
+  border-bottom: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
 }
 
 /* The editor panel's modal dialogs (modified-time conflict and
@@ -50,24 +50,24 @@
 .editor-close {
   max-width: 360px;
   padding: var(--space-xl, 16px);
-  background: var(--bg-raised, #1a1a1a);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg-raised, #141414);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
 }
 
 .editor-conflict__title,
 .editor-close__title {
   margin: 0 0 var(--space-md, 8px);
-  font-size: 14px;
+  font-size: var(--font-size-lg, 14px);
   font-weight: 600;
-  color: var(--text, #e8e8e8);
+  color: var(--text, #F0F0F0);
 }
 
 .editor-conflict__line,
 .editor-close__line {
   margin: 0 0 var(--space-lg, 12px);
-  font-size: 13px;
-  color: var(--text-muted, #909090);
+  font-size: var(--font-size-base, 13px);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .editor-conflict__actions,
@@ -80,18 +80,18 @@
 .editor-conflict__button,
 .editor-close__button {
   padding: var(--space-sm, 6px) var(--space-lg, 12px);
-  background: var(--bg, #0f0f0f);
-  color: var(--text, #e8e8e8);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg, #181818);
+  color: var(--text, #F0F0F0);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-base, 13px);
   cursor: pointer;
 }
 
 .editor-conflict__button:hover,
 .editor-close__button:hover {
-  background: var(--bg-hover, #252525);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .editor-conflict__button:focus-visible,

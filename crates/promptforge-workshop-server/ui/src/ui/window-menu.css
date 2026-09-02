@@ -13,7 +13,7 @@
   padding: 0 var(--space-lg, 12px);
   background: none;
   border: none;
-  color: var(--titlebar-foreground, #e8e8e8);
+  color: var(--titlebar-foreground, #F0F0F0);
   font: inherit;
   cursor: pointer;
   user-select: none;
@@ -21,7 +21,7 @@
 
 .window-titlebar__menu:hover,
 .window-titlebar__menu[aria-expanded="true"] {
-  background: var(--titlebar-hover, #252525);
+  background: var(--titlebar-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .window-titlebar__menu:focus-visible {
@@ -39,9 +39,9 @@
   z-index: 100;
   min-width: var(--titlebar-popover-min-width, 200px);
   padding: var(--space-xs, 4px) 0;
-  background: var(--bg-raised, #1a1a1a);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg-raised, #141414);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
   box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
 }
 
@@ -58,7 +58,7 @@
   padding: var(--space-xs, 4px) var(--space-lg, 12px);
   background: none;
   border: none;
-  color: var(--text, #e8e8e8);
+  color: var(--text, #F0F0F0);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -66,17 +66,17 @@
 }
 
 .window-titlebar__item:hover {
-  background: var(--bg-hover, #252525);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .window-titlebar__item:focus-visible {
   outline: 1px solid var(--titlebar-accent, #e05a2b);
   outline-offset: -1px;
-  background: var(--bg-hover, #252525);
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
 }
 
 .window-titlebar__item[aria-disabled="true"] {
-  color: var(--text-muted, #909090);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
   cursor: default;
 }
 
@@ -85,8 +85,8 @@
 }
 
 .window-titlebar__shortcut {
-  color: var(--text-muted, #909090);
-  font-size: 12px;
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  font-size: var(--font-size-sm, 12px);
 }
 
 /* Checkable rows (the Model menu): a fixed-width check column keeps the
@@ -104,11 +104,11 @@
 /* The pending mark: an ellipsis on the profile a switch is loading,
    muted where the settled check is accented. */
 .window-titlebar__item-check--pending {
-  color: var(--text-muted, #909090);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
 }
 
 .window-titlebar__separator {
   height: 1px;
   margin: var(--space-xs, 4px) 0;
-  background: var(--border, #2a2a2a);
+  background: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
 }

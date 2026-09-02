@@ -15,7 +15,7 @@
 
 .about-dialog {
   padding: var(--space-xl, 16px);
-  background: var(--bg-raised, #1a1a1a);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
+  background: var(--bg-raised, #141414);
+  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
+  border-radius: var(--radius, 6px);
 }
