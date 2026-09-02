@@ -96,12 +96,27 @@ jobs:
         shell: bash
         run: |
           version="${TAG_NAME#promptforge-workshop-v}"
-          version="${version%%-test*}"
           built="${{ steps.build.outputs.appVersion }}"
           if [ "$built" != "$version" ]; then
             echo "tag version $version does not match the crate version $built"
             exit 1
           fi
+
+      - name: Give macOS updater bundles architecture-specific names
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
+        shell: bash
+        run: |
+          version="${TAG_NAME#promptforge-workshop-v}"
+          if [[ "${{ matrix.name }}" == "macos-arm" ]]; then
+            arch="aarch64"
+          else
+            arch="x86_64"
+          fi
+          bundle=$(find target -path "*/bundle/macos/*.app.tar.gz" | head -1)
+          [ -n "$bundle" ] || { echo "no macOS updater bundle"; exit 1; }
+          renamed="$(dirname "$bundle")/PromptForge_${version}_${arch}.app.tar.gz"
+          mv "$bundle" "$renamed"
+          mv "$bundle.sig" "$renamed.sig"
 
       - name: Upload the installers
         uses: actions/upload-artifact@v4
@@ -152,7 +167,6 @@ jobs:
           if (-not $exe) { throw "PromptForge.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
           $version = $env:TAG_NAME -replace '^promptforge-workshop-v', ''
-          $version = $version -replace '-test.*$', ''
           if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
@@ -191,7 +205,6 @@ jobs:
           hdiutil detach "/Volumes/PromptForge" -quiet
           bin=$(find /tmp/PromptForge.app/Contents/MacOS -type f | head -1)
           version="${TAG_NAME#promptforge-workshop-v}"
-          version="${version%%-test*}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
@@ -231,7 +244,6 @@ jobs:
           bin=$(dpkg -L "$package" | grep -E '/usr/bin/[^/]+$' | head -1)
           [ -n "$bin" ] || { echo "no binary in the deb"; exit 1; }
           version="${TAG_NAME#promptforge-workshop-v}"
-          version="${version%%-test*}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           # The AppImage is not installed; check it exists and runs --version.
@@ -291,7 +303,7 @@ jobs:
 
           root = Path("dist")
           tag = os.environ["TAG_NAME"]
-          version = tag.removeprefix("promptforge-workshop-v").split("-test", 1)[0]
+          version = tag.removeprefix("promptforge-workshop-v")
           repository = os.environ["GITHUB_REPOSITORY"]
           platforms = {}
           for platform, artifact, pattern in [
