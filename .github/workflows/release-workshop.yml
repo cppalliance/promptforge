@@ -145,8 +145,9 @@ jobs:
           $setup = Get-ChildItem -Recurse dist -Filter *-setup.exe | Select-Object -First 1
           if (-not $setup) { throw "no NSIS installer in the artifact" }
           Start-Process $setup.FullName -ArgumentList "/S" -Wait
-          $exe = @("$env:LOCALAPPDATA\Programs", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
-            ForEach-Object { Get-ChildItem $_ -Recurse -Filter PromptForge.exe -ErrorAction SilentlyContinue } |
+          $exe = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
+            ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
+            Where-Object { $_.Name -in @("PromptForge.exe", "promptforge-workshop.exe") } |
             Select-Object -First 1
           if (-not $exe) { throw "PromptForge.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
