@@ -110,3 +110,4 @@
 - [2026-09-01-1-build-simplification] product release lanes: Gateway, Workshop, and native accelerator artifacts release independently on platform-appropriate lanes.
 - [2026-09-02-1-workshop-agent-window-clone] reference-derived presentation: Visual parity values need source citations and measured layout composition, not token resemblance alone.
 - [2026-09-01-2-nightly-installer-builds] fork-first workflow proof: Release workflow changes should prove their event and artifact paths on a fork before upstream scheduling.
+- [2026-09-02-2-workshop-cursor-parity] single shortcut authority: When the app owns a shortcut, the embedded browser must not race it with a native accelerator.
