@@ -40,6 +40,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A106. Mutable release channels identify an exact source commit and skip unchanged builds.
 - A107. Agent input appears only after its program launches; New Agent starts a fresh session.
 - A108. Native libraries are platform-selected, digest-verified artifacts loaded behind narrow FFI.
+- A109. Visible product versions derive from package or build metadata.
 
 ## Principles
 
