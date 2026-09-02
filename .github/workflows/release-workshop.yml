@@ -39,10 +39,10 @@ jobs:
             args: ""
           - name: macos-arm
             runs-on: macos-latest
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --bundles app,dmg"
           - name: macos-intel
             runs-on: macos-latest
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --bundles app,dmg"
           - name: linux
             runs-on: ubuntu-22.04
             args: ""
@@ -113,7 +113,7 @@ jobs:
             target/**/bundle/deb/*.deb
             target/**/bundle/appimage/*.AppImage
             target/**/bundle/**/*.sig
-            target/**/bundle/**/*.tar.gz
+            target/**/bundle/macos/*.app.tar.gz
           if-no-files-found: error
 
   test:
@@ -276,7 +276,7 @@ jobs:
         working-directory: dist
         run: |
           shopt -s globstar nullglob
-          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage **/*.tar.gz > SHA256SUMS
+          sha256sum **/*.exe **/*.dmg **/*.deb **/*.AppImage **/*.app.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
       - name: Assemble latest.json
@@ -294,18 +294,18 @@ jobs:
           version = tag.removeprefix("promptforge-workshop-v").split("-test", 1)[0]
           repository = os.environ["GITHUB_REPOSITORY"]
           platforms = {}
-          for platform, artifact in {
-              "windows-x86_64": "workshop-windows",
-              "darwin-aarch64": "workshop-macos-arm",
-              "darwin-x86_64": "workshop-macos-intel",
-              "linux-x86_64": "workshop-linux",
-          }.items():
+          for platform, artifact, pattern in [
+              ("windows-x86_64", "workshop-windows", "*-setup.exe.sig"),
+              ("darwin-aarch64", "workshop-macos-arm", "*.app.tar.gz.sig"),
+              ("darwin-x86_64", "workshop-macos-intel", "*.app.tar.gz.sig"),
+              ("linux-x86_64", "workshop-linux", "*.AppImage.sig"),
+          ]:
               folder = root / artifact
-              signed = []
-              for signature in folder.rglob("*.sig"):
-                  bundle = Path(str(signature)[:-4])
-                  if bundle.is_file():
-                      signed.append((bundle, signature))
+              signed = [
+                  (Path(str(signature)[:-4]), signature)
+                  for signature in folder.rglob(pattern)
+                  if Path(str(signature)[:-4]).is_file()
+              ]
               if len(signed) != 1:
                   names = ", ".join(str(path) for path, _ in signed)
                   raise SystemExit(f"{artifact} has {len(signed)} signed updater bundles: {names}")
@@ -341,6 +341,6 @@ jobs:
             dist/**/*.deb
             dist/**/*.AppImage
             dist/**/*.sig
-            dist/**/*.tar.gz
+            dist/**/*.app.tar.gz
             dist/SHA256SUMS
             dist/latest.json
