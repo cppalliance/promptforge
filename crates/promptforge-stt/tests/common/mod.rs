@@ -45,7 +45,7 @@ impl TestServer {
         };
         let route_state = state;
         let handle = promptforge_workshop_server::spawn_with_routes(config, move |app| {
-            promptforge_stt::voice_routes(route_state, app.push())
+            promptforge_stt::stt_routes(route_state, app.push())
         })
         .expect("workshop server spawns with STT routes");
         Self {

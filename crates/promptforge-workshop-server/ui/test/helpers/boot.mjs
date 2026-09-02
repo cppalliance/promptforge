@@ -102,7 +102,7 @@ export async function bootWorkbench(name, run) {
   }
   globalThis.WebSocket = FakeWebSocket;
 
-  // Voice capture stubs: jsdom has no audio stack, so the mic button's
+  // Dictation stubs: jsdom has no audio stack, so the mic button's
   // getUserMedia/AudioContext path is scripted to succeed. The bundle
   // reads the globals.
   const fakeAudioStream = { getTracks: () => [{ stop() {} }] };
@@ -135,7 +135,7 @@ export async function bootWorkbench(name, run) {
   // The workbench state (models, profiles, selection) arrives only over
   // the socket, so a booted workbench fetches nothing but the Workshop
   // tree's roots listing (answered empty: no grants yet) and the agent
-  // session's voice capability probe (answered fully capable, so a test
+  // session's STT capability probe (answered fully capable, so a test
   // can start a take). Any other fetch - including the retired /v1/models
   // and /profiles boot fetches - rejects the test.
   globalThis.fetch = (url) => {
@@ -147,7 +147,7 @@ export async function bootWorkbench(name, run) {
         }),
       );
     }
-    if (url === "/voice/capability") {
+    if (url === "/stt/capability") {
       return Promise.resolve(
         new Response(JSON.stringify({ gpu: true, engine: true }), {
           status: 200,
@@ -246,10 +246,10 @@ export async function bootWorkbench(name, run) {
   // agent panel's /agents/ws connection.
   const wsSocket = () =>
     sockets.filter((socket) => socket.url.endsWith("/ws") && !socket.url.endsWith("/agents/ws")).at(-1);
-  // The agent panel's session socket, and the per-take /voice sockets the
+  // The agent panel's session socket, and the per-take /stt sockets the
   // mic opens.
   const agentsSocket = () => sockets.filter((socket) => socket.url.endsWith("/agents/ws")).at(-1);
-  const voiceSockets = () => sockets.filter((socket) => socket.url.endsWith("/voice"));
+  const sttSockets = () => sockets.filter((socket) => socket.url.endsWith("/stt"));
 
   // The fake socket flips to OPEN on a 0ms timer, and the app can boot
   // during the bundle import's own microtask drain - before any macrotask
@@ -329,7 +329,7 @@ export async function bootWorkbench(name, run) {
     FakeWebSocket,
     wsSocket,
     agentsSocket,
-    voiceSockets,
+    sttSockets,
     emitAgent,
     agentPanel,
     statusBar,

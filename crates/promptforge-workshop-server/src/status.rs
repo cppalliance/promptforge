@@ -2,7 +2,7 @@
 //! subsystem to every connected `/ws` session.
 //!
 //! Anything with user-visible latency - startup phases, gateway round
-//! trips, voice capture and transcription, model downloads - reports what
+//! trips, dictation and transcription, model downloads - reports what
 //! it is doing as a [`StatusBarUpdate`]. The bus is a tokio broadcast
 //! channel: updates fan out to all current subscribers, a send with no
 //! subscribers is a no-op, and a subscriber that falls more than

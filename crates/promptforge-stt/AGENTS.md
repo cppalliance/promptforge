@@ -1,7 +1,7 @@
 # promptforge-stt
 
 This crate owns gateway-hosted speech-to-text runtime behavior: artifact
-provisioning, active-profile engine lifecycle, the `/voice` WebSocket, and the
+provisioning, active-profile engine lifecycle, the `/stt` WebSocket, and the
 OpenAI-compatible transcription endpoint.
 
 ## Rules
@@ -13,7 +13,7 @@ OpenAI-compatible transcription endpoint.
   provisions only the selected `Config::stt_models()` pair.
 - The `cuda` feature only forwards to `promptforge-transcribe/cuda`. Features
   stay additive.
-- `/voice` keeps its existing wire path and frame contract. OpenAI multipart
+- `/stt` keeps its existing wire path and frame contract. OpenAI multipart
   input is capped at 25 MiB before decode.
 - Every public item carries a `///` doc comment; behavior changes ship with
   tests in the same change.

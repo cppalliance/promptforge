@@ -1,13 +1,13 @@
-// Voice dictation on the agent session input (src/ui/agent-session-view.ts
-// mounting src/ui/voice.ts), driven through the real AgentSessionService
-// over a scripted wire, a scripted /voice socket, stubbed audio, and a
+// Dictation on the agent session input (src/ui/agent-session-view.ts
+// mounting src/ui/stt.ts), driven through the real AgentSessionService
+// over a scripted wire, a scripted /stt socket, stubbed audio, and a
 // recording status sink in jsdom. Pins the composer behaviors the mic
 // carried before it moved here: the take is gated by the pinned wait and
 // by the capability probe (a blocked click names its reason and opens no
 // socket); the REC badge follows the recording; interims splice
 // committed+tentative at the cursor and the final replaces them in place;
 // the input is readOnly for the take's duration; a send discards the live
-// take; a dying wait discards it too. Run: node test/agent-voice.mjs
+// take; a dying wait discards it too. Run: node test/agent-stt.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -82,7 +82,7 @@ window.AudioContext = FakeAudioContext;
 globalThis.AudioContext = FakeAudioContext;
 globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
-// A scripted /voice socket: opens asynchronously like a real one, records
+// A scripted /stt socket: opens asynchronously like a real one, records
 // what the client sends, and lets the test push server frames.
 const sockets = [];
 class FakeWebSocket {
@@ -144,8 +144,8 @@ const capabilityResponse = (body) =>
   });
 globalThis.fetch = (url) => {
   probes.push(url);
-  if (url !== "/voice/capability") {
-    return Promise.reject(new Error(`unexpected fetch in the agent-voice test: ${url}`));
+  if (url !== "/stt/capability") {
+    return Promise.reject(new Error(`unexpected fetch in the agent-stt test: ${url}`));
   }
   if (capabilityAnswer === null) {
     return Promise.reject(new Error("connection refused"));
@@ -158,7 +158,7 @@ globalThis.fetch = (url) => {
   return Promise.resolve(capabilityResponse(capabilityAnswer));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-voice-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "promptforge-agent-stt-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, Emitter, AgentSessionService, AgentSessionView } = await import(
   pathToFileURL(bundlePath).href
@@ -171,7 +171,7 @@ function check(name, condition) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// startVoice crosses several await points (getUserMedia, socket open,
+// startStt crosses several await points (getUserMedia, socket open,
 // worklet load) before sending "start"; poll until the take is live.
 async function waitFor(condition) {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -181,7 +181,7 @@ async function waitFor(condition) {
   return false;
 }
 
-// The scripted wire behind the real service: only the frames voice cares
+// The scripted wire behind the real service: only the frames dictation cares
 // about are driven (input_required, input_cancelled, agent_session).
 function makeWire() {
   const emitters = {
@@ -219,7 +219,7 @@ function makeWire() {
 
 // Mounts a view over a fresh service with the probe answering
 // `capability`, waits for the probe to settle, and returns the handles.
-// `status` records what voice paints: local messages and the REC state.
+// `status` records what dictation paints: local messages and the REC state.
 async function harness(capability = { gpu: true, engine: true }) {
   capabilityAnswer = capability;
   const probesBefore = probes.length;
@@ -243,7 +243,7 @@ async function harness(capability = { gpu: true, engine: true }) {
   const mic = view.element.querySelector(".agent-session__mic");
   const input = view.element.querySelector(".agent-session__input");
   const form = view.element.querySelector(".agent-session__form");
-  // Clicks the mic and waits for the take's /voice socket to open and
+  // Clicks the mic and waits for the take's /stt socket to open and
   // send "start"; null when no take began within the wait.
   async function startTake() {
     const before = sockets.length;
@@ -275,7 +275,7 @@ await assertNoLeaks(lifecycle, async () => {
         mic.querySelector("svg") !== null,
     );
     const gated = await startTake();
-    check("a mic click with no wait pinned opens no /voice socket", gated === null);
+    check("a mic click with no wait pinned opens no /stt socket", gated === null);
     check(
       "a gated click names the missing wait on the status bar",
       status.local.length === 1 &&
@@ -286,7 +286,7 @@ await assertNoLeaks(lifecycle, async () => {
 
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
-    check("the mic click opens a /voice socket once a wait is pinned", socket !== null);
+    check("the mic click opens a /stt socket once a wait is pinned", socket !== null);
     if (socket === null) {
       dispose();
       return;
@@ -297,7 +297,7 @@ await assertNoLeaks(lifecycle, async () => {
 
     wire.fire.inputCancelled("tok1");
     check("a cancelled wait clears the REC badge", !status.recording);
-    check("a cancelled wait closes the take's voice socket", socket.closed);
+    check("a cancelled wait closes the take's /stt socket", socket.closed);
     check("a cancelled wait lifts readOnly and drops the interim", !input.readOnly && input.value === "");
     check("a cancelled wait disables the input again", input.disabled);
     socket.message({ type: "final", text: "LATE FINAL" });
@@ -307,7 +307,7 @@ await assertNoLeaks(lifecycle, async () => {
     const reopened = await startTake();
     check("a fresh wait lets the mic start a fresh take", reopened !== null);
     reopened?.close();
-    check("a dropped voice socket clears the REC badge", !status.recording);
+    check("a dropped /stt socket clears the REC badge", !status.recording);
 
     // A new session resets the pin: the take dies with it.
     wire.fire.inputRequired("tok3");
@@ -330,7 +330,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("interim splice: the mic click did not open a /voice socket");
+      failures.push("interim splice: the mic click did not open a /stt socket");
       dispose();
       return;
     }
@@ -364,7 +364,7 @@ await assertNoLeaks(lifecycle, async () => {
     input.setSelectionRange(1, 1);
     let socket = await startTake();
     if (socket === null) {
-      failures.push("cursor insert: the mic click did not open a /voice socket");
+      failures.push("cursor insert: the mic click did not open a /stt socket");
       dispose();
       return;
     }
@@ -405,12 +405,12 @@ await assertNoLeaks(lifecycle, async () => {
     input.setSelectionRange(6, 6);
     const socket = await startTake();
     if (socket === null) {
-      failures.push("readonly take: the mic click did not open a /voice socket");
+      failures.push("readonly take: the mic click did not open a /stt socket");
       dispose();
       return;
     }
     check("the input is readOnly while the take is live", input.readOnly);
-    check("the take marks the input as recording", input.classList.contains("voice-input--recording"));
+    check("the take marks the input as recording", input.classList.contains("stt-input--recording"));
     socket.message({ type: "interim", committed: " world", tentative: "" });
     check("the interim still lands programmatically", input.value === "prefix world");
     // Stopping through the mic sends "stop" and waits for the final.
@@ -418,7 +418,7 @@ await assertNoLeaks(lifecycle, async () => {
     check("a second mic click sends stop", socket.sent.includes("stop"));
     check("readOnly holds until the final arrives", input.readOnly);
     socket.message({ type: "final", text: " world" });
-    check("the final lifts readOnly", !input.readOnly && !input.classList.contains("voice-input--recording"));
+    check("the final lifts readOnly", !input.readOnly && !input.classList.contains("stt-input--recording"));
     check("the final text stays in place", input.value === "prefix world");
     dispose();
   }
@@ -430,7 +430,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok1");
     let socket = await startTake();
     if (socket === null) {
-      failures.push("stop window: the mic click did not open a /voice socket");
+      failures.push("stop window: the mic click did not open a /stt socket");
       dispose();
       return;
     }
@@ -481,7 +481,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("discard on send: the mic click did not open a /voice socket");
+      failures.push("discard on send: the mic click did not open a /stt socket");
       dispose();
       return;
     }
@@ -490,7 +490,7 @@ await assertNoLeaks(lifecycle, async () => {
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     check("the send carries the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
     check("the send clears the REC badge", !status.recording);
-    check("the send closes the take's voice socket", socket.closed);
+    check("the send closes the take's /stt socket", socket.closed);
     check("the send lifts readOnly and clears the box", !input.readOnly && input.value === "");
     socket.message({ type: "final", text: "LATE FINAL" });
     check("a late final after the send writes nothing", input.value === "");
@@ -519,7 +519,7 @@ await assertNoLeaks(lifecycle, async () => {
     const { wire, status, startTake, dispose } = await harness(capability);
     wire.fire.inputRequired("tok");
     const socket = await startTake();
-    check(`${name} blocks the take with no /voice socket`, socket === null);
+    check(`${name} blocks the take with no /stt socket`, socket === null);
     check(
       `${name} names its reason on the status bar`,
       status.local.length === 1 && status.local[0].label.includes(expected) && status.local[0].severity === "info",
@@ -528,13 +528,13 @@ await assertNoLeaks(lifecycle, async () => {
   }
 
   // A click that beats the probe is refused, not let through on the wait
-  // alone: a server with no engine still accepts /voice, so the gate must
+  // alone: a server with no engine still accepts /stt, so the gate must
   // hold until the answer is known. Once it arrives, the same click starts a take.
   {
     const { wire, status, startTake, dispose } = await harness("pending");
     wire.fire.inputRequired("tok");
     const early = await startTake();
-    check("a click while the probe is in flight opens no /voice socket", early === null);
+    check("a click while the probe is in flight opens no /stt socket", early === null);
     check(
       "a click while the probe is in flight says the check is still running",
       status.local.length === 1 && status.local[0].label.includes("still checking") && status.local[0].severity === "info",
@@ -549,9 +549,9 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 if (failures.length > 0) {
-  console.error(`agent-voice: ${failures.length} failure(s)`);
+  console.error(`agent-stt: ${failures.length} failure(s)`);
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.log("agent-voice: all assertions passed");
+console.log("agent-stt: all assertions passed");
 process.exit(0);

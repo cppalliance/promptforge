@@ -102,7 +102,7 @@ mod hosted {
         // the workshop under a path on the gateway listener.
         let handle = promptforge_workshop_server::spawn_with_routes(
             ws_config(config.server(), workshop, config_path, bound),
-            move |state| promptforge_stt::voice_routes(stt, state.push()),
+            move |state| promptforge_stt::stt_routes(stt, state.push()),
         )
         .map_err(StartupError::workshop)?;
         tracing::info!("workshop serving on {}", handle.url());

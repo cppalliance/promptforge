@@ -59,7 +59,7 @@ impl TestServer {
     }
 
     /// The `ws://` URL of `path` on this server, for example `/ws` or
-    /// `/voice`.
+    /// `/stt`.
     pub(crate) fn ws_url(&self, path: &str) -> String {
         let url = self
             .handle

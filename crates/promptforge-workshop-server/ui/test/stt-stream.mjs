@@ -1,11 +1,11 @@
-// Stream-generation test for the voice client (src/ui/voice.ts, step 15):
+// Stream-generation test for the STT client (src/ui/stt.ts, step 15):
 // the server's `stream` frame announces the take's generation; interim and
 // final frames tagged with an older generation are stale (a stop/restart
 // race) and must be discarded; frames with no generation, or tagged frames
 // arriving before any announcement, are treated as current so the client
-// tolerates a server that never announces. Drives setupVoice against a
+// tolerates a server that never announces. Drives setupStt against a
 // scripted fake WebSocket and stubbed audio in a jsdom DOM.
-// Run: node test/voice-stream.mjs
+// Run: node test/stt-stream.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +20,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { setupVoice } from "./src/ui/voice.ts";
+      export { setupStt } from "./src/ui/stt.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -34,9 +34,9 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-voice-stream-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "promptforge-stt-stream-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, setupVoice } = await import(pathToFileURL(bundlePath).href);
+const { lifecycle, setupStt } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -83,7 +83,7 @@ window.AudioContext = FakeAudioContext;
 globalThis.AudioContext = FakeAudioContext;
 globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
-// A scripted /voice socket. Opens asynchronously like a real one; the
+// A scripted /stt socket. Opens asynchronously like a real one; the
 // test drives server frames through message().
 const sockets = [];
 class FakeWebSocket {
@@ -132,7 +132,7 @@ class FakeWebSocket {
 window.WebSocket = FakeWebSocket;
 globalThis.WebSocket = FakeWebSocket;
 
-// startVoice crosses several await points (getUserMedia, socket open,
+// startStt crosses several await points (getUserMedia, socket open,
 // worklet load) before sending "start"; poll until the take is live.
 async function waitFor(condition) {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -148,13 +148,13 @@ await assertNoLeaks(lifecycle, async () => {
   const mic = window.document.createElement("button");
   const input = window.document.createElement("textarea");
   window.document.body.append(mic, input);
-  const handle = setupVoice({ mic, input }, statusBar, () => null);
+  const handle = setupStt({ mic, input }, statusBar, () => null);
 
   // --- The stream frame sets the generation; matching frames apply -------
 
   mic.click();
   check(
-    "the mic click opens a /voice socket and sends start",
+    "the mic click opens a /stt socket and sends start",
     await waitFor(() => sockets.length === 1 && sockets[0].sent.includes("start")),
   );
   const socket = sockets[0];
@@ -187,7 +187,7 @@ await assertNoLeaks(lifecycle, async () => {
   input.setSelectionRange(0, 0);
   mic.click();
   check(
-    "a second mic click opens a fresh /voice socket",
+    "a second mic click opens a fresh /stt socket",
     await waitFor(() => sockets.length === 2 && sockets[1].sent.includes("start")),
   );
   sockets[1].message({ type: "interim", committed: "later take", tentative: "", generation: 5 });
@@ -204,10 +204,10 @@ await assertNoLeaks(lifecycle, async () => {
   const blockedInput = window.document.createElement("textarea");
   window.document.body.append(blockedMic, blockedInput);
   const local = [];
-  const blockedHandle = setupVoice(
+  const blockedHandle = setupStt(
     { mic: blockedMic, input: blockedInput },
     { showLocal: (label, severity) => local.push({ label, severity }), setRecording() {} },
-    () => "Voice dictation needs a GPU this server doesn't have.",
+    () => "Dictation needs a GPU this server doesn't have.",
   );
   blockedMic.click();
   await waitFor(() => local.length > 0);
@@ -218,16 +218,16 @@ await assertNoLeaks(lifecycle, async () => {
       local[0].severity === "info",
   );
   check(
-    "a blocked click opens no /voice socket",
+    "a blocked click opens no /stt socket",
     sockets.length === 2,
   );
   blockedHandle.dispose();
 });
 
 if (failures.length > 0) {
-  console.error(`voice-stream: ${failures.length} failure(s)`);
+  console.error(`stt-stream: ${failures.length} failure(s)`);
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.log("voice-stream: all assertions passed");
+console.log("stt-stream: all assertions passed");
 process.exit(0);

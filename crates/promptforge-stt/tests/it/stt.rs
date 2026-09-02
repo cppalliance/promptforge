@@ -1,4 +1,4 @@
-//! Characterization tests for the mechanically moved `/voice` socket.
+//! Characterization tests for the mechanically moved `/stt` socket.
 
 #![expect(
     clippy::expect_used,
@@ -68,7 +68,7 @@ fn fixture_server(with_final: bool) -> TestServer {
 #[tokio::test]
 async fn a_take_counts_pcm_frames_and_tags_the_final_with_its_generation() {
     let server = TestServer::spawn();
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(
         socket.recv_json().await,
@@ -91,7 +91,7 @@ async fn a_take_counts_pcm_frames_and_tags_the_final_with_its_generation() {
 #[tokio::test]
 async fn a_restart_increments_the_generation_and_a_new_connection_resets_it() {
     let server = TestServer::spawn();
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(
         socket.recv_json().await["generation"],
@@ -117,7 +117,7 @@ async fn a_restart_increments_the_generation_and_a_new_connection_resets_it() {
         "the second take counts only its own frames"
     );
 
-    let mut second = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut second = JsonSocket::connect(&server.ws_url("/stt")).await;
     second.send_text("start").await;
     assert_eq!(
         second.recv_json().await["generation"],
@@ -129,9 +129,9 @@ async fn a_restart_increments_the_generation_and_a_new_connection_resets_it() {
 }
 
 #[tokio::test]
-async fn voice_upgrade_keeps_the_loopback_origin_allowlist() {
+async fn stt_upgrade_keeps_the_loopback_origin_allowlist() {
     let server = TestServer::spawn();
-    let url = server.ws_url("/voice");
+    let url = server.ws_url("/stt");
     let mut request = url.into_client_request().expect("request builds");
     request.headers_mut().insert(
         "origin",
@@ -153,7 +153,7 @@ async fn voice_upgrade_keeps_the_loopback_origin_allowlist() {
 #[tokio::test]
 async fn unknown_text_is_ignored_without_changing_the_take() {
     let server = TestServer::spawn();
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(
         socket.recv_json().await,
@@ -173,7 +173,7 @@ async fn unknown_text_is_ignored_without_changing_the_take() {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn speech_produces_generation_tagged_interim_and_final_frames() {
     let server = fixture_server(false);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(
         socket.recv_json().await,
@@ -218,7 +218,7 @@ async fn speech_produces_generation_tagged_interim_and_final_frames() {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn interim_only_stop_keeps_speech_before_a_silence_gap() {
     let server = fixture_server(false);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     send_samples(&mut socket, &jfk_samples()).await;
@@ -239,7 +239,7 @@ async fn interim_only_stop_keeps_speech_before_a_silence_gap() {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn silence_produces_no_interims_and_an_empty_final() {
     let server = fixture_server(false);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     send_pcm(&mut socket, 3 * 16_000).await;
@@ -271,7 +271,7 @@ async fn wait_for_committed(socket: &mut JsonSocket) -> String {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn final_frame_is_the_committed_prefix_plus_the_tail() {
     let server = fixture_server(true);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     let samples = jfk_samples();
@@ -302,7 +302,7 @@ async fn final_frame_is_the_committed_prefix_plus_the_tail() {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
     let server = fixture_server(true);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     send_samples(&mut socket, &jfk_samples()).await;
@@ -323,7 +323,7 @@ async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn interim_frames_keep_committed_text_append_only() {
     let server = fixture_server(true);
-    let mut socket = JsonSocket::connect(&server.ws_url("/voice")).await;
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     let samples = jfk_samples();

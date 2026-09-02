@@ -13,12 +13,12 @@ import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
 import { AgentMenu } from "../agent-menu";
 import { AgentSessionView } from "../agent-session-view";
-import type { VoiceStatus } from "../voice";
+import type { SttStatus } from "../stt";
 
-// Where the session view's voice reports when the panel is built without
+// Where the session view's dictation reports when the panel is built without
 // the composition root's status bar (the registry tests): messages and
 // the REC badge have nowhere to land, so they land nowhere.
-const SILENT_STATUS: VoiceStatus = {
+const SILENT_STATUS: SttStatus = {
   showLocal: () => undefined,
   setRecording: () => undefined,
 };
@@ -26,7 +26,7 @@ const SILENT_STATUS: VoiceStatus = {
 export class AgentPanel extends Disposable implements IContentRenderer {
   readonly element = document.createElement("div");
 
-  constructor(private readonly status: VoiceStatus = SILENT_STATUS) {
+  constructor(private readonly status: SttStatus = SILENT_STATUS) {
     super();
     this.element.className = "agent-panel";
   }

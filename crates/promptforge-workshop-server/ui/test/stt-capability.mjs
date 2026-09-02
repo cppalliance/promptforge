@@ -1,10 +1,10 @@
-// Unit test for the voice capability probe (src/ui/voice.ts
-// voiceCapability). Bundles the TS module with esbuild and drives it
+// Unit test for the STT capability probe (src/ui/stt.ts
+// sttCapability). Bundles the TS module with esbuild and drives it
 // against scripted fetch responses: gpu/engine boolean combinations,
 // non-OK status, network failure, and malformed bodies. The mic stays
 // visible whatever the answer - the probe feeds the blocker reason the
 // status bar names on click - so every failure mode must answer null.
-// Run: node test/voice-capability.mjs
+// Run: node test/stt-capability.mjs
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -12,7 +12,7 @@ import * as esbuild from "esbuild";
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "ui", "voice.ts")],
+  entryPoints: [path.join(uiDir, "..", "src", "ui", "stt.ts")],
   bundle: true,
   write: false,
   format: "esm",
@@ -23,7 +23,7 @@ const bundle = await esbuild.build({
 });
 const code = bundle.outputFiles[0].text;
 const mod = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
-const { voiceCapability } = mod;
+const { sttCapability } = mod;
 
 const failures = [];
 function check(name, condition) {
@@ -49,11 +49,11 @@ async function withFetch(impl, run) {
 
 await withFetch(
   (url) => {
-    check("probe queries /voice/capability", url === "/voice/capability");
+    check("probe queries /stt/capability", url === "/stt/capability");
     return Promise.resolve(jsonResponse({ gpu: true, engine: true }));
   },
   async () => {
-    const answer = await voiceCapability();
+    const answer = await sttCapability();
     check(
       "gpu and engine true answer both true",
       answer !== null && answer.gpu === true && answer.engine === true,
@@ -64,7 +64,7 @@ await withFetch(
 await withFetch(
   () => Promise.resolve(jsonResponse({ gpu: false, engine: true })),
   async () => {
-    const answer = await voiceCapability();
+    const answer = await sttCapability();
     check(
       "gpu false answers gpu false with the engine flag intact",
       answer !== null && answer.gpu === false && answer.engine === true,
@@ -75,7 +75,7 @@ await withFetch(
 await withFetch(
   () => Promise.resolve(jsonResponse({ gpu: true, engine: false })),
   async () => {
-    const answer = await voiceCapability();
+    const answer = await sttCapability();
     check(
       "engine false answers engine false with the gpu flag intact",
       answer !== null && answer.gpu === true && answer.engine === false,
@@ -84,32 +84,32 @@ await withFetch(
 );
 
 await withFetch(() => Promise.resolve(jsonResponse({ gpu: "yes", engine: true })), async () => {
-  check("a non-boolean gpu answers null", (await voiceCapability()) === null);
+  check("a non-boolean gpu answers null", (await sttCapability()) === null);
 });
 
 await withFetch(() => Promise.resolve(jsonResponse({ gpu: true })), async () => {
-  check("a missing engine field answers null", (await voiceCapability()) === null);
+  check("a missing engine field answers null", (await sttCapability()) === null);
 });
 
 await withFetch(() => Promise.resolve(jsonResponse({})), async () => {
-  check("a missing gpu field answers null", (await voiceCapability()) === null);
+  check("a missing gpu field answers null", (await sttCapability()) === null);
 });
 
 await withFetch(() => Promise.resolve(jsonResponse("not json at all")), async () => {
-  check("an unparseable body answers null", (await voiceCapability()) === null);
+  check("an unparseable body answers null", (await sttCapability()) === null);
 });
 
 await withFetch(() => Promise.resolve(jsonResponse({ gpu: true, engine: true }, 500)), async () => {
-  check("a non-OK status answers null", (await voiceCapability()) === null);
+  check("a non-OK status answers null", (await sttCapability()) === null);
 });
 
 await withFetch(() => Promise.reject(new Error("connection refused")), async () => {
-  check("a network failure answers null", (await voiceCapability()) === null);
+  check("a network failure answers null", (await sttCapability()) === null);
 });
 
 if (failures.length > 0) {
-  console.error(`voice-capability test failed:\n- ${failures.join("\n- ")}`);
+  console.error(`stt-capability test failed:\n- ${failures.join("\n- ")}`);
   process.exit(1);
 }
-console.log("voice-capability test passed");
+console.log("stt-capability test passed");
 process.exit(0);
