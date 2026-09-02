@@ -1,0 +1,49 @@
+/* The model picker trigger (model-picker-trigger.ts imports this file;
+   esbuild bundles it into dist/app.css). The dropdown it opens is
+   styled by workshop/dropdown.css; these rules cover only the trigger.
+   Themed values come from the :root tokens in style.css; every var()
+   carries a fallback so a deleted token degrades instead of breaking. */
+
+.model-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  block-size: var(--model-trigger-height, 24px);
+  padding-block: 0;
+  padding-inline: var(--space-2, 8px);
+  font: inherit;
+  font-size: var(--font-size-sm, 12px);
+  line-height: var(--line-height-sm, 16px);
+  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  background: transparent;
+  border: none;
+  border-radius: var(--model-trigger-radius, 9999px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* The open state keeps the hover wash: DropdownMenu sets aria-expanded
+   on the trigger while its menu is up. */
+.model-picker-trigger:hover,
+.model-picker-trigger[aria-expanded="true"] {
+  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  color: var(--text, #F0F0F0);
+}
+
+.model-picker-trigger:focus-visible {
+  outline: 2px solid var(--accent-dim, #b04722);
+  outline-offset: 2px;
+}
+
+/* Long model ids truncate instead of stretching the toolbar. */
+.model-picker-trigger__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-inline-size: 200px;
+}
+
+.model-picker-trigger__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
