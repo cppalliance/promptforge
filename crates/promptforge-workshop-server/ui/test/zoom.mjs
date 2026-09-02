@@ -3,7 +3,7 @@
 // src/ui/window-menu.ts. Bundles the TS modules with esbuild into one
 // module graph - so the menu rows, the keydown listener, and the test all
 // share one zoom state - with "@tauri-apps/api/window" and
-// "@tauri-apps/api/webviewWindow" aliased to the recording stubs in
+// "@tauri-apps/api/webviewWindow" aliased to recording stubs in
 // test/helpers, and drives them against jsdom built from the real
 // index.html. Covers: the zoom math (0.1 steps, clamped to 0.5-2.0, reset
 // to 1.0), the browser fallback's CSS zoom application, persistence
@@ -11,8 +11,8 @@
 // the default, a storage failure leaving the zoom applied and logged, the
 // Ctrl+= / Ctrl+Shift+= / Ctrl+- / Ctrl+0 keybindings,
 // the Window menu's zoom rows, and the desktop path routing zoom to the
-// native webview instead of the CSS fallback. Overlay anchoring at
-// non-1.0 zoom is a visual check, deferred out of jsdom scope.
+// native webview. Overlay anchoring at non-1.0 zoom is a visual check,
+// deferred out of jsdom scope.
 // Run: node test/zoom.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -218,6 +218,12 @@ async function scenario({ desktop = false } = {}) {
   check("Ctrl+- zooms out", module.getZoom() === 1.1);
   press("0");
   check("Ctrl+0 resets the zoom", module.getZoom() === 1);
+  event = press("Unidentified", { code: "Equal" });
+  check("the main keyboard Equal code zooms in", module.getZoom() === 1.1);
+  check("the Equal code is consumed", event.defaultPrevented === true);
+  event = press("Unidentified", { code: "Minus" });
+  check("the main keyboard Minus code zooms out", module.getZoom() === 1);
+  check("the Minus code is consumed", event.defaultPrevented === true);
   press("=", { altKey: true });
   check("an Alt chord is not a zoom binding", module.getZoom() === 1);
   uninstall.dispose();
@@ -276,14 +282,14 @@ async function scenario({ desktop = false } = {}) {
   check("the menu's Reset Zoom returns to 100%", module.getZoom() === 1);
 }
 
-// --- Desktop: zoom routes to the native webview, not the CSS fallback --------
+// --- Desktop: viewport-aware zoom routes through the native webview -----------
 
 {
   const { window, module, webviewZooms } = await scenario({ desktop: true });
   module.zoomIn();
   check("desktop zoom goes to the native webview", webviewZooms().join(",") === "1.1");
   check(
-    "desktop zoom leaves the CSS fallback untouched",
+    "desktop zoom leaves CSS zoom untouched",
     window.document.documentElement.style.zoom === "" &&
       window.document.body.style.position === "",
   );

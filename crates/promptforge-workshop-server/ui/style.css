@@ -5,13 +5,11 @@
    :root block below: palette, type, spacing, radius, and the status bar's
    progress and LED effect. Reskinning the UI means editing this one block
    (or overriding it from an additional stylesheet loaded after this one);
-   no rule below the block hardcodes a color or a themed length. Every
-   var() use carries a fallback, so deleting a variable degrades to the
-   stock skin instead of breaking the property.
+   no rule below the block hardcodes a color or a themed length.
 
    The surface, text, border, spacing, radius, shadow, and motion values
    mirror Cursor's dark theme (extracted from its workbench tokens); the
-   accent stays the workshop orange.
+   accent stays PromptForge gold.
 
    This file carries only the resets, the :root design tokens, and the
    global scrollbars. Component rules live in per-component CSS files
@@ -20,29 +18,84 @@
    ========================================================================== */
 
 :root {
-  /* Surfaces */
-  --bg: #181818; /* window background, chat background */
-  --bg-raised: #141414; /* raised surfaces: status bar, cards */
-  --bg-hover: color-mix(in srgb, #F0F0F0 8%, transparent); /* hover washes and user message bubbles */
-  --bg-card: color-mix(in srgb, #F0F0F0 6%, transparent); /* card fills over --bg */
-  --bg-input: #181818; /* input well backgrounds */
-  --bg-elevated: #181818; /* elevated overlay surfaces */
+  /* Cursor Dark primitives (from cursor-dark-color-theme.json + JS registry) */
+  --cursor-base: #F0F0F0;
+  --cursor-chrome: #141414;
+  --cursor-editor: #181818;
+  --cursor-sidebar: #181818;
+  --cursor-focus: #F0F0F0;
+  --cursor-accent: #599CE7;
+  --cursor-brand: #F54E00;
+  --cursor-blue: #7BAFE9;
+  --cursor-cyan: #81A1C1;
+  --cursor-green: #3FA266;
+  --cursor-red: #FC6B83;
+  --cursor-danger: #E34671;
+  --cursor-yellow: #F1B467;
+  --cursor-magenta: #B48EAD;
+  --cursor-orange: #D08770;
+  --cursor-purple: #9386F2;
+
+  /* Cursor Dark derived surfaces */
+  --cursor-bg-quinary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
+  --cursor-bg-quaternary: color-mix(in srgb, var(--cursor-base) 6%, transparent);
+  --cursor-bg-tertiary: color-mix(in srgb, var(--cursor-base) 8%, transparent);
+  --cursor-bg-secondary: color-mix(in srgb, var(--cursor-base) 14%, transparent);
+  --cursor-bg-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
+  --cursor-bg-active: color-mix(in srgb, var(--cursor-base) 16%, transparent);
+  --cursor-bg-focused: color-mix(in srgb, var(--cursor-base) 22%, transparent);
+  --cursor-bg-card: var(--cursor-bg-quaternary);
+  --cursor-bg-elevated: #181818;
+  --cursor-bg-input-surface: var(--cursor-bg-quaternary);
+
+  /* Cursor Dark derived strokes */
+  --cursor-stroke-quaternary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
+  --cursor-stroke-tertiary: color-mix(in srgb, var(--cursor-base) 8%, transparent);
+  --cursor-stroke-secondary: color-mix(in srgb, var(--cursor-base) 12%, transparent);
+  --cursor-stroke-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
+  --cursor-stroke-focused: color-mix(in srgb, var(--cursor-focus, var(--cursor-base)) 15%, transparent);
+
+  /* Cursor Dark derived text */
+  --cursor-text-primary: #F0F0F0;
+  --cursor-text-secondary: color-mix(in srgb, var(--cursor-base) 74%, transparent);
+  --cursor-text-tertiary: color-mix(in srgb, var(--cursor-base) 60%, transparent);
+  --cursor-text-quaternary: color-mix(in srgb, var(--cursor-base) 36%, transparent);
+
+  /* Cursor Dark derived icons */
+  --cursor-icon-primary: #F0F0F0;
+  --cursor-icon-secondary: color-mix(in srgb, var(--cursor-base) 66%, transparent);
+  --cursor-icon-tertiary: color-mix(in srgb, var(--cursor-base) 52%, transparent);
+  --cursor-icon-quaternary: color-mix(in srgb, var(--cursor-base) 28%, transparent);
+
+  /* Cursor Dark shadows */
+  --cursor-shadow-primary: #00000033;
+  --cursor-shadow-secondary: #0000001F;
+  --cursor-shadow-tertiary: #0000000F;
+
+  /* VS Code theme surfaces (white-based alpha, for shell chrome) */
+  --bg: #181818;
+  --bg-raised: #141414;
+  --bg-hover: #F0F0F011;
+  --bg-card: #F0F0F00A;
+  --bg-input: #F0F0F00A;
+  --bg-elevated: #181818;
 
   /* Text and borders (opacity tiers over the dark surfaces) */
-  --text: #F0F0F0; /* 15.8:1 on --bg */
-  --text-muted: color-mix(in srgb, #F0F0F0 74%, transparent); /* ~9:1 on --bg */
-  --text-tertiary: color-mix(in srgb, #F0F0F0 60%, transparent); /* ~4.2:1 on --bg: secondary content only, never primary meaning */
-  --text-quaternary: color-mix(in srgb, #F0F0F0 36%, transparent); /* de-emphasized hints */
-  --border: color-mix(in srgb, #F0F0F0 12%, transparent);
-  --border-subtle: color-mix(in srgb, #F0F0F0 8%, transparent);
+  --text: #F0F0F0;
+  --text-muted: #F0F0F0BD;
+  --text-tertiary: #F0F0F05C;
+  --text-quaternary: #F0F0F099;
+  --input-placeholder: #F0F0F099;
+  --border: #F0F0F013;
+  --border-subtle: #F0F0F011;
 
   /* Accent and semantics */
-  --accent: #e05a2b; /* primary action (send button) */
-  --accent-dim: #b04722; /* focus borders; 3.2:1 on --bg, 3.3:1 on --bg-raised */
-  --danger: #dc3545; /* recording background, non-text danger accents */
-  --danger-text: #e4606d; /* --danger lightened past 4.5:1 on the dark surfaces (5.2:1 on --bg) */
-  --on-danger: #ffffff; /* icon or text on a --danger fill (recording mic) */
-  --hover-glow: var(--accent, #e05a2b); /* ring and bloom on hover */
+  --accent: #e4b570;
+  --accent-dim: #b89059;
+  --danger: #E34671;
+  --danger-text: #FC6B83;
+  --on-danger: #ffffff;
+  --hover-glow: var(--accent, #e4b570);
   --color-red: #FC6B83;
   --color-green: #3FA266;
   --color-yellow: #F1B467;
@@ -51,7 +104,7 @@
   --color-purple: #9386F2;
 
   /* Type */
-  --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-prose: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif;
   --code-font: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
@@ -109,10 +162,10 @@
   --height-lg: 32px;
 
   /* Shadows */
-  --shadow-primary: color-mix(in srgb, #000 20%, transparent);
-  --shadow-secondary: color-mix(in srgb, var(--shadow-primary, color-mix(in srgb, #000 20%, transparent)) 60%, transparent);
-  --shadow-tertiary: color-mix(in srgb, var(--shadow-primary, color-mix(in srgb, #000 20%, transparent)) 30%, transparent);
-  --shadow-popup: 0 3px 8px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent)), 0 2px 5px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent)), 0 1px 1px var(--shadow-secondary, color-mix(in srgb, #000 12%, transparent));
+  --shadow-primary: var(--cursor-shadow-primary);
+  --shadow-secondary: var(--cursor-shadow-secondary);
+  --shadow-tertiary: var(--cursor-shadow-tertiary);
+  --shadow-popup: 0 3px 8px var(--cursor-shadow-secondary), 0 2px 5px var(--cursor-shadow-secondary), 0 1px 1px var(--cursor-shadow-secondary);
 
   /* Syntax highlighting (code blocks) */
   --syntax-bg: #181818;
@@ -136,67 +189,76 @@
   /* Component tokens (consumed by the agent-window components) */
   --mention-bg: color-mix(in srgb, #81A1C1 12%, transparent);
   --mention-text: #81A1C1;
-  --tool-card-bg: var(--bg, #181818);
-  --tool-card-border: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
+  --tool-card-bg: #181818;
+  --tool-card-border: var(--cursor-stroke-tertiary);
   --tool-card-header-height: 28px;
-  --prompt-input-bg: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
-  --prompt-input-border: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  --prompt-input-border-focus: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  --prompt-input-min-height: 36px;
+  --prompt-input-bg: var(--cursor-bg-input-surface);
+  --prompt-input-border: var(--cursor-stroke-secondary);
+  --prompt-input-border-focus: var(--cursor-stroke-primary);
+  --prompt-input-min-height: 18px;
   --prompt-input-max-height: 200px;
   --prompt-input-radius: 6px;
   --model-trigger-height: 24px;
   --model-trigger-radius: 9999px;
-  --token-ring-track: var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  --token-ring-fill: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  --token-ring-track: var(--cursor-stroke-secondary);
+  --token-ring-fill: var(--cursor-icon-secondary);
+  --agent-max-width: 840px;
+  --agent-card-radius: 12px;
+  --feed-padding-inline: 12px;
+  --feed-row-gap: 14px;
+  --agent-outer-padding: 12px;
+  --bubble-radius: 12px;
+  --assistant-inset: 13px;
+  --space-2-5: 10px;
+  --token-ring-size: 16px;
 
   /* Status bar */
-  --status-bar-height: 28px;
-  --status-bar-bg: var(--bg-raised, #141414);
-  --status-bar-text: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
-  --status-bar-text-error: var(--danger-text, #e4606d);
-  --status-bar-padding-inline: var(--space-lg, 12px);
-  --status-bar-gap: var(--space-lg, 12px);
+  --status-bar-height: 22px;
+  --status-bar-bg: #141414;
+  --status-bar-text: #F0F0F099;
+  --status-bar-text-error: #FC6B83;
+  --status-bar-padding-inline: 7px;
+  --status-bar-gap: 3px;
 
   /* Status bar progress bar */
   --progress-width: 96px;
   --progress-height: 6px;
-  --progress-fill: #28a745;
-  --progress-track: rgba(255, 255, 255, 0.08);
+  --progress-fill: #3FA266;
+  --progress-track: #F0F0F011;
   --progress-glow: 4px; /* blur radius of the fill's box-shadow glow */
 
   /* Status bar activity LED */
   --led-size: 10px;
-  --led-green: #28a745; /* generating activity */
-  --led-amber: #f09030; /* thinking activity */
-  --led-off: rgba(255, 255, 255, 0.08); /* the unlit lens */
-  --led-core: #ffffff; /* hot center of the lit gradient */
-  --led-glow-radius: 6px; /* base blur of the layered bloom */
-  --led-pulse-ms: 250ms; /* hold window and ease-out decay; read by JS */
-  --led-fade-in-ms: 60ms; /* fast ease-in when a pulse lights the LED */
-  --led-lens-highlight: rgba(255, 255, 255, 0.18);
-  --led-lens-shadow: rgba(0, 0, 0, 0.45);
+  --led-green: #3FA266;
+  --led-amber: #F1B467;
+  --led-off: #F0F0F011;
+  --led-core: #ffffff;
+  --led-glow-radius: 6px;
+  --led-pulse-ms: 250ms;
+  --led-fade-in-ms: 60ms;
+  --led-lens-highlight: #F0F0F02E;
+  --led-lens-shadow: #00000073;
 
   /* Window title bar (custom Windows chrome) */
-  --titlebar-height: 40px;
-  --titlebar-bg: var(--bg, #181818);
-  --titlebar-foreground: var(--text, #F0F0F0);
-  --titlebar-divider: var(--border, color-mix(in srgb, #F0F0F0 12%, transparent)); /* the one-pixel lower edge */
-  --titlebar-accent: var(--accent, #e05a2b); /* focus/selection states only */
-  --titlebar-glyph: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent)); /* window-control SVG strokes */
-  --titlebar-hover: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent)); /* neutral wash: menus, Minimize, Maximize */
+  --titlebar-height: 35px;
+  --titlebar-bg: #141414;
+  --titlebar-foreground: #F0F0F084;
+  --titlebar-divider: #F0F0F013;
+  --titlebar-accent: var(--accent);
+  --titlebar-glyph: #F0F0F05C;
+  --titlebar-hover: #F0F0F011;
   --titlebar-control-width: 46px;
-  --titlebar-close-hover: var(--danger, #dc3545);
-  --titlebar-close-glyph-hover: var(--on-danger, #ffffff);
+  --titlebar-close-hover: #E34671;
+  --titlebar-close-glyph-hover: #ffffff;
   --titlebar-icon-size: 20px;
   --titlebar-font-size: 13px;
-  --titlebar-popover-min-width: 200px;
-  --titlebar-popover-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --titlebar-popover-min-width: 160px;
+  --titlebar-popover-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 
   /* Scrollbars (applied globally below) */
   --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
-  --scrollbar-thumb: rgba(255, 255, 255, 0.16); /* translucent on any surface */
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --scrollbar-thumb: #F0F0F011;
+  --scrollbar-thumb-hover: #F0F0F01E;
 }
 
 * {
@@ -213,12 +275,12 @@
    -------------------------------------------------------------------------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb, rgba(255, 255, 255, 0.16)) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: var(--scrollbar-width, 8px);
-  height: var(--scrollbar-width, 8px);
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
 }
 
 ::-webkit-scrollbar-track {
@@ -226,12 +288,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb, rgba(255, 255, 255, 0.16));
-  border-radius: calc(var(--scrollbar-width, 8px) / 2);
+  background: var(--scrollbar-thumb);
+  border-radius: calc(var(--scrollbar-width) / 2);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.28));
+  background: var(--scrollbar-thumb-hover);
 }
 
 ::-webkit-scrollbar-corner {
@@ -242,10 +304,10 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg, #181818);
-  color: var(--text, #F0F0F0);
-  font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
-  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-prose);
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -255,5 +317,10 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
   margin: 0;
+}
+
+:focus {
+  outline: none !important;
 }

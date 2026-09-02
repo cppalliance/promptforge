@@ -35,13 +35,16 @@ const zoneGroups = new Map<ZoneName, string>();
 const zoneOverrides = new Map<string, ZoneName>();
 
 /**
- * The panel id for one open: editors key by path, and every other panel
- * kind is a singleton keyed by its type name.
+ * The panel id for one open: editors key by path, new agent panels key by
+ * their instance id, and every other panel kind is a singleton.
  */
 export function panelIdFor(type: PanelType, params: PanelParams): string {
   if (type === "editor") {
     const path = params.path;
     return `editor:${typeof path === "string" ? path : ""}`;
+  }
+  if (type === "agent" && typeof params.instance === "string") {
+    return `agent:${params.instance}`;
   }
   return type;
 }

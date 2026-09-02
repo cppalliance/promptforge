@@ -10,26 +10,24 @@
 .workshop-dropdown {
   position: fixed;
   z-index: 9999;
-  background-color: var(--bg-raised, #141414);
-  border: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  border-radius: var(--radius, 6px);
-  box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
-  min-width: 160px;
-  padding: var(--space-xs, 4px);
+  background-color: var(--cursor-chrome);
+  border: 1px solid var(--cursor-stroke-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-popup);
+  min-width: 210px;
+  padding: var(--space-xs);
   display: flex;
   flex-direction: column;
-  animation: workshop-dropdown-fade var(--duration-normal, 150ms) var(--ease-out-quint, cubic-bezier(0.16, 1, 0.3, 1)) forwards;
+  animation: workshop-dropdown-fade 0.083s linear forwards;
 }
 
 @keyframes workshop-dropdown-fade {
   0% {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
   }
 
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -42,41 +40,47 @@
 .workshop-dropdown__item {
   display: flex;
   align-items: center;
-  gap: var(--space-md, 8px);
+  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-md, 8px) var(--space-lg, 12px);
+  height: var(--height-base);
+  padding: 0 var(--space-2);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius);
   cursor: pointer;
-  color: var(--text, #F0F0F0);
+  color: var(--cursor-text-primary);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--font-size-base);
   text-align: left;
-  transition:
-    background-color var(--duration-slow, 200ms),
-    color var(--duration-slow, 200ms);
 }
 
 .workshop-dropdown__item:hover {
-  background-color: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background-color: var(--bg-hover);
 }
 
 .workshop-dropdown__item:focus-visible {
-  outline: 1px solid var(--accent-dim, #b04722);
-  outline-offset: -1px;
-  background-color: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  outline: none;
+  background-color: var(--bg-hover);
+}
+
+.workshop-dropdown__item--selected {
+  background-color: var(--cursor-bg-secondary);
 }
 
 .workshop-dropdown__item--danger {
-  color: var(--danger-text, #e4606d);
+  color: var(--danger-text);
 }
 
 .workshop-dropdown__icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: var(--space-4, 16px);
-  height: var(--space-4, 16px);
+  width: var(--space-4);
+  height: var(--space-4);
   color: inherit;
+}
+
+.workshop-dropdown__check {
+  margin-inline-start: auto;
+  color: var(--cursor-icon-primary);
 }

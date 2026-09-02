@@ -9,17 +9,30 @@
    height so a descender never clips against a fixed box. */
 .status-bar {
   flex: none;
-  min-height: var(--status-bar-height, 28px);
+  min-height: var(--status-bar-height);
   display: flex;
   align-items: center;
-  gap: var(--status-bar-gap, 12px);
-  padding-inline: var(--status-bar-padding-inline, 12px);
-  background: var(--status-bar-bg, #141414);
-  border-top: 1px solid var(--border, color-mix(in srgb, #F0F0F0 12%, transparent));
-  font-size: var(--font-size-base, 13px);
-  line-height: 1.4;
-  color: var(--status-bar-text, color-mix(in srgb, #F0F0F0 74%, transparent));
+  background: var(--status-bar-bg);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--status-bar-text);
   user-select: none;
+  transition: background-color 0.15s ease-out;
+}
+
+.status-bar > * {
+  padding: 0 5px;
+  margin: 0 3px;
+}
+
+.status-bar > :first-child {
+  padding-left: 7px;
+}
+
+.status-bar > :last-child {
+  padding-right: 7px;
 }
 
 .status-bar__text {
@@ -31,13 +44,13 @@
 }
 
 .status-bar__text--error {
-  color: var(--status-bar-text-error, #e4606d);
+  color: var(--status-bar-text-error);
 }
 
 .status-bar__right {
   display: flex;
   align-items: center;
-  gap: var(--space-1, 4px);
+  gap: var(--space-1);
 }
 
 /* The LED indicators group: swapped out as one unit whenever the progress
@@ -46,7 +59,7 @@
 .status-bar__indicators {
   display: inline-flex;
   align-items: center;
-  gap: var(--led-size, 10px);
+  gap: var(--led-size);
 }
 
 .status-bar__slot {
@@ -54,7 +67,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: var(--progress-width, 96px);
+  min-width: var(--progress-width);
 }
 
 .status-bar__progress[hidden],
@@ -66,24 +79,24 @@
    glow. WebView2 is Chromium, so the webkit progress pseudoelements are the
    styled surface. */
 .status-bar__progress {
-  width: var(--progress-width, 96px);
-  height: var(--progress-height, 6px);
+  width: var(--progress-width);
+  height: var(--progress-height);
   appearance: none;
   border: none;
-  border-radius: calc(var(--progress-height, 6px) / 2);
-  background: var(--progress-track, rgba(255, 255, 255, 0.08));
+  border-radius: calc(var(--progress-height) / 2);
+  background: var(--progress-track);
   overflow: hidden;
 }
 
 .status-bar__progress::-webkit-progress-bar {
-  background: var(--progress-track, rgba(255, 255, 255, 0.08));
-  border-radius: calc(var(--progress-height, 6px) / 2);
+  background: var(--progress-track);
+  border-radius: calc(var(--progress-height) / 2);
 }
 
 .status-bar__progress::-webkit-progress-value {
-  background: var(--progress-fill, #28a745);
-  border-radius: calc(var(--progress-height, 6px) / 2);
-  box-shadow: 0 0 var(--progress-glow, 4px) var(--progress-fill, #28a745);
+  background: var(--progress-fill);
+  border-radius: calc(var(--progress-height) / 2);
+  box-shadow: 0 0 var(--progress-glow) var(--progress-fill);
 }
 
 /* The status LEDs: small circles standing in the indicators group whenever
@@ -95,48 +108,48 @@
    rule's transition is the slow ease-out decay; each modifier's own
    transition makes the fade-in fast. */
 .status-bar__led {
-  width: var(--led-size, 10px);
-  height: var(--led-size, 10px);
+  width: var(--led-size);
+  height: var(--led-size);
   border-radius: 50%;
-  background: var(--led-off, rgba(255, 255, 255, 0.08));
+  background: var(--led-off);
   box-shadow:
-    inset 0 1px 1px var(--led-lens-highlight, rgba(255, 255, 255, 0.18)),
-    inset 0 -1px 2px var(--led-lens-shadow, rgba(0, 0, 0, 0.45));
+    inset 0 1px 1px var(--led-lens-highlight),
+    inset 0 -1px 2px var(--led-lens-shadow);
   transition:
-    background var(--led-pulse-ms, 250ms) ease-out,
-    box-shadow var(--led-pulse-ms, 250ms) ease-out;
+    background var(--led-pulse-ms) ease-out,
+    box-shadow var(--led-pulse-ms) ease-out;
 }
 
 .status-bar__led--generating,
 .status-bar__led--thinking,
 .status-bar__led--recording {
   transition:
-    background var(--led-fade-in-ms, 60ms) ease-in,
-    box-shadow var(--led-fade-in-ms, 60ms) ease-in;
+    background var(--led-fade-in-ms) ease-in,
+    box-shadow var(--led-fade-in-ms) ease-in;
 }
 
 .status-bar__led--generating {
-  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-green, #28a745) 60%);
+  background: radial-gradient(circle, var(--led-core) 0%, var(--led-green) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-green, #28a745),
-    0 0 var(--led-glow-radius, 6px) var(--led-green, #28a745),
-    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-green, #28a745) 55%, transparent);
+    0 0 calc(var(--led-glow-radius) / 2) var(--led-green),
+    0 0 var(--led-glow-radius) var(--led-green),
+    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-green) 55%, transparent);
 }
 
 .status-bar__led--thinking {
-  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-amber, #f09030) 60%);
+  background: radial-gradient(circle, var(--led-core) 0%, var(--led-amber) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #f09030),
-    0 0 var(--led-glow-radius, 6px) var(--led-amber, #f09030),
-    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #f09030) 55%, transparent);
+    0 0 calc(var(--led-glow-radius) / 2) var(--led-amber),
+    0 0 var(--led-glow-radius) var(--led-amber),
+    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-amber) 55%, transparent);
 }
 
 /* The recording LED: the same lit treatment in red while the mic records.
    Idle is the shared unlit lens of the base .status-bar__led rule. */
 .status-bar__led--recording {
-  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, #ff2a4d 60%);
+  background: radial-gradient(circle, var(--led-core) 0%, #ff2a4d 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius, 6px) / 2) #ff2a4d,
-    0 0 var(--led-glow-radius, 6px) #ff2a4d,
-    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, #ff2a4d 55%, transparent);
+    0 0 calc(var(--led-glow-radius) / 2) #ff2a4d,
+    0 0 var(--led-glow-radius) #ff2a4d,
+    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, #ff2a4d 55%, transparent);
 }

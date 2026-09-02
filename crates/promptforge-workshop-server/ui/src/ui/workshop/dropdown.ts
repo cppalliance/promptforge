@@ -13,6 +13,7 @@ import "./dropdown.css";
 export interface DropdownItem {
   label: string;
   iconHtml?: string;
+  selected?: boolean;
   danger?: boolean;
   onClick: () => void;
 }
@@ -29,7 +30,11 @@ export class DropdownMenu {
   private nextMenuId = 0;
 
   /** Opens a menu of `items` anchored to `trigger`. */
-  show(trigger: HTMLElement, items: readonly DropdownItem[]): void {
+  show(
+    trigger: HTMLElement,
+    items: readonly DropdownItem[],
+    point?: Readonly<{ x: number; y: number }>,
+  ): void {
     if (this.active !== null) {
       const wasSameTrigger = this.active.trigger === trigger;
       this.active.close(wasSameTrigger);
@@ -54,6 +59,10 @@ export class DropdownMenu {
           ? "workshop-dropdown__item workshop-dropdown__item--danger"
           : "workshop-dropdown__item";
       button.setAttribute("role", "menuitem");
+      if (item.selected === true) {
+        button.classList.add("workshop-dropdown__item--selected");
+        button.setAttribute("aria-current", "true");
+      }
       if (item.iconHtml !== undefined) {
         const icon = document.createElement("span");
         icon.className = "workshop-dropdown__icon";
@@ -64,6 +73,13 @@ export class DropdownMenu {
       label.className = "workshop-dropdown__label";
       label.textContent = item.label;
       button.appendChild(label);
+      if (item.selected === true) {
+        const check = document.createElement("span");
+        check.className = "workshop-dropdown__check";
+        check.setAttribute("aria-hidden", "true");
+        check.textContent = "✓";
+        button.appendChild(check);
+      }
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         item.onClick();
@@ -90,17 +106,23 @@ export class DropdownMenu {
     const triggerRect = trigger.getBoundingClientRect();
     const menuWidth = menu.offsetWidth;
     const menuHeight = menu.offsetHeight;
-    if (triggerRect.bottom + 4 + menuHeight > window.innerHeight) {
+    if (point !== undefined) {
+      menu.style.left = `${Math.max(4, Math.min(point.x, window.innerWidth - menuWidth - 4))}px`;
+      menu.style.right = "auto";
+      menu.style.top = `${Math.max(4, Math.min(point.y, window.innerHeight - menuHeight - 4))}px`;
+    } else if (triggerRect.bottom + 4 + menuHeight > window.innerHeight) {
       menu.style.top = `${triggerRect.top - menuHeight - 4}px`;
     } else {
       menu.style.top = `${triggerRect.bottom + 4}px`;
     }
-    if (triggerRect.left + menuWidth > window.innerWidth - 16) {
-      menu.style.right = `${window.innerWidth - triggerRect.right}px`;
-      menu.style.left = "auto";
-    } else {
-      menu.style.left = `${triggerRect.left}px`;
-      menu.style.right = "auto";
+    if (point === undefined) {
+      if (triggerRect.left + menuWidth > window.innerWidth - 16) {
+        menu.style.right = `${window.innerWidth - triggerRect.right}px`;
+        menu.style.left = "auto";
+      } else {
+        menu.style.left = `${triggerRect.left}px`;
+        menu.style.right = "auto";
+      }
     }
 
     const onOutsidePointerDown = (event: PointerEvent) => {

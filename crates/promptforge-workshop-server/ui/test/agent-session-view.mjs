@@ -386,24 +386,24 @@ await assertNoLeaks(lifecycle, () => {
     dispose();
   }
 
-  // --- The placeholder names the gate's state --------------------------------
+  // --- The placeholder matches Cursor's agent input ---------------------------
 
   {
     const { wire, editorEl, dispose } = harness();
     const placeholder = () => editorEl.querySelector("p")?.getAttribute("data-placeholder");
     check(
-      "the placeholder names the blocker while no wait is open",
-      placeholder() === "The agent is working; the input opens when it asks",
+      "the input carries Cursor's agent placeholder",
+      placeholder() === "Plan, Build, / for skills, @ for context",
     );
     wire.fire.inputRequired("tok");
     check(
-      "the placeholder invites a message once a wait is pinned",
-      placeholder() === "Message the agent",
+      "the placeholder stays stable when the input opens",
+      placeholder() === "Plan, Build, / for skills, @ for context",
     );
     wire.fire.inputCancelled("tok");
     check(
-      "the placeholder returns to the blocker when the wait dies",
-      placeholder() === "The agent is working; the input opens when it asks",
+      "the placeholder stays stable when the input closes",
+      placeholder() === "Plan, Build, / for skills, @ for context",
     );
     dispose();
   }
@@ -430,11 +430,13 @@ await assertNoLeaks(lifecycle, () => {
     const view = new AgentSessionView(service, silentStatus, modelService);
     window.document.body.appendChild(view.element);
     const toolbar = view.element.querySelector(".agent-toolbar");
+    const bar = view.element.querySelector(".agent-session__bar");
     check(
-      "the toolbar mounts between the feed and the input bar",
+      "the toolbar mounts inside the input card after the prompt",
       toolbar !== null &&
-        view.element.querySelector(".agent-session__feed")?.nextElementSibling === toolbar &&
-        toolbar.nextElementSibling === view.element.querySelector(".agent-session__bar"),
+        bar !== null &&
+        toolbar.parentElement === bar &&
+        toolbar.previousElementSibling?.classList.contains("prompt-input") === true,
     );
     check(
       "the toolbar composes the mode chip, the model picker, and the context ring",

@@ -15,7 +15,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: transparent;
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 		font-size: 0.8125rem;
 		font-weight: 500;
 		white-space: nowrap;
@@ -38,23 +38,23 @@
 	/* Near-black label: white on the accent is 3.7:1 and fails AA,
 	   #0F0F0F on it is 5.2:1. */
 	.button-primary {
-		background: var(--accent, #E05A2B);
+		background: var(--accent);
 		color: #0F0F0F;
 	}
 	.button-primary:hover {
-		background: var(--accent-hover, #F07030);
+		background: var(--accent-hover);
 	}
 	.button-outline {
-		border-color: var(--border, #2A2A2A);
+		border-color: var(--border);
 		background: rgb(255 255 255 / 0.06);
 	}
 	.button-outline:hover {
 		background: rgb(255 255 255 / 0.1);
 	}
 	.button-danger {
-		border-color: var(--danger, #DC3545);
+		border-color: var(--danger);
 		background: rgba(220, 53, 69, 0.1);
-		color: var(--danger-text, #F28B93);
+		color: var(--danger-text);
 	}
 	.button-danger:hover {
 		background: rgba(220, 53, 69, 0.15);
@@ -68,7 +68,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: rgba(232, 232, 232, 0.05);
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 		font-size: 0.8125rem;
 	}
 	/* One shade lighter than --text-secondary: over the translucent
@@ -105,7 +105,7 @@
 		border: 1px solid transparent;
 		border-radius: 9999px;
 		background: rgba(232, 232, 232, 0.05);
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 		font-size: 0.8125rem;
 		cursor: pointer;
 	}
@@ -133,9 +133,9 @@
 	.menu {
 		min-width: 8rem;
 		padding: 0.25rem;
-		border: 1px solid var(--border, #2A2A2A);
+		border: 1px solid var(--border);
 		border-radius: 0.75rem;
-		background: var(--bg-secondary, #1A1A1A);
+		background: var(--bg-secondary);
 		box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
 	}
 	.menu-item {
@@ -146,16 +146,16 @@
 		border: 0;
 		border-radius: 11px;
 		background: transparent;
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 		font-size: 0.8125rem;
 		text-align: start;
 		cursor: pointer;
 	}
 	.menu-item:hover {
-		background: var(--bg-tertiary, #252525);
+		background: var(--bg-tertiary);
 	}
 	.menu-item[aria-selected="true"] {
-		background: var(--accent-subtle, rgba(224, 90, 43, 0.15));
+		background: var(--accent-subtle);
 	}
 	.dropdown-menu {
 		position: absolute;
@@ -183,7 +183,7 @@
 		padding: 0;
 		border: 1px solid transparent;
 		border-radius: 9999px;
-		background: var(--bg-tertiary, #252525);
+		background: var(--bg-tertiary);
 		cursor: pointer;
 		transition: background-color 140ms ease-out;
 	}
@@ -192,7 +192,7 @@
 		width: 16px;
 		height: 16px;
 		border-radius: 50%;
-		background: var(--text-primary, #E8E8E8);
+		background: var(--text-primary);
 		transform: translateX(0);
 		transition: transform 140ms ease-out, background-color 140ms ease-out;
 	}
@@ -202,7 +202,7 @@
 		inset: -0.5rem -0.75rem;
 	}
 	.switch[aria-checked="true"] {
-		background: var(--accent, #E05A2B);
+		background: var(--accent);
 	}
 	.switch[aria-checked="true"]::before {
 		background: #FFFFFF;
@@ -242,8 +242,8 @@
 		border-radius: 9999px;
 		background: linear-gradient(
 			to right,
-			var(--text-secondary, #888888) calc(var(--slider-progress, 0) * 100%),
-			rgb(255 255 255 / 0.08) calc(var(--slider-progress, 0) * 100%)
+			var(--text-secondary) calc(var(--slider-progress) * 100%),
+			rgb(255 255 255 / 0.08) calc(var(--slider-progress) * 100%)
 		);
 	}
 	.slider::-webkit-slider-thumb {
@@ -253,7 +253,7 @@
 		margin-top: -5px;
 		border: 0;
 		border-radius: 50%;
-		background: var(--text-secondary, #888888);
+		background: var(--text-secondary);
 		transition: box-shadow 140ms ease-out;
 	}
 	.slider:hover::-webkit-slider-thumb,
@@ -268,14 +268,14 @@
 	.slider::-moz-range-progress {
 		height: 4px;
 		border-radius: 9999px;
-		background: var(--text-secondary, #888888);
+		background: var(--text-secondary);
 	}
 	.slider::-moz-range-thumb {
 		width: 14px;
 		height: 14px;
 		border: 0;
 		border-radius: 50%;
-		background: var(--text-secondary, #888888);
+		background: var(--text-secondary);
 		transition: box-shadow 140ms ease-out;
 	}
 	.slider:hover::-moz-range-thumb,
@@ -298,13 +298,13 @@
 		padding-inline: 0.625rem;
 		border-radius: 9999px;
 		background: rgb(255 255 255 / 0.06);
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 		font-size: 0.71875rem;
 		font-weight: 500;
 		white-space: nowrap;
 	}
 	.pill-accent {
-		background: var(--accent-subtle, rgba(224, 90, 43, 0.15));
+		background: var(--accent-subtle);
 		color: #FFD080;
 	}
 
@@ -322,14 +322,14 @@
 		background: rgba(232, 232, 232, 0.05);
 	}
 	.chip-input:focus-within {
-		border-color: var(--accent, #E05A2B);
+		border-color: var(--accent);
 	}
 	.chip-input > input {
 		flex: 1;
 		min-width: 6ch;
 		border: 0;
 		background: transparent;
-		color: var(--text-primary, #E8E8E8);
+		color: var(--text-primary);
 	}
 	/* The container's focus-within accent border is the visible focus
 	   indicator for the inner entry; a second ring inside the field

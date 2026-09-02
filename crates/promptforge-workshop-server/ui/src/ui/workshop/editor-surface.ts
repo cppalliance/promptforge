@@ -76,23 +76,23 @@ export interface EditorSurface {
 const promptforgeTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "var(--bg, #0f0f0f)",
-      color: "var(--text, #e8e8e8)",
+      backgroundColor: "var(--bg)",
+      color: "var(--text)",
       height: "100%",
       fontSize: "13px",
     },
     ".cm-content": {
-      fontFamily: 'var(--code-font, ui-monospace, "Cascadia Code", Consolas, monospace)',
-      caretColor: "var(--text, #e8e8e8)",
+      fontFamily: 'var(--code-font)',
+      caretColor: "var(--text)",
     },
     ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--text, #e8e8e8)",
+      borderLeftColor: "var(--text)",
     },
     ".cm-gutters": {
-      backgroundColor: "var(--bg-raised, #1a1a1a)",
-      color: "var(--text-muted, #909090)",
+      backgroundColor: "var(--bg-raised)",
+      color: "var(--text-muted)",
       border: "none",
-      borderRight: "1px solid var(--border, #2a2a2a)",
+      borderRight: "1px solid var(--border)",
     },
     // Not --bg-hover: its #252525 wash drops accent-colored syntax tokens
     // to 4.14:1, under the 4.5:1 floor. A 4% white wash over --bg keeps
@@ -104,28 +104,28 @@ const promptforgeTheme = EditorView.theme(
       backgroundColor: "rgba(255, 255, 255, 0.04)",
     },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-      backgroundColor: "var(--accent-dim, #b04722)",
+      backgroundColor: "var(--accent-dim)",
     },
     "&.cm-focused": {
-      outline: "1px solid var(--accent-dim, #b04722)",
+      outline: "1px solid var(--accent-dim)",
       outlineOffset: "-1px",
     },
     ".cm-searchMatch": {
-      backgroundColor: "var(--accent-dim, #b04722)",
-      outline: "1px solid var(--accent, #e05a2b)",
+      backgroundColor: "var(--accent-dim)",
+      outline: "1px solid var(--accent)",
     },
     ".cm-searchMatch-selected": {
-      backgroundColor: "var(--accent, #e05a2b)",
+      backgroundColor: "var(--accent)",
     },
     ".cm-panels": {
-      backgroundColor: "var(--bg-raised, #1a1a1a)",
-      color: "var(--text, #e8e8e8)",
+      backgroundColor: "var(--bg-raised)",
+      color: "var(--text)",
     },
     ".cm-panels input, .cm-panels button": {
-      backgroundColor: "var(--bg, #0f0f0f)",
-      color: "var(--text, #e8e8e8)",
-      border: "1px solid var(--border, #2a2a2a)",
-      borderRadius: "var(--radius, 8px)",
+      backgroundColor: "var(--bg)",
+      color: "var(--text)",
+      border: "1px solid var(--border)",
+      borderRadius: "var(--radius)",
     },
   },
   { dark: true },
@@ -135,20 +135,20 @@ const promptforgeTheme = EditorView.theme(
 // the LED green/amber for strings and literals, muted gray for comments
 // and punctuation. Every value stays at or above 4.5:1 on --bg.
 const promptforgeHighlight = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent, #e05a2b)" },
-  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green, #28a745)" },
-  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber, #f09030)" },
-  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted, #909090)", fontStyle: "italic" },
-  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent, #e05a2b)" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text, #e8e8e8)" },
-  { tag: [tags.propertyName, tags.attributeName], color: "var(--text, #e8e8e8)" },
-  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted, #909090)" },
-  { tag: tags.heading, color: "var(--accent, #e05a2b)", fontWeight: "bold" },
-  { tag: tags.link, color: "var(--accent, #e05a2b)", textDecoration: "underline" },
+  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber)" },
+  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text)" },
+  { tag: [tags.propertyName, tags.attributeName], color: "var(--text)" },
+  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted)" },
+  { tag: tags.heading, color: "var(--accent)", fontWeight: "bold" },
+  { tag: tags.link, color: "var(--accent)", textDecoration: "underline" },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "bold" },
   { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: tags.invalid, color: "var(--danger-text, #e4606d)" },
+  { tag: tags.invalid, color: "var(--danger-text)" },
 ]);
 
 /** The lowercase file extension of a path, or null when it has none. */

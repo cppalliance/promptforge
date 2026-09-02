@@ -6,12 +6,12 @@
    defaults instead of breaking the property. */
 
 .tool-call-card {
-  background: var(--tool-card-bg, #181818);
-  border: 1px solid var(--tool-card-border, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-radius: var(--radius, 6px);
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-sm, 16px);
-  color: var(--text, #F0F0F0);
+  background: var(--tool-card-bg);
+  border: 1px solid var(--tool-card-border);
+  border-radius: var(--bubble-radius);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--text);
   /* Clips the header wash to the card's radius; the summary's focus
      outline draws inside (negative offset) so it survives the clip. */
   overflow: hidden;
@@ -20,13 +20,13 @@
 .tool-call-card__summary {
   display: flex;
   align-items: center;
-  gap: var(--space-2, 8px);
-  min-block-size: var(--tool-card-header-height, 28px);
+  gap: var(--space-2);
+  min-block-size: var(--tool-card-header-height);
   padding-block: 0;
-  padding-inline: var(--space-2, 8px) var(--space-3, 12px);
+  padding-inline: var(--space-1-5) var(--space-2-5);
   cursor: pointer;
   list-style: none;
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--text-muted);
 }
 
 .tool-call-card__summary::-webkit-details-marker {
@@ -37,10 +37,10 @@
 .tool-call-card__summary::before {
   content: "›";
   flex: none;
-  font-size: var(--font-size-base, 13px);
+  font-size: var(--font-size-base);
   line-height: 1;
-  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
-  transition: transform var(--duration-fast, 100ms) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1));
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-out-cubic);
 }
 
 .tool-call-card[open] > .tool-call-card__summary::before {
@@ -48,12 +48,12 @@
 }
 
 .tool-call-card__summary:hover {
-  background: var(--bg-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--bg-hover);
 }
 
 .tool-call-card__summary:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: -2px;
+  outline: none;
+  background: var(--bg-hover);
 }
 
 /* Settled state: a quiet green dot. */
@@ -61,15 +61,15 @@
   flex: none;
   inline-size: 8px;
   block-size: 8px;
-  border-radius: var(--radius-full, 9999px);
-  background: var(--color-green, #3FA266);
+  border-radius: var(--radius-full);
+  background: var(--color-green);
 }
 
 /* Running state: a pulsing yellow dot. The period derives from the slow
    duration token; the pulse is decorative, so reduced motion drops it. */
 .tool-call-card--running .tool-call-card__status {
-  background: var(--color-yellow, #F1B467);
-  animation: tool-call-card-pulse calc(var(--duration-slow, 200ms) * 6) var(--ease-out-cubic, cubic-bezier(0.215, 0.61, 0.355, 1)) infinite;
+  background: var(--color-yellow);
+  animation: tool-call-card-pulse calc(var(--duration-slow) * 6) var(--ease-out-cubic) infinite;
 }
 
 @keyframes tool-call-card-pulse {
@@ -89,8 +89,8 @@
 }
 
 .tool-call-card__name {
-  font-weight: var(--font-weight-semibold, 590);
-  color: var(--text, #F0F0F0);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -100,12 +100,12 @@
   flex: none;
   min-inline-size: 16px;
   padding-block: 0;
-  padding-inline: var(--space-1, 4px);
-  border-radius: var(--radius-full, 9999px);
-  background: var(--bg-card, color-mix(in srgb, #F0F0F0 6%, transparent));
-  color: var(--text-tertiary, color-mix(in srgb, #F0F0F0 60%, transparent));
-  font-size: var(--font-size-xs, 11px);
-  line-height: var(--line-height-sm, 16px);
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
   text-align: center;
 }
 
@@ -127,16 +127,16 @@
 .tool-call-card__body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
-  border-block-start: 1px solid var(--tool-card-border, color-mix(in srgb, #F0F0F0 8%, transparent));
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
+  gap: var(--space-1-5);
+  border-block-start: 1px solid var(--tool-card-border);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-2-5);
 }
 
 .tool-call-card__call-name {
   margin: 0;
-  font-weight: var(--font-weight-semibold, 590);
-  color: var(--text-muted, color-mix(in srgb, #F0F0F0 74%, transparent));
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-muted);
 }
 
 /* Shiki's pre carries inline colors from the theme; the plain-fallback
@@ -145,15 +145,15 @@
 .tool-call-card__raw,
 .tool-call-card__result {
   margin: 0;
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
-  background: var(--syntax-bg, #181818);
-  border: 1px solid var(--border-subtle, color-mix(in srgb, #F0F0F0 8%, transparent));
-  border-radius: var(--radius, 6px);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
+  background: var(--syntax-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
   overflow-x: auto;
-  font-family: var(--code-font, ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace);
-  font-size: var(--font-size-sm, 12px);
-  line-height: var(--line-height-base, 18px);
+  font-family: var(--code-font);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
 }
 
 /* The result block scrolls instead of growing the feed row. */

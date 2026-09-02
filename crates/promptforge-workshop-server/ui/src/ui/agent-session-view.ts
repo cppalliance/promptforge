@@ -38,7 +38,7 @@ import {
   type SttHandle,
   type SttStatus,
 } from "./stt";
-import { ICON_MIC } from "./workshop/icons";
+import { ICON_MIC, ICON_SEND } from "./workshop/icons";
 
 /** One painted feed row, kept for the identity diff. */
 interface RenderedRow {
@@ -224,26 +224,25 @@ export class AgentSessionView extends Disposable {
     this.send = document.createElement("button");
     this.send.type = "button";
     this.send.className = "agent-session__send";
-    this.send.textContent = "Send";
+    this.send.setAttribute("aria-label", "Send");
+    this.send.innerHTML = ICON_SEND;
     this.send.addEventListener("click", () => this.submit());
     const promptInput = new PromptInput({
-      // A function, not a fixed string: the placeholder names the gate's
-      // state, and the Placeholder decoration re-evaluates it on every
-      // state update (setEditable triggers one).
-      placeholder: () =>
-        this.service.pendingInputToken === null
-          ? "The agent is working; the input opens when it asks"
-          : "Message the agent",
+      placeholder: "Plan, Build, / for skills, @ for context",
       ariaLabel: "Message",
       onSubmit: () => this.submit(),
     });
-    bar.append(promptInput.element, this.mic, this.send);
     if (modelService !== undefined) {
       const toolbar = this._register(new AgentToolbar(modelService));
-      this.element.append(this.feed, toolbar.element, bar);
+      toolbar.element.append(this.mic, this.send);
+      bar.append(promptInput.element, toolbar.element);
     } else {
-      this.element.append(this.feed, bar);
+      bar.append(promptInput.element, this.mic, this.send);
     }
+    const outer = document.createElement("div");
+    outer.className = "agent-session__outer";
+    outer.appendChild(bar);
+    this.element.append(this.feed, outer);
 
     // Element-owned listeners die with the elements; only service
     // subscriptions need the lifecycle.

@@ -6,8 +6,8 @@
 
 .token-ring {
   display: block;
-  inline-size: var(--token-ring-size, 16px);
-  block-size: var(--token-ring-size, 16px);
+  inline-size: var(--token-ring-size);
+  block-size: var(--token-ring-size);
 }
 
 .token-ring-background,
@@ -16,11 +16,11 @@
 }
 
 .token-ring-background {
-  stroke: var(--token-ring-track, color-mix(in srgb, #F0F0F0 8%, transparent));
+  stroke: var(--token-ring-track);
 }
 
 .token-ring-progress {
-  stroke: var(--token-ring-fill, color-mix(in srgb, #F0F0F0 74%, transparent));
+  stroke: var(--token-ring-fill);
   /* SVG arcs start at three o'clock; rotate so the fill grows from twelve. */
   transform: rotate(-90deg);
   transform-origin: center;

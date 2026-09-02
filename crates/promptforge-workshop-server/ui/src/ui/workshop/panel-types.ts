@@ -10,6 +10,7 @@ import { Disposable } from "../../base/lifecycle";
 import type { ModelService } from "../../services/model-service";
 import type { SttStatus } from "../stt";
 import { AgentPanel } from "./agent-panel";
+import { DropdownMenu } from "./dropdown";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
 import { WorkshopTreePanel, type TreeStatusSink } from "./workshop-panel";
@@ -40,6 +41,8 @@ export interface PanelTypeEntry {
 
 /** The registered name of the close-button-free tab renderer. */
 export const PERMANENT_TAB = "permanent";
+/** The registered name of the agent tab renderer with an SPA context menu. */
+export const AGENT_TAB = "agent-tab";
 
 export const PANEL_TYPES = {
   tree: {
@@ -70,7 +73,7 @@ export const PANEL_TYPES = {
     type: "agent",
     defaultZone: "right",
     title: "Agent Session",
-    tabComponent: undefined,
+    tabComponent: AGENT_TAB,
     factory: (services?: PanelServices): IContentRenderer =>
       new AgentPanel(services?.statusBar, services?.modelService),
   },
@@ -130,11 +133,66 @@ class PermanentTab extends Disposable implements ITabRenderer {
   }
 }
 
+class AgentTab extends Disposable implements ITabRenderer {
+  public readonly element = document.createElement("div");
+  private readonly content = document.createElement("div");
+  private readonly close = document.createElement("button");
+  private readonly menu = this._register(new DropdownMenu());
+
+  constructor() {
+    super();
+    this.element.className = "dv-default-tab";
+    this.content.className = "dv-default-tab-content";
+    this.close.type = "button";
+    this.close.className = "dv-default-tab-action";
+    this.close.setAttribute("aria-label", "Close");
+    this.close.textContent = "×";
+    this.element.append(this.content, this.close);
+  }
+
+  public init(parameters: TabPartInitParameters): void {
+    this.content.textContent = parameters.title;
+    this._register(
+      parameters.api.onDidTitleChange((event) => {
+        this.content.textContent = event.title;
+      }),
+    );
+    this.close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      parameters.api.close();
+    });
+    this.element.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.menu.show(
+        this.element,
+        [
+          { label: "Close", onClick: () => parameters.api.close() },
+          {
+            label: "Close Others",
+            onClick: () => {
+              for (const panel of [...parameters.api.group.panels]) {
+                if (panel.api.id !== parameters.api.id) {
+                  panel.api.close();
+                }
+              }
+            },
+          },
+        ],
+        { x: event.clientX, y: event.clientY },
+      );
+    });
+  }
+}
+
 /**
  * Dockview's createTabComponent dispatch. Returning undefined for any
  * other name (including panels that never named a tab component) makes
  * Dockview fall back to its default closable tab.
  */
 export function createPanelTabComponent(options: CreateComponentOptions): ITabRenderer | undefined {
-  return options.name === PERMANENT_TAB ? new PermanentTab() : undefined;
+  if (options.name === PERMANENT_TAB) {
+    return new PermanentTab();
+  }
+  return options.name === AGENT_TAB ? new AgentTab() : undefined;
 }

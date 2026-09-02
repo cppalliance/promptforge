@@ -1,6 +1,6 @@
 // The mode chip (src/ui/mode-chip.ts) in jsdom: a button showing the
-// current mode's icon and label. Clicking opens a DropdownMenu of the
-// four modes; picking one updates the chip and fires
+// current mode's icon, label, and chevron. Clicking opens a DropdownMenu
+// of Cursor's five modes; picking one updates the chip and fires
 // "agent-mode-changed" on document with the mode as detail; re-picking
 // the current mode fires nothing; dispose() closes an open menu. Runs
 // under the shared leak check: a ModeChip left undisposed fails.
@@ -73,9 +73,10 @@ await assertNoLeaks(lifecycle, async () => {
   check(
     "the modes are the as-const map the plan fixes",
     UNIFIED_MODES.Agent === "agent" &&
-      UNIFIED_MODES.Ask === "ask" &&
       UNIFIED_MODES.Plan === "plan" &&
-      UNIFIED_MODES.Debug === "debug",
+      UNIFIED_MODES.Debug === "debug" &&
+      UNIFIED_MODES.Multitask === "multitask" &&
+      UNIFIED_MODES.Ask === "ask",
   );
   check(
     "the mode-changed event name is the literal the plan fixes",
@@ -99,7 +100,8 @@ await assertNoLeaks(lifecycle, async () => {
     check(
       "the chip shows the current mode's label and icon",
       chip.element.querySelector(".mode-chip__label")?.textContent === "Agent" &&
-        chip.element.querySelector(".mode-chip__icon svg") !== null,
+        chip.element.querySelector(".mode-chip__icon svg") !== null &&
+        chip.element.querySelector(".mode-chip__chevron svg") !== null,
     );
     chip.dispose();
     chip.element.remove();
@@ -113,13 +115,17 @@ await assertNoLeaks(lifecycle, async () => {
     chip.element.click();
     check("clicking the chip opens the dropdown", menuEl() !== null);
     const items = menuItems();
+    const labels = items.map(
+      (item) => item.querySelector(".workshop-dropdown__label")?.textContent,
+    );
     check(
-      "the dropdown lists the four modes in order",
-      items.length === 4 &&
-        items[0]?.textContent === "Agent" &&
-        items[1]?.textContent === "Ask" &&
-        items[2]?.textContent === "Plan" &&
-        items[3]?.textContent === "Debug",
+      "the dropdown lists Cursor's five modes in order",
+      items.length === 5 &&
+        labels.join(",") === "Agent,Plan,Debug,Multitask,Ask",
+    );
+    check(
+      "the current mode row carries Cursor's trailing check",
+      items[0]?.querySelector(".workshop-dropdown__check")?.textContent === "✓",
     );
     check(
       "every mode item renders its icon",
@@ -145,7 +151,7 @@ await assertNoLeaks(lifecycle, async () => {
 
     const agentIconHtml = chip.element.querySelector(".mode-chip__icon")?.innerHTML;
     chip.element.click();
-    menuItems()[2]?.click();
+    menuItems()[1]?.click();
     check(
       "selecting a mode changes the chip label",
       chip.element.querySelector(".mode-chip__label")?.textContent === "Plan",
@@ -163,7 +169,7 @@ await assertNoLeaks(lifecycle, async () => {
     check("selecting a mode closes the dropdown", menuEl() === null);
 
     chip.element.click();
-    menuItems()[2]?.click();
+    menuItems()[1]?.click();
     check("re-selecting the current mode fires no event", events.length === 1);
 
     document.removeEventListener(AGENT_MODE_CHANGED_EVENT, onModeChanged);

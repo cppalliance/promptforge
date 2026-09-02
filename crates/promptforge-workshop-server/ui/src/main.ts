@@ -2,7 +2,7 @@ import "dockview/dist/styles/dockview.css";
 
 import { createDockview, themeDark } from "dockview";
 
-import { DisposableStore } from "./base/lifecycle";
+import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService } from "./services/model-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
@@ -21,6 +21,13 @@ import { initZones, openInZone } from "./ui/workshop/zones";
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
 const disposables = new DisposableStore();
+const suppressNativeContextMenu = (event: MouseEvent): void => event.preventDefault();
+document.addEventListener("contextmenu", suppressNativeContextMenu, { capture: true });
+disposables.add(
+  toDisposable(() =>
+    document.removeEventListener("contextmenu", suppressNativeContextMenu, { capture: true }),
+  ),
+);
 
 // One persistent socket carries the server's downstream JSON - status
 // updates the status bar renders as they arrive, catalog pushes, and
@@ -159,28 +166,27 @@ const modelMenu: ModelMenuService = {
   },
 };
 
+const openNewAgent = (): void => {
+  openInZone("agent", { instance: window.crypto.randomUUID() });
+};
+
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the model service's catalog and writes the selection back
 // into it, and its Profiles section reads the workbench service through
-// the profileMenu view above. Agent windows are modal - one agent session
-// per window - so File > New Agent and Window > Agent Session both open
-// or focus the singleton agent-session panel.
+// the profileMenu view above. Each New Agent command creates a separate
+// panel, socket, and modal server session in the right zone.
 disposables.add(
   setupWindowMenus({
     agents: {
-      newAgent: () => {
-        openInZone("agent", {});
-      },
+      newAgent: openNewAgent,
     },
     workshop: {
       toggleWorkshopPanel: () => toggleWorkshopPanel(dock),
       openGatewayConfig: () => {
         openInZone("config", {});
       },
-      openAgentSession: () => {
-        openInZone("agent", {});
-      },
+      openAgentSession: openNewAgent,
     },
     modelMenu,
     profileMenu,

@@ -194,12 +194,12 @@ await assertNoLeaks(lifecycle, async () => {
     toolbarRule.includes("display: flex") && toolbarRule.includes("align-items: center"),
   );
   check(
-    "the toolbar spaces its children with the spacing token",
-    toolbarRule.includes("gap: var(--space-1, 4px)"),
+    "the toolbar uses Cursor's workspace input-row gap",
+    toolbarRule.includes("gap: 0.55rem"),
   );
   check(
     "the toolbar stands at base control height",
-    toolbarRule.includes("block-size: var(--height-base, 28px)"),
+    toolbarRule.includes("min-block-size: var(--height-base)"),
   );
   check(
     "the ring pins to the trailing edge with a logical property",
@@ -207,8 +207,8 @@ await assertNoLeaks(lifecycle, async () => {
   );
   const varUses = cssText.match(/var\([^)]*\)/g) ?? [];
   check(
-    "every var() in the toolbar stylesheet carries a fallback",
-    varUses.length > 0 && varUses.every((use) => use.includes(",")),
+    "no var() in the toolbar stylesheet carries a fallback",
+    varUses.length > 0 && varUses.every((use) => !use.includes(",")),
   );
 });
 

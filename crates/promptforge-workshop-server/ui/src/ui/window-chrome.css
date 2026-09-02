@@ -15,11 +15,11 @@
   flex: none;
   display: flex;
   align-items: stretch;
-  height: var(--titlebar-height, 40px);
-  background: var(--titlebar-bg, #181818);
-  border-bottom: 1px solid var(--titlebar-divider, color-mix(in srgb, #F0F0F0 12%, transparent));
-  color: var(--titlebar-foreground, #F0F0F0);
-  font-size: var(--titlebar-font-size, 13px);
+  height: var(--titlebar-height);
+  background: var(--titlebar-bg);
+  border-bottom: 1px solid var(--titlebar-divider);
+  color: var(--titlebar-foreground);
+  font-size: var(--titlebar-font-size);
   line-height: 1;
   user-select: none;
 }
@@ -32,9 +32,9 @@
 .window-titlebar__icon {
   flex: none;
   align-self: center;
-  width: var(--titlebar-icon-size, 20px);
-  height: var(--titlebar-icon-size, 20px);
-  margin-inline: var(--space-lg, 12px) var(--space-xs, 4px);
+  width: var(--titlebar-icon-size);
+  height: var(--titlebar-icon-size);
+  margin-inline: var(--space-lg) var(--space-xs);
 }
 
 /* The empty center: the only surface that initiates a native drag. */
@@ -60,7 +60,7 @@
 }
 
 .window-titlebar__control {
-  width: var(--titlebar-control-width, 46px);
+  width: var(--titlebar-control-width);
   min-height: 24px;
   display: inline-flex;
   align-items: center;
@@ -68,24 +68,24 @@
   padding: 0;
   background: none;
   border: none;
-  color: var(--titlebar-glyph, color-mix(in srgb, #F0F0F0 74%, transparent));
+  color: var(--titlebar-glyph);
   cursor: pointer;
   user-select: none;
 }
 
 .window-titlebar__control:focus-visible {
-  outline: 1px solid var(--titlebar-accent, #e05a2b);
-  outline-offset: -1px;
+  outline: none;
+  background: var(--titlebar-hover);
 }
 
 .window-titlebar__control--minimize:hover,
 .window-titlebar__control--maximize:hover {
-  background: var(--titlebar-hover, color-mix(in srgb, #F0F0F0 8%, transparent));
+  background: var(--titlebar-hover);
 }
 
 .window-titlebar__control--close:hover {
-  background: var(--titlebar-close-hover, #dc3545);
-  color: var(--titlebar-close-glyph-hover, #ffffff);
+  background: var(--titlebar-close-hover);
+  color: var(--titlebar-close-glyph-hover);
 }
 
 /* The maximize control swaps its two SVG glyphs via the hidden attribute;

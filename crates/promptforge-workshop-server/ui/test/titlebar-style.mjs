@@ -73,11 +73,11 @@ for (const variable of [
 // --- The bar ----------------------------------------------------------------
 
 const bar = ruleBlock(".window-titlebar");
-check("the bar is a fixed height via --titlebar-height", /height:\s*var\(--titlebar-height,/.test(bar));
-check("the bar paints the near-black surface", /background:\s*var\(--titlebar-bg,/.test(bar));
+check("the bar is a fixed height via --titlebar-height", /height:\s*var\(--titlebar-height\)/.test(bar));
+check("the bar paints the near-black surface", /background:\s*var\(--titlebar-bg\)/.test(bar));
 check(
   "the bar carries the one-pixel lower divider",
-  /border-bottom:\s*1px solid var\(--titlebar-divider,/.test(bar),
+  /border-bottom:\s*1px solid var\(--titlebar-divider\)/.test(bar),
 );
 check("the bar is not selectable", /user-select:\s*none/.test(bar));
 
@@ -90,15 +90,15 @@ check("the drag region is not selectable", /user-select:\s*none/.test(drag));
 // --- Window controls ----------------------------------------------------------
 
 const control = ruleBlock(".window-titlebar__control");
-check("controls size from --titlebar-control-width", /width:\s*var\(--titlebar-control-width,/.test(control));
+check("controls size from --titlebar-control-width", /width:\s*var\(--titlebar-control-width\)/.test(control));
 check("control hit areas keep a 24px floor", /min-height:\s*24px/.test(control));
-check("control glyphs use the muted-gray token", /color:\s*var\(--titlebar-glyph,/.test(control));
+check("control glyphs use the muted-gray token", /color:\s*var\(--titlebar-glyph\)/.test(control));
 check("controls are not selectable", /user-select:\s*none/.test(control));
 
 const neutralHover = ruleBlock(".window-titlebar__control--minimize:hover");
 check(
   "Minimize/Maximize hover is the neutral wash",
-  /background:\s*var\(--titlebar-hover,/.test(neutralHover),
+  /background:\s*var\(--titlebar-hover\)/.test(neutralHover),
 );
 
 // The maximize/restore glyphs are SVG, outside the UA [hidden] rule's
@@ -107,46 +107,47 @@ const glyphHidden = ruleBlock(".window-titlebar__glyph--maximize[hidden]");
 check("the glyph [hidden] rule hides the swapped-out SVG", /display:\s*none/.test(glyphHidden));
 
 const closeHover = ruleBlock(".window-titlebar__control--close:hover");
-check("Close hover is the red danger fill", /background:\s*var\(--titlebar-close-hover,/.test(closeHover));
+check("Close hover is the red danger fill", /background:\s*var\(--titlebar-close-hover\)/.test(closeHover));
 check(
   "Close hover flips the glyph to the on-danger color",
-  /color:\s*var\(--titlebar-close-glyph-hover,/.test(closeHover),
+  /color:\s*var\(--titlebar-close-glyph-hover\)/.test(closeHover),
 );
 
 // --- Program icon and menu buttons ----------------------------------------------
 
 const icon = ruleBlock(".window-titlebar__icon");
-check("the program icon sizes from --titlebar-icon-size", /width:\s*var\(--titlebar-icon-size,/.test(icon));
-check("the program icon height tracks the same token", /height:\s*var\(--titlebar-icon-size,/.test(icon));
+check("the program icon sizes from --titlebar-icon-size", /width:\s*var\(--titlebar-icon-size\)/.test(icon));
+check("the program icon height tracks the same token", /height:\s*var\(--titlebar-icon-size\)/.test(icon));
 
 const menuHover = ruleBlock(".window-titlebar__menu:hover");
 check(
   "menu buttons take the neutral wash on hover and while open",
-  /background:\s*var\(--titlebar-hover,/.test(menuHover),
+  /background:\s*var\(--titlebar-hover\)/.test(menuHover),
 );
 
 // --- Menu popovers ------------------------------------------------------------
 
 const popover = ruleBlock(".window-titlebar__popover");
-check("popovers are raised near-black surfaces", /background:\s*var\(--bg-raised,/.test(popover));
-check("popovers carry the subtle border", /border:\s*1px solid var\(--border,/.test(popover));
+check("popovers are raised near-black surfaces", /background:\s*var\(--bg-raised\)/.test(popover));
+check("popovers carry the subtle border", /border:\s*1px solid var\(--border\)/.test(popover));
 check(
   "popover width floors at --titlebar-popover-min-width",
-  /min-width:\s*var\(--titlebar-popover-min-width,/.test(popover),
+  /min-width:\s*var\(--titlebar-popover-min-width\)/.test(popover),
 );
 check(
   "popovers lift with the --titlebar-popover-shadow token",
-  /box-shadow:\s*var\(--titlebar-popover-shadow,/.test(popover),
+  /box-shadow:\s*var\(--titlebar-popover-shadow\)/.test(popover),
 );
 
 const itemFocus = ruleBlock(".window-titlebar__item:focus-visible");
 check(
-  "menu focus/selection ring uses the purple accent",
-  /outline:\s*1px solid var\(--titlebar-accent,/.test(itemFocus),
+  "menu keyboard focus uses the hover background without a frame",
+  /outline:\s*none/.test(itemFocus) &&
+    /background:\s*var\(--bg-hover\)/.test(itemFocus),
 );
 
 const shortcut = ruleBlock(".window-titlebar__shortcut");
-check("shortcut columns render muted", /color:\s*var\(--text-muted,/.test(shortcut));
+check("shortcut columns render muted", /color:\s*var\(--text-muted\)/.test(shortcut));
 
 const disabledHover = ruleBlock('.window-titlebar__item[aria-disabled="true"]:hover');
 check("disabled menu rows suppress the hover wash", /background:\s*none/.test(disabledHover));
@@ -157,14 +158,17 @@ const titlebarSection = cssText.slice(
   cssText.indexOf(".window-titlebar {"),
   cssText.indexOf(".about-dialog-overlay"),
 );
-check("no title-bar rule removes the focus outline", !/outline:\s*none/.test(titlebarSection));
+check(
+  "title-bar focus states contain no accent frames",
+  !/outline:\s*(1px|2px)[^;]*accent/.test(titlebarSection),
+);
 check(
   "title-bar controls carry :focus-visible replacements",
   (titlebarSection.match(/:focus-visible/g) || []).length >= 3,
 );
 check(
-  "the title bar animates nothing (hover states flip instantly)",
-  !/(transition|animation)\s*:/.test(titlebarSection),
+  "hover states flip instantly without transitions",
+  !/transition\s*:/.test(titlebarSection),
 );
 
 // --- What jsdom can prove about the shipped markup -----------------------------
@@ -197,7 +201,7 @@ if (barEl) {
   // flows through the variable.
   check(
     "the revealed bar's height is declared via --titlebar-height",
-    revealed.height.startsWith("var(--titlebar-height,"),
+    revealed.height.startsWith("var(--titlebar-height"),
   );
   check(
     "--titlebar-height resolves to a fixed pixel value",

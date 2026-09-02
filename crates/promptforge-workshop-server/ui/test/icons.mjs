@@ -38,6 +38,7 @@ const expectedSizes = {
   ICON_TRASH_2: 15,
   ICON_FOLDER_PLUS: 15,
   ICON_MIC: 16,
+  ICON_SEND: 16,
 };
 
 check(
