@@ -111,7 +111,7 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
 }
 
 /// Installs the agent-only `models.chat` yield shim on a VM whose shim
-/// prelude already ran ([`install_shim_prelude`] stashed the shim in the
+/// prelude already ran (`install_shim_prelude` stashed the shim in the
 /// registry).
 ///
 /// The agent executor is the only caller: `models.chat` never exists in a
