@@ -84,8 +84,12 @@ fn attach_handlers(
 /// etc.) race the app's JS keydown handler. Disabling them here makes
 /// the JS handler in shortcuts.ts the sole zoom path.
 fn disable_browser_accelerator_keys(core: &ICoreWebView2) -> windows_core::Result<()> {
+    // SAFETY: `core` is the live interface supplied by the webview controller,
+    // and this call runs on that webview's thread.
     let settings = unsafe { core.Settings()? };
     let settings3: ICoreWebView2Settings3 = settings.cast()?;
+    // SAFETY: `settings3` was queried from the live settings interface and is
+    // called on the owning webview thread.
     unsafe { settings3.SetAreBrowserAcceleratorKeysEnabled(false) }
 }
 
