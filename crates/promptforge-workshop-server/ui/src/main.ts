@@ -81,8 +81,10 @@ await markdownReady.catch((error: unknown) => {
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   // The status bar rides along so the Workshop tree's workspace actions
-  // (add and remove folders) can announce their outcomes.
-  createComponent: (options) => createPanelComponent(options, { statusBar }),
+  // (add and remove folders) can announce their outcomes; the model
+  // service rides along so the agent session's toolbar picker reads the
+  // shared catalog and selection.
+  createComponent: (options) => createPanelComponent(options, { statusBar, modelService }),
   createTabComponent: createPanelTabComponent,
   theme: themeDark,
   disableFloatingGroups: true,

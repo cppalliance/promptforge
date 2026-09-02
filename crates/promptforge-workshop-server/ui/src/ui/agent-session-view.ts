@@ -26,6 +26,8 @@ import type {
   ToolCallItem,
   TranscriptItem,
 } from "../services/agent-session";
+import type { ModelService } from "../services/model-service";
+import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
 import { PromptInput } from "./prompt-input";
 import { ToolCallCard } from "./tool-call-card";
@@ -169,10 +171,13 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
 }
 
 /**
- * The session surface: the transcript feed over the input bar. The
- * input enables only while a wait is pinned; submitting answers the wait
- * through the service and clears the box on a successful send. The
- * status sink receives dictation's local messages and REC badge state.
+ * The session surface: the transcript feed over the toolbar and the
+ * input bar. The toolbar (mode chip, model picker, context ring) mounts
+ * only when the composition root threads a ModelService through; a view
+ * built without one mounts none. The input enables only while a wait is
+ * pinned; submitting answers the wait through the service and clears
+ * the box on a successful send. The status sink receives dictation's
+ * local messages and REC badge state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
@@ -192,6 +197,7 @@ export class AgentSessionView extends Disposable {
   constructor(
     private readonly service: AgentSessionService,
     status: SttStatus,
+    modelService?: ModelService,
   ) {
     super();
     this.element = document.createElement("section");
@@ -232,7 +238,12 @@ export class AgentSessionView extends Disposable {
       onSubmit: () => this.submit(),
     });
     bar.append(promptInput.element, this.mic, this.send);
-    this.element.append(this.feed, bar);
+    if (modelService !== undefined) {
+      const toolbar = this._register(new AgentToolbar(modelService));
+      this.element.append(this.feed, toolbar.element, bar);
+    } else {
+      this.element.append(this.feed, bar);
+    }
 
     // Element-owned listeners die with the elements; only service
     // subscriptions need the lifecycle.

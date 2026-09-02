@@ -5,7 +5,9 @@
 // tool output, error rows); streaming deltas paint a pending row the
 // durable event settles, with the settled history never rebuilt; the
 // input pins to the pending wait, answers it byte-exact, and returns to
-// disabled. Run: node test/agent-session-view.mjs
+// disabled; a view built with a ModelService mounts the toolbar (mode
+// chip, model picker, context ring) between the feed and the input bar.
+// Run: node test/agent-session-view.mjs
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -23,6 +25,7 @@ const bundle = await esbuild.build({
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { Emitter } from "./src/base/event.ts";
       export { AgentSessionService } from "./src/services/agent-session.ts";
+      export { ModelService } from "./src/services/model-service.ts";
       export { AgentSessionView } from "./src/ui/agent-session-view.ts";
     `,
     resolveDir: path.join(testDir, ".."),
@@ -55,6 +58,10 @@ globalThis.window = window;
 globalThis.document = window.document;
 globalThis.Event = window.Event;
 globalThis.KeyboardEvent = window.KeyboardEvent;
+// The toolbar's mode chip dispatches a CustomEvent on the document;
+// jsdom's dispatchEvent rejects Node's realm, so the bundle needs
+// jsdom's constructor.
+globalThis.CustomEvent = window.CustomEvent;
 // The prompt input reads skin tokens through getComputedStyle; jsdom's
 // copies must be bound to their window.
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
@@ -68,7 +75,7 @@ globalThis.fetch = (url) =>
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-agent-session-view-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, Emitter, AgentSessionService, AgentSessionView } = await import(
+const { lifecycle, Emitter, AgentSessionService, AgentSessionView, ModelService } = await import(
   pathToFileURL(bundlePath).href
 );
 
@@ -399,6 +406,83 @@ await assertNoLeaks(lifecycle, () => {
       placeholder() === "The agent is working; the input opens when it asks",
     );
     dispose();
+  }
+
+  // --- The toolbar mounts between the feed and the input bar ---------------
+
+  {
+    const { view, dispose } = harness();
+    check(
+      "a view built without a model service mounts no toolbar",
+      view.element.querySelector(".agent-toolbar") === null,
+    );
+    dispose();
+  }
+
+  {
+    const sent = [];
+    const modelService = new ModelService((id) => {
+      sent.push(id);
+      return true;
+    });
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const view = new AgentSessionView(service, silentStatus, modelService);
+    window.document.body.appendChild(view.element);
+    const toolbar = view.element.querySelector(".agent-toolbar");
+    check(
+      "the toolbar mounts between the feed and the input bar",
+      toolbar !== null &&
+        view.element.querySelector(".agent-session__feed")?.nextElementSibling === toolbar &&
+        toolbar.nextElementSibling === view.element.querySelector(".agent-session__bar"),
+    );
+    check(
+      "the toolbar composes the mode chip, the model picker, and the context ring",
+      toolbar?.querySelector(".mode-chip__label")?.textContent === "Agent" &&
+        toolbar?.querySelector(".model-picker-trigger__label")?.textContent === "Select model" &&
+        toolbar?.querySelector(".token-ring")?.getAttribute("aria-valuenow") === "0",
+    );
+    modelService.setModels([
+      { id: "alpha", description: "first" },
+      { id: "beta", description: "second" },
+    ]);
+    modelService.applySelected("alpha");
+    check(
+      "the picker shows the service's current model",
+      toolbar?.querySelector(".model-picker-trigger__label")?.textContent === "alpha",
+    );
+    toolbar?.querySelector(".model-picker-trigger")?.click();
+    const modelItems = [...document.querySelectorAll(".workshop-dropdown__item")];
+    check(
+      "the picker dropdown lists the catalog",
+      modelItems.length === 2 &&
+        modelItems[1]?.querySelector(".workshop-dropdown__label")?.textContent === "beta",
+    );
+    modelItems[1]?.click();
+    check(
+      "picking a model sends the selection through the service",
+      isDeepStrictEqual(sent, ["beta"]),
+    );
+    let modeEvent = null;
+    const onMode = (event) => {
+      modeEvent = event.detail;
+    };
+    document.addEventListener("agent-mode-changed", onMode);
+    toolbar?.querySelector(".mode-chip")?.click();
+    const planItem = [...document.querySelectorAll(".workshop-dropdown__item")].find(
+      (item) => item.querySelector(".workshop-dropdown__label")?.textContent === "Plan",
+    );
+    planItem?.click();
+    document.removeEventListener("agent-mode-changed", onMode);
+    check(
+      "picking a mode fires agent-mode-changed and updates the chip",
+      modeEvent === "plan" &&
+        toolbar?.querySelector(".mode-chip__label")?.textContent === "Plan",
+    );
+    view.dispose();
+    service.dispose();
+    modelService.dispose();
+    view.element.remove();
   }
 
   // --- A new session clears the feed -----------------------------------------

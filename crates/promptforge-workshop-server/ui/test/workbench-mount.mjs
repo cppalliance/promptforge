@@ -1,7 +1,8 @@
 // The bundled app mounts the whole workbench into dist/index.html: dockview
 // initializes inside #dock with the Workshop tree and the agent-session
 // panel (its menu visible, its session view hidden until a session is
-// acknowledged, its input pinned closed), and the status bar boots as a
+// acknowledged, its input pinned closed, its toolbar reading the shared
+// model service's snapshot selection), and the status bar boots as a
 // <footer> landmark reading "Ready" with its progress bar hidden and its
 // activity LED present. Guards the DOM contract between index.html and
 // the panel factories. Run: node test/workbench-mount.mjs (after `npm run
@@ -38,6 +39,23 @@ await bootWorkbench("the bundled app mounts the whole workbench", async (ctx) =>
       failures.push("the agent-session input did not mount");
     } else if (input.getAttribute("contenteditable") !== "false") {
       failures.push("the agent input must start disabled with no pending wait");
+    }
+    const toolbar = view?.querySelector(".agent-toolbar");
+    if (!toolbar) {
+      failures.push("the agent-session toolbar did not mount");
+    } else {
+      if (!toolbar.querySelector(".mode-chip")) {
+        failures.push("the toolbar mounted no mode chip");
+      }
+      if (!toolbar.querySelector(".token-ring")) {
+        failures.push("the toolbar mounted no context ring");
+      }
+      const pickerLabel = toolbar.querySelector(".model-picker-trigger__label")?.textContent;
+      if (pickerLabel !== "test-model") {
+        failures.push(
+          `the toolbar's model picker reads "${pickerLabel}", expected the snapshot's "test-model"`,
+        );
+      }
     }
   }
   if (!statusBar) failures.push("status bar placeholder missing");
