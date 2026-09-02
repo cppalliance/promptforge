@@ -8,9 +8,11 @@ import "./about-dialog.css";
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 import type { UpdateService } from "../services/update-service";
 
-// Mirrors [workspace.package] version in the workspace Cargo.toml; bump
-// together with the crate version.
-const APP_VERSION = "0.2.0";
+// The crate version, substituted by the esbuild define in build.mjs and
+// the crate's build.rs; a bundle built without the define shows the "dev"
+// fallback instead of breaking on a free identifier.
+declare const __APP_VERSION__: string | undefined;
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 const LICENSE = "BSL-1.0";
 
 const FOCUSABLE_SELECTOR =

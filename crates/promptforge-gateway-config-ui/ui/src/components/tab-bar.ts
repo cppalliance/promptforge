@@ -17,6 +17,12 @@ import type { IconNode } from "lucide";
 
 import type { ViewId } from "../router";
 
+// The crate version, substituted by the esbuild define in build.mjs; a
+// bundle built without the define shows the "dev" fallback instead of
+// breaking on a free identifier.
+declare const __APP_VERSION__: string | undefined;
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+
 /** One tab: destination view, label, lucide icon, and hash target. */
 const TABS: ReadonlyArray<readonly [view: ViewId, label: string, icon: IconNode, href: string]> = [
   ["settings", "Settings", Settings, "#/settings"],
@@ -91,6 +97,9 @@ export function createTabBar(options: TabBarOptions): TabBar {
 
   const actions = document.createElement("div");
   actions.className = "tab-actions";
+  const version = document.createElement("span");
+  version.className = "tab-version";
+  version.textContent = `v${APP_VERSION}`;
   const dot = document.createElement("span");
   dot.className = "status-dot";
   const dotText = document.createElement("span");
@@ -101,7 +110,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
   // report says shadow files exist.
   const pending = document.createElement("div");
   pending.className = "apply-actions";
-  actions.append(dot, pending);
+  actions.append(version, dot, pending);
   element.append(actions);
 
   return {

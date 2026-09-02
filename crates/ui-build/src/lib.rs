@@ -31,7 +31,7 @@ pub struct UiBuild {
     /// Run the layer-rule check before bundling (workshop only).
     pub layer_check: bool,
     /// Bake the crate version into the bundle as the `__APP_VERSION__`
-    /// define (config UI only).
+    /// define.
     pub define_app_version: bool,
 }
 
