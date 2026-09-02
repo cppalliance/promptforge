@@ -160,12 +160,9 @@ jobs:
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: crates/promptforge-workshop
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config tauri.nightly.conf.json
 
       - name: Upload the installers
         uses: actions/upload-artifact@v4

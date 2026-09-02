@@ -29,6 +29,7 @@ mod health;
 mod linux_media;
 mod navigation;
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Mutex, PoisonError};
@@ -70,6 +71,18 @@ fn print_version() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn update_supported(os: &str, appimage: Option<&OsStr>) -> bool {
+    os != "linux" || appimage.is_some_and(|value| !value.is_empty())
+}
+
+#[tauri::command]
+fn desktop_update_supported() -> bool {
+    update_supported(
+        std::env::consts::OS,
+        std::env::var_os("APPIMAGE").as_deref(),
+    )
+}
+
 fn run() -> anyhow::Result<()> {
     let builder = tauri::Builder::default()
         // Registered first so a second launch exits inside `build`, before
@@ -93,6 +106,7 @@ fn run() -> anyhow::Result<()> {
                 )
                 .build(),
         )
+        .invoke_handler(tauri::generate_handler![desktop_update_supported])
         .setup(boot_and_open);
     // Off Windows, OS file drops arrive as Tauri's own drag-drop event and
     // are dispatched into the same promptforge:file-drop grant flow. On
@@ -261,6 +275,18 @@ mod tests {
     #[test]
     fn crate_is_named_promptforge_workshop() {
         assert_eq!(env!("CARGO_PKG_NAME"), "promptforge-workshop");
+    }
+
+    #[test]
+    fn linux_updates_require_an_appimage_runtime() {
+        assert!(!update_supported("linux", None));
+        assert!(!update_supported("linux", Some(OsStr::new(""))));
+        assert!(update_supported(
+            "linux",
+            Some(OsStr::new("/tmp/PromptForge.AppImage"))
+        ));
+        assert!(update_supported("windows", None));
+        assert!(update_supported("macos", None));
     }
 
     #[test]

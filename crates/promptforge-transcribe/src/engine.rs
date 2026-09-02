@@ -108,7 +108,6 @@ impl SttEngine {
                 source: Box::new(source),
             }
         })?;
-        library.install_logging_hooks();
         let gpu_available = library.gpu_available().unwrap_or_else(|error| {
             tracing::warn!(%error, "could not inspect whisper GPU support");
             false

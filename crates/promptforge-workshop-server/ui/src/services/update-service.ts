@@ -2,6 +2,7 @@
 // snapshots and the composition root owns its lifetime.
 
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 
@@ -18,6 +19,7 @@ export type UpdatePhase =
   | "installing"
   | "restarting"
   | "error"
+  | "unsupported"
   | "browser";
 
 export interface UpdateSnapshot {
@@ -41,6 +43,7 @@ interface DesktopUpdate {
 
 export interface UpdateBackend {
   readonly desktop: boolean;
+  supported(): Promise<boolean>;
   currentVersion(): Promise<string>;
   check(): Promise<DesktopUpdate | null>;
   relaunch(): Promise<void>;
@@ -49,6 +52,7 @@ export interface UpdateBackend {
 function defaultBackend(): UpdateBackend {
   return {
     desktop: typeof window !== "undefined" && window.__TAURI_INTERNALS__ !== undefined,
+    supported: async (): Promise<boolean> => invoke<boolean>("desktop_update_supported"),
     currentVersion: getVersion,
     check: async (): Promise<Update | null> => check({ timeout: 30_000 }),
     relaunch,
@@ -79,6 +83,7 @@ export class UpdateService extends Disposable {
   private state: UpdateSnapshot = EMPTY;
   private update: DesktopUpdate | null = null;
   private checking: Promise<void> | null = null;
+  private disposed = false;
 
   readonly onDidChange: Event<UpdateSnapshot> = this.changes.event;
 
@@ -102,6 +107,9 @@ export class UpdateService extends Disposable {
   }
 
   async checkNow(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     if (!this.backend.desktop) {
       this.publish({ phase: "browser", error: "" });
       return;
@@ -175,6 +183,7 @@ export class UpdateService extends Disposable {
   }
 
   override dispose(): void {
+    this.disposed = true;
     if (this.update !== null) {
       void this.update.close();
       this.update = null;
@@ -186,7 +195,15 @@ export class UpdateService extends Disposable {
     this.publish({ phase: "checking", error: "" });
     try {
       const currentVersion = await this.backend.currentVersion();
+      if (!(await this.backend.supported())) {
+        this.publish({ phase: "unsupported", currentVersion, error: "" });
+        return;
+      }
       const update = await this.backend.check();
+      if (this.disposed) {
+        await update?.close();
+        return;
+      }
       if (this.update !== null && this.update !== update) {
         await this.update.close();
       }
@@ -223,6 +240,9 @@ export class UpdateService extends Disposable {
   }
 
   private publish(change: Partial<UpdateSnapshot>): void {
+    if (this.disposed) {
+      return;
+    }
     this.state = { ...this.state, ...change };
     this.changes.fire(this.state);
   }

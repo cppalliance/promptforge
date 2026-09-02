@@ -58,6 +58,9 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server
 
+      - name: Check headless gateway
+        run: cargo check -p promptforge-gateway --no-default-features
+
       # No build step may write into the repository (the UI bundles build
       # into OUT_DIR now); catch a regression here rather than in a diff.
       - name: Clean tree

@@ -6,6 +6,13 @@ use std::ptr;
 use crate::WhisperError;
 use crate::raw;
 
+#[derive(Debug)]
+enum Language {
+    Unchanged,
+    Auto,
+    Explicit(CString),
+}
+
 /// Decoding strategy for a full whisper pass.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -29,7 +36,7 @@ impl SamplingStrategy {
 #[derive(Debug)]
 pub struct FullParams {
     pub(crate) strategy: SamplingStrategy,
-    language: Option<CString>,
+    language: Language,
     initial_prompt: Option<CString>,
     translate: Option<bool>,
     no_context: Option<bool>,
@@ -49,7 +56,7 @@ impl FullParams {
     pub fn new(strategy: SamplingStrategy) -> Self {
         Self {
             strategy,
-            language: None,
+            language: Language::Unchanged,
             initial_prompt: None,
             translate: None,
             no_context: None,
@@ -69,13 +76,14 @@ impl FullParams {
     /// # Errors
     /// Returns [`WhisperError::InteriorNull`] when `language` contains a null.
     pub fn set_language(&mut self, language: Option<&str>) -> Result<(), WhisperError> {
-        self.language = language
-            .map(|language| {
-                CString::new(language).map_err(|_| WhisperError::InteriorNull {
+        self.language = match language {
+            Some(language) => Language::Explicit(CString::new(language).map_err(|_| {
+                WhisperError::InteriorNull {
                     value: "whisper language",
-                })
-            })
-            .transpose()?;
+                }
+            })?),
+            None => Language::Auto,
+        };
         Ok(())
     }
 
@@ -146,10 +154,17 @@ impl FullParams {
     pub(crate) fn apply(&self, native: &mut raw::FullParams) {
         let SamplingStrategy::Greedy { best_of } = self.strategy;
         native.greedy.best_of = best_of;
-        native.language = self
-            .language
-            .as_ref()
-            .map_or(ptr::null(), |value| value.as_ptr());
+        match &self.language {
+            Language::Unchanged => {}
+            Language::Auto => {
+                native.language = ptr::null();
+                native.detect_language = true;
+            }
+            Language::Explicit(language) => {
+                native.language = language.as_ptr();
+                native.detect_language = false;
+            }
+        }
         native.initial_prompt = self
             .initial_prompt
             .as_ref()

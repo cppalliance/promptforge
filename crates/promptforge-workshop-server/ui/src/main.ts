@@ -23,6 +23,9 @@ import { initZones, openInZone } from "./ui/workshop/zones";
 // The root of the ownership tree: every top-level binding registers here,
 // so the whole composition tears down with one dispose() call.
 const disposables = new DisposableStore();
+const disposePage = (): void => disposables.dispose();
+window.addEventListener("pagehide", disposePage, { once: true });
+disposables.add(toDisposable(() => window.removeEventListener("pagehide", disposePage)));
 const suppressNativeContextMenu = (event: MouseEvent): void => event.preventDefault();
 document.addEventListener("contextmenu", suppressNativeContextMenu, { capture: true });
 disposables.add(
