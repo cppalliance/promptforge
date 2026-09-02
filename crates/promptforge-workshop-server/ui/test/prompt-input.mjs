@@ -170,6 +170,10 @@ await assertNoLeaks(lifecycle, () => {
       "an Enter flagged isComposing without a tracked session still does not submit",
       submitted === 0,
     );
+    check(
+      "an Enter flagged isComposing is claimed, not split into a paragraph",
+      input.getText() === "hello",
+    );
     input.dispose();
   }
 
@@ -269,6 +273,143 @@ await assertNoLeaks(lifecycle, () => {
     check(
       "setEditable(true) restores contenteditable",
       editor.getAttribute("contenteditable") === "true",
+    );
+    input.dispose();
+  }
+
+  // --- The dictation target seam (SttInputTarget) ----------------------------
+
+  {
+    const input = new PromptInput();
+    input.setText("ab");
+    check("setText loads plain text", input.getText() === "ab");
+    input.setSelection(2, 2);
+    check(
+      "setSelection places the cursor between the characters",
+      input.getSelection().start === 2 && input.getSelection().end === 2,
+    );
+    input.replaceRange(2, 2, "X");
+    check("replaceRange splices at the cursor", input.getText() === "aXb");
+    check(
+      "replaceRange leaves the cursor after the inserted text",
+      input.getSelection().start === 3 && input.getSelection().end === 3,
+    );
+    input.replaceRange(1, 4, "");
+    check("replaceRange with empty text deletes the range", input.getText() === "");
+    input.setText("line one\nline two");
+    check(
+      "setText writes one paragraph per newline",
+      input.getText() === "line one\nline two" &&
+        editorElement(input).querySelectorAll("p").length === 2,
+    );
+    input.dispose();
+  }
+
+  // --- Newlines cross the target seam ---------------------------------------------
+
+  {
+    const input = new PromptInput();
+    input.setText("a\n\nb");
+    check(
+      "setText writes an empty paragraph for an empty line",
+      input.getText() === "a\n\nb" &&
+        editorElement(input).querySelectorAll("p").length === 3,
+    );
+    input.setText("ab");
+    input.setSelection(2, 2);
+    input.replaceRange(2, 2, "x\ny");
+    check(
+      "replaceRange splices a newline as a hard break inside the paragraph",
+      input.getText() === "ax\nyb" &&
+        editorElement(input).querySelectorAll("p").length === 1,
+    );
+    // The take's splice math (TakeState.length in stt.ts) holds only while
+    // every inserted character, newline included, occupies one position.
+    check(
+      "a spliced newline occupies one position, keeping the take's length arithmetic",
+      input.getSelection().start === 5 && input.getSelection().end === 5,
+    );
+    input.replaceRange(2, 5, "");
+    check(
+      "deleting the spliced range restores the pre-take text",
+      input.getText() === "ab",
+    );
+    input.dispose();
+  }
+
+  // --- The two locks compose on one contenteditable -----------------------------
+
+  {
+    const input = new PromptInput();
+    const editor = editorElement(input);
+    input.setReadOnly(true);
+    check(
+      "setReadOnly locks the editor and marks the frame",
+      editor.getAttribute("contenteditable") === "false" &&
+        input.element.classList.contains("stt-input--recording"),
+    );
+    input.setEditable(false);
+    input.setReadOnly(false);
+    check(
+      "lifting the take lock under a closed gate stays non-editable",
+      editor.getAttribute("contenteditable") === "false" &&
+        !input.element.classList.contains("stt-input--recording"),
+    );
+    input.setReadOnly(true);
+    input.setEditable(true);
+    check(
+      "the gate reopening under a live take lock stays non-editable",
+      editor.getAttribute("contenteditable") === "false",
+    );
+    input.setReadOnly(false);
+    check(
+      "lifting the last lock reopens the editor",
+      editor.getAttribute("contenteditable") === "true",
+    );
+    input.dispose();
+  }
+
+  // --- Enter submits while read-only --------------------------------------------
+
+  {
+    let submitted = 0;
+    const input = new PromptInput({
+      content: "<p>hello</p>",
+      onSubmit: () => {
+        submitted++;
+      },
+    });
+    input.setReadOnly(true);
+    pressEnter(editorElement(input));
+    check(
+      "Enter submits while the box is read-only (a live take)",
+      submitted === 1,
+    );
+    check(
+      "the read-only submitting Enter leaves the text untouched",
+      input.getText() === "hello",
+    );
+    input.dispose();
+  }
+
+  // --- Placeholder dynamics --------------------------------------------------------
+
+  {
+    let label = "first";
+    const input = new PromptInput({ placeholder: () => label });
+    check(
+      "a function placeholder is evaluated for the decoration",
+      editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "first",
+    );
+    label = "second";
+    input.setEditable(false);
+    check(
+      "the placeholder re-evaluates on the gate flip",
+      editorElement(input).querySelector("p")?.getAttribute("data-placeholder") === "second",
+    );
+    check(
+      "the placeholder still shows while non-editable",
+      editorElement(input).querySelector("p")?.classList.contains("is-editor-empty") === true,
     );
     input.dispose();
   }

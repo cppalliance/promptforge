@@ -14,9 +14,53 @@ import "./stt.css";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
 
+/**
+ * What dictation needs from its host input: a text target the take can
+ * splice the transcript into. Offsets are the target's own text
+ * coordinates - a textarea's string offsets, the prompt editor's
+ * ProseMirror positions. A take only ever combines a captured `start`
+ * with the length of the text it last inserted there, which is valid in
+ * both spaces.
+ */
+export interface SttInputTarget {
+  /** The current selection: the take's insertion anchor. */
+  getSelection(): { start: number; end: number };
+  /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
+  replaceRange(from: number, to: number, text: string): void;
+  /** Locks the input against typing while a take splices, or releases it. */
+  setReadOnly(readOnly: boolean): void;
+  /** Returns focus to the input; a landed final calls it. */
+  focus(): void;
+}
+
 export interface SttElements {
   mic: HTMLButtonElement;
-  input: HTMLTextAreaElement;
+  input: SttInputTarget;
+}
+
+/**
+ * The textarea target: one-line wrappers over the native selection API,
+ * behavior unchanged from when setupStt held the textarea directly.
+ */
+export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
+  return {
+    getSelection: () => ({
+      start: input.selectionStart ?? input.value.length,
+      end: input.selectionEnd ?? input.value.length,
+    }),
+    replaceRange: (from, to, text) => {
+      input.setRangeText(text, from, to, "end");
+      // Programmatic value sets don't fire the textarea's "input" event,
+      // so every dictation-driven rewrite dispatches it: dictation
+      // behaves like typing to whatever listens on the input.
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    setReadOnly: (readOnly) => {
+      input.readOnly = readOnly;
+      input.classList.toggle("stt-input--recording", readOnly);
+    },
+    focus: () => input.focus(),
+  };
 }
 
 /**
@@ -84,8 +128,13 @@ interface SttSession {
 }
 
 interface TakeState {
-  prefix: string;
-  suffix: string;
+  /** The offset where the take's inserted region starts. */
+  from: number;
+  /**
+   * The length of the region the take owns: the selection it captured at
+   * record start, then the last splice it wrote.
+   */
+  length: number;
 }
 
 // One socket's announced stream generation (services/protocol.ts
@@ -117,19 +166,10 @@ export function setupStt(
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
-  // Programmatic value sets don't fire the textarea's "input" event, so
-  // every dictation-driven rewrite dispatches it: dictation behaves like typing
-  // to whatever listens on the input.
-  function notifyInput(): void {
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
   function spliceValue(text: string): void {
     if (!take) return;
-    input.value = take.prefix + text + take.suffix;
-    const cursorPos = take.prefix.length + text.length;
-    input.setSelectionRange(cursorPos, cursorPos);
-    notifyInput();
+    input.replaceRange(take.from, take.from + take.length, text);
+    take.length = text.length;
   }
 
   // Tears down a session's audio half. The socket half is closed by the
@@ -147,24 +187,16 @@ export function setupStt(
 
   function finishTake(finalText: string): void {
     if (!take) return;
-    input.value = take.prefix + finalText + take.suffix;
-    const cursorPos = take.prefix.length + finalText.length;
-    input.setSelectionRange(cursorPos, cursorPos);
+    spliceValue(finalText);
     take = null;
-    input.readOnly = false;
-    input.classList.remove("stt-input--recording");
-    notifyInput();
+    input.setReadOnly(false);
   }
 
   function discardTake(): void {
     if (!take) return;
-    input.value = take.prefix + take.suffix;
-    const cursorPos = take.prefix.length;
-    input.setSelectionRange(cursorPos, cursorPos);
+    spliceValue("");
     take = null;
-    input.readOnly = false;
-    input.classList.remove("stt-input--recording");
-    notifyInput();
+    input.setReadOnly(false);
   }
 
   // Handles one server text message. Returns true when the take is over and
@@ -232,15 +264,9 @@ export function setupStt(
   }
 
   function beginTake(): void {
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? input.value.length;
-    const value = input.value;
-    take = {
-      prefix: value.slice(0, start),
-      suffix: value.slice(end),
-    };
-    input.readOnly = true;
-    input.classList.add("stt-input--recording");
+    const { start, end } = input.getSelection();
+    take = { from: start, length: end - start };
+    input.setReadOnly(true);
   }
 
   async function startStt(): Promise<void> {

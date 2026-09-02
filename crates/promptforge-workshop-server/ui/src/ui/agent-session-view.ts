@@ -27,6 +27,7 @@ import type {
   TranscriptItem,
 } from "../services/agent-session";
 import { renderMarkdown } from "./markdown-render";
+import { PromptInput } from "./prompt-input";
 import { ToolCallCard } from "./tool-call-card";
 import {
   setupStt,
@@ -168,15 +169,19 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
 }
 
 /**
- * The session surface: the transcript feed over the input form. The
+ * The session surface: the transcript feed over the input bar. The
  * input enables only while a wait is pinned; submitting answers the wait
  * through the service and clears the box on a successful send. The
  * status sink receives dictation's local messages and REC badge state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
+  /**
+   * The prompt box under the feed. Exposed so tests can drive content
+   * and selection - the DOM alone sets neither on a ProseMirror editor.
+   */
+  readonly promptInput: PromptInput;
   private readonly feed: HTMLOListElement;
-  private readonly input: HTMLTextAreaElement;
   private readonly mic: HTMLButtonElement;
   private readonly send: HTMLButtonElement;
   private readonly stt: SttHandle;
@@ -200,12 +205,8 @@ export class AgentSessionView extends Disposable {
     this.feed.setAttribute("aria-live", "polite");
     this.feed.setAttribute("aria-atomic", "false");
 
-    const form = document.createElement("form");
-    form.className = "agent-session__form";
-    this.input = document.createElement("textarea");
-    this.input.className = "agent-session__input";
-    this.input.rows = 1;
-    this.input.setAttribute("aria-label", "Message");
+    const bar = document.createElement("div");
+    bar.className = "agent-session__bar";
     this.mic = document.createElement("button");
     this.mic.type = "button";
     this.mic.className = "agent-session__mic stt-mic";
@@ -215,30 +216,27 @@ export class AgentSessionView extends Disposable {
     // A static lucide string, not data: the only markup this view writes.
     this.mic.innerHTML = ICON_MIC;
     this.send = document.createElement("button");
-    this.send.type = "submit";
+    this.send.type = "button";
     this.send.className = "agent-session__send";
     this.send.textContent = "Send";
-    form.append(this.input, this.mic, this.send);
-    this.element.append(this.feed, form);
+    this.send.addEventListener("click", () => this.submit());
+    const promptInput = new PromptInput({
+      // A function, not a fixed string: the placeholder names the gate's
+      // state, and the Placeholder decoration re-evaluates it on every
+      // state update (setEditable triggers one).
+      placeholder: () =>
+        this.service.pendingInputToken === null
+          ? "The agent is working; the input opens when it asks"
+          : "Message the agent",
+      ariaLabel: "Message",
+      onSubmit: () => this.submit(),
+    });
+    bar.append(promptInput.element, this.mic, this.send);
+    this.element.append(this.feed, bar);
 
     // Element-owned listeners die with the elements; only service
     // subscriptions need the lifecycle.
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      this.submit();
-    });
-    this.input.addEventListener("keydown", (event) => {
-      // An Enter that commits an IME composition is not a send: without
-      // the isComposing guard the box would submit half-composed text.
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        this.submit();
-      }
-    });
-
     this._register(this.service.onDidChangeTranscript(() => this.renderFeed()));
-    // Discard before repaint: the take lifts the input's readOnly, and the
-    // repaint then disables the box against the dead wait.
     this._register(
       this.service.onDidChangePendingInput((token) => {
         if (token === null) {
@@ -247,18 +245,16 @@ export class AgentSessionView extends Disposable {
         this.renderInputState();
       }),
     );
-    this.renderFeed();
-    this.renderInputState();
 
-    // The dictation control over the mic and input; registered so disposing
-    // the view unwires the mic and discards a live take. The blocker
-    // names the first reason a take cannot start, capability before the
-    // wait. The probe resolves after mount; a click that beats it is
-    // refused, because a server with no engine still accepts /stt and
-    // answers an empty final, so an unchecked take would record for
-    // nothing.
+    // The dictation control over the mic and input. Registered before the
+    // prompt input so disposal discards a live take while the editor
+    // still stands. The blocker names the first reason a take cannot
+    // start, capability before the wait. The probe resolves after mount;
+    // a click that beats it is refused, because a server with no engine
+    // still accepts /stt and answers an empty final, so an unchecked
+    // take would record for nothing.
     this.stt = this._register(
-      setupStt({ mic: this.mic, input: this.input }, status, () => {
+      setupStt({ mic: this.mic, input: promptInput }, status, () => {
         if (this.capability === undefined) {
           return "Dictation is still checking what this server can do; try again in a moment.";
         }
@@ -277,6 +273,11 @@ export class AgentSessionView extends Disposable {
         return null;
       }),
     );
+    this.promptInput = this._register(promptInput);
+
+    this.renderFeed();
+    this.renderInputState();
+
     void sttCapability().then((answer) => {
       this.capability = answer;
     });
@@ -318,14 +319,11 @@ export class AgentSessionView extends Disposable {
     this.feed.scrollTop = this.feed.scrollHeight;
   }
 
-  /** Pins the input to the pending wait: enabled only while one is open. */
+  /** Pins the input to the pending wait: editable only while one is open. */
   private renderInputState(): void {
     const pinned = this.service.pendingInputToken !== null;
-    this.input.disabled = !pinned;
+    this.promptInput.setEditable(pinned);
     this.send.disabled = !pinned;
-    this.input.placeholder = pinned
-      ? "Message the agent"
-      : "The agent is working; the input opens when it asks";
   }
 
   /**
@@ -337,13 +335,15 @@ export class AgentSessionView extends Disposable {
    * discarded rather than landing in a box that already sent.
    */
   private submit(): void {
-    const text = this.input.value;
+    const text = this.promptInput.getText();
     if (text === "" || this.service.pendingInputToken === null) {
       return;
     }
     // Read before discarding: the discard restores the box to its
     // pre-take text, and the send carries what was showing.
     this.stt.discardIfRecording();
-    this.input.value = this.service.respond(text) ? "" : text;
+    if (this.service.respond(text)) {
+      this.promptInput.clear();
+    }
   }
 }

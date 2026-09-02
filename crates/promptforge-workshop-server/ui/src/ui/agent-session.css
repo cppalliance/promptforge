@@ -200,7 +200,7 @@
 
 /* --- The input affordance ------------------------------------------------ */
 
-.agent-session__form {
+.agent-session__bar {
   flex: none;
   display: flex;
   gap: var(--space-2, 8px);
@@ -210,26 +210,11 @@
   background: var(--bg-composer, #0f0f0f);
 }
 
-.agent-session__input {
+/* The prompt box owns the row's remaining width; its frame and type
+   styles live in prompt-input.css. */
+.agent-session__bar > .prompt-input {
   flex: 1;
   min-inline-size: 0;
-  resize: none;
-  font: inherit;
-  color: var(--text, #e8e8e8);
-  background: var(--bg-raised, #1a1a1a);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 8px);
-  padding-block: var(--space-2, 8px);
-  padding-inline: var(--space-3, 12px);
-}
-
-.agent-session__input:focus-visible {
-  outline: 2px solid var(--accent-dim, #b04722);
-  outline-offset: 1px;
-}
-
-.agent-session__input:disabled {
-  color: var(--text-muted, #909090);
 }
 
 .agent-session__send {

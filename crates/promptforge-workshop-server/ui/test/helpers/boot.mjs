@@ -65,6 +65,10 @@ export async function bootWorkbench(name, run) {
   };
   window.Element.prototype.scrollTo = () => {};
   window.HTMLElement.prototype.scrollIntoView = () => {};
+  // jsdom's Range has no layout rects; ProseMirror's scroll-to-selection
+  // reads them when a landed dictation final focuses the prompt editor.
+  window.Range.prototype.getClientRects = () => [];
+  window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
 
   // A scripted WebSocket stands in for the server's persistent sockets:
   // the workshop /ws connection the composition root opens, and the
@@ -203,7 +207,8 @@ export async function bootWorkbench(name, run) {
   // assigns the bundle's own module-scope tracker variable, located by its
   // single call site in the DisposableStore constructor.
   const bundleSource = await readFile(path.join(distDir, "app.js"), "utf8");
-  const trackerVar = bundleSource.match(/(\w+)\?\.trackCreated\(this\)/)?.[1];
+  // Minified identifiers may contain $, which \w excludes.
+  const trackerVar = bundleSource.match(/([\w$]+)\?\.trackCreated\(this\)/)?.[1];
   if (!trackerVar) {
     throw new Error(
       "boot.mjs could not locate the disposable tracker seam in dist/app.js; rebuild dist or retune the seam regex",

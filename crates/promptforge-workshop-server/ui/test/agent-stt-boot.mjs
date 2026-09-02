@@ -13,7 +13,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   // The session view (and its mic) shows once a session is acknowledged.
   emitAgent({ type: "agent_session", session: "s1", agent: "chat" });
   const mic = document.querySelector("#dock .agent-session__mic");
-  const input = document.querySelector("#dock .agent-session__input");
+  const input = document.querySelector("#dock .prompt-input__editor");
   if (!mic || !input) {
     failures.push("the agent session mounted no mic beside its input");
     return;
@@ -63,8 +63,8 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
     failures.push("starting dictation did not light the REC badge");
   }
   sttSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "hello", tentative: "" }) });
-  if (input.value !== "hello" || !input.readOnly) {
-    failures.push(`the interim did not land in the readOnly agent input (got "${input.value}")`);
+  if (input.textContent !== "hello" || input.getAttribute("contenteditable") !== "false") {
+    failures.push(`the interim did not land in the read-only agent input (got "${input.textContent}")`);
   }
 
   // The scripted socket never fires onclose on its own; a drop clears the badge.
@@ -72,8 +72,8 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   if (recEl.classList.contains("status-bar__rec--active")) {
     failures.push("a dropped /stt socket did not clear the REC badge");
   }
-  if (input.readOnly) {
-    failures.push("a dropped /stt socket did not lift the input's readOnly");
+  if (input.getAttribute("contenteditable") !== "true") {
+    failures.push("a dropped /stt socket did not lift the input's read-only lock");
   }
 
   // Closing the Agent tab from its tab chip disposes the panel, the view,
