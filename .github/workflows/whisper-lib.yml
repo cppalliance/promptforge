@@ -127,15 +127,16 @@ jobs:
             if (-not $compiler) { throw "CMake did not record its CUDA compiler" }
             Split-Path ($compiler -split "=", 2)[1] -Parent
           }
+          $cudaRoot = Split-Path $cudaBin -Parent
           @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll") |
             ForEach-Object {
-              Get-ChildItem $cudaBin -Filter $_ |
+              Get-ChildItem $cudaRoot -Recurse -Filter $_ -File -ErrorAction SilentlyContinue |
                 ForEach-Object { Copy-Item $_.FullName package -Force }
             }
           Copy-Item whisper.cpp\include\whisper.h package
           Copy-Item whisper.cpp\LICENSE package
           if (-not (Test-Path package\whisper.dll)) { throw "whisper.dll missing from install" }
-          foreach ($runtime in @("ggml*.dll", "cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+          foreach ($runtime in @("ggml*.dll")) {
             if (-not (Get-ChildItem package -Filter $runtime)) {
               throw "$runtime missing from the runtime bundle"
             }
@@ -143,6 +144,23 @@ jobs:
           Compress-Archive -Path package\* -DestinationPath "dist\$archive"
           $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Set-Content -NoNewline "dist\$archive.sha256"
+
+      - name: Smoke-load Windows runtime
+        if: matrix.platform == 'windows-x86_64-cuda'
+        shell: powershell
+        run: |
+          $package = (Resolve-Path package).Path
+          $system32 = Join-Path $env:SystemRoot "System32"
+          @"
+          import ctypes
+          import os
+          package = r"$package"
+          os.environ["PATH"] = package + os.pathsep + r"$system32"
+          os.add_dll_directory(package)
+          whisper = ctypes.CDLL(os.path.join(package, "whisper.dll"))
+          whisper.whisper_print_system_info.restype = ctypes.c_char_p
+          print(whisper.whisper_print_system_info().decode())
+          "@ | python -
 
       - name: Package Unix runtime
         if: matrix.platform != 'windows-x86_64-cuda'
