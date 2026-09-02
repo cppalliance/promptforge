@@ -39,8 +39,11 @@ const bundle = await esbuild.build({
   loader: { ".css": "empty" },
 });
 
+// pretendToBeVisual supplies the requestAnimationFrame ProseMirror
+// schedules with; the prompt input's editor mounts in every harness.
 const { window } = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
+  pretendToBeVisual: true,
 });
 for (const key of ["document", "HTMLElement", "Node", "Element", "KeyboardEvent"]) {
   if (!(key in globalThis) && key in window) {
@@ -52,6 +55,15 @@ globalThis.document = window.document;
 globalThis.location = window.location;
 globalThis.Event = window.Event;
 globalThis.KeyboardEvent = window.KeyboardEvent;
+// The prompt input reads skin tokens through getComputedStyle; jsdom's
+// copies must be bound to their window.
+globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+// jsdom's Range has no layout rects; ProseMirror's scroll-to-selection
+// reads them when a landed final focuses the editor.
+window.Range.prototype.getClientRects = () => [];
+window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
 
 // Audio stubs: jsdom has no audio stack, so the getUserMedia/AudioContext
 // path is scripted to succeed.
@@ -241,8 +253,15 @@ async function harness(capability = { gpu: true, engine: true }) {
   // The probe's then-callback lands a tick after the response resolves.
   await sleep(10);
   const mic = view.element.querySelector(".agent-session__mic");
-  const input = view.element.querySelector(".agent-session__input");
-  const form = view.element.querySelector(".agent-session__form");
+  // The ProseMirror prompt box: content and selection are driven through
+  // the component (the DOM alone sets neither). The pending-wait gate
+  // and a take's read-only both show on the editor's contenteditable
+  // attribute; the take alone marks the frame with stt-input--recording.
+  const input = view.promptInput;
+  const editorEl = view.element.querySelector(".prompt-input__editor");
+  const editable = () => editorEl.getAttribute("contenteditable") === "true";
+  const recording = () => input.element.classList.contains("stt-input--recording");
+  const send = view.element.querySelector(".agent-session__send");
   // Clicks the mic and waits for the take's /stt socket to open and
   // send "start"; null when no take began within the wait.
   async function startTake() {
@@ -258,15 +277,15 @@ async function harness(capability = { gpu: true, engine: true }) {
     service.dispose();
     view.element.remove();
   };
-  return { wire, service, view, status, mic, input, form, startTake, dispose };
+  return { wire, service, view, status, mic, input, editorEl, editable, recording, send, startTake, dispose };
 }
 
 await assertNoLeaks(lifecycle, async () => {
   // --- The pinned wait gates the mic; a dying wait discards the take -------
 
   {
-    const { wire, status, mic, input, startTake, dispose } = await harness();
-    check("the mic mounts enabled beside a disabled input", !mic.disabled && input.disabled);
+    const { wire, status, mic, input, editable, recording, startTake, dispose } = await harness();
+    check("the mic mounts enabled beside a disabled input", !mic.disabled && !editable());
     check(
       "the mic is a push-to-talk button with an accessible name",
       mic.type === "button" &&
@@ -282,7 +301,7 @@ await assertNoLeaks(lifecycle, async () => {
         status.local[0].label.includes("isn't asking for input") &&
         status.local[0].severity === "info",
     );
-    check("a gated click leaves the input disabled and unlocked", input.disabled && !input.readOnly);
+    check("a gated click leaves the input disabled and unlocked", !editable() && !recording());
 
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
@@ -293,15 +312,21 @@ await assertNoLeaks(lifecycle, async () => {
     }
     check("a live take lights the REC badge and presses the mic", status.recording && mic.getAttribute("aria-pressed") === "true");
     socket.message({ type: "interim", committed: "hello", tentative: "" });
-    check("the interim lands in the pinned input", input.value === "hello" && input.readOnly);
+    check(
+      "the interim lands in the pinned input",
+      input.getText() === "hello" && !editable() && recording(),
+    );
 
     wire.fire.inputCancelled("tok1");
     check("a cancelled wait clears the REC badge", !status.recording);
     check("a cancelled wait closes the take's /stt socket", socket.closed);
-    check("a cancelled wait lifts readOnly and drops the interim", !input.readOnly && input.value === "");
-    check("a cancelled wait disables the input again", input.disabled);
+    check(
+      "a cancelled wait lifts the take lock and drops the interim",
+      !recording() && input.getText() === "",
+    );
+    check("a cancelled wait disables the input again", !editable());
     socket.message({ type: "final", text: "LATE FINAL" });
-    check("a final arriving after the discard writes nothing", input.value === "");
+    check("a final arriving after the discard writes nothing", input.getText() === "");
 
     wire.fire.inputRequired("tok2");
     const reopened = await startTake();
@@ -314,13 +339,38 @@ await assertNoLeaks(lifecycle, async () => {
     const third = await startTake();
     check("a take starts against the third wait", third !== null);
     wire.fire.session("s2");
-    check("a new session discards the live take", third?.closed === true && !status.recording && !input.readOnly);
+    check("a new session discards the live take", third?.closed === true && !status.recording && !recording());
 
     dispose();
     const before = sockets.length;
     mic.click();
     await sleep(20);
     check("a click on the disposed view's mic starts nothing", sockets.length === before);
+  }
+
+  // --- A wait swapped mid-take holds the take's lock -------------------------
+
+  {
+    const { wire, input, editable, recording, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok1");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("wait swap: the mic click did not open a /stt socket");
+      dispose();
+      return;
+    }
+    socket.message({ type: "interim", committed: "held", tentative: "" });
+    wire.fire.inputRequired("tok2");
+    check(
+      "a wait swapped mid-take keeps the input locked to the take",
+      !editable() && recording(),
+    );
+    socket.message({ type: "final", text: "held final" });
+    check(
+      "the take finishes against the new wait",
+      editable() && !recording() && input.getText() === "held final",
+    );
+    dispose();
   }
 
   // --- Interims splice committed and tentative -------------------------------
@@ -336,32 +386,33 @@ await assertNoLeaks(lifecycle, async () => {
     }
     const interim = (committed, tentative) => socket.message({ type: "interim", committed, tentative });
     interim("One two.", "three");
-    check("committed and tentative join with a space", input.value === "One two. three");
+    check("committed and tentative join with a space", input.getText() === "One two. three");
     interim("One two. three four.", "");
-    check("a grown committed prefix lands verbatim", input.value === "One two. three four.");
-    const grownLength = input.value.length;
+    check("a grown committed prefix lands verbatim", input.getText() === "One two. three four.");
+    const grownLength = input.getText().length;
     interim("One two. three four. five six.", "se");
     check(
       "a shorter tentative never shrinks the text while committed grows",
-      input.value === "One two. three four. five six. se" && input.value.length > grownLength,
+      input.getText() === "One two. three four. five six. se" && input.getText().length > grownLength,
     );
     interim("One two. three four. five six. ", "seven");
     check(
       "a trailing-whitespace committed prefix gains no double space",
-      input.value === "One two. three four. five six. seven",
+      input.getText() === "One two. three four. five six. seven",
     );
     interim("", "fresh start");
-    check("an empty committed prefix gains no leading space", input.value === "fresh start");
+    check("an empty committed prefix gains no leading space", input.getText() === "fresh start");
     dispose();
   }
 
   // --- Takes insert at the cursor -------------------------------------------
 
   {
-    const { wire, input, startTake, dispose } = await harness();
+    const { wire, input, editable, startTake, dispose } = await harness();
     wire.fire.inputRequired("tok");
-    input.value = "ab";
-    input.setSelectionRange(1, 1);
+    // ProseMirror positions: inside the first paragraph, text offset + 1.
+    input.setText("ab");
+    input.setSelection(2, 2);
     let socket = await startTake();
     if (socket === null) {
       failures.push("cursor insert: the mic click did not open a /stt socket");
@@ -369,64 +420,65 @@ await assertNoLeaks(lifecycle, async () => {
       return;
     }
     socket.message({ type: "interim", committed: "X", tentative: "" });
-    check("an interim inserts at the cursor", input.value === "aXb");
-    check("the cursor sits after the inserted interim", input.selectionStart === 2 && input.selectionEnd === 2);
+    check("an interim inserts at the cursor", input.getText() === "aXb");
+    check(
+      "the cursor sits after the inserted interim",
+      input.getSelection().start === 3 && input.getSelection().end === 3,
+    );
     socket.message({ type: "final", text: "Y" });
-    check("the final replaces the interim in place", input.value === "aYb" && !input.readOnly);
+    check("the final replaces the interim in place", input.getText() === "aYb" && editable());
     check("the final closes the take's socket", socket.closed);
 
-    input.value = "ab";
-    input.setSelectionRange(0, 2);
+    input.setText("ab");
+    input.setSelection(1, 3);
     socket = await startTake();
     socket?.message({ type: "interim", committed: "X", tentative: "" });
-    check("a selection is replaced outright", input.value === "X");
+    check("a selection is replaced outright", input.getText() === "X");
     socket?.close();
 
-    input.value = "start";
-    input.setSelectionRange(5, 5);
+    input.setText("start");
     socket = await startTake();
     socket?.message({ type: "final", text: " hello" });
-    check("the first take appends at the end", input.value === "start hello");
+    check("the first take appends at the end", input.getText() === "start hello");
     socket = await startTake();
     socket?.message({ type: "final", text: " world" });
     check(
       "a second take composes at the cursor the first left behind",
-      input.value === "start hello world" && !input.readOnly,
+      input.getText() === "start hello world" && editable(),
     );
     dispose();
   }
 
-  // --- The input is readOnly for the take's duration -------------------------
+  // --- The input is read-only for the take's duration ------------------------
 
   {
-    const { wire, input, mic, startTake, dispose } = await harness();
+    const { wire, input, mic, editable, recording, startTake, dispose } = await harness();
     wire.fire.inputRequired("tok");
-    input.value = "prefix";
-    input.setSelectionRange(6, 6);
+    input.setText("prefix");
     const socket = await startTake();
     if (socket === null) {
       failures.push("readonly take: the mic click did not open a /stt socket");
       dispose();
       return;
     }
-    check("the input is readOnly while the take is live", input.readOnly);
-    check("the take marks the input as recording", input.classList.contains("stt-input--recording"));
+    check("the input is read-only while the take is live", !editable());
+    check("the take marks the input as recording", recording());
     socket.message({ type: "interim", committed: " world", tentative: "" });
-    check("the interim still lands programmatically", input.value === "prefix world");
+    check("the interim still lands programmatically", input.getText() === "prefix world");
     // Stopping through the mic sends "stop" and waits for the final.
     mic.click();
     check("a second mic click sends stop", socket.sent.includes("stop"));
-    check("readOnly holds until the final arrives", input.readOnly);
+    check("the take lock holds until the final arrives", !editable());
     socket.message({ type: "final", text: " world" });
-    check("the final lifts readOnly", !input.readOnly && !input.classList.contains("stt-input--recording"));
-    check("the final text stays in place", input.value === "prefix world");
+    check("the final lifts the take lock", editable() && !recording());
+    check("the final text stays in place", input.getText() === "prefix world");
     dispose();
   }
 
   // --- A stopped take awaiting its final is still a take -------------------
 
   {
-    const { wire, status, mic, input, form, startTake, dispose } = await harness();
+    const { wire, status, mic, input, editable, recording, send, startTake, dispose } = await harness();
     wire.fire.inputRequired("tok1");
     let socket = await startTake();
     if (socket === null) {
@@ -436,36 +488,41 @@ await assertNoLeaks(lifecycle, async () => {
     }
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     mic.click();
-    check("the stop clears the REC badge while the final is awaited", !status.recording && input.readOnly);
+    check("the stop clears the REC badge while the final is awaited", !status.recording && !editable());
     wire.fire.inputCancelled("tok1");
     check("a wait dying in the stop window closes the awaited socket", socket.closed);
-    check("a wait dying in the stop window lifts readOnly and drops the interim", !input.readOnly && input.value === "");
+    check(
+      "a wait dying in the stop window lifts the take lock and drops the interim",
+      !recording() && input.getText() === "",
+    );
     socket.message({ type: "final", text: "LATE FINAL" });
-    check("a final after a stop-window discard writes nothing", input.value === "");
+    check("a final after a stop-window discard writes nothing", input.getText() === "");
 
     wire.fire.inputRequired("tok2");
     socket = await startTake();
     socket?.message({ type: "interim", committed: "sent as shown", tentative: "" });
     mic.click();
-    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    send.click();
     check(
       "a send in the stop window carries the interim and closes the awaited socket",
       isDeepStrictEqual(wire.responses, [["tok2", "sent as shown"]]) && socket?.closed === true,
     );
-    check("a send in the stop window lifts readOnly and clears the box", !input.readOnly && input.value === "");
+    check(
+      "a send in the stop window lifts the take lock and clears the box",
+      !recording() && input.getText() === "",
+    );
     socket?.message({ type: "final", text: "LATE FINAL" });
-    check("a final after a stop-window send writes nothing", input.value === "");
+    check("a final after a stop-window send writes nothing", input.getText() === "");
 
     wire.fire.inputRequired("tok3");
-    input.value = "typed ";
-    input.setSelectionRange(6, 6);
+    input.setText("typed ");
     socket = await startTake();
     socket?.message({ type: "interim", committed: "lost", tentative: "" });
     mic.click();
     socket?.close();
     check(
-      "a socket dropping in the stop window lifts readOnly and reverts to the pre-take text",
-      !input.readOnly && input.value === "typed ",
+      "a socket dropping in the stop window lifts the take lock and reverts to the pre-take text",
+      editable() && input.getText() === "typed ",
     );
     check(
       "a socket dropping in the stop window says so on the status bar",
@@ -477,7 +534,7 @@ await assertNoLeaks(lifecycle, async () => {
   // --- A send discards the live take -----------------------------------------
 
   {
-    const { wire, status, input, form, startTake, dispose } = await harness();
+    const { wire, status, input, editorEl, recording, send, startTake, dispose } = await harness();
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
@@ -487,19 +544,23 @@ await assertNoLeaks(lifecycle, async () => {
     }
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     check("the REC badge is lit before the send", status.recording);
-    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    send.click();
     check("the send carries the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
     check("the send clears the REC badge", !status.recording);
     check("the send closes the take's /stt socket", socket.closed);
-    check("the send lifts readOnly and clears the box", !input.readOnly && input.value === "");
+    check(
+      "the send lifts the take lock and clears the box",
+      !recording() && input.getText() === "",
+    );
     socket.message({ type: "final", text: "LATE FINAL" });
-    check("a late final after the send writes nothing", input.value === "");
+    check("a late final after the send writes nothing", input.getText() === "");
 
-    // Enter sends the same way the form does.
+    // Enter sends the same way the button does - even mid-take, when the
+    // editor is read-only and ProseMirror drops its keydown.
     wire.fire.inputRequired("tok2");
     const second = await startTake();
     second?.message({ type: "interim", committed: "via enter", tentative: "" });
-    input.dispatchEvent(
+    editorEl.dispatchEvent(
       new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     check(

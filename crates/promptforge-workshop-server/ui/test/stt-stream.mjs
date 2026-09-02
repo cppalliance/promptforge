@@ -20,7 +20,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
-      export { setupStt } from "./src/ui/stt.ts";
+      export { setupStt, textareaSttTarget } from "./src/ui/stt.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -36,7 +36,7 @@ const bundle = await esbuild.build({
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-stt-stream-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
-const { lifecycle, setupStt } = await import(pathToFileURL(bundlePath).href);
+const { lifecycle, setupStt, textareaSttTarget } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
 function check(name, condition) {
@@ -148,7 +148,7 @@ await assertNoLeaks(lifecycle, async () => {
   const mic = window.document.createElement("button");
   const input = window.document.createElement("textarea");
   window.document.body.append(mic, input);
-  const handle = setupStt({ mic, input }, statusBar, () => null);
+  const handle = setupStt({ mic, input: textareaSttTarget(input) }, statusBar, () => null);
 
   // --- The stream frame sets the generation; matching frames apply -------
 
@@ -205,7 +205,7 @@ await assertNoLeaks(lifecycle, async () => {
   window.document.body.append(blockedMic, blockedInput);
   const local = [];
   const blockedHandle = setupStt(
-    { mic: blockedMic, input: blockedInput },
+    { mic: blockedMic, input: textareaSttTarget(blockedInput) },
     { showLocal: (label, severity) => local.push({ label, severity }), setRecording() {} },
     () => "Dictation needs a GPU this server doesn't have.",
   );

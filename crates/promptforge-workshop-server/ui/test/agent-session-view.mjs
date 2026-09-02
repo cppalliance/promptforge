@@ -39,8 +39,11 @@ const bundle = await esbuild.build({
   loader: { ".css": "empty" },
 });
 
+// pretendToBeVisual supplies the requestAnimationFrame ProseMirror
+// schedules with; the prompt input's editor mounts in every harness.
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://127.0.0.1:7910/",
+  pretendToBeVisual: true,
 });
 const { window } = dom;
 for (const key of ["document", "HTMLElement", "Node", "Element", "Event", "KeyboardEvent"]) {
@@ -52,6 +55,11 @@ globalThis.window = window;
 globalThis.document = window.document;
 globalThis.Event = window.Event;
 globalThis.KeyboardEvent = window.KeyboardEvent;
+// The prompt input reads skin tokens through getComputedStyle; jsdom's
+// copies must be bound to their window.
+globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
+globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 // The view probes STT capability on mount; this suite is not about
 // dictation (test/agent-stt.mjs is), so the probe fails and the mic stays
 // gated. Any other fetch is a regression.
@@ -127,15 +135,19 @@ function harness() {
   const view = new AgentSessionView(service, silentStatus);
   window.document.body.appendChild(view.element);
   const rows = () => [...view.element.querySelectorAll(".agent-item")];
-  const input = view.element.querySelector(".agent-session__input");
+  // The ProseMirror prompt box: content and selection are driven through
+  // the component (the DOM alone sets neither), and the pending-wait
+  // gate shows on the editor's contenteditable attribute.
+  const input = view.promptInput;
+  const editorEl = view.element.querySelector(".prompt-input__editor");
+  const editable = () => editorEl.getAttribute("contenteditable") === "true";
   const send = view.element.querySelector(".agent-session__send");
-  const form = view.element.querySelector(".agent-session__form");
   const dispose = () => {
     view.dispose();
     service.dispose();
     view.element.remove();
   };
-  return { wire, service, view, rows, input, send, form, dispose };
+  return { wire, service, view, rows, input, editorEl, editable, send, dispose };
 }
 
 await assertNoLeaks(lifecycle, () => {
@@ -316,42 +328,41 @@ await assertNoLeaks(lifecycle, () => {
   // --- The input pins to the pending wait ------------------------------------
 
   {
-    const { wire, input, send, form, dispose } = harness();
+    const { wire, input, editorEl, editable, send, dispose } = harness();
     check(
       "the input starts disabled with no wait open",
-      input.disabled === true && send.disabled === true,
+      !editable() && send.disabled === true,
     );
     wire.fire.inputRequired("tok1");
     check(
       "an input_required enables the pinned input",
-      input.disabled === false && send.disabled === false,
+      editable() && send.disabled === false,
     );
-    input.value = "two  spaces ";
-    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    input.setText("two  spaces ");
+    send.click();
     check(
       "submitting answers the wait byte-exact, untrimmed",
       isDeepStrictEqual(wire.responses, [["tok1", "two  spaces "]]),
     );
-    check("a successful send clears the box", input.value === "");
+    check("a successful send clears the box", input.getText() === "");
     check(
       "the spent wait returns the input to disabled",
-      input.disabled === true && send.disabled === true,
+      !editable() && send.disabled === true,
     );
     wire.fire.inputRequired("tok2");
-    input.value = "";
-    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    send.click();
     check("an empty box sends nothing", wire.responses.length === 1);
-    input.value = "enter sends";
-    input.dispatchEvent(
+    input.setText("enter sends");
+    editorEl.dispatchEvent(
       new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     check(
-      "Enter submits without a form event",
+      "Enter submits without a button click",
       isDeepStrictEqual(wire.responses[1], ["tok2", "enter sends"]),
     );
     wire.fire.inputRequired("tok3");
-    input.value = "変換中";
-    input.dispatchEvent(
+    input.setText("変換中");
+    editorEl.dispatchEvent(
       new window.KeyboardEvent("keydown", {
         key: "Enter",
         isComposing: true,
@@ -361,10 +372,32 @@ await assertNoLeaks(lifecycle, () => {
     );
     check(
       "Enter that commits an IME composition does not submit",
-      wire.responses.length === 2 && input.value === "変換中",
+      wire.responses.length === 2 && input.getText() === "変換中",
     );
     wire.fire.inputCancelled("tok3");
-    check("a cancelled wait returns the input to disabled", input.disabled === true);
+    check("a cancelled wait returns the input to disabled", !editable());
+    dispose();
+  }
+
+  // --- The placeholder names the gate's state --------------------------------
+
+  {
+    const { wire, editorEl, dispose } = harness();
+    const placeholder = () => editorEl.querySelector("p")?.getAttribute("data-placeholder");
+    check(
+      "the placeholder names the blocker while no wait is open",
+      placeholder() === "The agent is working; the input opens when it asks",
+    );
+    wire.fire.inputRequired("tok");
+    check(
+      "the placeholder invites a message once a wait is pinned",
+      placeholder() === "Message the agent",
+    );
+    wire.fire.inputCancelled("tok");
+    check(
+      "the placeholder returns to the blocker when the wait dies",
+      placeholder() === "The agent is working; the input opens when it asks",
+    );
     dispose();
   }
 

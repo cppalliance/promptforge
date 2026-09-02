@@ -33,10 +33,10 @@ await bootWorkbench("the bundled app mounts the whole workbench", async (ctx) =>
     if (view && !view.hidden) {
       failures.push("the session view must stay hidden until a session is acknowledged");
     }
-    const input = view?.querySelector(".agent-session__input");
+    const input = view?.querySelector(".prompt-input__editor");
     if (!input) {
       failures.push("the agent-session input did not mount");
-    } else if (!input.disabled) {
+    } else if (input.getAttribute("contenteditable") !== "false") {
       failures.push("the agent input must start disabled with no pending wait");
     }
   }

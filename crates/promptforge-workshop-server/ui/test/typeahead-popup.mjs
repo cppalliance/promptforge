@@ -71,6 +71,10 @@ globalThis.DOMRect = dom.window.DOMRect;
 // scope, not from the view's window.
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+// jsdom's Range has no layout rects; ProseMirror's scroll-to-selection
+// reads them when selecting a mention focuses the editor.
+dom.window.Range.prototype.getClientRects = () => [];
+dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-typeahead-popup-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
