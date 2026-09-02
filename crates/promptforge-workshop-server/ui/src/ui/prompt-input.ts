@@ -13,7 +13,7 @@ import { Editor } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import { MentionChip } from "./workshop/mention-chip";
+import { MentionChip, MentionSuggestionPluginKey } from "./workshop/mention-chip";
 
 // The fallbacks mirror the token defaults in style.css; they apply when
 // the skin is absent (tests) or the token is deleted.
@@ -94,9 +94,8 @@ export class PromptInput extends Disposable {
         Placeholder.configure({
           placeholder: options.placeholder ?? "Message the agent",
         }),
-        // Inline mention pills (@-referenced files). The suggestion
-        // trigger is inert until the typeahead step supplies items and a
-        // popup renderer; the chip NodeView is live now.
+        // Inline mention pills (@-referenced files) with the typeahead
+        // popup wired into the extension's suggestion seam.
         MentionChip,
       ],
       content: options.content ?? "",
@@ -107,11 +106,18 @@ export class PromptInput extends Disposable {
           "aria-label": options.ariaLabel ?? "Message",
           "aria-multiline": "true",
         },
-        handleKeyDown: (_view, event) => {
+        handleKeyDown: (view, event) => {
           // An Enter that commits an IME composition is not a send:
           // without the isComposing guard the box would submit
           // half-composed text.
           if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            // An open mention typeahead owns Enter - it inserts the
+            // highlighted item. editorProps handlers run before the
+            // suggestion state plugin's, so without this check the
+            // submit would fire instead of the selection.
+            if (MentionSuggestionPluginKey.getState(view.state)?.active === true) {
+              return false;
+            }
             options.onSubmit?.();
             return true;
           }
