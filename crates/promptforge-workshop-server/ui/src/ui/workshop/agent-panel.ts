@@ -11,6 +11,7 @@ import type { IContentRenderer } from "dockview";
 import { Disposable } from "../../base/lifecycle";
 import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
+import type { ModelService } from "../../services/model-service";
 import { AgentMenu } from "../agent-menu";
 import { AgentSessionView } from "../agent-session-view";
 import type { SttStatus } from "../stt";
@@ -26,7 +27,10 @@ const SILENT_STATUS: SttStatus = {
 export class AgentPanel extends Disposable implements IContentRenderer {
   readonly element = document.createElement("div");
 
-  constructor(private readonly status: SttStatus = SILENT_STATUS) {
+  constructor(
+    private readonly status: SttStatus = SILENT_STATUS,
+    private readonly modelService?: ModelService,
+  ) {
     super();
     this.element.className = "agent-panel";
   }
@@ -35,7 +39,7 @@ export class AgentPanel extends Disposable implements IContentRenderer {
     const socket = this._register(new AgentSocket());
     const service = this._register(new AgentSessionService(socket));
     const menu = this._register(new AgentMenu(service));
-    const view = this._register(new AgentSessionView(service, this.status));
+    const view = this._register(new AgentSessionView(service, this.status, this.modelService));
     view.element.hidden = true;
     this.element.append(menu.element, view.element);
     this._register(
