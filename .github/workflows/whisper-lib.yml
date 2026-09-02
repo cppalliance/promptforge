@@ -33,7 +33,7 @@ jobs:
       matrix:
         include:
           - platform: windows-x86_64-cuda
-            runs-on: windows-2022
+            runs-on: [self-hosted, windows, cuda]
           - platform: macos-aarch64-metal
             runs-on: macos-latest
           - platform: macos-x86_64
@@ -51,26 +51,6 @@ jobs:
           repository: ggml-org/whisper.cpp
           ref: ${{ env.WHISPER_TAG }}
           path: whisper.cpp
-
-      # Jimver/cuda-toolkit's local installer crashes on windows-2022 with
-      # exit code 0xE0FF0009. Use NVIDIA's network installer, as in the
-      # llama-cuda-blackwell workflow.
-      - name: Install the CUDA toolkit
-        if: matrix.platform == 'windows-x86_64-cuda'
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          version="13.2.0"
-          short="13.2"
-          url="https://developer.download.nvidia.com/compute/cuda/${version}/network_installers/cuda_${version}_windows_network.exe"
-          curl -Lo cuda_installer.exe "$url"
-          ./cuda_installer.exe -s -n
-          rm -f cuda_installer.exe
-          cuda_path="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${short}"
-          test -f "$cuda_path/bin/nvcc.exe"
-          echo "CUDA_PATH=$cuda_path" >> "$GITHUB_ENV"
-          echo "CUDA_PATH_V${short//./_}=$cuda_path" >> "$GITHUB_ENV"
-          echo "$cuda_path/bin" >> "$GITHUB_PATH"
 
       - name: Configure Windows CUDA
         if: matrix.platform == 'windows-x86_64-cuda'
