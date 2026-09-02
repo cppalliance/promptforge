@@ -65,7 +65,7 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
 
 /**
  * The status-bar slice dictation paints: local messages (blockers, capture
- * failures, an empty take) and the REC badge. `StatusBar` satisfies it
+ * failures, an empty take) and the recording LED. `StatusBar` satisfies it
  * structurally; tests hand in a recording fake.
  */
 export interface SttStatus {

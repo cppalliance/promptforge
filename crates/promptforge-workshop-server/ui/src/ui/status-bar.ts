@@ -1,9 +1,9 @@
 // The status bar renderer: consumes the observer's status frames off the
 // persistent socket and paints them into the bar. Info and error frames set
 // the text (the description rides as the tooltip) and drive the right slot,
-// which holds the progress bar or the REC+LED indicators group - never
-// both. Debug frames are internal instrumentation: they never touch the
-// text or the slot, but they do pulse the LED.
+// which holds the progress bar or the recording+activity LED indicators
+// group - never both. Debug frames are internal instrumentation: they never
+// touch the text or the slot, but they do pulse the LED.
 
 import "./status-bar.css";
 
@@ -31,11 +31,11 @@ export class StatusBar extends Disposable {
     const text = root.querySelector<HTMLElement>(".status-bar__text");
     const progress = root.querySelector<HTMLProgressElement>(".status-bar__progress");
     const indicators = root.querySelector<HTMLElement>(".status-bar__indicators");
-    const led = root.querySelector<HTMLElement>(".status-bar__led");
-    const rec = root.querySelector<HTMLElement>(".status-bar__rec");
+    const led = root.querySelector<HTMLElement>(".status-bar__led:not(.status-bar__led--rec)");
+    const rec = root.querySelector<HTMLElement>(".status-bar__led--rec");
     if (!text || !progress || !indicators || !led || !rec) {
       throw new Error(
-        "DOM Error: the status bar is missing its text, progress, indicators, LED, or REC element.",
+        "DOM Error: the status bar is missing its text, progress, indicators, activity LED, or recording LED element.",
       );
     }
     this.text = text;
@@ -83,12 +83,12 @@ export class StatusBar extends Disposable {
   }
 
   /**
-   * Swaps the slot between the progress bar and the REC+LED indicators
-   * group. Progress wins: a frame carrying progress shows the bar at that
-   * fraction and hides the group; a null progress restores the group. The
-   * swap rides the `hidden` attribute and never touches the REC state or
-   * the LED classes, so a live recording's badge reappears intact; the
-   * slot's fixed width keeps the bar from reflowing.
+   * Swaps the slot between the progress bar and the recording+activity LED
+   * indicators group. Progress wins: a frame carrying progress shows the
+   * bar at that fraction and hides the group; a null progress restores the
+   * group. The swap rides the `hidden` attribute and never touches the
+   * recording state or the LED classes, so a live recording's LED
+   * reappears lit; the slot's fixed width keeps the bar from reflowing.
    */
   private renderSlot(progress: StatusFrame["progress"]): void {
     if (progress) {
@@ -134,10 +134,10 @@ export class StatusBar extends Disposable {
 
   /**
    * Clears every LED activity state - sustained and pulsed - and applies
-   * the idle lens. Only the LED is touched: the text, tooltip, progress,
-   * and REC badge belong to other flows. Used when a chat is aborted,
-   * because the recycled socket never sees the server's terminal status
-   * frame for the aborted chat.
+   * the idle lens. Only the activity LED is touched: the text, tooltip,
+   * progress, and recording LED belong to other flows. Used when a chat is
+   * aborted, because the recycled socket never sees the server's terminal
+   * status frame for the aborted chat.
    */
   clearActivity(): void {
     this.sustained = null;
@@ -149,9 +149,9 @@ export class StatusBar extends Disposable {
     this.applyLed();
   }
 
-  /** Lights or dims the REC badge with the mic's recording state. */
+  /** Lights or dims the recording LED with the mic's recording state. */
   setRecording(on: boolean): void {
-    this.rec.classList.toggle("status-bar__rec--active", on);
+    this.rec.classList.toggle("status-bar__led--recording", on);
   }
 
   /**

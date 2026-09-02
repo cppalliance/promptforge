@@ -177,7 +177,7 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
  * built without one mounts none. The input enables only while a wait is
  * pinned; submitting answers the wait through the service and clears
  * the box on a successful send. The status sink receives dictation's
- * local messages and REC badge state.
+ * local messages and recording LED state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;

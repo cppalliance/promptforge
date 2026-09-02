@@ -3,8 +3,8 @@
 // the text and the styling clears on the next info frame, and debug frames
 // are internal instrumentation that must not touch either. Progress: a
 // non-null progress renders the bar in the slot at the frame's fraction and
-// hides the REC+LED indicators group; a null progress removes the bar and
-// restores the group; debug frames never disturb the slot.
+// hides the recording+activity LED indicators group; a null progress removes
+// the bar and restores the group; debug frames never disturb the slot.
 // Run: node test/status-frames.mjs (after `npm run build`).
 import { bootWorkbench } from "./helpers/boot.mjs";
 
@@ -57,7 +57,7 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
     failures.push(`progress bar shows ${progressEl.value}/${progressEl.max}, expected 1/4`);
   }
   if (!indicatorsEl.hidden) {
-    failures.push("the REC+LED group did not hide while progress is showing");
+    failures.push("the recording and activity LED group did not hide while progress is showing");
   }
   emitStatus({
     label: "Downloading model",
@@ -72,6 +72,6 @@ await bootWorkbench("status frames render into the bar", async (ctx) => {
   emitStatus({ label: "Download complete", description: "ready" });
   if (!progressEl.hidden) failures.push("a null-progress frame did not hide the progress bar");
   if (indicatorsEl.hidden) {
-    failures.push("the REC+LED group did not return when progress cleared");
+    failures.push("the recording and activity LED group did not return when progress cleared");
   }
 });

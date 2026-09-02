@@ -187,7 +187,7 @@ stub.setDirty(false);
 // --- StatusBar: the LED decay timer -----------------------------------------
 
 const statusBar = root.add(new StatusBar(window.document.querySelector(".status-bar")));
-const led = window.document.querySelector(".status-bar__led");
+const led = window.document.querySelector(".status-bar__led:not(.status-bar__led--rec)");
 const generatingFrame = {
   type: "status",
   label: "Working",

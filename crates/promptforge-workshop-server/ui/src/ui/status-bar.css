@@ -3,10 +3,10 @@
 
 /* The status bar: a permanent full-width footer below the shell. The left
    text carries the observer's current label; the right group holds the
-   slot, which holds the progress bar or the REC+LED indicators group
-   (never both - the slot's children are mutually exclusive, driven by the
-   hidden attribute). min-height rather than height so a descender never
-   clips against a fixed box. */
+   slot, which holds the progress bar or the recording+activity LED
+   indicators group (never both - the slot's children are mutually
+   exclusive, driven by the hidden attribute). min-height rather than
+   height so a descender never clips against a fixed box. */
 .status-bar {
   flex: none;
   min-height: var(--status-bar-height, 28px);
@@ -40,34 +40,13 @@
   gap: 4px;
 }
 
-/* The REC+LED indicators group: swapped out as one unit whenever the
-   progress bar occupies the slot. */
+/* The LED indicators group: swapped out as one unit whenever the progress
+   bar occupies the slot. The gap is one LED-width so the recording LED
+   sits one LED-width left of the activity LED. */
 .status-bar__indicators {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-
-/* The REC badge: a dim dark-red outline while idle and a lit bright red
-   while the mic records. */
-.status-bar__rec {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  padding: 2px 5px;
-  border: 1px solid var(--rec-idle, #552222);
-  border-radius: 2px;
-  color: var(--rec-idle, #552222);
-  transition: color 0.1s, border-color 0.1s, box-shadow 0.15s;
-}
-
-.status-bar__rec--active {
-  color: var(--rec-active, #ff0000);
-  border-color: var(--rec-active, #ff0000);
-  box-shadow: 0 0 3px var(--rec-active, #ff0000);
+  gap: var(--led-size, 10px);
 }
 
 .status-bar__slot {
@@ -107,12 +86,14 @@
   box-shadow: 0 0 var(--progress-glow, 4px) var(--progress-fill, #28a745);
 }
 
-/* The activity LED: a small circle standing in the slot whenever no frame
-   carries progress. Idle is an unlit lens - a dark translucent disc with a
-   subtle inner highlight. A pulse adds the --generating or --thinking
-   modifier: a bright radial-gradient core with a layered box-shadow bloom.
-   The idle rule's transition is the slow ease-out decay; the modifier's
-   own transition makes the fade-in fast. */
+/* The status LEDs: small circles standing in the indicators group whenever
+   no frame carries progress. The recording LED carries the --rec marker;
+   the activity LED is the unmarked one. Idle is an unlit lens - a dark
+   translucent disc with a subtle inner highlight. A pulse adds the
+   --generating or --thinking modifier, and the mic adds --recording: a
+   bright radial-gradient core with a layered box-shadow bloom. The idle
+   rule's transition is the slow ease-out decay; each modifier's own
+   transition makes the fade-in fast. */
 .status-bar__led {
   width: var(--led-size, 10px);
   height: var(--led-size, 10px);
@@ -127,7 +108,8 @@
 }
 
 .status-bar__led--generating,
-.status-bar__led--thinking {
+.status-bar__led--thinking,
+.status-bar__led--recording {
   transition:
     background var(--led-fade-in-ms, 60ms) ease-in,
     box-shadow var(--led-fade-in-ms, 60ms) ease-in;
@@ -147,4 +129,14 @@
     0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #f09030),
     0 0 var(--led-glow-radius, 6px) var(--led-amber, #f09030),
     0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #f09030) 55%, transparent);
+}
+
+/* The recording LED: the same lit treatment in red while the mic records.
+   Idle is the shared unlit lens of the base .status-bar__led rule. */
+.status-bar__led--recording {
+  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, #ff2a4d 60%);
+  box-shadow:
+    0 0 calc(var(--led-glow-radius, 6px) / 2) #ff2a4d,
+    0 0 var(--led-glow-radius, 6px) #ff2a4d,
+    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, #ff2a4d 55%, transparent);
 }

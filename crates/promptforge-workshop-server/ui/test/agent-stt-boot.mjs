@@ -1,7 +1,7 @@
 // Dictation on the booted workbench: the mic mounts on the agent session's
 // input, the capability probe reaches /stt/capability, a click with no
 // wait pinned names the blocker on the real status bar, a live take lights
-// the real REC badge, and a dropped /stt socket clears it. The
+// the real recording LED, and a dropped /stt socket dims it. The
 // behaviors themselves are pinned by test/agent-stt.mjs against the
 // view; this proves the composition root wires the view to the bar.
 // Run: node test/agent-stt-boot.mjs (after `npm run build`).
@@ -18,8 +18,8 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
     failures.push("the agent session mounted no mic beside its input");
     return;
   }
-  if (recEl.classList.contains("status-bar__rec--active")) {
-    failures.push("the REC badge must start idle");
+  if (recEl.classList.contains("status-bar__led--recording")) {
+    failures.push("the recording LED must start dark");
   }
   // The probe resolves a tick after mount.
   await sleep(20);
@@ -49,7 +49,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
     failures.push(`a gated click named no blocker on the status bar (got "${statusText.textContent}")`);
   }
 
-  // A pinned wait opens the mic; the take lights the real REC badge.
+  // A pinned wait opens the mic; the take lights the real recording LED.
   emitAgent({ type: "input_required", token: "tok1" });
   const sttSocket = await startTake();
   if (!sttSocket) {
@@ -59,18 +59,18 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   if (!sttSocket.sent.includes("start")) {
     failures.push("the take did not send start on its /stt socket");
   }
-  if (!recEl.classList.contains("status-bar__rec--active")) {
-    failures.push("starting dictation did not light the REC badge");
+  if (!recEl.classList.contains("status-bar__led--recording")) {
+    failures.push("starting dictation did not light the recording LED");
   }
   sttSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "hello", tentative: "" }) });
   if (input.textContent !== "hello" || input.getAttribute("contenteditable") !== "false") {
     failures.push(`the interim did not land in the read-only agent input (got "${input.textContent}")`);
   }
 
-  // The scripted socket never fires onclose on its own; a drop clears the badge.
+  // The scripted socket never fires onclose on its own; a drop dims the LED.
   sttSocket.onclose?.();
-  if (recEl.classList.contains("status-bar__rec--active")) {
-    failures.push("a dropped /stt socket did not clear the REC badge");
+  if (recEl.classList.contains("status-bar__led--recording")) {
+    failures.push("a dropped /stt socket did not dim the recording LED");
   }
   if (input.getAttribute("contenteditable") !== "true") {
     failures.push("a dropped /stt socket did not lift the input's read-only lock");

@@ -4,7 +4,7 @@
 // recording status sink in jsdom. Pins the composer behaviors the mic
 // carried before it moved here: the take is gated by the pinned wait and
 // by the capability probe (a blocked click names its reason and opens no
-// socket); the REC badge follows the recording; interims splice
+// socket); the recording LED follows the recording; interims splice
 // committed+tentative at the cursor and the final replaces them in place;
 // the input is readOnly for the take's duration; a send discards the live
 // take; a dying wait discards it too. Run: node test/agent-stt.mjs
@@ -231,7 +231,8 @@ function makeWire() {
 
 // Mounts a view over a fresh service with the probe answering
 // `capability`, waits for the probe to settle, and returns the handles.
-// `status` records what dictation paints: local messages and the REC state.
+// `status` records what dictation paints: local messages and the recording
+// state.
 async function harness(capability = { gpu: true, engine: true }) {
   capabilityAnswer = capability;
   const probesBefore = probes.length;
@@ -310,7 +311,7 @@ await assertNoLeaks(lifecycle, async () => {
       dispose();
       return;
     }
-    check("a live take lights the REC badge and presses the mic", status.recording && mic.getAttribute("aria-pressed") === "true");
+    check("a live take lights the recording LED and presses the mic", status.recording && mic.getAttribute("aria-pressed") === "true");
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     check(
       "the interim lands in the pinned input",
@@ -318,7 +319,7 @@ await assertNoLeaks(lifecycle, async () => {
     );
 
     wire.fire.inputCancelled("tok1");
-    check("a cancelled wait clears the REC badge", !status.recording);
+    check("a cancelled wait dims the recording LED", !status.recording);
     check("a cancelled wait closes the take's /stt socket", socket.closed);
     check(
       "a cancelled wait lifts the take lock and drops the interim",
@@ -332,7 +333,7 @@ await assertNoLeaks(lifecycle, async () => {
     const reopened = await startTake();
     check("a fresh wait lets the mic start a fresh take", reopened !== null);
     reopened?.close();
-    check("a dropped /stt socket clears the REC badge", !status.recording);
+    check("a dropped /stt socket dims the recording LED", !status.recording);
 
     // A new session resets the pin: the take dies with it.
     wire.fire.inputRequired("tok3");
@@ -488,7 +489,7 @@ await assertNoLeaks(lifecycle, async () => {
     }
     socket.message({ type: "interim", committed: "hello", tentative: "" });
     mic.click();
-    check("the stop clears the REC badge while the final is awaited", !status.recording && !editable());
+    check("the stop dims the recording LED while the final is awaited", !status.recording && !editable());
     wire.fire.inputCancelled("tok1");
     check("a wait dying in the stop window closes the awaited socket", socket.closed);
     check(
@@ -543,10 +544,10 @@ await assertNoLeaks(lifecycle, async () => {
       return;
     }
     socket.message({ type: "interim", committed: "hello", tentative: "" });
-    check("the REC badge is lit before the send", status.recording);
+    check("the recording LED is lit before the send", status.recording);
     send.click();
     check("the send carries the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
-    check("the send clears the REC badge", !status.recording);
+    check("the send dims the recording LED", !status.recording);
     check("the send closes the take's /stt socket", socket.closed);
     check(
       "the send lifts the take lock and clears the box",
