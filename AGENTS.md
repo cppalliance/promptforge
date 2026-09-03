@@ -29,7 +29,7 @@ Two products ship from this workspace: `gateway.exe`, the lean server, and `prom
 
 ## Progress
 
-Long-running work reports progress through `promptforge-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
+Long-running work reports progress through `shared-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
 
 ## Comments
 

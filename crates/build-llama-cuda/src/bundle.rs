@@ -401,7 +401,7 @@ pub(crate) fn build_with(
 ) -> anyhow::Result<BuildOutcome> {
     anyhow::ensure!(
         host_os == "windows" && host_arch == "x86_64",
-        "llama-cuda-build runs on Windows x86-64 only (found {host_os}/{host_arch})"
+        "build-llama-cuda runs on Windows x86-64 only (found {host_os}/{host_arch})"
     );
     let commit = verify_source(probe, &request.source)?;
     let tools = probe_toolchain(probe, env)?;

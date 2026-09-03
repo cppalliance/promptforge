@@ -1,4 +1,4 @@
-# promptforge-progress
+# shared-progress
 
 This crate owns the progress vocabulary and nothing else: operation-scoped
 weighted progress trees, the process-wide `ProgressHub` broker, reporting

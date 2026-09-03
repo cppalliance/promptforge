@@ -5,7 +5,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use gateway_config::{Config, SttRole, WorkshopSttConfig};
 use gateway_local::artifacts::ArtifactStore;
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use gateway_transcribe::{EngineConfig, SttEngine, SttSlot};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

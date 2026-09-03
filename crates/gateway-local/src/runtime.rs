@@ -17,7 +17,7 @@ use gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingM
 use gateway_protocol::ShutdownError;
 use gateway_routing::queue::DominionQueue;
 use gateway_routing::{Endpoint, Model, dominion_queues};
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
 use crate::dialect::resolve_local_dialect;
@@ -875,7 +875,7 @@ endpoints = ["e"]
 "#,
         )
         .expect("config");
-        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        let hub = Arc::new(shared_progress::ProgressHub::new());
         let tree = hub.operation();
         let parent = tree.register("local-models", 1.0);
         let runtime = LocalRuntime::start(&config, Some(&parent)).expect("empty local runtime");
@@ -925,7 +925,7 @@ context = 512
         ))
         .expect("config");
 
-        let hub = Arc::new(promptforge_progress::ProgressHub::new());
+        let hub = Arc::new(shared_progress::ProgressHub::new());
         let tree = hub.operation();
         let parent = tree.register("local-models", 1.0);
 

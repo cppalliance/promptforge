@@ -5,7 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use sha2::{Digest, Sha256};

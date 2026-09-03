@@ -580,7 +580,7 @@ fn debug_redacts_api_key() {
 fn ready_leaf_completes_when_the_readiness_poll_succeeds() {
     // The readiness leaf is indeterminate: it jumps from 0.0 to 1.0 exactly
     // once, when the bounded poll confirms authenticated readiness.
-    let hub = Arc::new(promptforge_progress::ProgressHub::new());
+    let hub = Arc::new(shared_progress::ProgressHub::new());
     let tree = hub.operation();
     let ready = tree.register("ready", 1.0);
     let port = free_port().expect("select free port");
@@ -620,7 +620,7 @@ fn ready_leaf_stays_unfinished_when_readiness_never_arrives() {
         interval: Duration::from_millis(10),
         http_timeout: Duration::from_millis(50),
     };
-    let hub = Arc::new(promptforge_progress::ProgressHub::new());
+    let hub = Arc::new(shared_progress::ProgressHub::new());
     let tree = hub.operation();
     let ready = tree.register("ready", 1.0);
     let port = free_port().expect("select free port");

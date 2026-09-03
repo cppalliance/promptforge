@@ -5,8 +5,8 @@
 //! `npm ci` in `ui/` per checkout; see the crate README.
 
 fn main() -> std::process::ExitCode {
-    match ui_build::build(ui_build::UiBuild {
-        static_files: ui_build::CONFIG_UI_STATIC_FILES,
+    match build_ui::build(build_ui::UiBuild {
+        static_files: build_ui::CONFIG_UI_STATIC_FILES,
         layer_check: false,
         define_app_version: true,
     }) {

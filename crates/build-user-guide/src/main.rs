@@ -28,7 +28,7 @@ const GUIDES: &[(&str, &str)] = &[
 fn main() {
     let workspace = workspace_root();
     let crates_dir = workspace.join("crates");
-    let own_dir = crates_dir.join("make-user-guide");
+    let own_dir = crates_dir.join("build-user-guide");
 
     let mut out = String::new();
 

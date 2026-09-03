@@ -26,7 +26,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use gateway_config::LlamaBackend;
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 

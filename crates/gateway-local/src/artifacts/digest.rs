@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use super::{INSTALL_MARKER, Result};
 use crate::error::LocalError;

@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use crate::embed::Encoder;
 use crate::error::{ModelLoadError, QueryError};
@@ -95,7 +95,7 @@ impl Model {
 mod tests {
     use std::sync::Arc;
 
-    use promptforge_progress::{EventState, ProgressHub};
+    use shared_progress::{EventState, ProgressHub};
 
     use super::Model;
 

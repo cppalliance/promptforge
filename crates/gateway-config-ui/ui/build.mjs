@@ -1,6 +1,6 @@
 // Bundles src/main.ts into dist/app.js and copies the static assets into
 // dist/. The crate's build.rs performs the same steps into OUT_DIR on
-// `cargo build` (through the ui-build helper); this script exists for the
+// `cargo build` (through the build-ui helper); this script exists for the
 // fast iteration workflow (`npm run watch` rebuilds on save without a Rust
 // recompile) and for the jsdom tests that import the built dist/app.js.
 import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
@@ -26,7 +26,7 @@ async function crateVersion() {
 
 const version = await crateVersion();
 
-// Mirrored in the ui-build crate's CONFIG_UI_STATIC_FILES.
+// Mirrored in the build-ui crate's CONFIG_UI_STATIC_FILES.
 const STATIC_FILES = ["index.html", "icons/promptforge-icon-1.png"];
 
 // Always minified: the bundle is never inspected by hand, and matching the

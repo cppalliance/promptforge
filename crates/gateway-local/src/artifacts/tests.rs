@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use tempfile::TempDir;
 
-use promptforge_progress::{EventState, ProgressHub};
+use shared_progress::{EventState, ProgressHub};
 
 use super::archive::{extract_archive_with_progress, safe_archive_path};
 use super::assets::ArchiveRef;

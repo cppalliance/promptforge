@@ -15,7 +15,7 @@ the one completion method and always streams SSE internally: it requests
 passes a no-op closure). A tool-call batch finished by `length` or
 `content_filter` fails whole, so partial arguments never execute.
 `subscribe_progress` consumes the gateway's `GET /admin/progress` SSE
-stream as decoded `promptforge-progress` events.
+stream as decoded `shared-progress` events.
 
 Each `Completion` carries the call's metadata parsed from the stream:
 the serving `model`, `usage` token accounting (with cached- and

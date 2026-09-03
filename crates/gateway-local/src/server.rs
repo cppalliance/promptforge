@@ -13,7 +13,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use gateway_config::Secret;
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use crate::error::LocalError;
 use support::{

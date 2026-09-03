@@ -27,7 +27,7 @@ gateway-routing = { path = "crates/gateway-routing", version = "0.2.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
 promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.2.0" }
 promptforge-parser = { path = "crates/promptforge-parser", version = "0.2.0" }
-promptforge-progress = { path = "crates/promptforge-progress", version = "0.2.0" }
+shared-progress = { path = "crates/shared-progress", version = "0.2.0" }
 gateway-stt = { path = "crates/gateway-stt", version = "0.2.0" }
 promptforge-store = { path = "crates/promptforge-store", version = "0.2.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.2.0" }
@@ -38,7 +38,7 @@ promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.
 gateway-web-search = { path = "crates/gateway-web-search", version = "0.2.0" }
 promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "0.2.0" }
 gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.2.0" }
-workshop-agent = { path = "crates/workshop-agent", version = "0.2.0" }
+promptforge-agent = { path = "crates/promptforge-agent", version = "0.2.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"

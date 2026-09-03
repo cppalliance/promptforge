@@ -22,7 +22,7 @@ use futures_util::StreamExt;
 use tokio::sync::oneshot;
 
 use promptforge_model_client::model::subscribe_progress;
-use promptforge_progress::{ProgressHub, RemoteOperation};
+use shared_progress::{ProgressHub, RemoteOperation};
 
 use crate::heartbeat::GatewayHealth;
 
@@ -167,7 +167,7 @@ async fn run(
 #[cfg(test)]
 mod tests {
     // Fractions are fixed-point millionths, so equality comparisons are exact
-    // (the promptforge-progress remote.rs test precedent).
+    // (the shared-progress remote.rs test precedent).
     #![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
 
     use super::*;
@@ -178,7 +178,7 @@ mod tests {
     use axum::response::{IntoResponse, Response};
     use tokio::sync::broadcast;
 
-    use promptforge_progress::OperationSnapshot;
+    use shared_progress::OperationSnapshot;
 
     use crate::app::fixtures::spawn_gateway;
 

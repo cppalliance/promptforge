@@ -40,7 +40,7 @@ use promptforge_workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ServerConfig,
     UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
 };
-use workshop_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
+use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
 use crate::common::{JsonSocket, spawn_gateway};

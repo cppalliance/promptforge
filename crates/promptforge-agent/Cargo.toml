@@ -1,12 +1,12 @@
 [package]
-name = "workshop-agent"
+name = "promptforge-agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-description = "Workshop agent-program executor: run_agent drives .lua agent programs over the promptforge substrate"
+description = "Promptforge library agent-program executor: run_agent drives .lua agent programs over the promptforge substrate"
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]

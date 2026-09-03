@@ -45,7 +45,7 @@ use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, Th
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
 use tokio::sync::broadcast;
-use workshop_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
+use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;

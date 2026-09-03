@@ -15,7 +15,7 @@ on:
         default: "b10082"
   push:
     branches: [master]
-    paths: [crates/llama-cuda-build/**]
+    paths: [crates/build-llama-cuda/**]
 
 permissions:
   contents: read
@@ -76,7 +76,7 @@ jobs:
           echo "$cuda_path/bin" >> "$GITHUB_PATH"
 
       - name: Build the release zip
-        run: cargo run --locked -p llama-cuda-build -- --source llama.cpp --tag ${{ env.TAG }} --arch 120a-real --no-smoke --out dist/
+        run: cargo run --locked -p build-llama-cuda -- --source llama.cpp --tag ${{ env.TAG }} --arch 120a-real --no-smoke --out dist/
 
       - name: Upload the build artifact
         uses: actions/upload-artifact@v4

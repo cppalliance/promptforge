@@ -9,7 +9,7 @@ repository.workspace = true
 description = "PromptForge Whisper transcription engine: model ownership, inference workers, segmentation, and silence gating"
 
 [dependencies]
-promptforge-progress.workspace = true
+shared-progress.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "make-user-guide"
+name = "build-user-guide"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

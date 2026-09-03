@@ -31,7 +31,7 @@ impl ProgressHandle {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -51,7 +51,7 @@ impl ProgressHandle {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -81,7 +81,7 @@ impl ProgressHandle {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -104,7 +104,7 @@ impl ProgressHandle {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -133,7 +133,7 @@ impl ProgressHandle {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();

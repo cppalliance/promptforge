@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use gateway_whisper_ffi::{WhisperContext, WhisperLibrary, WhisperState};
 
 use crate::error::TranscribeError;

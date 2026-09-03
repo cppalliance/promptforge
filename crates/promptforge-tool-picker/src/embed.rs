@@ -12,7 +12,7 @@
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config as BertConfig};
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use tokenizers::{Tokenizer, TruncationParams};
 
 use crate::assets;

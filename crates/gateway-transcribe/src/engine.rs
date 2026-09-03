@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use gateway_whisper_ffi::WhisperLibrary;
 
 use crate::SAMPLE_RATE;

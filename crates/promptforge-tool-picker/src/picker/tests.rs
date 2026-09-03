@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use promptforge_progress::{EventState, ProgressHub};
+use shared_progress::{EventState, ProgressHub};
 use serde_json::json;
 
 use super::ToolPicker;
