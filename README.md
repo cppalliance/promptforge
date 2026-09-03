@@ -4,16 +4,30 @@
 
 # PromptForge
 
-A runtime that executes AI prompt pipelines defined in a single markdown file. The markdown is the program, the model is the CPU. YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions, and a credential-holding gateway that keeps vendor keys off the prompt process. Write a prompt, run it, get a result.
+A runtime that executes AI prompt pipelines defined in a single markdown file. The markdown is the program, the model is the CPU.
+
+![Download the Workshop](images/download-workshop.png)
+
+## Downloads
+
+Get the Workshop, the desktop app for writing and running prompts:
+
+- **Windows**: [PromptForge-setup.exe](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge-setup.exe)
+- **macOS (Apple Silicon)**: [PromptForge-arm64.dmg](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge-arm64.dmg)
+- **macOS (Intel)**: [PromptForge-x64.dmg](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge-x64.dmg)
+- **Linux**: [PromptForge.AppImage](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge.AppImage) or [PromptForge.deb](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge.deb)
+
+These links always point at the latest tested release. Running a headless gateway instead? Grab a [nightly build](https://github.com/cppalliance/promptforge/releases/tag/nightly) or build from source below. Embedding the engine in your own program? The [guide](https://cppalliance.github.io/promptforge/) covers every audience.
 
 ![Workshop](images/banner-01.png)
 
 ## What you get
 
-- 📄 **Markdown prompts** - frontmatter, one H1, H2 sections that run top to bottom
-- 🔧 **Lua control** - bind tools and models, compute values, write the store, fan out work
-- 🌐 **Tools that ship** - local `web_fetch`, gateway-backed `web_search`, semantic capability binding
-- 🔌 **Inference gateway** - OpenAI-shaped chat, bearer auth, catalog at `GET /v1/models`
+The Workshop is the desktop application. It edits prompts as visible stacks of blocks, runs them against your gateway, and records every run, edit, and decision in an append-only event log. Voice input is built in, and the app updates itself from the release channel.
+
+The gateway is the one process that holds your credentials. It serves an OpenAI-compatible API, routes chat completions to frontier APIs or to local models on your own hardware, and keeps vendor keys off every other process. One configuration file defines the model catalog, the concurrency pools, and the search tool.
+
+The prompt language is the programming surface. A prompt is a markdown document: YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions. The engine executes it with deterministic control flow, isolated sections, and fan-out concurrency set in configuration. The same language is available as a Rust library, so your own programs can run prompts in-process.
 
 ![Android heads](images/banner-02.png)
 
@@ -45,17 +59,6 @@ Prose goes to the model. Lua sets up the turn. The response is the run's result.
 
 ![Holographic code](images/banner-03.png)
 
-## Quick start
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export PROMPTFORGE_GATEWAY_API_KEY=dev-secret
-cargo run -p gateway -- serve gateway.toml --profile main &
-cargo run -p workshop
-```
-
-Two processes: the gateway holds the vendor credential; the Workshop desktop app edits and runs prompts against it.
-
 ## Build from source
 
 Every build needs Rust 1.89 or later and Node.js 22. The two web UIs are bundled with esbuild during the Cargo build, so run `npm ci` once in each `ui/` folder after cloning:
@@ -67,41 +70,11 @@ npm ci --prefix crates/workshop-server/ui
 npm ci --prefix crates/gateway-config-ui/ui
 ```
 
-`cargo build` builds the gateway, the default workspace member. `cargo build -p workshop` builds the desktop app. See the [gateway README](crates/gateway/README.md) for the feature details.
+`cargo build` builds the gateway, the default workspace member. `cargo build -p workshop` builds the desktop app. Platform notes:
 
-### Ubuntu 22.04
-
-```bash
-sudo apt install build-essential pkg-config cmake clang libclang-dev
-# only for the desktop app (workshop):
-sudo apt install libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-```
-
-```bash
-cargo build
-cargo build -p workshop --no-default-features
-```
-
-### macOS
-
-```bash
-xcode-select --install
-brew install cmake node
-```
-
-```bash
-cargo build
-cargo build -p workshop --no-default-features
-```
-
-### Windows
-
-Install Visual Studio with the "Desktop development with C++" workload and Node.js 22. PromptForge downloads its pinned CUDA-enabled whisper.cpp runtime on first use, so building the workshop needs neither CMake nor the CUDA toolkit.
-
-```bash
-cargo build
-cargo build -p workshop
-```
+- **Ubuntu 22.04**: `sudo apt install build-essential pkg-config cmake clang libclang-dev`; the desktop app also needs `libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`, and builds with `cargo build -p workshop --no-default-features`.
+- **macOS**: `xcode-select --install` and `brew install cmake node`, then `cargo build -p workshop --no-default-features`.
+- **Windows**: install Visual Studio with the "Desktop development with C++" workload and Node.js 22, then `cargo build -p workshop`.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
@@ -124,38 +97,9 @@ flowchart LR
 
 ![Robot internals](images/banner-05.png)
 
-## Crates
-
-| Crate | Description | crates.io |
-| --- | --- | --- |
-| [promptforge](crates/promptforge) | Integrator facade: `pipeline::run` for document prompts, `agent::run` for agent programs | not published |
-| [promptforge-core](crates/promptforge-core) | Parser, executor, Lua runtime, store, gateway client | [![Crates.io](https://img.shields.io/crates/v/promptforge-core.svg)](https://crates.io/crates/promptforge-core) |
-| [promptforge-core-support](crates/promptforge-core-support) | Shared host-support primitives: untrusted guards, cooperative cancellation, run observation | [![Crates.io](https://img.shields.io/crates/v/promptforge-core-support.svg)](https://crates.io/crates/promptforge-core-support) |
-| [gateway](crates/gateway) | Inference gateway with model catalog and credential isolation | [![Crates.io](https://img.shields.io/crates/v/gateway.svg)](https://crates.io/crates/gateway) |
-| [build-llama-cuda](crates/build-llama-cuda) | Command-line builder of the CUDA `llama-server` release zip; runs on the GitHub build machine | not published |
-| [promptforge-model-client](crates/promptforge-model-client) | Gateway model client: OpenAI-shaped completions transport, wire types, model catalog and binding vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-model-client.svg)](https://crates.io/crates/promptforge-model-client) |
-| [gateway-local](crates/gateway-local) | Gateway-owned local inference: GGUF provisioning, artifact store, managed `llama-server` lifecycle | [![Crates.io](https://img.shields.io/crates/v/gateway-local.svg)](https://crates.io/crates/gateway-local) |
-| [gateway-protocol](crates/gateway-protocol) | OpenAI wire protocol and upstream abstraction for the gateway | [![Crates.io](https://img.shields.io/crates/v/gateway-protocol.svg)](https://crates.io/crates/gateway-protocol) |
-| [gateway-routing](crates/gateway-routing) | Routing vocabulary for the gateway: `Model`/`Endpoint` table entries and dominion admission queues | [![Crates.io](https://img.shields.io/crates/v/gateway-routing.svg)](https://crates.io/crates/gateway-routing) |
-| [promptforge-lua](crates/promptforge-lua) | Sandboxed Lua runtime: the section VM, coroutine protocol, and host surface | [![Crates.io](https://img.shields.io/crates/v/promptforge-lua.svg)](https://crates.io/crates/promptforge-lua) |
-| [promptforge-parser](crates/promptforge-parser) | Prompt document parser: frontmatter, section tree, exact `lua` fence splitting, `ParseError` vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-parser.svg)](https://crates.io/crates/promptforge-parser) |
-| [shared-progress](crates/shared-progress) | Progress vocabulary: operation-scoped weighted trees, process hub, coalesced events, remote import | not published |
-| [gateway-stt](crates/gateway-stt) | Gateway-owned STT runtime: artifact provisioning, engine lifecycle, `/stt`, and OpenAI transcription | not published |
-| [promptforge-store](crates/promptforge-store) | Run-scoped virtual filesystem: `Store` backend contract, `MemStore`/`FileStore` backends, shared `StoreRef` handle | [![Crates.io](https://img.shields.io/crates/v/promptforge-store.svg)](https://crates.io/crates/promptforge-store) |
-| [promptforge-tool-picker](crates/promptforge-tool-picker) | Semantic tool resolution via sentence embeddings | [![Crates.io](https://img.shields.io/crates/v/promptforge-tool-picker.svg)](https://crates.io/crates/promptforge-tool-picker) |
-| [promptforge-tools](crates/promptforge-tools) | Runtime-agnostic tool contract: `Tool`, `ToolCatalog`, `ToolId` | [![Crates.io](https://img.shields.io/crates/v/promptforge-tools.svg)](https://crates.io/crates/promptforge-tools) |
-| [promptforge-webfetch](crates/promptforge-webfetch) | SSRF-safe web fetch tool for model-supplied URLs | [![Crates.io](https://img.shields.io/crates/v/promptforge-webfetch.svg)](https://crates.io/crates/promptforge-webfetch) |
-| [promptforge-web-search](crates/promptforge-web-search) | Web search tool proxying through the gateway with credential isolation | [![Crates.io](https://img.shields.io/crates/v/promptforge-web-search.svg)](https://crates.io/crates/promptforge-web-search) |
-| [gateway-web-search](crates/gateway-web-search) | Gateway-side web-search service: Brave provider client, request validation, result post-processing | [![Crates.io](https://img.shields.io/crates/v/gateway-web-search.svg)](https://crates.io/crates/gateway-web-search) |
-| [gateway-whisper-ffi](crates/gateway-whisper-ffi) | Runtime-loaded safe wrapper over PromptForge's pinned whisper.cpp C API | not published |
-| [gateway-transcribe](crates/gateway-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
-| [promptforge-agent](crates/promptforge-agent) | Promptforge library agent-program executor: `run_agent` drives `.lua` agent programs over the promptforge substrate | not published |
-| [workshop-server](crates/workshop-server) | Workshop HTTP server: agent sessions, model catalog passthrough, workspace API, and UI assets | not published |
-| [workshop](crates/workshop) | Workshop desktop app (Tauri): boots the gateway and opens the window | not published |
-
 ## Documentation
 
-- [PromptForge User Guide](https://cppalliance.github.io/promptforge/) - full documentation
+- [PromptForge Guide](https://cppalliance.github.io/promptforge/) - four documentation sets: the Workshop, the gateway, the prompt language, and agent programs
 
 Build the guide locally with `mdbook build guide`.
 
