@@ -1,4 +1,4 @@
-﻿# Models
+# Models
 
 A prompt does not name a model directly. It describes the capability it needs, and the runtime resolves that description against the catalog. This chapter teaches the three calls that declare and select models, `models.bind`, `models.default`, and `models.use`, plus the `infer` family for direct inference from Lua. Capability-based binding is what keeps a prompt portable across catalogs, so it is worth learning as a habit from the start.
 

@@ -1,4 +1,4 @@
-﻿# The Configuration File
+# The Configuration File
 
 This chapter teaches you the shape of the one file that configures the whole gateway. You will learn the version key, the server section, how to keep secrets out of the file, and the loopback wall that guards the admin surface. Every other chapter adds sections to this file, so a solid mental model here pays off everywhere.
 

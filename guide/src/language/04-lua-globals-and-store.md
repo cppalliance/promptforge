@@ -1,4 +1,4 @@
-﻿# Lua Globals and the Store
+# Lua Globals and the Store
 
 Every section runs sandboxed Lua, but it does not run empty-handed. This chapter teaches the globals the runtime seeds into each section, `args`, `sys`, `var`, `reply`, and `log`, plus the run-scoped `store` where a prompt keeps its bulk state. These are your everyday tools, so we take them one at a time.
 

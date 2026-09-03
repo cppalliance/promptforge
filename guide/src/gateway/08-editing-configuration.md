@@ -1,4 +1,4 @@
-﻿# Editing Configuration Safely
+# Editing Configuration Safely
 
 This chapter teaches you the safe-edit surface: how the gateway stages edits in shadow files, how you preview and apply them, and how you recover when an edit is wrong. Editing through this surface means a bad config can never take down a running gateway.
 

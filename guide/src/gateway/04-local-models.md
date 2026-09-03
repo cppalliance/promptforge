@@ -1,4 +1,4 @@
-﻿# Local Models
+# Local Models
 
 This chapter teaches you to run models on your own machine through the gateway. You will learn to declare a local model, how the gateway provisions and verifies it, and how the managed child processes behave. Local models share the gateway's OpenAI routing with remote models, so everything you learned about the catalog still applies.
 

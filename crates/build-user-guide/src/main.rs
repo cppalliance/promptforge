@@ -109,6 +109,7 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
         let content = fs::read_to_string(&path)
             .map_err(|e| AssembleError(format!("cannot read {}: {e}", path.display())))?;
         let title = content
+            .trim_start_matches('\u{feff}')
             .lines()
             .find_map(|line| line.strip_prefix("# "))
             .map(str::trim)

@@ -1,4 +1,4 @@
-﻿# Frontmatter and Structure
+# Frontmatter and Structure
 
 A PromptForge prompt is one markdown file, and this chapter teaches you how that file is put together: the frontmatter block at the top, the title, and the sections that divide the body. It is worth learning first because the parser checks the whole shape before anything runs, so a prompt that gets the structure right never fails halfway through a run.
 

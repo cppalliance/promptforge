@@ -1,4 +1,4 @@
-﻿# The Configuration UI
+# The Configuration UI
 
 The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
 

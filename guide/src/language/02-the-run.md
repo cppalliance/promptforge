@@ -1,4 +1,4 @@
-﻿# The Run
+# The Run
 
 You can now write a well-formed prompt file, so the next question is what happens when it runs. This chapter walks a run from beginning to end: the live pass over the title, the ordered walk through the sections, how replies appear, and how a run finishes. Once you can picture a run, every other feature of the language has a place to attach.
 

@@ -1,4 +1,4 @@
-﻿# Sections and Blocks
+# Sections and Blocks
 
 You have seen the run from the outside. This chapter goes inside a section and teaches the pieces you write there: the exact fence forms, the horizontal rule that changes a section's meaning, list sections, and the shared library. These are the parts you touch in every prompt, so it pays to learn their exact shapes now.
 

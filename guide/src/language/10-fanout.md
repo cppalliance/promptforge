@@ -1,4 +1,4 @@
-﻿# Fanout
+# Fanout
 
 Some work is the same task repeated over a collection: summarize each file, grade each answer, research each topic. The call `fanout` runs a worker section once per collection member, concurrently, and hands you one result per member. This chapter teaches the call, the shape of its results, and the isolation and failure rules that make concurrency safe. It closes the set because it uses everything before it: sections, the store, control flow, and limits.
 

@@ -1,4 +1,4 @@
-﻿# Install and Run
+# Install and Run
 
 This chapter teaches you to get the gateway running on your machine: how to install it, how to start it with a config file and a profile, and how to confirm it is healthy. You do these things every time you bring the gateway up, so they are worth learning well.
 

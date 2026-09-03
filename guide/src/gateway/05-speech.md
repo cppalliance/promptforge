@@ -1,4 +1,4 @@
-﻿# Speech-to-Text
+# Speech-to-Text
 
 This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the /stt endpoints serve. Speech builds on local models, because speech models are provisioned and cached the same way.
 

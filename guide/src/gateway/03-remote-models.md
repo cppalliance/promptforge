@@ -1,4 +1,4 @@
-﻿# Remote Models and Endpoints
+# Remote Models and Endpoints
 
 This chapter teaches you to declare remote backends and the models they serve. You will learn endpoint entries, model entries, and the catalog your callers see. Remote models are the simplest way to get the gateway serving, so they come first.
 

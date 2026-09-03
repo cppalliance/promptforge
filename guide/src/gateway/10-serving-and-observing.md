@@ -1,4 +1,4 @@
-﻿# Serving and Observing
+# Serving and Observing
 
 This chapter teaches you the running gateway: the HTTP endpoints it serves, the tools it can host, and the health, logs, and observability surface you operate day to day. You already run a configured gateway with a profile and its models.
 

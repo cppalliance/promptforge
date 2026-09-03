@@ -1,4 +1,4 @@
-﻿# Profiles and Switching
+# Profiles and Switching
 
 This chapter teaches you profiles: named checklists that decide which models the gateway serves, and how to switch between them at runtime. Profiles are how one config file serves a work machine, a travel laptop, and a demo box without editing a single model entry.
 

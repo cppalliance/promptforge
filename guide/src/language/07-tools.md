@@ -1,4 +1,4 @@
-﻿# Tools
+# Tools
 
 Models reach the outside world through tools, and a prompt controls exactly which tools the model can see. This chapter teaches the declaration and scoping calls, `tools.bind`, `tools.always`, and `tools.add`, plus local tools written in Lua, direct dispatch with `tool_call`, and the failure modes you will meet. Tool scoping is the prompt's main safety surface, so we build it up one call at a time.
 
