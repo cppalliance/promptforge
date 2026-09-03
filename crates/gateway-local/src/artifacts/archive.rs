@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use super::Result;
 use super::assets::ArchiveKind;

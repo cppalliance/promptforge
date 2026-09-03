@@ -18,7 +18,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 
-use promptforge_progress::{ProgressHub, ProgressMeter};
+use shared_progress::{ProgressHub, ProgressMeter};
 
 use crate::protocol::Activity;
 use crate::push::Push;

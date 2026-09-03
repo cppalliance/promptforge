@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 /// Progress updates for a single HTTP blob download.
 pub trait DownloadProgress: Send {

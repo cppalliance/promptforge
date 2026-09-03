@@ -22,7 +22,7 @@ open.workspace = true
 percent-encoding.workspace = true
 promptforge-core-support.workspace = true
 promptforge-model-client.workspace = true
-promptforge-progress.workspace = true
+shared-progress.workspace = true
 promptforge-store.workspace = true
 promptforge-tools.workspace = true
 rand.workspace = true
@@ -37,7 +37,7 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
-workshop-agent.workspace = true
+promptforge-agent.workspace = true
 
 [features]
 default = []
@@ -53,7 +53,7 @@ tower.workspace = true
 # The build script bundles the UI with esbuild into OUT_DIR through the
 # shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
-ui-build = { path = "../ui-build" }
+build-ui = { path = "../build-ui" }
 
 [lints]
 workspace = true

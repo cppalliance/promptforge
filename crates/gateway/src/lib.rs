@@ -128,7 +128,7 @@ use crate::wire::{
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
-use promptforge_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
+use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
 #[cfg(feature = "workshop")]
 use gateway_stt::{SttRuntime, SttState};
 #[cfg(feature = "web-search")]
@@ -1080,7 +1080,7 @@ async fn run_switch_with_config(
 fn prepare_switch_target(
     catalog: &Config,
     name: &ProfileName,
-    loading: &promptforge_progress::ProgressHandle,
+    loading: &shared_progress::ProgressHandle,
 ) -> Result<(Config, Routing), GatewayError> {
     if !catalog
         .profiles()
@@ -1579,7 +1579,7 @@ mod progress_tests {
     use std::time::Duration;
 
     use futures_util::StreamExt as _;
-    use promptforge_progress::{EventState, ProgressEvent, ProgressHub};
+    use shared_progress::{EventState, ProgressEvent, ProgressHub};
 
     use super::{PROGRESS_HEARTBEAT, progress_sse_response};
 
@@ -1791,7 +1791,7 @@ mod switch_tests {
     use std::sync::Arc;
 
     use futures_util::StreamExt as _;
-    use promptforge_progress::ProgressHub;
+    use shared_progress::ProgressHub;
 
     use super::{GatewayError, drain_switch_stages, switch_sse_response};
 

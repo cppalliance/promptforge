@@ -12,7 +12,7 @@ reuses the public `ArtifactStore` for speech-model provisioning.
   keeps `run_switch`, the `/v1/cache` HTTP adapter, and the routing table.
 - The runtime never compiles native dependencies and never invokes CMake,
   NVCC, MSBuild, Git, PowerShell, or any other build tool. Native compilation
-  belongs to the `llama-cuda-build` tool running on a build machine or to
+  belongs to the `build-llama-cuda` tool running on a build machine or to
   packaging; runtime code may only download, verify, stage, and launch
   pinned, checksummed archives.
 - Shared vocabulary comes from below: wire types, `Upstream`, and

@@ -8,13 +8,13 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use llama_cuda_build::{BuildRequest, build};
+use build_llama_cuda::{BuildRequest, build};
 
 const USAGE: &str = "\
-llama-cuda-build - build the CUDA llama-server release zip (Windows x64)
+build-llama-cuda - build the CUDA llama-server release zip (Windows x64)
 
 USAGE:
-    llama-cuda-build --source <folder> --tag <tag> --out <folder> [OPTIONS]
+    build-llama-cuda --source <folder> --tag <tag> --out <folder> [OPTIONS]
 
 REQUIRED:
     --source <folder>   llama.cpp checkout to compile (a git checkout, not a tarball)
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("llama-cuda-build failed:\n{error:#}");
+            eprintln!("build-llama-cuda failed:\n{error:#}");
             ExitCode::FAILURE
         }
     }

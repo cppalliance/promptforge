@@ -42,7 +42,7 @@ gateway-loopback.workspace = true
 gateway-protocol.workspace = true
 gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
-promptforge-progress = { workspace = true, features = ["serde"] }
+shared-progress = { workspace = true, features = ["serde"] }
 gateway-stt = { workspace = true, optional = true }
 gateway-web-search = { workspace = true, optional = true }
 promptforge-workshop-server = { workspace = true, optional = true }

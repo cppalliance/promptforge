@@ -23,7 +23,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
-use promptforge_progress::{EventState, OperationId, ProgressEvent, ProgressHandle};
+use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHandle};
 
 use crate::error::GatewayError;
 use crate::local::artifacts::{
@@ -346,7 +346,7 @@ mod tests {
     #![expect(clippy::float_cmp, reason = "fixed-point fractions compare exactly")]
 
     use futures_util::StreamExt as _;
-    use promptforge_progress::ProgressHub;
+    use shared_progress::ProgressHub;
 
     use super::*;
 

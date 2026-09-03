@@ -3,7 +3,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 use gateway_whisper_ffi::{FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState};
 
 use crate::MAX_PROMPT_TOKENS;
@@ -257,7 +257,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use promptforge_progress::ProgressHub;
+    use shared_progress::ProgressHub;
 
     use super::*;
 

@@ -29,5 +29,5 @@ The crate has no feature flags.
 
 Runtime code never compiles native dependencies; it only downloads,
 verifies, stages, and launches pinned `llama-server` archives. The CUDA
-build for Blackwell GPUs is compiled on GitHub by the `llama-cuda-build`
+build for Blackwell GPUs is compiled on GitHub by the `build-llama-cuda`
 tool and downloaded like any other archive.

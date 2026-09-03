@@ -18,7 +18,7 @@ use crate::tree::TreeState;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use promptforge_progress::{EventState, ProgressEvent, ProgressHub, RemoteOperation};
+/// use shared_progress::{EventState, ProgressEvent, ProgressHub, RemoteOperation};
 ///
 /// let hub = Arc::new(ProgressHub::new());
 /// let remote = RemoteOperation::attach(&hub);
@@ -70,7 +70,7 @@ impl RemoteOperation {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::{EventState, ProgressEvent, ProgressHub, RemoteOperation};
+    /// use shared_progress::{EventState, ProgressEvent, ProgressHub, RemoteOperation};
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let remote = RemoteOperation::attach(&hub);

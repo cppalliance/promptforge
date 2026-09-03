@@ -19,7 +19,7 @@ futures-util.workspace = true
 # re-exports.
 promptforge-core-support.workspace = true
 # The serde feature decodes the gateway's progress event stream.
-promptforge-progress = { workspace = true, features = ["serde"] }
+shared-progress = { workspace = true, features = ["serde"] }
 promptforge-tool-picker.workspace = true
 reqwest.workspace = true
 serde.workspace = true

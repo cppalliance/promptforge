@@ -124,7 +124,7 @@ impl Gateway {
         Self::from_config_with_hub(
             config,
             profiles,
-            Arc::new(promptforge_progress::ProgressHub::new()),
+            Arc::new(shared_progress::ProgressHub::new()),
         )
     }
 
@@ -134,7 +134,7 @@ impl Gateway {
     pub(crate) fn from_config_with_hub(
         config: &Config,
         profiles: ProfilesContext,
-        hub: Arc<promptforge_progress::ProgressHub>,
+        hub: Arc<shared_progress::ProgressHub>,
     ) -> Result<Gateway, StartupError> {
         // Startup provisioning is the hub's first operation tree: it lives
         // for the provisioning call and detaches when the tree drops.
@@ -494,7 +494,7 @@ fn serve_thread(
         }
     };
     let bind = config.bind_addr();
-    let hub = Arc::new(promptforge_progress::ProgressHub::new());
+    let hub = Arc::new(shared_progress::ProgressHub::new());
     // The renderer starts before provisioning so boot downloads draw; it is
     // a plain thread because provisioning runs before the runtime exists,
     // and its Drop stops it on every exit path below.

@@ -26,7 +26,7 @@ const EVENT_CAPACITY: usize = 1024;
 ///
 /// ```
 /// use std::sync::Arc;
-/// use promptforge_progress::ProgressHub;
+/// use shared_progress::ProgressHub;
 ///
 /// let hub = Arc::new(ProgressHub::new());
 /// assert!(hub.snapshot().is_empty());
@@ -79,7 +79,7 @@ impl ProgressHub {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let mut events = hub.subscribe();

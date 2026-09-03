@@ -204,7 +204,7 @@ const WINDOWS_X86_64_CUDA: ServerAsset<'static> = ServerAsset {
 };
 
 // The PromptForge Blackwell build, produced by the llama-cuda-blackwell
-// workflow from `crates/llama-cuda-build`. The zip ships the CUDA runtime
+// workflow from `crates/build-llama-cuda`. The zip ships the CUDA runtime
 // DLLs, so the host needs only the NVIDIA driver.
 //
 const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {

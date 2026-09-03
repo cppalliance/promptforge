@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (chat runs through `.lua` agent programs over `workshop-agent`), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, and workspace APIs. The gateway-owned `gateway-stt` runtime attaches `/stt` when this server is embedded. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
+The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (chat runs through `.lua` agent programs over `promptforge-agent`), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, and workspace APIs. The gateway-owned `gateway-stt` runtime attaches `/stt` when this server is embedded. The desktop shell (`promptforge-workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
 
 ## Quick start
 
@@ -55,7 +55,7 @@ A background heartbeat polls the gateway's `GET /health` every five seconds and 
 
 ## UI development
 
-The chat UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `ui-build` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.
+The chat UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `build-ui` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.
 
 The workflow: edit the TypeScript, then `cargo build` (or `cargo run -p promptforge-workshop-server`). The build script re-bundles whenever `ui/src/` or the static UI files change - a build-script-only rerun, no Rust recompile - and debug builds read the bundle from disk on every request. `npm run build` and `npm run watch` in `ui/` still write `ui/dist/` in place, which nothing serves: that tree exists for the jsdom tests, which import the built bundle.
 
@@ -128,7 +128,7 @@ The variables:
 
 ## Agent sessions
 
-`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.lua` agent programs from `agents.path`, launches each as a session running `workshop_agent::run_agent` with the Workshop's `user_input` tool, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
+`AgentSessions` (reached through `AppState::agents`) is the registry behind `GET /agents/ws`: it discovers `.lua` agent programs from `agents.path`, launches each as a session running `promptforge_agent::run_agent` with the Workshop's `user_input` tool, a persisting `WorkshopObserver` event log at `state_dir/sessions/<session-id>.jsonl`, a model catalog built from the retained gateway catalog, and a `ui()` snapshot serving the selected model and the first granted workspace root. Sessions survive socket disconnect: sockets attach and detach, a reconnect replays the persisted log (every durable frame carries its log index) and re-announces unresolved waits. Live deltas ride a dedicated ephemeral channel, each stamped with the reply id of the durable event that will supersede it. Turn-cancel fires the session's retained cancel handle and relaunches the program over the retained event log - a stop reason, never an error - while `AgentSessions::close` ends a session for good.
 
 ## Minimum Rust Version
 

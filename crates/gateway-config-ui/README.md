@@ -11,7 +11,7 @@ The PromptForge gateway config UI: the embedded SPA assets and the esbuild build
 
 ## UI development
 
-The UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `ui-build` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.
+The UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `build-ui` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.
 
 The workflow: edit the TypeScript, then `cargo build`. The build script re-bundles whenever `ui/src/` or the static UI files change - a build-script-only rerun, no Rust recompile - and debug builds read the bundle from disk on every request. `npm run build` and `npm run watch` in `ui/` still write `ui/dist/` in place, which nothing serves: that tree exists for the jsdom tests, which import the built bundle.
 

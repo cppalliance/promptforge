@@ -10,7 +10,7 @@
 //! borrowed model, and [`ToolPicker::rebuild`] replaces a picker's catalog while
 //! preserving its model and policy. Building over an empty catalog succeeds.
 
-use promptforge_progress::ProgressHandle;
+use shared_progress::ProgressHandle;
 
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};
 use crate::config::Config;

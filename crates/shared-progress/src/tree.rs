@@ -375,7 +375,7 @@ fn headline_walk(inner: &TreeInner, slot: usize, share: f64, best: &mut Option<(
 ///
 /// ```
 /// use std::sync::Arc;
-/// use promptforge_progress::ProgressHub;
+/// use shared_progress::ProgressHub;
 ///
 /// let hub = Arc::new(ProgressHub::new());
 /// let tree = hub.operation();
@@ -404,7 +404,7 @@ impl ProgressTree {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -431,7 +431,7 @@ impl ProgressTree {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();

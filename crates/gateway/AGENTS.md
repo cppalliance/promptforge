@@ -11,11 +11,11 @@ Gateway-hosted speech-to-text lifecycle and HTTP routes live in
 
 - Runtime and serve paths never compile native dependencies and never
   invoke CMake, NVCC, MSBuild, Git, PowerShell, or any other build tool.
-  Native compilation belongs to the `llama-cuda-build` tool on a build
+  Native compilation belongs to the `build-llama-cuda` tool on a build
   machine or to packaging; runtime code may only download, verify, stage,
   and launch pinned, checksummed archives.
 - The CUDA `llama-server` is a managed download produced by the
-  `llama-cuda-build` release workflow, never a Cargo build product.
+  `build-llama-cuda` release workflow, never a Cargo build product.
 - The `local` feature is additive and defaults on; `--no-default-features`
   must keep compiling as a headless gateway without the local crate and its
   archive/blocking-HTTP dependencies.

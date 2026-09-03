@@ -1,8 +1,9 @@
-# workshop-agent
+# promptforge-agent
 
-This crate is the workshop's agent-program executor: `run_agent` drives a
-`.lua` agent program - one long-running Lua coroutine - over the promptforge
-library substrate, with `AgentConfig` carrying exactly what agents need.
+This crate is the promptforge library product's agent-program executor:
+`run_agent` drives a `.lua` agent program - one long-running Lua coroutine -
+over the library substrate, with `AgentConfig` carrying exactly what agents
+need.
 
 ## Rules
 

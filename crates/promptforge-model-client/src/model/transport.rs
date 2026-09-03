@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 
 use futures_util::Stream;
-use promptforge_progress::ProgressEvent;
+use shared_progress::ProgressEvent;
 use serde::Deserialize;
 
 use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
@@ -497,7 +497,7 @@ mod tests {
         );
     }
 
-    use promptforge_progress::EventState;
+    use shared_progress::EventState;
 
     /// Serializes a wire-format progress event by hand, so the tests pin the
     /// JSON shape rather than the progress crate's constructors.

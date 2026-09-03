@@ -18,7 +18,7 @@ flate2.workspace = true
 gateway-config.workspace = true
 gateway-protocol.workspace = true
 gateway-routing.workspace = true
-promptforge-progress.workspace = true
+shared-progress.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true

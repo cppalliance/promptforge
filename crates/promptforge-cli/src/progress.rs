@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use promptforge_progress::{OperationSnapshot, ProgressHandle, ProgressHub, ProgressTree};
+use shared_progress::{OperationSnapshot, ProgressHandle, ProgressHub, ProgressTree};
 
 /// Snapshot poll cadence of the renderer thread.
 const RENDER_INTERVAL: Duration = Duration::from_millis(120);

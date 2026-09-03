@@ -23,7 +23,7 @@ tower.workspace = true
 # The build script bundles the UI with esbuild into OUT_DIR through the
 # shared helper; nothing UI-built lands in the repository.
 [build-dependencies]
-ui-build = { path = "../ui-build" }
+build-ui = { path = "../build-ui" }
 
 [lints]
 workspace = true

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::Router;
 
-use promptforge_progress::ProgressHub;
+use shared_progress::ProgressHub;
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;

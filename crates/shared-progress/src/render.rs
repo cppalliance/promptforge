@@ -40,7 +40,7 @@ impl ProgressHub {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use promptforge_progress::ProgressHub;
+    /// use shared_progress::ProgressHub;
     ///
     /// let hub = Arc::new(ProgressHub::new());
     /// let tree = hub.operation();
@@ -84,7 +84,7 @@ impl ProgressHub {
 ///
 /// ```
 /// use std::sync::Arc;
-/// use promptforge_progress::{ProgressHub, ProgressMeter};
+/// use shared_progress::{ProgressHub, ProgressMeter};
 ///
 /// let hub = Arc::new(ProgressHub::new());
 /// let mut meter = ProgressMeter::new();

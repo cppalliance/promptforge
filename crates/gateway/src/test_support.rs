@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gateway_config::Config;
-use promptforge_progress::ProgressHub;
+use shared_progress::ProgressHub;
 
 use crate::routing::Routing;
 use crate::{AppState, ProfileSelection, build_router};

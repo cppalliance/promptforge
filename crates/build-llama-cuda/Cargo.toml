@@ -1,5 +1,5 @@
 [package]
-name = "llama-cuda-build"
+name = "build-llama-cuda"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ publish = false
 description = "Builds the CUDA llama-server release zip from a llama.cpp checkout (Windows x64)"
 
 [[bin]]
-name = "llama-cuda-build"
+name = "build-llama-cuda"
 path = "src/main.rs"
 
 [dependencies]
