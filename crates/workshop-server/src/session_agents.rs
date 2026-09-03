@@ -442,7 +442,14 @@ impl Observer for SessionObserver {
         // the SPA. The observation carries no payload; the frame names
         // the boundary that failed.
         if matches!(event, Observation::ModelTurnFailed) {
-            let _ = self.errors.send(format!("{event} in agent `{section}`"));
+            let message = format!("{event} in agent `{section}`");
+            let _ = self.errors.send(message.clone());
+            // The failed round never reaches on_assistant_reply, so this
+            // terminal status is the only frame that releases the
+            // turn-dispatch Thinking push; without it the status bar's
+            // sustained amber LED never returns to idle.
+            self.push
+                .push_failure("Model turn failed", message, Activity::General);
         }
         self.log.observe(execution, section, event);
     }
@@ -1042,6 +1049,39 @@ mod tests {
         assert!(
             sessions.lock().is_empty(),
             "a refused launch registers no session"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_model_turn_pushes_a_terminal_failure_status() {
+        let status = crate::status::StatusBus::new();
+        let mut status_rx = status.subscribe();
+        let catalog = CatalogBus::new();
+        let menu = MenuBus::new(catalog.clone(), None);
+        let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
+        let observer = SessionObserver {
+            log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
+            rounds: Arc::new(AtomicU64::new(0)),
+            push: Push::new(status, catalog, menu),
+            backoff: ReconnectBackoff::new(),
+            errors,
+        };
+
+        observer.observe("run", "chat", Observation::ModelTurnFailed);
+
+        let update = status_rx
+            .recv()
+            .await
+            .expect("the failed round pushes a terminal status");
+        assert_eq!(update.severity, crate::protocol::Severity::Error);
+        assert_eq!(
+            update.activity,
+            Activity::General,
+            "a non-thinking activity releases the status bar's sustained amber LED"
+        );
+        assert_eq!(
+            errors_rx.recv().await.expect("the error frame is sent"),
+            "Model turn failed in agent `chat`"
         );
     }
 
