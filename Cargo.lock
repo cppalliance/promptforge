@@ -542,6 +542,9 @@ version = "0.2.0"
 [[package]]
 name = "build-user-guide"
 version = "0.2.0"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "bumpalo"

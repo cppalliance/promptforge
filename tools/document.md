@@ -86,7 +86,7 @@ Dispatch `<chapter-gate-task>` with the draft path, `tiered.md`, and `evidence-d
 
 ### Stage 9: audit (main)
 
-Copy each approved draft to `guide/src/<set>/<chapter>.md`. Check the seams across chapters: links resolve, every concept is grounded before use, the template is complete, the house rules hold. Run `mdbook build guide`. It must pass.
+Copy each approved draft to `guide/src/<set>/NN-<chapter>.md`, where NN is the chapter's two-digit position in the template (01, 02, ...). The assembler sorts by file name, so the prefix is the reading order. Check the seams across chapters: links resolve, every concept is grounded before use, the template is complete, the house rules hold. Run `mdbook build guide`. It must pass.
 
 ## The intro lens
 
