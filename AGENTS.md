@@ -1,49 +1,21 @@
 # PromptForge
 
-Multi-crate Rust workspace for the PromptForge pipeline runtime.
+Multi-crate Rust workspace for the PromptForge pipeline runtime, the inference gateway, and the workshop desktop product.
 
-## Do more with less
-
-This rule outranks every other rule here. Before you add a frontmatter field, a configuration key, a public type, or a new resolution path, answer one question: can this be built with what is already there? Lua already runs, sandboxed and budgeted. The run-scoped store already exists, has a file backend, and is already reachable from Lua. The catalog already resolves globs and exceptions. New machinery has to beat all of that on the merits, and "it would be tidier" is not a merit. If you add it anyway, say in the commit which existing facility you considered and why it could not carry the work.
-
-## Rules
-
-- After completing work (compiles + tests pass), update README.md if the public surface changed.
-- Every public type, function, and module must have a `///` doc comment. `cargo doc` is the project documentation.
-- Each crate's own AGENTS.md binds its subtree. Read the ones governing the paths you touch before writing or reviewing code.
-- The existing test suite stays green and intact during refactors: fix forward; never rewrite a test to make it pass.
-- Library and serve paths never call `process::exit` or install process-global state; failures return through the spawn handshake.
-- Runtime and serve paths never compile native dependencies or invoke compilers or build tools. Native compilation belongs to the Cargo build or packaging process; runtime may only verify, stage, and launch build-produced artifacts.
-- Do NOT look at files outside this repo for reference.
-- The plan is the spec. Work from the plan and AGENTS.md only.
-
-## Binaries and features
-
-Two products ship from this workspace: `gateway.exe`, the lean server, and `workshop.exe`, the batteries-included desktop app that boots the gateway in-process. The binary is the feature set; features are not product variants.
-
+- Do more with less. Before adding a frontmatter field, configuration key, public type, or resolution path, answer whether Lua (sandboxed and budgeted), the run-scoped store (file backend, Lua-reachable), or the catalog (globs and exceptions) already carries the work; new machinery must beat those on the merits, and "tidier" is not a merit - if you add it anyway, the commit names which facility you considered and why it could not.
+- The plan is the spec. Work from the plan and AGENTS.md only; do not look at files outside this repo for reference.
+- Crate names encode product membership: `gateway*` for the gateway product, `promptforge*` for the library product (including the `promptforge` facade and `promptforge-agent`), bare `workshop*` for the workshop product, `shared-*` for crates that ship in more than one deliverable, and `build-*` for compile-time or CI tooling linked into no deliverable.
+- Three products ship from this workspace: `gateway.exe` (lean server), the `promptforge` library (`pipeline::run` / `agent::run`), and `workshop.exe` (batteries-included desktop that boots the gateway in-process). The binary is the feature set; features are not product variants.
 - A Cargo feature exists only to gate a real constraint: a toolchain requirement (`cuda`) or a heavy native build (`local`). Do not add features that merely describe product shape.
-- `cargo build` builds the gateway (the workspace default member); `cargo build -p workshop` builds the desktop app.
-- `config-ui` is a default gateway feature and always present in the desktop build. The UI bundles are built by the crate build scripts into `OUT_DIR` with esbuild; nothing UI-built is checked into the repo, so every build needs Node 22 and one `npm ci` per `ui/` folder.
 - Never make `workshop` a default gateway feature. The desktop exe is the everything-build; the gateway stays the lean one. That asymmetry is the product boundary.
 - Keep `cargo check -p gateway --no-default-features` green. Nobody ships that build, but it is the cheap gate that catches optional-feature types leaking into core paths.
-
-## Progress
-
-Long-running work reports progress through `shared-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
-
-## Comments
-
-`///` doc comments on public items are mandatory (above) and are not what this section governs. Any other comment earns its place by exactly four things: a non-obvious why, an invisible constraint no type or test enforces, an external-bug workaround, or a subtle ordering requirement. Comments that narrate what the code already says are deleted on sight. A module doc earns its place by documenting the domain, not by restating the file name.
-
-Every platform or external-bug workaround carries its upstream issue URL inline, in the comment that explains it. When the workaround dies, the URL says when it can be buried.
-
-```rust
-// Tauri's drag-drop handler suppresses HTML5 drag events on Windows
-// (https://github.com/tauri-apps/tauri/issues/15138), so ...
-```
-
-## Verify
-
-- Rust: `cargo test` at the workspace root (covers the gateway, the default member; CI runs the full workspace).
-- UI: `npm run typecheck && npm test` in `crates/workshop-server/ui`.
-- Config UI: `npm run typecheck && npm run build && npm test` in `crates/gateway-config-ui/ui` (the test suite imports the built `dist/app.js`, so build first).
+- Runtime and serve paths never compile native dependencies or invoke compilers or build tools. Native compilation belongs to the Cargo build or packaging process; runtime may only verify, stage, and launch build-produced artifacts.
+- Library and serve paths never call `process::exit` or install process-global state; failures return through the spawn handshake.
+- Long-running work reports progress through `shared-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub.
+- Every public type, function, and module must have a `///` doc comment; `cargo doc` is the project documentation. Behavior changes ship with tests in the same change.
+- Non-doc comments earn their place by a non-obvious why, an invisible constraint no type or test enforces, an external-bug workaround, or a subtle ordering requirement; narrating comments are deleted on sight. Every platform or external-bug workaround carries its upstream issue URL inline in the comment that explains it (example shape: cite the tauri-apps/tauri issue URL next to the Windows drag-drop workaround). When the workaround dies, the URL says when it can be buried.
+- Each crate's own AGENTS.md binds its subtree and is read together with this root file; nested files do not restate workspace-wide rules.
+- The existing test suite stays green and intact during refactors: fix forward; never rewrite a test to make it pass.
+- After completing work (compiles + tests pass), update README.md if the public surface changed.
+- `config-ui` is a default gateway feature and always present in the desktop build. UI bundles are built by crate build scripts into `OUT_DIR` with esbuild; nothing UI-built is checked into the repo, so every build needs Node 22 and one `npm ci` per `ui/` folder. `cargo build` builds the gateway (workspace default member); `cargo build -p workshop` builds the desktop app.
+- Verify: Rust with `cargo test` at the workspace root (covers the gateway default member; CI runs the full workspace); UI with `npm run typecheck && npm test` in `crates/workshop-server/ui`; config UI with `npm run typecheck && npm run build && npm test` in `crates/gateway-config-ui/ui` (tests import built `dist/app.js`, so build first).
