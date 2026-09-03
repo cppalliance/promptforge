@@ -97,6 +97,6 @@ workspace = true
 # build turns the workshop feature on; the sample systemd unit rides in the
 # archive.
 [package.metadata.dist]
+dist = true
 features = ["workshop"]
 include = ["packaging/gateway.service"]
-
