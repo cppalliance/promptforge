@@ -115,3 +115,5 @@
 - [2026-09-02-4-evergreen-links-and-version] evergreen alias: Stable download aliases may move only by repointing to already-versioned release artifacts.
 - [2026-09-02-5-crate-taxonomy-rename] facade purity: The integrator-facing promptforge crate should expose documented re-exports and contain no implementation logic.
 - [2026-09-02-6-product-user-guides] manifest-complete extraction: A documentation run visits every source in its lens and records empty extractions as coverage evidence.
+- [2026-09-03-1-enhance-tts-endpoint-report] speech input fidelity: Preserve backend-significant inline speech tags in input; sanitizing them changes requested content.
+- [2026-09-03-1-enhance-tts-endpoint-report] speech dialect edges: Voice objects, provider SSE, response formats, and transcoding remain adapter-level compatibility details.

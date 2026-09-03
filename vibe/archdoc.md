@@ -40,7 +40,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A108. Native libraries are platform-selected, digest-verified artifacts loaded behind narrow FFI.
 - A109. Visible product versions derive from package or build metadata.
 - A110. Crate names encode product ownership, shared substrate, or build-only tooling.
-- A111. Guides are organized by audience; deterministic assembly owns navigation and exports.
+
+- A112. Stream permits live through body termination; stalled reads expire within a bounded interval.
 
 ## Principles
 
