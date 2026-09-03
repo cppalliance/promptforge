@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge prompt document parser: frontmatter, section tree, and exact lua fence splitting"
 readme = "README.md"

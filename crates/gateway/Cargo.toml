@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
 readme = "README.md"
@@ -99,5 +100,3 @@ workspace = true
 features = ["workshop"]
 include = ["packaging/gateway.service"]
 
-[package.metadata.cargo-semver-checks.lints]
-workspace = true

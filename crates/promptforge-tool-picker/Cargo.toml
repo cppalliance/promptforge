@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge tool picker: resolve a plain-English capability need to a tool from an abstract catalog"
 readme = "README.md"
@@ -44,9 +45,6 @@ test-fixtures = []
 # The crate dev-depends on itself so every test target builds the library
 # with test-fixtures enabled, without gate commands needing a --features flag.
 promptforge-tool-picker = { path = ".", features = ["test-fixtures"] }
-
-[package.metadata.docs.rs]
-all-features = true
 
 [lints]
 workspace = true

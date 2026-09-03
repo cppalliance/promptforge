@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge gateway local inference: GGUF provisioning, artifact store, and the llama-server child lifecycle"
 readme = "README.md"
@@ -40,5 +41,3 @@ tempfile.workspace = true
 [lints]
 workspace = true
 
-[package.metadata.cargo-semver-checks.lints]
-workspace = true

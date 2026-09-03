@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge gateway web-search service: the Brave Search provider client, request validation, and result post-processing"
 readme = "README.md"

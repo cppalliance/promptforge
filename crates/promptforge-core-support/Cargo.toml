@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge shared host-support primitives: untrusted guards, cooperative cancellation, run observation"
 readme = "README.md"
