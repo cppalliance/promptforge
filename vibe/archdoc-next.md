@@ -117,3 +117,5 @@
 - [2026-09-02-6-product-user-guides] manifest-complete extraction: A documentation run visits every source in its lens and records empty extractions as coverage evidence.
 - [2026-09-03-1-enhance-tts-endpoint-report] speech input fidelity: Preserve backend-significant inline speech tags in input; sanitizing them changes requested content.
 - [2026-09-03-1-enhance-tts-endpoint-report] speech dialect edges: Voice objects, provider SSE, response formats, and transcoding remain adapter-level compatibility details.
+- [2026-09-03-2-enhance-image-endpoint-spec] readiness means usable: A supervised inference child becomes ready only after a representative warm-up succeeds; pre-probe exit is failure regardless of exit code.
+- [2026-09-03-2-enhance-image-endpoint-spec] image retry ambiguity: Preserve structured upstream codes and request IDs; never blindly retry generation that may already have completed and billed.
