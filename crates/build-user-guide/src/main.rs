@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::{fs, process};
 
 const GUIDES: &[(&str, &str)] = &[
-    ("promptforge-cli", "user-guide-promptforge-cli.md"),
     (
         "gateway-config",
         "user-guide-promptforge-gateway-config.md",

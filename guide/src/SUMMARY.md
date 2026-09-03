@@ -1,7 +1,6 @@
 # Summary
 
 - [Introduction](introduction.md)
-- [Running Prompts](cli.md)
 - [Gateway Configuration](gateway-config.md)
 - [Local Models](local-models.md)
 - [Speech-to-Text](stt.md)
