@@ -6,7 +6,7 @@
 /local/
 /guide/book/
 *.env
-# Voice test fixtures, downloaded out of band (see design/).
+# Voice test fixtures, downloaded out of band (see design/design-promptforge-workshop.md).
 /crates/gateway-transcribe/tests/fixtures/
 # UI build pipeline: npm install target and the esbuild output. The build
 # scripts write the bundle to OUT_DIR; `npm run build`/`--watch` still write
