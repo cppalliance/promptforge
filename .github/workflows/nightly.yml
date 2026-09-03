@@ -113,7 +113,7 @@ jobs:
           name: ${{ env.ARTIFACT }}
           path: ${{ env.ARTIFACT }}.tar.gz
 
-  # -- Workshop: Windows, macOS ARM, macOS Intel, Linux ------------------
+  # -- Workshop: Windows, macOS ARM, macOS Intel, Linux x64 and ARM64 ----
 
   workshop:
     needs: check
@@ -138,6 +138,10 @@ jobs:
             runs-on: ubuntu-22.04
             args: ""
             suffix: linux-x64
+          - name: linux-arm
+            runs-on: ubuntu-22.04-arm
+            args: ""
+            suffix: linux-arm64
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +151,7 @@ jobs:
         uses: ./.github/actions/hf-model-cache
 
       - name: Add the Rust target
-        if: matrix.name != 'windows' && matrix.name != 'linux'
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: actions/setup-node@v4
@@ -163,10 +167,13 @@ jobs:
         run: npm ci
 
       - name: Install Tauri system packages
-        if: matrix.name == 'linux'
+        if: startsWith(matrix.name, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev
+          # xdg-utils: the AppImage bundler shells out to xdg-open, which the
+          # ARM runner images do not preinstall (the x64 image does).
+          # https://github.com/tauri-apps/tauri-action/issues/1319
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev xdg-utils
 
       # tauri.conf.json ships the gateway via bundle.externalBin, which
       # resolves binaries/promptforge-gateway-<target-triple> at bundle
@@ -180,6 +187,7 @@ jobs:
             macos-arm)   triple="aarch64-apple-darwin";    ext="" ;;
             macos-intel) triple="x86_64-apple-darwin";     ext="" ;;
             linux)       triple="x86_64-unknown-linux-gnu"; ext="" ;;
+            linux-arm)   triple="aarch64-unknown-linux-gnu"; ext="" ;;
           esac
           case "${{ matrix.args }}" in
             *--target*)

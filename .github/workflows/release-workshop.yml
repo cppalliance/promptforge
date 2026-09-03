@@ -2,10 +2,10 @@ name: Release Workshop
 run-name: PromptForge Workshop ${{ github.ref_name }}
 
 # Builds the PromptForge Workshop desktop installers for Windows, macOS
-# (ARM and Intel), and Linux on a workshop-v* tag, tests each
-# installer on a clean machine of the same kind, and publishes one GitHub
-# Release with all five installers and a SHA256SUMS file. A failed test
-# means no release.
+# (ARM and Intel), and Linux (x86_64 and ARM64) on a workshop-v* tag,
+# tests each installer on a clean machine of the same kind, and publishes
+# one GitHub Release with all seven installers and a SHA256SUMS file.
+# A failed test means no release.
 #
 # Platform code signing is still absent. Tauri updater bundles are signed
 # independently with the release minisign key.
@@ -47,6 +47,9 @@ jobs:
           - name: linux
             runs-on: ubuntu-22.04
             args: ""
+          - name: linux-arm
+            runs-on: ubuntu-22.04-arm
+            args: ""
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +60,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Add the Rust target
-        if: matrix.name != 'windows' && matrix.name != 'linux'
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: actions/setup-node@v4
@@ -79,10 +82,13 @@ jobs:
         uses: ./.github/actions/hf-model-cache
 
       - name: Install Tauri system packages
-        if: matrix.name == 'linux'
+        if: startsWith(matrix.name, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev
+          # xdg-utils: the AppImage bundler shells out to xdg-open, which the
+          # ARM runner images do not preinstall (the x64 image does).
+          # https://github.com/tauri-apps/tauri-action/issues/1319
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev xdg-utils
 
       # SIGNING (Windows): import the Authenticode certificate here once an
       # EV/OV cert exists; tauri-action picks it up from the machine store.
@@ -101,6 +107,7 @@ jobs:
             macos-arm)   triple="aarch64-apple-darwin";    ext="" ;;
             macos-intel) triple="x86_64-apple-darwin";     ext="" ;;
             linux)       triple="x86_64-unknown-linux-gnu"; ext="" ;;
+            linux-arm)   triple="aarch64-unknown-linux-gnu"; ext="" ;;
           esac
           case "${{ matrix.args }}" in
             *--target*)
@@ -178,6 +185,8 @@ jobs:
             runs-on: macos-15-intel
           - name: linux
             runs-on: ubuntu-22.04
+          - name: linux-arm
+            runs-on: ubuntu-22.04-arm
     runs-on: ${{ matrix.runs-on }}
     steps:
       - name: Download the installers
@@ -298,7 +307,7 @@ jobs:
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
 
       - name: Install and check (Linux)
-        if: matrix.name == 'linux'
+        if: startsWith(matrix.name, 'linux')
         run: |
           set -e
           sudo apt-get update
@@ -396,6 +405,7 @@ jobs:
               ("darwin-aarch64", "workshop-macos-arm", "*.app.tar.gz.sig"),
               ("darwin-x86_64", "workshop-macos-intel", "*.app.tar.gz.sig"),
               ("linux-x86_64", "workshop-linux", "*.AppImage.sig"),
+              ("linux-aarch64", "workshop-linux-arm", "*.AppImage.sig"),
           ]:
               folder = root / artifact
               signed = [
@@ -462,6 +472,8 @@ jobs:
           copy_one "workshop-macos-intel/*.dmg" PromptForge-x64.dmg
           copy_one "workshop-linux/*.deb" PromptForge.deb
           copy_one "workshop-linux/*.AppImage" PromptForge.AppImage
+          copy_one "workshop-linux-arm/*.deb" PromptForge-arm64.deb
+          copy_one "workshop-linux-arm/*.AppImage" PromptForge-arm64.AppImage
           ls -l dist/evergreen
 
       - name: Publish the stable updater pointer
