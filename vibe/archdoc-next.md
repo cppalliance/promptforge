@@ -114,3 +114,4 @@
 - [2026-09-02-3-whisper-shared-lib] signed update chain: Desktop updates require signed platform artifacts and a signed manifest before install and relaunch.
 - [2026-09-02-4-evergreen-links-and-version] evergreen alias: Stable download aliases may move only by repointing to already-versioned release artifacts.
 - [2026-09-02-5-crate-taxonomy-rename] facade purity: The integrator-facing promptforge crate should expose documented re-exports and contain no implementation logic.
+- [2026-09-02-6-product-user-guides] manifest-complete extraction: A documentation run visits every source in its lens and records empty extractions as coverage evidence.

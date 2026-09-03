@@ -17,7 +17,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Invariants
 
 - A2. The gateway is the sole holder of vendor and remote-service credentials.
-- A3. The executor installs no process-global state.
 - A5. The store confines every path to its configured backend root.
 - A6. The Lua VM boundary exposes only host-installed capabilities.
 - A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
@@ -41,6 +40,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A108. Native libraries are platform-selected, digest-verified artifacts loaded behind narrow FFI.
 - A109. Visible product versions derive from package or build metadata.
 - A110. Crate names encode product ownership, shared substrate, or build-only tooling.
+- A111. Guides are organized by audience; deterministic assembly owns navigation and exports.
 
 ## Principles
 
