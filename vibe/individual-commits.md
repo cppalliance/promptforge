@@ -170,3 +170,5 @@ a restarted CI run exposed a Windows-only clippy failure blocking the v0.2.0 rel
 
 the fix split by cause - four real lints fixed in code, twelve lints inside macro expansions handled by extending the test module's allow, since macro-generated code can't be changed. (user shared the failure and approved the push, assistant reasoned the split)
 
+## 2026-09-03 HuggingFace caching in CI
+

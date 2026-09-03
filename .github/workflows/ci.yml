@@ -9,6 +9,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# promptforge-tool-picker's build script downloads its embedding model from the
+# Hugging Face Hub. Anonymous requests are rate limited per IP, and the Actions
+# runner pool shares those IPs with every other project's CI, so authenticate
+# when we can. Empty on fork PRs (secrets are withheld); hf-hub then falls back
+# to anonymous, which is what the cache is there to make rare.
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -25,6 +33,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
 
       - uses: actions/setup-node@v4
         with:
@@ -86,6 +97,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -131,6 +145,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
 
       - name: Install Tauri system packages
         run: |
@@ -218,6 +235,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
 
       - uses: actions/setup-node@v4
         with:
