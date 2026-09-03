@@ -23,7 +23,7 @@ pub(crate) use imp::reject_profiles_directory;
 pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
 pub use stt::{RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttRole};
-pub use workshop::{WorkshopConfig, WorkshopSttConfig, WorkshopTapeConfig};
+pub use workshop::{WorkshopConfig, WorkshopSttConfig};
 
 #[cfg(test)]
 use crate::error::ConfigError;

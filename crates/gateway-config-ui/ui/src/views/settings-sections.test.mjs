@@ -1,7 +1,7 @@
 // Pins the Settings view's editable panels: the Gateway card's
 // single-config save (untouched secrets ride through as "***", a typed
 // key leaves the DOM after the save, the restart and new-key notes),
-// the Workshop Enable flow with STT/tape subsections, dominion cards
+// the Workshop Enable flow with the STT subsection, dominion cards
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
 // focused draft), endpoint cards (Change-reveal secret, remote-only
 // dominion options), the Storage save, the Tools Enable flow, the
@@ -149,20 +149,12 @@ test("Workshop exposes STT capture tuning without legacy model paths", async () 
   assert.equal(root.querySelector("[data-key='stt.interim_model']"), null);
   assert.equal(root.querySelector("[data-key='stt.final_source']"), null);
 
-  root.querySelector(".add-tape").click();
-  await settle();
-  assert.equal(
-    root.querySelector(".field-row[data-key='tape.path'] input").value,
-    "tape.jsonl",
-  );
-
   root.querySelector(".card-save").click();
   await settle();
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
   assert.equal(bodies[0].workshop.bind, "127.0.0.1:7910");
   assert.equal(bodies[0].workshop.stt.window_seconds, 15);
-  assert.equal(bodies[0].workshop.tape.path, "tape.jsonl");
   assert.equal(
     bodies[0].server.bind,
     "127.0.0.1:8081",

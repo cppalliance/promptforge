@@ -157,7 +157,7 @@ function configUiUrl(bind: string): string {
 
 /** The `[workshop]` defaults the Enable button seeds. */
 function workshopDefaults(): EntryData {
-  return { bind: "127.0.0.1:7910", open_browser: false, stt: null, tape: null };
+  return { bind: "127.0.0.1:7910", open_browser: false, stt: null };
 }
 
 /** The `[workshop.stt]` capture defaults, mirroring the config crate. */
@@ -1028,22 +1028,13 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         },
       ]),
       restoreRecommendedButton(),
-      workshopSubsection(card, "tape", "Tape", () => ({ path: "tape.jsonl" }), [
-        {
-          path: "tape.path",
-          label: "Tape path",
-          help: "Path of the JSONL session tape, relative to the boot config directory.",
-          type: "input",
-          fallback: "tape.jsonl",
-        },
-      ]),
       restartNote(),
       saveButton(card, () => saveGlobalCard(card, "workshop")),
     );
     panel.append(box);
   }
 
-  /** A collapsible `[workshop.stt]` or `[workshop.tape]` subsection. */
+  /** A collapsible `[workshop.stt]` subsection. */
   function workshopSubsection(
     card: Card,
     key: string,
