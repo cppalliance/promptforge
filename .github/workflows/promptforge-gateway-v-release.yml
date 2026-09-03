@@ -42,7 +42,7 @@ on:
   pull_request:
   push:
     tags:
-      - 'promptforge-gateway-v**[0-9]+.[0-9]+.[0-9]+*'
+      - 'gateway-v**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
@@ -134,7 +134,7 @@ jobs:
       - name: "Install UI dependencies"
         run: "npm ci --prefix crates/promptforge-workshop-server/ui"
       - name: "Install config UI dependencies"
-        run: "npm ci --prefix crates/promptforge-gateway-config-ui/ui"
+        run: "npm ci --prefix crates/gateway-config-ui/ui"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

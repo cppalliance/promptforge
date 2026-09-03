@@ -14,7 +14,7 @@ on:
     branches: [master]
     paths:
       - ".github/workflows/whisper-lib.yml"
-      - "crates/whisper-ffi/**"
+      - "crates/gateway-whisper-ffi/**"
 
 permissions:
   contents: read

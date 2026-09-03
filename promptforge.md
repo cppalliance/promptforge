@@ -6,9 +6,9 @@ Load this file to write and run PromptForge prompts. The repo root is `c:\Users\
 
 When the user says `promptforge <name> [input]`:
 
-1. **Gateway.** Check terminals for a running `promptforge-gateway`. If absent, start one in a background terminal from the repo root:
+1. **Gateway.** Check terminals for a running `gateway`. If absent, start one in a background terminal from the repo root:
    ```
-   cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main
+   cargo run -p gateway -- serve local/gateway.toml --profile main
    ```
    Wait for the line containing "serving" before proceeding.
 2. **Run.** From the repo root, call the CLI against the prompt file under `prompts/`:
@@ -28,7 +28,7 @@ Secrets live in name-matched `.env` files next to their `.toml` configs in `loca
 
 | Component | Command | Env file | Default bind |
 |---|---|---|---|
-| Gateway | `cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main` | `local/profiles/main.env`, then `local/gateway.env` (process env wins) | `127.0.0.1:8081` |
+| Gateway | `cargo run -p gateway -- serve local/gateway.toml --profile main` | `local/profiles/main.env`, then `local/gateway.env` (process env wins) | `127.0.0.1:8081` |
 
 ## `local/gateway.toml` (gateway config)
 

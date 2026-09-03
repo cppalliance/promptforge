@@ -55,4 +55,4 @@ No content hashes in asset filenames and no cache headers: the workshop UI is a 
 
 ## Transcription boundary
 
-The gateway owns STT through `promptforge-stt`: artifact provisioning, engine construction and teardown, the `/stt` WebSocket, and OpenAI multipart transcription all stay outside this crate. This crate supplies the Workshop listener, status bus, and cross-site guard that the gateway-owned STT routes attach to through `spawn_with_routes`. It never depends on `promptforge-transcribe` or holds whisper model state.
+The gateway owns STT through `gateway-stt`: artifact provisioning, engine construction and teardown, the `/stt` WebSocket, and OpenAI multipart transcription all stay outside this crate. This crate supplies the Workshop listener, status bus, and cross-site guard that the gateway-owned STT routes attach to through `spawn_with_routes`. It never depends on `gateway-transcribe` or holds whisper model state.

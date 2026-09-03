@@ -1,0 +1,19 @@
+[package]
+name = "gateway-loopback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway loopback wall: the one shared middleware refusing non-loopback peers on the config surface"
+
+[dependencies]
+axum.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true

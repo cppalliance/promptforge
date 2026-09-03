@@ -1,0 +1,29 @@
+[package]
+name = "gateway-config-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway config UI: embedded SPA assets and the shared loopback middleware, mounted by the gateway at /config"
+
+[dependencies]
+axum.workspace = true
+# The shared loopback wall; defined in its own always-on crate so headless
+# gateway builds carry the same check without this crate's asset machinery.
+gateway-loopback.workspace = true
+rust-embed.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+tower.workspace = true
+
+# The build script bundles the UI with esbuild into OUT_DIR through the
+# shared helper; nothing UI-built lands in the repository.
+[build-dependencies]
+ui-build = { path = "../ui-build" }
+
+[lints]
+workspace = true

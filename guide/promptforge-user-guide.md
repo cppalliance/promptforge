@@ -794,7 +794,7 @@ PromptForge Gateway is a local model-serving gateway. It serves your prompts and
 
 ### What the Gateway Is
 
-The gateway is one binary, `promptforge-gateway`. It routes OpenAI-shaped chat completion requests to a backend. You run it in the foreground and it serves until you stop it.
+The gateway is one binary, `gateway`. It routes OpenAI-shaped chat completion requests to a backend. You run it in the foreground and it serves until you stop it.
 
 Every client addresses a model by the public `name` you gave it in `gateway.toml`. The gateway resolves that name to a configured endpoint. It rewrites the name to the endpoint's upstream model alias before it calls the provider. Your clients never learn the upstream alias.
 
@@ -809,7 +809,7 @@ Named profiles select which models the gateway serves. You switch the active pro
 Start the gateway with one command:
 
 ````bash
-promptforge-gateway serve gateway.toml --profile main
+gateway serve gateway.toml --profile main
 ````
 
 `serve` is the only subcommand. Boot requires two things: a config path and a profile name.
@@ -834,7 +834,7 @@ The `[server]` section sets the listener address and the shared bearer key. Both
 
 Once serving, a log line announces the bound address. Press Ctrl-C to shut down gracefully. The process exits 0 on success and non-zero otherwise. Failures print a chain of `caused by:` lines so you see the root cause. Startup failures are classified into six named categories: Config, Provisioning, Bind, Thread, Serve, and Workshop. You can tell a bad config file from a port conflict without reading internals.
 
-Run `promptforge-gateway -h` to print usage and exit. Unknown flags, unknown subcommands, and a missing `serve` subcommand are usage errors printed to stderr with the full usage text.
+Run `gateway -h` to print usage and exit. Unknown flags, unknown subcommands, and a missing `serve` subcommand are usage errors printed to stderr with the full usage text.
 
 ### Inference Endpoints
 

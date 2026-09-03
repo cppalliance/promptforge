@@ -32,14 +32,14 @@ jobs:
       - name: Install from the archive
         working-directory: target/distrib
         run: |
-          tar -xf promptforge-gateway-x86_64-unknown-linux-gnu.tar.xz
-          sudo install -m 755 promptforge-gateway-x86_64-unknown-linux-gnu/promptforge-gateway /usr/local/bin/promptforge-gateway
+          tar -xf gateway-x86_64-unknown-linux-gnu.tar.xz
+          sudo install -m 755 gateway-x86_64-unknown-linux-gnu/gateway /usr/local/bin/gateway
 
       - name: Version check
         run: |
           tag="$(jq -r .announcement_tag <<<"$PLAN")"
-          version="${tag#promptforge-gateway-v}"
-          output="$(promptforge-gateway --version)"
+          version="${tag#gateway-v}"
+          output="$(gateway --version)"
           echo "$output"
           grep -F "$version" <<<"$output"
 
@@ -47,7 +47,7 @@ jobs:
         run: |
           workdir="$(mktemp -d)"
           printf 'config-version = 2\n[server]\nbind = "127.0.0.1:8081"\napi_key = "test-key"\n\n[[profile]]\nname = "main"\nmodels = []\n' > "$workdir/gateway.toml"
-          promptforge-gateway serve "$workdir/gateway.toml" --profile main &
+          gateway serve "$workdir/gateway.toml" --profile main &
           server_pid=$!
           trap 'kill $server_pid 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do

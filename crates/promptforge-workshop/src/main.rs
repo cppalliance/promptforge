@@ -36,7 +36,7 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use promptforge_gateway::{GatewayHandle, ProfileName, ServeOptions};
+use gateway::{GatewayHandle, ProfileName, ServeOptions};
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt as _;
 
@@ -166,7 +166,7 @@ fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
     };
     let profile =
         ProfileName::parse(discover::DEFAULT_PROFILE).context("parse the default profile name")?;
-    let gateway = promptforge_gateway::spawn(&ServeOptions::new(config_path, profile))
+    let gateway = gateway::spawn(&ServeOptions::new(config_path, profile))
         .context("start the merged gateway")?;
     match workshop_url(&gateway).and_then(|url| {
         health::wait_for_health(&url, HEALTH_TIMEOUT)

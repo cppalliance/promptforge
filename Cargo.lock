@@ -1959,6 +1959,192 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "dotenvy",
+ "futures-util",
+ "gateway-config",
+ "gateway-config-ui",
+ "gateway-local",
+ "gateway-loopback",
+ "gateway-protocol",
+ "gateway-routing",
+ "gateway-stt",
+ "gateway-web-search",
+ "indicatif",
+ "nvml-wrapper",
+ "open",
+ "png 0.18.1",
+ "promptforge-core",
+ "promptforge-progress",
+ "promptforge-workshop-server",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml 0.8.2",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "gateway-config"
+version = "0.2.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml 0.8.2",
+ "url",
+]
+
+[[package]]
+name = "gateway-config-ui"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "gateway-loopback",
+ "rust-embed",
+ "tempfile",
+ "tokio",
+ "tower",
+ "ui-build",
+]
+
+[[package]]
+name = "gateway-local"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "gateway-config",
+ "gateway-protocol",
+ "gateway-routing",
+ "minijinja",
+ "minijinja-contrib",
+ "promptforge-progress",
+ "rand 0.9.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "url",
+ "zip 8.6.0",
+]
+
+[[package]]
+name = "gateway-loopback"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "gateway-protocol"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "gateway-config",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "gateway-routing"
+version = "0.2.0"
+dependencies = [
+ "gateway-config",
+ "gateway-protocol",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
+name = "gateway-stt"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "gateway-config",
+ "gateway-local",
+ "gateway-stt",
+ "gateway-transcribe",
+ "hound",
+ "promptforge-progress",
+ "promptforge-workshop-server",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+ "tracing",
+]
+
+[[package]]
+name = "gateway-transcribe"
+version = "0.2.0"
+dependencies = [
+ "gateway-transcribe",
+ "gateway-whisper-ffi",
+ "hound",
+ "promptforge-progress",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gateway-web-search"
+version = "0.2.0"
+dependencies = [
+ "gateway-config",
+ "gateway-protocol",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "gateway-whisper-ffi"
+version = "0.2.0"
+dependencies = [
+ "libloading 0.8.9",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4504,132 +4690,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-gateway"
-version = "0.2.0"
-dependencies = [
- "axum",
- "dotenvy",
- "futures-util",
- "indicatif",
- "nvml-wrapper",
- "open",
- "png 0.18.1",
- "promptforge-core",
- "promptforge-gateway-config",
- "promptforge-gateway-config-ui",
- "promptforge-gateway-local",
- "promptforge-gateway-loopback",
- "promptforge-gateway-protocol",
- "promptforge-gateway-routing",
- "promptforge-progress",
- "promptforge-stt",
- "promptforge-web-search-service",
- "promptforge-workshop-server",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "subtle",
- "sysinfo",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "toml 0.8.2",
- "tower",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
-name = "promptforge-gateway-config"
-version = "0.2.0"
-dependencies = [
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.19",
- "toml 0.8.2",
- "url",
-]
-
-[[package]]
-name = "promptforge-gateway-config-ui"
-version = "0.2.0"
-dependencies = [
- "axum",
- "promptforge-gateway-loopback",
- "rust-embed",
- "tempfile",
- "tokio",
- "tower",
- "ui-build",
-]
-
-[[package]]
-name = "promptforge-gateway-local"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "flate2",
- "minijinja",
- "minijinja-contrib",
- "promptforge-gateway-config",
- "promptforge-gateway-protocol",
- "promptforge-gateway-routing",
- "promptforge-progress",
- "rand 0.9.5",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tar",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "url",
- "zip 8.6.0",
-]
-
-[[package]]
-name = "promptforge-gateway-loopback"
-version = "0.2.0"
-dependencies = [
- "axum",
- "tokio",
- "tower",
-]
-
-[[package]]
-name = "promptforge-gateway-protocol"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "promptforge-gateway-config",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "promptforge-gateway-routing"
-version = "0.2.0"
-dependencies = [
- "promptforge-gateway-config",
- "promptforge-gateway-protocol",
- "thiserror 2.0.19",
- "tokio",
-]
-
-[[package]]
 name = "promptforge-lua"
 version = "0.2.0"
 dependencies = [
@@ -4694,30 +4754,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-stt"
-version = "0.2.0"
-dependencies = [
- "axum",
- "futures-util",
- "hound",
- "promptforge-gateway-config",
- "promptforge-gateway-local",
- "promptforge-progress",
- "promptforge-stt",
- "promptforge-transcribe",
- "promptforge-workshop-server",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tokio-tungstenite",
- "tower",
- "tracing",
-]
-
-[[package]]
 name = "promptforge-tool-picker"
 version = "0.2.0"
 dependencies = [
@@ -4747,40 +4783,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-transcribe"
-version = "0.2.0"
-dependencies = [
- "hound",
- "promptforge-progress",
- "promptforge-transcribe",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "whisper-ffi",
-]
-
-[[package]]
 name = "promptforge-web-search"
 version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
  "promptforge-tools",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "url",
-]
-
-[[package]]
-name = "promptforge-web-search-service"
-version = "0.2.0"
-dependencies = [
- "promptforge-gateway-config",
- "promptforge-gateway-protocol",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4816,7 +4824,7 @@ name = "promptforge-workshop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "promptforge-gateway",
+ "gateway",
  "rand 0.9.5",
  "serde_json",
  "tauri",
@@ -7802,14 +7810,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "whisper-ffi"
-version = "0.2.0"
-dependencies = [
- "libloading 0.8.9",
- "thiserror 2.0.19",
 ]
 
 [[package]]

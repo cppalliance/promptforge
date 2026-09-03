@@ -4,7 +4,7 @@ name: llama-cuda-blackwell
 # Windows computer (no GPU needed to compile), smoke-tests it on our
 # self-hosted GPU computer, and publishes a GitHub Release the gateway
 # downloads at run time (the `cuda-blackwell` row in
-# crates/promptforge-gateway-local/src/artifacts/assets.rs).
+# crates/gateway-local/src/artifacts/assets.rs).
 
 on:
   workflow_dispatch:
@@ -110,7 +110,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Download the build artifact

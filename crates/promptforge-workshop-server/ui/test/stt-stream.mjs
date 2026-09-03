@@ -34,7 +34,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-stt-stream-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "gateway-stt-stream-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, setupStt, textareaSttTarget } = await import(pathToFileURL(bundlePath).href);
 

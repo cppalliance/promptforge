@@ -17,7 +17,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 # config-ui is a gateway default already; naming it here pins the desktop
 # exe to carry the config UI even if the default edge is ever severed.
-promptforge-gateway = { workspace = true, features = ["workshop", "config-ui"] }
+gateway = { workspace = true, features = ["workshop", "config-ui"] }
 rand.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
