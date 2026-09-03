@@ -6,7 +6,7 @@
 
 A runtime that executes AI prompt pipelines defined in a single markdown file. The markdown is the program, the model is the CPU.
 
-![Download the Workshop](images/download-workshop.png)
+![Gloves and sparks](images/banner-04.png)
 
 ## Downloads
 
@@ -18,8 +18,6 @@ Get the Workshop, the desktop app for writing and running prompts:
 - **Linux**: [PromptForge.AppImage](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge.AppImage) or [PromptForge.deb](https://github.com/cppalliance/promptforge/releases/download/workshop-latest/PromptForge.deb)
 
 These links always point at the latest tested release. Running a headless gateway instead? Grab a [nightly build](https://github.com/cppalliance/promptforge/releases/tag/nightly) or build from source below. Embedding the engine in your own program? The [guide](https://cppalliance.github.io/promptforge/) covers every audience.
-
-![Workshop](images/banner-01.png)
 
 ## What you get
 
@@ -78,7 +76,7 @@ npm ci --prefix crates/gateway-config-ui/ui
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 
-![Gloves and sparks](images/banner-04.png)
+![Robot internals](images/banner-05.png)
 
 ## How it works
 
@@ -94,8 +92,6 @@ flowchart LR
   Model --> Store[Store artifacts]
   Store --> Out[Run result]
 ```
-
-![Robot internals](images/banner-05.png)
 
 ## Documentation
 
