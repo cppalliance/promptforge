@@ -166,3 +166,7 @@ a public function's doc comment linked a private item, which CI denies; backtick
 
 a restarted CI run exposed a Windows-only clippy failure blocking the v0.2.0 release; safety comments document the unsafe COM call invariants, satisfying the lint gate without touching working interop code. (assistant reasoned, autonomous CI fix)
 
+## 2026-09-02 Fix clippy warnings failing CI
+
+the fix split by cause - four real lints fixed in code, twelve lints inside macro expansions handled by extending the test module's allow, since macro-generated code can't be changed. (user shared the failure and approved the push, assistant reasoned the split)
+

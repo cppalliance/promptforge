@@ -8,6 +8,7 @@
 //! files. Neither owned file is hand-edited.
 
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -97,7 +98,11 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
         let entry =
             entry.map_err(|e| AssembleError(format!("cannot read {}: {e}", set_dir.display())))?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(".md") && name != "index.md" {
+        if Path::new(&name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            && name != "index.md"
+        {
             names.push(name);
         }
     }
@@ -128,7 +133,7 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
 fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     let mut out = format!("# {part_title}\n");
     for chapter in chapters {
-        out.push_str(&format!("\n- [{}]({})", chapter.title, chapter.file_name));
+        let _ = write!(out, "\n- [{}]({})", chapter.title, chapter.file_name);
     }
     out.push('\n');
     out
@@ -139,14 +144,9 @@ fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
 fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
     let mut out = String::from("# Summary\n\n- [Introduction](introduction.md)\n");
     for (set, part_title, chapters) in parts {
-        out.push_str(&format!(
-            "\n# {part_title}\n\n- [Overview]({set}/index.md)\n"
-        ));
+        let _ = write!(out, "\n# {part_title}\n\n- [Overview]({set}/index.md)\n");
         for chapter in chapters {
-            out.push_str(&format!(
-                "- [{}]({}/{})\n",
-                chapter.title, set, chapter.file_name
-            ));
+            let _ = writeln!(out, "- [{}]({}/{})", chapter.title, set, chapter.file_name);
         }
     }
     out

@@ -200,7 +200,12 @@ fn dropped_paths(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Vec<PathBuf
 
 // The clippy allows cover code the #[implement] macro expands in tests.
 #[cfg(test)]
-#[allow(clippy::inline_always, clippy::ref_as_ptr)]
+#[allow(
+    clippy::inline_always,
+    clippy::ref_as_ptr,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr
+)]
 mod tests {
     use std::path::PathBuf;
 
