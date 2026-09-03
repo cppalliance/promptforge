@@ -137,6 +137,7 @@ flowchart LR
 
 | Crate | Description | crates.io |
 | --- | --- | --- |
+| [promptforge](crates/promptforge) | Integrator facade: `pipeline::run` for document prompts, `agent::run` for agent programs | not published |
 | [promptforge-core](crates/promptforge-core) | Parser, executor, Lua runtime, store, gateway client | [![Crates.io](https://img.shields.io/crates/v/promptforge-core.svg)](https://crates.io/crates/promptforge-core) |
 | [promptforge-core-support](crates/promptforge-core-support) | Shared host-support primitives: untrusted guards, cooperative cancellation, run observation | [![Crates.io](https://img.shields.io/crates/v/promptforge-core-support.svg)](https://crates.io/crates/promptforge-core-support) |
 | [promptforge-cli](crates/promptforge-cli) | `promptforge run` command-line binary | [![Crates.io](https://img.shields.io/crates/v/promptforge-cli.svg)](https://crates.io/crates/promptforge-cli) |

@@ -1,0 +1,20 @@
+[package]
+name = "promptforge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge integrator facade: pipeline::run for document prompts, agent::run for agent programs"
+readme = "README.md"
+keywords = ["promptforge", "prompt", "llm", "agent", "ai"]
+categories = ["development-tools"]
+documentation = "https://cppalliance.github.io/promptforge/"
+
+[dependencies]
+promptforge-agent.workspace = true
+promptforge-core.workspace = true
+
+[lints]
+workspace = true
