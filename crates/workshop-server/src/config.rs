@@ -143,7 +143,7 @@ pub struct ServerConfig {
     /// Directory holding the server's persistent state: agent session
     /// event logs live under `state_dir/sessions/`, and the per-profile
     /// model memory and boot orphan sweep anchor here. Defaults to the
-    /// config file's own directory ([`Config::parse`] anchors the empty
+    /// config file's own directory (`Config::parse` anchors the empty
     /// default there).
     pub state_dir: PathBuf,
 }
@@ -163,7 +163,7 @@ impl Default for ServerConfig {
 #[serde(default)]
 pub struct AgentsConfig {
     /// Directory whose `.lua` files are the launchable agent programs.
-    /// Defaults to `agents/` beside the config file ([`Config::parse`]
+    /// Defaults to `agents/` beside the config file (`Config::parse`
     /// anchors the empty default there). A missing directory means no
     /// agents are offered - a state, not an error.
     pub path: PathBuf,
