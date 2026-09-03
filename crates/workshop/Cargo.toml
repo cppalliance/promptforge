@@ -18,9 +18,10 @@ anyhow.workspace = true
 # config-ui is a gateway default already; naming it here pins the desktop
 # exe to carry the config UI even if the default edge is ever severed.
 gateway = { workspace = true, features = ["workshop", "config-ui"] }
+percent-encoding.workspace = true
 rand.workspace = true
 serde_json.workspace = true
-tauri.workspace = true
+tauri = { workspace = true, features = ["webview-data-url"] }
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-process.workspace = true

@@ -138,27 +138,129 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The setup hook: boots the gateway on a background thread, waits for the
-/// hosted workshop's health, and opens the window on it. The setup hook
-/// returns immediately so Tauri's event loop runs and pumps OS events during
-/// the gateway boot and any initial model provisioning downloads.
+/// The embedded startup splash document displayed while the in-process gateway
+/// boots and provisions its initial model assets.
+const LOADING_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge</title>
+<style>
+  :root {
+    --bg: #121214;
+    --text: #e4e4e7;
+    --text-muted: #71717a;
+    --accent: #22c55e;
+    --track: #27272a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 380px;
+    width: 100%;
+    padding: 32px 24px;
+    text-align: center;
+  }
+  .logo {
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    margin-bottom: 28px;
+    color: #ffffff;
+  }
+  .progress-track {
+    width: 100%;
+    height: 4px;
+    background: var(--track);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 18px;
+    position: relative;
+  }
+  .progress-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    background: var(--accent);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+    border-radius: 2px;
+    animation: indeterminate 1.8s infinite ease-in-out;
+  }
+  @keyframes indeterminate {
+    0% { left: -40%; width: 40%; }
+    50% { left: 20%; width: 60%; }
+    100% { left: 100%; width: 40%; }
+  }
+  .status {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">PromptForge</div>
+    <div class="progress-track">
+      <div class="progress-bar"></div>
+    </div>
+    <div class="status">Starting PromptForge gateway & initializing models...</div>
+  </div>
+</body>
+</html>"#;
+
+/// Formats the embedded loading HTML into a data URL for initial webview presentation.
+fn loading_url() -> anyhow::Result<url::Url> {
+    let encoded = percent_encoding::utf8_percent_encode(
+        LOADING_HTML,
+        percent_encoding::NON_ALPHANUMERIC,
+    );
+    let raw = format!("data:text/html;charset=utf-8,{encoded}");
+    url::Url::parse(&raw).context("parse the splash screen data URL")
+}
+
+/// The shared origin slot holding the server origin once known, for navigation filtering.
+type OriginSlot = std::sync::Arc<Mutex<Option<url::Origin>>>;
+
+/// The setup hook: creates the application window immediately with the startup
+/// splash screen, then boots the gateway on a background thread. Once the gateway's
+/// health probe answers, the window navigates to the hosted workshop URL.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let origin_slot = create_window(app)?;
     let app_handle = app.handle().clone();
     std::thread::Builder::new()
         .name("workshop-boot".to_string())
         .spawn(move || match boot() {
             Ok((gateway, url)) => {
                 app_handle.manage(GatewaySlot::new(Some(gateway)));
+                let server_origin = url.origin();
+                *origin_slot
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(server_origin);
                 let handle_for_window = app_handle.clone();
-                let url_for_window = url;
                 let _ = app_handle.run_on_main_thread(move || {
-                    if let Err(error) = open_window(&handle_for_window, &url_for_window) {
-                        eprintln!("could not open window: {error:?}");
-                        show_boot_error(
-                            &handle_for_window,
-                            &format!("Could not open application window: {error}"),
-                        );
-                        handle_for_window.exit(1);
+                    if let Some(window) = handle_for_window.get_webview_window("main") {
+                        if let Err(error) = window.navigate(url) {
+                            eprintln!("could not navigate to workshop: {error:?}");
+                        }
+                        let _ = window.set_focus();
                     }
                 });
             }
@@ -216,25 +318,46 @@ fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
     }
 }
 
-/// Creates the workshop window on `url`: hidden while built so the
-/// window-state restore never flashes, undecorated on Windows where the
-/// custom HTML title bar replaces the native frame (macOS and Linux keep
-/// their decorated windows), then shown.
-fn open_window(app: &tauri::AppHandle, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {
-    let server_origin = url.origin();
-    let opener = app.clone();
-    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
+/// Creates the workshop window immediately on launch: displays the startup
+/// splash screen while built so the window-state restore never flashes, undecorated
+/// on Windows where the custom HTML title bar replaces the native frame (macOS and
+/// Linux keep their decorated windows), then shown and focused.
+fn create_window(app: &mut tauri::App) -> Result<OriginSlot, Box<dyn std::error::Error>> {
+    let initial_url = loading_url()?;
+    let origin_slot: OriginSlot = std::sync::Arc::new(Mutex::new(None));
+    let nav_slot = std::sync::Arc::clone(&origin_slot);
+    let opener = app.handle().clone();
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(initial_url))
         .title("PromptForge")
         .inner_size(1024.0, 768.0)
         .visible(false)
         .on_navigation(move |target| {
-            match navigation::classify_navigation(&server_origin, target.as_str()) {
-                navigation::Navigation::Allow => true,
-                navigation::Navigation::OpenExternally => {
-                    if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
-                        eprintln!("could not open {target} in the system browser: {error}");
+            let allowed_origin = nav_slot
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            match allowed_origin {
+                Some(server_origin) => {
+                    match navigation::classify_navigation(&server_origin, target.as_str()) {
+                        navigation::Navigation::Allow => true,
+                        navigation::Navigation::OpenExternally => {
+                            if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
+                                eprintln!("could not open {target} in the system browser: {error}");
+                            }
+                            false
+                        }
                     }
-                    false
+                }
+                None => {
+                    if let Ok(parsed) = url::Url::parse(target.as_str()) {
+                        if matches!(parsed.scheme(), "http" | "https") {
+                            if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
+                                eprintln!("could not open {target} in the system browser: {error}");
+                            }
+                            return false;
+                        }
+                    }
+                    true
                 }
             }
         });
@@ -264,7 +387,8 @@ fn open_window(app: &tauri::AppHandle, url: &url::Url) -> Result<(), Box<dyn std
     #[cfg(target_os = "windows")]
     window.set_decorations(false)?;
     window.show()?;
-    Ok(())
+    let _ = window.set_focus();
+    Ok(origin_slot)
 }
 
 /// The hosted workshop's URL from the gateway handle. The app compiles
