@@ -6,7 +6,7 @@ The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: 
 
 ## Quick start
 
-Create a `workshop.toml` in the current directory (see [`workshop.example.toml`](../../workshop.example.toml) at the repository root for a commented version of every field):
+Create a `workshop.toml` in the current directory. Every field is optional and the defaults are built in:
 
 ```toml
 [gateway]

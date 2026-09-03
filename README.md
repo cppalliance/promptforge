@@ -157,7 +157,6 @@ flowchart LR
 
 - [PromptForge User Guide](https://cppalliance.github.io/promptforge/) - full documentation
 - [User Guide](guide/promptforge-user-guide.md) - progressive tutorial for writing prompts
-- [design-core.md](design/design-core.md) - core design notes
 
 Build the guide locally with `mdbook build guide`.
 
