@@ -16,6 +16,10 @@ concurrency:
 
 env:
   RUSTUP_TOOLCHAIN: stable
+  # See the note in ci.yml: authenticate to the Hugging Face Hub so the
+  # embedding-model download is not subject to the shared anonymous per-IP
+  # rate limit. Empty when the secret is absent, which means anonymous.
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
 jobs:
   # Exit early when master hasn't moved since the last nightly.
@@ -57,6 +61,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,6 +92,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -135,6 +143,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
 
       - name: Add the Rust target
         if: matrix.name != 'windows' && matrix.name != 'linux'

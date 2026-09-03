@@ -1,0 +1,28 @@
+name: Hugging Face model cache
+description: >-
+  Restore the sentence-embedding model that promptforge-tool-picker's build
+  script compiles into the crate, so CI fetches it from the Hugging Face Hub
+  once per runner platform instead of once per job.
+
+runs:
+  using: composite
+  steps:
+    # hf-hub resolves its default cache relative to the home directory, which
+    # varies by platform. Pin it to the runner temp directory instead: one
+    # known path on every OS, and — importantly — outside github.workspace, so
+    # the "Clean tree" steps do not see the cache as a dirtied repository.
+    #
+    # Set here rather than in a job-level `env:` block because the `runner`
+    # context is not available to `env` at workflow or job level, only to steps.
+    - name: Point HF_HUB_CACHE at the runner temp directory
+      shell: bash
+      run: echo "HF_HUB_CACHE=$RUNNER_TEMP/hf-cache" >> "$GITHUB_ENV"
+
+    - name: Restore the embedding model
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/hf-cache
+        # Keyed on build.rs, which holds the pinned REVISION. Bumping the model
+        # there invalidates this key automatically, so the two never drift.
+        # An unrelated edit to build.rs costs one re-download, which is cheap.
+        key: hf-hub-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/promptforge-tool-picker/build.rs') }}
