@@ -31,7 +31,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -45,18 +45,18 @@ jobs:
       # Tauri system libraries. All gateway and STT features are pure Rust
       # now that whisper.cpp is loaded from a managed runtime artifact.
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
+        run: cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features --doc
+        run: cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server
+        run: cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server
 
       - name: Check headless gateway
         run: cargo check -p gateway --no-default-features
@@ -91,20 +91,20 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
-      # promptforge-workshop pins the gateway's config-ui feature, so its
+      # workshop pins the gateway's config-ui feature, so its
       # build script needs the config UI's node_modules.
       - name: Install config UI dependencies
         working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Clippy (workshop)
-        run: cargo clippy -p promptforge-workshop -p promptforge-workshop-server --all-targets -- -D warnings
+        run: cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings
 
       - name: Test (workshop)
-        run: cargo test --locked -p promptforge-workshop -p promptforge-workshop-server
+        run: cargo test --locked -p workshop -p workshop-server
 
       - name: Clean tree
         shell: bash
@@ -142,7 +142,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -150,7 +150,7 @@ jobs:
         run: npm ci
 
       - name: Build (workshop, Linux)
-        run: cargo build --locked -p promptforge-workshop
+        run: cargo build --locked -p workshop
 
       - name: Clean tree
         shell: bash
@@ -174,19 +174,19 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Typecheck
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm run typecheck
 
       - name: Build
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm run build
 
       - name: Test
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm test
 
       - name: Install config UI dependencies
@@ -224,7 +224,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -233,8 +233,8 @@ jobs:
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
-          cargo test --locked --workspace --exclude promptforge-workshop --exclude promptforge-workshop-server --all-features
+          cargo build --locked --workspace --exclude workshop --exclude workshop-server --all-features
+          cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features
 
   supply-chain:
     runs-on: ubuntu-latest

@@ -21,7 +21,7 @@ mod hosted {
     /// A running hosted workshop server, held by [`crate::GatewayHandle`].
     #[derive(Debug)]
     pub(crate) struct WorkshopHandle {
-        inner: promptforge_workshop_server::ServerHandle,
+        inner: workshop_server::ServerHandle,
     }
 
     impl WorkshopHandle {
@@ -37,10 +37,10 @@ mod hosted {
         pub(crate) fn shutdown(self) {
             let url = self.inner.url().to_string();
             match self.inner.shutdown() {
-                Ok(promptforge_workshop_server::Termination::Graceful) => {
+                Ok(workshop_server::Termination::Graceful) => {
                     tracing::info!("workshop at {url} stopped gracefully");
                 }
-                Ok(promptforge_workshop_server::Termination::Forced) => {
+                Ok(workshop_server::Termination::Forced) => {
                     tracing::warn!("workshop at {url} was forced down after its drain window");
                 }
                 // Termination is non-exhaustive; a future ending is still a
@@ -100,7 +100,7 @@ mod hosted {
         // duplication is harmless - each port answers with its own - but it
         // is the known blocker for the documented future option of nesting
         // the workshop under a path on the gateway listener.
-        let handle = promptforge_workshop_server::spawn_with_routes(
+        let handle = workshop_server::spawn_with_routes(
             ws_config(config.server(), workshop, config_path, bound),
             move |state| gateway_stt::stt_routes(stt, state.push()),
         )
@@ -128,19 +128,19 @@ mod hosted {
         workshop: &WorkshopConfig,
         config_path: &Path,
         bound: SocketAddr,
-    ) -> promptforge_workshop_server::Config {
+    ) -> workshop_server::Config {
         let boot_dir = config_path.parent().unwrap_or(Path::new("."));
-        let mut config = promptforge_workshop_server::Config {
-            gateway: promptforge_workshop_server::GatewayConfig {
+        let mut config = workshop_server::Config {
+            gateway: workshop_server::GatewayConfig {
                 base_url: client_url(server, bound),
                 api_key: server.api_key().expose().to_string(),
             },
-            server: promptforge_workshop_server::ServerConfig {
+            server: workshop_server::ServerConfig {
                 bind: workshop.bind().to_string(),
                 open_browser: workshop.open_browser(),
-                ..promptforge_workshop_server::ServerConfig::default()
+                ..workshop_server::ServerConfig::default()
             },
-            agents: promptforge_workshop_server::AgentsConfig::default(),
+            agents: workshop_server::AgentsConfig::default(),
         };
         // The boot config carries no keys for the workshop's state and
         // agent-program paths, so their empty defaults anchor beside the

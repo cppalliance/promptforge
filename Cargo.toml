@@ -4,7 +4,7 @@ members = ["crates/*"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
-# `cargo build -p promptforge-workshop`.
+# `cargo build -p workshop`.
 default-members = ["crates/gateway"]
 
 [workspace.package]
@@ -36,7 +36,7 @@ promptforge-tools = { path = "crates/promptforge-tools", version = "0.2.0" }
 gateway-transcribe = { path = "crates/gateway-transcribe", version = "0.2.0" }
 promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.2.0" }
 gateway-web-search = { path = "crates/gateway-web-search", version = "0.2.0" }
-promptforge-workshop-server = { path = "crates/promptforge-workshop-server", version = "0.2.0" }
+workshop-server = { path = "crates/workshop-server", version = "0.2.0" }
 gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.2.0" }
 promptforge-agent = { path = "crates/promptforge-agent", version = "0.2.0" }
 pulldown-cmark = "0.12"
@@ -118,7 +118,7 @@ nvml-wrapper = "0.12"
 open = "5"
 # Encodes PNG fixtures in the gateway's integration tests.
 png = "0.18"
-# Tauri v2 desktop framework for promptforge-workshop. tauri is pinned to the
+# Tauri v2 desktop framework for workshop. tauri is pinned to the
 # minor because `with_webview` exposes webview2-com/webkit2gtk types that may
 # shift in a Tauri minor release (the docs.rs guidance for `with_webview`).
 tauri = "~2.11"

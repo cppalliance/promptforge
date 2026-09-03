@@ -13,7 +13,7 @@ use axum::routing::get;
 use gateway_transcribe::{
     MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail,
 };
-use promptforge_workshop_server::{Activity, Push};
+use workshop_server::{Activity, Push};
 use serde::Serialize;
 use tokio::sync::watch;
 
@@ -40,7 +40,7 @@ pub fn routes(stt: SttState, push: Push) -> Router {
         .route("/stt/capability", get(capability))
         .route("/stt", get(upgrade))
         .route_layer(axum::middleware::from_fn(
-            promptforge_workshop_server::cross_site_guard,
+            workshop_server::cross_site_guard,
         ))
         .with_state(RouteState { stt, push })
 }
@@ -62,7 +62,7 @@ async fn upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !promptforge_workshop_server::origin_allowed(&headers) {
+    if !workshop_server::origin_allowed(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     ws.on_upgrade(move |socket| run_session(socket, state.stt, state.push))

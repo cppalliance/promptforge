@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use gateway_stt::{SttRuntime, SttState};
-use promptforge_workshop_server::{
+use workshop_server::{
     AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle,
 };
 use tokio::net::TcpStream;
@@ -44,7 +44,7 @@ impl TestServer {
             agents: AgentsConfig::default(),
         };
         let route_state = state;
-        let handle = promptforge_workshop_server::spawn_with_routes(config, move |app| {
+        let handle = workshop_server::spawn_with_routes(config, move |app| {
             gateway_stt::stt_routes(route_state, app.push())
         })
         .expect("workshop server spawns with STT routes");

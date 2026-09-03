@@ -65,7 +65,7 @@ enum StartupRepr {
     Serve(#[source] ServeReprSource),
     #[cfg(feature = "workshop")]
     #[error("workshop startup error")]
-    Workshop(#[source] promptforge_workshop_server::SpawnError),
+    Workshop(#[source] workshop_server::SpawnError),
 }
 
 impl StartupError {
@@ -104,7 +104,7 @@ impl StartupError {
     }
 
     #[cfg(feature = "workshop")]
-    pub(crate) fn workshop(err: promptforge_workshop_server::SpawnError) -> Self {
+    pub(crate) fn workshop(err: workshop_server::SpawnError) -> Self {
         StartupError(StartupRepr::Workshop(err))
     }
 }

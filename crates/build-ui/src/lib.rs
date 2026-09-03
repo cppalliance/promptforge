@@ -1,7 +1,7 @@
 //! Shared build-script helper that bundles a crate's `ui/` TypeScript
 //! sources with esbuild into the Cargo build output directory.
 //!
-//! Both UI crates (`promptforge-workshop-server` and
+//! Both UI crates (`workshop-server` and
 //! `gateway-config-ui`) drive their entire UI build through
 //! [`build`]: the bundle and copies of the static files land in
 //! `$OUT_DIR/ui-dist/`, which git never tracks, so no build step can dirty

@@ -45,7 +45,7 @@ gateway-routing.workspace = true
 shared-progress = { workspace = true, features = ["serde"] }
 gateway-stt = { workspace = true, optional = true }
 gateway-web-search = { workspace = true, optional = true }
-promptforge-workshop-server = { workspace = true, optional = true }
+workshop-server = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -75,7 +75,7 @@ config-ui = ["dep:gateway-config-ui"]
 # Host the workshop UI server on a second loopback listener. The default
 # stays empty so headless gateway builds never pull speech-to-text or the
 # Node UI build into the graph.
-workshop = ["dep:gateway-stt", "dep:promptforge-workshop-server", "dep:open"]
+workshop = ["dep:gateway-stt", "dep:workshop-server", "dep:open"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.

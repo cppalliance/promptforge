@@ -62,7 +62,7 @@ jobs:
           node-version: 22
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/promptforge-workshop-server/ui
+          npm ci --prefix crates/workshop-server/ui
           npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
         run: cargo build --release --locked -p gateway --features workshop
@@ -91,7 +91,7 @@ jobs:
           node-version: 22
       - name: Install UI dependencies
         run: |
-          npm ci --prefix crates/promptforge-workshop-server/ui
+          npm ci --prefix crates/workshop-server/ui
           npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
         run: cargo build --release --locked -p gateway --features workshop
@@ -145,7 +145,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -161,7 +161,7 @@ jobs:
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         with:
-          projectPath: crates/promptforge-workshop
+          projectPath: crates/workshop
           args: ${{ matrix.args }} --config tauri.nightly.conf.json
 
       - name: Upload the installers

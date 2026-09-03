@@ -1,0 +1,64 @@
+[package]
+name = "workshop-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge Workshop HTTP server: serves the workshop API to the desktop shell"
+
+[[bin]]
+name = "workshop-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+dunce.workspace = true
+futures-util.workspace = true
+open.workspace = true
+percent-encoding.workspace = true
+promptforge-core-support.workspace = true
+promptforge-model-client.workspace = true
+shared-progress.workspace = true
+promptforge-store.workspace = true
+promptforge-tools.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+promptforge-agent.workspace = true
+
+[features]
+default = []
+test-fixtures = []
+
+[dev-dependencies]
+workshop-server = { path = ".", features = ["test-fixtures"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite.workspace = true
+tower.workspace = true
+
+# The build script bundles the UI with esbuild into OUT_DIR through the
+# shared helper; nothing UI-built lands in the repository.
+[build-dependencies]
+build-ui = { path = "../build-ui" }
+
+[lints]
+workspace = true
+
+# Not released through cargo-dist; the gateway is the only disted package
+# (see dist-workspace.toml).
+[package.metadata.dist]
+dist = false
