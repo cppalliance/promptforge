@@ -128,11 +128,11 @@ use crate::wire::{
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
-use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
 #[cfg(feature = "workshop")]
 use gateway_stt::{SttRuntime, SttState};
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
+use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -1261,12 +1261,12 @@ async fn commit_profile_state(
     match persistence {
         StatePersistence::None => Ok(()),
         StatePersistence::Write => persist_active_profile(state, name).await,
-        StatePersistence::Promote(state_path) => tokio::task::spawn_blocking(move || {
-            gateway_config::promote_shadow(&state_path)
-        })
-        .await
-        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
-        .map_err(config_write::config_write_error),
+        StatePersistence::Promote(state_path) => {
+            tokio::task::spawn_blocking(move || gateway_config::promote_shadow(&state_path))
+                .await
+                .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+                .map_err(config_write::config_write_error)
+        }
     }
 }
 
@@ -1277,12 +1277,10 @@ async fn persist_active_profile(state: &AppState, name: &ProfileName) -> Result<
     };
     let config_path = config.path.clone();
     let name = name.clone();
-    tokio::task::spawn_blocking(move || {
-        gateway_config::persist_profile_state(&config_path, &name)
-    })
-    .await
-    .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
-    .map_err(config_write::config_write_error)
+    tokio::task::spawn_blocking(move || gateway_config::persist_profile_state(&config_path, &name))
+        .await
+        .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
+        .map_err(config_write::config_write_error)
 }
 
 /// Builds the switch-profile SSE response: the hub's event stream filtered

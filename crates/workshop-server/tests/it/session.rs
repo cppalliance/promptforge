@@ -27,9 +27,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt as _;
 use tokio_tungstenite::tungstenite;
 
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router,
-};
+use workshop_server::{AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router};
 
 const CATALOG: &str =
     r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;

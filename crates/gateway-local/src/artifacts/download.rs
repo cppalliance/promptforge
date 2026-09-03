@@ -5,10 +5,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
-use shared_progress::ProgressHandle;
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use sha2::{Digest, Sha256};
+use shared_progress::ProgressHandle;
 
 use super::Result;
 use super::confine::source_marker_path;

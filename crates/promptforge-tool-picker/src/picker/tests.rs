@@ -2,8 +2,8 @@
 
 use std::sync::{Arc, OnceLock};
 
-use shared_progress::{EventState, ProgressHub};
 use serde_json::json;
+use shared_progress::{EventState, ProgressHub};
 
 use super::ToolPicker;
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};

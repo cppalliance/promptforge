@@ -4,8 +4,8 @@
 use std::num::NonZeroU32;
 
 use futures_util::Stream;
-use shared_progress::ProgressEvent;
 use serde::Deserialize;
+use shared_progress::ProgressEvent;
 
 use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::Error;

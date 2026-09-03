@@ -5,8 +5,8 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use gateway_config::{Config, SttRole, WorkshopSttConfig};
 use gateway_local::artifacts::ArtifactStore;
-use shared_progress::ProgressHandle;
 use gateway_transcribe::{EngineConfig, SttEngine, SttSlot};
+use shared_progress::ProgressHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoadedModelRole {

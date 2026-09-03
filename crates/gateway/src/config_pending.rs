@@ -192,9 +192,7 @@ pub(crate) fn relative_name(file: &Path, root: Option<&Path>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gateway_config::{
-        Config, ProfileSelection, profile_state_path, shadow_path, write_shadow,
-    };
+    use gateway_config::{Config, ProfileSelection, profile_state_path, shadow_path, write_shadow};
 
     use super::*;
     use crate::test_support::{AdminPaths, serve_with_paths};

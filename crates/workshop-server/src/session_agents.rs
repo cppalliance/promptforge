@@ -35,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 use promptforge_core_support::cancel::CancelHandle;
 use promptforge_core_support::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
 use promptforge_core_support::observe::{Observation, Observer};
@@ -45,7 +46,6 @@ use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, Th
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
 use tokio::sync::broadcast;
-use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;

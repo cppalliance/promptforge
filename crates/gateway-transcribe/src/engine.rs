@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use shared_progress::ProgressHandle;
 use gateway_whisper_ffi::WhisperLibrary;
+use shared_progress::ProgressHandle;
 
 use crate::SAMPLE_RATE;
 use crate::error::TranscribeError;

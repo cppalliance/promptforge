@@ -159,7 +159,8 @@ pub mod fixtures {
     /// Panics when the fixture is absent or the platform loader rejects it.
     #[must_use]
     pub fn require_loaded_library() -> gateway_whisper_ffi::WhisperLibrary {
-        gateway_whisper_ffi::WhisperLibrary::load(&require_library()).expect("whisper test library loads")
+        gateway_whisper_ffi::WhisperLibrary::load(&require_library())
+            .expect("whisper test library loads")
     }
 
     /// Loads the packaged test library and tiny-model context.
@@ -167,7 +168,10 @@ pub mod fixtures {
     /// # Panics
     /// Panics when either fixture is absent or whisper rejects the model.
     #[must_use]
-    pub fn require_context() -> (gateway_whisper_ffi::WhisperLibrary, gateway_whisper_ffi::WhisperContext) {
+    pub fn require_context() -> (
+        gateway_whisper_ffi::WhisperLibrary,
+        gateway_whisper_ffi::WhisperContext,
+    ) {
         let library = require_loaded_library();
         let context = gateway_whisper_ffi::WhisperContext::new(&library, &require_model())
             .expect("fixture model loads");

@@ -691,9 +691,7 @@ fn load_startup_with_environment(
         .map(|profile| ProfileName::parse(profile.name()))
         .transpose()
         .map_err(|error| {
-            StartupError::config(gateway_config::ConfigError::validation(
-                error.to_string(),
-            ))
+            StartupError::config(gateway_config::ConfigError::validation(error.to_string()))
         })?;
     Ok((
         config,
