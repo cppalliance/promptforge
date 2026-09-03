@@ -124,9 +124,9 @@ pub(crate) struct SessionHost {
 /// Typed and construction-phased: everything a launch needs is captured
 /// when [`AppState`](crate::AppState) builds, and the only mutable state
 /// is the session map itself. Sessions survive socket disconnect -
-/// sockets attach and detach through [`socket`] - which is this module's
-/// documented carve-out from the crate's no-session-registry socket
-/// rule.
+/// sockets attach and detach through the `socket` module - which is this
+/// module's documented carve-out from the crate's no-session-registry
+/// socket rule.
 #[derive(Clone)]
 pub struct AgentSessions {
     inner: Arc<Inner>,
