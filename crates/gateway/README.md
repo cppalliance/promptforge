@@ -133,7 +133,7 @@ entries above; the active profile enables them by catalog name.
 | `interval_ms` | `500` | Milliseconds between interim passes while a take is recording. |
 | `vocabulary` | `[]` | Domain terms whisper is biased toward. Empty disables biasing. |
 
-`[workshop.tape]` (optional) is accepted for compatibility and ignored: the workshop no longer records a session tape. Agent sessions persist their event logs as JSONL under the workshop's state directory (`sessions/` beside the boot config).
+Agent sessions persist their event logs as JSONL under the workshop's state directory (`sessions/` beside the boot config).
 
 ## Local model companions
 

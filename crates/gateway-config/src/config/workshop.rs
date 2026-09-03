@@ -8,7 +8,6 @@
 //! drift.
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,10 +18,6 @@ const DEFAULT_STT_WINDOW_SECONDS: u64 = 15;
 /// Default interval between interim transcriptions, in milliseconds.
 /// Mirrors the workshop server's own default.
 const DEFAULT_STT_INTERVAL_MS: u64 = 500;
-
-/// The tape filename used when `[workshop.tape]` does not name one.
-/// Mirrors the workshop server's own default.
-const DEFAULT_TAPE_FILE: &str = "tape.jsonl";
 
 fn default_workshop_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7910))
@@ -46,10 +41,6 @@ pub struct WorkshopConfig {
     /// section is present.
     #[serde(default)]
     stt: Option<WorkshopSttConfig>,
-    /// Session tape settings. Absent when no `[workshop.tape]` section is
-    /// present.
-    #[serde(default)]
-    tape: Option<WorkshopTapeConfig>,
 }
 
 impl WorkshopConfig {
@@ -123,74 +114,6 @@ impl WorkshopConfig {
     #[must_use]
     pub fn stt(&self) -> Option<&WorkshopSttConfig> {
         self.stt.as_ref()
-    }
-
-    /// Returns the `[workshop.tape]` settings, or `None` when the section is
-    /// absent.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.tape]
-    /// # path = "session.jsonl"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let workshop = config.workshop().expect("workshop section present");
-    /// assert!(workshop.tape().is_some());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn tape(&self) -> Option<&WorkshopTapeConfig> {
-        self.tape.as_ref()
-    }
-
-    /// Returns the tape file path anchored against `boot_dir`, the directory
-    /// holding the boot config.
-    ///
-    /// An absent `[workshop.tape]` (or an absent path) resolves the default
-    /// `tape.jsonl` against `boot_dir`; a relative path resolves against
-    /// `boot_dir`; an absolute path is returned unchanged. The process
-    /// current directory never participates, so the tape file (and the
-    /// workshop state persisted beside it) cannot scatter with the embedding
-    /// binary's start directory.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # use std::path::{Path, PathBuf};
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop]
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let workshop = config.workshop().expect("workshop section present");
-    /// assert_eq!(
-    ///     workshop.tape_path(Path::new("/etc/pf")),
-    ///     PathBuf::from("/etc/pf").join("tape.jsonl")
-    /// );
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn tape_path(&self, boot_dir: &Path) -> PathBuf {
-        let path = self.tape.as_ref().map_or_else(
-            || PathBuf::from(DEFAULT_TAPE_FILE),
-            |tape| tape.path.clone(),
-        );
-        if path.is_absolute() {
-            path
-        } else {
-            boot_dir.join(path)
-        }
     }
 }
 
@@ -310,59 +233,8 @@ impl WorkshopSttConfig {
     }
 }
 
-/// The `[workshop.tape]` section: session tape settings, mirroring the
-/// workshop server's own tape settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-#[non_exhaustive]
-pub struct WorkshopTapeConfig {
-    /// Path of the JSONL tape file.
-    path: PathBuf,
-}
-
-impl Default for WorkshopTapeConfig {
-    fn default() -> WorkshopTapeConfig {
-        WorkshopTapeConfig {
-            path: PathBuf::from(DEFAULT_TAPE_FILE),
-        }
-    }
-}
-
-impl WorkshopTapeConfig {
-    /// Returns the configured tape file path, exactly as written.
-    ///
-    /// Anchor it with [`WorkshopConfig::tape_path`] before use: a relative
-    /// value resolves against the boot-config directory, never the process
-    /// current directory.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # use std::path::Path;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.tape]
-    /// # path = "session.jsonl"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let tape = config.workshop().and_then(|w| w.tape()).expect("tape present");
-    /// assert_eq!(tape.path(), Path::new("session.jsonl"));
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-
     use super::WorkshopConfig;
     use crate::config::Config;
 
@@ -385,7 +257,6 @@ mod tests {
         assert_eq!(workshop.bind().to_string(), "127.0.0.1:7910");
         assert!(!workshop.open_browser());
         assert!(workshop.stt().is_none());
-        assert!(workshop.tape().is_none());
     }
 
     #[test]
@@ -400,9 +271,6 @@ open_browser = true
 window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
-
-[workshop.tape]
-path = "session.jsonl"
 "#,
         );
         let workshop = config.workshop().expect("workshop section present");
@@ -412,8 +280,6 @@ path = "session.jsonl"
         assert_eq!(stt.window_seconds(), 8);
         assert_eq!(stt.interval_ms(), 250);
         assert_eq!(stt.vocabulary(), ["MCP", "GGUF"]);
-        let tape = workshop.tape().expect("tape present");
-        assert_eq!(tape.path(), Path::new("session.jsonl"));
     }
 
     #[test]
@@ -430,11 +296,7 @@ path = "session.jsonl"
 
     #[test]
     fn workshop_rejects_unknown_fields_in_every_sub_table() {
-        for section in [
-            "[workshop]\nbogus = 1\n",
-            "[workshop.stt]\nbogus = 1\n",
-            "[workshop.tape]\nbogus = 1\n",
-        ] {
+        for section in ["[workshop]\nbogus = 1\n", "[workshop.stt]\nbogus = 1\n"] {
             let error = Config::from_toml_str(&format!("{BASE}{section}"))
                 .expect_err("an unknown workshop field must fail");
             assert_eq!(error.kind(), crate::ConfigErrorKind::Parse, "in {section}");
@@ -470,41 +332,6 @@ path = "session.jsonl"
     }
 
     #[test]
-    fn workshop_tape_path_anchors_absent_and_relative_against_the_boot_dir() {
-        let boot_dir = Path::new("boot-dir");
-
-        let absent = parse("[workshop]\n");
-        assert_eq!(
-            absent.workshop().expect("present").tape_path(boot_dir),
-            boot_dir.join("tape.jsonl"),
-            "an absent [workshop.tape] anchors the default filename"
-        );
-
-        let relative = parse("[workshop.tape]\npath = \"tapes/session.jsonl\"\n");
-        assert_eq!(
-            relative.workshop().expect("present").tape_path(boot_dir),
-            boot_dir.join("tapes").join("session.jsonl"),
-            "a relative path anchors against the boot dir, not the cwd"
-        );
-    }
-
-    #[test]
-    fn workshop_tape_path_keeps_an_absolute_path() {
-        let absolute = std::env::temp_dir().join("pf-tape.jsonl");
-        let config = parse(&format!(
-            "[workshop.tape]\npath = {:?}\n",
-            absolute.display().to_string()
-        ));
-        assert_eq!(
-            config
-                .workshop()
-                .expect("present")
-                .tape_path(Path::new("boot-dir")),
-            PathBuf::from(&absolute)
-        );
-    }
-
-    #[test]
     fn workshop_config_round_trips_through_json() {
         let config = parse(
             r#"
@@ -515,9 +342,6 @@ open_browser = true
 [workshop.stt]
 window_seconds = 8
 vocabulary = ["MCP", "GGUF"]
-
-[workshop.tape]
-path = "session.jsonl"
 "#,
         );
         let workshop = config.workshop().expect("workshop section present");

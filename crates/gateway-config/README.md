@@ -33,7 +33,7 @@ Use this canonical section order to minimize merge noise:
 
 1. `config-version`
 2. `[server]`
-3. `[workshop]`, `[workshop.stt]`, `[workshop.tape]`
+3. `[workshop]`, `[workshop.stt]`
 4. `[local]`
 5. `[tools]` and child tables
 6. `[[dominion]]`

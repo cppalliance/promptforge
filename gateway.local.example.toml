@@ -22,10 +22,6 @@ window_seconds = 15
 interval_ms = 500
 vocabulary = ["PromptForge", "WG21", "GGUF"]
 
-# Optional session tape path. Relative paths resolve from this file's directory.
-[workshop.tape]
-path = "tape.jsonl"
-
 # Optional artifact cache root. The default is ~/.promptforge, or
 # %USERPROFILE%\.promptforge on Windows.
 [local]

@@ -109,9 +109,6 @@ window_seconds = 8
 interval_ms = 250
 vocabulary = ["MCP", "GGUF"]
 
-[workshop.tape]
-path = "session.jsonl"
-
 [[profile]]
 name = "work"
 models = ["gpt", "gemma", "whisper-base-en"]

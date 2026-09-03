@@ -1,7 +1,7 @@
 //! THE PARITY GATE: six in-process tests over the SSE mock gateway, each
-//! pinned to a behavior the direct-to-gateway chat relay serves today.
-//! Green means the built-in `chat` agent demonstrably replaces the relay;
-//! the excision step does not begin until this whole module passes.
+//! pinned to a behavior the built-in `chat` agent must keep. The agent
+//! replaced the direct-to-gateway chat relay; these tests hold the parity
+//! the relay established.
 //!
 //! Every test launches the embedded `agents/chat.lua`: the fixture's
 //! agents directory does not exist, so what runs is exactly what ships.
