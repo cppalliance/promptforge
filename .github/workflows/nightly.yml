@@ -113,7 +113,7 @@ jobs:
           name: ${{ env.ARTIFACT }}
           path: ${{ env.ARTIFACT }}.tar.gz
 
-  # -- Workshop: Windows, macOS ARM, macOS Intel, Linux ------------------
+  # -- Workshop: Windows, macOS ARM, macOS Intel, Linux x64 and ARM64 ----
 
   workshop:
     needs: check
@@ -138,6 +138,10 @@ jobs:
             runs-on: ubuntu-22.04
             args: ""
             suffix: linux-x64
+          - name: linux-arm
+            runs-on: ubuntu-22.04-arm
+            args: ""
+            suffix: linux-arm64
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +151,7 @@ jobs:
         uses: ./.github/actions/hf-model-cache
 
       - name: Add the Rust target
-        if: matrix.name != 'windows' && matrix.name != 'linux'
+        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - uses: actions/setup-node@v4
@@ -163,7 +167,7 @@ jobs:
         run: npm ci
 
       - name: Install Tauri system packages
-        if: matrix.name == 'linux'
+        if: startsWith(matrix.name, 'linux')
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
