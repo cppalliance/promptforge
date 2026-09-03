@@ -15,5 +15,5 @@ pub mod pipeline {
 
 /// Agent programs (`.lua`): the Lua program owns the loop.
 pub mod agent {
-    pub use promptforge_agent::{run_agent as run, AgentConfig, AgentError};
+    pub use promptforge_agent::{AgentConfig, AgentError, run_agent as run};
 }

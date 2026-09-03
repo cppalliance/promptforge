@@ -507,12 +507,10 @@ mod tests {
 
     #[test]
     fn prefix_web_search_upstream_prefixes_status_body() {
-        let err = prefix_web_search_upstream(
-            gateway_protocol::ProtocolError::upstream_status(
-                429,
-                "rate limited".to_string(),
-            ),
-        );
+        let err = prefix_web_search_upstream(gateway_protocol::ProtocolError::upstream_status(
+            429,
+            "rate limited".to_string(),
+        ));
         match err {
             gateway_protocol::ProtocolError::UpstreamStatus { body, .. } => {
                 assert_eq!(body, "web_search: rate limited");

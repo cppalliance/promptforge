@@ -10,12 +10,10 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use gateway_transcribe::{
-    MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail,
-};
-use workshop_server::{Activity, Push};
+use gateway_transcribe::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail};
 use serde::Serialize;
 use tokio::sync::watch;
+use workshop_server::{Activity, Push};
 
 use crate::runtime::SttState;
 
@@ -39,9 +37,7 @@ pub fn routes(stt: SttState, push: Push) -> Router {
     Router::new()
         .route("/stt/capability", get(capability))
         .route("/stt", get(upgrade))
-        .route_layer(axum::middleware::from_fn(
-            workshop_server::cross_site_guard,
-        ))
+        .route_layer(axum::middleware::from_fn(workshop_server::cross_site_guard))
         .with_state(RouteState { stt, push })
 }
 

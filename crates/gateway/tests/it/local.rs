@@ -1,8 +1,8 @@
 //! Live local-inference smoke tests (ignored by default).
 
+use gateway::{Config, Gateway, ProfilesContext};
 use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::model::CompletionOptions;
-use gateway::{Config, Gateway, ProfilesContext};
 use serde_json::Value;
 
 use crate::support::{

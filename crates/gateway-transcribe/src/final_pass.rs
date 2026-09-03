@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use shared_progress::ProgressHandle;
 use gateway_whisper_ffi::{WhisperContext, WhisperLibrary, WhisperState};
+use shared_progress::ProgressHandle;
 
 use crate::error::TranscribeError;
 use crate::prompt::{final_prompt, fit_glossary};

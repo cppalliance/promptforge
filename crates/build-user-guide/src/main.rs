@@ -6,14 +6,8 @@ use std::path::{Path, PathBuf};
 use std::{fs, process};
 
 const GUIDES: &[(&str, &str)] = &[
-    (
-        "gateway-config",
-        "user-guide-promptforge-gateway-config.md",
-    ),
-    (
-        "gateway-local",
-        "user-guide-promptforge-gateway-local.md",
-    ),
+    ("gateway-config", "user-guide-promptforge-gateway-config.md"),
+    ("gateway-local", "user-guide-promptforge-gateway-local.md"),
     ("gateway-stt", "user-guide-promptforge-stt.md"),
     ("gateway", "user-guide-promptforge-gateway.md"),
     ("promptforge-core", "user-guide-promptforge-core.md"),

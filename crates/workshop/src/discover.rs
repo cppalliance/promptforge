@@ -203,8 +203,7 @@ mod tests {
         let written = generate_default(&path).expect("first run generates");
         assert_eq!(written, path);
 
-        let profile =
-            gateway::ProfileName::parse(DEFAULT_PROFILE).expect("valid profile name");
+        let profile = gateway::ProfileName::parse(DEFAULT_PROFILE).expect("valid profile name");
         let catalog = gateway::Config::from_toml_str(
             &std::fs::read_to_string(&path).expect("generated config reads"),
         )
@@ -229,8 +228,7 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let path = generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("generates");
         let raw = std::fs::read_to_string(&path).expect("read back");
-        let config =
-            gateway::Config::from_toml_str(&raw).expect("the boot config is valid");
+        let config = gateway::Config::from_toml_str(&raw).expect("the boot config is valid");
 
         let workshop = config
             .workshop()

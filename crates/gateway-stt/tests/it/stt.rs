@@ -56,9 +56,7 @@ fn fixture_server(with_final: bool) -> TestServer {
     ))
     .expect("fixture catalog parses");
     let config = catalog
-        .select_profile(
-            &gateway_config::ProfileName::parse("work").expect("profile name"),
-        )
+        .select_profile(&gateway_config::ProfileName::parse("work").expect("profile name"))
         .expect("fixture profile selects");
     let state = SttState::default();
     let runtime = SttRuntime::start(&config, state.clone(), None).expect("fixture engine loads");

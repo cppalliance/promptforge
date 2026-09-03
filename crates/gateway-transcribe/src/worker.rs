@@ -3,8 +3,10 @@
 use std::io::Read;
 use std::path::Path;
 
+use gateway_whisper_ffi::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState,
+};
 use shared_progress::ProgressHandle;
-use gateway_whisper_ffi::{FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState};
 
 use crate::MAX_PROMPT_TOKENS;
 use crate::error::TranscribeError;

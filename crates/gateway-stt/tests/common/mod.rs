@@ -9,12 +9,10 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use gateway_stt::{SttRuntime, SttState};
-use workshop_server::{
-    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle,
-};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
 
 pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 

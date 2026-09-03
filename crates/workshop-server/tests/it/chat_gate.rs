@@ -27,6 +27,7 @@ use futures_util::StreamExt as _;
 use serde_json::json;
 use tokio::sync::broadcast;
 
+use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 use promptforge_core_support::cancel::CancelHandle;
 use promptforge_core_support::events::{EventLog as _, RuntimeEventKind};
 use promptforge_core_support::observe::Observer;
@@ -40,7 +41,6 @@ use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ServerConfig,
     UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
 };
-use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
 use crate::common::{JsonSocket, spawn_gateway};

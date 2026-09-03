@@ -13,12 +13,10 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use workshop_server::{
-    AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle,
-};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
 
 /// How long one frame read may take before the test fails: generous enough
 /// for a slow CI runner, far below any test's own deadline.
@@ -50,8 +48,7 @@ impl TestServer {
             },
             agents: AgentsConfig::default(),
         };
-        let handle =
-            workshop_server::spawn(config).expect("the workshop server spawns");
+        let handle = workshop_server::spawn(config).expect("the workshop server spawns");
         Self {
             handle: Some(handle),
             _state_dir: state_dir,

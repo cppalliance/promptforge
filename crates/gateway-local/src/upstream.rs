@@ -329,9 +329,7 @@ impl LocalUpstream {
         let response = self
             .post(&self.http_stream, "chat/completions", &req)
             .await?;
-        Ok(gateway_protocol::upstream::sse_chunks(
-            response, requested,
-        ))
+        Ok(gateway_protocol::upstream::sse_chunks(response, requested))
     }
 
     /// Run the dead-child recovery after a transport failure.

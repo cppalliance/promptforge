@@ -20,9 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde_json::json;
 
-use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router,
-};
+use workshop_server::{AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router};
 
 use crate::common::{JsonSocket, spawn_gateway};
 
