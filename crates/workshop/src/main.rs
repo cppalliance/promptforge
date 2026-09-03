@@ -138,22 +138,52 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The setup hook: boots the gateway, waits for the hosted workshop's
-/// health, and opens the window on it. A boot failure prints its full
-/// error chain and exits the process directly: returning `Err` would
-/// surface as Tauri's "Failed to setup app" panic, losing the chain and
-/// the failure exit code.
+/// The setup hook: boots the gateway on a background thread, waits for the
+/// hosted workshop's health, and opens the window on it. The setup hook
+/// returns immediately so Tauri's event loop runs and pumps OS events during
+/// the gateway boot and any initial model provisioning downloads.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    match boot() {
-        Ok((gateway, url)) => {
-            app.manage(GatewaySlot::new(Some(gateway)));
-            open_window(app, &url)
-        }
-        Err(error) => {
-            eprintln!("{error:?}");
-            std::process::exit(1);
-        }
-    }
+    let app_handle = app.handle().clone();
+    std::thread::Builder::new()
+        .name("workshop-boot".to_string())
+        .spawn(move || match boot() {
+            Ok((gateway, url)) => {
+                app_handle.manage(GatewaySlot::new(Some(gateway)));
+                let handle_for_window = app_handle.clone();
+                let url_for_window = url;
+                let _ = app_handle.run_on_main_thread(move || {
+                    if let Err(error) = open_window(&handle_for_window, &url_for_window) {
+                        eprintln!("could not open window: {error:?}");
+                        show_boot_error(
+                            &handle_for_window,
+                            &format!("Could not open application window: {error}"),
+                        );
+                        handle_for_window.exit(1);
+                    }
+                });
+            }
+            Err(error) => {
+                eprintln!("{error:?}");
+                show_boot_error(
+                    &app_handle,
+                    &format!("PromptForge failed to start:\n\n{error:#}"),
+                );
+                app_handle.exit(1);
+            }
+        })
+        .context("spawn workshop boot thread")?;
+    Ok(())
+}
+
+/// Shows a native error dialog on boot failure before exiting.
+fn show_boot_error(handle: &tauri::AppHandle, message: &str) {
+    use tauri_plugin_dialog::DialogExt as _;
+    handle
+        .dialog()
+        .message(message)
+        .title("PromptForge")
+        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+        .blocking_show();
 }
 
 /// Discovers or generates the boot config, spawns the merged gateway, and
@@ -190,9 +220,9 @@ fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
 /// window-state restore never flashes, undecorated on Windows where the
 /// custom HTML title bar replaces the native frame (macOS and Linux keep
 /// their decorated windows), then shown.
-fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {
+fn open_window(app: &tauri::AppHandle, url: &url::Url) -> Result<(), Box<dyn std::error::Error>> {
     let server_origin = url.origin();
-    let opener = app.handle().clone();
+    let opener = app.clone();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
         .title("PromptForge")
         .inner_size(1024.0, 768.0)
