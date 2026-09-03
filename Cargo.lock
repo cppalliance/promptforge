@@ -573,6 +573,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-llama-cuda"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "zip 8.6.0",
+]
+
+[[package]]
+name = "build-ui"
+version = "0.2.0"
+
+[[package]]
+name = "build-user-guide"
+version = "0.2.0"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1978,12 +1999,11 @@ dependencies = [
  "open",
  "png 0.18.1",
  "promptforge-core",
- "shared-progress",
- "promptforge-workshop-server",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-progress",
  "subtle",
  "sysinfo",
  "tempfile",
@@ -1994,6 +2014,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "workshop-server",
 ]
 
 [[package]]
@@ -2015,12 +2036,12 @@ name = "gateway-config-ui"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "build-ui",
  "gateway-loopback",
  "rust-embed",
  "tempfile",
  "tokio",
  "tower",
- "build-ui",
 ]
 
 [[package]]
@@ -2034,12 +2055,12 @@ dependencies = [
  "gateway-routing",
  "minijinja",
  "minijinja-contrib",
- "shared-progress",
  "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-progress",
  "tar",
  "tempfile",
  "thiserror 2.0.19",
@@ -2095,17 +2116,17 @@ dependencies = [
  "gateway-stt",
  "gateway-transcribe",
  "hound",
- "shared-progress",
- "promptforge-workshop-server",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-progress",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
  "tower",
  "tracing",
+ "workshop-server",
 ]
 
 [[package]]
@@ -3488,19 +3509,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "build-llama-cuda"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "flate2",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "zip 8.6.0",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3570,10 +3578,6 @@ name = "macro_rules_attribute-proc_macro"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
-
-[[package]]
-name = "build-user-guide"
-version = "0.2.0"
 
 [[package]]
 name = "markup5ever"
@@ -4639,6 +4643,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-agent"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "mlua",
+ "promptforge-core-support",
+ "promptforge-lua",
+ "promptforge-model-client",
+ "promptforge-store",
+ "promptforge-tools",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "promptforge-cli"
 version = "0.2.0"
 dependencies = [
@@ -4647,11 +4668,11 @@ dependencies = [
  "fastrand",
  "indicatif",
  "promptforge-core",
- "shared-progress",
  "promptforge-tool-picker",
  "promptforge-tools",
  "promptforge-web-search",
  "promptforge-webfetch",
+ "shared-progress",
  "tokio",
 ]
 
@@ -4711,11 +4732,11 @@ dependencies = [
  "axum",
  "futures-util",
  "promptforge-core-support",
- "shared-progress",
  "promptforge-tool-picker",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "shared-progress",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -4736,16 +4757,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shared-progress"
-version = "0.2.0"
-dependencies = [
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "promptforge-store"
 version = "0.2.0"
 dependencies = [
@@ -4763,12 +4774,12 @@ dependencies = [
  "candle-transformers",
  "half",
  "hf-hub",
- "shared-progress",
  "promptforge-tool-picker",
  "safetensors",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-progress",
  "thiserror 2.0.19",
  "tokenizers",
 ]
@@ -4817,65 +4828,6 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "promptforge-workshop"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "gateway",
- "rand 0.9.5",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tempfile",
- "url",
- "webkit2gtk",
- "webview2-com",
- "windows-core 0.61.2",
-]
-
-[[package]]
-name = "promptforge-workshop-server"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "dunce",
- "futures-util",
- "open",
- "percent-encoding",
- "promptforge-core-support",
- "promptforge-model-client",
- "shared-progress",
- "promptforge-store",
- "promptforge-tools",
- "promptforge-workshop-server",
- "rand 0.9.5",
- "reqwest 0.12.28",
- "rust-embed",
- "serde",
- "serde_json",
- "socket2",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tokio-tungstenite",
- "toml 0.8.2",
- "tower",
- "tracing",
- "tracing-subscriber",
- "build-ui",
- "url",
- "promptforge-agent",
 ]
 
 [[package]]
@@ -5951,6 +5903,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shared-progress"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7334,10 +7296,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "build-ui"
-version = "0.2.0"
-
-[[package]]
 name = "unic-char-property"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8362,20 +8320,62 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
-name = "promptforge-agent"
+name = "workshop"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
+ "gateway",
+ "rand 0.9.5",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "url",
+ "webkit2gtk",
+ "webview2-com",
+ "windows-core 0.61.2",
+]
+
+[[package]]
+name = "workshop-server"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
  "async-trait",
  "axum",
- "mlua",
+ "build-ui",
+ "dunce",
+ "futures-util",
+ "open",
+ "percent-encoding",
+ "promptforge-agent",
  "promptforge-core-support",
- "promptforge-lua",
  "promptforge-model-client",
  "promptforge-store",
  "promptforge-tools",
+ "rand 0.9.5",
+ "reqwest 0.12.28",
+ "rust-embed",
+ "serde",
  "serde_json",
+ "shared-progress",
+ "socket2",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-tungstenite",
+ "toml 0.8.2",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "workshop-server",
 ]
 
 [[package]]

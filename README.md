@@ -72,23 +72,23 @@ Every build needs Rust 1.89 or later and Node.js 22. The two web UIs are bundled
 ```bash
 git clone git@github.com:cppalliance/promptforge.git
 cd promptforge
-npm ci --prefix crates/promptforge-workshop-server/ui
+npm ci --prefix crates/workshop-server/ui
 npm ci --prefix crates/gateway-config-ui/ui
 ```
 
-`cargo build` builds the gateway, the default workspace member. `cargo build -p promptforge-workshop` builds the desktop app. See the [gateway README](crates/gateway/README.md) for the feature details.
+`cargo build` builds the gateway, the default workspace member. `cargo build -p workshop` builds the desktop app. See the [gateway README](crates/gateway/README.md) for the feature details.
 
 ### Ubuntu 22.04
 
 ```bash
 sudo apt install build-essential pkg-config cmake clang libclang-dev
-# only for the desktop app (promptforge-workshop):
+# only for the desktop app (workshop):
 sudo apt install libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
 ```bash
 cargo build
-cargo build -p promptforge-workshop --no-default-features
+cargo build -p workshop --no-default-features
 ```
 
 ### macOS
@@ -100,7 +100,7 @@ brew install cmake node
 
 ```bash
 cargo build
-cargo build -p promptforge-workshop --no-default-features
+cargo build -p workshop --no-default-features
 ```
 
 ### Windows
@@ -109,7 +109,7 @@ Install Visual Studio with the "Desktop development with C++" workload and Node.
 
 ```bash
 cargo build
-cargo build -p promptforge-workshop
+cargo build -p workshop
 ```
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
@@ -159,8 +159,8 @@ flowchart LR
 | [gateway-whisper-ffi](crates/gateway-whisper-ffi) | Runtime-loaded safe wrapper over PromptForge's pinned whisper.cpp C API | not published |
 | [gateway-transcribe](crates/gateway-transcribe) | Whisper transcription engine: inference workers, segmentation, silence gating | not published |
 | [promptforge-agent](crates/promptforge-agent) | Promptforge library agent-program executor: `run_agent` drives `.lua` agent programs over the promptforge substrate | not published |
-| [promptforge-workshop-server](crates/promptforge-workshop-server) | Workshop HTTP server: agent sessions, model catalog passthrough, workspace API, and UI assets | not published |
-| [promptforge-workshop](crates/promptforge-workshop) | Workshop desktop app (Tauri): boots the gateway and opens the window | not published |
+| [workshop-server](crates/workshop-server) | Workshop HTTP server: agent sessions, model catalog passthrough, workspace API, and UI assets | not published |
+| [workshop](crates/workshop) | Workshop desktop app (Tauri): boots the gateway and opens the window | not published |
 
 ## Documentation
 

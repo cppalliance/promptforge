@@ -2,7 +2,7 @@ name: Release Workshop
 run-name: PromptForge Workshop ${{ github.ref_name }}
 
 # Builds the PromptForge Workshop desktop installers for Windows, macOS
-# (ARM and Intel), and Linux on a promptforge-workshop-v* tag, tests each
+# (ARM and Intel), and Linux on a workshop-v* tag, tests each
 # installer on a clean machine of the same kind, and publishes one GitHub
 # Release with all five installers and a SHA256SUMS file. A failed test
 # means no release.
@@ -13,7 +13,7 @@ run-name: PromptForge Workshop ${{ github.ref_name }}
 on:
   push:
     tags:
-      - "promptforge-workshop-v**[0-9]+.[0-9]+.[0-9]+*"
+      - "workshop-v**[0-9]+.[0-9]+.[0-9]+*"
 
 permissions:
   contents: write
@@ -65,7 +65,7 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-workshop-server/ui
+        working-directory: crates/workshop-server/ui
         run: npm ci
 
       - name: Install config UI dependencies
@@ -90,13 +90,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: crates/promptforge-workshop
+          projectPath: crates/workshop
           args: ${{ matrix.args }}
 
       - name: The built version matches the tag
         shell: bash
         run: |
-          version="${TAG_NAME#promptforge-workshop-v}"
+          version="${TAG_NAME#workshop-v}"
           built="${{ steps.build.outputs.appVersion }}"
           if [ "$built" != "$version" ]; then
             echo "tag version $version does not match the crate version $built"
@@ -107,7 +107,7 @@ jobs:
         if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
         shell: bash
         run: |
-          version="${TAG_NAME#promptforge-workshop-v}"
+          version="${TAG_NAME#workshop-v}"
           if [[ "${{ matrix.name }}" == "macos-arm" ]]; then
             arch="aarch64"
           else
@@ -163,11 +163,11 @@ jobs:
           Start-Process $setup.FullName -ArgumentList "/S" -Wait
           $exe = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
             ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -in @("PromptForge.exe", "promptforge-workshop.exe") } |
+            Where-Object { $_.Name -in @("PromptForge.exe", "workshop.exe") } |
             Select-Object -First 1
           if (-not $exe) { throw "PromptForge.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
-          $version = $env:TAG_NAME -replace '^promptforge-workshop-v', ''
+          $version = $env:TAG_NAME -replace '^workshop-v', ''
           if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
@@ -205,7 +205,7 @@ jobs:
           cp -R "/Volumes/PromptForge/PromptForge.app" /tmp/PromptForge.app
           hdiutil detach "/Volumes/PromptForge" -quiet
           bin=$(find /tmp/PromptForge.app/Contents/MacOS -type f | head -1)
-          version="${TAG_NAME#promptforge-workshop-v}"
+          version="${TAG_NAME#workshop-v}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
@@ -244,7 +244,7 @@ jobs:
           package=$(dpkg-deb -f "$deb" Package)
           bin=$(dpkg -L "$package" | grep -E '/usr/bin/[^/]+$' | head -1)
           [ -n "$bin" ] || { echo "no binary in the deb"; exit 1; }
-          version="${TAG_NAME#promptforge-workshop-v}"
+          version="${TAG_NAME#workshop-v}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           # The AppImage is not installed; check it exists and runs --version.
@@ -308,7 +308,7 @@ jobs:
 
           root = Path("dist")
           tag = os.environ["TAG_NAME"]
-          version = tag.removeprefix("promptforge-workshop-v")
+          version = tag.removeprefix("workshop-v")
           repository = os.environ["GITHUB_REPOSITORY"]
           platforms = {}
           for platform, artifact, pattern in [
@@ -389,11 +389,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view promptforge-workshop-latest >/dev/null 2>&1; then
-            gh release upload promptforge-workshop-latest \
+          if gh release view workshop-latest >/dev/null 2>&1; then
+            gh release upload workshop-latest \
               dist/latest.json dist/evergreen/* --clobber
           else
-            gh release create promptforge-workshop-latest \
+            gh release create workshop-latest \
               --target "$GITHUB_SHA" \
               --title "PromptForge Workshop updater" \
               --notes "Stable updater manifest for the latest tested Workshop release." \

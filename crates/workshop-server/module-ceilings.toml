@@ -1,0 +1,160 @@
+# Module size ratchet for workshop-server. Enforced by the `ratchet`
+# module of the tests/it integration binary; a module that outgrows its
+# ceiling fails `cargo test -p workshop-server --test it`.
+#
+# Counting rule: physical lines, the count diff tooling reports - every
+# newline ends a line, and a final line missing its trailing newline still
+# counts as one. Blank lines and comments count; this is a tripwire against
+# regrowth, not a code-quality metric.
+#
+# Slack: the test lets a module run up to 30 lines past its ceiling (the
+# SLACK constant in tests/it/ratchet.rs). A fixed count rather than a
+# percentage, because a percentage would hand the largest modules - the ones
+# the ratchet exists to contain - the most free growth.
+#
+# Raising a ceiling: edit the number here in the same commit as the growth,
+# and state the reason in that commit's message. Never raise a ceiling to
+# quiet the test in an unrelated commit.
+#
+# New and deleted modules: every .rs file under src/ has exactly one entry
+# here. The test fails on a missing entry (a new module ships with a
+# recorded ceiling) and on a stale one (a deleted module takes its entry
+# with it).
+#
+# Shrinking is free and never fails the test; after a big shrink, re-record
+# the ceiling downward in the same commit to bank the gain.
+
+[modules]
+# `AppState::new` owns only Workshop server state. Gateway-owned STT attaches
+# its routes after construction. Shrank in the chat-relay excision: the
+# session recorder left the state and its construction.
+"app.rs" = 347
+"assets.rs" = 69
+"atomic.rs" = 230
+# Re-recorded at measured size: an earlier growth commit missed this
+# re-record (the slack absorbed it), and the chat-relay excision's doc
+# edit here is net zero.
+"backoff.rs" = 235
+"catalog.rs" = 118
+"config.rs" = 541
+"cross_site.rs" = 338
+"deadline.rs" = 112
+# Grew by the revoke seam: the `NotGranted` variant's wire mapping (404,
+# `not_granted`) and its case in the seam test. Shrank in the chat-relay
+# excision: `BadRequest` and `StreamUnsupported` left with their tests.
+"error.rs" = 494
+# Grew by the config-panel proxy seam: the `base_url` accessor,
+# `ForwardedResponse`, and the `forward` relay the /gateway/api route
+# calls - one more request shape on the same gateway HTTP client. Shrank
+# in the chat-relay excision: the chat completion methods and `ChatStream`
+# left with their tests.
+"gateway.rs" = 1232
+# New module: the gateway progress subscriber, importing the gateway's
+# /admin/progress event stream into the workshop ProgressHub as a
+# RemoteOperation while the heartbeat reads the gateway as reachable.
+# Grew by the closable mock feed and injected resubscribe delay (the
+# malformed-event skip and stream-end resubscribe tests) - the recorded
+# ceiling had also been set four lines under the module's measured size.
+"gateway_progress.rs" = 466
+# Grew by the join-time status recompute: the transition-label constants and
+# the join_status helper (a late-joining session's line comes from the
+# current probe, not a stale retained announcement) plus their tests.
+"heartbeat.rs" = 969
+# New module: the user-input wait machinery - the WaitRegistry of
+# single-use cryptographic wait tokens, the Workshop's user_input Tool
+# (trusted structured output; a drop guard turns every dying wait into a
+# durable input_cancelled frame), and the input_response producer that
+# fires on_user_input then completes the wait; roughly half the count is
+# its in-file unit tests. Grew by the review round's documentation and
+# redaction pins: # Examples doctests on the registry and tool
+# constructors (the crate convention) and the Debug-never-shows-a-token
+# test - same responsibility, added coverage.
+"input.rs" = 791
+# Grew by the session split's test seams: the fixtures module now re-exports
+# the bus, health, backoff, and heartbeat types the socket behavior tests
+# drive directly (visibility cannot be feature-gated, so the re-exports are
+# present in every build, doc-hidden). Grew again by the input module's
+# declaration and re-exports.
+"lib.rs" = 81
+"main.rs" = 47
+"menu.rs" = 922
+# New module: the run event log (WorkshopObserver) - Observer write side,
+# EventLog read side, subscribe() broadcast, and versioned JSONL
+# persistence with load_from replay; roughly half the count is its
+# in-file unit tests, including the review round's persistence-robustness
+# pins (CRLF endings load, unknown event kinds refuse to load).
+"observer.rs" = 878
+# Grew by the agent-session frame family: the agents list, the
+# launch/attach acknowledgment, the indexed durable agent_event frame,
+# the reply-stamped ephemeral agent_delta frame, and their wire-shape
+# pins - the same one-responsibility protocol module, more frames. Grew
+# again by the shared agent-frame fixture test, asserting the same JSON
+# (tests/fixtures/agent-frames.json) the SPA suite asserts from its
+# side - same responsibility, cross-suite drift coverage. Shrank in the
+# chat-relay excision: the chat request parser and the delta, reasoning,
+# and done frames left with their tests.
+"protocol.rs" = 945
+# New module: the ProgressHub-to-status-bar renderer and its anti-flicker
+# state machine (show delay, minimum visible time, detach poll). Grew by
+# the lapsed-deadline detach poll (a past wake instant re-armed would spin
+# the select loop) and its two pinning tests. Grew again by the
+# minimum-visible backward-step floor (a new operation attaching during the
+# hold continues from the drained level) and the lagged-receiver,
+# pre-subscription catch, and backward-step tests.
+"progress.rs" = 500
+"push.rs" = 274
+# Shrank in the chat-relay excision: the buffered chat handler and its
+# recorder left with their tests; the catalog passthrough stays.
+"relay.rs" = 175
+"routes.rs" = 8
+"routes/assets.rs" = 117
+# Grew in the chat-relay excision by the POST /chat absence pin (404),
+# while the route itself left.
+"routes/chat.rs" = 72
+# New module: the gateway-config panel's origin probe and the
+# allowlisted key-attaching proxy the panel's postMessage bridge calls.
+# Grew by the same-origin config SPA proxy (the index and asset routes,
+# the shared `proxy_config_asset` relay, and the dot-segment refusal);
+# the growth commit missed this re-record, banked here at measured size.
+"routes/gateway_config.rs" = 390
+"routes/health.rs" = 50
+"routes/workspace.rs" = 20
+"serve.rs" = 560
+# Shrank in the chat-relay excision: the socket keeps the menu events,
+# boot snapshots, and bus forwarding; the chat multiplexing left whole.
+"session.rs" = 225
+# New module: the agent-session registry (the documented carve-out from
+# the no-session-registry socket rule: sessions outlive sockets) -
+# discovery, launch, the per-session supervisor with turn-cancel
+# relaunch, the reply-id round counter, and the ui/model-catalog/client
+# builders; roughly a third of the count is its in-file unit tests.
+# Grew by the review round's client-less launch refusal
+# (LaunchRefusal::GatewayUnusable and its ordering test) - same
+# responsibility, a closed silent-fallback hole. Grew by the embedded
+# built-in chat agent (always-discovered `chat`, dir-file shadowing,
+# the agent_source resolver) and the session error broadcast feeding
+# the SPA's error frames (a failed model round the program survived;
+# a run that ended in error) - discovery and lifecycle reporting, the
+# module's existing responsibilities, plus their unit tests. Grew by
+# the review round's unreadable-shadow test: an existing chat.lua that
+# cannot be read surfaces its error instead of silently serving the
+# embedded source.
+"session_agents.rs" = 1060
+# New module: the /agents/ws socket - one select! loop owning the
+# socket, the launch/attach/input_response/cancel frame handling, the
+# cursor-driven durable event drain, and the reconnect replay-and-resend
+# path. Grew by the session-error arm: the fourth subscription,
+# forwarding the session's error reports as id-less error frames ahead
+# of the wait frames - the same forwarding responsibility, one more
+# family.
+"session_agents/socket.rs" = 419
+"session/log.rs" = 15
+"session/menu.rs" = 165
+"status.rs" = 199
+# Grew by grant revocation: `Workspace::revoke` (exact canonical match,
+# with a literal-key fallback so a deleted root stays revocable; nested
+# grants independent), the `POST /workspace/revoke` handler with its
+# request/response shapes, and the revoke unit and route tests. Grew
+# again by the `exists` flag on `TreeEntry` (a granted root deleted from
+# disk lists as missing) and its listing tests.
+"workspace.rs" = 1272

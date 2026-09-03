@@ -7,7 +7,7 @@ segmentation, silence gating, and the runtime-loaded gateway-whisper-ffi integra
 ## Rules
 
 - Engine-only ownership. This crate never depends on HTTP, WebSocket, or UI
-  crates, and never on `gateway-stt`, `promptforge-workshop-server`, or the
+  crates, and never on `gateway-stt`, `workshop-server`, or the
   gateway. Gateway-owned artifact provisioning, route state, and activation
   live in `gateway-stt`.
 - The host configures the engine through `EngineConfig`'s plain values only.
