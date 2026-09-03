@@ -1,5 +1,4 @@
 [![CI](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml/badge.svg)](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/promptforge-cli.svg)](https://crates.io/crates/promptforge-cli)
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org/)
 
@@ -49,21 +48,13 @@ Prose goes to the model. Lua sets up the turn. The response is the run's result.
 ## Quick start
 
 ```bash
-cargo install promptforge-cli gateway
-gateway serve gateway.toml --profile main &
-promptforge run prompts/hello.md
-```
-
-Two processes: the gateway holds the vendor credential; the client points at it.
-
-```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 export PROMPTFORGE_GATEWAY_API_KEY=dev-secret
 cargo run -p gateway -- serve gateway.toml --profile main &
-
-export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
-cargo run -p promptforge-cli -- run prompts/hello.md
+cargo run -p workshop
 ```
+
+Two processes: the gateway holds the vendor credential; the Workshop desktop app edits and runs prompts against it.
 
 ## Build from source
 
@@ -140,7 +131,6 @@ flowchart LR
 | [promptforge](crates/promptforge) | Integrator facade: `pipeline::run` for document prompts, `agent::run` for agent programs | not published |
 | [promptforge-core](crates/promptforge-core) | Parser, executor, Lua runtime, store, gateway client | [![Crates.io](https://img.shields.io/crates/v/promptforge-core.svg)](https://crates.io/crates/promptforge-core) |
 | [promptforge-core-support](crates/promptforge-core-support) | Shared host-support primitives: untrusted guards, cooperative cancellation, run observation | [![Crates.io](https://img.shields.io/crates/v/promptforge-core-support.svg)](https://crates.io/crates/promptforge-core-support) |
-| [promptforge-cli](crates/promptforge-cli) | `promptforge run` command-line binary | [![Crates.io](https://img.shields.io/crates/v/promptforge-cli.svg)](https://crates.io/crates/promptforge-cli) |
 | [gateway](crates/gateway) | Inference gateway with model catalog and credential isolation | [![Crates.io](https://img.shields.io/crates/v/gateway.svg)](https://crates.io/crates/gateway) |
 | [build-llama-cuda](crates/build-llama-cuda) | Command-line builder of the CUDA `llama-server` release zip; runs on the GitHub build machine | not published |
 | [promptforge-model-client](crates/promptforge-model-client) | Gateway model client: OpenAI-shaped completions transport, wire types, model catalog and binding vocabulary | [![Crates.io](https://img.shields.io/crates/v/promptforge-model-client.svg)](https://crates.io/crates/promptforge-model-client) |

@@ -8,7 +8,6 @@ A PromptForge prompt is a single file. Sections run top to bottom. Lua blocks co
 
 Each chapter is the user guide for one component of the workspace:
 
-- [Running Prompts](cli.md) - the `promptforge-cli` command-line tool: point it at a prompt file and run it.
 - [Gateway Configuration](gateway-config.md) - configuring the gateway: endpoints, credentials, and model routing.
 - [Local Models](local-models.md) - running local GGUF models through the gateway.
 - [Speech-to-Text](stt.md) - the `gateway-stt` speech-to-text component.
@@ -19,4 +18,4 @@ Each chapter is the user guide for one component of the workspace:
 
 ## How to read this guide
 
-Start with [Running Prompts](cli.md) to run your first prompt, then [Writing Prompts](prompts.md) for the prompt file format. If you are deploying a model backend, read [Gateway Configuration](gateway-config.md) and [Gateway](gateway.md). The remaining chapters cover each subsystem in depth.
+Start with [Writing Prompts](prompts.md) for the prompt file format. If you are deploying a model backend, read [Gateway Configuration](gateway-config.md) and [Gateway](gateway.md). The remaining chapters cover each subsystem in depth. Use the Workshop desktop app to edit and run prompts locally.

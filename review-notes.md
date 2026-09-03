@@ -39,7 +39,7 @@ Observe these notes. Do nothing else. Append new notes when they arrive. Do not 
 
 15. Keep `lua shared` in the preamble. One compiled library, replayed as the first chunk of every section VM. Not live H1. At most one fence; not under H1 as a second live program. Docs: shared helpers vs live preamble Lua.
 
-16. `var` semantics (locked): the store is the intentional shared mutable world; `var` is the walk-local clipboard. One `var` per walk: fall-through and `jump` share it (H1 is the first writer, not a special seed). `execute()` and `fanout()` clone `var` in; child writes do not affect the caller. Store stays shared (execute/fanout writes are visible). Fixes docs (`promptforge.md`, `guide/src/lua.md`) vs implementation. Fanout arms keep fresh-per-arm clones.
+16. `var` semantics (locked): the store is the intentional shared mutable world; `var` is the walk-local clipboard. One `var` per walk: fall-through and `jump` share it (H1 is the first writer, not a special seed). `execute()` and `fanout()` clone `var` in; child writes do not affect the caller. Store stays shared (execute/fanout writes are visible). Fixes docs (`guide/src/lua.md`) vs implementation. Fanout arms keep fresh-per-arm clones.
 
 17. `reply` carries to the next section on the same walk; `jump` preserves it unless the author sets `reply = nil`. Conversation does not carry. Keep. Docs already say this.
 

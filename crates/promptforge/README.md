@@ -13,7 +13,3 @@ use promptforge::agent::{run, AgentConfig, AgentError};
 ```
 
 Substrate types (parser, store, tools, models) come from their own crates - this package depends only on `promptforge-core` and `promptforge-agent`.
-
-## CLI note
-
-The `promptforge` binary ships from the `promptforge-cli` package. Prefer `cargo run -p promptforge-cli` over `-p promptforge` (this library package has no binary).
