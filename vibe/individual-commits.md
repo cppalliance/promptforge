@@ -172,3 +172,7 @@ the fix split by cause - four real lints fixed in code, twelve lints inside macr
 
 ## 2026-09-03 HuggingFace caching in CI
 
+## 2026-09-03 Push a terminal status when a model turn fails
+
+turn dispatch pushes Thinking (amber LED) and success releases it, but the ModelTurnFailed path only sent an ephemeral error frame, so nothing released the sustained state; the fix pushes a failure status frame, matching the pattern everywhere else. (user reported, assistant reasoned)
+

@@ -138,8 +138,11 @@
 # module's existing responsibilities, plus their unit tests. Grew by
 # the review round's unreadable-shadow test: an existing chat.lua that
 # cannot be read surfaces its error instead of silently serving the
-# embedded source.
-"session_agents.rs" = 1060
+# embedded source. Grew by the terminal failure status on a failed model
+# round (the push_failure that releases the status bar's sustained
+# Thinking LED, which only on_assistant_reply's idle otherwise clears)
+# and its pinning test.
+"session_agents.rs" = 1100
 # New module: the /agents/ws socket - one select! loop owning the
 # socket, the launch/attach/input_response/cancel frame handling, the
 # cursor-driven durable event drain, and the reconnect replay-and-resend
