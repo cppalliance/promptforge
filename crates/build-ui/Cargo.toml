@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "Build-script helper that bundles a crate's ui/ sources with esbuild into OUT_DIR"
 

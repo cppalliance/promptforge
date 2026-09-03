@@ -121,7 +121,7 @@ open = "5"
 png = "0.18"
 # Tauri v2 desktop framework for workshop. tauri is pinned to the
 # minor because `with_webview` exposes webview2-com/webkit2gtk types that may
-# shift in a Tauri minor release (the docs.rs guidance for `with_webview`).
+# shift in a Tauri minor release (the upstream guidance for `with_webview`).
 tauri = "~2.11"
 tauri-build = "2.6.3"
 tauri-plugin-dialog = "2.7.3"
@@ -165,10 +165,6 @@ dbg_macro = "warn"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"
-
-# Published members opt in below their package metadata. Keep semver-checks
-# policy centralized here as the workspace grows.
-[workspace.metadata.cargo-semver-checks.lints]
 
 # The profile that 'dist' will build with
 [profile.dist]

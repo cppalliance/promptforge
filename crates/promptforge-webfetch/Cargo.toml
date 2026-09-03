@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
 readme = "README.md"
@@ -32,9 +33,6 @@ tokio.workspace = true
 axum.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
-
-[package.metadata.docs.rs]
-all-features = true
 
 [lints]
 workspace = true

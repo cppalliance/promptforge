@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge gateway model client: OpenAI-shaped completions transport, wire types, and the model catalog/binding vocabulary"
 readme = "README.md"

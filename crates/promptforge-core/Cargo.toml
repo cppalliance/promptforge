@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 readme = "README.md"
 keywords = ["prompt", "llm", "ai", "runtime", "openai"]
 categories = ["text-processing", "api-bindings"]
@@ -34,9 +35,6 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 axum.workspace = true
 promptforge-parser = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
-
-[package.metadata.docs.rs]
-all-features = true
 
 [lints]
 workspace = true

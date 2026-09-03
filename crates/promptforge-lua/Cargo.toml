@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge sandboxed Lua runtime: the section VM, coroutine protocol, and host surface"
 readme = "README.md"

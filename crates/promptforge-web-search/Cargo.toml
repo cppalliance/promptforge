@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge web_search tool: proxy a search query through the gateway so the vendor credential never leaves the server"
 readme = "README.md"
@@ -26,9 +27,6 @@ axum.workspace = true
 # `io-util` is the `AsyncReadExt`/`AsyncWriteExt` the raw TCP mock frames its
 # truncated response with.
 tokio = { workspace = true, features = ["io-util"] }
-
-[package.metadata.docs.rs]
-all-features = true
 
 [lints]
 workspace = true

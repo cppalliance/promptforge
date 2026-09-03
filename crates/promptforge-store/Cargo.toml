@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish = false
 
 description = "PromptForge run-scoped virtual filesystem: the Store backend contract, in-memory and file backends, and the shared StoreRef handle"
 readme = "README.md"
