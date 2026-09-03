@@ -5,6 +5,7 @@
 /conformance-audit.md
 /local/
 /guide/book/
+/guide/scratch/
 *.env
 # Voice test fixtures, downloaded out of band (see design/design-promptforge-workshop.md).
 /crates/gateway-transcribe/tests/fixtures/
