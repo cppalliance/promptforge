@@ -228,10 +228,8 @@ const LOADING_HTML: &str = r#"<!DOCTYPE html>
 
 /// Formats the embedded loading HTML into a data URL for initial webview presentation.
 fn loading_url() -> anyhow::Result<url::Url> {
-    let encoded = percent_encoding::utf8_percent_encode(
-        LOADING_HTML,
-        percent_encoding::NON_ALPHANUMERIC,
-    );
+    let encoded =
+        percent_encoding::utf8_percent_encode(LOADING_HTML, percent_encoding::NON_ALPHANUMERIC);
     let raw = format!("data:text/html;charset=utf-8,{encoded}");
     url::Url::parse(&raw).context("parse the splash screen data URL")
 }
@@ -251,9 +249,7 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             Ok((gateway, url)) => {
                 app_handle.manage(GatewaySlot::new(Some(gateway)));
                 let server_origin = url.origin();
-                *origin_slot
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = Some(server_origin);
+                *origin_slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(server_origin);
                 let handle_for_window = app_handle.clone();
                 let _ = app_handle.run_on_main_thread(move || {
                     if let Some(window) = handle_for_window.get_webview_window("main") {
@@ -336,29 +332,27 @@ fn create_window(app: &mut tauri::App) -> Result<OriginSlot, Box<dyn std::error:
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone();
-            match allowed_origin {
-                Some(server_origin) => {
-                    match navigation::classify_navigation(&server_origin, target.as_str()) {
-                        navigation::Navigation::Allow => true,
-                        navigation::Navigation::OpenExternally => {
-                            if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
-                                eprintln!("could not open {target} in the system browser: {error}");
-                            }
-                            false
+            if let Some(server_origin) = allowed_origin {
+                match navigation::classify_navigation(&server_origin, target.as_str()) {
+                    navigation::Navigation::Allow => true,
+                    navigation::Navigation::OpenExternally => {
+                        if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>)
+                        {
+                            eprintln!("could not open {target} in the system browser: {error}");
                         }
+                        false
                     }
                 }
-                None => {
-                    if let Ok(parsed) = url::Url::parse(target.as_str()) {
-                        if matches!(parsed.scheme(), "http" | "https") {
-                            if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
-                                eprintln!("could not open {target} in the system browser: {error}");
-                            }
-                            return false;
-                        }
+            } else {
+                if let Ok(parsed) = url::Url::parse(target.as_str())
+                    && matches!(parsed.scheme(), "http" | "https")
+                {
+                    if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
+                        eprintln!("could not open {target} in the system browser: {error}");
                     }
-                    true
+                    return false;
                 }
+                true
             }
         });
     // Tauri's drag-drop handler suppresses HTML5 drag events on Windows
