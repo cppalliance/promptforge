@@ -15,6 +15,7 @@ license = "BSL-1.0"
 repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
+promptforge = { path = "crates/promptforge", version = "0.2.0" }
 promptforge-core = { path = "crates/promptforge-core", version = "0.2.0" }
 promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.2.0" }
 gateway = { path = "crates/gateway", version = "0.2.0" }

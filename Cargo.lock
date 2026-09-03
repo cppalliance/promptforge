@@ -4643,6 +4643,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge"
+version = "0.2.0"
+dependencies = [
+ "promptforge-agent",
+ "promptforge-core",
+]
+
+[[package]]
 name = "promptforge-agent"
 version = "0.2.0"
 dependencies = [
