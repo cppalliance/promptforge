@@ -1,4 +1,4 @@
-﻿# Prose Substitution
+# Prose Substitution
 
 Prose blocks are not static text. Before prose is sent to the model, `{{ }}` placeholders in it are replaced with live values from the run. This chapter teaches the substitution language: the namespaces, the path syntax, the escapes, and the errors. It is a small language, and learning it well keeps your prompts honest, because substitution never computes anything.
 

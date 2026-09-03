@@ -1,4 +1,4 @@
-﻿# Limits and Errors
+# Limits and Errors
 
 Every run operates inside budgets, and every failure arrives in a stable shape. This chapter teaches the limits you can set, the defaults you get, and the error vocabulary you will see when something goes wrong. Knowing the failure shapes in advance is what makes a prompt debuggable.
 

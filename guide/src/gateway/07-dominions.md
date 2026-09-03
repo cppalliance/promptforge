@@ -1,4 +1,4 @@
-﻿# Dominions and Queues
+# Dominions and Queues
 
 This chapter teaches you dominions: named compute pools that cap concurrency, park or reject excess callers, and schedule waiting clients fairly. Dominions are how you keep one busy model from starving the rest.
 

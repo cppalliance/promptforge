@@ -1,4 +1,4 @@
-﻿# Control Flow
+# Control Flow
 
 Fall-through runs sections in file order, but real prompts need to choose their path. This chapter teaches the two calls that move control, `jump` for transfer and `execute` for subroutines, together with the visibility rules that decide which sections you may name. Learn the visible set first; everything else follows from it.
 
