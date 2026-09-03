@@ -94,8 +94,8 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
     let entries = fs::read_dir(set_dir)
         .map_err(|e| AssembleError(format!("cannot read {}: {e}", set_dir.display())))?;
     for entry in entries {
-        let entry = entry
-            .map_err(|e| AssembleError(format!("cannot read {}: {e}", set_dir.display())))?;
+        let entry =
+            entry.map_err(|e| AssembleError(format!("cannot read {}: {e}", set_dir.display())))?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.ends_with(".md") && name != "index.md" {
             names.push(name);
@@ -114,9 +114,7 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
             .find_map(|line| line.strip_prefix("# "))
             .map(str::trim)
             .filter(|title| !title.is_empty())
-            .ok_or_else(|| {
-                AssembleError(format!("no H1 title in {}", path.display()))
-            })?
+            .ok_or_else(|| AssembleError(format!("no H1 title in {}", path.display())))?
             .to_owned();
         chapters.push(Chapter {
             file_name: name,
@@ -130,10 +128,7 @@ fn read_chapters(set_dir: &Path) -> Result<Vec<Chapter>, AssembleError> {
 fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
     let mut out = format!("# {part_title}\n");
     for chapter in chapters {
-        out.push_str(&format!(
-            "\n- [{}]({})",
-            chapter.title, chapter.file_name
-        ));
+        out.push_str(&format!("\n- [{}]({})", chapter.title, chapter.file_name));
     }
     out.push('\n');
     out
@@ -144,7 +139,9 @@ fn render_index(part_title: &str, chapters: &[Chapter]) -> String {
 fn render_summary(parts: &[(&str, &str, Vec<Chapter>)]) -> String {
     let mut out = String::from("# Summary\n\n- [Introduction](introduction.md)\n");
     for (set, part_title, chapters) in parts {
-        out.push_str(&format!("\n# {part_title}\n\n- [Overview]({set}/index.md)\n"));
+        out.push_str(&format!(
+            "\n# {part_title}\n\n- [Overview]({set}/index.md)\n"
+        ));
         for chapter in chapters {
             out.push_str(&format!(
                 "- [{}]({}/{})\n",
@@ -178,8 +175,12 @@ fn render_export(
 /// under `src/`.
 fn check_links(summary: &str, src: &Path) -> Result<(), AssembleError> {
     for line in summary.lines() {
-        let Some(start) = line.find("](") else { continue };
-        let Some(end) = line[start + 2..].find(')') else { continue };
+        let Some(start) = line.find("](") else {
+            continue;
+        };
+        let Some(end) = line[start + 2..].find(')') else {
+            continue;
+        };
         let target = &line[start + 2..start + 2 + end];
         let path = src.join(target);
         if !path.is_file() {
@@ -239,11 +240,7 @@ mod tests {
         )
         .expect("chapter 2");
         for set in ["gateway", "language", "agent"] {
-            fs::write(
-                src.join(set).join("01-start.md"),
-                "# Start\n\nBody.\n",
-            )
-            .expect("chapter");
+            fs::write(src.join(set).join("01-start.md"), "# Start\n\nBody.\n").expect("chapter");
         }
         dir
     }
@@ -251,8 +248,7 @@ mod tests {
     #[test]
     fn chapters_sort_in_reading_order_and_read_titles() {
         let dir = fake_guide();
-        let chapters =
-            read_chapters(&dir.path().join("src").join("workshop")).expect("chapters");
+        let chapters = read_chapters(&dir.path().join("src").join("workshop")).expect("chapters");
         let names: Vec<&str> = chapters
             .iter()
             .map(|chapter| chapter.file_name.as_str())
@@ -265,8 +261,7 @@ mod tests {
     #[test]
     fn index_lists_every_chapter() {
         let dir = fake_guide();
-        let chapters =
-            read_chapters(&dir.path().join("src").join("workshop")).expect("chapters");
+        let chapters = read_chapters(&dir.path().join("src").join("workshop")).expect("chapters");
         let index = render_index("The Workshop", &chapters);
         assert!(index.starts_with("# The Workshop\n"));
         assert!(index.contains("- [The Window](01-the-window.md)"));
@@ -280,13 +275,19 @@ mod tests {
         let parts: Vec<(&str, &str, Vec<Chapter>)> = SETS
             .iter()
             .map(|(set, title)| {
-                (*set, *title, read_chapters(&src.join(set)).expect("chapters"))
+                (
+                    *set,
+                    *title,
+                    read_chapters(&src.join(set)).expect("chapters"),
+                )
             })
             .collect();
         let summary = render_summary(&parts);
         let workshop = summary.find("# The Workshop").expect("workshop part");
         let gateway = summary.find("# The Gateway").expect("gateway part");
-        let language = summary.find("# The Prompt Language").expect("language part");
+        let language = summary
+            .find("# The Prompt Language")
+            .expect("language part");
         let agent = summary.find("# Agent Programs").expect("agent part");
         assert!(workshop < gateway && gateway < language && language < agent);
         assert!(summary.contains("- [Introduction](introduction.md)"));
@@ -306,15 +307,13 @@ mod tests {
     fn assembly_is_deterministic() {
         let dir = fake_guide();
         assemble(dir.path()).expect("first run");
-        let first = fs::read_to_string(dir.path().join("src").join("SUMMARY.md"))
-            .expect("summary");
+        let first = fs::read_to_string(dir.path().join("src").join("SUMMARY.md")).expect("summary");
         assemble(dir.path()).expect("second run");
-        let second = fs::read_to_string(dir.path().join("src").join("SUMMARY.md"))
-            .expect("summary");
+        let second =
+            fs::read_to_string(dir.path().join("src").join("SUMMARY.md")).expect("summary");
         assert_eq!(first, second);
         let export =
-            fs::read_to_string(dir.path().join("promptforge-workshop-guide.md"))
-                .expect("export");
+            fs::read_to_string(dir.path().join("promptforge-workshop-guide.md")).expect("export");
         assert!(export.contains("# The Workshop"));
         assert!(export.contains("# The Window"));
         assert!(export.contains("# The Editor"));
