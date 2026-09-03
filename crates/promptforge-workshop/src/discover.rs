@@ -27,7 +27,7 @@ fn default_boot_config(api_key: &str) -> String {
 
 # PromptForge gateway configuration
 # Generated on first run. Edit as needed.
-# See: crates/promptforge-gateway/README.md
+# See: crates/gateway/README.md
 
 [server]
 bind = "127.0.0.1:8081"
@@ -204,8 +204,8 @@ mod tests {
         assert_eq!(written, path);
 
         let profile =
-            promptforge_gateway::ProfileName::parse(DEFAULT_PROFILE).expect("valid profile name");
-        let catalog = promptforge_gateway::Config::from_toml_str(
+            gateway::ProfileName::parse(DEFAULT_PROFILE).expect("valid profile name");
+        let catalog = gateway::Config::from_toml_str(
             &std::fs::read_to_string(&path).expect("generated config reads"),
         )
         .expect("generated catalog parses");
@@ -230,7 +230,7 @@ mod tests {
         let path = generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("generates");
         let raw = std::fs::read_to_string(&path).expect("read back");
         let config =
-            promptforge_gateway::Config::from_toml_str(&raw).expect("the boot config is valid");
+            gateway::Config::from_toml_str(&raw).expect("the boot config is valid");
 
         let workshop = config
             .workshop()

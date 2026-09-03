@@ -35,7 +35,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Format
@@ -59,7 +59,7 @@ jobs:
         run: cargo doc --workspace --no-deps --all-features --exclude promptforge-workshop --exclude promptforge-workshop-server
 
       - name: Check headless gateway
-        run: cargo check -p promptforge-gateway --no-default-features
+        run: cargo check -p gateway --no-default-features
 
       # No build step may write into the repository (the UI bundles build
       # into OUT_DIR now); catch a regression here rather than in a diff.
@@ -97,7 +97,7 @@ jobs:
       # promptforge-workshop pins the gateway's config-ui feature, so its
       # build script needs the config UI's node_modules.
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Clippy (workshop)
@@ -146,7 +146,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Build (workshop, Linux)
@@ -190,19 +190,19 @@ jobs:
         run: npm test
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Typecheck config UI
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm run typecheck
 
       - name: Build config UI
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm run build
 
       - name: Test config UI
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm test
 
   msrv:
@@ -228,7 +228,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Build and test on MSRV

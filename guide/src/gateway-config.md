@@ -1,1 +1,1 @@
-{{#include ../../crates/promptforge-gateway-config/user-guide-promptforge-gateway-config.md}}
+{{#include ../../crates/gateway-config/user-guide-promptforge-gateway-config.md}}

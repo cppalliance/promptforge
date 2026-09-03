@@ -11,7 +11,7 @@ Each chapter is the user guide for one component of the workspace:
 - [Running Prompts](cli.md) - the `promptforge-cli` command-line tool: point it at a prompt file and run it.
 - [Gateway Configuration](gateway-config.md) - configuring the gateway: endpoints, credentials, and model routing.
 - [Local Models](local-models.md) - running local GGUF models through the gateway.
-- [Speech-to-Text](stt.md) - the `promptforge-stt` speech-to-text component.
+- [Speech-to-Text](stt.md) - the `gateway-stt` speech-to-text component.
 - [Gateway](gateway.md) - the model backend server: chat completion routing, credentials, and the model catalog.
 - [Writing Prompts](prompts.md) - the `promptforge-core` library: prompt file format, Lua scripting, models, tools, fanout, store, and errors.
 - [Tool Picker](tool-picker.md) - semantic tool resolution using an embedded embedding model.

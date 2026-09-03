@@ -1,0 +1,35 @@
+[package]
+name = "gateway-transcribe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge Whisper transcription engine: model ownership, inference workers, segmentation, and silence gating"
+
+[dependencies]
+promptforge-progress.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+gateway-whisper-ffi.workspace = true
+# Optional: only the test-fixtures feature decodes the WAV voice fixtures.
+hound = { workspace = true, optional = true }
+
+[features]
+default = []
+# Compiles the crate-internal test fixtures and re-exports them to consumers'
+# integration-test binaries; enabled for every test build by the self
+# dev-dependency below, never by production consumers.
+test-fixtures = ["dep:hound"]
+
+[dev-dependencies]
+# The crate dev-depends on itself so every test target builds the library
+# with test-fixtures enabled, without gate commands needing a --features flag.
+gateway-transcribe = { path = ".", features = ["test-fixtures"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

@@ -8,15 +8,15 @@ use std::{fs, process};
 const GUIDES: &[(&str, &str)] = &[
     ("promptforge-cli", "user-guide-promptforge-cli.md"),
     (
-        "promptforge-gateway-config",
+        "gateway-config",
         "user-guide-promptforge-gateway-config.md",
     ),
     (
-        "promptforge-gateway-local",
+        "gateway-local",
         "user-guide-promptforge-gateway-local.md",
     ),
-    ("promptforge-stt", "user-guide-promptforge-stt.md"),
-    ("promptforge-gateway", "user-guide-promptforge-gateway.md"),
+    ("gateway-stt", "user-guide-promptforge-stt.md"),
+    ("gateway", "user-guide-promptforge-gateway.md"),
     ("promptforge-core", "user-guide-promptforge-core.md"),
     (
         "promptforge-tool-picker",

@@ -8,10 +8,10 @@
 *.bin binary
 # The UI sources are bundled by esbuild; CRLF conversion on Windows
 # checkouts would change bundle bytes between platforms.
-crates/promptforge-gateway-config-ui/ui/** text eol=lf
+crates/gateway-config-ui/ui/** text eol=lf
 crates/promptforge-workshop-server/ui/** text eol=lf
 # Images are not text; the blanket rules above must not convert them.
-crates/promptforge-gateway-config-ui/ui/**/*.png binary
+crates/gateway-config-ui/ui/**/*.png binary
 crates/promptforge-workshop-server/ui/**/*.png binary
 # The event-log schema canary pins the version-1 file exactly as the log
 # writer emits it (LF); autocrlf must not rewrite it on Windows checkouts.

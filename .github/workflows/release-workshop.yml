@@ -69,7 +69,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Install Tauri system packages

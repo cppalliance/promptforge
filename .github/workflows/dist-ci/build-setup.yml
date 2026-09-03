@@ -11,4 +11,4 @@
 - name: Install UI dependencies
   run: npm ci --prefix crates/promptforge-workshop-server/ui
 - name: Install config UI dependencies
-  run: npm ci --prefix crates/promptforge-gateway-config-ui/ui
+  run: npm ci --prefix crates/gateway-config-ui/ui

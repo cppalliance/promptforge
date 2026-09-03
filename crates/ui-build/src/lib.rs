@@ -2,7 +2,7 @@
 //! sources with esbuild into the Cargo build output directory.
 //!
 //! Both UI crates (`promptforge-workshop-server` and
-//! `promptforge-gateway-config-ui`) drive their entire UI build through
+//! `gateway-config-ui`) drive their entire UI build through
 //! [`build`]: the bundle and copies of the static files land in
 //! `$OUT_DIR/ui-dist/`, which git never tracks, so no build step can dirty
 //! the repository. Cargo's own change detection decides when the bundle is

@@ -1,0 +1,38 @@
+[package]
+name = "gateway-stt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+description = "PromptForge gateway-owned speech-to-text runtime and HTTP endpoints"
+
+[dependencies]
+axum.workspace = true
+futures-util.workspace = true
+hound.workspace = true
+gateway-config.workspace = true
+gateway-local.workspace = true
+promptforge-progress.workspace = true
+gateway-transcribe.workspace = true
+promptforge-workshop-server.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+test-fixtures = ["gateway-transcribe/test-fixtures"]
+
+[dev-dependencies]
+gateway-stt = { path = ".", features = ["test-fixtures"] }
+sha2.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true

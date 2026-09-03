@@ -1,7 +1,7 @@
 [workspace]
 # Only the gateway is released through cargo-dist (Linux installers); the
 # workshop desktop app has its own workflow (release-workshop.yml).
-members = ["cargo:crates/promptforge-gateway"]
+members = ["cargo:crates/gateway"]
 
 # Config for 'dist'
 [dist]
@@ -17,8 +17,8 @@ installers = ["shell"]
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 # Where to host releases
 hosting = "github"
-# Only promptforge-gateway-v* tags start a release.
-tag-namespace = "promptforge-gateway-v"
+# Only gateway-v* tags start a release.
+tag-namespace = "gateway-v"
 # The gateway build compiles the two web UIs with esbuild, so the build
 # machines need Node 22 and the npm installs first.
 github-build-setup = "dist-ci/build-setup.yml"
@@ -35,7 +35,7 @@ allow-dirty = ["ci"]
 host-jobs = ["./gateway-release-test"]
 github-release = "announce"
 # NOTE: cargo-dist's generated announce job does not check the host-job's
-# result, so .github/workflows/promptforge-gateway-v-release.yml carries a
+# result, so .github/workflows/gateway-v-release.yml carries a
 # hand-edit adding `needs.custom-gateway-release-test.result == 'success'`
 # to the announce condition. Re-apply it after every `cargo dist generate`.
 

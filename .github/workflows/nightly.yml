@@ -52,7 +52,7 @@ jobs:
     if: needs.check.outputs.should-build == 'true'
     runs-on: ubuntu-22.04
     env:
-      ARTIFACT: promptforge-gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-x64
+      ARTIFACT: gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-x64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -63,13 +63,13 @@ jobs:
       - name: Install UI dependencies
         run: |
           npm ci --prefix crates/promptforge-workshop-server/ui
-          npm ci --prefix crates/promptforge-gateway-config-ui/ui
+          npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
-        run: cargo build --release --locked -p promptforge-gateway --features workshop
+        run: cargo build --release --locked -p gateway --features workshop
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/promptforge-gateway "$ARTIFACT/"
+          cp target/release/gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:
@@ -81,7 +81,7 @@ jobs:
     if: needs.check.outputs.should-build == 'true'
     runs-on: ubuntu-22.04-arm
     env:
-      ARTIFACT: promptforge-gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-arm64
+      ARTIFACT: gateway-nightly-${{ needs.check.outputs.date }}-${{ needs.check.outputs.short-sha }}-linux-arm64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -92,13 +92,13 @@ jobs:
       - name: Install UI dependencies
         run: |
           npm ci --prefix crates/promptforge-workshop-server/ui
-          npm ci --prefix crates/promptforge-gateway-config-ui/ui
+          npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
-        run: cargo build --release --locked -p promptforge-gateway --features workshop
+        run: cargo build --release --locked -p gateway --features workshop
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/promptforge-gateway "$ARTIFACT/"
+          cp target/release/gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:
@@ -149,7 +149,7 @@ jobs:
         run: npm ci
 
       - name: Install config UI dependencies
-        working-directory: crates/promptforge-gateway-config-ui/ui
+        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Install Tauri system packages
