@@ -12,10 +12,10 @@ const FANOUT_EPILOG_EXECUTION: &str = "fixture-fanout-epilog";
 const FANOUT_STORE_EXECUTION: &str = "fixture-fanout-store";
 const FANOUT_FAILURE_EXECUTION: &str = "fixture-fanout-failure";
 
-const FANOUT_BASIC: &str = include_str!("../../prompts/execution/fanout-basic.md");
-const FANOUT_EPILOG: &str = include_str!("../../prompts/execution/fanout-epilog.md");
-const FANOUT_STORE_WRITES: &str = include_str!("../../prompts/execution/fanout-store-writes.md");
-const FANOUT_ARM_FAILURE: &str = include_str!("../../prompts/execution/fanout-arm-failure.md");
+const FANOUT_BASIC: &str = include_str!("../prompts/execution/fanout-basic.md");
+const FANOUT_EPILOG: &str = include_str!("../prompts/execution/fanout-epilog.md");
+const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-store-writes.md");
+const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-failure.md");
 
 /// The worker-template section name both fanout arms execute under. The
 /// observation stream keys arm events by this section, not by `sys.index`

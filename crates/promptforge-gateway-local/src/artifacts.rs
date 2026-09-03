@@ -1,7 +1,7 @@
 //! Pinned native runtimes and GGUF cache for gateway-owned local inference.
 //!
 //! Downloads land under the operator cache (`~/.promptforge` by default). The
-//! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
+//! `llama-server` build is pinned to b10082,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
 //! Speech-to-text uses a separately pinned whisper.cpp shared-library bundle.
 //!

@@ -19,15 +19,15 @@ const STORE_TRIAD_EXECUTION: &str = "fixture-store-triad";
 const REPLY_SUBST_NIL_EXECUTION: &str = "fixture-reply-subst-nil";
 const ITEM_OUTSIDE_EXECUTION: &str = "fixture-item-outside";
 
-const LOG_CHECKPOINTS: &str = include_str!("../../prompts/execution/log-checkpoints.md");
-const PROLOGUE_RETURN: &str = include_str!("../../prompts/execution/prologue-return.md");
-const STORE_FALLTHROUGH: &str = include_str!("../../prompts/execution/store-fallthrough.md");
+const LOG_CHECKPOINTS: &str = include_str!("../prompts/execution/log-checkpoints.md");
+const PROLOGUE_RETURN: &str = include_str!("../prompts/execution/prologue-return.md");
+const STORE_FALLTHROUGH: &str = include_str!("../prompts/execution/store-fallthrough.md");
 const REPLY_NIL_SECTION_ONE: &str =
-    include_str!("../../prompts/execution/reply-nil-section-one.md");
-const STORE_TRIAD: &str = include_str!("../../prompts/execution/store-triad.md");
+    include_str!("../prompts/execution/reply-nil-section-one.md");
+const STORE_TRIAD: &str = include_str!("../prompts/execution/store-triad.md");
 const REPLY_SUBSTITUTION_NIL: &str =
-    include_str!("../../prompts/invalid/reply-substitution-nil.md");
-const ITEM_OUTSIDE_FANOUT: &str = include_str!("../../prompts/invalid/item-outside-fanout.md");
+    include_str!("../prompts/invalid/reply-substitution-nil.md");
+const ITEM_OUTSIDE_FANOUT: &str = include_str!("../prompts/invalid/item-outside-fanout.md");
 
 struct ExecutionErrorFixture {
     name: &'static str,
