@@ -12,6 +12,7 @@ description = "Runtime-loaded safe bindings for PromptForge's pinned whisper.cpp
 [dependencies]
 libloading.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 # Dynamic symbol calls are the purpose of this crate. Keep unsafe denied
 # globally and opt into the smallest documented blocks at each FFI boundary.

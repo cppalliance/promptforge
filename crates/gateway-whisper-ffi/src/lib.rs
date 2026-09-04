@@ -12,6 +12,7 @@
 mod context;
 mod error;
 mod library;
+mod log;
 mod params;
 mod raw;
 
@@ -62,6 +63,10 @@ mod tests {
             .map(PathBuf::from)
             .expect("PROMPTFORGE_WHISPER_LIBRARY is set");
         let library = WhisperLibrary::load(&path).expect("packaged whisper runtime loads");
+        // `WhisperLibrary::load` resolves `whisper_log_set` eagerly, so the
+        // load above proves the pinned b4938 library exports it; installing
+        // the bridge proves the resolved symbol is callable.
+        library.set_log_callback();
         let info = library
             .system_info()
             .expect("system information is exported");

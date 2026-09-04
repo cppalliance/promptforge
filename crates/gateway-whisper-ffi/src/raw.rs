@@ -144,3 +144,8 @@ pub(crate) type FullGetSegmentTextFromState =
 pub(crate) type PrintSystemInfo = unsafe extern "C" fn() -> *const c_char;
 pub(crate) type Free = unsafe extern "C" fn(*mut Context);
 pub(crate) type FreeState = unsafe extern "C" fn(*mut State);
+
+/// `ggml_log_callback` from the pinned b4938 ggml.h. The level is a C
+/// `enum ggml_log_level`, which the ABI passes as `c_int`.
+pub(crate) type LogCallback = Option<extern "C" fn(c_int, *const c_char, *mut c_void)>;
+pub(crate) type LogSet = unsafe extern "C" fn(LogCallback, *mut c_void);

@@ -8,6 +8,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 use crate::WhisperError;
+use crate::log;
 use crate::raw;
 
 #[derive(Clone, Copy)]
@@ -23,6 +24,7 @@ pub(crate) struct Functions {
     print_system_info: raw::PrintSystemInfo,
     pub(crate) free: raw::Free,
     pub(crate) free_state: raw::FreeState,
+    log_set: raw::LogSet,
 }
 
 impl Functions {
@@ -67,6 +69,7 @@ impl Functions {
             )?,
             free: load_symbol(library, b"whisper_free\0", "whisper_free")?,
             free_state: load_symbol(library, b"whisper_free_state\0", "whisper_free_state")?,
+            log_set: load_symbol(library, b"whisper_log_set\0", "whisper_log_set")?,
         })
     }
 }
@@ -154,6 +157,21 @@ impl WhisperLibrary {
     /// system-information string.
     pub fn gpu_available(&self) -> Result<bool, WhisperError> {
         Ok(system_info_has_gpu(&self.system_info()?))
+    }
+
+    /// Installs the process-wide bridge routing whisper.cpp and ggml log
+    /// output into `tracing` events at the `whisper_cpp` target, replacing
+    /// the default `stderr` writes.
+    ///
+    /// whisper.cpp holds one global callback, so repeated calls are
+    /// idempotent: every call installs the same static function.
+    pub fn set_log_callback(&self) {
+        // SAFETY: `log::TRACING_BRIDGE` is an `extern "C" fn` with the pinned
+        // b4938 `ggml_log_callback` signature; it never unwinds and reads no
+        // user_data, so a null user_data pointer is valid.
+        unsafe {
+            (self.inner.functions.log_set)(log::TRACING_BRIDGE, std::ptr::null_mut());
+        }
     }
 }
 

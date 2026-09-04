@@ -108,6 +108,9 @@ impl SttEngine {
                 source: Box::new(source),
             }
         })?;
+        // Route ggml/whisper C logging into tracing before any context is
+        // created, so the `whisper_cpp=warn` filter covers engine startup.
+        library.set_log_callback();
         let gpu_available = library.gpu_available().unwrap_or_else(|error| {
             tracing::warn!(%error, "could not inspect whisper GPU support");
             false
