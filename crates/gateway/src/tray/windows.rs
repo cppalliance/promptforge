@@ -16,7 +16,7 @@ use std::os::windows::process::CommandExt as _;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuId, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, SetLastError, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -28,7 +28,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::api_error::StartupError;
 use crate::runner::{GatewayHandle, ServeOptions, run_headless, spawn};
-use crate::tray::logic::{self, MenuItemSpec, TrayPhase};
+use crate::tray::logic::{self, TrayPhase};
+use crate::tray::menu::{BuiltMenu, MenuBuildError};
 
 /// The window message that asks the loop to drain the forwarded events.
 const WM_TRAY_EVENT: u32 = WM_APP + 1;
@@ -91,15 +92,11 @@ enum TrayError {
     #[error("decode the tray icon")]
     Icon(#[source] tray_icon::BadIcon),
     /// The menu could not be assembled.
-    #[error("build the tray menu")]
-    Menu(#[source] tray_icon::menu::Error),
+    #[error(transparent)]
+    Menu(#[from] MenuBuildError),
     /// The tray icon could not be registered with the shell.
     #[error("register the tray icon")]
     Register(#[source] tray_icon::Error),
-    /// The menu spec did not yield every retained item (a `menu_spec`
-    /// bug).
-    #[error("the menu spec is incomplete")]
-    Spec,
 }
 
 /// An event forwarded from a tray-icon or muda callback into the message
@@ -159,71 +156,6 @@ impl logic::RunKeyStore for WindowsRunKey {
 
     fn delete(&mut self) -> std::io::Result<()> {
         crate::boot::registry::delete_run_value()
-    }
-}
-
-/// The materialized menu plus the retained item handles the loop mutates
-/// in place. A displayed menu is never rebuilt: rebuilding is both a
-/// stale-menu UX bug (muda#129) and a use-after-free class (muda#328).
-struct BuiltMenu {
-    menu: Menu,
-    status: MenuItem,
-    workshop: MenuItem,
-    settings: MenuItem,
-    login: CheckMenuItem,
-    quit: MenuItem,
-}
-
-impl BuiltMenu {
-    /// Builds the native menu from the platform-independent spec.
-    fn from_spec(spec: &[MenuItemSpec]) -> Result<BuiltMenu, TrayError> {
-        let menu = Menu::new();
-        let mut status = None;
-        let mut workshop = None;
-        let mut settings = None;
-        let mut login = None;
-        let mut quit = None;
-        for item in spec {
-            match item {
-                MenuItemSpec::Status(text) => {
-                    let item = MenuItem::new(text, false, None);
-                    menu.append(&item).map_err(TrayError::Menu)?;
-                    status = Some(item);
-                }
-                MenuItemSpec::Workshop { enabled } => {
-                    let item = MenuItem::new("Workshop", *enabled, None);
-                    menu.append(&item).map_err(TrayError::Menu)?;
-                    workshop = Some(item);
-                }
-                MenuItemSpec::Settings => {
-                    let item = MenuItem::new("Settings", true, None);
-                    menu.append(&item).map_err(TrayError::Menu)?;
-                    settings = Some(item);
-                }
-                MenuItemSpec::Separator => {
-                    menu.append(&PredefinedMenuItem::separator())
-                        .map_err(TrayError::Menu)?;
-                }
-                MenuItemSpec::LaunchAtLogin { checked } => {
-                    let item = CheckMenuItem::new("Launch at Login", true, *checked, None);
-                    menu.append(&item).map_err(TrayError::Menu)?;
-                    login = Some(item);
-                }
-                MenuItemSpec::Quit => {
-                    let item = MenuItem::new("Quit", true, None);
-                    menu.append(&item).map_err(TrayError::Menu)?;
-                    quit = Some(item);
-                }
-            }
-        }
-        Ok(BuiltMenu {
-            menu,
-            status: status.ok_or(TrayError::Spec)?,
-            workshop: workshop.ok_or(TrayError::Spec)?,
-            settings: settings.ok_or(TrayError::Spec)?,
-            login: login.ok_or(TrayError::Spec)?,
-            quit: quit.ok_or(TrayError::Spec)?,
-        })
     }
 }
 
@@ -315,7 +247,8 @@ impl Tray {
         let workshop_exe = probe_workshop();
         let login_checked = logic::launch_at_login(&WindowsRunKey);
         let label = logic::status_label(TrayPhase::Starting, 0, 0.0);
-        let spec = logic::menu_spec(&label, workshop_exe.is_some(), login_checked);
+        // The HKCU Run key is always available, so the item is always enabled.
+        let spec = logic::menu_spec(&label, workshop_exe.is_some(), true, login_checked);
         let menu = BuiltMenu::from_spec(&spec)?;
         let (events, rx) = mpsc::channel();
         let hwnd = create_window()?;

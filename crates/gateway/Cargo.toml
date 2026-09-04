@@ -70,8 +70,8 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # First-run STT gating reads the installer's registry choice (src/boot.rs):
-# RegOpenKeyExW + RegQueryValueExW. The tray backend (src/tray/) adds the
-# Run-key write shim and the hidden-window message loop.
+# RegOpenKeyExW + RegQueryValueExW. The Windows tray backend (src/tray/) adds
+# the Run-key write shim and the hidden-window message loop.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
@@ -79,10 +79,22 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Registry",
     "Win32_UI_WindowsAndMessaging",
 ] }
-# The tray icon and its menu (muda via the tray_icon::menu re-export).
+
+# The tray icon and its menu (muda via the tray_icon::menu re-export), and
+# the /auth browser handoff behind the Settings item, on the platforms with
+# a tray backend.
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 tray-icon.workspace = true
-# The tray's Settings item and double-click open the /auth browser handoff.
 open.workspace = true
+
+# The macOS tray backend (src/tray/macos.rs): the NSApplication run loop owns
+# the main thread, and SMAppService backs Launch at Login.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+objc2-service-management.workspace = true
+block2.workspace = true
 
 [features]
 default = ["local", "web-search", "config-ui", "stt"]

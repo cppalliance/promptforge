@@ -118,10 +118,39 @@ sysinfo = { version = "0.38", default-features = false, features = ["system", "d
 nvml-wrapper = "0.12"
 # Opens a URL in the system browser for the windowless server frame.
 open = "5"
-# The gateway's system tray on Windows (macOS joins in a later step).
+# The gateway's system tray on Windows and macOS.
 # 0.24.1+ is required: it re-registers the icon on TaskbarCreated and keeps
 # a hidden icon hidden across Explorer restarts.
 tray-icon = "0.24.1"
+# The macOS tray backend: the NSApplication run loop owns the main thread and
+# SMAppService backs Launch at Login. objc2 is the maintained successor to the
+# objc crate family; the framework crates are feature-gated per class so the
+# build links only what the backend uses.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    # setActivationPolicy and NSApplicationActivationPolicy live behind the
+    # NSRunningApplication feature (they are declared in its header).
+    "NSRunningApplication",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSTimer",
+    # The block-based NSTimer initializer is gated on NSDate + block2.
+    "NSDate",
+    "block2",
+    # NSProcessInfo.operatingSystemVersion gates SMAppService to macOS 13+.
+    "NSProcessInfo",
+] }
+objc2-service-management = { version = "0.3", default-features = false, features = [
+    "std",
+    # The SMAppService class binding is a per-class feature.
+    "SMAppService",
+    "objc2",
+    "objc2-foundation",
+] }
+block2 = "0.6"
 # Thin process-image shims for shared-sidecar's stale detection; both are
 # already in the tree transitively.
 libc = "0.2"

@@ -357,13 +357,13 @@ impl GatewayHandle {
     }
 
     /// The bearer key the tray needs for its browser-handoff URL.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     pub(crate) fn tray_key(&self) -> &str {
         self.api_key.expose()
     }
 
     /// The assembled state, for the tray's in-process status reads.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     pub(crate) fn tray_state(&self) -> &AppState {
         &self.state
     }
@@ -371,7 +371,7 @@ impl GatewayHandle {
     /// Whether the gateway thread is still serving. A finished thread means
     /// serving ended - requested (`POST /shutdown` fires the shared signal)
     /// or failed; the tray tells the two apart through the signal.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     pub(crate) fn is_serving(&self) -> bool {
         self.thread
             .as_ref()

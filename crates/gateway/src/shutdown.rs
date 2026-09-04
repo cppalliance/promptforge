@@ -41,7 +41,7 @@ impl ShutdownSignal {
     }
 
     /// Whether the signal has been fired.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     pub(crate) fn is_fired(&self) -> bool {
         self.fired.load(Ordering::Acquire)
     }
@@ -113,8 +113,8 @@ mod tests {
 
     /// The tray's status tick reads `is_fired` synchronously to tell a
     /// requested shutdown apart from a serve-loop failure; the method is
-    /// Windows-gated like its only caller.
-    #[cfg(target_os = "windows")]
+    /// gated on the tray backends like its only callers.
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     #[test]
     fn fire_sets_the_synchronous_peek() {
         let signal = super::ShutdownSignal::default();

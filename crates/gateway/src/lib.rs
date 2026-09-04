@@ -313,7 +313,7 @@ impl AppState {
     /// Returns `None` when a profile switch holds the live-state write
     /// lock: the tray's timer skips that tick rather than blocking the
     /// message loop.
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(target_os = "windows", target_os = "macos", test))]
     pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
         let live = self.live.try_read().ok()?;
         let models = live.routing.models().len();
