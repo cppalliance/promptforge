@@ -138,16 +138,23 @@ pub(crate) enum GatewayError {
     #[error("config write failed")]
     ConfigWriteIo(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// `POST /admin/config-apply` promoted configuration files but profile
-    /// activation failed. The message carries the activation failure's full
-    /// cause chain; callers inspect status before retrying because failure can
-    /// occur before or after a degraded partial activation.
+    /// `POST /admin/config-apply` ran its profile activation and it failed.
+    /// A failure before the commit promoted nothing, so the pending changes
+    /// stay staged and `GET /admin/config-dirty` still reports them; a
+    /// `PartialStart` (a `local` build) lands after the commit, with the
+    /// shadows promoted and the profile live minus the models that did not
+    /// start. The message carries the activation failure's full cause
+    /// chain; callers inspect status before retrying because it tells the
+    /// two apart.
     #[non_exhaustive]
-    #[error(
-        "config promoted to disk but profile activation failed ({0}); inspect \
-         gateway status and retry Apply"
-    )]
+    #[error("profile activation failed ({0}); inspect gateway status before retrying Apply")]
     ApplyReloadFailed(String),
+
+    /// `POST /admin/config-apply` was cancelled - by the user, by a revert,
+    /// or by process shutdown - before its commit, so nothing was promoted
+    /// and the pending changes stay staged for a retry.
+    #[error("apply cancelled; the pending changes are still staged, retry Apply")]
+    ApplyCancelled,
 
     /// A pending-state read could not resolve the shadow-overlaid
     /// configuration: a chain file or shadow is unreadable, unparsable, or
@@ -409,6 +416,11 @@ impl GatewayError {
                 "server_error",
                 "apply_reload_failed",
             ),
+            GatewayError::ApplyCancelled => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "apply_cancelled",
+            ),
             GatewayError::PendingConfig(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
@@ -597,6 +609,14 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
                     "apply_reload_failed",
+                ),
+            ),
+            (
+                GatewayError::ApplyCancelled,
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "apply_cancelled",
                 ),
             ),
         ];

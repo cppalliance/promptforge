@@ -228,10 +228,13 @@ pub(crate) struct AppState {
     switch: Arc<tokio::sync::Mutex<()>>,
     /// Inference requests that must drain before local children stop.
     in_flight: Arc<drain::InFlight>,
-    /// Serializes direct profile switches, `POST /admin/config-apply`,
-    /// `POST /admin/config-revert`, and every shadow-writing `PUT` save, so
-    /// state persistence cannot race pending-state promotion and Apply only
-    /// promotes shadow combinations the latest save validated whole.
+    /// Protects shadow-file consistency: the census-and-capture step of
+    /// `POST /admin/config-apply`, the Apply command's commit,
+    /// `POST /admin/config-revert`, and every shadow-writing `PUT` save
+    /// serialize on it, so Apply only captures shadow combinations the
+    /// latest save validated whole and never half-promotes one. Held for
+    /// those short steps only, never across a download; profile loads do
+    /// not take it - the command queue already serializes them with Apply.
     apply: Arc<tokio::sync::Mutex<()>>,
     /// The process-lifetime progress broker: operations attach trees for
     /// their own lifetimes, and `GET /admin/progress` streams its events.
@@ -1225,15 +1228,17 @@ pub(crate) enum StatePersistence {
     None,
     /// Atomically replace real state while preserving any pending shadow.
     Write,
-    /// Promote the pending state shadow as part of Apply.
-    Promote(std::path::PathBuf),
+    /// Promote the shadows an Apply captured: each capture's contents land in
+    /// its real file, and the shadow is deleted only when it still holds
+    /// those contents, so a save that raced the apply stays pending.
+    Promote(Vec<config_apply::ShadowCapture>),
 }
 
 /// Executes a switch using an optional catalog parsed by Apply.
 ///
 /// `token` is the command's cancellation: checked at phase boundaries and
 /// honored by the local start, so a cancelled switch stops instead of
-/// running its remaining phases. Apply passes a never-fired token.
+/// running its remaining phases.
 /// `persistence` is evaluated once, at commit time, so a debounced queue
 /// duplicate can upgrade an ephemeral load into a persisted one while the
 /// switch is still running.
@@ -1324,7 +1329,7 @@ async fn run_switch_with_config(
     // Persistence is part of the serialized switch. Once the state file
     // commits, the in-memory swap below is infallible, so another switch can
     // never overwrite pending state between activation and persistence.
-    commit_profile_state(&state, &name, persistence()).await?;
+    commit_profile_state(&state, &name, persistence(), token).await?;
 
     // Atomic swap: commit the whole new profile at once.
     {
@@ -1583,19 +1588,32 @@ async fn replace_runtimes(
 }
 
 /// Commits active-profile state while the caller holds the switch lock.
+///
+/// The `Promote` arm takes the apply lock for the commit alone - never
+/// across a download - so it serializes with saves and revert, and it
+/// re-checks `token` under that lock: a revert that fired the token while
+/// this commit waited for the lock must win, or the commit would write the
+/// snapshot over files the user just reverted.
 async fn commit_profile_state(
     state: &AppState,
     name: &ProfileName,
     persistence: StatePersistence,
+    token: &tokio_util::sync::CancellationToken,
 ) -> Result<(), GatewayError> {
     match persistence {
         StatePersistence::None => Ok(()),
         StatePersistence::Write => persist_active_profile(state, name).await,
-        StatePersistence::Promote(state_path) => {
-            tokio::task::spawn_blocking(move || gateway_config::promote_shadow(&state_path))
+        StatePersistence::Promote(captures) => {
+            let _apply = state.apply.lock().await;
+            if token.is_cancelled() {
+                return Err(GatewayError::CommandCancelled(
+                    commands::APPLY_CONFIG_LABEL.to_owned(),
+                ));
+            }
+            tokio::task::spawn_blocking(move || config_apply::promote_captures(&captures))
                 .await
-                .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))?
-                .map_err(config_write::config_write_error)
+                .map_err(|join| GatewayError::ConfigWriteIo(Box::new(join)))??;
+            Ok(())
         }
     }
 }
@@ -2921,6 +2939,12 @@ mod status_surface_tests {
                         Err(GatewayError::CommandCancelled(format!(
                             "load-profile: {name}"
                         )))
+                    }
+                    Command::ApplyConfig { token, .. } => {
+                        token.cancelled().await;
+                        Err(GatewayError::CommandCancelled(
+                            crate::commands::APPLY_CONFIG_LABEL.to_owned(),
+                        ))
                     }
                     Command::ProvisionModel { name, token, .. } => {
                         token.cancelled().await;

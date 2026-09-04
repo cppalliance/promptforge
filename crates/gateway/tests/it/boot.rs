@@ -212,19 +212,11 @@ models = ["missing-model"]
     handle.shutdown().expect("graceful shutdown");
 }
 
-/// Quit while a command is active fires the command's cancellation token:
-/// the command settles as cancelled and the gateway thread joins promptly
-/// instead of waiting out the command's work. The in-flight window here is
-/// the switch's bounded drain behind a held request; the mid-download stop
-/// is pinned by gateway-local's chunk-boundary test.
-#[tokio::test]
-async fn quit_during_an_active_command_cancels_it_and_exits_promptly() {
-    let (backend, mut arrivals) = crate::support::slow_fake_backend().await;
-    let temp = tempfile::tempdir().unwrap();
-    let path = write_config(
-        &temp,
-        format!(
-            r#"
+/// A config with two profiles over one backend, so a switch from `main` to
+/// `other` exercises the switch machinery against the slow backend.
+fn two_profile_config(backend: std::net::SocketAddr) -> String {
+    format!(
+        r#"
 config-version = 2
 
 [server]
@@ -259,8 +251,19 @@ models = ["main-model"]
 name = "other"
 models = ["other-model"]
 "#
-        ),
-    );
+    )
+}
+
+/// Quit while a command is active fires the command's cancellation token:
+/// the command settles as cancelled and the gateway thread joins promptly
+/// instead of waiting out the command's work. The in-flight window here is
+/// the switch's bounded drain behind a held request; the mid-download stop
+/// is pinned by gateway-local's chunk-boundary test.
+#[tokio::test]
+async fn quit_during_an_active_command_cancels_it_and_exits_promptly() {
+    let (backend, mut arrivals) = crate::support::slow_fake_backend().await;
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(&temp, two_profile_config(backend));
     let options = ServeOptions::new(
         Some(path),
         ProfileName::parse("main").expect("profile name"),
@@ -327,4 +330,87 @@ models = ["other-model"]
         .recv_timeout(PHASE_TIMEOUT)
         .expect("quit during an active command returns promptly");
     result.expect("graceful shutdown");
+}
+
+/// A save never waits for a running switch: the `LoadProfile` command does
+/// not hold the apply lock, so `PUT /admin/config` completes within the
+/// phase timeout while the switch is parked in its drain behind a held
+/// request, and the switch still finishes once the request is released.
+#[tokio::test]
+async fn a_save_completes_while_a_switch_command_is_parked() {
+    let (backend, mut arrivals) = crate::support::slow_fake_backend().await;
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(&temp, two_profile_config(backend));
+    let options = ServeOptions::new(
+        Some(path.clone()),
+        ProfileName::parse("main").expect("profile name"),
+    )
+    .with_run_dir(temp.path().join("run"));
+    let handle = gateway::spawn(&options).expect("gateway spawns");
+    let url = handle.url().to_owned();
+    let http = reqwest::Client::new();
+    wait_for_catalog(&url, &http, &["main-model"]).await;
+
+    // Hold a chat request in flight, so the switch command parks in its
+    // bounded drain with the request still registered.
+    let chat = tokio::spawn({
+        let http = http.clone();
+        let url = format!("{url}/v1/chat/completions");
+        async move {
+            http.post(url)
+                .bearer_auth("test-token")
+                .json(&serde_json::json!({
+                    "model": "main-model",
+                    "messages": [{ "role": "user", "content": "ping" }]
+                }))
+                .send()
+                .await
+        }
+    });
+    let release = crate::support::next_arrival(&mut arrivals).await;
+    let mut switching = send_within(
+        http.post(format!("{url}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": "other" })),
+    )
+    .await;
+    let mut body = String::new();
+    read_until(&mut switching, "loading-profile", &mut body).await;
+
+    // The save lands while the switch is parked; `send_within` bounds it by
+    // the phase timeout, well inside the drain's own deadline.
+    let document = json_within(
+        send_within(
+            http.get(format!("{url}/admin/config"))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    let save = send_within(
+        http.put(format!("{url}/admin/config"))
+            .bearer_auth("test-token")
+            .json(&document),
+    )
+    .await;
+    assert_eq!(
+        save.status(),
+        reqwest::StatusCode::OK,
+        "the save does not wait for the parked switch"
+    );
+    assert!(
+        path.with_file_name("gateway.toml.next").is_file(),
+        "the save staged its shadow while the switch was active"
+    );
+
+    // Release the held request: the switch drains and completes.
+    let _ = release.send(());
+    let response = chat.await.expect("chat task").expect("chat request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    read_until(&mut switching, "\"status\"", &mut body).await;
+    assert!(
+        body.contains("\"ready\""),
+        "the parked switch completes after the release: {body}"
+    );
+    handle.shutdown().expect("graceful shutdown");
 }

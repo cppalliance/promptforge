@@ -108,6 +108,27 @@ fn write_shadow_repr(target: &Path, contents: &str) -> Result<PathBuf, Repr> {
     Ok(shadow)
 }
 
+/// Replaces `target` with `contents` through a temporary file and rename.
+///
+/// This is the primitive behind [`write_shadow`] and
+/// [`persist_profile_state`], exposed so a caller holding a file's intended
+/// contents can commit them without staging a shadow first.
+///
+/// # Errors
+/// Returns [`ConfigError`](crate::ConfigError) when writing or renaming fails.
+///
+/// # Examples
+/// ```no_run
+/// use gateway_config::write_atomic;
+/// use std::path::Path;
+///
+/// write_atomic(Path::new("gateway.toml"), "config-version = 2\n")?;
+/// # Ok::<(), gateway_config::ConfigError>(())
+/// ```
+pub fn write_atomic(target: &Path, contents: &str) -> Result<(), crate::ConfigError> {
+    write_atomic_repr(target, contents).map_err(crate::ConfigError::from)
+}
+
 fn write_atomic_repr(target: &Path, contents: &str) -> Result<(), Repr> {
     let temp = unique_sidecar(target, "tmp");
     if let Err(source) = fs::write(&temp, contents) {

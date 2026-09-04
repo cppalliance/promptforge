@@ -81,7 +81,7 @@ The built-in `RECOMMENDED_STT_MODELS` pair is `base.en` for interim and `small.e
 
 ## Pending edits
 
-`save_config_shadow` accepts the pending admin document. It writes global config to `gateway.toml.next` and writes the matching `active_profile` key to `gateway.state.toml.next`. `load_pending_config` reads those shadows with the same selection precedence. No save touches a real file until `promote_shadow`.
+`save_config_shadow` accepts the pending admin document. It writes global config to `gateway.toml.next` and writes the matching `active_profile` key to `gateway.state.toml.next`. `load_pending_config` reads those shadows with the same selection precedence. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive both shadows and `persist_profile_state` build on.
 
 ## License
 

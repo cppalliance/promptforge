@@ -1,9 +1,10 @@
 //! The command queue: serialized, debounced, cancellable gateway commands.
 //!
 //! Everything slow the gateway does - the boot-time profile load, profile
-//! switches, model provisioning and unloads - runs as a [`Command`] on one
-//! worker task draining a bounded channel FIFO, so downloads never fight
-//! each other for bandwidth and the listener stays live while they run.
+//! switches, config applies, model provisioning and unloads - runs as a
+//! [`Command`] on one worker task draining a bounded channel FIFO, so
+//! downloads never fight each other for bandwidth and the listener stays
+//! live while they run.
 //! Each command reports into its own [`ProgressTree`] on the process hub and
 //! carries a [`CancellationToken`] the worker honors at chunk and phase
 //! boundaries. The in-process status ([`CommandQueue::active_command`] and
@@ -20,14 +21,20 @@ use shared_progress::{OperationId, ProgressHub, ProgressTree};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::config_apply::ApplySnapshot;
 use crate::error::GatewayError;
 use crate::{AppState, StatePersistence};
 
 /// Bound on commands waiting to start. Debounce keeps at most one pending
-/// `LoadProfile` and one pending `ProvisionModel` per model, so a full
-/// queue means an `UnloadModel` burst; the sender settles the overflow with
-/// [`GatewayError::QueueFull`] rather than growing memory unboundedly.
+/// `LoadProfile`, one pending `ApplyConfig`, and one pending
+/// `ProvisionModel` per model, so a full queue means an `UnloadModel`
+/// burst; the sender settles the overflow with [`GatewayError::QueueFull`]
+/// rather than growing memory unboundedly.
 const QUEUE_CAPACITY: usize = 32;
+
+/// The `ApplyConfig` command's display name: the status bar and tray show
+/// it, and the switch's cancellation error names it.
+pub(crate) const APPLY_CONFIG_LABEL: &str = "apply-config";
 
 /// What a settled command produced: the profile name for `LoadProfile`, a
 /// summary line for the rest.
@@ -52,6 +59,28 @@ pub(crate) enum Command {
         /// Whether a successful load persists the active-profile selection.
         persist: Arc<AtomicBool>,
         /// Cancellation token, checked at chunk and phase boundaries.
+        token: CancellationToken,
+    },
+    /// Apply the staged configuration: switch to the snapshot's selected
+    /// profile through the profile-switch machinery, then promote the
+    /// captured shadows at the switch's commit. Nothing touches a real file
+    /// before that commit, so a failed or cancelled apply leaves every
+    /// shadow staged for a retry.
+    ///
+    /// Debounce is asymmetric by design. An `ApplyConfig` replaces a pending
+    /// `LoadProfile` and cancels an active one: the applied configuration
+    /// supersedes any in-flight switch, the boot load included, and a
+    /// cancelled download keeps its partial for resume. A `LoadProfile`
+    /// arriving while an `ApplyConfig` is pending or active queues behind it
+    /// FIFO without cancelling it: a switch after an apply is a legitimate
+    /// order, while the reverse would discard the user's pending changes. A
+    /// second `ApplyConfig` attaches to the first and shares its outcome.
+    ApplyConfig {
+        /// The pending config and shadow contents the route captured under
+        /// the apply lock.
+        snapshot: ApplySnapshot,
+        /// Cancellation token, checked at phase boundaries and again under
+        /// the apply lock at the commit.
         token: CancellationToken,
     },
     /// Download and verify one model into the artifact store. Spawning it
@@ -101,6 +130,7 @@ impl Command {
     fn label(&self) -> String {
         match self {
             Command::LoadProfile { name, .. } => format!("load-profile: {name}"),
+            Command::ApplyConfig { .. } => APPLY_CONFIG_LABEL.to_owned(),
             Command::ProvisionModel { name, .. } => format!("provision-model: {name}"),
             Command::UnloadModel { name } => format!("unload-model: {name}"),
         }
@@ -109,9 +139,9 @@ impl Command {
     /// The token the worker honors, when the command carries one.
     fn token(&self) -> Option<CancellationToken> {
         match self {
-            Command::LoadProfile { token, .. } | Command::ProvisionModel { token, .. } => {
-                Some(token.clone())
-            }
+            Command::LoadProfile { token, .. }
+            | Command::ApplyConfig { token, .. }
+            | Command::ProvisionModel { token, .. } => Some(token.clone()),
             Command::UnloadModel { .. } => None,
         }
     }
@@ -121,6 +151,7 @@ impl Command {
     fn debounce_key(&self) -> Option<DebounceKey> {
         match self {
             Command::LoadProfile { name, .. } => Some(DebounceKey::Profile(name.to_string())),
+            Command::ApplyConfig { .. } => Some(DebounceKey::Apply),
             Command::ProvisionModel { name, .. } => Some(DebounceKey::Model(name.clone())),
             Command::UnloadModel { .. } => None,
         }
@@ -130,17 +161,30 @@ impl Command {
     fn persist_flag(&self) -> Option<Arc<AtomicBool>> {
         match self {
             Command::LoadProfile { persist, .. } => Some(Arc::clone(persist)),
-            _ => None,
+            Command::ApplyConfig { .. }
+            | Command::ProvisionModel { .. }
+            | Command::UnloadModel { .. } => None,
         }
     }
 }
 
 /// The identity a command debounces on: profile name for `LoadProfile`,
-/// model name for `ProvisionModel`.
+/// model name for `ProvisionModel`, and one shared slot for `ApplyConfig`,
+/// so at most one apply is ever pending or active.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DebounceKey {
     Profile(String),
+    Apply,
     Model(String),
+}
+
+impl DebounceKey {
+    /// Whether an incoming command with this key supersedes a `LoadProfile`
+    /// already in the queue: a newer switch (latest wins) or an apply (the
+    /// applied configuration outranks any in-flight switch).
+    fn supersedes_load_profile(&self) -> bool {
+        matches!(self, DebounceKey::Profile(_) | DebounceKey::Apply)
+    }
 }
 
 /// A command in the channel, carrying its queue id so the worker can find
@@ -285,11 +329,13 @@ impl CommandQueue {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Enqueues `command`, applying the debounce: a `LoadProfile` or
-    /// `ProvisionModel` duplicating the pending or active command attaches
-    /// to it; a `LoadProfile` for a different profile replaces the pending
-    /// one and cancels the active one (latest wins). `UnloadModel` is never
-    /// debounced.
+    /// Enqueues `command`, applying the debounce: a `LoadProfile`,
+    /// `ApplyConfig`, or `ProvisionModel` duplicating the pending or active
+    /// command attaches to it; a `LoadProfile` for a different profile, or
+    /// an `ApplyConfig`, replaces the pending `LoadProfile` and cancels the
+    /// active one (latest wins, and an apply outranks a switch). A
+    /// `LoadProfile` never displaces an `ApplyConfig`; it queues behind it.
+    /// `UnloadModel` is never debounced.
     pub(crate) fn enqueue(&self, command: Command) -> Enqueued {
         let (waiter_tx, waiter_rx) = oneshot::channel();
         let mut state = self.lock();
@@ -368,9 +414,13 @@ impl CommandQueue {
                 outcome: waiter_rx,
             };
         }
-        if matches!(key, Some(DebounceKey::Profile(_))) {
-            // A pending switch to a different profile is replaced: the
-            // queue holds at most one pending `LoadProfile`, latest wins.
+        if key
+            .as_ref()
+            .is_some_and(DebounceKey::supersedes_load_profile)
+        {
+            // A pending switch is replaced: the queue holds at most one
+            // pending `LoadProfile`, and the latest switch or the apply
+            // wins. A pending `ApplyConfig` is never displaced here.
             if let Some(position) = state
                 .pending
                 .iter()
@@ -380,8 +430,8 @@ impl CommandQueue {
                 let label = replaced.label.clone();
                 replaced.settle(Err(GatewayError::CommandCancelled(label)));
             }
-            // An active switch to a different profile is cancelled, so
-            // the new one starts promptly.
+            // An active switch is cancelled, so the new command starts
+            // promptly; an active `ApplyConfig` keeps running.
             if let Some(token) = state
                 .active
                 .as_ref()
@@ -434,6 +484,16 @@ impl CommandQueue {
             .collect()
     }
 
+    /// How many callers await the active command's outcome, for tests that
+    /// must know a debounced duplicate has attached before they act.
+    #[cfg(test)]
+    pub(crate) fn active_waiters(&self) -> usize {
+        self.lock()
+            .active
+            .as_ref()
+            .map_or(0, |active| active.waiters.len())
+    }
+
     /// Fires the active command's cancellation token. Returns whether a
     /// command was active. The command settles as cancelled once its body
     /// reaches the next chunk or phase boundary.
@@ -445,6 +505,40 @@ impl CommandQueue {
         if let Some(token) = &active.token {
             token.cancel();
         }
+        true
+    }
+
+    /// Cancels the `ApplyConfig` command, wherever it sits: fires the active
+    /// one's token, or removes the pending one and settles its waiters as
+    /// cancelled. Returns whether an apply existed. Revert calls this before
+    /// deleting shadows, so an apply's deferred commit can never write its
+    /// snapshot over files the user just reverted.
+    pub(crate) fn cancel_apply(&self) -> bool {
+        let (fired, removed) = {
+            let mut state = self.lock();
+            let fired = match &state.active {
+                Some(active) if active.key == Some(DebounceKey::Apply) => {
+                    if let Some(token) = &active.token {
+                        token.cancel();
+                    }
+                    true
+                }
+                _ => false,
+            };
+            let position = state
+                .pending
+                .iter()
+                .position(|entry| entry.key == Some(DebounceKey::Apply));
+            (
+                fired,
+                position.and_then(|index| state.pending.remove(index)),
+            )
+        };
+        let Some(entry) = removed else {
+            return fired;
+        };
+        let label = entry.label.clone();
+        entry.settle(Err(GatewayError::CommandCancelled(label)));
         true
     }
 
@@ -627,6 +721,9 @@ async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> O
             persist,
             token,
         } => load_profile(&state, name, persist, token, tree).await,
+        Command::ApplyConfig { snapshot, token } => {
+            crate::config_apply::apply_config(&state, snapshot, token, tree).await
+        }
         Command::ProvisionModel {
             name,
             source,
@@ -644,9 +741,10 @@ async fn load_profile(
     token: CancellationToken,
     tree: ProgressTree,
 ) -> Outcome {
-    // Direct switches serialize with pending saves and Apply, exactly as the
-    // route-driven switch always has.
-    let _apply = state.apply.lock().await;
+    // No apply lock here: the queue serializes this switch with Apply, and
+    // its real-state write races nothing else - saves and revert touch only
+    // shadows. Holding the lock across the download is what used to park
+    // every save, revert, and apply behind a boot load.
     let label = format!("load-profile: {name}");
     // The flag is read at commit time, so a debounced duplicate arriving
     // mid-run can still upgrade an ephemeral boot load into a persisted one.
@@ -808,6 +906,25 @@ mod tests {
         }
     }
 
+    /// An `ApplyConfig` over a one-profile config with nothing captured; the
+    /// stub executors never read the snapshot.
+    fn apply() -> Command {
+        let config = Config::from_toml_str(
+            "config-version = 2\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"t\"\n\
+             [[profile]]\nname = \"alpha\"\nmodels = []\n",
+        )
+        .expect("config parses");
+        Command::ApplyConfig {
+            snapshot: ApplySnapshot {
+                config: Box::new(config),
+                profile: ProfileName::parse("alpha").expect("profile name"),
+                files: Vec::new(),
+                restart_required: false,
+            },
+            token: CancellationToken::new(),
+        }
+    }
+
     /// An `AppState` over a minimal config; the stub executors never read it.
     fn state() -> AppState {
         let config = Config::from_toml_str(
@@ -815,6 +932,21 @@ mod tests {
         )
         .expect("config parses");
         app_state(config, None)
+    }
+
+    /// Whether the active command is the one labelled `name`.
+    fn active_is(queue: &CommandQueue, name: &str) -> bool {
+        queue
+            .active_command()
+            .is_some_and(|status| status.name == name)
+    }
+
+    fn pending_names(queue: &CommandQueue) -> Vec<String> {
+        queue
+            .pending_commands()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect()
     }
 
     /// Polls `condition` with a bounded wait, for observing the worker's
@@ -900,6 +1032,165 @@ mod tests {
         assert!(queue.cancel_active());
         let outcome = second.outcome.await.expect("beta settles");
         assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        queue.shutdown();
+    }
+
+    #[test]
+    fn an_apply_attaches_to_a_pending_apply() {
+        let queue = queue();
+        let first = queue.enqueue(apply());
+        let second = queue.enqueue(apply());
+
+        assert_eq!(
+            pending_names(&queue),
+            ["apply-config"],
+            "one apply is pending; the duplicate never enters the queue"
+        );
+        assert_eq!(
+            first.operation, second.operation,
+            "the duplicate attaches to the pending apply's operation"
+        );
+    }
+
+    #[test]
+    fn a_load_profile_queues_behind_a_pending_apply_without_replacing_it() {
+        let queue = queue();
+        let applied = queue.enqueue(apply());
+        let _switch = queue.enqueue(load_profile("alpha"));
+
+        assert_eq!(
+            pending_names(&queue),
+            ["apply-config", "load-profile: alpha"],
+            "the switch queues FIFO behind the apply"
+        );
+        drop(applied);
+    }
+
+    #[tokio::test]
+    async fn an_apply_replaces_the_pending_load_profile_and_cancels_the_active_one() {
+        let state = state();
+        let queue = state.commands.clone();
+        let _worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+
+        let active = queue.enqueue(load_profile("alpha"));
+        wait_until("alpha to go active", || {
+            active_is(&queue, "load-profile: alpha")
+        })
+        .await;
+        let pending = queue.enqueue(load_profile("beta"));
+        let applied = queue.enqueue(apply());
+
+        let outcome = pending.outcome.await.expect("the replaced switch settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "the pending switch is replaced by the apply: {outcome:?}"
+        );
+        let outcome = active.outcome.await.expect("the active switch settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "the active switch is cancelled so the apply starts: {outcome:?}"
+        );
+        wait_until("the apply to go active", || {
+            active_is(&queue, "apply-config")
+        })
+        .await;
+        assert!(
+            pending_names(&queue).is_empty(),
+            "no switch survives behind the apply"
+        );
+
+        assert!(queue.cancel_active());
+        let outcome = applied.outcome.await.expect("the apply settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        queue.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_load_profile_queues_behind_an_active_apply_without_cancelling_it() {
+        let state = state();
+        let queue = state.commands.clone();
+        let _worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+
+        let mut applied = queue.enqueue(apply());
+        wait_until("the apply to go active", || {
+            active_is(&queue, "apply-config")
+        })
+        .await;
+        let switch = queue.enqueue(load_profile("alpha"));
+        // Give the worker every chance to act on a cancellation that must
+        // not have happened.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+
+        assert!(
+            active_is(&queue, "apply-config"),
+            "the apply keeps running under the queued switch"
+        );
+        assert_eq!(pending_names(&queue), ["load-profile: alpha"]);
+        assert!(
+            matches!(
+                applied.outcome.try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            ),
+            "the apply's waiter is not settled by the switch"
+        );
+
+        assert!(queue.cancel_active());
+        let outcome = applied.outcome.await.expect("the apply settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        wait_until("alpha to go active", || {
+            active_is(&queue, "load-profile: alpha")
+        })
+        .await;
+        assert!(queue.cancel_active());
+        let outcome = switch.outcome.await.expect("alpha settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        queue.shutdown();
+    }
+
+    #[tokio::test]
+    async fn cancel_apply_removes_a_pending_apply_and_fires_an_active_one() {
+        // Pending: no worker, so the apply waits in the queue.
+        let queue = queue();
+        assert!(
+            !queue.cancel_apply(),
+            "an idle queue has no apply to cancel"
+        );
+        let _switch = queue.enqueue(load_profile("alpha"));
+        assert!(
+            !queue.cancel_apply(),
+            "a pending switch is not an apply and stays put"
+        );
+        assert_eq!(pending_names(&queue), ["load-profile: alpha"]);
+        let pending = queue.enqueue(apply());
+        assert!(queue.cancel_apply(), "the pending apply is removed");
+        assert!(pending_names(&queue).is_empty());
+        let outcome = pending.outcome.await.expect("the removed apply settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+
+        // Active: the parked apply observes its token.
+        let state = state();
+        let queue = state.commands.clone();
+        let _worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+        let active = queue.enqueue(apply());
+        wait_until("the apply to go active", || {
+            active_is(&queue, "apply-config")
+        })
+        .await;
+        assert!(queue.cancel_apply(), "the active apply's token fires");
+        let outcome = active.outcome.await.expect("the active apply settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        wait_until("the queue to go idle", || queue.active_command().is_none()).await;
         queue.shutdown();
     }
 

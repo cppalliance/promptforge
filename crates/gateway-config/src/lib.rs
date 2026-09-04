@@ -27,7 +27,8 @@
 //! [`promote_shadow`] is the explicit apply step. It uses atomic replacement
 //! where the platform supports it and a failure-safe backup fallback
 //! elsewhere. [`persist_profile_state`] atomically updates the real active
-//! profile without consuming an unapplied state shadow.
+//! profile without consuming an unapplied state shadow, and [`write_atomic`]
+//! is the bare replace-through-rename primitive both build on.
 //!
 //! The crate never mutates the process environment: `${VAR}` interpolation
 //! reads it, and loading env files into it is the calling binary's job.
@@ -64,5 +65,6 @@ pub use crate::profile::{
 };
 pub use crate::shadow::{
     PendingReport, PendingShadows, load_pending_config, pending_report, pending_var_references,
-    persist_profile_state, promote_shadow, save_config_shadow, shadow_path, write_shadow,
+    persist_profile_state, promote_shadow, save_config_shadow, shadow_path, write_atomic,
+    write_shadow,
 };

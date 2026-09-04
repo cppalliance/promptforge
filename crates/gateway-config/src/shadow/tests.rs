@@ -30,6 +30,32 @@ fn write_config() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
+fn write_atomic_replaces_the_real_file_and_leaves_its_shadow_alone() {
+    let (_temp, path) = write_config();
+    write_shadow(&path, "config-version = 2\n").expect("stage shadow");
+
+    write_atomic(&path, "config-version = 3\n").expect("atomic write");
+
+    assert_eq!(
+        fs::read_to_string(&path).expect("read real"),
+        "config-version = 3\n",
+        "the real file carries the written contents"
+    );
+    assert_eq!(
+        fs::read_to_string(shadow_path(&path)).expect("read shadow"),
+        "config-version = 2\n",
+        "the shadow is not consumed by a direct write"
+    );
+    let leftovers: Vec<_> = fs::read_dir(path.parent().expect("parent"))
+        .expect("list dir")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".tmp-") || name.contains(".backup-"))
+        .collect();
+    assert!(leftovers.is_empty(), "no sidecar survives: {leftovers:?}");
+}
+
+#[test]
 fn pending_document_splits_active_profile_into_state_shadow() {
     let (_temp, path) = write_config();
     let mut document: Value = toml::from_str(CONFIG).expect("fixture parses");
