@@ -42,13 +42,6 @@ impl SecretString {
         Ok(SecretString(secret))
     }
 
-    /// Builds the empty sentinel used only by the disabled client, which never
-    /// sends the credential. Crate-internal so no real credential path can
-    /// produce a blank secret.
-    pub(crate) fn disabled_placeholder() -> SecretString {
-        SecretString(String::new())
-    }
-
     /// Borrows the raw secret. Crate-internal so no downstream code can read a
     /// credential back out of the type.
     pub(crate) fn expose(&self) -> &str {
@@ -99,6 +92,9 @@ impl fmt::Display for SecretString {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayEndpoint {
     pub(crate) url: String,
+    /// Whether the host names the local machine: `localhost`, or an IP whose
+    /// `is_loopback()` holds. Decided at construction from the parsed host.
+    loopback: bool,
 }
 
 impl GatewayEndpoint {
@@ -138,12 +134,16 @@ impl GatewayEndpoint {
                 "gateway URL must use the http or https scheme: {trimmed:?}"
             )));
         }
-        match parsed.host_str() {
-            None | Some("") => {
+        let loopback = match parsed.host() {
+            None | Some(url::Host::Domain("")) => {
                 return Err(reject(format!("gateway URL names no host: {trimmed:?}")));
             }
-            Some(_) => {}
-        }
+            // The URL parser lowercases the host of an http(s) URL, so the
+            // literal comparison covers `LOCALHOST` too.
+            Some(url::Host::Domain(domain)) => domain == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        };
         if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err(reject(
                 "gateway URL must not embed credentials (user:pass@)".to_owned(),
@@ -158,6 +158,7 @@ impl GatewayEndpoint {
             // Normalized by the URL parser; trim the trailing slash so request
             // paths (`{base}/chat/completions`) join cleanly.
             url: parsed.as_str().trim_end_matches('/').to_string(),
+            loopback,
         })
     }
 
@@ -165,6 +166,31 @@ impl GatewayEndpoint {
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Returns whether the endpoint's host is the local machine.
+    ///
+    /// True for `localhost`, `127.0.0.1` (and the rest of `127.0.0.0/8`), and
+    /// `::1`; false for every other name or address. A loopback gateway admits
+    /// keyless same-machine callers by default, so
+    /// [`GatewayClient::from_env`](super::GatewayClient::from_env) makes the
+    /// bearer key optional exactly when this holds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_model_client::client::GatewayEndpoint;
+    ///
+    /// assert!(GatewayEndpoint::new("http://127.0.0.1:8081/v1")?.is_loopback());
+    /// assert!(GatewayEndpoint::new("http://[::1]:8081/v1")?.is_loopback());
+    /// assert!(GatewayEndpoint::new("http://localhost:8081/v1")?.is_loopback());
+    /// assert!(!GatewayEndpoint::new("http://192.168.1.20:8081/v1")?.is_loopback());
+    /// assert!(!GatewayEndpoint::new("https://gateway.example.com/v1")?.is_loopback());
+    /// # Ok::<(), promptforge_model_client::model::CompletionError>(())
+    /// ```
+    #[must_use]
+    pub fn is_loopback(&self) -> bool {
+        self.loopback
     }
 }
 

@@ -102,15 +102,162 @@ fn from_env_missing_gateway_url() {
 
 #[test]
 fn from_env_missing_gateway_key() {
-    let err = from_env_with(lookup_from(&[(
-        "PROMPTFORGE_GATEWAY_URL",
+    // A LAN gateway never trusts a keyless caller, so the key stays required
+    // there; an empty value is the same as no value. Only the exact name
+    // `localhost` is loopback: a name that merely contains it is not.
+    for key_pairs in [
+        vec![("PROMPTFORGE_GATEWAY_URL", "http://192.168.1.20:8081/v1")],
+        vec![
+            ("PROMPTFORGE_GATEWAY_URL", "http://192.168.1.20:8081/v1"),
+            ("PROMPTFORGE_GATEWAY_API_KEY", ""),
+        ],
+        vec![("PROMPTFORGE_GATEWAY_URL", "https://gateway.example.com/v1")],
+        vec![(
+            "PROMPTFORGE_GATEWAY_URL",
+            "http://localhost.evil.com:8081/v1",
+        )],
+        vec![("PROMPTFORGE_GATEWAY_URL", "http://notlocalhost:8081/v1")],
+    ] {
+        let err = from_env_with(lookup_from(&key_pairs))
+            .expect_err("missing key against a non-loopback gateway must fail");
+        assert!(
+            matches!(err, Error::MissingEnv(ref name) if name == "PROMPTFORGE_GATEWAY_API_KEY"),
+            "expected MissingEnv for {key_pairs:?}, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn from_env_missing_gateway_key_is_fine_for_a_loopback_gateway() {
+    // A loopback gateway trusts keyless same-machine callers by default, so
+    // the key is optional for every loopback spelling; the built client is
+    // the keyless one, which the Debug form cannot distinguish (no presence
+    // signal leaks), so the header test below pins what it sends.
+    for url in [
         "http://127.0.0.1:8081/v1",
-    )]))
-    .expect_err("missing key must fail");
-    assert!(matches!(
-        err,
-        Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_API_KEY"
-    ));
+        "http://127.0.0.2:8081/v1",
+        "http://[::1]:8081/v1",
+        "http://localhost:8081/v1",
+        "http://LOCALHOST:8081/v1",
+    ] {
+        let client = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_URL", url)]))
+            .unwrap_or_else(|err| panic!("a loopback URL needs no key, got {err:?} for {url}"));
+        assert!(
+            !client.has_key(),
+            "the client built for {url} must carry no key"
+        );
+        let empty_key = from_env_with(lookup_from(&[
+            ("PROMPTFORGE_GATEWAY_URL", url),
+            ("PROMPTFORGE_GATEWAY_API_KEY", ""),
+        ]))
+        .unwrap_or_else(|err| panic!("an empty key on loopback is unset, got {err:?} for {url}"));
+        assert!(!empty_key.has_key());
+    }
+    let keyed = from_env_with(lookup_from(&[
+        ("PROMPTFORGE_GATEWAY_URL", "http://127.0.0.1:8081/v1"),
+        ("PROMPTFORGE_GATEWAY_API_KEY", "tok"),
+    ]))
+    .expect("a loopback URL with a key builds");
+    assert!(
+        keyed.has_key(),
+        "a key that is set is kept even on loopback"
+    );
+}
+
+/// Spawns a gateway that records the `Authorization` header of each
+/// completion request (as `Some(value)` or `None`) and answers a minimal
+/// stop-finished stream, returning its `/v1` base and the capture slot.
+async fn spawn_auth_capturing_gateway() -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Option<Option<String>>>>,
+) {
+    use std::sync::{Arc, Mutex};
+
+    use axum::Router;
+    use axum::http::HeaderMap;
+    use axum::routing::post;
+
+    let captured: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+    let slot = Arc::clone(&captured);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap| {
+            let slot = Arc::clone(&slot);
+            async move {
+                let auth = headers
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned);
+                *slot.lock().expect("capture lock") = Some(auth);
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    sse_body(&[
+                        content_chunk("ok"),
+                        serde_json::json!({
+                            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }]
+                        }),
+                    ]),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/v1"), captured)
+}
+
+#[tokio::test]
+async fn keyless_client_sends_no_authorization_header() {
+    // The gateway's loopback trust admits only a request with NO
+    // Authorization header at all - a presented-but-wrong bearer is still
+    // 401 - so a keyless client must omit the header, not send an empty one.
+    let (base, captured) = spawn_auth_capturing_gateway().await;
+    let client = GatewayClient::keyless(GatewayEndpoint::new(&base).expect("valid endpoint"));
+    client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("the keyless completion succeeds");
+    let seen = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("the gateway saw the request");
+    assert_eq!(
+        seen, None,
+        "a keyless client must send no Authorization header, got {seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn keyed_client_still_sends_the_bearer_header() {
+    let (base, captured) = spawn_auth_capturing_gateway().await;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&base).expect("valid endpoint"),
+        SecretString::new("tok").expect("non-empty test key"),
+    );
+    client
+        .complete(&[Message::user("hi")], None, &openai_options(), |_| {})
+        .await
+        .expect("the keyed completion succeeds");
+    let seen = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("the gateway saw the request");
+    assert_eq!(seen.as_deref(), Some("Bearer tok"));
+}
+
+#[test]
+fn keyless_client_debug_is_indistinguishable_from_a_keyed_one() {
+    // No presence signal leaks through Debug either way.
+    let keyless =
+        GatewayClient::keyless(GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid"));
+    let rendered = format!("{keyless:?}");
+    assert!(rendered.contains("<redacted>"), "got: {rendered}");
+    assert!(!rendered.contains("None"), "got: {rendered}");
 }
 
 #[test]

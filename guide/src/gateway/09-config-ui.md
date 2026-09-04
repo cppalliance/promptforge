@@ -1,6 +1,6 @@
 # The Configuration UI
 
-The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
+The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key when the gateway asks for one, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
 
 ## Reach the UI
 
@@ -10,7 +10,7 @@ The UI pages need no bearer token, but every asset route answers 403 Forbidden t
 
 ## Sign in
 
-On first load without a stored key, you see a "PromptForge Gateway" sign-in card with a labeled API key password field and a Connect button. A wrong key shows "Invalid API key". An unreachable gateway shows "Gateway unreachable". The verified key is stored for the browser session. Any later 401 from the gateway clears the stored key and returns you to the key prompt.
+With the default `trust_loopback = true`, the UI opens straight into the shell: it runs on the gateway's own machine, and the gateway admits a loopback caller that presents no key. On a shared machine that same trust admits every other OS account, so an operator there sets `trust_loopback = false`; the UI then asks for the key. On first load without a stored key, you see a "PromptForge Gateway" sign-in card with a labeled API key password field and a Connect button. A wrong key shows "Invalid API key". An unreachable gateway shows "Gateway unreachable". The verified key is stored for the browser session. Any later 401 from the gateway clears the stored key and returns you to the key prompt.
 
 ## Get oriented
 
@@ -22,7 +22,7 @@ A connection dot in the tab bar shows whether the gateway is reachable. The tab 
 
 Edits move through three states: unsaved edits held in the browser, saved pending shadows on the gateway, and the applied running configuration. When pending changes exist, the tab bar shows an Apply button labeled with the pending file count beside a Revert All button. When a previous session left unapplied changes, a banner offers Review, Apply, and Revert All.
 
-Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation.
+Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation.
 
 Open the Review dialog to list every pending configuration change as a table of path, running value, and pending value. Secret values are never displayed.
 
@@ -58,7 +58,7 @@ The Settings view has seven sections: System, Gateway, Workshop, Dominions, Endp
 
 The System panel shows live metric tiles: CPU, RAM, VRAM with the GPU name, and disk usage with the cache path. The tiles refresh every 5 seconds, and a failed refresh keeps the last snapshot. Metric bars recolor by load: warning in the 70 to 89 percent band and danger at 90 percent or more.
 
-The Gateway card edits the bind address and the API key. A note says the boot configuration cannot hot-reload, and changing the API key warns that the new key will be required after restart. The typed key leaves the DOM once saved. Stored secrets render as a masked readout with a Change button; leaving the input empty keeps the existing key, and an Eye toggle reveals and re-hides the secret.
+The Gateway card edits the bind address, the API key, and the Trust loopback connections switch. The switch is on by default and admits callers on this machine that present no key; its help text states the cost, that on a shared machine any other OS account can then use the gateway, and turning it off requires the key from every caller. A note says the boot configuration cannot hot-reload, and changing the API key warns that the new key will be required after restart. The typed key leaves the DOM once saved. Stored secrets render as a masked readout with a Change button; leaving the input empty keeps the existing key, and an Eye toggle reveals and re-hides the secret.
 
 The Dominions and Endpoints cards show used-by chips that count dependents, and a delete confirmation names them. A local-kind dominion reveals the `vram_gb` budget field, and switching the kind to remote hides it. An endpoint binds to a dominion from a dropdown offering only remote-kind dominions plus None. The endpoint protocol dropdown is locked to `openai`, and the endpoint API key stays redacted through saves until Change reveals the input.
 

@@ -77,6 +77,46 @@ test("a Gateway save PUTs the global shadow with the untouched api_key as ***", 
   assert.equal(bodies[0].server.api_key, "***", "the untouched secret rides through redacted");
 });
 
+test("the Trust loopback toggle defaults on, names the caveat, and round-trips through the [server] save", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  const row = root.querySelector(".field-row[data-key='trust_loopback']");
+  assert.ok(row, "the [server] card carries the trust_loopback field");
+  assert.equal(row.querySelector("label").textContent, "Trust loopback connections");
+  const toggle = row.querySelector(".switch");
+  assert.equal(
+    toggle.getAttribute("aria-checked"),
+    "true",
+    "a config without the field shows the gateway's default (on)",
+  );
+  assert.match(
+    row.querySelector(".field-help").textContent,
+    /shared machine[\s\S]*turn this off/,
+    "the help text states the shared-machine caveat and the opt-out together",
+  );
+
+  toggle.click();
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+
+  const bodies = putBodies(stub, "/admin/config");
+  assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
+  assert.equal(bodies[0].server.trust_loopback, false, "the toggle rides in the [server] section");
+  assert.equal(bodies[0].server.bind, "127.0.0.1:8081", "the other [server] fields ride along");
+  assert.equal(bodies[0].server.api_key, "***", "the untouched secret stays redacted");
+  assert.equal(
+    root
+      .querySelector(".field-row[data-key='trust_loopback'] .switch")
+      .getAttribute("aria-checked"),
+    "false",
+    "after the save the pending view renders the saved value",
+  );
+});
+
 test("changing the gateway api_key warns about the new key and saves it", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });

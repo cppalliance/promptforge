@@ -18,7 +18,7 @@ cargo install gateway
 promptforge-gateway serve gateway.toml --profile main
 ```
 
-The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). With neither set, the gateway searches beside the executable, then the working directory, then the user profile's `.promptforge` directory; when no `gateway.toml` exists, first run writes a default there - loopback on an OS-assigned port, a fresh random bearer key, the recommended STT pair unless the installer declined it - and boots from it. The profile comes from `--profile NAME`, the `PROMPTFORGE_PROFILE` environment variable, or the sibling state file, in that precedence; with none set, startup refuses and lists the profiles the config defines. The generated default writes its state file selecting `default`, so a bare first boot needs no flags.
+The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). With neither set, the gateway searches beside the executable, then the working directory, then the user profile's `.promptforge` directory; when no `gateway.toml` exists, first run writes a default there - loopback on an OS-assigned port, a fresh random bearer key, `trust_loopback = true` so same-machine callers need no key (with the shared-machine caveat and the `trust_loopback = false` opt-out noted in the file), the recommended STT pair unless the installer declined it - and boots from it. The profile comes from `--profile NAME`, the `PROMPTFORGE_PROFILE` environment variable, or the sibling state file, in that precedence; with none set, startup refuses and lists the profiles the config defines. The generated default writes its state file selecting `default`, so a bare first boot needs no flags.
 
 Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions`, serves a model catalog at `GET /v1/models`, and, with the default-on `stt` feature, accepts OpenAI-compatible multipart transcription at `POST /v1/audio/transcriptions`.
 
@@ -62,12 +62,15 @@ The pre-2 layout is a hard break with no compat loader: a config carrying an `in
 
 ## The `[server]` section
 
-The boot config's `[server]` section is required and has no defaults. Both fields accept `${VAR}` interpolation from the process environment.
+The boot config's `[server]` section is required; `bind` and `api_key` have no defaults and accept `${VAR}` interpolation from the process environment.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `bind` | required | Socket address the gateway listener binds. |
-| `api_key` | required | Shared bearer key every `/v1/*` request must present. |
+| `api_key` | required | Shared bearer key. Every request from a non-loopback peer must present it, and a presented key is always checked. |
+| `trust_loopback` | `true` | Admit a loopback peer that presents no credential at all, on every route including the admin surface. On a shared machine this lets any other OS account on the same host use the gateway, including reading upstream API keys from the admin config surface; set `trust_loopback = false` (or bind off loopback) to require the bearer key from every caller. |
+
+Loopback trust is deliberately narrow. It applies only when no `Authorization` header was sent - a presented-but-wrong bearer is still 401, even from loopback - and only when the request's fetch metadata allows ambient access: no `Sec-Fetch-Site` header (curl, the SDK, the workshop, any non-browser client) or `same-origin`/`none` (the config SPA on its own origin, a typed URL). A browser page on another origin sends `cross-site` and is refused, so loopback trust does not reopen the CSRF hole the bearer requirement closed; the Host allowlist below still closes DNS rebinding. A request without a peer address fails closed and needs the key. The SDK's `GatewayClient::from_env` reads the same rule: `PROMPTFORGE_GATEWAY_API_KEY` is optional when `PROMPTFORGE_GATEWAY_URL` is loopback, required otherwise.
 
 The section is process-owned: a pending edit that changes it is promoted to disk on Apply but takes effect only on restart, reported as `restart_required` in the apply response.
 

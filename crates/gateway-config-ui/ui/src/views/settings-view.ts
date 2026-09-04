@@ -914,8 +914,15 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       fieldRow(card, {
         path: "api_key",
         label: "API key",
-        help: "The bearer key every API caller must present.",
+        help: "The bearer key every caller from another machine must present; a presented key is always checked.",
         type: "secret",
+      }),
+      fieldRow(card, {
+        path: "trust_loopback",
+        label: "Trust loopback connections",
+        help: "Admit callers on this machine that present no key, on every route including this admin surface. On a shared machine any other OS account can then use the gateway, including reading upstream API keys from the config - turn this off to require the key from every caller.",
+        type: "toggle",
+        fallback: true,
       }),
     );
     if (isEdited(card, "api_key")) {

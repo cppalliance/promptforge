@@ -9,6 +9,11 @@ bind = "127.0.0.1:8081"
 # Use a variable reference (api_key = "${PROMPTFORGE_GATEWAY_API_KEY}") to
 # keep the secret out of the file, or a literal for single-user setups.
 api_key = "change-me-to-a-secret"
+# Loopback callers that present no key are trusted (the default). On a shared
+# machine any other OS account can then use the gateway, including reading
+# upstream API keys from the admin config surface - set trust_loopback = false
+# to require the bearer key from every caller.
+trust_loopback = true
 
 # Optional embedded Workshop listener.
 [workshop]

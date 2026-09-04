@@ -11,8 +11,14 @@ Create a `workshop.toml` in the current directory. Every field is optional and t
 ```toml
 [gateway]
 base_url = "http://127.0.0.1:8081"
+# Optional for a loopback gateway: with the gateway's default
+# trust_loopback = true, a same-machine caller that presents no key is
+# admitted. Required when the gateway is on another host or its operator
+# set trust_loopback = false.
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 ```
+
+A gateway that trusts loopback callers trusts every OS account on that machine, including reading upstream API keys from the gateway's admin config surface; on a shared machine the gateway operator sets `trust_loopback = false`, and then this key is required.
 
 Then run:
 
@@ -33,7 +39,7 @@ Every field of `workshop.toml`:
 | Field | Default | Description |
 | --- | --- | --- |
 | `gateway.base_url` | (empty) | Base URL of the PromptForge gateway. A live `gateway.json` connection file in `~/.promptforge/run` (written by a running gateway) wins over this setting; the explicit value is the fallback for a gateway discovery cannot see, such as a LAN gateway. With no live file and no explicit value, startup fails plainly: no gateway configured or running |
-| `gateway.api_key` | (empty) | Bearer key for the gateway API; supports `${VAR}` interpolation; empty sends no `Authorization` header |
+| `gateway.api_key` | (empty) | Bearer key for the gateway API; supports `${VAR}` interpolation; empty sends no `Authorization` header, which a loopback gateway with the default `trust_loopback = true` accepts (a LAN gateway, or one with `trust_loopback = false`, answers 401) |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
 | `server.state_dir` | the config file's directory | Directory holding the server's persistent state: agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written here |

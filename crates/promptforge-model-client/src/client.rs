@@ -8,10 +8,10 @@
 //! [`StreamDelta`]. A caller with no use for deltas passes a no-op closure.
 //! [`GatewayClient::complete`] sends a `tools` array when the caller
 //! supplies one, so the executor's tool-call loop runs over this client.
-//! The client holds only the gateway's URL and the shared key; the vendor
-//! credential lives in the gateway, so the executor never sees it. Point
-//! `PROMPTFORGE_GATEWAY_URL` at a local server or another gateway to
-//! retarget it.
+//! The client holds only the gateway's URL and, when one is set, the shared
+//! key; the vendor credential lives in the gateway, so the executor never
+//! sees it. Point `PROMPTFORGE_GATEWAY_URL` at a local server or another
+//! gateway to retarget it; a loopback gateway needs no key.
 
 mod config;
 mod stream;

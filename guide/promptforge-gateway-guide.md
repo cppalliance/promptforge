@@ -32,7 +32,7 @@ The first argument is the path to the config file. The `--profile` flag names th
 
 You can supply both values through environment variables instead of command-line arguments. The config path comes from the positional argument or from `PROMPTFORGE_GATEWAY_CONFIG`; the command line wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
-You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key - and boots from it. The generated config selects a profile named `default`, so a bare first boot needs no flags.
+You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key and `trust_loopback = true` so callers on the same machine need no key - and boots from it. The generated file notes the caveat beside that line: on a shared machine any other OS account can then use the gateway, and `trust_loopback = false` requires the key from everyone. The generated config selects a profile named `default`, so a bare first boot needs no flags.
 
 ## The system tray
 
@@ -52,11 +52,19 @@ curl http://127.0.0.1:8081/health
 
 GET /health needs no credentials. It always answers 200 while the gateway is serving.
 
-Every /v1 route requires the shared bearer key from the config file. The address in this request is the `bind` value from the `[server]` section of the config file; `127.0.0.1:8081` is an example bind. A request with a wrong token is rejected with status 401 and error code `unauthorized`:
+Every /v1 route is authenticated with the shared bearer key from the config file. The address in this request is the `bind` value from the `[server]` section of the config file; `127.0.0.1:8081` is an example bind. A request with a wrong token is rejected with status 401 and error code `unauthorized`, from any peer:
 
 ````
 curl -H "Authorization: Bearer wrong-token" http://127.0.0.1:8081/v1/models
 ````
+
+From the gateway's own machine you can leave the key out entirely. With the default `trust_loopback = true`, a loopback request that presents no credential is admitted:
+
+````
+curl http://127.0.0.1:8081/v1/models
+````
+
+This convenience has one cost: on a shared machine, any other OS account can use the gateway the same way, including reading upstream API keys from the admin config surface. Set `trust_loopback = false` in `[server]` to require the key from every caller. The configuration chapter covers the rule in full.
 
 ## Choose what to build
 
@@ -88,7 +96,7 @@ From the tray, choose Quit. From a script or another PromptForge component, send
 
 # The Configuration File
 
-This chapter teaches you the shape of the one file that configures the whole gateway. You will learn the version key, the server section, how to keep secrets out of the file, and the loopback wall that guards the admin surface. Every other chapter adds sections to this file, so a solid mental model here pays off everywhere.
+This chapter teaches you the shape of the one file that configures the whole gateway. You will learn the version key, the server section, how to keep secrets out of the file, when a same-machine caller needs no key, and the loopback wall that guards the admin surface. Every other chapter adds sections to this file, so a solid mental model here pays off everywhere.
 
 ## One file, one version
 
@@ -127,7 +135,7 @@ upstream = "gpt-5"
 endpoints = ["openai"]
 ````
 
-The `[server]` section sets the socket address and the shared bearer key. Every /v1/* request must present the key. The key must not be empty.
+The `[server]` section sets the socket address and the shared bearer key. Every request from another machine must present the key, and a key that is presented is always checked. The key must not be empty. A third field, `trust_loopback`, controls whether callers on the gateway's own machine may skip the key. It defaults to true, which on a shared machine also admits every other OS account there; set `trust_loopback = false` to require the key from everyone. The rule is covered in full below.
 
 The model catalog lives in the same file. Remote models are `[[model]]` entries. Local models are `[[local_model]]` entries. Speech models are `[[stt_model]]` entries. Later chapters cover each kind.
 
@@ -155,9 +163,26 @@ You can classify a load failure into stable kinds: unreadable file, invalid TOML
 
 Two field rules are worth memorizing early. A `sha256` pin must be exactly 64 hexadecimal characters; uppercase and surrounding whitespace are accepted and normalized to lowercase. And a `[[model]]` entry without a `description` or a `context` is rejected at load.
 
+## Loopback trust
+
+By default a caller on the gateway's own machine needs no key. With `trust_loopback = true` (the default, and what the first-run config writes), a request from a loopback peer that presents no credential at all is admitted on every route, the admin surface included. That is what lets `curl http://127.0.0.1:8081/v1/models`, the SDK with only `PROMPTFORGE_GATEWAY_URL` set, and the config UI on its own origin work without a key.
+
+The trust is narrow on purpose. It applies only when the request carries no `Authorization` header: a presented-but-wrong bearer is still rejected with 401, even from loopback, so a stale key is always detected. And it applies only when the request's fetch metadata allows ambient access: no `Sec-Fetch-Site` header (curl, the SDK, any non-browser client) or a value of `same-origin` or `none` (the config UI, a typed URL). A page on another origin sends `cross-site`, and browsers never let a page strip that header, so a web page cannot ride your loopback peer into the admin surface. A request with no peer address fails closed and needs the key.
+
+The cost is the shared-machine case. On a machine with more than one OS account, any other account can use your gateway, including reading upstream API keys from the admin config surface. If that describes your machine, set `trust_loopback = false` to require the bearer key from every caller, or bind the gateway off loopback:
+
+````
+[server]
+bind = "127.0.0.1:8081"
+api_key = "${GATEWAY_KEY}"
+trust_loopback = false
+````
+
+`[server]` is process-owned, so a change to `trust_loopback` takes effect on the next restart.
+
 ## The loopback wall
 
-The admin config endpoints sit behind a loopback wall in every build. A non-loopback peer gets 403 before bearer auth even runs. The wall covers config read and write, the env file, pending state, apply and revert, orphans, system metrics, model info, chat templates, the Hugging Face proxy, profile create and delete, and reveal. The wall fails closed: a request with no peer address is refused.
+The admin config endpoints sit behind a loopback wall in every build. A non-loopback peer gets 403 before bearer auth even runs. The wall covers config read and write, the env file, pending state, apply and revert, orphans, system metrics, model info, chat templates, the Hugging Face proxy, profile create and delete, and reveal. The wall fails closed: a request with no peer address is refused. Loopback trust adds a rule to authentication; it removes no wall.
 
 ## Derived addresses
 
@@ -585,6 +610,10 @@ curl -X POST -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:8081/admin
 
 The real file is replaced atomically. On platforms where rename cannot overwrite, a backup-and-restore fallback preserves the old file. The reply carries `applied`, `reloaded`, and `restart_required`. The reply tells you when an edit needs a process restart to take effect: an env shadow or a change to `[server]` or `[workshop]` requires a restart. The apply's reload stages stream on the live progress stream; the apply response carries only the outcome.
 
+An apply that changes the config or the state runs as a command on the gateway's command queue, the same queue that runs profile switches and boot provisioning. The request waits for the command's outcome, so the call above still returns when the apply is done. While the command runs, `GET /admin/status` reports it as the active command named `apply-config`, and the config UI's Apply overlay follows its stages and carries a Cancel button. `POST /admin/queue/cancel` stops it; the request then answers 503 with error code `apply_cancelled`. An apply supersedes any profile switch in flight, including the boot load, because the applied configuration is the one you want running; a profile switch requested during an apply waits behind it. An apply that touches only the env file, or only a process-owned section, needs no reload and runs inline without a command.
+
+Promotion happens at the end. The shadow files are read into memory when the apply is requested, the new configuration is downloaded and started, and only then are the captured bytes written to the real files and the shadows removed. A cancelled or failed apply therefore promotes nothing: every shadow stays on disk, the pending count stays where it was, and the next Apply runs the whole thing again. A save that lands while an apply is in flight is kept as the next pending change, never silently lost and never half-applied.
+
 ## Revert
 
 Discard every staged edit without touching the real files:
@@ -605,13 +634,13 @@ Read and stage the gateway's global `.env` file over the same surface. GET /admi
 
 ## Failure behavior
 
-You are protected from half-applied state. Apply, revert, and saves serialize on one lock. An invalid pending config is never promoted. A failed apply leaves the rejected shadow on disk for correction or revert. A failed state-shadow write rolls the config shadow back to its previous contents.
+You are protected from half-applied state. Saves, revert, and the apply's snapshot and commit steps serialize on one lock, and applies serialize with profile switches on the command queue. An invalid pending config is never promoted; the request fails before any command exists. A failed or cancelled apply leaves every shadow on disk for correction, retry, or revert. A revert issued during an apply cancels the apply first, so the apply's commit never writes over files you just reverted. A failed state-shadow write rolls the config shadow back to its previous contents.
 
 ---
 
 # The Configuration UI
 
-The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
+The gateway serves a browser UI for configuration: you reach it over HTTP, sign in with your API key when the gateway asks for one, and edit every part of the configuration through its views. The UI rides the safe-edit surface from the previous chapter, so everything you do there moves through pending shadows and Apply.
 
 ## Reach the UI
 
@@ -621,7 +650,7 @@ The UI pages need no bearer token, but every asset route answers 403 Forbidden t
 
 ## Sign in
 
-On first load without a stored key, you see a "PromptForge Gateway" sign-in card with a labeled API key password field and a Connect button. A wrong key shows "Invalid API key". An unreachable gateway shows "Gateway unreachable". The verified key is stored for the browser session. Any later 401 from the gateway clears the stored key and returns you to the key prompt.
+With the default `trust_loopback = true`, the UI opens straight into the shell: it runs on the gateway's own machine, and the gateway admits a loopback caller that presents no key. On a shared machine that same trust admits every other OS account, so an operator there sets `trust_loopback = false`; the UI then asks for the key. On first load without a stored key, you see a "PromptForge Gateway" sign-in card with a labeled API key password field and a Connect button. A wrong key shows "Invalid API key". An unreachable gateway shows "Gateway unreachable". The verified key is stored for the browser session. Any later 401 from the gateway clears the stored key and returns you to the key prompt.
 
 ## Get oriented
 
@@ -633,7 +662,7 @@ A connection dot in the tab bar shows whether the gateway is reachable. The tab 
 
 Edits move through three states: unsaved edits held in the browser, saved pending shadows on the gateway, and the applied running configuration. When pending changes exist, the tab bar shows an Apply button labeled with the pending file count beside a Revert All button. When a previous session left unapplied changes, a banner offers Review, Apply, and Revert All.
 
-Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation.
+Pressing Apply opens a progress overlay that follows the gateway's live progress stream stage by stage until the apply finishes or fails. The overlay carries a Cancel button; pressing it stops the apply on the gateway, and the overlay reports that the apply was cancelled and your pending changes are still staged. A failed stage holds on the error message for a moment before the overlay closes. When an applied configuration requires a restart, a banner reads "Restart the gateway to apply these changes." and clears itself once the gateway comes back on a new config generation.
 
 Open the Review dialog to list every pending configuration change as a table of path, running value, and pending value. Secret values are never displayed.
 
@@ -669,7 +698,7 @@ The Settings view has seven sections: System, Gateway, Workshop, Dominions, Endp
 
 The System panel shows live metric tiles: CPU, RAM, VRAM with the GPU name, and disk usage with the cache path. The tiles refresh every 5 seconds, and a failed refresh keeps the last snapshot. Metric bars recolor by load: warning in the 70 to 89 percent band and danger at 90 percent or more.
 
-The Gateway card edits the bind address and the API key. A note says the boot configuration cannot hot-reload, and changing the API key warns that the new key will be required after restart. The typed key leaves the DOM once saved. Stored secrets render as a masked readout with a Change button; leaving the input empty keeps the existing key, and an Eye toggle reveals and re-hides the secret.
+The Gateway card edits the bind address, the API key, and the Trust loopback connections switch. The switch is on by default and admits callers on this machine that present no key; its help text states the cost, that on a shared machine any other OS account can then use the gateway, and turning it off requires the key from every caller. A note says the boot configuration cannot hot-reload, and changing the API key warns that the new key will be required after restart. The typed key leaves the DOM once saved. Stored secrets render as a masked readout with a Change button; leaving the input empty keeps the existing key, and an Eye toggle reveals and re-hides the secret.
 
 The Dominions and Endpoints cards show used-by chips that count dependents, and a delete confirmation names them. A local-kind dominion reveals the `vram_gb` budget field, and switching the kind to remote hides it. An endpoint binds to a dominion from a dropdown offering only remote-kind dominions plus None. The endpoint protocol dropdown is locked to `openai`, and the endpoint API key stays redacted through saves until Change reveals the input.
 

@@ -28,7 +28,7 @@ The first argument is the path to the config file. The `--profile` flag names th
 
 You can supply both values through environment variables instead of command-line arguments. The config path comes from the positional argument or from `PROMPTFORGE_GATEWAY_CONFIG`; the command line wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
-You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key - and boots from it. The generated config selects a profile named `default`, so a bare first boot needs no flags.
+You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key and `trust_loopback = true` so callers on the same machine need no key - and boots from it. The generated file notes the caveat beside that line: on a shared machine any other OS account can then use the gateway, and `trust_loopback = false` requires the key from everyone. The generated config selects a profile named `default`, so a bare first boot needs no flags.
 
 ## The system tray
 
@@ -48,11 +48,19 @@ curl http://127.0.0.1:8081/health
 
 GET /health needs no credentials. It always answers 200 while the gateway is serving.
 
-Every /v1 route requires the shared bearer key from the config file. The address in this request is the `bind` value from the `[server]` section of the config file; `127.0.0.1:8081` is an example bind. A request with a wrong token is rejected with status 401 and error code `unauthorized`:
+Every /v1 route is authenticated with the shared bearer key from the config file. The address in this request is the `bind` value from the `[server]` section of the config file; `127.0.0.1:8081` is an example bind. A request with a wrong token is rejected with status 401 and error code `unauthorized`, from any peer:
 
 ````
 curl -H "Authorization: Bearer wrong-token" http://127.0.0.1:8081/v1/models
 ````
+
+From the gateway's own machine you can leave the key out entirely. With the default `trust_loopback = true`, a loopback request that presents no credential is admitted:
+
+````
+curl http://127.0.0.1:8081/v1/models
+````
+
+This convenience has one cost: on a shared machine, any other OS account can use the gateway the same way, including reading upstream API keys from the admin config surface. Set `trust_loopback = false` in `[server]` to require the key from every caller. The configuration chapter covers the rule in full.
 
 ## Choose what to build
 

@@ -13,13 +13,19 @@ use super::{Completion, GatewayEndpoint, Message, SecretString, StreamDelta, Too
 use crate::model::{CompletionError, CompletionOptions};
 use crate::{Error, Result};
 
-/// A chat completions client bound to one gateway URL and shared bearer key.
+/// A chat completions client bound to one gateway URL and, usually, the
+/// gateway's shared bearer key.
+///
+/// The key is optional: a gateway on the same machine admits keyless
+/// loopback callers by default, and a client built without a key
+/// ([`GatewayClient::keyless`]) sends no `Authorization` header at all.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct GatewayClient {
     transport: GatewayTransport,
     base_url: String,
-    key: SecretString,
+    /// The bearer presented on every request, or `None` to present nothing.
+    key: Option<SecretString>,
     /// Wall-clock cap applied to each completion request.
     request_timeout: Duration,
     /// Byte ceiling enforced on a response body before it is decoded.
@@ -125,7 +131,38 @@ impl GatewayClient {
         GatewayClient {
             transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: endpoint.url,
-            key,
+            key: Some(key),
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+        }
+    }
+
+    /// Build a client that presents no bearer key.
+    ///
+    /// Every request goes out without an `Authorization` header. This fits a
+    /// gateway on the same machine, which trusts keyless loopback callers by
+    /// default (and, on a shared machine, every other OS account there)
+    /// unless its operator set `trust_loopback = false`; against any other
+    /// gateway the requests fail with a `Backend` 401. Nothing here checks
+    /// the endpoint's host - the caller decides, and
+    /// [`GatewayClient::from_env`] decides by [`GatewayEndpoint::is_loopback`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_model_client::client::{GatewayClient, GatewayEndpoint};
+    ///
+    /// let endpoint = GatewayEndpoint::new("http://127.0.0.1:8081/v1")?;
+    /// let client = GatewayClient::keyless(endpoint);
+    /// let _ = client;
+    /// # Ok::<(), promptforge_model_client::model::CompletionError>(())
+    /// ```
+    #[must_use]
+    pub fn keyless(endpoint: GatewayEndpoint) -> GatewayClient {
+        GatewayClient {
+            transport: GatewayTransport::Http(reqwest::Client::new()),
+            base_url: endpoint.url,
+            key: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
@@ -157,10 +194,17 @@ impl GatewayClient {
         GatewayClient {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
-            key: SecretString::disabled_placeholder(),
+            key: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
+    }
+
+    /// Whether this client presents a bearer key; a test seam for the
+    /// environment constructor, which never exposes the key itself.
+    #[cfg(test)]
+    pub(crate) fn has_key(&self) -> bool {
+        self.key.is_some()
     }
 
     /// Applies the run's HTTP limits to this client.
@@ -196,11 +240,21 @@ impl GatewayClient {
     /// Builds a client from the environment.
     ///
     /// - URL: `PROMPTFORGE_GATEWAY_URL`. Required.
-    /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer. Required.
+    /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer.
+    ///   Required unless the URL's host is loopback (`127.0.0.1`, `::1`,
+    ///   `localhost`); a loopback gateway trusts keyless same-machine callers
+    ///   by default, so the client is then built keyless and sends no
+    ///   `Authorization` header. An empty value counts as unset. That trust
+    ///   also admits every other OS account on a shared machine, so an
+    ///   operator there sets `trust_loopback = false`; then set the key, or
+    ///   a keyless client's requests fail with a `Backend` 401.
     ///
     /// # Errors
-    /// Returns a [`CompletionError`] with `Config` kind when either variable is
-    /// not set or is set to a non-Unicode value.
+    /// Returns a [`CompletionError`] with `Config` kind when
+    /// `PROMPTFORGE_GATEWAY_URL` is unset or invalid, when either variable is
+    /// set to a non-Unicode value, or when the URL's host is not loopback (a
+    /// LAN or remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is unset or
+    /// empty.
     pub fn from_env() -> std::result::Result<GatewayClient, CompletionError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
@@ -258,17 +312,17 @@ impl GatewayClient {
         let request_body = build_request_body(messages, tools, options);
 
         let started = Instant::now();
-        let mut response = http
+        let mut request = http
             .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(self.key.expose())
             // reqwest's whole-request timeout covers the body read, so the
             // run's wall-clock cap bounds the entire stream, not just the
             // connection.
             .timeout(self.request_timeout)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(Error::http)?;
+            .json(&request_body);
+        if let Some(key) = &self.key {
+            request = request.bearer_auth(key.expose());
+        }
+        let mut response = request.send().await.map_err(Error::http)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -424,15 +478,25 @@ async fn read_body_capped(mut response: reqwest::Response, cap: u64) -> Result<V
     Ok(body)
 }
 
+/// The environment-driven constructor behind [`GatewayClient::from_env`],
+/// with the variable lookup injected so tests need not touch the process
+/// environment.
+///
+/// The key is optional exactly when the URL's host is loopback; an empty key
+/// counts as unset ([`SecretString::new`] refuses only an empty secret, and
+/// `Result::ok` folds that refusal into `None`).
 pub(crate) fn from_env_with(
     lookup: impl Fn(&str) -> std::result::Result<Option<String>, Error>,
 ) -> Result<GatewayClient> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
-    let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
-        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
-    let key = SecretString::new(key)
-        .map_err(|_| Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY must not be empty".into()))?;
-    Ok(GatewayClient::new(endpoint, key))
+    let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
+        .map(SecretString::new)
+        .and_then(std::result::Result::ok);
+    match key {
+        Some(key) => Ok(GatewayClient::new(endpoint, key)),
+        None if endpoint.is_loopback() => Ok(GatewayClient::keyless(endpoint)),
+        None => Err(Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY".into())),
+    }
 }
