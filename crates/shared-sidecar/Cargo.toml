@@ -1,0 +1,56 @@
+[package]
+name = "shared-sidecar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge sidecar discovery seam: the gateway.json connection file, its launch lock, stale detection, and the health probe shared by the gateway and the workshop readers"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# Process-image lookup for stale detection (src/sys/macos.rs): proc_pidpath.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
+# Process-image lookup for stale detection (src/sys/windows.rs):
+# OpenProcess + QueryFullProcessImageNameW.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Not `workspace = true`: the process-image shims under src/sys/ are raw FFI
+# and cannot be written without unsafe, and a workspace `forbid` cannot be
+# overridden by a module allow. The workspace lint set is mirrored with
+# unsafe_code lowered to deny, which the sys modules alone opt out of.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+future_incompatible = { level = "warn", priority = -1 }
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "warn"
+doc_markdown = "allow"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"

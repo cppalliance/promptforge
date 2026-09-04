@@ -24,7 +24,6 @@
 mod bridge;
 mod discover;
 mod drops;
-mod health;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod navigation;
@@ -169,7 +168,7 @@ fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
     let gateway = gateway::spawn(&ServeOptions::new(config_path, profile))
         .context("start the merged gateway")?;
     match workshop_url(&gateway).and_then(|url| {
-        health::wait_for_health(&url, HEALTH_TIMEOUT)
+        shared_sidecar::wait_for_health(&url, HEALTH_TIMEOUT)
             .context("wait for the hosted workshop")
             .map(|()| url)
     }) {

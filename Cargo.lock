@@ -1911,10 +1911,12 @@ dependencies = [
  "shared-loopback",
  "shared-progress",
  "shared-protocol",
+ "shared-sidecar",
  "subtle",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.19",
+ "time",
  "tokio",
  "toml 0.8.2",
  "tower",
@@ -5802,6 +5804,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-sidecar"
+version = "0.2.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "shellexpand"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8207,6 +8221,7 @@ dependencies = [
  "gateway",
  "rand 0.9.5",
  "serde_json",
+ "shared-sidecar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

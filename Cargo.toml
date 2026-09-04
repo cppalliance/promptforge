@@ -24,6 +24,7 @@ gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.2.0" }
 gateway-local = { path = "crates/gateway-local", version = "0.2.0" }
 shared-loopback = { path = "crates/shared-loopback", version = "0.2.0" }
 shared-protocol = { path = "crates/shared-protocol", version = "0.2.0" }
+shared-sidecar = { path = "crates/shared-sidecar", version = "0.2.0" }
 gateway-routing = { path = "crates/gateway-routing", version = "0.2.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
 promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.2.0" }
@@ -117,6 +118,10 @@ sysinfo = { version = "0.38", default-features = false, features = ["system", "d
 nvml-wrapper = "0.12"
 # Opens a URL in the system browser for the windowless server frame.
 open = "5"
+# Thin process-image shims for shared-sidecar's stale detection; both are
+# already in the tree transitively.
+libc = "0.2"
+windows-sys = { version = "0.61", default-features = false }
 # Encodes PNG fixtures in the gateway's integration tests.
 png = "0.18"
 # Tauri v2 desktop framework for workshop. tauri is pinned to the

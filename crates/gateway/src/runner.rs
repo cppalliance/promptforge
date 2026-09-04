@@ -34,6 +34,10 @@ pub struct ServeOptions {
     pub config_path: PathBuf,
     /// Optional command-line profile override.
     pub profile: Option<ProfileName>,
+    /// Directory the `gateway.json` connection file is written to after a
+    /// successful bind; `None` uses the default run directory under the
+    /// user profile's `.promptforge` directory.
+    pub run_dir: Option<PathBuf>,
 }
 
 impl ServeOptions {
@@ -43,7 +47,16 @@ impl ServeOptions {
         ServeOptions {
             config_path,
             profile: profile.into(),
+            run_dir: None,
         }
+    }
+
+    /// Sets the connection-file run directory, for tests and portable
+    /// installs; the default is the user profile's `.promptforge/run`.
+    #[must_use]
+    pub fn with_run_dir(mut self, run_dir: PathBuf) -> ServeOptions {
+        self.run_dir = Some(run_dir);
+        self
     }
 }
 
@@ -536,6 +549,10 @@ fn serve_thread(
             return Ok(());
         }
     };
+    // The connection file lands before the readiness signal so a spawned
+    // gateway is discoverable the moment `spawn` returns; the guard removes
+    // it on every exit path below, graceful shutdown included.
+    let _connection_file = connection_file_guard(&config, options, address);
     #[cfg(feature = "workshop")]
     let workshop = workshop::spawn_if_configured(
         &config,
@@ -560,6 +577,64 @@ fn serve_thread(
     runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
         .map_err(StartupError::serve)
+}
+
+/// Removes the connection file on drop when it still belongs to this
+/// process, so a graceful shutdown withdraws the gateway from discovery
+/// while a replacement's file is spared.
+#[derive(Debug)]
+struct ConnectionFileGuard {
+    run_dir: PathBuf,
+    pid: u32,
+}
+
+impl Drop for ConnectionFileGuard {
+    fn drop(&mut self) {
+        if let Err(error) = shared_sidecar::remove_if_mine(&self.run_dir, self.pid) {
+            tracing::warn!("could not remove the connection file: {error}");
+        }
+    }
+}
+
+/// Writes the `gateway.json` connection file for the just-bound `address`
+/// and returns the guard that removes it on drop. A failure is logged and
+/// tolerated: the gateway keeps serving, and discovery degrades to a
+/// relaunch instead of an attach.
+fn connection_file_guard(
+    config: &Config,
+    options: &ServeOptions,
+    address: std::net::SocketAddr,
+) -> Option<ConnectionFileGuard> {
+    let Some(run_dir) = options
+        .run_dir
+        .clone()
+        .or_else(shared_sidecar::default_run_dir)
+    else {
+        tracing::warn!("no user profile directory found; no connection file written");
+        return None;
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let file = shared_sidecar::ConnectionFile {
+        port: address.port(),
+        api_key: config.server_key().expose().to_owned(),
+        pid: std::process::id(),
+        epoch: u64::try_from(now.unix_timestamp()).unwrap_or(0),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        // A well-known Rfc3339 format of a valid `now_utc` cannot fail;
+        // the fallback keeps the field a plain string.
+        started_at: now
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| String::from("unknown")),
+    };
+    let pid = file.pid;
+    if let Err(error) = file.write_to(&run_dir) {
+        tracing::warn!(
+            "could not write the connection file in {}: {error}; attachers will relaunch instead",
+            run_dir.display()
+        );
+        return None;
+    }
+    Some(ConnectionFileGuard { run_dir, pid })
 }
 
 /// Resolves only on an explicit shutdown send. A sender dropped without

@@ -20,6 +20,8 @@ anyhow.workspace = true
 gateway = { workspace = true, features = ["workshop", "config-ui"] }
 rand.workspace = true
 serde_json.workspace = true
+# The health wait comes from the shared connection-file seam.
+shared-sidecar.workspace = true
 tauri.workspace = true
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true

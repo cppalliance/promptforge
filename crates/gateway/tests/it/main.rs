@@ -31,4 +31,5 @@ mod profiles;
 mod progress;
 mod queue;
 mod rerank;
+mod sidecar;
 mod web_search;
