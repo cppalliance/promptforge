@@ -68,6 +68,16 @@ jobs:
         working-directory: crates/workshop-server/ui
         run: npm ci
 
+      # The gateway sidecar build needs the config UI's esbuild pipeline
+      # (default `config-ui` feature) and the embedding model that
+      # promptforge-tool-picker's build script compiles in.
+      - name: Install config UI dependencies
+        working-directory: crates/gateway-config-ui/ui
+        run: npm ci
+
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
+
       - name: Install Tauri system packages
         if: matrix.name == 'linux'
         run: |
@@ -78,6 +88,32 @@ jobs:
       # EV/OV cert exists; tauri-action picks it up from the machine store.
       # SIGNING (macOS): import the Developer ID certificate and pass
       # APPLE_CERTIFICATE/APPLE_SIGNING_IDENTITY to tauri-action's env.
+
+      # tauri.conf.json ships the gateway via bundle.externalBin, which
+      # resolves binaries/promptforge-gateway-<target-triple> at bundle
+      # time; build and stage it before tauri-action runs.
+      - name: Build and stage the gateway sidecar
+        shell: bash
+        run: |
+          set -e
+          case "${{ matrix.name }}" in
+            windows)     triple="x86_64-pc-windows-msvc";  ext=".exe" ;;
+            macos-arm)   triple="aarch64-apple-darwin";    ext="" ;;
+            macos-intel) triple="x86_64-apple-darwin";     ext="" ;;
+            linux)       triple="x86_64-unknown-linux-gnu"; ext="" ;;
+          esac
+          case "${{ matrix.args }}" in
+            *--target*)
+              cargo build --release --locked -p gateway --target "$triple"
+              src="target/$triple/release/promptforge-gateway$ext"
+              ;;
+            *)
+              cargo build --release --locked -p gateway
+              src="target/release/promptforge-gateway$ext"
+              ;;
+          esac
+          mkdir -p crates/workshop/binaries
+          cp "$src" "crates/workshop/binaries/promptforge-gateway-$triple$ext"
 
       - name: Build the app
         id: build
@@ -162,15 +198,30 @@ jobs:
             Where-Object { $_.Name -in @("promptforge-workshop.exe") } |
             Select-Object -First 1
           if (-not $exe) { throw "promptforge-workshop.exe not found after install" }
+          # The gateway ships as an externalBin sidecar; a default (all
+          # components checked) silent install must lay it beside the shell.
+          $gateway = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
+            ForEach-Object { Get-ChildItem $_ -Recurse -Filter promptforge-gateway.exe -ErrorAction SilentlyContinue } |
+            Select-Object -First 1
+          if (-not $gateway) { throw "promptforge-gateway.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
           $version = $env:TAG_NAME -replace '^workshop-v', ''
           if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
           New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-          # The shell hosts the workshop server in-process on an OS-assigned
-          # loopback port and attaches to a gateway; an explicit dummy
-          # endpoint lets the server boot with no gateway running.
+          # A default install lays the gateway beside the shell, so boot
+          # launches it instead of using an explicit endpoint. A minimal
+          # gateway.toml keeps that first boot free of STT model downloads;
+          # the dummy workshop.toml endpoint remains the fallback when no
+          # sibling gateway exists.
+          @'
+          config-version = 2
+
+          [server]
+          bind = "127.0.0.1:0"
+          api_key = "release-smoke"
+          '@ | Set-Content (Join-Path $configDir "gateway.toml")
           @'
           [gateway]
           base_url = "http://127.0.0.1:1"
@@ -206,14 +257,26 @@ jobs:
           hdiutil attach "$dmg" -nobrowse -quiet
           cp -R "/Volumes/PromptForge/PromptForge.app" /tmp/PromptForge.app
           hdiutil detach "/Volumes/PromptForge" -quiet
-          bin=$(find /tmp/PromptForge.app/Contents/MacOS -type f | head -1)
+          # The bundle holds two executables (the gateway ships via
+          # externalBin beside the main binary); pick the shell by name.
+          bin="/tmp/PromptForge.app/Contents/MacOS/promptforge-workshop"
+          [ -x "$bin" ] || { echo "promptforge-workshop not in the bundle"; exit 1; }
           version="${TAG_NAME#workshop-v}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
-          # The shell hosts the workshop server in-process on an OS-assigned
-          # loopback port and attaches to a gateway; an explicit dummy
-          # endpoint lets the server boot with no gateway running.
+          # A default install lays the gateway beside the shell, so boot
+          # launches it instead of using an explicit endpoint. A minimal
+          # gateway.toml keeps that first boot free of STT model downloads;
+          # the dummy workshop.toml endpoint remains the fallback when no
+          # sibling gateway exists.
+          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
+          config-version = 2
+
+          [server]
+          bind = "127.0.0.1:0"
+          api_key = "release-smoke"
+          EOF
           cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"
@@ -244,8 +307,11 @@ jobs:
           [ -n "$deb" ] || { echo "no deb in the artifact"; exit 1; }
           sudo dpkg -i "$deb" || sudo apt-get install -f -y
           package=$(dpkg-deb -f "$deb" Package)
-          bin=$(dpkg -L "$package" | grep -E '/usr/bin/[^/]+$' | head -1)
-          [ -n "$bin" ] || { echo "no binary in the deb"; exit 1; }
+          # The deb holds two executables (the gateway ships via
+          # externalBin into /usr/bin beside the main binary); pick the
+          # shell by name.
+          bin=$(dpkg -L "$package" | grep -E '/usr/bin/promptforge-workshop$' | head -1)
+          [ -n "$bin" ] || { echo "no promptforge-workshop in the deb"; exit 1; }
           version="${TAG_NAME#workshop-v}"
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
@@ -255,9 +321,18 @@ jobs:
           chmod +x "$appimage"
           "$appimage" --version | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
-          # The shell hosts the workshop server in-process on an OS-assigned
-          # loopback port and attaches to a gateway; an explicit dummy
-          # endpoint lets the server boot with no gateway running.
+          # A default install lays the gateway beside the shell, so boot
+          # launches it instead of using an explicit endpoint. A minimal
+          # gateway.toml keeps that first boot free of STT model downloads;
+          # the dummy workshop.toml endpoint remains the fallback when no
+          # sibling gateway exists.
+          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
+          config-version = 2
+
+          [server]
+          bind = "127.0.0.1:0"
+          api_key = "release-smoke"
+          EOF
           cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"

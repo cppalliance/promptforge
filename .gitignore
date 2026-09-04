@@ -18,3 +18,6 @@
 /crates/gateway-config-ui/ui/dist/
 # tauri-build's generated ACL schemas, regenerated on every workshop build.
 /crates/workshop/gen/
+# The gateway sidecar staged for bundle.externalBin by CI before
+# `tauri build` (crates/workshop/tauri.conf.json); a build artifact.
+/crates/workshop/binaries/

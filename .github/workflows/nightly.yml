@@ -168,6 +168,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
+      # tauri.conf.json ships the gateway via bundle.externalBin, which
+      # resolves binaries/promptforge-gateway-<target-triple> at bundle
+      # time; build and stage it before tauri-action runs.
+      - name: Build and stage the gateway sidecar
+        shell: bash
+        run: |
+          set -e
+          case "${{ matrix.name }}" in
+            windows)     triple="x86_64-pc-windows-msvc";  ext=".exe" ;;
+            macos-arm)   triple="aarch64-apple-darwin";    ext="" ;;
+            macos-intel) triple="x86_64-apple-darwin";     ext="" ;;
+            linux)       triple="x86_64-unknown-linux-gnu"; ext="" ;;
+          esac
+          case "${{ matrix.args }}" in
+            *--target*)
+              cargo build --release --locked -p gateway --target "$triple"
+              src="target/$triple/release/promptforge-gateway$ext"
+              ;;
+            *)
+              cargo build --release --locked -p gateway
+              src="target/release/promptforge-gateway$ext"
+              ;;
+          esac
+          mkdir -p crates/workshop/binaries
+          cp "$src" "crates/workshop/binaries/promptforge-gateway-$triple$ext"
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         with:

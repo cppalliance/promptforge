@@ -28,6 +28,7 @@ ManifestDPIAwareness PerMonitorV2
 !include FileFunc.nsh
 !include x64.nsh
 !include WordFunc.nsh
+!include Sections.nsh
 !include "utils.nsh"
 !include "FileAssociation.nsh"
 !include "Win\COM.nsh"
@@ -80,6 +81,35 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+; Set when a running promptforge-gateway.exe was stopped in the Gateway
+; section, so the Finalize section can relaunch it after the update.
+Var GatewayWasRunning
+
+; Persists one component's checkbox state as a DWORD (1 = installed,
+; 0 = declined) under the product key, so update and passive installs can
+; re-apply the original selection (see RestoreComponentSelections).
+!macro PersistComponent SECTION_ID VALUE_NAME
+ SectionGetFlags ${SECTION_ID} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 = ${SF_SELECTED}
+ WriteRegDWORD HKCU "${MANUPRODUCTKEY}\Components" "${VALUE_NAME}" 1
+ ${Else}
+ WriteRegDWORD HKCU "${MANUPRODUCTKEY}\Components" "${VALUE_NAME}" 0
+ ${EndIf}
+!macroend
+
+; Update mode installs over the top without uninstalling, so a component
+; declined at the original install would linger on disk; delete its
+; payload explicitly.
+!macro DeleteComponentPayloadIfDeclined SECTION_ID FILE_PATH
+ ${If} $UpdateMode = 1
+ SectionGetFlags ${SECTION_ID} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 <> ${SF_SELECTED}
+ Delete "${FILE_PATH}"
+ ${EndIf}
+ ${EndIf}
+!macroend
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -389,6 +419,13 @@ Function PageLeaveReinstall
  reinst_done:
 FunctionEnd
 
+; 4b. Components page: Gateway, Workshop, and STT are independently
+; checkable, all checked by default. Skipped in passive and update modes,
+; where .onInit forces the persisted selection onto the sections instead.
+!define MUI_COMPONENTSPAGE_NODESC
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassiveOrUpdate
+!insertmacro MUI_PAGE_COMPONENTS
+
 ; 5. Choose install directory page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_DIRECTORY
@@ -419,10 +456,23 @@ Var AppStartMenuFolder
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishPageShow
 !insertmacro MUI_PAGE_FINISH
 
+Function FinishPageShow
+ ; The Run checkbox follows the Workshop component; hide it on a
+ ; Gateway-only install, where there is no main binary to run.
+ ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+ ShowWindow $mui.FinishPage.Run ${SW_HIDE}
+ ${EndIf}
+FunctionEnd
+
 Function RunMainBinary
+ ; The finish-page Run checkbox follows the Workshop component; on a
+ ; Gateway-only install there is no main binary to run.
+ ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+ ${EndIf}
 FunctionEnd
 
 ; Uninstaller Pages
@@ -495,6 +545,14 @@ Function .onInit
  StrCpy $UpdateMode 1
  ${EndIf}
 
+ ; Passive and update installs skip the components page; force the
+ ; persisted component selection onto the sections instead, so an update
+ ; never resurrects a component the user declined at the original install.
+ ${If} $UpdateMode = 1
+ ${OrIf} $PassiveMode = 1
+ Call RestoreComponentSelections
+ ${EndIf}
+
  !if "${DISPLAYLANGUAGESELECTOR}" == "true"
  !insertmacro MUI_LANGDLL_DISPLAY
  !endif
@@ -527,7 +585,7 @@ Function .onInit
  !endif
 FunctionEnd
 
-Section EarlyChecks
+Section "-EarlyChecks"
  ; Abort silent installer if downgrades is disabled
  !if "${ALLOWDOWNGRADES}" == "false"
  ${If} ${Silent}
@@ -546,7 +604,7 @@ Section EarlyChecks
 
 SectionEnd
 
-Section WebView2
+Section "-WebView2"
  ; Check if Webview2 is already installed and skip this section
  ${If} ${RunningX64}
  ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\${WEBVIEW2APPGUID}" "pv"
@@ -638,12 +696,45 @@ Section WebView2
  ${EndIf}
 SectionEnd
 
-Section Install
- SetOutPath $INSTDIR
-
+Section "-Prepare"
  !ifmacrodef NSIS_HOOK_PREINSTALL
  !insertmacro NSIS_HOOK_PREINSTALL
  !endif
+SectionEnd
+
+Section "Gateway" SecGateway
+ SetOutPath $INSTDIR
+
+ ; The updater's passive install only auto-kills the main binary (the
+ ; CheckIfAppIsRunning in the Workshop section), so a running gateway
+ ; would file-lock its own overwrite and fail the update. Stop it by
+ ; process name through the same nsis_tauri_utils mechanism - parsing
+ ; %USERPROFILE%\.promptforge\run\gateway.json for the pid in NSIS buys
+ ; nothing when the image name is unique - and relaunch it in the
+ ; Finalize section. Living inside the Gateway section, the stop runs
+ ; only when the component is selected: a declined section leaves the
+ ; payload untouched, and a daemon the install does not overwrite is
+ ; not the installer's to kill.
+ !if "${INSTALLMODE}" == "currentUser"
+ nsis_tauri_utils::FindProcessCurrentUser "promptforge-gateway.exe"
+ !else
+ nsis_tauri_utils::FindProcess "promptforge-gateway.exe"
+ !endif
+ Pop $R0
+ ${If} $R0 = 0
+ StrCpy $GatewayWasRunning 1
+ !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
+ ${EndIf}
+
+ ; Copy external binaries (promptforge-gateway.exe via bundle.externalBin,
+ ; the only entry today - split per-component if that changes)
+ {{#each binaries}}
+ File /a "/oname={{this}}" "{{no-escape @key}}"
+ {{/each}}
+SectionEnd
+
+Section "Workshop" SecWorkshop
+ SetOutPath $INSTDIR
 
  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
@@ -656,11 +747,6 @@ Section Install
  {{/each}}
  {{#each resources}}
  File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
- {{/each}}
-
- ; Copy external binaries
- {{#each binaries}}
- File /a "/oname={{this}}" "{{no-escape @key}}"
  {{/each}}
 
  ; Create file associations
@@ -678,6 +764,35 @@ Section Install
  WriteRegStr SHCTX "Software\Classes\\{{protocol}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
  {{/each}}
 
+ ; Remove old main binary if it doesn't match new main binary name
+ ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
+ ${If} $OldMainBinaryName != ""
+ ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
+ Delete "$INSTDIR\$OldMainBinaryName"
+ ${EndIf}
+
+ ; Save current MAINBINARYNAME for future updates
+ WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "${MAINBINARYNAME}.exe"
+
+ ; Create start menu shortcut
+ !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
+ Call CreateOrUpdateStartMenuShortcut
+ !insertmacro MUI_STARTMENU_WRITE_END
+
+ ; Create desktop shortcut for silent and passive installers
+ ; because finish page will be skipped
+ ${If} $PassiveMode = 1
+ ${OrIf} ${Silent}
+ Call CreateOrUpdateDesktopShortcut
+ ${EndIf}
+SectionEnd
+
+Section "STT" SecSTT
+ ; No files: STT is a config gate. The Finalize section records the
+ ; selection for the gateway's first-run config generation.
+SectionEnd
+
+Section "-Finalize"
  ; Create uninstaller
  WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -690,19 +805,17 @@ Section Install
  WriteRegStr SHCTX "${UNINSTKEY}" $MultiUser.InstallMode 1
  !endif
 
- ; Remove old main binary if it doesn't match new main binary name
- ReadRegStr $OldMainBinaryName SHCTX "${UNINSTKEY}" "MainBinaryName"
- ${If} $OldMainBinaryName != ""
- ${AndIf} $OldMainBinaryName != "${MAINBINARYNAME}.exe"
- Delete "$INSTDIR\$OldMainBinaryName"
- ${EndIf}
-
- ; Save current MAINBINARYNAME for future updates
- WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "${MAINBINARYNAME}.exe"
-
  ; Registry information for add/remove programs
  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayName" "${PRODUCTNAME}"
+ ; The display icon follows the Workshop exe when it is installed, the
+ ; gateway exe on a Gateway-only install.
+ SectionGetFlags ${SecWorkshop} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 = ${SF_SELECTED}
  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
+ ${Else}
+ WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\promptforge-gateway.exe$\""
+ ${EndIf}
  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
  WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
  WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$\"$INSTDIR$\""
@@ -721,16 +834,39 @@ Section Install
  WriteRegStr SHCTX "${UNINSTKEY}" "HelpLink" "${HOMEPAGE}"
  !endif
 
- ; Create start menu shortcut
- !insertmacro MUI_STARTMENU_WRITE_BEGIN Application
- Call CreateOrUpdateStartMenuShortcut
- !insertmacro MUI_STARTMENU_WRITE_END
+ ; Persist the component selection so update and passive installs can
+ ; re-apply it (see RestoreComponentSelections).
+ !insertmacro PersistComponent ${SecGateway} Gateway
+ !insertmacro PersistComponent ${SecWorkshop} Workshop
+ !insertmacro PersistComponent ${SecSTT} STT
 
- ; Create desktop shortcut for silent and passive installers
- ; because finish page will be skipped
- ${If} $PassiveMode = 1
- ${OrIf} ${Silent}
- Call CreateOrUpdateDesktopShortcut
+ ; The STT checkbox writes the first-run config gate: checked deletes the
+ ; value (absent = STT on), unchecked writes 0. Update mode never touches
+ ; it - the user's first run already consumed the original choice.
+ ${If} $UpdateMode <> 1
+ SectionGetFlags ${SecSTT} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 = ${SF_SELECTED}
+ DeleteRegValue HKCU "${MANUPRODUCTKEY}" "InstallSTT"
+ ${Else}
+ WriteRegDWORD HKCU "${MANUPRODUCTKEY}" "InstallSTT" 0
+ ${EndIf}
+ ${EndIf}
+
+ ; Update mode installs over the top without uninstalling; delete the
+ ; payloads of declined components or they would linger.
+ !insertmacro DeleteComponentPayloadIfDeclined ${SecGateway} $INSTDIR\promptforge-gateway.exe
+ !insertmacro DeleteComponentPayloadIfDeclined ${SecWorkshop} $INSTDIR\${MAINBINARYNAME}.exe
+
+ ; Relaunch the gateway when the install stopped one and the component
+ ; stays installed. `serve --login` keeps the relaunch headless: no
+ ; browser, no window.
+ ${If} $GatewayWasRunning = 1
+ SectionGetFlags ${SecGateway} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 = ${SF_SELECTED}
+ nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --login"
+ ${EndIf}
  ${EndIf}
 
  !ifmacrodef NSIS_HOOK_POSTINSTALL
@@ -776,26 +912,28 @@ Function un.onInit
  ${EndIf}
 FunctionEnd
 
-Section Uninstall
-
+Section "un.Gateway"
  !ifmacrodef NSIS_HOOK_PREUNINSTALL
  !insertmacro NSIS_HOOK_PREUNINSTALL
  !endif
 
+ !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
+
+ ; Delete external binaries (promptforge-gateway.exe)
+ {{#each binaries}}
+ Delete "$INSTDIR\\{{this}}"
+ {{/each}}
+SectionEnd
+
+Section "un.Workshop"
  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
- ; Delete the app directory and its content from disk
- ; Copy main executable
+ ; Delete the main executable
  Delete "$INSTDIR\${MAINBINARYNAME}.exe"
 
  ; Delete resources
  {{#each resources}}
  Delete "$INSTDIR\\{{this.[1]}}"
- {{/each}}
-
- ; Delete external binaries
- {{#each binaries}}
- Delete "$INSTDIR\\{{this}}"
  {{/each}}
 
  ; Delete app associations
@@ -812,7 +950,9 @@ Section Uninstall
  DeleteRegKey SHCTX "Software\Classes\\{{protocol}}"
  ${EndIf}
  {{/each}}
+SectionEnd
 
+Section Uninstall
  ; Delete uninstaller
  Delete "$INSTDIR\uninstall.exe"
 
@@ -865,6 +1005,15 @@ Section Uninstall
  ; We do this when not updating (to preserve the registry value on updates)
  ${If} $UpdateMode <> 1
  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
+ ; The gateway's Launch at Login entry (the tray writes this value name).
+ DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "PromptForgeGateway"
+ ${EndIf}
+
+ ; Remove the persisted component selection and the STT first-run gate
+ ; when not updating (updates preserve both).
+ ${If} $UpdateMode <> 1
+ DeleteRegValue HKCU "${MANUPRODUCTKEY}" "InstallSTT"
+ DeleteRegKey HKCU "${MANUPRODUCTKEY}\Components"
  ${EndIf}
 
  ; Delete app data if the checkbox is selected
@@ -908,6 +1057,49 @@ FunctionEnd
 
 Function SkipIfPassive
  ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
+FunctionEnd
+
+Function SkipIfPassiveOrUpdate
+ ${If} $PassiveMode = 1
+ ${OrIf} $UpdateMode = 1
+ Abort
+ ${EndIf}
+FunctionEnd
+
+; Forces the persisted component selection onto the sections in passive
+; and update mode, which skip the components page. Values absent from the
+; registry (installs that predate persistence) keep the default:
+; everything selected.
+Function RestoreComponentSelections
+ ClearErrors
+ ReadRegDWORD $0 HKCU "${MANUPRODUCTKEY}\Components" "Gateway"
+ ${IfNot} ${Errors}
+ ${If} $0 = 1
+ SectionSetFlags ${SecGateway} ${SF_SELECTED}
+ ${Else}
+ SectionSetFlags ${SecGateway} 0
+ ${EndIf}
+ ${EndIf}
+
+ ClearErrors
+ ReadRegDWORD $0 HKCU "${MANUPRODUCTKEY}\Components" "Workshop"
+ ${IfNot} ${Errors}
+ ${If} $0 = 1
+ SectionSetFlags ${SecWorkshop} ${SF_SELECTED}
+ ${Else}
+ SectionSetFlags ${SecWorkshop} 0
+ ${EndIf}
+ ${EndIf}
+
+ ClearErrors
+ ReadRegDWORD $0 HKCU "${MANUPRODUCTKEY}\Components" "STT"
+ ${IfNot} ${Errors}
+ ${If} $0 = 1
+ SectionSetFlags ${SecSTT} ${SF_SELECTED}
+ ${Else}
+ SectionSetFlags ${SecSTT} 0
+ ${EndIf}
+ ${EndIf}
 FunctionEnd
 Function un.SkipIfPassive
  ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
