@@ -72,3 +72,52 @@ fn spawn_writes_the_connection_file_and_shutdown_removes_it() {
         "a clean shutdown removes the connection file"
     );
 }
+
+#[test]
+fn post_shutdown_stops_the_gateway_and_removes_the_connection_file() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let config_path = temp.path().join("gateway.toml");
+    std::fs::write(&config_path, CATALOG).unwrap();
+    let run_dir = temp.path().join("run");
+    let options = ServeOptions::new(
+        Some(config_path),
+        ProfileName::parse("alpha").expect("profile name"),
+    )
+    .with_run_dir(run_dir.clone());
+
+    let gateway = spawn(&options).expect("the gateway boots");
+    let url = gateway.url().to_owned();
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let status = runtime
+        .block_on(async {
+            reqwest::Client::new()
+                .post(format!("{url}/shutdown"))
+                .bearer_auth("test-token")
+                .send()
+                .await
+        })
+        .expect("the shutdown POST answers");
+    assert_eq!(status.status(), reqwest::StatusCode::ACCEPTED);
+    drop(runtime);
+
+    // `join` sends no signal of its own: only the route's signal can end
+    // the gateway thread, so the rendezvous pins that the route drove the
+    // shutdown.
+    let (done, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(gateway.join());
+    });
+    done_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the route's signal stopped the gateway thread")
+        .expect("clean shutdown");
+    assert_eq!(
+        shared_sidecar::ConnectionFile::read(&run_dir).expect("read after shutdown"),
+        None,
+        "the route-driven shutdown removes the connection file"
+    );
+}

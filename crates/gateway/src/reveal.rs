@@ -465,7 +465,7 @@ cache_dir = '{cache}'
             .expect("the test listener binds");
         let addr = listener.local_addr().expect("the bound address");
         tokio::spawn(async move {
-            let _ignored = axum::serve(listener, crate::build_router(state)).await;
+            let _ignored = axum::serve(listener, crate::build_router(state, None)).await;
         });
 
         let response = post_reveal(addr, Some("test-token"), &target.display().to_string()).await;
@@ -536,7 +536,7 @@ cache_dir = '{cache}'
         let peer: SocketAddr = "198.51.100.7:44821".parse().expect("a socket address");
         request.extensions_mut().insert(ConnectInfo(peer));
 
-        let response = crate::build_router(state)
+        let response = crate::build_router(state, None)
             .oneshot(request)
             .await
             .expect("the router is infallible");

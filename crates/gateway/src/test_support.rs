@@ -88,8 +88,9 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
 }
 
 /// Binds an ephemeral loopback listener and serves `state` on it,
-/// returning the bound address. Connect info is wired exactly as in the
-/// production serve path, so loopback-only routes see a peer address.
+/// returning the bound address. Connect info and the host-authority wall
+/// are wired exactly as in the production serve path, so loopback-only
+/// routes see a peer address and the wall sees the bound socket.
 pub(crate) async fn serve_state(state: AppState) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -98,7 +99,7 @@ pub(crate) async fn serve_state(state: AppState) -> SocketAddr {
     tokio::spawn(async move {
         let _ignored = axum::serve(
             listener,
-            build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+            build_router(state, Some(addr)).into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await;
     });

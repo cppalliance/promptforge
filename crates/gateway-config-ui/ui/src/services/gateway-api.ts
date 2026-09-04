@@ -240,6 +240,23 @@ export class GatewayApi {
   }
 
   /**
+   * Probes whether an ambient credential authenticates this session. The
+   * `/auth` browser handoff lands on the SPA with an HttpOnly cookie and
+   * no stored key; a 200 from `GET /admin/status` with no presented key
+   * means the cookie carried auth, and anything else means the key
+   * prompt. Never fires `onUnauthorized` and never throws: a failed probe
+   * simply resolves false.
+   */
+  async hasAmbientAuth(): Promise<boolean> {
+    try {
+      const response = await this.transport(`${this.base}/admin/status`, {});
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Probes `GET /admin/status` with a candidate key. A 200 stores the
    * key and resolves true; a 401 resolves false without firing
    * `onUnauthorized`, because the caller is the key prompt itself. Any

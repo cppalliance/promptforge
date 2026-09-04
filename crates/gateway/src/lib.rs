@@ -47,13 +47,21 @@
 //! restart-required for a promoted boot shadow) and
 //! `POST /admin/config-revert` (delete every shadow, touching nothing
 //! else), a loopback-only, bearer-authed `POST /admin/reveal` opening the
-//! host OS file manager at a path confined to the artifact cache - and
+//! host OS file manager at a path confined to the artifact cache, a
+//! loopback-only, bearer-authed `POST /shutdown` driving the same
+//! graceful shutdown Ctrl-C drives - and
 //! `GET /health`. The whole admin config surface (config read/write, env,
 //! pending state, apply/revert, orphans, system, model-info, the HF
-//! proxy, reveal) sits behind the shared loopback
+//! proxy, reveal, shutdown) sits behind the shared loopback
 //! wall from `shared-loopback` in every build; with the
 //! `config-ui` feature the embedded config SPA is served at `/config/`
-//! behind the same wall. In-process
+//! behind the same wall, and `GET /auth?key=` sets a session proof
+//! derived from the bearer key as an HttpOnly cookie and redirects to the
+//! key-free `/config/`, so a browser handoff never leaves the key in
+//! browser history. When the listener is
+//! bound to loopback, every route additionally sits behind the shared
+//! host-authority wall, which refuses requests whose `Host` is not the
+//! bound socket (the DNS-rebinding defense). In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
@@ -69,6 +77,7 @@ mod dialect;
 mod drain;
 mod env_file;
 mod error;
+mod handoff;
 mod hf;
 #[cfg(feature = "local")]
 mod model_info;
@@ -78,6 +87,7 @@ mod render;
 mod reveal;
 mod routing;
 mod runner;
+mod shutdown;
 mod system;
 #[cfg(test)]
 mod test_support;
@@ -204,6 +214,12 @@ pub(crate) struct AppState {
     /// Launches the OS file manager for `POST /admin/reveal`; injectable
     /// so tests assert the constructed command without spawning anything.
     reveal: Arc<dyn reveal::RevealLauncher>,
+    /// The process-shutdown signal fired by `POST /shutdown`; the serve
+    /// loop selects on it alongside the caller-owned shutdown future.
+    shutdown: shutdown::ShutdownSignal,
+    /// Process-lifetime random salt for the `/auth` handoff's session
+    /// proof; a restart or key rotation invalidates every minted cookie.
+    handoff_salt: [u8; 32],
     /// Stable STT slot shared by gateway and workshop routes across runtime
     /// replacement.
     #[cfg(feature = "stt")]
@@ -256,6 +272,16 @@ impl AppState {
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
             reveal: Arc::new(reveal::SpawnLauncher),
+            shutdown: shutdown::ShutdownSignal::default(),
+            handoff_salt: {
+                // The OS-seeded CSPRNG, as for the generated bearer key:
+                // the salt keeps a harvested handoff cookie from ever
+                // resolving to the long-term key.
+                use rand::Rng as _;
+                let mut salt = [0u8; 32];
+                rand::rng().fill(&mut salt);
+                salt
+            },
             #[cfg(feature = "stt")]
             stt_state,
         }
@@ -289,7 +315,15 @@ impl AppState {
 }
 
 /// Build the gateway's axum router.
-pub(crate) fn build_router(state: AppState) -> Router {
+///
+/// `bound` is the socket the server actually bound. When it is loopback,
+/// the whole surface is wrapped in the shared host-authority wall
+/// ([`shared_loopback::require_loopback_host`]), the DNS-rebinding
+/// defense; a non-loopback bind installs nothing, since a LAN server has
+/// no loopback allowlist to enforce. The [`Gateway::router`] seam passes
+/// `None` and carries no host wall: with no bound socket there is no
+/// authority to allowlist.
+pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>) -> Router {
     let router = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/embeddings", post(embeddings))
@@ -322,8 +356,11 @@ pub(crate) fn build_router(state: AppState) -> Router {
     // The admin config surface reads secrets in plaintext, writes files,
     // and launches processes, so every route below sits behind the shared
     // loopback wall in every build: a non-loopback peer is refused with
-    // 403 before bearer auth even runs.
+    // 403 before bearer auth even runs. `POST /shutdown` kills the process
+    // and `GET /auth` mints the key's ambient cookie, so both are walled
+    // with the config surface they serve.
     let walled = Router::new()
+        .route("/shutdown", post(shutdown::admin_shutdown))
         .route("/admin/system", get(system::admin_system))
         .route(
             "/admin/config",
@@ -368,9 +405,12 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/model-info", get(model_info::admin_model_info));
     // `GET /config` (no trailing slash) redirects to `/config/` so the
     // SPA's relative asset references resolve against the mount point;
-    // it is walled like the assets it fronts.
+    // it is walled like the assets it fronts. `GET /auth` is the browser
+    // handoff onto that surface, so it exists only when the surface does.
     #[cfg(feature = "config-ui")]
-    let walled = walled.route("/config", get(config_ui_redirect));
+    let walled = walled
+        .route("/config", get(config_ui_redirect))
+        .route("/auth", get(handoff::auth_handoff));
     let router = router
         .merge(walled.route_layer(axum::middleware::from_fn(shared_loopback::require_loopback)));
     // The SPA asset router arrives with the same loopback wall already
@@ -378,7 +418,16 @@ pub(crate) fn build_router(state: AppState) -> Router {
     // carries no gateway state.
     #[cfg(feature = "config-ui")]
     let router = router.nest_service("/config/", gateway_config_ui::routes());
-    router.with_state(state)
+    let router = router.with_state(state);
+    // The host-authority wall is the outermost layer, so a rebound
+    // hostname is refused before any route logic runs.
+    match bound {
+        Some(bound) => router.layer(axum::middleware::from_fn_with_state(
+            bound,
+            shared_loopback::require_loopback_host,
+        )),
+        None => router,
+    }
 }
 
 /// Redirects `GET /config` to `/config/`, where the SPA index is served
@@ -1423,6 +1472,16 @@ fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
 }
 
 /// Compare the request's bearer token against the configured token.
+///
+/// The `/auth` browser handoff sets the key's session proof as an
+/// HttpOnly cookie, so a request presenting that cookie authenticates
+/// identically: the cookie is the key's ambient form, accepted anywhere
+/// the bearer header is. Two guards shape the cookie path that the
+/// bearer path does not need: the proof is recomputed from the
+/// process-lifetime salt and the live key (the cookie never carries the
+/// key itself), and the request must carry Fetch Metadata a cross-origin
+/// page cannot strip, since an ambient credential would otherwise answer
+/// to any same-site loopback page (ports are not part of a site).
 pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
     let presented = headers
         .get(AUTHORIZATION)
@@ -1431,10 +1490,18 @@ pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<
         .unwrap_or("");
     let live = state.live.read().await;
     if secret_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
-        Ok(())
-    } else {
-        Err(GatewayError::Unauthorized)
+        return Ok(());
     }
+    if let Some(cookie) = handoff::presented_cookie_proof(headers)
+        && handoff::fetch_metadata_allows_cookie(headers)
+        && secret_eq(
+            &cookie,
+            &handoff::session_token(&state.handoff_salt, live.key.expose().as_bytes()),
+        )
+    {
+        return Ok(());
+    }
+    Err(GatewayError::Unauthorized)
 }
 
 /// Constant-time credential comparison.
@@ -1501,7 +1568,7 @@ mod transcription_auth_tests {
 
     #[tokio::test]
     async fn transcription_checks_bearer_auth_before_multipart_extraction() {
-        let response = build_router(state())
+        let response = build_router(state(), None)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -1535,7 +1602,7 @@ mod transcription_auth_tests {
         .into_bytes();
         body.append(&mut wav);
         body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
-        let response = build_router(state())
+        let response = build_router(state(), None)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -2017,7 +2084,7 @@ cache_dir = '{cache}'
             let peer: SocketAddr = peer.parse().expect("a socket address");
             request.extensions_mut().insert(ConnectInfo(peer));
         }
-        build_router(state)
+        build_router(state, None)
             .oneshot(request)
             .await
             .expect("the router is infallible")
@@ -2200,7 +2267,12 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn without_the_feature_no_config_routes_exist() {
         let (_temp, state) = fixture();
-        for path in ["/config", "/config/", "/config/app.js"] {
+        for path in [
+            "/config",
+            "/config/",
+            "/config/app.js",
+            "/auth?key=test-token",
+        ] {
             let status = send_with_peer(state.clone(), Method::GET, path, Some("127.0.0.1:50000"))
                 .await
                 .status();
@@ -2210,5 +2282,77 @@ cache_dir = '{cache}'
                 "GET {path} must not exist in a build without the config-ui feature"
             );
         }
+    }
+
+    /// Sends one request through `build_router` with the host wall
+    /// installed for `bound`, with the given `Host` header (or none).
+    async fn send_with_host(state: AppState, path: &str, host: Option<&str>) -> StatusCode {
+        let bound: SocketAddr = "127.0.0.1:8081".parse().expect("a socket address");
+        let mut builder = Request::builder()
+            .uri(path)
+            .header(AUTHORIZATION, "Bearer test-token");
+        if let Some(host) = host {
+            builder = builder.header(axum::http::header::HOST, host);
+        }
+        build_router(state, Some(bound))
+            .oneshot(
+                builder
+                    .body(Body::empty())
+                    .expect("static request parts are valid"),
+            )
+            .await
+            .expect("the router is infallible")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn the_host_wall_refuses_a_foreign_host_on_every_route() {
+        let (_temp, state) = fixture();
+        // `/health` is deliberately not exempt: the connection-file probe
+        // sends the bound address as Host, so the wall keeps it honest.
+        for path in ["/health", "/admin/status", "/v1/models", "/shutdown"] {
+            assert_eq!(
+                send_with_host(state.clone(), path, Some("attacker.com")).await,
+                StatusCode::FORBIDDEN,
+                "{path} must refuse a rebound hostname"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_host_wall_admits_the_bound_and_localhost_authorities() {
+        let (_temp, state) = fixture();
+        for host in ["127.0.0.1:8081", "localhost:8081"] {
+            assert_eq!(
+                send_with_host(state.clone(), "/health", Some(host)).await,
+                StatusCode::OK,
+                "Host: {host} names the bound socket"
+            );
+        }
+        // A missing authority fails closed.
+        assert_eq!(
+            send_with_host(state.clone(), "/health", None).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[tokio::test]
+    async fn the_router_seam_without_a_bound_address_carries_no_host_wall() {
+        let (_temp, state) = fixture();
+        let response = build_router(state, None)
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .header(axum::http::header::HOST, "attacker.com")
+                    .body(Body::empty())
+                    .expect("static request parts are valid"),
+            )
+            .await
+            .expect("the router is infallible");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "the `Gateway::router` seam has no bound socket to allowlist"
+        );
     }
 }

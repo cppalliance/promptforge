@@ -88,7 +88,16 @@ export function boot(root: HTMLElement, options: BootOptions = {}): void {
   if (api.hasKey()) {
     showShell();
   } else {
-    showPrompt();
+    // The `/auth` handoff lands here with an HttpOnly cookie and no
+    // stored key: probe once, mounting the shell when the cookie carries
+    // auth and the key prompt otherwise.
+    void api.hasAmbientAuth().then((authenticated) => {
+      if (authenticated) {
+        showShell();
+      } else {
+        showPrompt();
+      }
+    });
   }
 }
 

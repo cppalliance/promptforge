@@ -32,4 +32,5 @@ mod progress;
 mod queue;
 mod rerank;
 mod sidecar;
+mod surface;
 mod web_search;

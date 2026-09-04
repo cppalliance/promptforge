@@ -74,6 +74,19 @@ impl TestServer {
         }
     }
 
+    /// Awaits the serve task without sending the shutdown signal, for
+    /// tests that stop the server through its own HTTP surface
+    /// (`POST /shutdown`): only the route's signal can end the task.
+    pub(crate) async fn join(mut self) {
+        if let Some(handle) = self.handle.take() {
+            tokio::time::timeout(PHASE_TIMEOUT, handle)
+                .await
+                .expect("gateway serve task did not stop within the phase timeout")
+                .expect("gateway serve task panicked")
+                .expect("gateway serve returned an error");
+        }
+    }
+
     /// Signals graceful shutdown, awaits the serve task within [`PHASE_TIMEOUT`],
     /// and propagates a serve failure instead of discarding it (IT-004).
     pub(crate) async fn shutdown(mut self) {

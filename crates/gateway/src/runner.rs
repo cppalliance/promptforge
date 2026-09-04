@@ -235,8 +235,14 @@ impl Gateway {
     /// This is the crate's one deliberate, documented Axum integration point;
     /// the crate is an application, not a general library, so exposing an
     /// [`axum::Router`] here is intentional.
+    ///
+    /// The router carries no bound socket, so the host-authority wall is
+    /// not installed; it exists on the [`serve`](Self::serve) path, where
+    /// the bound address is known. Likewise `POST /shutdown` answers 202
+    /// here without stopping anything: only `serve` selects on the
+    /// route's signal.
     pub fn router(&self) -> axum::Router {
-        build_router(self.state.clone())
+        build_router(self.state.clone(), None)
     }
 
     /// Bounded stdout/stderr tails captured from each running local
@@ -255,27 +261,40 @@ impl Gateway {
         self.state.live.read().await.local.diagnostics()
     }
 
-    /// Serve on a caller-owned listener until `shutdown` completes.
+    /// Serve on a caller-owned listener until `shutdown` completes or
+    /// `POST /shutdown` fires the route's own signal, whichever comes
+    /// first; both drive the same graceful drain.
     ///
     /// Tests pass an ephemeral [`TcpListener`] they bound themselves (no port
     /// race), read back `local_addr`, and drive a rendezvous instead of
     /// sleeping.
     ///
     /// # Errors
-    /// Returns [`ServeError`] when the HTTP server fails.
+    /// Returns [`ServeError`] when the bound address cannot be read or the
+    /// HTTP server fails.
     pub async fn serve(
         self,
         listener: TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServeError> {
+        // The configured bind may carry port 0; the bound address is what
+        // the host-authority wall allowlists.
+        let bound = listener.local_addr().map_err(ServeError::io)?;
+        let route_shutdown = self.state.shutdown.clone();
         // Connect info exposes each request's peer address, so
         // loopback-only routes (`POST /admin/reveal`) can tell loopback
         // callers from LAN callers.
         axum::serve(
             listener,
-            build_router(self.state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            build_router(self.state, Some(bound))
+                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
-        .with_graceful_shutdown(shutdown)
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                () = shutdown => {}
+                () = route_shutdown.fired() => {}
+            }
+        })
         .await
         .map_err(ServeError::io)
     }

@@ -43,6 +43,18 @@ test("a verified key is stored in sessionStorage and the shell mounts", async ()
   assert.equal(root.querySelector("#gateway-api-key"), null, "the prompt is gone");
 });
 
+test("an ambient handoff cookie mounts the shell without a stored key", async () => {
+  // No key in the stub: the gateway's /auth cookie authenticates every
+  // call, so boot's ambient probe answers 200 and the prompt never shows.
+  const app = await loadApp();
+  const stub = gatewayStub();
+  const { dom, root } = await bootApp({ stub });
+
+  assert.ok(root.querySelector("header.tab-bar"), "the shell mounted on the ambient cookie");
+  assert.equal(root.querySelector("#gateway-api-key"), null, "no key prompt is shown");
+  assert.equal(dom.window.sessionStorage.getItem(app.API_KEY_STORAGE_KEY), null, "no key is stored");
+});
+
 test("a rejected key shows the inline invalid-key error and stores nothing", async () => {
   const app = await loadApp();
   const stub = gatewayStub({ key: "sesame" });
