@@ -125,6 +125,12 @@ export class ConfigStore {
   cache: CacheListEntry[] = [];
   /** The active profile's name, from `GET /admin/status`. */
   activeProfile = "";
+  /**
+   * Counts completed reverts. A view that holds unsaved edits of its own
+   * compares this on notify and discards them when it moved, so Revert
+   * All returns every pane to the running configuration.
+   */
+  revertGeneration = 0;
   /** Server-owned template families, mapper, and effective decisions. */
   private chatTemplates: ChatTemplateCatalog = { families: [], mappings: [], models: [] };
 
@@ -685,9 +691,17 @@ export class ConfigStore {
     return outcome;
   }
 
-  /** Deletes every shadow and refreshes. */
+  /**
+   * Deletes every shadow, discards unsaved edits and drafts, and
+   * refreshes. Revert All promises the running configuration, so edits
+   * layered on the shadows go with them: otherwise their dirty dots and
+   * Save/Reset controls outlive the pending state they sat on.
+   */
   async revertAll(): Promise<void> {
     await this.api.revertConfig();
+    this.edits.clear();
+    this.drafts = [];
+    this.revertGeneration += 1;
     await this.refreshAll();
     this.notify();
   }

@@ -5,7 +5,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../harness.mjs";
+import {
+  bootApp,
+  gatewayStub,
+  jsonResponse,
+  modelsFixture,
+  navigate,
+  settle,
+} from "../harness.mjs";
 
 /** A stub whose pending view already differs (a previous session's save). */
 function dirtyStub() {
@@ -203,4 +210,116 @@ test("Revert All confirms first, then calls config-revert", async () => {
   const call = stub.calls.find((c) => c.url.endsWith("/admin/config-revert"));
   assert.equal(call?.init.method, "POST", "the confirmed revert POSTs config-revert");
   assert.equal(root.querySelector(".apply-button"), null, "the pair clears after revert");
+});
+
+/** Confirms the open Revert All dialog and lets the revert settle. */
+async function confirmRevert(root, doc) {
+  root.querySelector(".revert-button").click();
+  await settle();
+  doc.querySelector(".confirm-overlay .button-danger").click();
+  await settle();
+}
+
+test("Revert All discards a model's unsaved edits along with the shadows", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+  const description = root.querySelector(".field-row[data-key='description'] textarea");
+  description.value = "typed but never saved";
+  description.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  assert.ok(root.querySelector(".dirty-dot"), "the unsaved edit raises the dirty dot");
+  assert.equal(root.querySelector(".detail-save").disabled, false, "Save arms for the edit");
+
+  await confirmRevert(root, dom.window.document);
+
+  assert.equal(root.querySelector(".apply-button"), null, "the pair clears after revert");
+  assert.equal(root.querySelector(".dirty-dot"), null, "the dirty dot goes with the revert");
+  assert.equal(root.querySelector(".field-reset"), null, "the field reset goes too");
+  assert.equal(root.querySelector(".detail-save").disabled, true, "Save disarms");
+  assert.equal(
+    root.querySelector(".field-row[data-key='description'] textarea").value,
+    "defined in the leaf",
+    "the field shows the running value again",
+  );
+});
+
+test("a failed Revert All keeps the unsaved edits", async () => {
+  const stub = dirtyStub();
+  const fetch = stub.fetchFn;
+  stub.fetchFn = async (input, init = {}) => {
+    if (String(input).endsWith("/admin/config-revert")) {
+      return jsonResponse({ error: "the shadow is locked" }, 500);
+    }
+    return fetch(input, init);
+  };
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+  const description = root.querySelector(".field-row[data-key='description'] textarea");
+  description.value = "typed but never saved";
+  description.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+
+  await confirmRevert(root, dom.window.document);
+  assert.ok(root.ownerDocument.querySelector(".toast-error"), "the failure surfaces as a toast");
+  // A failed revert notifies nobody, so the pane still shows its last
+  // paint; a route round-trip repaints from the store's real state.
+  navigate(dom, "#/local");
+  await settle();
+  navigate(dom, "#/local/llama-leaf");
+  await settle();
+
+  assert.ok(root.querySelector(".dirty-dot"), "the edit survives the failed revert");
+  assert.equal(root.querySelector(".detail-save").disabled, false, "Save stays armed");
+  assert.equal(
+    root.querySelector(".field-row[data-key='description'] textarea").value,
+    "typed but never saved",
+    "the field keeps the typed value",
+  );
+  assert.ok(root.querySelector(".apply-button"), "the pair stays while the shadows remain");
+});
+
+test("Revert All discards a draft model", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/local");
+  await settle();
+  root.querySelector(".toolbar-add-local").click();
+  await settle();
+  const names = () => [...root.querySelectorAll(".model-name")].map((el) => el.textContent);
+  assert.ok(names().includes("new-local-model"), "the draft joins the list before the revert");
+
+  await confirmRevert(root, dom.window.document);
+
+  assert.ok(!names().includes("new-local-model"), "the draft goes with the revert");
+});
+
+test("Revert All discards the Settings view's unsaved edits", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  const bind = root.querySelector(".field-row[data-key='bind'] input");
+  const original = bind.value;
+  bind.value = "0.0.0.0:9999";
+  bind.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  assert.ok(root.querySelector(".dirty-dot"), "the unsaved edit raises the dirty dot");
+  assert.equal(root.querySelector(".card-save").disabled, false, "Save arms for the edit");
+
+  await confirmRevert(root, dom.window.document);
+
+  assert.equal(root.querySelector(".dirty-dot"), null, "the dirty dot goes with the revert");
+  assert.equal(root.querySelector(".card-save").disabled, true, "Save disarms");
+  assert.equal(
+    root.querySelector(".field-row[data-key='bind'] input").value,
+    original,
+    "the field shows the running value again",
+  );
 });

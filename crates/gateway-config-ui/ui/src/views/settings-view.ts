@@ -223,7 +223,18 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   /** The System panel's live region; polling stops once it disconnects. */
   let liveBox: HTMLElement | null = null;
 
+  let seenRevert = store.revertGeneration;
   store.subscribe(() => {
+    // A Revert All discards this view's unsaved edits and drafts too,
+    // mounted or not: they sat on the pending state the revert removed.
+    if (store.revertGeneration !== seenRevert) {
+      seenRevert = store.revertGeneration;
+      edits.clear();
+      sectionDrafts.clear();
+      arrayDrafts.dominion = [];
+      arrayDrafts.endpoint = [];
+      revealed.clear();
+    }
     // Guard on this view's own root, not just `main`: `main` is shared
     // with every other view, so a store notification arriving while
     // another view owns it must not let this one repaint the pane.
