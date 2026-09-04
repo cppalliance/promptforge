@@ -13,9 +13,6 @@ on:
         description: llama.cpp release tag to build (for example b10082)
         required: true
         default: "b10082"
-  push:
-    branches: [master]
-    paths: [crates/build-llama-cuda/**]
 
 permissions:
   contents: read
