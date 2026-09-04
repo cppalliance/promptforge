@@ -27,6 +27,21 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::{AppState, build_router};
 
+/// How long a shutdown waits for in-flight requests to finish before it
+/// abandons them. Long enough for a response already being written; short
+/// enough that a quit never looks stuck. Streams that select on the
+/// shutdown signal end at once and never reach this bound.
+const GRACEFUL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long the gateway thread waits for `spawn_blocking` work after
+/// serving ends. Dropping a tokio runtime waits indefinitely for its
+/// blocking pool, and a request the drain abandoned may still sit in a
+/// blocking call, so the runtime is abandoned after this bound and the
+/// leftover work dies with the process. The command worker is not covered
+/// here: `serve` joins it before returning, so a command body that ignored
+/// its token would pin that join first.
+const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Options for running the gateway. Built by the binary from parsed args.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -368,6 +383,12 @@ impl Gateway {
     /// ([`router`](Self::router)) has no worker, so its queue accepts but
     /// never runs commands.
     ///
+    /// Shutdown fires the route signal (so every open-ended stream ends),
+    /// closes the queue (so the active command cancels and nothing pending
+    /// starts), then drains in-flight requests for at most
+    /// [`GRACEFUL_DRAIN_TIMEOUT`]; a connection that outlives the drain is
+    /// dropped with the runtime rather than pinning the exit.
+    ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
     /// HTTP server fails.
@@ -381,13 +402,14 @@ impl Gateway {
         let bound = listener.local_addr().map_err(ServeError::io)?;
         let state = self.state;
         let route_shutdown = state.shutdown.clone();
+        let drain_shutdown = state.shutdown.clone();
         let commands = state.commands.clone();
         let commands_after = state.commands.clone();
         let worker = state.commands.spawn_worker(&state);
         // Connect info exposes each request's peer address, so
         // loopback-only routes (`POST /admin/reveal`) can tell loopback
         // callers from LAN callers.
-        let result = axum::serve(
+        let server = axum::serve(
             listener,
             build_router(state, Some(bound))
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -397,13 +419,28 @@ impl Gateway {
                 () = shutdown => {}
                 () = route_shutdown.fired() => {}
             }
-            // Cancel the active command before the runtime winds down, so a
-            // quit during provisioning stops the download instead of waiting
-            // on it.
-            commands.cancel_active();
-        })
-        .await
-        .map_err(ServeError::io);
+            // The caller-owned future may have fired without the route
+            // signal; firing it here ends every stream that selects on it,
+            // so the drain below is not held open by a progress subscriber.
+            route_shutdown.fire();
+            // Close the queue before the drain: the active command's token
+            // fires so a quit during provisioning stops the download, and no
+            // pending command starts under a server that is going away.
+            commands.shutdown();
+        });
+        let server = std::future::IntoFuture::into_future(server);
+        let result = tokio::select! {
+            result = server => result.map_err(ServeError::io),
+            () = async {
+                drain_shutdown.fired().await;
+                tokio::time::sleep(GRACEFUL_DRAIN_TIMEOUT).await;
+            } => {
+                tracing::warn!(
+                    "graceful drain exceeded {GRACEFUL_DRAIN_TIMEOUT:?}; abandoning the remaining connections"
+                );
+                Ok(())
+            }
+        };
         // Close the queue and reap the worker, so a gateway served on a
         // caller-owned runtime (tests, embedders) leaves no task behind.
         commands_after.shutdown();
@@ -441,6 +478,101 @@ mod stt_tests {
             detail.contains("`stt` feature"),
             "the refusal names the missing feature: {error}: {detail}"
         );
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use std::net::SocketAddr;
+    use std::time::{Duration, Instant};
+
+    use axum::extract::State;
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+    use super::*;
+
+    /// A backend whose `/chat/completions` reports each arrival and then
+    /// never answers, so a proxied chat request stays in flight at the
+    /// gateway for as long as the test needs it there.
+    async fn silent_backend() -> (SocketAddr, UnboundedReceiver<()>) {
+        async fn completions(
+            State(arrivals): State<UnboundedSender<()>>,
+        ) -> axum::http::StatusCode {
+            let _ = arrivals.send(());
+            std::future::pending::<()>().await;
+            axum::http::StatusCode::OK
+        }
+        let (arrivals, arrived) = tokio::sync::mpsc::unbounded_channel();
+        let app = axum::Router::new()
+            .route("/chat/completions", axum::routing::post(completions))
+            .with_state(arrivals);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the backend binds");
+        let addr = listener.local_addr().expect("the bound address");
+        tokio::spawn(async move {
+            let _ignored = axum::serve(listener, app).await;
+        });
+        (addr, arrived)
+    }
+
+    /// A proxied request whose upstream never answers cannot pin the exit:
+    /// the drain gives it the whole of [`GRACEFUL_DRAIN_TIMEOUT`], then
+    /// `serve` returns without it.
+    #[tokio::test]
+    async fn serve_abandons_a_stalled_request_after_the_drain_bound() {
+        let (backend, mut arrivals) = silent_backend().await;
+        let config = Config::from_toml_str(&format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"silent\"\nprotocol = \"openai\"\n\
+             base_url = \"http://{backend}\"\napi_key = \"\"\n\
+             [[model]]\nname = \"test-model\"\ndescription = \"never answers\"\n\
+             context = 8192\nthinking = \"never\"\nupstream = \"backend-model\"\n\
+             endpoints = [\"silent\"]\n"
+        ))
+        .expect("config parses");
+        let gateway =
+            Gateway::from_config(&config, ProfilesContext::default()).expect("gateway assembles");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the listener binds");
+        let addr = listener.local_addr().expect("the bound address");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let serve = tokio::spawn(gateway.serve(listener, async move {
+            let _ = shutdown_rx.await;
+        }));
+
+        let stalled = tokio::spawn(
+            reqwest::Client::new()
+                .post(format!("http://{addr}/v1/chat/completions"))
+                .bearer_auth("test-token")
+                .json(&serde_json::json!({
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "ping"}]
+                }))
+                .send(),
+        );
+        // The arrival is the rendezvous: the gateway's handler is now
+        // awaiting an upstream that never answers.
+        tokio::time::timeout(Duration::from_secs(10), arrivals.recv())
+            .await
+            .expect("the proxied request reaches the backend")
+            .expect("the backend reports the arrival");
+
+        let started = Instant::now();
+        let _ = shutdown.send(());
+        tokio::time::timeout(GRACEFUL_DRAIN_TIMEOUT * 2, serve)
+            .await
+            .expect("serve returns within twice the drain bound")
+            .expect("the serve task did not panic")
+            .expect("serve returns Ok after abandoning the drain");
+        assert!(
+            started.elapsed() >= GRACEFUL_DRAIN_TIMEOUT,
+            "the in-flight request is given the whole drain bound: {:?}",
+            started.elapsed()
+        );
+        stalled.abort();
     }
 }
 
@@ -738,9 +870,11 @@ fn serve_thread(
                 tokio_util::sync::CancellationToken::new(),
             ));
     }
-    runtime
+    let result = runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
-        .map_err(StartupError::serve)
+        .map_err(StartupError::serve);
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    result
 }
 
 /// Removes the connection file on drop when it still belongs to this

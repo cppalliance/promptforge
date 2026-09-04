@@ -8,48 +8,43 @@
 //! drains in-flight requests before closing their connections, so the
 //! response always reaches the caller ahead of the shutdown it asked for.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use axum::extract::State;
 use axum::http::StatusCode;
+use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::auth::Caller;
 use crate::error::GatewayError;
 
-/// The process-shutdown signal shared by the `POST /shutdown` route and
-/// the serve loop, which selects on it alongside the caller-owned shutdown
-/// future.
+/// The process-shutdown signal shared by the `POST /shutdown` route, the
+/// serve loop (which selects on it alongside the caller-owned shutdown
+/// future), and every open-ended response stream, which ends when it fires
+/// so the graceful drain has nothing left to wait for.
 ///
-/// Every clone shares the one underlying signal. A `fire` that lands
-/// before the serve loop waits is not lost: the notify stores a single
-/// permit, so the pending `fired` resolves immediately.
+/// Every clone shares the one underlying signal. It is a cancellation
+/// token, not a notify: a `fire` wakes every waiter at once and stays
+/// fired, so a stream that subscribes after the signal ends immediately.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ShutdownSignal {
-    notify: Arc<tokio::sync::Notify>,
-    /// Set by `fire` before the notify, so a synchronous reader (the
-    /// tray's status tick) can tell a requested shutdown apart from a
-    /// serve-loop failure without consuming the permit.
-    fired: Arc<AtomicBool>,
+    token: CancellationToken,
 }
 
 impl ShutdownSignal {
     /// Fires the signal, starting the serve loop's graceful shutdown.
     pub(crate) fn fire(&self) {
-        self.fired.store(true, Ordering::Release);
-        self.notify.notify_one();
+        self.token.cancel();
     }
 
-    /// Whether the signal has been fired.
+    /// Whether the signal has been fired; the tray's status tick reads it
+    /// to tell a requested shutdown apart from a serve-loop failure.
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub(crate) fn is_fired(&self) -> bool {
-        self.fired.load(Ordering::Acquire)
+        self.token.is_cancelled()
     }
 
     /// Resolves once the signal has fired.
     pub(crate) async fn fired(&self) {
-        self.notify.notified().await;
+        self.token.cancelled().await;
     }
 }
 

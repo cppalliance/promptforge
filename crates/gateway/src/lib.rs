@@ -1079,18 +1079,22 @@ const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(1
 /// [`PROGRESS_HEARTBEAT`] while the hub is idle. Intermediate events are
 /// lossy - a lagging subscriber drops them - and terminal events are never
 /// coalesced at the source. Client disconnect is Drop all the way down, as
-/// with the switch stream: the response body owns the receiver.
+/// with the switch stream: the response body owns the receiver. The one
+/// server-side end is the process shutdown signal: an attached subscriber
+/// (the config SPA, the workshop) would otherwise hold its connection open
+/// through the graceful drain and pin the process.
 async fn admin_progress(
     State(state): State<AppState>,
     caller: Caller,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &caller).await?;
-    Ok(progress_sse_response(&state.hub))
+    Ok(progress_sse_response(&state.hub, state.shutdown.clone()))
 }
 
 /// Builds the progress SSE response over `hub`: a snapshot of the live
-/// operations first, then the broadcast stream, heartbeats in the gaps.
-fn progress_sse_response(hub: &ProgressHub) -> Response {
+/// operations first, then the broadcast stream, heartbeats in the gaps,
+/// until `shutdown` fires.
+fn progress_sse_response(hub: &ProgressHub, shutdown: shutdown::ShutdownSignal) -> Response {
     // Subscribe before snapshotting so no event between the two is lost; a
     // `Begun` replayed from the snapshot is idempotent for remote import.
     let rx = hub.subscribe();
@@ -1134,23 +1138,25 @@ fn progress_sse_response(hub: &ProgressHub) -> Response {
             pending,
             rx,
             tokio::time::interval_at(heartbeat_at, PROGRESS_HEARTBEAT),
+            shutdown,
         ),
-        |(mut pending, mut rx, mut heartbeat)| async move {
+        |(mut pending, mut rx, mut heartbeat, shutdown)| async move {
             if let Some(line) = pending.pop_front() {
                 return Some((
                     Ok::<_, std::convert::Infallible>(line),
-                    (pending, rx, heartbeat),
+                    (pending, rx, heartbeat, shutdown),
                 ));
             }
             loop {
                 tokio::select! {
+                    () = shutdown.fired() => return None,
                     _ = heartbeat.tick() => {
-                        return Some((Ok(": heartbeat\n\n".to_owned()), (pending, rx, heartbeat)));
+                        return Some((Ok(": heartbeat\n\n".to_owned()), (pending, rx, heartbeat, shutdown)));
                     }
                     received = rx.recv() => match received {
                         Ok(event) => {
                             if let Some(line) = event_line(&event) {
-                                return Some((Ok(line), (pending, rx, heartbeat)));
+                                return Some((Ok(line), (pending, rx, heartbeat, shutdown)));
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
@@ -2178,6 +2184,7 @@ mod progress_tests {
     use futures_util::StreamExt as _;
     use shared_progress::{EventState, ProgressEvent, ProgressHub};
 
+    use super::shutdown::ShutdownSignal;
     use super::{PROGRESS_HEARTBEAT, progress_sse_response};
 
     const FRAME_TIMEOUT: Duration = Duration::from_secs(5);
@@ -2247,7 +2254,7 @@ mod progress_tests {
     #[tokio::test]
     async fn the_stream_carries_begun_updated_finished_in_order() {
         let hub = Arc::new(ProgressHub::new());
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
 
         let tree = hub.operation();
@@ -2276,7 +2283,7 @@ mod progress_tests {
         // The subscriber connects after the work began, so the broadcast
         // alone would show nothing until the next report: the snapshot must
         // carry the current state.
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
         let events = read_events(&mut frames, 2).await;
         assert!(matches!(events[0].state, EventState::Begun { weight } if weight == 1.0));
@@ -2295,7 +2302,7 @@ mod progress_tests {
         // The leaf finished before the subscriber connected; without a
         // replayed Finished the subscriber would hold it as unfinished until
         // the tree detaches.
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
         let events = read_events(&mut frames, 3).await;
         assert!(matches!(events[0].state, EventState::Begun { .. }));
@@ -2314,7 +2321,7 @@ mod progress_tests {
     #[tokio::test]
     async fn a_lagged_subscriber_drops_the_overflow_and_carries_on() {
         let hub = Arc::new(ProgressHub::new());
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
 
         let tree = hub.operation();
@@ -2341,7 +2348,7 @@ mod progress_tests {
     #[tokio::test(start_paused = true)]
     async fn an_idle_hub_emits_heartbeat_comments_on_cadence() {
         let hub = Arc::new(ProgressHub::new());
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
 
         // No operations are live, so heartbeat comments are the only
@@ -2362,7 +2369,7 @@ mod progress_tests {
     #[tokio::test]
     async fn the_stream_goes_quiet_when_the_tree_drops() {
         let hub = Arc::new(ProgressHub::new());
-        let response = progress_sse_response(&hub);
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
 
         let tree = hub.operation();
@@ -2378,6 +2385,30 @@ mod progress_tests {
                 .await
                 .is_err(),
             "a dropped tree must leave the stream quiet until the next heartbeat"
+        );
+    }
+
+    /// The shutdown signal ends the open-ended stream, so an attached
+    /// subscriber cannot hold its connection through the graceful drain.
+    #[tokio::test]
+    async fn the_stream_ends_when_the_shutdown_signal_fires() {
+        let hub = Arc::new(ProgressHub::new());
+        let shutdown = ShutdownSignal::default();
+        let response = progress_sse_response(&hub, shutdown.clone());
+        let mut frames = response.into_body().into_data_stream();
+
+        let tree = hub.operation();
+        let _leaf = tree.register("download", 1.0);
+        let events = read_events(&mut frames, 1).await;
+        assert!(matches!(events[0].state, EventState::Begun { .. }));
+
+        shutdown.fire();
+        let end = tokio::time::timeout(FRAME_TIMEOUT, frames.next())
+            .await
+            .expect("the stream reacts to the signal within the frame timeout");
+        assert!(
+            end.is_none(),
+            "the stream ends on shutdown instead of waiting for the heartbeat: {end:?}"
         );
     }
 }
