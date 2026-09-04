@@ -18,7 +18,7 @@ cargo install gateway
 promptforge-gateway serve gateway.toml --profile main
 ```
 
-Boot requires a config path and a selected profile. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). The profile comes from `--profile NAME`, the `PROMPTFORGE_PROFILE` environment variable, or the sibling state file, in that precedence; with none set, startup refuses and lists the profiles the config defines.
+The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). With neither set, the gateway searches beside the executable, then the working directory, then the user profile's `.promptforge` directory; when no `gateway.toml` exists, first run writes a default there - loopback on an OS-assigned port, a fresh random bearer key, the recommended STT pair unless the installer declined it - and boots from it. The profile comes from `--profile NAME`, the `PROMPTFORGE_PROFILE` environment variable, or the sibling state file, in that precedence; with none set, startup refuses and lists the profiles the config defines. The generated default writes its state file selecting `default`, so a bare first boot needs no flags.
 
 Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions`, serves a model catalog at `GET /v1/models`, and, with `workshop`, accepts OpenAI-compatible multipart transcription at `POST /v1/audio/transcriptions`.
 

@@ -30,8 +30,11 @@ use crate::{AppState, build_router};
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct ServeOptions {
-    /// Path to the single global configuration file.
-    pub config_path: PathBuf,
+    /// Path to the single global configuration file. `None` runs boot
+    /// discovery (beside the executable, the working directory, the user
+    /// profile's `.promptforge` directory) and, when nothing is found,
+    /// first-run generation into the profile location.
+    pub config_path: Option<PathBuf>,
     /// Optional command-line profile override.
     pub profile: Option<ProfileName>,
     /// Directory the `gateway.json` connection file is written to after a
@@ -43,7 +46,10 @@ pub struct ServeOptions {
 impl ServeOptions {
     /// Builds serve options from the config path and optional profile override.
     #[must_use]
-    pub fn new(config_path: PathBuf, profile: impl Into<Option<ProfileName>>) -> ServeOptions {
+    pub fn new(
+        config_path: Option<PathBuf>,
+        profile: impl Into<Option<ProfileName>>,
+    ) -> ServeOptions {
         ServeOptions {
             config_path,
             profile: profile.into(),
@@ -172,11 +178,6 @@ impl Gateway {
                 crate::LOCAL_MODELS_UNSUPPORTED,
             )));
         }
-        if !config.stt_models().is_empty() && config.workshop().is_none() {
-            return Err(StartupError::provisioning(std::io::Error::other(
-                crate::STT_REQUIRES_WORKSHOP,
-            )));
-        }
         #[cfg(feature = "workshop")]
         let stt = {
             let tree = hub.operation();
@@ -281,6 +282,7 @@ impl Gateway {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "workshop"))]
 mod stt_tests {
     use super::*;
 
@@ -298,13 +300,13 @@ mod stt_tests {
             .select_profile(&ProfileName::parse("work").expect("profile name"))
             .expect("profile selects");
         let error = Gateway::from_config(&config, ProfilesContext::default())
-            .expect_err("STT without a workshop listener must be refused");
+            .expect_err("STT without the runtime feature must be refused");
         let detail = std::error::Error::source(&error)
             .map(ToString::to_string)
             .unwrap_or_default();
         assert!(
-            detail.contains("[workshop]"),
-            "the refusal names the missing listener section: {error}: {detail}"
+            detail.contains("workshop"),
+            "the refusal names the missing feature: {error}: {detail}"
         );
     }
 }
@@ -421,7 +423,7 @@ struct Ready {
 /// use std::path::PathBuf;
 ///
 /// let options = ServeOptions::new(
-///     PathBuf::from("/etc/promptforge/gateway.toml"),
+///     Some(PathBuf::from("/etc/promptforge/gateway.toml")),
 ///     ProfileName::parse("dev").unwrap(),
 /// );
 /// let gateway = spawn(&options)?;
@@ -507,6 +509,11 @@ fn serve_thread(
         }
     };
     let bind = config.bind_addr();
+    // load_startup resolved the boot path (explicit, discovered, or
+    // generated); the hosted workshop anchors its state beside it.
+    let Some(config_path) = profiles.config_path.clone() else {
+        unreachable!("load_startup resolves the boot config path");
+    };
     let hub = Arc::new(shared_progress::ProgressHub::new());
     // The renderer starts before provisioning so boot downloads draw; it is
     // a plain thread because provisioning runs before the runtime exists,
@@ -554,14 +561,10 @@ fn serve_thread(
     // it on every exit path below, graceful shutdown included.
     let _connection_file = connection_file_guard(&config, options, address);
     #[cfg(feature = "workshop")]
-    let workshop = workshop::spawn_if_configured(
-        &config,
-        &options.config_path,
-        address,
-        gateway.state.stt_state(),
-    );
+    let workshop =
+        workshop::spawn_if_configured(&config, &config_path, address, gateway.state.stt_state());
     #[cfg(not(feature = "workshop"))]
-    let workshop = workshop::spawn_if_configured(&config, &options.config_path, address);
+    let workshop = workshop::spawn_if_configured(&config, &config_path, address);
     let workshop = match workshop {
         Ok(workshop) => workshop,
         Err(error) => {
@@ -745,14 +748,19 @@ async fn shutdown_signal() {
     }
 }
 
-/// Loads the one env file, then the one config file with startup precedence.
+/// Resolves the boot config path, loads the one env file, then the one
+/// config file with startup precedence. An absent path in `options` runs
+/// boot discovery and, when nothing is found, first-run generation.
 fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), StartupError> {
-    load_env_file(&options.config_path.with_extension("env"));
+    let config_path = crate::boot::resolve_boot_config(options.config_path.clone())
+        .map_err(StartupError::boot)?;
+    load_env_file(&config_path.with_extension("env"));
     let environment = std::env::var("PROMPTFORGE_PROFILE").ok();
-    load_startup_with_environment(options, environment.as_deref())
+    load_startup_with_environment(&config_path, options, environment.as_deref())
 }
 
 fn load_startup_with_environment(
+    config_path: &Path,
     options: &ServeOptions,
     environment: Option<&str>,
 ) -> Result<(Config, ProfilesContext), StartupError> {
@@ -760,7 +768,7 @@ fn load_startup_with_environment(
         options.profile.as_ref().map(ProfileName::as_str),
         environment,
     );
-    let config = Config::load(&options.config_path, &selection).map_err(StartupError::config)?;
+    let config = Config::load(config_path, &selection).map_err(StartupError::config)?;
     let active = config
         .active_profile()
         .map(|profile| ProfileName::parse(profile.name()))
@@ -770,7 +778,7 @@ fn load_startup_with_environment(
         })?;
     Ok((
         config,
-        ProfilesContext::new(Some(options.config_path.clone()), active),
+        ProfilesContext::new(Some(config_path.to_path_buf()), active),
     ))
 }
 
@@ -852,10 +860,13 @@ models = ["beta-model"]
     #[test]
     fn command_line_profile_overrides_environment_and_state() {
         let (_temp, path) = fixture("alpha");
-        let options = ServeOptions::new(path, ProfileName::parse("beta").expect("name"));
+        let options = ServeOptions::new(
+            Some(path.clone()),
+            ProfileName::parse("beta").expect("name"),
+        );
 
         let (config, context) =
-            load_startup_with_environment(&options, Some("alpha")).expect("startup loads");
+            load_startup_with_environment(&path, &options, Some("alpha")).expect("startup loads");
 
         assert_eq!(config.models()[0].name(), "beta-model");
         assert_eq!(
@@ -867,10 +878,10 @@ models = ["beta-model"]
     #[test]
     fn environment_profile_overrides_state_without_a_cli_value() {
         let (_temp, path) = fixture("alpha");
-        let options = ServeOptions::new(path, None::<ProfileName>);
+        let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
 
         let (config, _) =
-            load_startup_with_environment(&options, Some("beta")).expect("startup loads");
+            load_startup_with_environment(&path, &options, Some("beta")).expect("startup loads");
 
         assert_eq!(config.models()[0].name(), "beta-model");
     }
@@ -878,22 +889,25 @@ models = ["beta-model"]
     #[test]
     fn startup_uses_the_sibling_state_without_overrides() {
         let (_temp, path) = fixture("alpha");
-        let options = ServeOptions::new(path, None::<ProfileName>);
+        let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
 
         let (config, context) =
-            load_startup_with_environment(&options, None).expect("startup loads");
+            load_startup_with_environment(&path, &options, None).expect("startup loads");
 
         assert_eq!(config.models()[0].name(), "alpha-model");
-        assert_eq!(context.config_path, Some(options.config_path));
+        assert_eq!(context.config_path, Some(path));
     }
 
     #[test]
     fn unknown_override_lists_the_loaded_catalog_profiles() {
         let (_temp, path) = fixture("alpha");
-        let options = ServeOptions::new(path, ProfileName::parse("ghost").expect("name"));
+        let options = ServeOptions::new(
+            Some(path.clone()),
+            ProfileName::parse("ghost").expect("name"),
+        );
 
-        let error =
-            load_startup_with_environment(&options, None).expect_err("unknown profile fails");
+        let error = load_startup_with_environment(&path, &options, None)
+            .expect_err("unknown profile fails");
         let text = error_text(&error);
 
         assert!(text.contains("ghost"), "{text}");

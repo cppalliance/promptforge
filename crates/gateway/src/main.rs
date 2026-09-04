@@ -2,7 +2,9 @@
 //! `promptforge-gateway serve [config.toml] [--profile NAME]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
-//! hands off to [`run`], which owns the tokio runtime, provisioning, and serving.
+//! hands off to [`run`], which owns the tokio runtime, provisioning, and
+//! serving. With no config path from either source, the gateway runs boot
+//! discovery and, on first run, generates a default config.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -13,7 +15,9 @@ use gateway::{ProfileName, ServeOptions, run};
 const USAGE: &str = concat!(
     "usage: promptforge-gateway serve [config.toml] [--profile NAME]\n",
     "       promptforge-gateway --version\n",
-    "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable",
+    "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable\n",
+    "with no config path, the gateway searches beside the executable, the current directory,\n",
+    "and the profile's .promptforge directory, generating a default config on first run",
 );
 
 fn main() -> ExitCode {
@@ -73,10 +77,11 @@ enum ParseError {
 
 /// Parse `serve` arguments into typed [`ServeOptions`].
 ///
-/// Uses `OsString` operands so non-UTF-8 config paths survive. Boot requires
-/// two things: a config path (the one optional positional, falling back to
-/// `PROMPTFORGE_GATEWAY_CONFIG`) and an optional `--profile NAME` override,
-/// which is validated into a [`ProfileName`] at parse time.
+/// Uses `OsString` operands so non-UTF-8 config paths survive. The config
+/// path (the one optional positional, falling back to
+/// `PROMPTFORGE_GATEWAY_CONFIG`) stays optional: with neither set, the
+/// gateway discovers or generates the boot config itself. `--profile NAME`
+/// is validated into a [`ProfileName`] at parse time.
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, ParseError> {
     let mut args = args.into_iter();
     let _binary = args.next();
@@ -126,24 +131,20 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
     }
 
     let config_path =
-        resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"))?;
+        resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
 
     Ok(ServeOptions::new(config_path, profile))
 }
 
 /// Resolves the config path: the CLI positional wins, then the
-/// `PROMPTFORGE_GATEWAY_CONFIG` environment variable.
+/// `PROMPTFORGE_GATEWAY_CONFIG` environment variable. `None` when neither
+/// is set, deferring to the gateway's boot discovery and first-run
+/// generation.
 ///
 /// Pure, so tests pass both sources explicitly and never touch the process
 /// environment (edition 2024 makes `set_var` unsafe).
-fn resolve_config_path(cli: Option<PathBuf>, env: Option<OsString>) -> Result<PathBuf, ParseError> {
-    match (cli, env) {
-        (Some(path), _) => Ok(path),
-        (None, Some(value)) => Ok(PathBuf::from(value)),
-        (None, None) => Err(ParseError::Usage(
-            "provide a config.toml path or set PROMPTFORGE_GATEWAY_CONFIG".into(),
-        )),
-    }
+fn resolve_config_path(cli: Option<PathBuf>, env: Option<OsString>) -> Option<PathBuf> {
+    cli.or_else(|| env.map(PathBuf::from))
 }
 
 #[cfg(test)]
@@ -162,23 +163,20 @@ mod tests {
         let path = resolve_config_path(
             Some(PathBuf::from("cli.toml")),
             Some(OsString::from("env.toml")),
-        )
-        .expect("resolve");
-        assert_eq!(path, PathBuf::from("cli.toml"));
+        );
+        assert_eq!(path, Some(PathBuf::from("cli.toml")));
     }
 
     #[test]
     fn env_path_is_the_fallback() {
-        let path = resolve_config_path(None, Some(OsString::from("env.toml"))).expect("resolve");
-        assert_eq!(path, PathBuf::from("env.toml"));
+        let path = resolve_config_path(None, Some(OsString::from("env.toml")));
+        assert_eq!(path, Some(PathBuf::from("env.toml")));
     }
 
     #[test]
-    fn neither_path_set_is_a_usage_error() {
-        let error = resolve_config_path(None, None).unwrap_err();
-        assert!(
-            matches!(&error, ParseError::Usage(message) if message.contains("PROMPTFORGE_GATEWAY_CONFIG"))
-        );
+    fn neither_path_set_defers_to_boot_discovery() {
+        let path = resolve_config_path(None, None);
+        assert_eq!(path, None, "the gateway discovers or generates the config");
     }
 
     #[test]
@@ -189,7 +187,7 @@ mod tests {
             options.profile.as_ref().map(ProfileName::as_str),
             Some("dev")
         );
-        assert_eq!(options.config_path, PathBuf::from("gateway.toml"));
+        assert_eq!(options.config_path, Some(PathBuf::from("gateway.toml")));
     }
 
     #[test]

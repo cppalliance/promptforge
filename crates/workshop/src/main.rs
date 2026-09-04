@@ -6,15 +6,13 @@
 
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
-//! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
-//! search order), generating a default config with its `default` profile in
-//! the user profile's `.promptforge` directory on first run, boots the
-//! merged gateway (which hosts the workshop UI on a second loopback
-//! listener) in-process, waits for the workshop's health endpoint to
-//! answer, and opens a Tauri window pointed at it. Closing the window exits
-//! the app and shuts the gateway down cleanly. Development against an
-//! external gateway uses the standalone `workshop-server`
-//! binary and its `workshop.toml` instead of this app.
+//! Boots the merged gateway (which hosts the workshop UI on a second
+//! loopback listener) in-process - the gateway discovers its boot config
+//! `gateway.toml` or generates a default on first run - waits for the
+//! workshop's health endpoint to answer, and opens a Tauri window pointed
+//! at it. Closing the window exits the app and shuts the gateway down
+//! cleanly. Development against an external gateway uses the standalone
+//! `workshop-server` binary and its `workshop.toml` instead of this app.
 
 // The only unsafe module in the crate: the WebView2 COM surface that
 // reads real OS paths out of dropped File objects and grants the
@@ -22,14 +20,12 @@
 #[cfg(target_os = "windows")]
 #[expect(unsafe_code, reason = "raw WebView2 COM has no safe wrapper")]
 mod bridge;
-mod discover;
 mod drops;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod navigation;
 
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -42,6 +38,9 @@ use tauri_plugin_opener::OpenerExt as _;
 /// How long the app waits for the hosted workshop's health endpoint
 /// before giving up.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The profile the shell boots the gateway into.
+const DEFAULT_PROFILE: &str = "default";
 
 /// The managed slot holding the gateway until the `RunEvent::Exit` handler
 /// shuts it down. `shutdown` consumes the handle, so the slot hands it over
@@ -155,18 +154,14 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
 }
 
-/// Discovers or generates the boot config, spawns the merged gateway, and
-/// waits out the hosted workshop's health probe. A failure after the spawn
-/// shuts the gateway down before propagating.
+/// Spawns the merged gateway - it discovers the boot config itself, or
+/// generates a default on first run - and waits out the hosted workshop's
+/// health probe. A failure after the spawn shuts the gateway down before
+/// propagating.
 fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
-    let config_path = match discover::discover_config()? {
-        Some(config_path) => config_path,
-        None => generate_in_profile()?,
-    };
-    let profile =
-        ProfileName::parse(discover::DEFAULT_PROFILE).context("parse the default profile name")?;
-    let gateway = gateway::spawn(&ServeOptions::new(config_path, profile))
-        .context("start the merged gateway")?;
+    let profile = ProfileName::parse(DEFAULT_PROFILE).context("parse the default profile name")?;
+    let gateway =
+        gateway::spawn(&ServeOptions::new(None, profile)).context("start the merged gateway")?;
     match workshop_url(&gateway).and_then(|url| {
         shared_sidecar::wait_for_health(&url, HEALTH_TIMEOUT)
             .context("wait for the hosted workshop")
@@ -252,19 +247,6 @@ fn workshop_url_from(url: Option<&str>) -> anyhow::Result<String> {
         "the boot config has no [workshop] section, so the gateway hosts no workshop UI; \
          add a [workshop] section to gateway.toml",
     )
-}
-
-/// First run: writes `gateway.toml` with its `default` profile into the user
-/// profile's `.promptforge` directory.
-fn generate_in_profile() -> anyhow::Result<PathBuf> {
-    let home = std::env::home_dir().context("locate the user profile directory")?;
-    let path = discover::profile_config_path(&home);
-    let path = discover::generate_default(&path).context("write the default configuration")?;
-    eprintln!(
-        "no gateway.toml found; wrote default config to {}",
-        path.display()
-    );
-    Ok(path)
 }
 
 #[cfg(test)]

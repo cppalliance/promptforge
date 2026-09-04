@@ -18,7 +18,6 @@ anyhow.workspace = true
 # config-ui is a gateway default already; naming it here pins the desktop
 # exe to carry the config UI even if the default edge is ever severed.
 gateway = { workspace = true, features = ["workshop", "config-ui"] }
-rand.workspace = true
 serde_json.workspace = true
 # The health wait comes from the shared connection-file seam.
 shared-sidecar.workspace = true

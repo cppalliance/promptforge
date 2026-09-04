@@ -39,7 +39,7 @@ fn spawn_writes_the_connection_file_and_shutdown_removes_it() {
     std::fs::write(&config_path, CATALOG).unwrap();
     let run_dir = temp.path().join("run");
     let options = ServeOptions::new(
-        config_path,
+        Some(config_path),
         ProfileName::parse("alpha").expect("profile name"),
     )
     .with_run_dir(run_dir.clone());

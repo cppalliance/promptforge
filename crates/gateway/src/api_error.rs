@@ -20,7 +20,7 @@ use gateway_config::ConfigError;
 ///
 /// # fn demo() {
 /// let options = ServeOptions::new(
-///     PathBuf::from("/etc/promptforge/gateway.toml"),
+///     Some(PathBuf::from("/etc/promptforge/gateway.toml")),
 ///     ProfileName::parse("dev").unwrap(),
 /// );
 /// if let Err(err) = run(&options) {
@@ -37,6 +37,9 @@ pub struct StartupError(StartupRepr);
 pub enum StartupErrorKind {
     /// Loading or validating the configuration failed.
     Config,
+    /// Discovering the boot configuration or generating the first-run
+    /// default failed.
+    Boot,
     /// Provisioning or starting local model children failed.
     Provisioning,
     /// Binding the listener failed.
@@ -55,6 +58,8 @@ pub enum StartupErrorKind {
 enum StartupRepr {
     #[error("configuration error")]
     Config(#[source] ConfigError),
+    #[error("boot configuration error")]
+    Boot(#[source] crate::boot::BootError),
     #[error("local provisioning error")]
     Provisioning(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("failed to bind the listener")]
@@ -74,6 +79,7 @@ impl StartupError {
     pub fn kind(&self) -> StartupErrorKind {
         match self.0 {
             StartupRepr::Config(_) => StartupErrorKind::Config,
+            StartupRepr::Boot(_) => StartupErrorKind::Boot,
             StartupRepr::Provisioning(_) => StartupErrorKind::Provisioning,
             StartupRepr::Bind(_) => StartupErrorKind::Bind,
             StartupRepr::Thread(_) => StartupErrorKind::Thread,
@@ -85,6 +91,10 @@ impl StartupError {
 
     pub(crate) fn config(err: ConfigError) -> Self {
         StartupError(StartupRepr::Config(err))
+    }
+
+    pub(crate) fn boot(err: crate::boot::BootError) -> Self {
+        StartupError(StartupRepr::Boot(err))
     }
 
     pub(crate) fn provisioning(err: impl std::error::Error + Send + Sync + 'static) -> Self {

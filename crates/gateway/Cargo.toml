@@ -37,6 +37,8 @@ gateway-config-ui = { workspace = true, optional = true }
 # Optional: gateway-owned local inference (GGUF provisioning, managed
 # `llama-server` children, blob cache store). Headless builds disable it.
 gateway-local = { workspace = true, optional = true }
+# The first-run bearer key (src/boot.rs) comes from the OS-seeded CSPRNG.
+rand.workspace = true
 # The shared loopback wall for the admin config endpoints; always on,
 # because those endpoints hold secrets in every build.
 shared-loopback.workspace = true
@@ -68,6 +70,14 @@ tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
+# First-run STT gating reads the installer's registry choice (src/boot.rs):
+# RegOpenKeyExW + RegQueryValueExW.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+] }
+
 [features]
 default = ["local", "web-search", "config-ui"]
 # Gateway-owned local inference via the `gateway-local` crate.
@@ -94,8 +104,29 @@ tempfile.workspace = true
 # loopback-wall tests can present a LAN peer no real TCP connection could.
 tower.workspace = true
 
-[lints]
-workspace = true
+# Not `workspace = true`: the registry shim in src/boot.rs is raw Win32 FFI
+# and cannot be written without unsafe, and a workspace `forbid` cannot be
+# overridden by a module allow. The workspace lint set is mirrored with
+# unsafe_code lowered to deny, which the shim module alone opts out of.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+future_incompatible = { level = "warn", priority = -1 }
+
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "warn"
+doc_markdown = "allow"
 
 # Release packaging through cargo-dist (see dist-workspace.toml): the
 # headless Linux gateway also serves the workshop web pages, so the release

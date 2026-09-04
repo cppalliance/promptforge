@@ -57,6 +57,7 @@
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
+mod boot;
 #[cfg(feature = "local")]
 mod cache;
 #[cfg(feature = "local")]
@@ -442,10 +443,6 @@ const CLIENT_HEADER: &str = "X-PromptForge-Client";
 #[cfg(not(feature = "local"))]
 const LOCAL_MODELS_UNSUPPORTED: &str =
     "configuration declares [[local_model]] but this build lacks the `local` feature";
-
-/// Error when STT is selected without its required workshop listener.
-const STT_REQUIRES_WORKSHOP: &str =
-    "the active profile selects [[stt_model]] but no [workshop] section is configured";
 
 /// Error when STT reaches a gateway build without the heavy runtime.
 #[cfg(not(feature = "workshop"))]
@@ -1096,13 +1093,6 @@ fn prepare_switch_target(
             return Err(GatewayError::switch_failed("select-profile", error));
         }
     };
-    if !config.stt_models().is_empty() && config.workshop().is_none() {
-        loading.fail();
-        return Err(GatewayError::switch_failed(
-            "start-stt",
-            std::io::Error::other(STT_REQUIRES_WORKSHOP),
-        ));
-    }
     #[cfg(not(feature = "workshop"))]
     if !config.stt_models().is_empty() {
         loading.fail();

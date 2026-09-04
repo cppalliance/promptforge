@@ -1904,6 +1904,7 @@ dependencies = [
  "open",
  "png 0.18.1",
  "promptforge-core",
+ "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1923,6 +1924,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
  "workshop-server",
 ]
 
@@ -8219,7 +8221,6 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "gateway",
- "rand 0.9.5",
  "serde_json",
  "shared-sidecar",
  "tauri",
