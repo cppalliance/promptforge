@@ -84,7 +84,7 @@ Models downloaded from Hugging Face get a metadata sidecar file beside the cache
 
 ## Startup and supervision
 
-Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. On a TTY you see progress bars; otherwise the progress appears as log lines.
+Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream.
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 

@@ -337,7 +337,7 @@ Models downloaded from Hugging Face get a metadata sidecar file beside the cache
 
 ## Startup and supervision
 
-Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. On a TTY you see progress bars; otherwise the progress appears as log lines.
+Startup reports a structured progress tree. One subtree covers the llama-server runtime, and each local model gets download, verify, and ready stages. Progress renders as tracing log lines on every stream.
 
 Startup is best-effort. Every model that launched keeps serving, and each model that failed is reported by name with its error. One bad model never blocks the rest. Startup failures are classified as plausibly transient or permanent, and the classification annotates the respawn diagnostics you see in the logs.
 
@@ -739,7 +739,7 @@ GET /admin/status reports the active profile, the models it exposes, and a confi
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 
-Download progress renders as terminal progress bars when the gateway runs on a TTY, and as tracing log lines otherwise.
+Download progress renders as tracing log lines on every stream.
 
 GET /admin/system reports host metrics: CPU, RAM, the cache drive, and the first NVIDIA GPU's VRAM. The GPU field is absent, never an error, when no capable driver is present. You can also pull bounded captured stdout and stderr tails for each running local model as diagnostics.
 

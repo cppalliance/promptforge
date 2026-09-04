@@ -1,8 +1,7 @@
 //! Download progress reporting into progress-tree leaves.
 //!
 //! The library never chooses a presentation: the owning process renders the
-//! hub (the gateway binary draws indicatif bars on a TTY, tracing lines
-//! otherwise).
+//! hub (the gateway binary emits tracing lines).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

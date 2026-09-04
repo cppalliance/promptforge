@@ -678,7 +678,7 @@ fn serve_thread(
     let bind = config.bind_addr();
     let hub = Arc::new(shared_progress::ProgressHub::new());
     // The renderer starts before serving so the boot command's downloads
-    // draw; it is a plain thread, and its Drop stops it on every exit path.
+    // log; it is a plain thread, and its Drop stops it on every exit path.
     let _renderer = crate::render::Renderer::start(&hub);
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
