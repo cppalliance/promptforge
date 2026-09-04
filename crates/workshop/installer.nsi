@@ -459,19 +459,30 @@ Var AppStartMenuFolder
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishPageShow
 !insertmacro MUI_PAGE_FINISH
 
+!define /ifndef WM_SETTEXT 0x000C
+
 Function FinishPageShow
- ; The Run checkbox follows the Workshop component; hide it on a
- ; Gateway-only install, where there is no main binary to run.
- ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+ ; The Run checkbox follows the components: the Workshop shell when
+ ; installed; on a Gateway-only install it becomes the first-run browser
+ ; handoff to the gateway's Settings page; hidden when neither landed.
+ ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+ ; Default label and target: run the shell.
+ ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
+ SendMessage $mui.FinishPage.Run ${WM_SETTEXT} 0 "STR:Open PromptForge Gateway settings in your browser"
+ ${Else}
  ShowWindow $mui.FinishPage.Run ${SW_HIDE}
  ${EndIf}
 FunctionEnd
 
 Function RunMainBinary
- ; The finish-page Run checkbox follows the Workshop component; on a
- ; Gateway-only install there is no main binary to run.
+ ; The finish-page Run checkbox follows the components: the Workshop shell
+ ; when installed; on a Gateway-only install it launches the gateway with
+ ; --open-settings, so the first boot opens the Settings page in the
+ ; default browser.
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+ ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --open-settings"
  ${EndIf}
 FunctionEnd
 

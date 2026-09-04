@@ -40,6 +40,10 @@ pub struct ServeOptions {
     /// successful bind; `None` uses the default run directory under the
     /// user profile's `.promptforge` directory.
     pub run_dir: Option<PathBuf>,
+    /// Opens the Settings handoff URL in the default browser once the
+    /// listener is bound - the binary's `--open-settings`, used by the
+    /// installer's first run. Embedders leave this `false`.
+    pub open_settings: bool,
 }
 
 impl ServeOptions {
@@ -53,6 +57,7 @@ impl ServeOptions {
             config_path,
             profile: profile.into(),
             run_dir: None,
+            open_settings: false,
         }
     }
 
@@ -61,6 +66,13 @@ impl ServeOptions {
     #[must_use]
     pub fn with_run_dir(mut self, run_dir: PathBuf) -> ServeOptions {
         self.run_dir = Some(run_dir);
+        self
+    }
+
+    /// Sets whether to open the Settings page in the browser once bound.
+    #[must_use]
+    pub fn with_open_settings(mut self, open_settings: bool) -> ServeOptions {
+        self.open_settings = open_settings;
         self
     }
 }
@@ -457,6 +469,7 @@ struct Ready {
 /// # Ok::<(), gateway::StartupError>(())
 /// ```
 pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
+    let open_settings = options.open_settings;
     let (ready_tx, ready_rx) = mpsc::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let options = options.clone();
@@ -465,15 +478,32 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
         .spawn(move || serve_thread(&options, &ready_tx, shutdown_rx))
         .map_err(StartupError::thread)?;
     match ready_rx.recv() {
-        Ok(Ok(ready)) => Ok(GatewayHandle {
-            url: ready.url,
-            api_key: ready.api_key,
-            state: ready.state,
-            shutdown: Some(shutdown_tx),
-            thread: Some(thread),
-        }),
+        Ok(Ok(ready)) => {
+            let handle = GatewayHandle {
+                url: ready.url,
+                api_key: ready.api_key,
+                state: ready.state,
+                shutdown: Some(shutdown_tx),
+                thread: Some(thread),
+            };
+            if open_settings {
+                open_settings_page(&handle);
+            }
+            Ok(handle)
+        }
         Ok(Err(error)) => Err(failed_handshake(thread, Some(error))),
         Err(_) => Err(failed_handshake(thread, None)),
+    }
+}
+
+/// Opens the Settings handoff URL in the default browser, for the binary's
+/// `--open-settings`: once, right after the bind, through the one-time
+/// `/auth` redirect so the key never sits in browser history. A browser
+/// that cannot launch warns; the gateway serves on.
+fn open_settings_page(handle: &GatewayHandle) {
+    let url = crate::handoff::auth_url(handle.url(), handle.api_key.expose());
+    if let Err(error) = open::that(&url) {
+        tracing::warn!("could not open the browser: {error}; the Settings URL is {url}");
     }
 }
 
