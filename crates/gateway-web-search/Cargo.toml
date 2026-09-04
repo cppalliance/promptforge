@@ -15,7 +15,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 gateway-config.workspace = true
-gateway-protocol.workspace = true
+shared-protocol.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

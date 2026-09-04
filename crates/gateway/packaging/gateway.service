@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/gateway serve /etc/promptforge/gateway.toml --profile main
+ExecStart=/usr/local/bin/promptforge-gateway serve /etc/promptforge/gateway.toml --profile main
 Restart=on-failure
 RestartSec=5
 # The gateway holds vendor credentials; run it as a dedicated user.

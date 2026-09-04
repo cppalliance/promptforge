@@ -23,7 +23,7 @@ cargo run -p workshop
 To check which version you have without starting anything, run:
 
 ````
-workshop --version
+promptforge-workshop --version
 ````
 
 This prints the version and exits. It does not boot the gateway and it does not open a window.

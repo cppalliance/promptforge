@@ -22,8 +22,8 @@ gateway = { path = "crates/gateway", version = "0.2.0" }
 gateway-config = { path = "crates/gateway-config", version = "0.2.0" }
 gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.2.0" }
 gateway-local = { path = "crates/gateway-local", version = "0.2.0" }
-gateway-loopback = { path = "crates/gateway-loopback", version = "0.2.0" }
-gateway-protocol = { path = "crates/gateway-protocol", version = "0.2.0" }
+shared-loopback = { path = "crates/shared-loopback", version = "0.2.0" }
+shared-protocol = { path = "crates/shared-protocol", version = "0.2.0" }
 gateway-routing = { path = "crates/gateway-routing", version = "0.2.0" }
 promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
 promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.2.0" }

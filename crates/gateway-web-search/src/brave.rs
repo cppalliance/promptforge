@@ -5,9 +5,9 @@
 //! [`BraveSearchParams`] and calls [`brave_search`]; everything Brave-specific
 //! (query pairs, over-fetch policy, JSON shape, error prefixing) lives here.
 
-use gateway_protocol::ProtocolError;
-use gateway_protocol::http_util;
 use serde::Deserialize;
+use shared_protocol::ProtocolError;
+use shared_protocol::http_util;
 
 use crate::service::SearchResult;
 

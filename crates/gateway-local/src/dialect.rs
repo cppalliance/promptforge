@@ -19,7 +19,7 @@ use crate::error::LocalError;
 const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Byte ceiling for a dialect-probe JSON body (HYGIENE-BOUNDS-001).
-const MAX_PROBE_BODY: u64 = gateway_protocol::http_util::MAX_JSON_BODY as u64;
+const MAX_PROBE_BODY: u64 = shared_protocol::http_util::MAX_JSON_BODY as u64;
 
 /// Evidence from a local child's `/props`, `/v1/models`, and sidecar metadata
 /// used to select a tool-calling dialect.

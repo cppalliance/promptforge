@@ -817,9 +817,9 @@ fn respawn_reuses_port_and_identity_after_child_death() {
 #[test]
 fn local_upstream_send_respawns_dead_child_once() {
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::ChatRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -912,9 +912,9 @@ fn local_upstream_send_embeddings_routes_through_child() {
     // An embeddings request forwards to the child's `/v1/embeddings` and the
     // response restores the caller's model name, same contract as chat.
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::{EmbeddingInput, EmbeddingRequest};
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::{EmbeddingInput, EmbeddingRequest};
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -980,9 +980,9 @@ fn local_upstream_send_rerank_routes_through_child() {
     // A rerank request forwards to the child's `/v1/rerank` and the response
     // restores the caller's model name, same contract as chat.
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::RerankRequest;
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::RerankRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -1049,10 +1049,10 @@ fn local_upstream_send_honors_cooldown_after_failed_respawn() {
     // UPSTREAM-005: a failed respawn records the attempt time; an immediate
     // second failure is short-circuited by the cooldown (no respawn storm).
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::ProtocolError;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
+    use shared_protocol::ProtocolError;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::ChatRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -1150,9 +1150,9 @@ fn local_upstream_concurrent_sends_respawn_child_at_most_once() {
     // UPSTREAM-005: two concurrent transport failures on a dead child serialize
     // through the guard mutex, so recovery respawns the child exactly once.
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::ChatRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -1293,9 +1293,9 @@ fn local_upstream_shutdown_kills_child_and_disables_respawn() {
     // PFGL-MOD-001/PF-GW-SERVER-004: an explicit shutdown terminates the child
     // and prevents any later transport failure from respawning it.
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::ChatRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
@@ -1422,9 +1422,9 @@ fn switch_shutdown_terminates_an_in_flight_respawned_child() {
     // recovery/respawn must cancel the respawn and terminate the freshly spawned
     // child, so no old child can outlive a profile switch.
     use crate::upstream::LocalUpstream;
-    use gateway_protocol::upstream::Upstream;
-    use gateway_protocol::wire::ChatRequest;
     use serde_json::Map;
+    use shared_protocol::upstream::Upstream;
+    use shared_protocol::wire::ChatRequest;
 
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);

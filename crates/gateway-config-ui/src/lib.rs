@@ -7,7 +7,7 @@
 //! routes carry no bearer auth - the SPA shell holds no secrets - but
 //! they are wrapped in [`require_loopback`], the single shared loopback
 //! check the gateway also applies to its admin config endpoints. The
-//! check itself lives in the always-on `gateway-loopback`
+//! check itself lives in the always-on `shared-loopback`
 //! crate (re-exported here), so headless gateway builds carry the same
 //! wall without compiling this crate's asset machinery.
 //!
@@ -19,5 +19,5 @@
 mod assets;
 mod routes;
 
-pub use gateway_loopback::require_loopback;
 pub use routes::routes;
+pub use shared_loopback::require_loopback;

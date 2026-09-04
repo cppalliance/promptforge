@@ -1,4 +1,4 @@
-# gateway-loopback
+# shared-loopback
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](../../LICENSE)
 

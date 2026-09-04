@@ -16,8 +16,8 @@ use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use gateway_config::Secret;
-use gateway_protocol::ProtocolError;
-use gateway_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
+use shared_protocol::ProtocolError;
+use shared_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};

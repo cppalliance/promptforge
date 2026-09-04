@@ -4,7 +4,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use gateway_config::ModelKind;
-use gateway_protocol::ProtocolError;
+use shared_protocol::ProtocolError;
 
 /// A request-time failure, rendered to the client as an OpenAI error envelope.
 #[derive(Debug, thiserror::Error)]

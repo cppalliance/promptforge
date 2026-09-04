@@ -74,7 +74,7 @@ impl WebSearchState {
             api_key: cfg.api_key().clone(),
             base_url: cfg.base_url().trim_end_matches('/').to_string(),
             settings: WebSearchSettings::from_config(cfg),
-            http: gateway_protocol::http_util::bounded_client(),
+            http: shared_protocol::http_util::bounded_client(),
         }
     }
 }
@@ -507,12 +507,12 @@ mod tests {
 
     #[test]
     fn prefix_web_search_upstream_prefixes_status_body() {
-        let err = prefix_web_search_upstream(gateway_protocol::ProtocolError::upstream_status(
+        let err = prefix_web_search_upstream(shared_protocol::ProtocolError::upstream_status(
             429,
             "rate limited".to_string(),
         ));
         match err {
-            gateway_protocol::ProtocolError::UpstreamStatus { body, .. } => {
+            shared_protocol::ProtocolError::UpstreamStatus { body, .. } => {
                 assert_eq!(body, "web_search: rate limited");
             }
             other => panic!("expected UpstreamStatus, got {other:?}"),

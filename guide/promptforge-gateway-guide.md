@@ -8,7 +8,7 @@ This chapter teaches you to get the gateway running on your machine: how to inst
 
 ## Install the binary
 
-The gateway is a single binary named `gateway`. It serves an OpenAI-shaped inference API. Install it with cargo:
+The gateway is a single binary named `promptforge-gateway`. It serves an OpenAI-shaped inference API. Install it with cargo:
 
 ````
 cargo install gateway
@@ -17,7 +17,7 @@ cargo install gateway
 Confirm the install by printing the version:
 
 ````
-gateway --version
+promptforge-gateway --version
 ````
 
 ## Start the gateway
@@ -25,7 +25,7 @@ gateway --version
 Start the gateway with one subcommand that names a config file and a profile:
 
 ````
-gateway serve gateway.toml --profile main
+promptforge-gateway serve gateway.toml --profile main
 ````
 
 The first argument is the path to the config file. The `--profile` flag names the profile to activate. The gateway always starts from one config file and one active profile.
@@ -57,7 +57,7 @@ Build-time feature flags decide which capabilities exist in the binary. The flag
 On Linux the release archive contains a sample systemd unit. The unit runs the gateway as a service with a fixed config path and profile, and restarts it automatically on failure:
 
 ````
-ExecStart=/usr/local/bin/gateway serve /etc/promptforge/gateway.toml --profile main
+ExecStart=/usr/local/bin/promptforge-gateway serve /etc/promptforge/gateway.toml --profile main
 Restart=on-failure
 RestartSec=5
 ````

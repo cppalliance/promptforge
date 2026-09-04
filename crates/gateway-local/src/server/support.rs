@@ -18,7 +18,7 @@ use super::{
     SpawnRequest,
 };
 use crate::error::LocalError;
-use gateway_protocol::http_util::MAX_JSON_BODY;
+use shared_protocol::http_util::MAX_JSON_BODY;
 
 /// A spawn callback: builds a child from a [`SpawnRequest`].
 pub(super) type SpawnFn = Box<dyn FnMut(&SpawnRequest<'_>) -> Result<Child> + Send>;

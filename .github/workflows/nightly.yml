@@ -75,7 +75,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/gateway "$ARTIFACT/"
+          cp target/release/promptforge-gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:
@@ -106,7 +106,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/gateway "$ARTIFACT/"
+          cp target/release/promptforge-gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:

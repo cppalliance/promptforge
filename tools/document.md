@@ -111,7 +111,7 @@ Template: the Tour. Dependency order. Each chapter builds on the last.
 
 <lens-gateway>
 Audience: the gateway operator.
-Targets: `crates/gateway/`, `crates/gateway-config/`, `crates/gateway-config-ui/`, `crates/gateway-local/`, `crates/gateway-loopback/`, `crates/gateway-protocol/`, `crates/gateway-routing/`, `crates/gateway-stt/`, `crates/gateway-transcribe/`, `crates/gateway-web-search/`, `crates/gateway-whisper-ffi/`, `gateway.local.example.toml`.
+Targets: `crates/gateway/`, `crates/gateway-config/`, `crates/gateway-config-ui/`, `crates/gateway-local/`, `crates/shared-loopback/`, `crates/shared-protocol/`, `crates/gateway-routing/`, `crates/gateway-stt/`, `crates/gateway-transcribe/`, `crates/gateway-web-search/`, `crates/gateway-whisper-ffi/`, `gateway.local.example.toml`.
 Extract: what the operator configures and observes. Every configuration key and what it does. Profiles. The configuration UI. The HTTP endpoints. Startup and provisioning behavior. Profile switching. Health and logs.
 Noise: internal machinery as features (wire types, transport internals, test infrastructure) and the Rust public API. Most files yield zero or one operator-facing features. That is expected. The empty extractions are the proof.
 Output: `guide/src/gateway/`.

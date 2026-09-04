@@ -1,4 +1,4 @@
-# gateway-protocol
+# shared-protocol
 
 This crate owns the OpenAI wire protocol and the upstream abstraction: the wire types and their validation, the `Upstream` trait and `OpenAiUpstream`, the bounded HTTP client helpers, and the protocol-level error types.
 

@@ -51,7 +51,7 @@
 //! `GET /health`. The whole admin config surface (config read/write, env,
 //! pending state, apply/revert, orphans, system, model-info, the HF
 //! proxy, reveal) sits behind the shared loopback
-//! wall from `gateway-loopback` in every build; with the
+//! wall from `shared-loopback` in every build; with the
 //! `config-ui` feature the embedded config SPA is served at `/config/`
 //! behind the same wall. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
@@ -85,7 +85,7 @@ mod workshop;
 // The wire protocol and upstream abstraction live in the protocol crate;
 // these re-exports keep every `crate::wire::*` and `crate::upstream::*`
 // path resolving unchanged.
-pub(crate) use gateway_protocol::{upstream, wire};
+pub(crate) use shared_protocol::{upstream, wire};
 // The dominion admission queues live in the routing crate; this re-export
 // keeps every `crate::queue::*` path resolving unchanged.
 pub(crate) use gateway_routing::queue;
@@ -368,9 +368,8 @@ pub(crate) fn build_router(state: AppState) -> Router {
     // it is walled like the assets it fronts.
     #[cfg(feature = "config-ui")]
     let walled = walled.route("/config", get(config_ui_redirect));
-    let router = router.merge(walled.route_layer(axum::middleware::from_fn(
-        gateway_loopback::require_loopback,
-    )));
+    let router = router
+        .merge(walled.route_layer(axum::middleware::from_fn(shared_loopback::require_loopback)));
     // The SPA asset router arrives with the same loopback wall already
     // applied inside `routes()`; `nest_service` because the asset router
     // carries no gateway state.

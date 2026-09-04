@@ -1896,8 +1896,6 @@ dependencies = [
  "gateway-config",
  "gateway-config-ui",
  "gateway-local",
- "gateway-loopback",
- "gateway-protocol",
  "gateway-routing",
  "gateway-stt",
  "gateway-web-search",
@@ -1910,7 +1908,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "shared-loopback",
  "shared-progress",
+ "shared-protocol",
  "subtle",
  "sysinfo",
  "tempfile",
@@ -1944,8 +1944,8 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "build-ui",
- "gateway-loopback",
  "rust-embed",
+ "shared-loopback",
  "tempfile",
  "tokio",
  "tower",
@@ -1958,7 +1958,6 @@ dependencies = [
  "async-trait",
  "flate2",
  "gateway-config",
- "gateway-protocol",
  "gateway-routing",
  "minijinja",
  "minijinja-contrib",
@@ -1968,6 +1967,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "shared-progress",
+ "shared-protocol",
  "tar",
  "tempfile",
  "thiserror 2.0.19",
@@ -1978,36 +1978,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-loopback"
-version = "0.2.0"
-dependencies = [
- "axum",
- "tokio",
- "tower",
-]
-
-[[package]]
-name = "gateway-protocol"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "gateway-config",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "gateway-routing"
 version = "0.2.0"
 dependencies = [
  "gateway-config",
- "gateway-protocol",
+ "shared-protocol",
  "thiserror 2.0.19",
  "tokio",
 ]
@@ -2055,10 +2030,10 @@ name = "gateway-web-search"
 version = "0.2.0"
 dependencies = [
  "gateway-config",
- "gateway-protocol",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "shared-protocol",
  "thiserror 2.0.19",
  "tokio",
  "url",
@@ -5792,6 +5767,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shared-loopback"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "shared-progress"
 version = "0.2.0"
 dependencies = [
@@ -5799,6 +5783,22 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "shared-protocol"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "gateway-config",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

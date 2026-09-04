@@ -1,5 +1,5 @@
-//! The `gateway` binary:
-//! `gateway serve [config.toml] [--profile NAME]`.
+//! The `promptforge-gateway` binary:
+//! `promptforge-gateway serve [config.toml] [--profile NAME]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
 //! hands off to [`run`], which owns the tokio runtime, provisioning, and serving.
@@ -11,8 +11,8 @@ use std::process::ExitCode;
 use gateway::{ProfileName, ServeOptions, run};
 
 const USAGE: &str = concat!(
-    "usage: gateway serve [config.toml] [--profile NAME]\n",
-    "       gateway --version\n",
+    "usage: promptforge-gateway serve [config.toml] [--profile NAME]\n",
+    "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable",
 );
 
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Err(ParseError::Version) => {
-            println!("gateway {}", env!("CARGO_PKG_VERSION"));
+            println!("promptforge-gateway {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Err(ParseError::Usage(message)) => {
@@ -151,7 +151,7 @@ mod tests {
     use super::*;
 
     fn args(items: &[&str]) -> Vec<OsString> {
-        std::iter::once("gateway")
+        std::iter::once("promptforge-gateway")
             .chain(items.iter().copied())
             .map(OsString::from)
             .collect()

@@ -163,9 +163,9 @@ jobs:
           Start-Process $setup.FullName -ArgumentList "/S" -Wait
           $exe = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
             ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -in @("PromptForge.exe", "workshop.exe") } |
+            Where-Object { $_.Name -in @("promptforge-workshop.exe") } |
             Select-Object -First 1
-          if (-not $exe) { throw "PromptForge.exe not found after install" }
+          if (-not $exe) { throw "promptforge-workshop.exe not found after install" }
           $output = & $exe.FullName --version | Out-String
           $version = $env:TAG_NAME -replace '^workshop-v', ''
           if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
@@ -193,7 +193,7 @@ jobs:
           $js = Invoke-WebRequest -Uri "http://127.0.0.1:7910/app.js" -UseBasicParsing
           # The current minified workbench is about 2.5 MB.
           if ($js.RawContentLength -gt 3000000) { throw "app.js is unexpectedly large ($($js.RawContentLength) bytes)" }
-          Get-Process PromptForge -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process promptforge-workshop -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Install and check (macOS)
         if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'

@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use gateway_protocol::{ProtocolError, ShutdownError};
+use shared_protocol::upstream::Upstream;
+use shared_protocol::wire::{
+    ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
+};
+use shared_protocol::{ProtocolError, ShutdownError};
 
 use crate::error::LocalError;
 use crate::server::{LaunchOptions, ServerGuard};
-use gateway_protocol::upstream::Upstream;
-use gateway_protocol::wire::{
-    ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
-};
 
 /// Minimum gap between respawn attempts for one local child.
 const RESPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -77,8 +77,8 @@ impl LocalUpstream {
                 last_respawn: Mutex::new(None),
                 shut_down: AtomicBool::new(false),
             }),
-            http: gateway_protocol::http_util::bounded_client(),
-            http_stream: gateway_protocol::http_util::streaming_client(),
+            http: shared_protocol::http_util::bounded_client(),
+            http_stream: shared_protocol::http_util::streaming_client(),
         }
     }
 
@@ -243,9 +243,9 @@ impl LocalUpstream {
 
         let status = response.status();
         if !status.is_success() {
-            let body = gateway_protocol::http_util::read_body_capped(
+            let body = shared_protocol::http_util::read_body_capped(
                 response,
-                gateway_protocol::http_util::MAX_ERROR_BODY,
+                shared_protocol::http_util::MAX_ERROR_BODY,
             )
             .await;
             let body: String = body.chars().take(2000).collect();
@@ -272,9 +272,9 @@ impl LocalUpstream {
         body: &impl serde::Serialize,
     ) -> Result<Vec<u8>, ProtocolError> {
         let response = self.post(&self.http, path, body).await?;
-        gateway_protocol::http_util::read_bytes_capped(
+        shared_protocol::http_util::read_bytes_capped(
             response,
-            gateway_protocol::http_util::MAX_JSON_BODY,
+            shared_protocol::http_util::MAX_JSON_BODY,
         )
         .await
         .map_err(ProtocolError::upstream_transport)
@@ -323,13 +323,13 @@ impl LocalUpstream {
         &self,
         mut req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<gateway_protocol::upstream::StreamedChunks, ProtocolError> {
+    ) -> Result<shared_protocol::upstream::StreamedChunks, ProtocolError> {
         let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
         req.stream = true;
         let response = self
             .post(&self.http_stream, "chat/completions", &req)
             .await?;
-        Ok(gateway_protocol::upstream::sse_chunks(response, requested))
+        Ok(shared_protocol::upstream::sse_chunks(response, requested))
     }
 
     /// Run the dead-child recovery after a transport failure.
@@ -414,7 +414,7 @@ impl Upstream for LocalUpstream {
         &self,
         req: ChatRequest,
         upstream_model: &str,
-    ) -> Result<gateway_protocol::upstream::StreamedChunks, ProtocolError> {
+    ) -> Result<shared_protocol::upstream::StreamedChunks, ProtocolError> {
         // Recovery applies only to a pre-stream transport failure: once the
         // chunk stream is open, a mid-stream death surfaces as an `Err` item
         // rather than triggering a respawn under a live response.

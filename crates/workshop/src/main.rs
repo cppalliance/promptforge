@@ -4,7 +4,7 @@
 // config notice) have nowhere to print.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! The `workshop` binary: the PromptForge Workshop desktop app.
+//! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Loads the gateway boot config `gateway.toml` (see [`discover`] for the
 //! search order), generating a default config with its `default` profile in
@@ -62,12 +62,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// `workshop --version`: print the version and exit, without
+/// `promptforge-workshop --version`: print the version and exit, without
 /// booting the gateway or opening a window. The release workflows smoke-test
 /// the installed package with it. The release build is GUI-subsystem on
 /// Windows, but a piped or inherited stdout still carries the line.
 fn print_version() -> ExitCode {
-    println!("workshop {}", env!("CARGO_PKG_VERSION"));
+    println!("promptforge-workshop {}", env!("CARGO_PKG_VERSION"));
     ExitCode::SUCCESS
 }
 

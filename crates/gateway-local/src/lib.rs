@@ -12,7 +12,7 @@
 //! header inspection in [`gguf`].
 //!
 //! Failures are reported as [`LocalError`]; an explicit teardown failure is
-//! reported as [`ShutdownError`](gateway_protocol::ShutdownError).
+//! reported as [`ShutdownError`](shared_protocol::ShutdownError).
 //! The crate contains no HTTP routing and no error envelopes; those live in
 //! the gateway crate.
 

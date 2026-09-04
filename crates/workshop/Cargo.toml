@@ -10,7 +10,7 @@ publish = false
 description = "PromptForge Workshop desktop app: boots the gateway and opens the workshop window"
 
 [[bin]]
-name = "workshop"
+name = "promptforge-workshop"
 path = "src/main.rs"
 
 [dependencies]

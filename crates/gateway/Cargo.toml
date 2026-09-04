@@ -14,7 +14,7 @@ categories = ["web-programming::http-server"]
 documentation = "https://cppalliance.github.io/promptforge/"
 
 [[bin]]
-name = "gateway"
+name = "promptforge-gateway"
 path = "src/main.rs"
 
 [dependencies]
@@ -39,8 +39,8 @@ gateway-config-ui = { workspace = true, optional = true }
 gateway-local = { workspace = true, optional = true }
 # The shared loopback wall for the admin config endpoints; always on,
 # because those endpoints hold secrets in every build.
-gateway-loopback.workspace = true
-gateway-protocol.workspace = true
+shared-loopback.workspace = true
+shared-protocol.workspace = true
 gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
 shared-progress = { workspace = true, features = ["serde"] }

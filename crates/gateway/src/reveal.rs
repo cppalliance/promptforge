@@ -5,7 +5,7 @@
 //! The endpoint launches a process, so it is guarded three ways. The
 //! caller must be on the loopback interface: `build_router` places the
 //! route behind the shared loopback wall from
-//! `gateway-loopback`, which refuses any non-loopback or
+//! `shared-loopback`, which refuses any non-loopback or
 //! unknown peer with a bare 403 before this handler ever runs (and
 //! before auth). The caller must present the bearer key (401). And the named
 //! path must canonicalize to strictly inside the artifact cache (the root is

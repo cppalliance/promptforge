@@ -1,4 +1,4 @@
-# gateway-loopback
+# shared-loopback
 
 The single shared loopback wall for the gateway config surface: one `require_loopback` middleware that refuses non-loopback peers before auth.
 
