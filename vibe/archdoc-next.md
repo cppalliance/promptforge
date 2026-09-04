@@ -119,3 +119,4 @@
 - [2026-09-03-1-enhance-tts-endpoint-report] speech dialect edges: Voice objects, provider SSE, response formats, and transcoding remain adapter-level compatibility details.
 - [2026-09-03-2-enhance-image-endpoint-spec] readiness means usable: A supervised inference child becomes ready only after a representative warm-up succeeds; pre-probe exit is failure regardless of exit code.
 - [2026-09-03-2-enhance-image-endpoint-spec] image retry ambiguity: Preserve structured upstream codes and request IDs; never blindly retry generation that may already have completed and billed.
+- [2026-09-03-3-gateway-sidecar-decomposition] shared-crate seam: Cross-product crates should each encode one dependency-light contract instead of growing a common junk drawer.

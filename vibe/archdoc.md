@@ -7,9 +7,9 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Components
 
 - executor: parses and executes prompt pipelines and agent programs; depends on: gateway, store, Lua VM boundary, shared substrate
-- gateway: server that owns model routing, provider access, and local inference lifecycle; it may cohost the Workshop listener but exposes protocol data rather than shared crate types; depends on: shared substrate
+- gateway: independent server process that owns model routing, provider access, and local inference lifecycle; exposes protocol data and discovery; depends on: shared substrate
 - CLI: thin shell adapter that supplies inputs and host resources to the executor; depends on: executor, gateway, store, shared substrate
-- workshop UI: desktop authoring shell and server that host the executor in-process and speak the gateway protocol even when cohosted; depends on: executor, gateway, store, shared substrate
+- workshop UI: desktop authoring shell and in-process server that host the executor and attach over the gateway protocol; depends on: executor, gateway, store, shared substrate
 - store: run-scoped virtual filesystem contract with interchangeable memory and file backends; depends on: none
 - Lua VM boundary: sandbox and coroutine bridge between prompt code and host capabilities; depends on: gateway, store, shared substrate
 - shared substrate: cross-product progress, loopback discovery, protocol, and sidecar facilities; depends on: none
@@ -38,11 +38,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A106. Mutable release channels identify an exact source commit and skip unchanged builds.
 - A107. Agent input appears only after its program launches; New Agent starts a fresh session.
 - A108. Native libraries are platform-selected, digest-verified artifacts loaded behind narrow FFI.
-- A109. Visible product versions derive from package or build metadata.
 
 - A112. Stream permits live through body termination; stalled reads expire within a bounded interval.
 
 - A113. Validate capabilities before queue admission; reject unsupported semantics.
+
+- A114. Only a service owns its connection record; clients validate identity, health, and authority before attaching.
 
 ## Principles
 
