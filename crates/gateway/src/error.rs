@@ -74,6 +74,19 @@ pub(crate) enum GatewayError {
     #[error("request cancelled for profile switch")]
     RequestCancelled,
 
+    /// The named model is configured but not yet loaded, and a queue command
+    /// (carried in the message) is working on the routing table. Maps to 503
+    /// so a client can retry once the active command completes.
+    #[non_exhaustive]
+    #[error("model provisioning in progress: {0}")]
+    ModelProvisioning(String),
+
+    /// A queued command was cancelled before it completed: by the user, by a
+    /// newer command winning the debounce, or by process shutdown.
+    #[non_exhaustive]
+    #[error("command cancelled: {0}")]
+    CommandCancelled(String),
+
     /// `POST /admin/switch-profile` named a profile that is not on disk.
     #[non_exhaustive]
     #[error("profile not found: {0}")]
@@ -344,6 +357,16 @@ impl GatewayError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
                 "profile_switch",
+            ),
+            GatewayError::ModelProvisioning(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "model_provisioning",
+            ),
+            GatewayError::CommandCancelled(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "command_cancelled",
             ),
             GatewayError::ProfileNotFound(_) => (
                 StatusCode::NOT_FOUND,

@@ -271,6 +271,11 @@ pub enum LocalError {
     #[error("llama-server startup interrupted by Ctrl-C")]
     StartupInterrupted,
 
+    /// Provisioning stopped because the caller's cancellation token fired.
+    /// The staged partial download stays in place so a later attempt resumes.
+    #[error("provisioning cancelled")]
+    Cancelled,
+
     /// `llama-server` did not expose its authenticated model within the deadline.
     #[error("llama-server did not expose its authenticated model within {seconds} seconds")]
     ReadinessTimeout {
@@ -459,6 +464,7 @@ mod tests {
         assert!(LocalError::Kill { source: io() }.is_retryable());
         // Permanent: integrity, config, validation, and misuse.
         assert!(!LocalError::StartupInterrupted.is_retryable());
+        assert!(!LocalError::Cancelled.is_retryable());
         assert!(
             !LocalError::DigestMismatch {
                 name: "m".to_owned(),

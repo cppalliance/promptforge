@@ -194,7 +194,17 @@ async fn apply_config(
         crate::StatePersistence::None,
         crate::StatePersistence::Promote,
     );
-    crate::run_switch_with_config(state.clone(), name, tree, Some(config), persistence).await?;
+    // Apply is not a queue command: it already holds the apply lock, and its
+    // caller waits on the reply, so it runs the switch uncancellable.
+    crate::run_switch_with_config(
+        state.clone(),
+        name,
+        tree,
+        Some(config),
+        || persistence,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await?;
     Ok(())
 }
 

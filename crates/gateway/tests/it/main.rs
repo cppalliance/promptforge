@@ -19,6 +19,7 @@
 
 mod support;
 
+mod boot;
 #[cfg(feature = "local")]
 mod cache;
 mod chat;

@@ -18,6 +18,7 @@ use gateway_routing::queue::DominionQueue;
 use gateway_routing::{Endpoint, Model, dominion_queues};
 use shared_progress::ProgressHandle;
 use shared_protocol::ShutdownError;
+use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, ArtifactStore, ProvisionedServer, ServerSelection};
 use crate::dialect::resolve_local_dialect;
@@ -206,6 +207,8 @@ impl LocalRuntime {
         let outcome = start_impl(
             config,
             progress,
+            &startup_interrupt_flag(),
+            None,
             ArtifactStore::provision_llama_server_with_progress,
             ServerGuard::start,
             StartPolicy::FailFast,
@@ -242,7 +245,44 @@ impl LocalRuntime {
         start_impl(
             config,
             progress,
+            &startup_interrupt_flag(),
+            None,
             ArtifactStore::provision_llama_server_with_progress,
+            ServerGuard::start,
+            StartPolicy::KeepReady,
+        )
+    }
+
+    /// [`Self::start_partial`] variant that stops promptly when `token`
+    /// fires: downloads stop at the next chunk boundary, phase boundaries
+    /// (verify, extract, spawn) check the token, and a cancellation is
+    /// [`LocalError::Cancelled`] rather than a partial outcome. Children
+    /// already started are dropped with the in-progress outcome, so their
+    /// processes die with it.
+    ///
+    /// `interrupted` is the child-readiness poll's cancellation flag, which
+    /// predates the token and speaks `AtomicBool`: the async caller bridges
+    /// the token onto it so one cancellation source stops a child that is
+    /// still loading weights. This function is synchronous and CPU-quiet but
+    /// blocking on I/O; async callers run it on `spawn_blocking`.
+    ///
+    /// # Errors
+    /// Returns [`LocalError`] when shared runtime provisioning fails or the
+    /// token fires.
+    pub fn start_partial_with_cancellation(
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+        token: &CancellationToken,
+        interrupted: &Arc<AtomicBool>,
+    ) -> Result<LocalStartOutcome, LocalError> {
+        start_impl(
+            config,
+            progress,
+            interrupted,
+            Some(token),
+            |store, selection, server| {
+                store.provision_llama_server_with_cancellation(selection, server, Some(token))
+            },
             ServerGuard::start,
             StartPolicy::KeepReady,
         )
@@ -282,10 +322,18 @@ fn provision_server(
 
 /// Shared body of [`LocalRuntime::start`] with the two externalities - the
 /// pinned-server provision and the child spawn - injectable, so a test can
-/// drive a start over a mock layout.
+/// drive a start over a mock layout. `interrupted` is the readiness poll's
+/// stop flag; `token`, when present, is checked at download chunk boundaries
+/// and phase boundaries.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the per-model startup loop is one provisioning flow; splitting it would scatter the phase-boundary token checks across call sites"
+)]
 fn start_impl(
     config: &Config,
     progress: Option<&ProgressHandle>,
+    interrupted: &Arc<AtomicBool>,
+    token: Option<&CancellationToken>,
     provision: impl FnOnce(
         &ArtifactStore,
         &ServerSelection<'_>,
@@ -312,20 +360,30 @@ fn start_impl(
         });
     }
 
+    // A token already fired starts nothing at all.
+    if token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(LocalError::Cancelled);
+    }
     let (store, server) = provision_server(config, progress, provision)?;
 
-    let interrupted = startup_interrupt_flag();
     let dominion_queues = dominion_queues(config);
     let mut started_models = Vec::with_capacity(config.local_models().len());
     let mut failures = Vec::new();
 
     for local_model in config.local_models() {
+        // Phase boundary: a cancelled command starts no further models, and
+        // the models already started drop with this in-progress outcome,
+        // killing their children.
+        if token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(LocalError::Cancelled);
+        }
         let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
         let started = (|| {
-            let model_path = store.ensure_model_with_progress(
+            let model_path = store.ensure_model_with_cancellation(
                 local_model.source(),
                 local_model.sha256(),
                 model_tree.as_ref(),
+                token,
             )?;
             tracing::info!(
                 model = %local_model.name(),
@@ -338,7 +396,11 @@ fn start_impl(
             let admission = resolve_admission(&dominion_queues, local_model)?;
             let mut options = launch_options_for(&store, local_model, &model_path, &admission)?;
             options.path_prefix.clone_from(&server.path_prefix);
-            provision_companions(&store, local_model, &mut options)?;
+            provision_companions(&store, local_model, &mut options, token)?;
+            // Phase boundary: spawn only for an uncancelled command.
+            if token.is_some_and(CancellationToken::is_cancelled) {
+                return Err(LocalError::Cancelled);
+            }
             let ready = model_tree.as_ref().map(|tree| tree.child("ready", 2.0));
             let guard = spawn(
                 &server.executable,
@@ -420,7 +482,9 @@ fn retain_start<T>(
         }
         Err(error) => error,
     };
-    if policy == StartPolicy::FailFast {
+    // Cancellation is fatal in both policies: the command is stopping, so
+    // later models must not start behind it.
+    if policy == StartPolicy::FailFast || matches!(error, LocalError::Cancelled) {
         return Err(error);
     }
     failures.push(LocalStartFailure {
@@ -457,6 +521,26 @@ impl LocalRuntime {
     #[must_use]
     pub fn child_count(&self) -> usize {
         self.models.len()
+    }
+
+    /// Removes one started model and its upstream from the runtime, returning
+    /// the model so the caller can tear the child down through the
+    /// [`Upstream`](shared_protocol::upstream::Upstream) seam (which disables
+    /// respawn before killing the process). Returns `None` when no started
+    /// model carries `name`.
+    ///
+    /// The caller owns the teardown: `shutdown` on the returned model's
+    /// endpoint upstream blocks on the child's exit, so async callers run it
+    /// on `spawn_blocking`.
+    #[must_use]
+    pub fn unload_model(&mut self, name: &str) -> Option<Arc<Model>> {
+        let index = self.models.iter().position(|model| model.name == name)?;
+        let model = self.models.remove(index);
+        // The upstreams vector is parallel to `models`; dropping this handle
+        // leaves the endpoint's `Arc<dyn Upstream>` clone alive for the
+        // caller's teardown.
+        drop(self.upstreams.remove(index));
+        Some(model)
     }
 
     /// Explicitly terminate every owned `llama-server` child and disable respawn,
@@ -586,9 +670,15 @@ fn provision_companions(
     store: &ArtifactStore,
     model: &LocalModelConfig,
     options: &mut LaunchOptions,
+    token: Option<&CancellationToken>,
 ) -> Result<(), LocalError> {
     if let Some(speculative) = model.speculative() {
-        let draft_model = store.ensure_model(speculative.source(), speculative.sha256())?;
+        let draft_model = store.ensure_model_with_cancellation(
+            speculative.source(),
+            speculative.sha256(),
+            None,
+            token,
+        )?;
         tracing::info!(
             model = %model.name(),
             path = %draft_model.display(),
@@ -600,7 +690,12 @@ fn provision_companions(
         });
     }
     if let Some(projector) = model.multimodal_projector() {
-        let projector_path = store.ensure_model(projector.source(), projector.sha256())?;
+        let projector_path = store.ensure_model_with_cancellation(
+            projector.source(),
+            projector.sha256(),
+            None,
+            token,
+        )?;
         tracing::info!(
             model = %model.name(),
             path = %projector_path.display(),
@@ -735,6 +830,7 @@ fn startup_interrupt_flag() -> Arc<AtomicBool> {
 mod tests {
     use super::*;
     use gateway_config::Config;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn sidecar_keeps_model_id_provenance_when_remote_template_is_unavailable() {
@@ -849,6 +945,68 @@ endpoints = ["e"]
     }
 
     #[test]
+    fn cancellation_is_fatal_even_under_the_partial_policy() {
+        // A cancelled command must not start later models: the Cancelled
+        // error escapes instead of being collected as a per-model failure.
+        let mut started: Vec<()> = Vec::new();
+        let mut failures = Vec::new();
+        let error = retain_start(
+            StartPolicy::KeepReady,
+            "cancelled",
+            Err(LocalError::Cancelled),
+            &mut started,
+            &mut failures,
+        )
+        .expect_err("cancellation aborts the start");
+        assert!(matches!(error, LocalError::Cancelled));
+        assert!(started.is_empty() && failures.is_empty());
+    }
+
+    #[test]
+    fn a_pre_cancelled_token_starts_nothing() {
+        // The token is checked before the server binary provisions: a
+        // cancelled start does no download and no spawn. The config's
+        // deliberately missing `llama_server_path` proves the point - an
+        // uncancelled start would fail with `InvalidSource` instead.
+        let config = Config::from_toml_str(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+llama_server_path = "/definitely/missing/llama-server"
+
+[[local_model]]
+name = "q"
+description = "a local model"
+source = "/models/q.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let token = CancellationToken::new();
+        token.cancel();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let error =
+            LocalRuntime::start_partial_with_cancellation(&config, None, &token, &interrupted)
+                .expect_err("a cancelled start provisions nothing");
+        assert!(
+            matches!(error, LocalError::Cancelled),
+            "the token check precedes provisioning: {error:?}"
+        );
+    }
+
+    #[test]
+    fn unload_model_on_an_empty_runtime_returns_none() {
+        let mut runtime = LocalRuntime::empty();
+        assert!(runtime.unload_model("ghost").is_none());
+        assert_eq!(runtime.child_count(), 0);
+    }
+
+    #[test]
     fn start_with_no_local_models_registers_no_leaves() {
         // An empty `[[local_model]]` set is a no-op start: the parent leaf
         // gains no children at all.
@@ -932,6 +1090,8 @@ context = 512
         let error = start_impl(
             &config,
             Some(&parent),
+            &startup_interrupt_flag(),
+            None,
             |_store, _selection, server| {
                 // An already-staged server has no download/verify/extract work.
                 if let Some(handle) = server {
@@ -1199,7 +1359,7 @@ sha256 = "{}"
         let store = ArtifactStore::new(temp.path()).expect("store");
 
         let mut options = launch_options(model, 1);
-        provision_companions(&store, model, &mut options).expect("provision companions");
+        provision_companions(&store, model, &mut options, None).expect("provision companions");
 
         let speculative = options.speculative.expect("speculative launch state");
         assert_eq!(speculative.draft_model, draft);
@@ -1245,7 +1405,7 @@ draft_max = 2
         let store = ArtifactStore::new(temp.path()).expect("store");
         let model = &mismatching.local_models()[0];
         let mut options = launch_options(model, 1);
-        let error = provision_companions(&store, model, &mut options)
+        let error = provision_companions(&store, model, &mut options, None)
             .expect_err("pin mismatch must fail provisioning");
         assert!(matches!(error, LocalError::DigestMismatch { .. }));
         assert!(options.speculative.is_none());
@@ -1258,7 +1418,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
         );
         let model = &missing.local_models()[0];
         let mut options = launch_options(model, 1);
-        let error = provision_companions(&store, model, &mut options)
+        let error = provision_companions(&store, model, &mut options, None)
             .expect_err("a missing local source must fail provisioning");
         assert!(matches!(error, LocalError::InvalidSource { .. }));
         assert!(options.multimodal_projector.is_none());
@@ -1275,7 +1435,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
         let store = ArtifactStore::new(temp.path()).expect("store");
         let mut options = launch_options(model, 1);
         let before = options.clone();
-        provision_companions(&store, model, &mut options).expect("no companions");
+        provision_companions(&store, model, &mut options, None).expect("no companions");
         assert_eq!(options, before);
         assert!(options.speculative.is_none());
         assert!(options.multimodal_projector.is_none());

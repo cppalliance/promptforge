@@ -9,6 +9,7 @@ use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use sha2::{Digest, Sha256};
 use shared_progress::ProgressHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::Result;
 use super::confine::source_marker_path;
@@ -73,13 +74,14 @@ pub(super) fn download(
     url: &str,
     destination: &Path,
     tree: Option<&ProgressHandle>,
+    token: Option<&CancellationToken>,
 ) -> Result<String> {
     match tree {
         Some(handle) => {
             let leaf = TreeProgress::new(handle.clone());
-            run_download(client, url, destination, &leaf)
+            run_download(client, url, destination, &leaf, token)
         }
-        None => run_download(client, url, destination, &NoopProgress),
+        None => run_download(client, url, destination, &NoopProgress, token),
     }
 }
 
@@ -89,8 +91,9 @@ fn run_download(
     url: &str,
     destination: &Path,
     progress: &dyn DownloadProgress,
+    token: Option<&CancellationToken>,
 ) -> Result<String> {
-    match download_with_progress(client, url, destination, progress) {
+    match download_with_progress(client, url, destination, progress, token) {
         Ok(digest) => {
             progress.finish();
             Ok(digest)
@@ -259,13 +262,22 @@ fn open_transfer(
 /// so the next attempt resumes.
 ///
 /// # Errors
-/// Returns [`LocalError`] on transport, size-cap, or filesystem failure.
+/// Returns [`LocalError`] on transport, size-cap, or filesystem failure, and
+/// [`LocalError::Cancelled`] when `token` fires; the check runs at entry and
+/// between chunks, so a cancelled transfer makes no request at all or stops
+/// at the next chunk boundary, and the staged partial stays in place for a
+/// later resume.
 pub(crate) fn download_with_progress(
     client: &Client,
     url: &str,
     destination: &Path,
     progress: &dyn DownloadProgress,
+    token: Option<&CancellationToken>,
 ) -> Result<String> {
+    // A token already fired makes no request and stages no file.
+    if token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(LocalError::Cancelled);
+    }
     let (response, resume_from) = negotiate_resume(client, url, resumable_len(destination, url)?)?;
     let mut response = response
         .error_for_status()
@@ -298,6 +310,12 @@ pub(crate) fn download_with_progress(
     )?;
     let mut writer = BufWriter::new(file);
     loop {
+        // The cancellation check sits between chunks: a fired token stops the
+        // transfer at the next boundary, keeping the staged partial and its
+        // provenance marker so a later attempt resumes where this one stopped.
+        if token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(LocalError::Cancelled);
+        }
         let count = response
             .read(&mut buffer)
             .map_err(|source| LocalError::DownloadRead {

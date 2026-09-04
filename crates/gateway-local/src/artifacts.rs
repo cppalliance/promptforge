@@ -29,6 +29,7 @@ use gateway_config::LlamaBackend;
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 use shared_progress::ProgressHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::error::LocalError;
 
@@ -207,6 +208,17 @@ impl ArtifactStore {
         selection: &ServerSelection<'_>,
         progress: Option<&ProgressHandle>,
     ) -> Result<ProvisionedServer> {
+        self.provision_llama_server_with_cancellation(selection, progress, None)
+    }
+
+    /// [`Self::provision_llama_server_with_progress`] variant that stops at
+    /// download chunk boundaries and phase boundaries when `token` fires.
+    pub(crate) fn provision_llama_server_with_cancellation(
+        &self,
+        selection: &ServerSelection<'_>,
+        progress: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
+    ) -> Result<ProvisionedServer> {
         if let Some(path) = selection.server_path {
             return external_server(path, "[local] llama_server_path");
         }
@@ -233,7 +245,7 @@ impl ArtifactStore {
             selection.backend,
             gpus.as_deref(),
         )?;
-        let executable = self.provision_server(asset, progress)?;
+        let executable = self.provision_server(asset, progress, token)?;
         Ok(ProvisionedServer {
             executable,
             path_prefix: Vec::new(),
@@ -253,7 +265,7 @@ impl ArtifactStore {
     pub fn provision_whisper_library(&self, progress: Option<&ProgressHandle>) -> Result<PathBuf> {
         let asset = whisper_asset(std::env::consts::OS, std::env::consts::ARCH)?;
         let archives = [asset.archive];
-        self.provision_install(whisper_install_asset(asset, &archives), progress)
+        self.provision_install(whisper_install_asset(asset, &archives), progress, None)
     }
 
     /// Ensures a GGUF (or other blob) from `source` is available locally.
@@ -282,10 +294,27 @@ impl ArtifactStore {
         sha256: Option<&str>,
         progress: Option<&ProgressHandle>,
     ) -> Result<PathBuf> {
+        self.ensure_model_with_cancellation(source, sha256, progress, None)
+    }
+
+    /// [`Self::ensure_model_with_progress`] variant that stops at download
+    /// chunk boundaries when `token` fires, returning
+    /// [`LocalError::Cancelled`]; the staged partial stays in place for a
+    /// later resume.
+    ///
+    /// # Errors
+    /// Returns a [`LocalError`] on download, verification, or path failures.
+    pub fn ensure_model_with_cancellation(
+        &self,
+        source: &str,
+        sha256: Option<&str>,
+        progress: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
+    ) -> Result<PathBuf> {
         let download = progress.map(|handle| handle.child("download", 4.0));
         let verify = progress.map(|handle| handle.child("verify", 1.0));
         let result =
-            self.ensure_model_reporting(source, sha256, download.as_ref(), verify.as_ref());
+            self.ensure_model_reporting(source, sha256, download.as_ref(), verify.as_ref(), token);
         // Terminal state is sticky, so leaves already finished inside (a
         // verified cache hit, a digest mismatch) are not failed twice.
         if result.is_err() {
@@ -305,6 +334,7 @@ impl ArtifactStore {
         sha256: Option<&str>,
         download: Option<&ProgressHandle>,
         verify: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
     ) -> Result<PathBuf> {
         if looks_like_url(source) {
             let name = filename_from_url(source)?;
@@ -317,7 +347,7 @@ impl ArtifactStore {
                 url: source,
                 sha256,
             };
-            self.ensure_blob_with_progress(asset, &destination, download, verify)?;
+            self.ensure_blob_with_progress(asset, &destination, download, verify, token)?;
             return Ok(destination);
         }
         // A path source is already local: the download stage has no work.
@@ -351,6 +381,7 @@ impl ArtifactStore {
         &self,
         asset: ServerAsset<'_>,
         progress: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
     ) -> Result<PathBuf> {
         self.provision_install(
             InstallAsset {
@@ -362,6 +393,7 @@ impl ArtifactStore {
                 allow_cached_fallback: true,
             },
             progress,
+            token,
         )
     }
 
@@ -369,6 +401,7 @@ impl ArtifactStore {
         &self,
         asset: InstallAsset<'_>,
         progress: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
     ) -> Result<PathBuf> {
         let download = progress.map(|handle| handle.child("download", 4.0));
         let verify = progress.map(|handle| handle.child("verify", 1.0));
@@ -379,6 +412,11 @@ impl ArtifactStore {
         // one with a warning instead of failing to start.
         let mut downloaded = Vec::new();
         for archive_ref in asset.archives {
+            // Phase boundary: a cancelled command stops before the next
+            // archive rather than midway through the set.
+            if token.is_some_and(CancellationToken::is_cancelled) {
+                return Err(LocalError::Cancelled);
+            }
             let archive = self.cache_path(Path::new("downloads").join(archive_ref.archive_name))?;
             let file_asset = FileAsset {
                 name: archive_ref.archive_name,
@@ -390,6 +428,7 @@ impl ArtifactStore {
                 &archive,
                 download.as_ref(),
                 verify.as_ref(),
+                token,
             ) {
                 if asset.allow_cached_fallback
                     && let Some(cached) =
@@ -425,6 +464,10 @@ impl ArtifactStore {
         remove_cache_entry(&self.cache, &staging)?;
         ensure_cache_directory(&self.cache, &staging)?;
 
+        // Phase boundary: extraction starts only for an uncancelled command.
+        if token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(LocalError::Cancelled);
+        }
         // Every archive extracts into the same install folder (the generic
         // CUDA asset pairs the server zip with its runtime zip).
         for (archive, archive_ref) in downloaded.iter().zip(asset.archives.iter()) {
@@ -586,6 +629,7 @@ impl ArtifactStore {
         destination: &Path,
         download: Option<&ProgressHandle>,
         verify: Option<&ProgressHandle>,
+        token: Option<&CancellationToken>,
     ) -> Result<()> {
         let _lock = self.lock_artifact(destination)?;
         validate_cache_path(&self.cache, destination)?;
@@ -647,7 +691,7 @@ impl ArtifactStore {
         ensure_cache_directory(&self.cache, parent)?;
         validate_cache_path(&self.cache, &staging)?;
         // A failed transfer keeps the staged partial for resume.
-        let actual = match download::download(&self.client, asset.url, &staging, download) {
+        let actual = match download::download(&self.client, asset.url, &staging, download, token) {
             Ok(actual) => actual,
             Err(error) => {
                 if !verify_finished && let Some(handle) = verify {
@@ -693,7 +737,7 @@ impl ArtifactStore {
         destination: &Path,
         progress: &dyn progress::DownloadProgress,
     ) -> Result<String> {
-        download::download_with_progress(&self.client, url, destination, progress)
+        download::download_with_progress(&self.client, url, destination, progress, None)
     }
 
     fn cache_path(&self, relative: PathBuf) -> Result<PathBuf> {

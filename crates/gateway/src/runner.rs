@@ -1,11 +1,13 @@
 //! Application entry points: [`spawn`], [`run`], and the assembled [`Gateway`].
 //!
-//! [`spawn`] is the embedding seam: it loads configuration, provisions local
-//! children, and serves on a dedicated thread with its own tokio runtime, so
-//! an embedding binary keeps its main thread. The call blocks until the
-//! listener is bound - that bind is the readiness signal - and the returned
-//! [`GatewayHandle`] carries the bound URL and a graceful-shutdown switch.
-//! [`run`] is the binary path: a thin wrapper that spawns, installs the
+//! [`spawn`] is the embedding seam: it loads configuration, assembles the
+//! serving shell, and serves on a dedicated thread with its own tokio
+//! runtime, so an embedding binary keeps its main thread. The call blocks
+//! until the listener is bound - that bind is the readiness signal - and the
+//! returned [`GatewayHandle`] carries the bound URL and a graceful-shutdown
+//! switch. Provisioning is not on this path: the boot `LoadProfile` command
+//! runs on the gateway's command queue after the bind. [`run`] is the binary
+//! path: a thin wrapper that spawns, installs the
 //! Ctrl-C handler, and joins. `Gateway` is the in-process assembly seam used
 //! by both and by integration tests, which bind their own listener and drive
 //! [`Gateway::serve`] with a caller-owned shutdown signal.
@@ -111,6 +113,86 @@ pub struct Gateway {
 }
 
 impl Gateway {
+    /// Assemble the serving shell instantly: an empty routing table, no
+    /// local runtime, no provisioning. Models arrive when the command
+    /// queue's boot `LoadProfile` hot-swaps them into the live table; until
+    /// then an unloaded but configured model earns a 503 naming the active
+    /// command.
+    ///
+    /// [`from_config`](Self::from_config) is the eager alternative for tests
+    /// and embedders: it provisions before returning.
+    ///
+    /// # Examples
+    /// ```
+    /// use gateway::{Config, Gateway, ProfilesContext};
+    ///
+    /// let toml = r#"
+    /// config-version = 2
+    ///
+    /// [server]
+    /// bind = "127.0.0.1:0"
+    /// api_key = "secret"
+    ///
+    /// [[endpoint]]
+    /// id = "e"
+    /// protocol = "openai"
+    /// base_url = "http://127.0.0.1:9"
+    /// api_key = ""
+    ///
+    /// [[model]]
+    /// name = "m"
+    /// description = "a model"
+    /// context = 8192
+    /// upstream = "u"
+    /// endpoints = ["e"]
+    /// "#;
+    /// let config = Config::from_toml_str(toml).unwrap();
+    /// let gateway = Gateway::new(&config, ProfilesContext::default());
+    /// let _router = gateway.router();
+    /// ```
+    #[must_use]
+    pub fn new(config: &Config, profiles: ProfilesContext) -> Gateway {
+        Self::new_with_hub(
+            config,
+            profiles,
+            Arc::new(shared_progress::ProgressHub::new()),
+        )
+    }
+
+    /// [`new`](Self::new) over a caller-provided progress hub, so the
+    /// serving lifecycle's renderer watches the boot command's progress.
+    pub(crate) fn new_with_hub(
+        config: &Config,
+        profiles: ProfilesContext,
+        hub: Arc<shared_progress::ProgressHub>,
+    ) -> Gateway {
+        let active = config
+            .active_profile()
+            .map(|profile| profile.name().to_owned())
+            .or_else(|| profiles.active.map(|name| name.to_string()));
+        let model_allowlist = config
+            .active_profile()
+            .map(|profile| profile.models().to_vec());
+        let state = AppState::from_parts(
+            Arc::new(Routing::empty()),
+            config.server_key(),
+            Arc::new(config.clone()),
+            #[cfg(feature = "local")]
+            LocalRuntime::empty(),
+            #[cfg(feature = "stt")]
+            gateway_stt::SttRuntime::empty(gateway_stt::SttState::default()),
+            #[cfg(feature = "web-search")]
+            config.web_search_config(),
+            profiles.config_path,
+            crate::ProfileSelection {
+                name: active,
+                model_allowlist,
+            },
+            hub,
+        );
+        Gateway { state }
+    }
+
     /// Assemble from a validated config. Provisions and starts local models.
     ///
     /// Profile switches derive subsets from this config's loaded catalog.
@@ -280,6 +362,12 @@ impl Gateway {
     /// race), read back `local_addr`, and drive a rendezvous instead of
     /// sleeping.
     ///
+    /// The command queue's worker task runs for the life of this call: boot
+    /// provisioning, profile switches, and unloads all drain through it. A
+    /// `Gateway` whose router is taken without serving
+    /// ([`router`](Self::router)) has no worker, so its queue accepts but
+    /// never runs commands.
+    ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
     /// HTTP server fails.
@@ -291,13 +379,17 @@ impl Gateway {
         // The configured bind may carry port 0; the bound address is what
         // the host-authority wall allowlists.
         let bound = listener.local_addr().map_err(ServeError::io)?;
-        let route_shutdown = self.state.shutdown.clone();
+        let state = self.state;
+        let route_shutdown = state.shutdown.clone();
+        let commands = state.commands.clone();
+        let commands_after = state.commands.clone();
+        let worker = state.commands.spawn_worker(&state);
         // Connect info exposes each request's peer address, so
         // loopback-only routes (`POST /admin/reveal`) can tell loopback
         // callers from LAN callers.
-        axum::serve(
+        let result = axum::serve(
             listener,
-            build_router(self.state, Some(bound))
+            build_router(state, Some(bound))
                 .into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .with_graceful_shutdown(async move {
@@ -305,9 +397,20 @@ impl Gateway {
                 () = shutdown => {}
                 () = route_shutdown.fired() => {}
             }
+            // Cancel the active command before the runtime winds down, so a
+            // quit during provisioning stops the download instead of waiting
+            // on it.
+            commands.cancel_active();
         })
         .await
-        .map_err(ServeError::io)
+        .map_err(ServeError::io);
+        // Close the queue and reap the worker, so a gateway served on a
+        // caller-owned runtime (tests, embedders) leaves no task behind.
+        commands_after.shutdown();
+        if let Some(worker) = worker {
+            let _ = worker.await;
+        }
+        result
     }
 }
 
@@ -392,10 +495,14 @@ impl GatewayHandle {
 
     /// Signals graceful shutdown and waits for the gateway thread to finish.
     ///
+    /// The active queue command's token fires first, so a quit during
+    /// provisioning cancels the download and the join returns promptly.
+    ///
     /// # Errors
     /// Returns [`StartupError`] when serving failed or the gateway thread
     /// panicked.
     pub fn shutdown(mut self) -> Result<(), StartupError> {
+        self.state.commands.cancel_active();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -547,11 +654,15 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
         .unwrap_or("non-string panic payload")
 }
 
-/// The gateway thread's body: load config, provision, build a runtime, bind,
-/// signal readiness through `ready`, then serve until `shutdown` resolves.
+/// The gateway thread's body: load config, build a runtime, bind, assemble
+/// the shell, signal readiness through `ready`, post the boot command, then
+/// serve until `shutdown` resolves.
 ///
-/// Startup failures are reported through `ready`; only serving failures
-/// become the thread's return value.
+/// The bind is the readiness signal: provisioning is the boot command's
+/// work, queued after the signal fires, so the gateway is reachable in under
+/// a second and a quit during provisioning cancels the download. Startup
+/// failures are reported through `ready`; only serving failures become the
+/// thread's return value.
 fn serve_thread(
     options: &ServeOptions,
     ready: &mpsc::Sender<Result<Ready, StartupError>>,
@@ -566,17 +677,9 @@ fn serve_thread(
     };
     let bind = config.bind_addr();
     let hub = Arc::new(shared_progress::ProgressHub::new());
-    // The renderer starts before provisioning so boot downloads draw; it is
-    // a plain thread because provisioning runs before the runtime exists,
-    // and its Drop stops it on every exit path below.
+    // The renderer starts before serving so the boot command's downloads
+    // draw; it is a plain thread, and its Drop stops it on every exit path.
     let _renderer = crate::render::Renderer::start(&hub);
-    let gateway = match Gateway::from_config_with_hub(&config, profiles, hub) {
-        Ok(gateway) => gateway,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return Ok(());
-        }
-    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -606,6 +709,10 @@ fn serve_thread(
             return Ok(());
         }
     };
+    // The shell assembles instantly: an empty routing table and no local
+    // runtime. Provisioning is the boot command's work, not startup's.
+    let boot_profile = profiles.active.clone();
+    let gateway = Gateway::new_with_hub(&config, profiles, hub);
     // The connection file lands before the readiness signal so a spawned
     // gateway is discoverable the moment `spawn` returns; the guard removes
     // it on every exit path below, graceful shutdown included.
@@ -616,6 +723,21 @@ fn serve_thread(
         api_key: config.server_key(),
         state: gateway.state.clone(),
     }));
+    // The boot command lands after the readiness signal: the queue worker
+    // loads the active profile's models into the live routing table while
+    // the gateway is already reachable. `persist: false` keeps a
+    // command-line or environment profile override ephemeral, exactly as
+    // startup always behaved.
+    if let Some(name) = boot_profile {
+        let _boot = gateway
+            .state
+            .commands
+            .enqueue(crate::commands::Command::load_profile(
+                name,
+                false,
+                tokio_util::sync::CancellationToken::new(),
+            ));
+    }
     runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
         .map_err(StartupError::serve)

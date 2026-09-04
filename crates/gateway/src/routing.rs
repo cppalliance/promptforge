@@ -23,6 +23,36 @@ pub(crate) struct Routing {
 }
 
 impl Routing {
+    /// An empty table: nothing routes until a command loads models into it.
+    /// The instant-ready boot path assembles the gateway over this shell.
+    pub(crate) fn empty() -> Routing {
+        Routing {
+            by_name: HashMap::new(),
+            models: Vec::new(),
+        }
+    }
+
+    /// A copy of this table without the model `name`, for the unload
+    /// command. Infallible: filtering an already-valid table cannot create
+    /// duplicates.
+    #[cfg(feature = "local")]
+    pub(crate) fn without(&self, name: &str) -> Routing {
+        Routing {
+            by_name: self
+                .by_name
+                .iter()
+                .filter(|(key, _)| key.as_str() != name)
+                .map(|(key, model)| (key.clone(), Arc::clone(model)))
+                .collect(),
+            models: self
+                .models
+                .iter()
+                .filter(|model| model.name != name)
+                .cloned()
+                .collect(),
+        }
+    }
+
     /// Build a routing table directly from resolved models. Intended for tests
     /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
     ///
@@ -256,6 +286,56 @@ endpoints = ["e"]
             r.model("nope"),
             Err(GatewayError::UnknownModel(_))
         ));
+    }
+
+    #[cfg(feature = "local")]
+    #[test]
+    fn without_drops_the_named_model_and_keeps_the_rest() {
+        let r = routing_from(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "first"
+description = "the model being unloaded"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "second"
+description = "the model that stays"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#,
+        );
+        let filtered = r.without("first");
+        assert!(
+            matches!(filtered.model("first"), Err(GatewayError::UnknownModel(_))),
+            "the named model no longer routes"
+        );
+        assert!(
+            filtered.model("second").is_ok(),
+            "the other model still routes"
+        );
+        assert_eq!(
+            filtered.models().len(),
+            1,
+            "the catalog listing loses exactly the named model"
+        );
+        // The source table is untouched: `without` copies.
+        assert!(r.model("first").is_ok());
+        // A name the table never held filters to an identical table.
+        assert_eq!(r.without("ghost").models().len(), 2);
     }
 
     #[test]

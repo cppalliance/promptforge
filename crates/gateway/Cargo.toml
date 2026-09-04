@@ -69,6 +69,9 @@ thiserror.workspace = true
 # RFC 3339 rendering of the connection file's started_at.
 time.workspace = true
 tokio = { workspace = true, features = ["signal"] }
+# CancellationToken for the command queue's per-command cancellation;
+# default-features off, the sync module is ungated.
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
