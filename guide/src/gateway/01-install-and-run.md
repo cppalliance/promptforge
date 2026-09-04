@@ -34,7 +34,7 @@ You can also start the gateway with no config file at all. When no `gateway.toml
 
 On a desktop system the gateway's face is the system tray. The icon shows the gateway's state, and its menu carries a status line, a Workshop item that launches the Workshop application when the installer laid it beside the gateway, a Settings item that opens the configuration UI in your browser, a Launch at Login toggle, and Quit. A gateway started at login never opens a browser or a window.
 
-For servers and CI, `--no-tray` keeps the plain headless loop. In a tray-less environment, `--print-url` prints the Settings URL to stdout once the gateway is bound. `--open-settings` opens the Settings page in your default browser once bound; the installer uses it on a Gateway-only install's first run. Launching `promptforge-gateway` while one is already running never starts a second copy: it opens the running gateway's Settings page instead.
+For servers and CI, `--no-tray` keeps the plain headless loop. In a tray-less environment, `--print-url` prints the Settings URL to stdout once the gateway is bound. `--browser` opens the Settings page in your default browser once bound; the installer uses it on a Gateway-only install's first run. Launching `promptforge-gateway` while one is already running never starts a second copy: it opens the running gateway's Settings page instead.
 
 After every successful bind the gateway writes a connection file (`gateway.json` in the run directory under the state directory) carrying its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
 

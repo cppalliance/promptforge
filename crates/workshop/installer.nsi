@@ -477,12 +477,12 @@ FunctionEnd
 Function RunMainBinary
  ; The finish-page Run checkbox follows the components: the Workshop shell
  ; when installed; on a Gateway-only install it launches the gateway with
- ; --open-settings, so the first boot opens the Settings page in the
+ ; --browser, so the first boot opens the Settings page in the
  ; default browser.
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
  ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
- nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --open-settings"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --browser"
  ${EndIf}
 FunctionEnd
 

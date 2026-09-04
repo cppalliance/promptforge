@@ -43,9 +43,9 @@ pub struct ServeOptions {
     /// user profile's `.promptforge` directory.
     pub run_dir: Option<PathBuf>,
     /// Opens the Settings handoff URL in the default browser once the
-    /// listener is bound - the binary's `--open-settings`, used by the
+    /// listener is bound - the binary's `--browser`, used by the
     /// installer's first run. Embedders leave this `false`.
-    pub open_settings: bool,
+    pub browser: bool,
 }
 
 impl ServeOptions {
@@ -59,7 +59,7 @@ impl ServeOptions {
             config_path,
             profile: profile.into(),
             run_dir: None,
-            open_settings: false,
+            browser: false,
         }
     }
 
@@ -73,8 +73,8 @@ impl ServeOptions {
 
     /// Sets whether to open the Settings page in the browser once bound.
     #[must_use]
-    pub fn with_open_settings(mut self, open_settings: bool) -> ServeOptions {
-        self.open_settings = open_settings;
+    pub fn with_browser(mut self, browser: bool) -> ServeOptions {
+        self.browser = browser;
         self
     }
 }
@@ -576,7 +576,7 @@ struct Ready {
 /// # Ok::<(), gateway::StartupError>(())
 /// ```
 pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
-    let open_settings = options.open_settings;
+    let browser = options.browser;
     let (ready_tx, ready_rx) = mpsc::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let options = options.clone();
@@ -593,7 +593,7 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
                 shutdown: Some(shutdown_tx),
                 thread: Some(thread),
             };
-            if open_settings {
+            if browser {
                 open_settings_page(&handle);
             }
             Ok(handle)
@@ -604,7 +604,7 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
 }
 
 /// Opens the Settings handoff URL in the default browser, for the binary's
-/// `--open-settings`: once, right after the bind, through the one-time
+/// `--browser`: once, right after the bind, through the one-time
 /// `/auth` redirect so the key never sits in browser history. A browser
 /// that cannot launch warns; the gateway serves on.
 fn open_settings_page(handle: &GatewayHandle) {

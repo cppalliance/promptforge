@@ -1,5 +1,5 @@
 //! The `promptforge-gateway` binary:
-//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--open-settings]`.
+//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
 //! hands off to [`run_with_tray`], which owns the tokio runtime, provisioning,
@@ -17,7 +17,7 @@ use std::process::ExitCode;
 use gateway::{ProfileName, ServeOptions, run, run_printing_url, run_with_tray};
 
 const USAGE: &str = concat!(
-    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--open-settings]\n",
+    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
     "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
@@ -26,7 +26,7 @@ const USAGE: &str = concat!(
     "--login      the launch came from the OS autostart entry; never opens a browser\n",
     "--print-url  print the Settings handoff URL once bound, then serve headless;\n",
     "             with a gateway already running, print its URL instead\n",
-    "--open-settings  open the Settings page in the default browser once bound;\n",
+    "--browser  open the Settings page in the default browser once bound;\n",
     "                 the installer's first run uses this",
 );
 
@@ -174,7 +174,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
     let mut tray = true;
     let mut login = false;
     let mut print_url = false;
-    let mut open_settings = false;
+    let mut browser = false;
 
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -192,7 +192,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
             Some("--no-tray") => tray = false,
             Some("--login") => login = true,
             Some("--print-url") => print_url = true,
-            Some("--open-settings") => open_settings = true,
+            Some("--browser") => browser = true,
             Some("-h" | "--help") => return Err(ParseError::Help),
             Some(other) if other.starts_with('-') => {
                 return Err(ParseError::Usage(format!("unknown flag {other}")));
@@ -214,8 +214,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
 
     Ok(Invocation {
         // `--login`'s contract is absolute - a login launch never opens a
-        // browser - so it wins over `--open-settings`.
-        serve: ServeOptions::new(config_path, profile).with_open_settings(open_settings && !login),
+        // browser - so it wins over `--browser`.
+        serve: ServeOptions::new(config_path, profile).with_browser(browser && !login),
         tray,
         login,
         print_url,
@@ -351,29 +351,29 @@ mod tests {
     }
 
     #[test]
-    fn open_settings_parses_and_rides_the_serve_options() {
-        let invocation = parse_args(args(&["serve", "--open-settings"])).expect("parse");
+    fn browser_parses_and_rides_the_serve_options() {
+        let invocation = parse_args(args(&["serve", "--browser"])).expect("parse");
         assert!(
-            invocation.serve.open_settings,
+            invocation.serve.browser,
             "the flag reaches the spawn hook through ServeOptions"
         );
         assert!(invocation.tray, "the flag is independent of the run loop");
     }
 
     #[test]
-    fn open_settings_defaults_off() {
+    fn browser_defaults_off() {
         let invocation = parse_args(args(&["serve"])).expect("parse");
         assert!(
-            !invocation.serve.open_settings,
+            !invocation.serve.browser,
             "embedders and ordinary launches never open a browser"
         );
     }
 
     #[test]
-    fn login_wins_over_open_settings() {
-        let invocation = parse_args(args(&["serve", "--login", "--open-settings"])).expect("parse");
+    fn login_wins_over_browser() {
+        let invocation = parse_args(args(&["serve", "--login", "--browser"])).expect("parse");
         assert!(
-            !invocation.serve.open_settings,
+            !invocation.serve.browser,
             "a login launch never opens a browser"
         );
     }
