@@ -28,6 +28,16 @@ The first argument is the path to the config file. The `--profile` flag names th
 
 You can supply both values through environment variables instead of command-line arguments. The config path comes from the positional argument or from `PROMPTFORGE_GATEWAY_CONFIG`; the command line wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
+You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key - and boots from it. The generated config selects a profile named `default`, so a bare first boot needs no flags.
+
+## The system tray
+
+On a desktop system the gateway's face is the system tray. The icon shows the gateway's state, and its menu carries a status line, a Workshop item that launches the Workshop application when the installer laid it beside the gateway, a Settings item that opens the configuration UI in your browser, a Launch at Login toggle, and Quit. A gateway started at login never opens a browser or a window.
+
+For servers and CI, `--no-tray` keeps the plain headless loop. In a tray-less environment, `--print-url` prints the Settings URL to stdout once the gateway is bound. Launching `promptforge-gateway` while one is already running never starts a second copy: it opens the running gateway's Settings page instead.
+
+After every successful bind the gateway writes a connection file (`gateway.json` in the run directory under the state directory) carrying its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
+
 ## Check that it is healthy
 
 Once the gateway is serving, probe its health endpoint:
@@ -68,5 +78,5 @@ Startup failures appear on stderr with the full cause chain: one `error:` line f
 
 ## Stop the gateway
 
-Stop the gateway cleanly with Ctrl-C. The gateway drains in-flight requests before it exits.
+From the tray, choose Quit. From a script or another PromptForge component, send an authenticated POST to the `/shutdown` route with the bearer key; it answers 202 and then the server goes down. Under `--no-tray`, Ctrl-C stops the gateway cleanly. Every path drains in-flight requests before the exit.
 
