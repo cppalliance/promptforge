@@ -132,6 +132,11 @@ test("panel mode routes every gateway call through the bridge, with no fetch and
   assert.equal(root.querySelector("#gateway-api-key"), null, "no key prompt in panel mode");
   assert.equal(root.querySelector("img.tab-medallion"), null, "no medallion in panel mode");
   assert.equal(
+    root.querySelector(".status-bar"),
+    null,
+    "no status bar in panel mode - the workshop owns status display",
+  );
+  assert.equal(
     root.querySelector(".banner")?.textContent?.includes("bridge pending"),
     false,
     "the bridge-pending banner is gone once the context arrives",

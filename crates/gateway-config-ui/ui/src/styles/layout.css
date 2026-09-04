@@ -1373,3 +1373,115 @@
 		flex-wrap: wrap;
 	}
 }
+
+/* Bottom status bar [VS Code]: fixed to the viewport bottom, one strip
+   sharing two mutually exclusive states - the idle endpoint LED strip
+   with the model/VRAM summary, and the active-command progress bar with
+   its label, pending count, and cancel button. */
+@layer components {
+	.status-bar {
+		position: fixed;
+		inset-block-end: 0;
+		inset-inline: 0;
+		z-index: 40;
+		display: flex;
+		align-items: center;
+		height: 1.75rem;
+		padding-inline: 0.75rem;
+		border-top: 1px solid var(--border);
+		background: var(--bg-secondary);
+		color: var(--text-secondary);
+		font-size: 0.75rem;
+	}
+	/* The fixed strip overlays the shell's tail; the component toggles
+	   this body class so the last content line stays clear of it. */
+	.has-status-bar .shell {
+		padding-block-end: 2.75rem;
+	}
+	.status-bar-idle,
+	.status-bar-active {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+	}
+	/* `hidden` loses to the flex display above without the override. */
+	.status-bar-idle[hidden],
+	.status-bar-active[hidden] {
+		display: none;
+	}
+
+	/* Endpoint LEDs: green ready, amber provisioning, gray unconfigured.
+	   The fills match the connection dot's 3:1 floor on the bar surface. */
+	.status-leds {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.status-led {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+	.status-led-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--text-secondary);
+	}
+	.status-led[data-state="ready"] .status-led-dot {
+		background: var(--success);
+	}
+	.status-led[data-state="provisioning"] .status-led-dot {
+		background: var(--warning);
+	}
+	.status-bar-summary {
+		margin-inline-start: auto;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	/* Active command: label, the full-width bar (fill scales by
+	   --progress like the metric tiles, compositor-only), the pending
+	   count, and the cancel button. */
+	.status-bar-command {
+		color: var(--text-primary);
+		white-space: nowrap;
+	}
+	.status-bar-progress {
+		flex: 1;
+		height: 0.375rem;
+		border-radius: 9999px;
+		background: rgb(0 0 0 / 0.4);
+		overflow: hidden;
+	}
+	.status-bar-progress-fill {
+		height: 100%;
+		border-radius: 9999px;
+		background: var(--accent);
+		transform-origin: 0 50%;
+		transform: scaleX(var(--progress, 0));
+		transition: transform 300ms ease-out;
+	}
+	.status-bar-pending {
+		white-space: nowrap;
+	}
+	.status-bar-pending[hidden] {
+		display: none;
+	}
+	/* One cancel button per waiting command, beside the count. */
+	.status-bar-pending-list {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		min-width: 0;
+	}
+	.status-bar-pending-cancel {
+		max-width: 16rem;
+	}
+	.status-bar-pending-cancel span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+}

@@ -157,10 +157,6 @@ struct PendingEntry {
     id: u64,
     key: Option<DebounceKey>,
     label: String,
-    #[allow(
-        dead_code,
-        reason = "read by pending_commands, which the status-surfaces step wires to the tray and routes"
-    )]
     queued_at: Instant,
     tree: ProgressTree,
     /// The `LoadProfile` persist flag a debounced duplicate can still
@@ -212,16 +208,8 @@ pub(crate) struct CommandStatus {
     /// The command's display name, for example `load-profile: main`.
     pub(crate) name: String,
     /// The command operation tree's weighted fraction, `0.0..=1.0`.
-    #[allow(
-        dead_code,
-        reason = "the tray status tick and /admin/status read it in the status-surfaces step"
-    )]
     pub(crate) progress: f64,
     /// When the worker started the command.
-    #[allow(
-        dead_code,
-        reason = "the tray status tick and /admin/status read it in the status-surfaces step"
-    )]
     pub(crate) started_at: Instant,
 }
 
@@ -229,16 +217,8 @@ pub(crate) struct CommandStatus {
 #[derive(Debug, Clone)]
 pub(crate) struct CommandSummary {
     /// The command's display name.
-    #[allow(
-        dead_code,
-        reason = "the tray status tick and /admin/status read it in the status-surfaces step"
-    )]
     pub(crate) name: String,
     /// When the command entered the queue.
-    #[allow(
-        dead_code,
-        reason = "the tray status tick and /admin/status read it in the status-surfaces step"
-    )]
     pub(crate) queued_at: Instant,
 }
 
@@ -443,10 +423,6 @@ impl CommandQueue {
     }
 
     /// The waiting commands, oldest first.
-    #[allow(
-        dead_code,
-        reason = "the tray status tick and /admin/status read it in the status-surfaces step"
-    )]
     pub(crate) fn pending_commands(&self) -> Vec<CommandSummary> {
         self.lock()
             .pending
@@ -475,10 +451,6 @@ impl CommandQueue {
     /// Removes the waiting command at `index`, settling its waiters as
     /// cancelled. Returns whether an entry was removed. The command's id
     /// stays in the channel; the worker skips it when it surfaces.
-    #[allow(
-        dead_code,
-        reason = "the admin queue-cancel route calls it in the status-surfaces step"
-    )]
     pub(crate) fn cancel_pending(&self, index: usize) -> bool {
         let entry = self.lock().pending.remove(index);
         let Some(entry) = entry else {

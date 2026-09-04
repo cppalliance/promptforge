@@ -415,6 +415,10 @@ function redactSecrets(view) {
  * report. When `key` is set, gateway requests without that
  * bearer answer 401; absolute (hub) URLs are exempt. Every call is
  * recorded in `calls`; the mutable config state is exposed as `state`.
+ * The queue surface: `/admin/status` returns `queue`, `endpoints`, and
+ * `vram_gb` from `state` (mutate them to drive the status bar), and the
+ * cancel routes record into `state.cancelActiveCalls` and
+ * `state.cancelPendingCalls`.
  */
 export function gatewayStub({
   profile = "default",
@@ -439,6 +443,9 @@ export function gatewayStub({
   applyOutcome,
   onPutConfig,
   env,
+  queue,
+  endpoints,
+  vramGb,
 } = {}) {
   const calls = [];
   const state = {
@@ -456,6 +463,16 @@ export function gatewayStub({
     active: profile,
     /** Process-lifetime config generation returned by admin status. */
     configGeneration,
+    /** The command queue readout returned by admin status. */
+    queue: queue ?? { active: null, pending: [] },
+    /** The endpoint readiness entries returned by admin status. */
+    endpoints: endpoints ?? [],
+    /** The declared VRAM total returned by admin status. */
+    vramGb: vramGb ?? 0,
+    /** Count of POST /admin/queue/cancel calls received. */
+    cancelActiveCalls: 0,
+    /** Every POST /admin/queue/cancel-pending body, in arrival order. */
+    cancelPendingCalls: [],
   };
   const hubDenied = () =>
     jsonResponse(
@@ -537,7 +554,18 @@ export function gatewayStub({
         profile: state.active,
         models,
         config_generation: state.configGeneration,
+        vram_gb: state.vramGb,
+        queue: state.queue,
+        endpoints: state.endpoints,
       });
+    }
+    if (url.endsWith("/admin/queue/cancel-pending")) {
+      state.cancelPendingCalls.push(JSON.parse(init.body ?? "{}"));
+      return jsonResponse({ cancelled: true });
+    }
+    if (url.endsWith("/admin/queue/cancel")) {
+      state.cancelActiveCalls += 1;
+      return jsonResponse({ cancelled: state.queue.active !== null });
     }
     if (url.endsWith("/admin/progress")) {
       return sseChannel().response;

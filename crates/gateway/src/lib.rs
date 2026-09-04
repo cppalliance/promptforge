@@ -15,7 +15,11 @@
 //! gateway-owned local generative inference via a managed `llama-server`
 //! subprocess (`[[local_model]]`), named profile checklists from one loaded
 //! catalog with bounded-drain `POST /admin/switch-profile` streaming its
-//! existing stages over SSE, a bearer-authed
+//! existing stages over SSE, a bearer-authed `GET /admin/status` readout
+//! carrying the command queue's active and pending commands plus one
+//! readiness entry per capability endpoint, bearer-authed
+//! `POST /admin/queue/cancel` and `POST /admin/queue/cancel-pending`
+//! cancelling the queue's active and waiting commands, a bearer-authed
 //! `GET /v1/models` catalog, a bearer-authed `GET /admin/config` view of the
 //! running global configuration as JSON with secrets redacted, a
 //! bearer-authed `GET /admin/progress` SSE
@@ -169,6 +173,28 @@ struct LiveState {
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
+}
+
+impl LiveState {
+    /// The number of models in the live routing table and the declared VRAM
+    /// total of the active local and STT models, for the tray's status line
+    /// and `GET /admin/status`.
+    fn model_status(&self) -> (usize, f64) {
+        let models = self.routing.models().len();
+        let vram_gb = self
+            .config
+            .local_models()
+            .iter()
+            .filter_map(gateway_config::LocalModelConfig::vram_gb)
+            .sum::<f64>()
+            + self
+                .config
+                .stt_models()
+                .iter()
+                .map(gateway_config::SttModelConfig::vram_gb)
+                .sum::<f64>();
+        (models, vram_gb)
+    }
 }
 
 /// Single configuration file used by admin routes and profile persistence.
@@ -326,20 +352,7 @@ impl AppState {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", test))]
     pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
         let live = self.live.try_read().ok()?;
-        let models = live.routing.models().len();
-        let vram_gb = live
-            .config
-            .local_models()
-            .iter()
-            .filter_map(gateway_config::LocalModelConfig::vram_gb)
-            .sum::<f64>()
-            + live
-                .config
-                .stt_models()
-                .iter()
-                .map(gateway_config::SttModelConfig::vram_gb)
-                .sum::<f64>();
-        Some((models, vram_gb))
+        Some(live.model_status())
     }
 }
 
@@ -362,7 +375,12 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
         .route("/admin/progress", get(admin_progress))
-        .route("/admin/switch-profile", post(admin_switch_profile));
+        .route("/admin/switch-profile", post(admin_switch_profile))
+        .route("/admin/queue/cancel", post(admin_queue_cancel))
+        .route(
+            "/admin/queue/cancel-pending",
+            post(admin_queue_cancel_pending),
+        );
     #[cfg(feature = "stt")]
     let router = router.merge(
         Router::new()
@@ -829,13 +847,61 @@ async fn admin_list_profiles(
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
+/// One capability endpoint's readout in the `GET /admin/status` response:
+/// the route path, a display name, whether the live routing table serves
+/// it, and whether a queue command is provisioning its models.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EndpointStatus {
+    path: &'static str,
+    name: &'static str,
+    ready: bool,
+    provisioning: bool,
+}
+
+/// Maps one capability endpoint's facts to its status entry. `ready` is
+/// the routing table's live state; `provisioning` means the configuration
+/// selects a model for the endpoint, none is loaded yet, and a queue
+/// command is running. A configured endpoint with no command running reads
+/// as simply not ready - the config UI's LED strip renders both
+/// not-ready states gray and reserves amber for active provisioning.
+fn endpoint_status(
+    path: &'static str,
+    name: &'static str,
+    configured: bool,
+    ready: bool,
+    command_active: bool,
+) -> EndpointStatus {
+    EndpointStatus {
+        path,
+        name,
+        ready,
+        provisioning: configured && !ready && command_active,
+    }
+}
+
+/// An `Instant` as Unix epoch seconds for the status wire shape. The
+/// conversion goes through the elapsed duration, so a clock that jumped
+/// backward clamps to now rather than underflowing.
+fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
+    let elapsed = instant.elapsed();
+    std::time::SystemTime::now()
+        .checked_sub(elapsed)
+        .unwrap_or_else(std::time::SystemTime::now)
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
 /// Current profile name, loaded model names, process config generation,
-/// the profile's model allowlist, and a queue note.
+/// the profile's model allowlist, the declared VRAM total, the command
+/// queue's active and pending commands, and one readiness entry per
+/// capability endpoint the gateway can serve.
 async fn admin_status(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
+    let active = state.commands.active_command();
+    let pending = state.commands.pending_commands();
     let live = state.live.read().await;
     let models: Vec<&str> = live
         .routing
@@ -849,14 +915,118 @@ async fn admin_status(
     let local_children = live.local.child_count();
     #[cfg(not(feature = "local"))]
     let local_children = 0;
+    let (_, vram_gb) = live.model_status();
+    let command_active = active.is_some();
+    let configured = |kind: ModelKind| {
+        live.config
+            .models()
+            .iter()
+            .any(|model| model.kind() == kind)
+            || live
+                .config
+                .local_models()
+                .iter()
+                .any(|model| model.kind() == kind)
+    };
+    let routed = |kind: ModelKind| live.routing.models().iter().any(|model| model.kind == kind);
+    let endpoints = vec![
+        endpoint_status(
+            "/v1/chat/completions",
+            "Chat completions",
+            configured(ModelKind::Chat),
+            routed(ModelKind::Chat),
+            command_active,
+        ),
+        endpoint_status(
+            "/v1/embeddings",
+            "Embeddings",
+            configured(ModelKind::Embedding),
+            routed(ModelKind::Embedding),
+            command_active,
+        ),
+        endpoint_status(
+            "/v1/rerank",
+            "Rerank",
+            configured(ModelKind::Classifier),
+            routed(ModelKind::Classifier),
+            command_active,
+        ),
+    ];
+    #[cfg(feature = "stt")]
+    let endpoints = {
+        let mut endpoints = endpoints;
+        endpoints.push(endpoint_status(
+            "/v1/audio/transcriptions",
+            "Audio transcriptions",
+            !live.config.stt_models().is_empty(),
+            state.stt_state.is_active(),
+            command_active,
+        ));
+        endpoints
+    };
     Ok(Json(serde_json::json!({
         "profile": live.profile_name,
         "models": models,
         "config_generation": state.config_generation.as_ref(),
         "model_allowlist": live.model_allowlist,
         "local_children": local_children,
-        "queue": "per-dominion shared waiting queue; profile switch drains in-flight inference for up to 30 seconds",
+        "vram_gb": vram_gb,
+        "queue": {
+            "active": active.map(|status| serde_json::json!({
+                "name": status.name,
+                "fraction": status.progress,
+                "started_at": instant_epoch_seconds(status.started_at),
+            })),
+            "pending": pending
+                .iter()
+                .map(|entry| serde_json::json!({
+                    "name": entry.name,
+                    "queued_at": instant_epoch_seconds(entry.queued_at),
+                }))
+                .collect::<Vec<_>>(),
+        },
+        "endpoints": endpoints
+            .iter()
+            .map(|endpoint| serde_json::json!({
+                "path": endpoint.path,
+                "name": endpoint.name,
+                "ready": endpoint.ready,
+                "provisioning": endpoint.provisioning,
+            }))
+            .collect::<Vec<_>>(),
     })))
+}
+
+/// The `POST /admin/queue/cancel` route: bearer-authed, fires the active
+/// command's cancellation token. The reply reports whether a command was
+/// active to cancel; the command settles as cancelled at its next chunk
+/// or phase boundary.
+async fn admin_queue_cancel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let cancelled = state.commands.cancel_active();
+    Ok(Json(serde_json::json!({ "cancelled": cancelled })))
+}
+
+/// The `POST /admin/queue/cancel-pending` request body.
+#[derive(Debug, Deserialize)]
+struct CancelPendingRequest {
+    index: usize,
+}
+
+/// The `POST /admin/queue/cancel-pending` route: bearer-authed, removes
+/// the waiting command at `index`, settling its waiters as cancelled. The
+/// reply reports whether an entry was removed.
+async fn admin_queue_cancel_pending(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CancelPendingRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let cancelled = state.commands.cancel_pending(request.index);
+    Ok(Json(serde_json::json!({ "cancelled": cancelled })))
 }
 
 /// The `GET /admin/config` route: bearer-authed, renders the running global
@@ -2490,7 +2660,7 @@ cache_dir = '{cache}'
         // own extractor past auth, so any non-403 status proves the wall
         // is absent (the same trick as the loopback-admission sweep).
         let status = send_with_peer(
-            state,
+            state.clone(),
             Method::POST,
             "/admin/switch-profile",
             Some("198.51.100.7:44821"),
@@ -2502,6 +2672,23 @@ cache_dir = '{cache}'
             StatusCode::FORBIDDEN,
             "POST /admin/switch-profile keeps its bearer-only, any-source behavior"
         );
+        // The queue-cancel routes share the bearer-only, any-source
+        // posture: cancelling a command mutates no configuration.
+        for path in ["/admin/queue/cancel", "/admin/queue/cancel-pending"] {
+            let status = send_with_peer(
+                state.clone(),
+                Method::POST,
+                path,
+                Some("198.51.100.7:44821"),
+            )
+            .await
+            .status();
+            assert_ne!(
+                status,
+                StatusCode::FORBIDDEN,
+                "POST {path} keeps its bearer-only, any-source behavior"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2680,5 +2867,327 @@ cache_dir = '{cache}'
             StatusCode::OK,
             "the `Gateway::router` seam has no bound socket to allowlist"
         );
+    }
+}
+
+#[cfg(test)]
+mod status_surface_tests {
+    //! The status surfaces over the command queue: the `GET
+    //! /admin/status` queue and endpoint readouts, and the queue-cancel
+    //! routes firing the active command's token and dropping pending
+    //! entries, exercised against a running fixture gateway with a
+    //! parked command.
+
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use axum::body::Body;
+    use axum::http::header::AUTHORIZATION;
+    use axum::http::{Request, StatusCode};
+    use futures_util::future::BoxFuture;
+    use gateway_config::{Config, ProfileName};
+    use tokio_util::sync::CancellationToken;
+    use tower::ServiceExt;
+
+    use super::{EndpointStatus, endpoint_status};
+    use crate::commands::{Command, Outcome};
+    use crate::error::GatewayError;
+    use crate::test_support::{app_state, serve_state};
+    use crate::{AppState, build_router};
+
+    /// A state whose catalog declares one local chat model the routing
+    /// table never holds: `app_state` routes only the remote catalog, so
+    /// `slow-model` stays configured-but-unloaded for the test's run.
+    fn state() -> AppState {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\
+             source = \"/models/slow.gguf\"\ncontext = 4096\n\
+             [[profile]]\nname = \"main\"\nmodels = [\"slow-model\"]\n",
+        )
+        .expect("config parses");
+        app_state(config, None)
+    }
+
+    /// An executor that parks every command until its token fires, then
+    /// settles it as cancelled - the shape of a provisioning download.
+    fn parking_executor() -> Arc<crate::commands::Executor> {
+        Arc::new(|_state, command, _tree| {
+            Box::pin(async move {
+                match command {
+                    Command::LoadProfile { name, token, .. } => {
+                        token.cancelled().await;
+                        Err(GatewayError::CommandCancelled(format!(
+                            "load-profile: {name}"
+                        )))
+                    }
+                    Command::ProvisionModel { name, token, .. } => {
+                        token.cancelled().await;
+                        Err(GatewayError::CommandCancelled(format!(
+                            "provision-model: {name}"
+                        )))
+                    }
+                    Command::UnloadModel { name } => Ok(format!("unloaded {name}")),
+                }
+            }) as BoxFuture<'static, Outcome>
+        })
+    }
+
+    /// Polls `condition` with a bounded wait, for observing the worker's
+    /// externally visible state transitions.
+    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !condition() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
+    async fn get_status(state: AppState) -> serde_json::Value {
+        let response = build_router(state, None)
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/status")
+                    .header(AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("static request parts are valid"),
+            )
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body reads"),
+        )
+        .expect("the status body is JSON")
+    }
+
+    #[test]
+    fn the_endpoint_readiness_mapping() {
+        let ready = endpoint_status("/v1/chat/completions", "Chat completions", true, true, true);
+        assert_eq!(
+            ready,
+            EndpointStatus {
+                path: "/v1/chat/completions",
+                name: "Chat completions",
+                ready: true,
+                provisioning: false,
+            },
+            "a served endpoint is never provisioning, even mid-command"
+        );
+        assert!(
+            endpoint_status("/v1/embeddings", "Embeddings", true, false, true).provisioning,
+            "configured, unserved, and a command running: provisioning"
+        );
+        assert!(
+            !endpoint_status("/v1/embeddings", "Embeddings", true, false, false).provisioning,
+            "configured and unserved with an idle queue reads as not ready, not provisioning"
+        );
+        assert!(
+            !endpoint_status("/v1/rerank", "Rerank", false, false, true).provisioning,
+            "an unconfigured endpoint is never provisioning"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_status_response_carries_the_queue_and_endpoint_shape() {
+        let body = get_status(state()).await;
+        assert_eq!(body["queue"]["active"], serde_json::Value::Null);
+        assert_eq!(body["queue"]["pending"], serde_json::json!([]));
+        assert!(
+            body["vram_gb"].is_number(),
+            "the declared VRAM total is always present: {body}"
+        );
+        let endpoints = body["endpoints"].as_array().expect("endpoints is an array");
+        let chat = endpoints
+            .iter()
+            .find(|entry| entry["path"] == "/v1/chat/completions")
+            .expect("the chat completions endpoint is listed");
+        assert_eq!(chat["name"], "Chat completions");
+        assert_eq!(
+            chat["ready"], false,
+            "the configured local model is not loaded"
+        );
+        assert_eq!(
+            chat["provisioning"], false,
+            "no command is running, so nothing provisions"
+        );
+        for path in ["/v1/embeddings", "/v1/rerank"] {
+            let entry = endpoints
+                .iter()
+                .find(|entry| entry["path"] == path)
+                .unwrap_or_else(|| panic!("the {path} endpoint is listed"));
+            assert_eq!(entry["ready"], false, "{path} has no configured model");
+            assert_eq!(entry["provisioning"], false);
+        }
+        #[cfg(feature = "stt")]
+        assert!(
+            endpoints
+                .iter()
+                .any(|entry| entry["path"] == "/v1/audio/transcriptions"),
+            "stt builds list the transcriptions endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_status_response_reports_the_active_and_pending_commands() {
+        let state = state();
+        let queue = state.commands.clone();
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+        let active = queue.enqueue(Command::load_profile(
+            ProfileName::parse("main").expect("profile name"),
+            false,
+            CancellationToken::new(),
+        ));
+        let pending = queue.enqueue(Command::ProvisionModel {
+            name: "extra".to_owned(),
+            source: "/models/extra.gguf".to_owned(),
+            token: CancellationToken::new(),
+        });
+        wait_until("the boot command to go active", || {
+            queue.active_command().is_some()
+        })
+        .await;
+
+        let body = get_status(state.clone()).await;
+        assert_eq!(
+            body["queue"]["active"]["name"], "load-profile: main",
+            "the active command is named: {body}"
+        );
+        assert!(
+            body["queue"]["active"]["fraction"].is_number(),
+            "the active command carries its progress fraction: {body}"
+        );
+        assert!(
+            body["queue"]["active"]["started_at"].is_u64(),
+            "the active command carries its start time as epoch seconds: {body}"
+        );
+        let pending_entries = body["queue"]["pending"]
+            .as_array()
+            .expect("pending is an array");
+        assert_eq!(pending_entries.len(), 1);
+        assert_eq!(pending_entries[0]["name"], "provision-model: extra");
+        assert!(pending_entries[0]["queued_at"].is_u64());
+        let chat = body["endpoints"]
+            .as_array()
+            .expect("endpoints is an array")
+            .iter()
+            .find(|entry| entry["path"] == "/v1/chat/completions")
+            .expect("the chat completions endpoint is listed")
+            .clone();
+        assert_eq!(
+            chat["provisioning"], true,
+            "a configured, unloaded chat model under a running command is provisioning"
+        );
+
+        queue.cancel_active();
+        drop((active, pending));
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    #[tokio::test]
+    async fn the_cancel_routes_fire_the_token_and_drop_pending_entries() {
+        let state = state();
+        let queue = state.commands.clone();
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+        let addr = serve_state(state).await;
+        let client = reqwest::Client::new();
+
+        let active = queue.enqueue(Command::load_profile(
+            ProfileName::parse("main").expect("profile name"),
+            false,
+            CancellationToken::new(),
+        ));
+        let pending = queue.enqueue(Command::ProvisionModel {
+            name: "extra".to_owned(),
+            source: "/models/extra.gguf".to_owned(),
+            token: CancellationToken::new(),
+        });
+        wait_until("the boot command to go active", || {
+            queue.active_command().is_some()
+        })
+        .await;
+
+        // The routes refuse an unauthenticated caller before touching the
+        // queue.
+        let response = client
+            .post(format!("http://{addr}/admin/queue/cancel"))
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // Cancelling a pending entry settles its waiter as cancelled and
+        // leaves the active command running.
+        let response = client
+            .post(format!("http://{addr}/admin/queue/cancel-pending"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "index": 0 }))
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(body["cancelled"], true, "the pending entry was removed");
+        let outcome = pending.outcome.await.expect("the pending waiter settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "the cancelled pending command settles as cancelled: {outcome:?}"
+        );
+        assert!(
+            queue.active_command().is_some(),
+            "the active command still runs"
+        );
+
+        // Cancelling the active command fires its token; the parked body
+        // observes it and settles as cancelled.
+        let response = client
+            .post(format!("http://{addr}/admin/queue/cancel"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the request sends");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(body["cancelled"], true, "a command was active to cancel");
+        let outcome = active.outcome.await.expect("the active waiter settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "the parked command observed its token: {outcome:?}"
+        );
+
+        // With the queue idle, both routes report nothing to cancel.
+        wait_until("the queue to go idle", || queue.active_command().is_none()).await;
+        let response = client
+            .post(format!("http://{addr}/admin/queue/cancel"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the request sends");
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(body["cancelled"], false, "no active command to cancel");
+        let response = client
+            .post(format!("http://{addr}/admin/queue/cancel-pending"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "index": 0 }))
+            .send()
+            .await
+            .expect("the request sends");
+        let body: serde_json::Value = response.json().await.expect("the reply is JSON");
+        assert_eq!(body["cancelled"], false, "no pending entry at the index");
+
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
     }
 }

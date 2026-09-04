@@ -18,6 +18,7 @@ import { confirmDialog } from "./components/confirm-modal";
 import { mountKeyPrompt } from "./components/key-prompt";
 import { createProfileSwitcher } from "./components/profile-switcher";
 import { openReviewDiff } from "./components/review-diff";
+import { createStatusBar } from "./components/status-bar";
 import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "./components/toast";
 import { startRouter } from "./router";
@@ -174,11 +175,11 @@ function memoryStorage(): Storage {
 
 /**
  * Mounts the live shell and starts its data flows, in either mode:
- * standalone (`bridge` null - medallion, progress subscription) or
- * workshop panel (`bridge` set - no medallion, no progress subscription
- * because the workshop owns progress display, and apply/revert are
- * announced to the parent). Returns the teardown that stops the router
- * and subscriptions.
+ * standalone (`bridge` null - medallion, progress subscription, the
+ * bottom status bar) or workshop panel (`bridge` set - no medallion, no
+ * progress subscription, no status bar because the workshop owns
+ * progress and status display, and apply/revert are announced to the
+ * parent). Returns the teardown that stops the router and subscriptions.
  */
 function mountLiveShell(
   root: HTMLElement,
@@ -335,7 +336,18 @@ function mountLiveShell(
   const bannerBox = document.createElement("div");
   bannerBox.className = "banner-stack";
   bannerBox.append(restartBanner, banner);
-  const main = mountChrome(root, tabBar.element, [toasts.element], bannerBox);
+  // The bottom status bar: standalone only. Panel mode hides it - the
+  // workshop owns status display there.
+  const statusBar =
+    bridge === null
+      ? createStatusBar({ api, onError: (message) => toasts.show(message, "error") })
+      : null;
+  const fixed: HTMLElement[] = [toasts.element];
+  if (statusBar !== null) {
+    fixed.push(statusBar.element);
+  }
+  const main = mountChrome(root, tabBar.element, fixed, bannerBox);
+  statusBar?.start();
 
   api.onHealth = (ok) => tabBar.setConnected(ok);
   const localView = createModelsView({ store, api, toasts, scope: "local" });
@@ -399,6 +411,7 @@ function mountLiveShell(
     stopRouter();
     stopProgress();
     unsubscribe();
+    statusBar?.stop();
     if (restartTimer !== null) {
       clearTimeout(restartTimer);
     }

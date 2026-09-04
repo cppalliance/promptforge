@@ -56,6 +56,8 @@ Every profile is validated at load: names are unique and legal, every listed mod
 
 Switching runs from the already-loaded catalog through `POST /admin/switch-profile`, streaming its stages (`loading-profile`, `stopping-models`, `starting-models`, one terminal event) over SSE. In-flight inference requests get a bounded drain - up to 30 seconds - before stragglers are cancelled and local children stop; the new subset then spawns and routing swaps atomically, and the choice persists to the state file. The Config UI stages `active_profile` as pending state like any other edit, so the switch lands atomically on Apply.
 
+Switches, boot provisioning, and model unloads run as commands on a serialized, debounced queue with per-command cancellation. `GET /admin/status` reports the queue (the active command's name, progress fraction, and start time, plus the pending commands) and one readiness entry per capability endpoint (`ready` when a loaded model serves it, `provisioning` when a command is loading its configured models). `POST /admin/queue/cancel` fires the active command's cancellation token; `POST /admin/queue/cancel-pending` drops a waiting command by index.
+
 The pre-2 layout is a hard break with no compat loader: a config carrying an `include` key, a top-level `models` allowlist, or the old `[workshop.voice]` model keys, a missing or wrong `config-version`, or a sibling `profiles/` directory fails to load with an error naming the file, key, and line, plus the replacement to use.
 
 ## The `[server]` section

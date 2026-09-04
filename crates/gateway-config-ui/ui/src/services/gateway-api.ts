@@ -11,6 +11,38 @@
 /** The sessionStorage slot holding the gateway bearer key. */
 export const API_KEY_STORAGE_KEY = "gateway-api-key";
 
+/** One capability endpoint's readiness, from `GET /admin/status`. */
+export interface EndpointStatus {
+  /** The route path, for example `/v1/chat/completions`. */
+  path: string;
+  /** The display name, for example `Chat completions`. */
+  name: string;
+  /** Whether at least one loaded model serves the endpoint. */
+  ready: boolean;
+  /** Whether a queue command is provisioning the endpoint's models. */
+  provisioning: boolean;
+}
+
+/** The command queue readout from `GET /admin/status`. */
+export interface QueueStatus {
+  /** The running command, or null when the worker is idle. */
+  active: {
+    /** The command's display name, for example `load-profile: main`. */
+    name: string;
+    /** The command's progress fraction, 0..1. */
+    fraction: number;
+    /** When the worker started the command, in Unix epoch seconds. */
+    started_at: number;
+  } | null;
+  /** The waiting commands, oldest first. */
+  pending: Array<{
+    /** The command's display name. */
+    name: string;
+    /** When the command entered the queue, in Unix epoch seconds. */
+    queued_at: number;
+  }>;
+}
+
 /** The shape of `GET /admin/status` this UI consumes. */
 export interface GatewayStatus {
   /** The active profile's name. */
@@ -19,6 +51,12 @@ export interface GatewayStatus {
   models: string[];
   /** Process-lifetime config generation, changed by a gateway restart. */
   config_generation: string;
+  /** Declared VRAM total of the active local and STT models, in GiB. */
+  vram_gb: number;
+  /** The command queue's active and pending commands. */
+  queue: QueueStatus;
+  /** One readiness entry per capability endpoint the gateway can serve. */
+  endpoints: EndpointStatus[];
 }
 
 /** The shape of `GET /admin/config-dirty`: the pending-shadow report. */
@@ -276,10 +314,12 @@ export class GatewayApi {
     return true;
   }
 
-  /** Fetches the running profile name and model list. */
+  /** Fetches the running profile name, model list, queue, and endpoints. */
   async getStatus(): Promise<GatewayStatus> {
     const raw = await this.getJson("/admin/status");
     const data = isRecord(raw) ? raw : {};
+    const queue = isRecord(data["queue"]) ? data["queue"] : {};
+    const active = isRecord(queue["active"]) ? queue["active"] : null;
     return {
       profile: typeof data["profile"] === "string" ? data["profile"] : "",
       models: Array.isArray(data["models"])
@@ -287,7 +327,68 @@ export class GatewayApi {
         : [],
       config_generation:
         typeof data["config_generation"] === "string" ? data["config_generation"] : "",
+      vram_gb: numberOrZero(data["vram_gb"]),
+      queue: {
+        active:
+          active !== null && typeof active["name"] === "string"
+            ? {
+                name: active["name"],
+                fraction: numberOrZero(active["fraction"]),
+                started_at: numberOrZero(active["started_at"]),
+              }
+            : null,
+        pending: Array.isArray(queue["pending"])
+          ? queue["pending"].flatMap((entry) =>
+              isRecord(entry) && typeof entry["name"] === "string"
+                ? [{ name: entry["name"], queued_at: numberOrZero(entry["queued_at"]) }]
+                : [],
+            )
+          : [],
+      },
+      endpoints: Array.isArray(data["endpoints"])
+        ? data["endpoints"].flatMap((entry) =>
+            isRecord(entry) &&
+            typeof entry["path"] === "string" &&
+            typeof entry["name"] === "string"
+              ? [
+                  {
+                    path: entry["path"],
+                    name: entry["name"],
+                    ready: entry["ready"] === true,
+                    provisioning: entry["provisioning"] === true,
+                  },
+                ]
+              : [],
+          )
+        : [],
     };
+  }
+
+  /**
+   * Fires the active command's cancellation token via
+   * `POST /admin/queue/cancel`. The command settles as cancelled at its
+   * next chunk or phase boundary; the next status poll reflects it.
+   */
+  async cancelActiveCommand(): Promise<void> {
+    const response = await this.send("/admin/queue/cancel", { method: "POST" });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
+  }
+
+  /**
+   * Removes the waiting command at `index` via
+   * `POST /admin/queue/cancel-pending`; its waiters settle as cancelled.
+   */
+  async cancelPendingCommand(index: number): Promise<void> {
+    const response = await this.send("/admin/queue/cancel-pending", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index }),
+    });
+    if (!response.ok) {
+      throw new GatewayHttpError(response.status, await refusalMessage(response));
+    }
   }
 
   /** Fetches the running config JSON (secrets `"***"`, provenance annotated). */

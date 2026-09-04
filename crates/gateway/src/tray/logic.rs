@@ -40,15 +40,28 @@ pub(crate) fn next_phase(poll: Poll) -> TrayPhase {
     }
 }
 
-/// The status label at the top of the menu, also used as the tooltip: the
-/// gateway state plus the models it serves, e.g. "Running - 2 models,
-/// 4.1 GB". The VRAM total is omitted when no local or STT model declares
-/// any.
-pub(crate) fn status_label(phase: TrayPhase, models: usize, vram_gb: f64) -> String {
+/// The status label at the top of the menu, also used as the tooltip.
+/// While the gateway serves, the label reads the command queue: an active
+/// command reports its name and rounded percent ("Running - load-profile:
+/// main (34%)"); an idle queue reports the loaded models, e.g. "Running -
+/// 2 models, 4.1 GB", with the VRAM total omitted when no local or STT
+/// model declares any. The icon tints stay phase-driven by the serve
+/// poll (grayed Starting, steady Running, red Error): the queue says
+/// nothing about a stopped gateway, so the phase machine keeps the icon.
+pub(crate) fn status_label(
+    phase: TrayPhase,
+    active: Option<(&str, f64)>,
+    models: usize,
+    vram_gb: f64,
+) -> String {
     match phase {
         TrayPhase::Starting => "Starting".to_owned(),
         TrayPhase::Error => "Error - serving stopped".to_owned(),
         TrayPhase::Running => {
+            if let Some((label, fraction)) = active {
+                let percent = fraction.clamp(0.0, 1.0) * 100.0;
+                return format!("Running - {label} ({percent:.0}%)");
+            }
             let models = match models {
                 1 => "1 model".to_owned(),
                 n => format!("{n} models"),
@@ -448,24 +461,81 @@ mod tests {
 
     #[test]
     fn the_status_label_follows_the_tray_idiom() {
-        assert_eq!(status_label(TrayPhase::Starting, 0, 0.0), "Starting");
+        assert_eq!(status_label(TrayPhase::Starting, None, 0, 0.0), "Starting");
         assert_eq!(
-            status_label(TrayPhase::Running, 2, 4.1),
+            status_label(TrayPhase::Running, None, 2, 4.1),
             "Running - 2 models, 4.1 GB"
         );
         assert_eq!(
-            status_label(TrayPhase::Running, 1, 1.0),
+            status_label(TrayPhase::Running, None, 1, 1.0),
             "Running - 1 model, 1.0 GB",
             "a single model is singular"
         );
         assert_eq!(
-            status_label(TrayPhase::Running, 2, 0.0),
+            status_label(TrayPhase::Running, None, 2, 0.0),
             "Running - 2 models",
             "a gateway serving only remote models declares no VRAM"
         );
         assert_eq!(
-            status_label(TrayPhase::Error, 0, 0.0),
+            status_label(TrayPhase::Running, None, 0, 0.0),
+            "Running - 0 models",
+            "an idle queue with nothing loaded says so"
+        );
+        assert_eq!(
+            status_label(TrayPhase::Error, None, 0, 0.0),
             "Error - serving stopped"
+        );
+    }
+
+    #[test]
+    fn an_active_command_drives_the_label_with_its_rounded_percent() {
+        assert_eq!(
+            status_label(
+                TrayPhase::Running,
+                Some(("load-profile: main", 0.34)),
+                0,
+                0.0
+            ),
+            "Running - load-profile: main (34%)"
+        );
+        assert_eq!(
+            status_label(
+                TrayPhase::Running,
+                Some(("provision-model: whisper-base-en", 0.996)),
+                2,
+                4.1
+            ),
+            "Running - provision-model: whisper-base-en (100%)",
+            "the command report outranks the model count, and the percent rounds"
+        );
+        assert_eq!(
+            status_label(
+                TrayPhase::Running,
+                Some(("load-profile: main", 1.7)),
+                0,
+                0.0
+            ),
+            "Running - load-profile: main (100%)",
+            "an over-1.0 fraction clamps rather than printing nonsense"
+        );
+    }
+
+    #[test]
+    fn the_starting_and_error_phases_ignore_the_queue() {
+        assert_eq!(
+            status_label(
+                TrayPhase::Starting,
+                Some(("load-profile: main", 0.5)),
+                0,
+                0.0
+            ),
+            "Starting",
+            "no poll has reported yet, so the queue readout waits"
+        );
+        assert_eq!(
+            status_label(TrayPhase::Error, Some(("load-profile: main", 0.5)), 3, 2.0),
+            "Error - serving stopped",
+            "a stopped gateway reports the error, not a stale command"
         );
     }
 

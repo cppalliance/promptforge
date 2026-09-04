@@ -240,7 +240,7 @@ impl Tray {
         let login_checked = login
             .as_ref()
             .is_some_and(|service| logic::launch_at_login(service));
-        let label = logic::status_label(TrayPhase::Starting, 0, 0.0);
+        let label = logic::status_label(TrayPhase::Starting, None, 0, 0.0);
         let spec = logic::menu_spec(
             &label,
             workshop_exe.is_some(),
@@ -387,8 +387,16 @@ fn tick(tray: &mut Tray) {
         return;
     }
     tray.phase = logic::next_phase(poll);
+    let command = handle.tray_state().commands.active_command();
     if let Some((models, vram_gb)) = handle.tray_state().tray_model_status() {
-        let label = logic::status_label(tray.phase, models, vram_gb);
+        let label = logic::status_label(
+            tray.phase,
+            command
+                .as_ref()
+                .map(|active| (active.name.as_str(), active.progress)),
+            models,
+            vram_gb,
+        );
         if label != tray.label {
             tray.status_item.set_text(&label);
             if let Some(icon) = tray.icon.as_ref()

@@ -246,7 +246,7 @@ impl Tray {
         let auth_url = crate::handoff::auth_url(handle.url(), handle.tray_key());
         let workshop_exe = probe_workshop();
         let login_checked = logic::launch_at_login(&WindowsRunKey);
-        let label = logic::status_label(TrayPhase::Starting, 0, 0.0);
+        let label = logic::status_label(TrayPhase::Starting, None, 0, 0.0);
         // The HKCU Run key is always available, so the item is always enabled.
         let spec = logic::menu_spec(&label, workshop_exe.is_some(), true, login_checked);
         let menu = BuiltMenu::from_spec(&spec)?;
@@ -522,8 +522,16 @@ fn tick(tray: &mut Tray) {
             tracing::debug!("could not update the tray icon: {error}");
         }
     }
+    let command = handle.tray_state().commands.active_command();
     if let Some((models, vram_gb)) = handle.tray_state().tray_model_status() {
-        let label = logic::status_label(phase, models, vram_gb);
+        let label = logic::status_label(
+            phase,
+            command
+                .as_ref()
+                .map(|active| (active.name.as_str(), active.progress)),
+            models,
+            vram_gb,
+        );
         if label != tray.label {
             tray.status_item.set_text(&label);
             if let Some(icon) = tray.icon.as_ref()
