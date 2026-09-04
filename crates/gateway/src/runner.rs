@@ -17,7 +17,7 @@ use std::thread::JoinHandle;
 
 use tokio::net::TcpListener;
 
-use gateway_config::{Config, ProfileName};
+use gateway_config::{Config, ProfileName, Secret};
 
 use crate::api_error::{ServeError, StartupError};
 #[cfg(feature = "local")]
@@ -336,6 +336,14 @@ mod stt_tests {
 #[derive(Debug)]
 pub struct GatewayHandle {
     url: String,
+    /// The process-lifetime bearer key, captured at bind for the tray's
+    /// `/auth` browser-handoff URL. `[server]` edits are restart-required,
+    /// so the key cannot change under a running process. Held as a
+    /// `Secret` so the derived `Debug` redacts it.
+    api_key: Secret,
+    /// A clone of the assembled state (all `Arc`s), so the tray's timer
+    /// reads model status in-process instead of polling over HTTP.
+    state: AppState,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<Result<(), StartupError>>>,
 }
@@ -346,6 +354,28 @@ impl GatewayHandle {
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The bearer key the tray needs for its browser-handoff URL.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn tray_key(&self) -> &str {
+        self.api_key.expose()
+    }
+
+    /// The assembled state, for the tray's in-process status reads.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn tray_state(&self) -> &AppState {
+        &self.state
+    }
+
+    /// Whether the gateway thread is still serving. A finished thread means
+    /// serving ended - requested (`POST /shutdown` fires the shared signal)
+    /// or failed; the tray tells the two apart through the signal.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn is_serving(&self) -> bool {
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
     }
 
     /// Signals graceful shutdown and waits for the gateway thread to finish.
@@ -392,10 +422,12 @@ impl Drop for GatewayHandle {
 }
 
 /// What the gateway thread reports through the readiness channel: the
-/// bound gateway URL.
+/// bound gateway URL, the bearer key, and a clone of the assembled state.
 #[derive(Debug)]
 struct Ready {
     url: String,
+    api_key: Secret,
+    state: AppState,
 }
 
 /// Spawns the gateway on a dedicated thread and blocks until the listener
@@ -435,6 +467,8 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
     match ready_rx.recv() {
         Ok(Ok(ready)) => Ok(GatewayHandle {
             url: ready.url,
+            api_key: ready.api_key,
+            state: ready.state,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         }),
@@ -549,6 +583,8 @@ fn serve_thread(
     tracing::info!("gateway serving on {address}");
     let _ = ready.send(Ok(Ready {
         url: format!("http://{address}"),
+        api_key: config.server_key(),
+        state: gateway.state.clone(),
     }));
     runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
@@ -632,7 +668,17 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
 /// serving fails; classify with [`StartupError::kind`].
 pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
-    let mut handle = spawn(options)?;
+    run_headless(spawn(options)?)
+}
+
+/// The headless main loop: Ctrl-C signals the gateway's graceful shutdown
+/// and this call blocks until serving ends. Shared by [`run`] and the
+/// tray's fallback when the system tray cannot start.
+///
+/// # Errors
+/// Returns [`StartupError`] when serving fails or the gateway thread
+/// panicked.
+pub(crate) fn run_headless(mut handle: GatewayHandle) -> Result<(), StartupError> {
     if let Some(shutdown) = handle.shutdown.take() {
         install_ctrl_c_handler(shutdown);
     }

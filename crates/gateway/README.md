@@ -24,6 +24,10 @@ Configure endpoints, models, and credentials in the TOML catalog. The gateway ac
 
 Embedding hosts use the library API instead of the binary: `spawn` starts the gateway on a dedicated thread with its own runtime and blocks until the listener is bound, returning a `GatewayHandle` that carries the bound URL and a graceful-shutdown switch (`url()`, `shutdown()`, `join()`).
 
+## System tray
+
+On Windows the binary's default main loop is the system tray: a hidden-window win32 message loop owns the main thread while serving stays on the gateway thread. The menu carries a disabled status line on top (gateway state plus served models and declared VRAM, refreshed on a timer from in-process state), then **Workshop** (launches `promptforge-workshop.exe` when the installer laid it beside the gateway; disabled on a Gateway-only install), **Settings** (opens the config SPA in the browser through the one-time `/auth?key=` handoff, as does double-clicking the icon), **Launch at Login** (a check item whose state is the HKCU Run key entry `PromptForgeGateway`, never local config), and **Quit** last, which fires the in-process shutdown signal directly. `--no-tray` keeps the headless Ctrl-C loop for servers and CI; the autostart entry's `"<exe>" --login` command line marks login launches, which never open a browser. macOS and Linux backends are planned; until they land, other platforms fall back to the headless loop with a warning.
+
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
 ## Profiles

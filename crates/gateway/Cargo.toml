@@ -70,12 +70,19 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 # First-run STT gating reads the installer's registry choice (src/boot.rs):
-# RegOpenKeyExW + RegQueryValueExW.
+# RegOpenKeyExW + RegQueryValueExW. The tray backend (src/tray/) adds the
+# Run-key write shim and the hidden-window message loop.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
+    "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+# The tray icon and its menu (muda via the tray_icon::menu re-export).
+tray-icon.workspace = true
+# The tray's Settings item and double-click open the /auth browser handoff.
+open.workspace = true
 
 [features]
 default = ["local", "web-search", "config-ui", "stt"]

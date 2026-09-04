@@ -91,6 +91,7 @@ mod shutdown;
 mod system;
 #[cfg(test)]
 mod test_support;
+mod tray;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
 // these re-exports keep every `crate::wire::*` and `crate::upstream::*`
@@ -106,6 +107,7 @@ pub(crate) use gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};
+pub use crate::tray::run_with_tray;
 pub use gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
 };
@@ -302,6 +304,32 @@ impl AppState {
     async fn begin_inference(&self) -> drain::InFlightGuard {
         let _switch = self.switch.lock().await;
         self.in_flight.register()
+    }
+
+    /// A point-in-time readout for the tray's status line: the number of
+    /// models in the live routing table and the declared VRAM total of the
+    /// active local and STT models.
+    ///
+    /// Returns `None` when a profile switch holds the live-state write
+    /// lock: the tray's timer skips that tick rather than blocking the
+    /// message loop.
+    #[cfg(any(target_os = "windows", test))]
+    pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
+        let live = self.live.try_read().ok()?;
+        let models = live.routing.models().len();
+        let vram_gb = live
+            .config
+            .local_models()
+            .iter()
+            .filter_map(gateway_config::LocalModelConfig::vram_gb)
+            .sum::<f64>()
+            + live
+                .config
+                .stt_models()
+                .iter()
+                .map(gateway_config::SttModelConfig::vram_gb)
+                .sum::<f64>();
+        Some((models, vram_gb))
     }
 }
 
@@ -1614,6 +1642,37 @@ mod transcription_auth_tests {
             .expect("body reads");
         let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
         assert_eq!(json["error"]["code"], "model_not_found");
+    }
+}
+
+#[cfg(test)]
+mod tray_status_tests {
+    use gateway_config::Config;
+
+    use crate::test_support::app_state;
+
+    #[test]
+    #[expect(
+        clippy::float_cmp,
+        reason = "3.5 + 1.0 is exact in binary floating point"
+    )]
+    fn the_tray_status_counts_routed_models_and_sums_declared_vram() {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"fake\"]\n\
+             [[model]]\nname = \"beta\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"fake\"]\n\
+             [[local_model]]\nname = \"gamma\"\ndescription = \"g\"\nsource = \"/models/gamma.gguf\"\ncontext = 4096\nvram_gb = 3.5\n\
+             [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = \"/speech.bin\"\nvram_gb = 1.0\n",
+        )
+        .expect("config parses");
+        let state = app_state(config, None);
+        let (models, vram_gb) = state
+            .tray_model_status()
+            .expect("an uncontended state reads");
+        assert_eq!(models, 2, "the harness routes the remote catalog");
+        assert_eq!(vram_gb, 4.5, "local and STT declarations sum");
     }
 }
 

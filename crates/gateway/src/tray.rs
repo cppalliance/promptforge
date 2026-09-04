@@ -1,0 +1,51 @@
+//! The system tray: the gateway's only on-screen presence.
+//!
+//! The gateway has no window - its config SPA is its face - so on an
+//! installed system the tray icon is the daemon's UI. The tray owns the
+//! main thread through a per-OS backend ([`windows`] today; macOS and
+//! Linux slot in behind the same entry point in their own steps), while
+//! the tokio runtime and serving stay on the gateway thread spawned by
+//! [`crate::spawn`]. The platform-independent rules - the menu layout, the
+//! status label, the icon phase machine, the launch-at-login entry - live
+//! in [`logic`] so the idiom cannot drift between platforms.
+//!
+//! [`run_with_tray`] is the binary's default main loop; `--no-tray` keeps
+//! the headless Ctrl-C loop ([`crate::run`]) for servers and CI.
+
+use crate::api_error::StartupError;
+use crate::runner::ServeOptions;
+
+// Compiled for every backend platform and for tests everywhere: the rules
+// are pure logic, and the test suite exercises them on headless CI.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod logic;
+#[cfg(target_os = "windows")]
+#[expect(
+    unsafe_code,
+    reason = "the hidden-window message loop is raw Win32 with no safe wrapper"
+)]
+mod windows;
+
+/// Runs the gateway with the system tray owning the main thread.
+///
+/// On Windows the tray's hidden-window message loop is the main loop and
+/// serving stays on the gateway thread. On platforms without a backend
+/// yet, this falls back to the headless Ctrl-C loop with a warning.
+///
+/// # Errors
+/// Returns [`StartupError`] when config loading, provisioning, binding, or
+/// serving fails; classify with [`StartupError::kind`].
+pub fn run_with_tray(options: &ServeOptions) -> Result<(), StartupError> {
+    run_inner(options)
+}
+
+#[cfg(target_os = "windows")]
+fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+    windows::run(options)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+    tracing::warn!("the system tray has no backend on this platform yet; running headless");
+    crate::run(options)
+}

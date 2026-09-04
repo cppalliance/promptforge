@@ -9,6 +9,7 @@
 //! response always reaches the caller ahead of the shutdown it asked for.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -26,12 +27,23 @@ use crate::error::GatewayError;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ShutdownSignal {
     notify: Arc<tokio::sync::Notify>,
+    /// Set by `fire` before the notify, so a synchronous reader (the
+    /// tray's status tick) can tell a requested shutdown apart from a
+    /// serve-loop failure without consuming the permit.
+    fired: Arc<AtomicBool>,
 }
 
 impl ShutdownSignal {
     /// Fires the signal, starting the serve loop's graceful shutdown.
     pub(crate) fn fire(&self) {
+        self.fired.store(true, Ordering::Release);
         self.notify.notify_one();
+    }
+
+    /// Whether the signal has been fired.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn is_fired(&self) -> bool {
+        self.fired.load(Ordering::Acquire)
     }
 
     /// Resolves once the signal has fired.
@@ -97,6 +109,18 @@ mod tests {
             .oneshot(request)
             .await
             .expect("the router is infallible")
+    }
+
+    /// The tray's status tick reads `is_fired` synchronously to tell a
+    /// requested shutdown apart from a serve-loop failure; the method is
+    /// Windows-gated like its only caller.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn fire_sets_the_synchronous_peek() {
+        let signal = super::ShutdownSignal::default();
+        assert!(!signal.is_fired(), "a fresh signal reads unfired");
+        signal.fire();
+        assert!(signal.is_fired(), "fire sets the peek before any wait");
     }
 
     #[tokio::test]

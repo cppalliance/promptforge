@@ -1,23 +1,27 @@
 //! The `promptforge-gateway` binary:
-//! `promptforge-gateway serve [config.toml] [--profile NAME]`.
+//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
-//! hands off to [`run`], which owns the tokio runtime, provisioning, and
-//! serving. With no config path from either source, the gateway runs boot
-//! discovery and, on first run, generates a default config.
+//! hands off to [`run_with_tray`], which owns the tokio runtime, provisioning,
+//! and serving while the system tray occupies the main thread. `--no-tray`
+//! keeps the headless Ctrl-C loop ([`run`]) for servers and CI. With no config
+//! path from either source, the gateway runs boot discovery and, on first run,
+//! generates a default config.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use gateway::{ProfileName, ServeOptions, run};
+use gateway::{ProfileName, ServeOptions, run, run_with_tray};
 
 const USAGE: &str = concat!(
-    "usage: promptforge-gateway serve [config.toml] [--profile NAME]\n",
+    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login]\n",
     "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
-    "and the profile's .promptforge directory, generating a default config on first run",
+    "and the profile's .promptforge directory, generating a default config on first run\n",
+    "--no-tray  run headless (Ctrl-C driven); for servers and CI\n",
+    "--login    the launch came from the OS autostart entry; never opens a browser",
 );
 
 fn main() -> ExitCode {
@@ -28,8 +32,8 @@ fn main() -> ExitCode {
         )
         .init();
 
-    let options = match parse_args(std::env::args_os()) {
-        Ok(options) => options,
+    let invocation = match parse_args(std::env::args_os()) {
+        Ok(invocation) => invocation,
         Err(ParseError::Help) => {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -45,7 +49,18 @@ fn main() -> ExitCode {
         }
     };
 
-    match run(&options) {
+    if invocation.login {
+        // A login-triggered start never opens a browser or window; no
+        // launch path opens one today, so the flag is a marker only.
+        tracing::debug!("launched by the OS autostart entry");
+    }
+
+    let result = if invocation.tray {
+        run_with_tray(&invocation.serve)
+    } else {
+        run(&invocation.serve)
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             print_error_chain(&error);
@@ -75,14 +90,26 @@ enum ParseError {
     Usage(String),
 }
 
-/// Parse `serve` arguments into typed [`ServeOptions`].
+/// The parsed invocation: the serve options plus how the main thread runs.
+#[derive(Debug)]
+struct Invocation {
+    /// What to serve.
+    serve: ServeOptions,
+    /// Whether the system tray occupies the main thread (default).
+    /// `--no-tray` keeps the headless Ctrl-C loop for servers and CI.
+    tray: bool,
+    /// Whether the launch came from the OS autostart entry (`--login`).
+    login: bool,
+}
+
+/// Parse `serve` arguments into a typed [`Invocation`].
 ///
 /// Uses `OsString` operands so non-UTF-8 config paths survive. The config
 /// path (the one optional positional, falling back to
 /// `PROMPTFORGE_GATEWAY_CONFIG`) stays optional: with neither set, the
 /// gateway discovers or generates the boot config itself. `--profile NAME`
 /// is validated into a [`ProfileName`] at parse time.
-fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, ParseError> {
+fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, ParseError> {
     let mut args = args.into_iter();
     let _binary = args.next();
 
@@ -100,6 +127,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
 
     let mut profile: Option<ProfileName> = None;
     let mut config_path: Option<PathBuf> = None;
+    let mut tray = true;
+    let mut login = false;
 
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -114,6 +143,8 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
                     .map_err(|error| ParseError::Usage(format!("invalid profile name: {error}")))?;
                 profile = Some(name);
             }
+            Some("--no-tray") => tray = false,
+            Some("--login") => login = true,
             Some("-h" | "--help") => return Err(ParseError::Help),
             Some(other) if other.starts_with('-') => {
                 return Err(ParseError::Usage(format!("unknown flag {other}")));
@@ -133,7 +164,11 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
     let config_path =
         resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
 
-    Ok(ServeOptions::new(config_path, profile))
+    Ok(Invocation {
+        serve: ServeOptions::new(config_path, profile),
+        tray,
+        login,
+    })
 }
 
 /// Resolves the config path: the CLI positional wins, then the
@@ -181,19 +216,45 @@ mod tests {
 
     #[test]
     fn parses_path_and_profile() {
-        let options =
+        let invocation =
             parse_args(args(&["serve", "gateway.toml", "--profile", "dev"])).expect("parse");
         assert_eq!(
-            options.profile.as_ref().map(ProfileName::as_str),
+            invocation.serve.profile.as_ref().map(ProfileName::as_str),
             Some("dev")
         );
-        assert_eq!(options.config_path, Some(PathBuf::from("gateway.toml")));
+        assert_eq!(
+            invocation.serve.config_path,
+            Some(PathBuf::from("gateway.toml"))
+        );
+    }
+
+    #[test]
+    fn the_tray_is_default_and_login_is_off() {
+        let invocation = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        assert!(invocation.tray, "the tray is the default main loop");
+        assert!(!invocation.login);
+    }
+
+    #[test]
+    fn no_tray_selects_the_headless_loop() {
+        let invocation = parse_args(args(&["serve", "--no-tray"])).expect("parse");
+        assert!(!invocation.tray);
+        assert!(!invocation.login);
+    }
+
+    #[test]
+    fn the_autostart_command_line_parses() {
+        // The Run-key entry is `"<exe>" --login`; a login launch must never
+        // fail on its own flag.
+        let invocation = parse_args(args(&["serve", "--login"])).expect("parse");
+        assert!(invocation.login);
+        assert!(invocation.tray, "a login launch still shows the tray");
     }
 
     #[test]
     fn missing_profile_defers_to_environment_or_state() {
-        let options = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
-        assert!(options.profile.is_none());
+        let invocation = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        assert!(invocation.serve.profile.is_none());
     }
 
     #[test]
