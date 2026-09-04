@@ -122,3 +122,5 @@
 - [2026-09-03-3-gateway-sidecar-decomposition] shared-crate seam: Cross-product crates should each encode one dependency-light contract instead of growing a common junk drawer.
 - [2026-09-04-1-async-boot-and-progress] superseding desired state: Repeated profile commands coalesce by target; a newer target cancels stale active work and alone may publish.
 - [2026-09-04-1-async-boot-and-progress] progress surface split: Structured state drives visual progress while terminal output remains ordinary tracing lines.
+- [2026-09-04-2-apply-as-queue-command] asymmetric command ordering: A broader Apply supersedes stale profile loading, while a later profile load waits behind Apply instead of discarding pending configuration.
+- [2026-09-04-2-apply-as-queue-command] ambient loopback trust: Keyless admin access needs verified loopback peer identity plus browser fetch-metadata checks; explicit bad credentials still fail closed.
