@@ -201,14 +201,28 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
 }
 
 /// Resolves the config path: the CLI positional wins, then the
-/// `PROMPTFORGE_GATEWAY_CONFIG` environment variable. `None` when neither
-/// is set, deferring to the gateway's boot discovery and first-run
-/// generation.
+/// `PROMPTFORGE_GATEWAY_CONFIG` environment variable - but only when it
+/// names an existing file. A stale env var warns and falls through to boot
+/// discovery: ambient state rots in ways a typed CLI path does not, and a
+/// forgotten variable must not hard-fail a first-run boot. A CLI
+/// positional is deliberate, so a missing file there stays an error
+/// downstream.
 ///
-/// Pure, so tests pass both sources explicitly and never touch the process
-/// environment (edition 2024 makes `set_var` unsafe).
+/// Tests pass both sources explicitly and never touch the process
+/// environment (edition 2024 makes `set_var` unsafe); the existence check
+/// touches only the paths the test itself creates.
 fn resolve_config_path(cli: Option<PathBuf>, env: Option<OsString>) -> Option<PathBuf> {
-    cli.or_else(|| env.map(PathBuf::from))
+    cli.or_else(|| {
+        let path = PathBuf::from(env?);
+        if path.is_file() {
+            return Some(path);
+        }
+        tracing::warn!(
+            path = %path.display(),
+            "PROMPTFORGE_GATEWAY_CONFIG names no file; falling back to discovery"
+        );
+        None
+    })
 }
 
 #[cfg(test)]
@@ -233,8 +247,19 @@ mod tests {
 
     #[test]
     fn env_path_is_the_fallback() {
-        let path = resolve_config_path(None, Some(OsString::from("env.toml")));
-        assert_eq!(path, Some(PathBuf::from("env.toml")));
+        let file = tempfile::NamedTempFile::new().expect("temp config");
+        let path = resolve_config_path(None, Some(file.path().as_os_str().to_os_string()));
+        assert_eq!(path, Some(file.path().to_path_buf()));
+    }
+
+    #[test]
+    fn a_stale_env_path_falls_back_to_discovery() {
+        let missing = PathBuf::from("definitely-not-here-env.toml");
+        let path = resolve_config_path(None, Some(missing.into_os_string()));
+        assert_eq!(
+            path, None,
+            "a stale env var warns and defers to boot discovery"
+        );
     }
 
     #[test]
