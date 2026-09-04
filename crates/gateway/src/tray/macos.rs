@@ -234,7 +234,7 @@ impl Tray {
         let app = NSApplication::sharedApplication(mtm);
         let glyph = logic::macos::template_glyph(BRAND_RGBA);
         let glyph = Icon::from_rgba(glyph, ICON_SIZE, ICON_SIZE).map_err(TrayError::Icon)?;
-        let auth_url = logic::auth_url(handle.url(), handle.tray_key());
+        let auth_url = crate::handoff::auth_url(handle.url(), handle.tray_key());
         let workshop_exe = probe_workshop();
         let login = LoginService::new();
         let login_checked = login
@@ -508,7 +508,7 @@ fn toggle_login(tray: &mut Tray) {
             return;
         }
     };
-    match logic::set_launch_at_login(store, &exe, enable) {
+    match logic::set_launch_at_login(store, &logic::run_key_command(&exe), enable) {
         Ok(enabled) => login_item.set_checked(enabled),
         Err(error) => {
             tracing::warn!("could not update the login registration: {error}");

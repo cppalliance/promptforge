@@ -243,7 +243,7 @@ impl Tray {
     /// gateway handle is only read, so a failure can hand it back.
     fn build(handle: &GatewayHandle) -> Result<Tray, TrayError> {
         let icons = PhaseIcons::load()?;
-        let auth_url = logic::auth_url(handle.url(), handle.tray_key());
+        let auth_url = crate::handoff::auth_url(handle.url(), handle.tray_key());
         let workshop_exe = probe_workshop();
         let login_checked = logic::launch_at_login(&WindowsRunKey);
         let label = logic::status_label(TrayPhase::Starting, 0, 0.0);
@@ -623,7 +623,7 @@ fn toggle_login(tray: &mut Tray) {
             return;
         }
     };
-    match logic::set_launch_at_login(&mut store, &exe, enable) {
+    match logic::set_launch_at_login(&mut store, &logic::run_key_command(&exe), enable) {
         Ok(enabled) => tray.login_item.set_checked(enabled),
         Err(error) => {
             tracing::warn!("could not update the login entry: {error}");

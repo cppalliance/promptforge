@@ -40,6 +40,18 @@ use crate::error::GatewayError;
 /// The cookie carrying the session proof for browser sessions.
 pub(crate) const AUTH_COOKIE: &str = "promptforge-gateway-session";
 
+/// The one-time browser handoff URL for opening the config SPA:
+/// `GET /auth` validates the key, sets the session cookie, and redirects to
+/// the key-free `/config/`, so the key never sits in browser history. The
+/// tray's Settings item, the relaunch handoff, and `--print-url` all build
+/// their URL here. The key is percent-encoded: a generated key is hex and
+/// passes through unchanged, but a configured key can carry query-special
+/// characters (`/auth` decodes through serde_urlencoded).
+pub(crate) fn auth_url(base_url: &str, key: &str) -> String {
+    let key: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
+    format!("{base_url}/auth?key={key}")
+}
+
 /// The `Sec-Fetch-Site` header name; the locked `http` crate carries no
 /// constant for it.
 const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
@@ -298,9 +310,30 @@ mod cookie_tests {
     use axum::http::header::{AUTHORIZATION, COOKIE};
     use gateway_config::Config;
 
-    use super::{AUTH_COOKIE, SEC_FETCH_SITE, hex_decode, presented_cookie_proof, session_token};
+    use super::{
+        AUTH_COOKIE, SEC_FETCH_SITE, auth_url, hex_decode, presented_cookie_proof, session_token,
+    };
     use crate::AppState;
     use crate::test_support::app_state;
+
+    #[test]
+    fn the_auth_url_targets_the_one_time_handoff() {
+        assert_eq!(
+            auth_url("http://127.0.0.1:8081", "abc123"),
+            "http://127.0.0.1:8081/auth?key=abc123"
+        );
+    }
+
+    #[test]
+    fn the_auth_url_percent_encodes_a_configured_key() {
+        // The WHATWG urlencoded byte serializer encodes space as `+`;
+        // serde_urlencoded decodes it back.
+        assert_eq!(
+            auth_url("http://127.0.0.1:8081", "a&b=c d"),
+            "http://127.0.0.1:8081/auth?key=a%26b%3Dc+d",
+            "a configured key with query-special characters survives the handoff"
+        );
+    }
 
     /// Hex-encodes as the route's `hex_encode` does; that encoder is
     /// compiled only with the config surface, while these cookie-auth

@@ -135,17 +135,6 @@ pub(crate) fn workshop_sibling(gateway_exe: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-/// The one-time browser handoff URL for the Settings item and the
-/// double-click: `GET /auth` validates the key, sets the session cookie,
-/// and redirects to the key-free `/config/`, so the key never sits in
-/// browser history. The key is percent-encoded: a generated key is hex
-/// and passes through unchanged, but a configured key can carry
-/// query-special characters (`/auth` decodes through serde_urlencoded).
-pub(crate) fn auth_url(base_url: &str, key: &str) -> String {
-    let key: String = url::form_urlencoded::byte_serialize(key.as_bytes()).collect();
-    format!("{base_url}/auth?key={key}")
-}
-
 /// The OS's launch-at-login store, behind a seam so the toggle logic is
 /// testable without touching the registry. The Windows implementation
 /// reads and writes the HKCU Run key through `crate::boot::registry`.
@@ -173,24 +162,31 @@ pub(crate) fn launch_at_login(store: &dyn RunKeyStore) -> bool {
 
 /// The login command line for the gateway executable: the quoted path
 /// (install paths contain spaces) plus `--login`, so a login-triggered
-/// start never opens a browser.
+/// start never opens a browser. This is the Windows Run-key shape, whose
+/// parser has no escape layer; the desktop-entry Exec shape is
+/// `linux::exec_command`. Gated on its callers: the Windows and macOS
+/// backends (macOS's store ignores the command but the call sites share
+/// `set_launch_at_login`), plus the tests.
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub(crate) fn run_key_command(exe: &Path) -> String {
     format!("\"{}\" --login", exe.display())
 }
 
 /// Sets or clears the OS autostart entry, returning the state now in
-/// effect.
+/// effect. The command is the caller's platform-shaped login command
+/// (`run_key_command` on Windows, `linux::exec_command` on Linux);
+/// macOS's store ignores it.
 ///
 /// # Errors
 /// Returns the OS error when the entry cannot be written or deleted; the
 /// reported state is then unchanged.
 pub(crate) fn set_launch_at_login(
     store: &mut dyn RunKeyStore,
-    exe: &Path,
+    command: &str,
     enable: bool,
 ) -> std::io::Result<bool> {
     if enable {
-        store.write(&run_key_command(exe))?;
+        store.write(command)?;
         Ok(true)
     } else {
         store.delete()?;
@@ -297,6 +293,109 @@ pub(crate) mod macos {
         );
         rgba.chunks_exact(4)
             .flat_map(|px| [0, 0, 0, px[3]])
+            .collect()
+    }
+}
+
+/// The Linux backend's pure rules: the watcher bus name, the XDG autostart
+/// entry's path and contents, the first-run notification, and the icon
+/// pixel conversion. Compiled for Linux and for tests everywhere, so CI
+/// exercises them without a session bus.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod linux {
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
+    /// The StatusNotifierWatcher's well-known bus name. Its owner on the
+    /// session bus is what makes a tray visible; stock GNOME runs no
+    /// watcher without the AppIndicator extension.
+    pub(crate) const WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
+
+    /// The freedesktop notification service's well-known bus name.
+    pub(crate) const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
+
+    /// The notification service's object path.
+    pub(crate) const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+
+    /// The autostart entry's file name inside the XDG autostart directory.
+    const AUTOSTART_FILE_NAME: &str = "promptforge-gateway.desktop";
+
+    /// The autostart entry's path: `$XDG_CONFIG_HOME/autostart/<name>`,
+    /// defaulting to `~/.config/autostart/<name>`. An empty or relative
+    /// `XDG_CONFIG_HOME` is ignored, per the basedir spec. The spec's
+    /// "absolute" is Linux path semantics, a leading `/`; checked as such
+    /// (`Path::is_absolute` would ask the host OS, which under a Windows
+    /// test host rejects a drive-less path).
+    pub(crate) fn autostart_path(xdg_config_home: Option<&OsStr>, home: &Path) -> PathBuf {
+        let config = xdg_config_home
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.starts_with("/"))
+            .unwrap_or_else(|| home.join(".config"));
+        config.join("autostart").join(AUTOSTART_FILE_NAME)
+    }
+
+    /// The Exec line's command: the exe path double-quoted with the
+    /// desktop-entry spec's reserved characters (`"`, `` ` ``, `$`, `\`)
+    /// backslash-escaped, plus `--login`. The shared `run_key_command`
+    /// quotes for the Windows Run key, whose parser has no escape layer;
+    /// the desktop-entry parser does, so an install path containing a
+    /// reserved character would misparse without the escaping.
+    pub(crate) fn exec_command(exe: &Path) -> String {
+        let raw = exe.to_string_lossy();
+        let mut quoted = String::with_capacity(raw.len() + 3);
+        quoted.push('"');
+        for ch in raw.chars() {
+            if matches!(ch, '"' | '`' | '$' | '\\') {
+                quoted.push('\\');
+            }
+            quoted.push(ch);
+        }
+        quoted.push('"');
+        format!("{quoted} --login")
+    }
+
+    /// The autostart entry's contents: `Terminal=false` (a daemon, not a
+    /// terminal program), and the Exec line is the login command - the
+    /// quoted exe plus `--login`, so a login-triggered start never
+    /// opens a browser. The app-grid launcher is packaging's file; this
+    /// writer serves the autostart toggle.
+    pub(crate) fn desktop_entry(exec_command: &str) -> String {
+        format!(
+            "[Desktop Entry]\n\
+             Type=Application\n\
+             Name=PromptForge Gateway\n\
+             Comment=PromptForge inference gateway\n\
+             Exec={exec_command}\n\
+             Terminal=false\n"
+        )
+    }
+
+    /// The first-run notification's sentinel: written after the no-watcher
+    /// notification is posted, so the once-per-install message never
+    /// repeats. Lives beside the profile config, not in the run directory -
+    /// it records user-facing state, not a runtime fact.
+    pub(crate) fn notification_marker(home: &Path) -> PathBuf {
+        home.join(".promptforge").join("tray-notification-sent")
+    }
+
+    /// The no-watcher notification's body, naming the Settings handoff URL
+    /// so a tray-less desktop user still has a path to the config SPA.
+    pub(crate) fn notification_body(settings_url: &str) -> String {
+        format!(
+            "This desktop shows no system tray, so no tray icon appears. \
+             The gateway is still running; its Settings page is {settings_url}"
+        )
+    }
+
+    /// RGBA to ksni's ARGB32: the alpha byte leads each pixel.
+    pub(crate) fn to_argb(rgba: &[u8]) -> Vec<u8> {
+        debug_assert!(
+            rgba.len().is_multiple_of(4),
+            "an RGBA buffer is whole pixels"
+        );
+        rgba.chunks_exact(4)
+            .flat_map(|px| [px[3], px[0], px[1], px[2]])
             .collect()
     }
 }
@@ -449,25 +548,6 @@ mod tests {
         assert_eq!(workshop_sibling(&gateway), None);
     }
 
-    #[test]
-    fn the_auth_url_targets_the_one_time_handoff() {
-        assert_eq!(
-            auth_url("http://127.0.0.1:8081", "abc123"),
-            "http://127.0.0.1:8081/auth?key=abc123"
-        );
-    }
-
-    #[test]
-    fn the_auth_url_percent_encodes_a_configured_key() {
-        // The WHATWG urlencoded byte serializer encodes space as `+`;
-        // serde_urlencoded decodes it back.
-        assert_eq!(
-            auth_url("http://127.0.0.1:8081", "a&b=c d"),
-            "http://127.0.0.1:8081/auth?key=a%26b%3Dc+d",
-            "a configured key with query-special characters survives the handoff"
-        );
-    }
-
     /// An in-memory `RunKeyStore` double.
     #[derive(Default)]
     struct FakeStore {
@@ -509,7 +589,8 @@ mod tests {
         let mut store = FakeStore::default();
         let exe = Path::new("C:\\PromptForge\\promptforge-gateway.exe");
 
-        let enabled = set_launch_at_login(&mut store, exe, true).expect("write succeeds");
+        let enabled =
+            set_launch_at_login(&mut store, &run_key_command(exe), true).expect("write succeeds");
         assert!(enabled);
         assert_eq!(
             store.value.as_deref(),
@@ -517,7 +598,8 @@ mod tests {
         );
         assert!(launch_at_login(&store), "the state reads from the store");
 
-        let enabled = set_launch_at_login(&mut store, exe, false).expect("delete succeeds");
+        let enabled =
+            set_launch_at_login(&mut store, &run_key_command(exe), false).expect("delete succeeds");
         assert!(!enabled);
         assert!(!launch_at_login(&store));
     }
@@ -529,7 +611,8 @@ mod tests {
             fail_writes: true,
         };
         let exe = Path::new("C:\\PromptForge\\promptforge-gateway.exe");
-        let error = set_launch_at_login(&mut store, exe, true).expect_err("the failure propagates");
+        let error = set_launch_at_login(&mut store, &run_key_command(exe), true)
+            .expect_err("the failure propagates");
         assert_eq!(error.to_string(), "access denied");
         assert!(
             !launch_at_login(&store),
@@ -665,6 +748,99 @@ mod tests {
             let rgba = [200u8, 100, 50, 255, 1, 2, 3, 64];
             let glyph = template_glyph(&rgba);
             assert_eq!(glyph, [0, 0, 0, 255, 0, 0, 0, 64]);
+        }
+    }
+
+    mod linux {
+        use super::super::linux::*;
+        use std::ffi::OsStr;
+        use std::path::{Path, PathBuf};
+
+        #[test]
+        fn the_watcher_and_notification_names_are_the_freedesktop_names() {
+            // A typo here silently strands the tray on every desktop.
+            assert_eq!(WATCHER_NAME, "org.kde.StatusNotifierWatcher");
+            assert_eq!(NOTIFICATIONS_NAME, "org.freedesktop.Notifications");
+            assert_eq!(NOTIFICATIONS_PATH, "/org/freedesktop/Notifications");
+        }
+
+        #[test]
+        fn the_autostart_path_honors_xdg_config_home() {
+            let home = Path::new("/home/user");
+            let xdg = OsStr::new("/xdg/config");
+            assert_eq!(
+                autostart_path(Some(xdg), home),
+                PathBuf::from("/xdg/config/autostart/promptforge-gateway.desktop")
+            );
+        }
+
+        #[test]
+        fn the_autostart_path_defaults_to_home_config() {
+            let home = Path::new("/home/user");
+            let expected =
+                PathBuf::from("/home/user/.config/autostart/promptforge-gateway.desktop");
+            assert_eq!(autostart_path(None, home), expected);
+            assert_eq!(
+                autostart_path(Some(OsStr::new("")), home),
+                expected,
+                "an empty XDG_CONFIG_HOME is ignored, per the basedir spec"
+            );
+            assert_eq!(
+                autostart_path(Some(OsStr::new("relative/dir")), home),
+                expected,
+                "a relative XDG_CONFIG_HOME is invalid and ignored"
+            );
+        }
+
+        #[test]
+        fn the_exec_command_quotes_spaces_and_escapes_reserved_characters() {
+            assert_eq!(
+                exec_command(Path::new("/opt/Prompt Forge/promptforge-gateway")),
+                "\"/opt/Prompt Forge/promptforge-gateway\" --login"
+            );
+            assert_eq!(
+                exec_command(Path::new("/opt/weird$`\\\"dir/promptforge-gateway")),
+                "\"/opt/weird\\$\\`\\\\\\\"dir/promptforge-gateway\" --login",
+                "the desktop-entry parser's reserved characters are backslash-escaped"
+            );
+        }
+
+        #[test]
+        fn the_desktop_entry_is_a_daemon_autostart_file() {
+            let entry = desktop_entry("\"/opt/Prompt Forge/promptforge-gateway\" --login");
+            assert_eq!(
+                entry,
+                "[Desktop Entry]\n\
+                 Type=Application\n\
+                 Name=PromptForge Gateway\n\
+                 Comment=PromptForge inference gateway\n\
+                 Exec=\"/opt/Prompt Forge/promptforge-gateway\" --login\n\
+                 Terminal=false\n",
+                "the Exec line carries the quoted exe and --login; Terminal=false"
+            );
+        }
+
+        #[test]
+        fn the_notification_marker_lives_beside_the_profile_config() {
+            assert_eq!(
+                notification_marker(Path::new("/home/user")),
+                PathBuf::from("/home/user/.promptforge/tray-notification-sent")
+            );
+        }
+
+        #[test]
+        fn the_notification_body_names_the_settings_url() {
+            let body = notification_body("http://127.0.0.1:8081/auth?key=abc123");
+            assert!(
+                body.contains("http://127.0.0.1:8081/auth?key=abc123"),
+                "the body hands the tray-less user the Settings URL: {body}"
+            );
+        }
+
+        #[test]
+        fn the_argb_conversion_leads_with_alpha() {
+            let rgba = [1u8, 2, 3, 4, 5, 6, 7, 8];
+            assert_eq!(to_argb(&rgba), [4, 1, 2, 3, 8, 5, 6, 7]);
         }
     }
 }

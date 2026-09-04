@@ -57,6 +57,9 @@ sha2.workspace = true
 # Host CPU/RAM/disk metrics for GET /admin/system.
 sysinfo.workspace = true
 subtle.workspace = true
+# Opens the Settings handoff URL in the system browser: the tray's Settings
+# item on every tray platform, and the relaunch handoff on every platform.
+open.workspace = true
 # JSON-to-TOML conversion for the shadow-write admin routes; already in the
 # tree via gateway-config.
 toml.workspace = true
@@ -80,12 +83,18 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
-# The tray icon and its menu (muda via the tray_icon::menu re-export), and
-# the /auth browser handoff behind the Settings item, on the platforms with
-# a tray backend.
+# The tray icon and its menu (muda via the tray_icon::menu re-export) on the
+# tray-icon platforms.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 tray-icon.workspace = true
-open.workspace = true
+
+# The Linux tray backend (src/tray/linux.rs): a pure StatusNotifierItem over
+# the session D-Bus via ksni - no GTK, no libappindicator - plus the small
+# zbus probes for the no-watcher fallback. ksni's async-io build runs its own
+# executor thread, so no GTK main thread and no tokio runtime coupling.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni.workspace = true
+zbus.workspace = true
 
 # The macOS tray backend (src/tray/macos.rs): the NSApplication run loop owns
 # the main thread, and SMAppService backs Launch at Login.

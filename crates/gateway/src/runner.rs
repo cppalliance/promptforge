@@ -357,13 +357,13 @@ impl GatewayHandle {
     }
 
     /// The bearer key the tray needs for its browser-handoff URL.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub(crate) fn tray_key(&self) -> &str {
         self.api_key.expose()
     }
 
     /// The assembled state, for the tray's in-process status reads.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub(crate) fn tray_state(&self) -> &AppState {
         &self.state
     }
@@ -371,7 +371,7 @@ impl GatewayHandle {
     /// Whether the gateway thread is still serving. A finished thread means
     /// serving ended - requested (`POST /shutdown` fires the shared signal)
     /// or failed; the tray tells the two apart through the signal.
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     pub(crate) fn is_serving(&self) -> bool {
         self.thread
             .as_ref()
@@ -669,6 +669,26 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
 /// serving fails; classify with [`StartupError::kind`].
 pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
     run_headless(spawn(options)?)
+}
+
+/// Prints the Settings handoff URL to stdout once the listener is bound,
+/// then serves headless until Ctrl-C: the tray-less environment's way to
+/// reach the config SPA. The URL is the one-time `/auth` redirect, so what
+/// lands on the terminal can be pasted into a browser without leaving the
+/// bearer key in its history.
+///
+/// # Errors
+/// Returns [`StartupError`] when config loading, provisioning, binding, or
+/// serving fails; classify with [`StartupError::kind`].
+pub fn run_printing_url(options: &ServeOptions) -> Result<(), StartupError> {
+    let handle = spawn(options)?;
+    // The URL is the machine-readable output of the `--print-url`
+    // affordance, so it goes to stdout itself, not through the log.
+    println!(
+        "{}",
+        crate::handoff::auth_url(handle.url(), handle.api_key.expose())
+    );
+    run_headless(handle)
 }
 
 /// The headless main loop: Ctrl-C signals the gateway's graceful shutdown

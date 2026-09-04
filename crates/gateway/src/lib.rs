@@ -83,6 +83,7 @@ mod hf;
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
+mod relaunch;
 mod render;
 mod reveal;
 mod routing;
@@ -106,7 +107,10 @@ pub(crate) use gateway_routing::queue;
 pub(crate) use gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
-pub use crate::runner::{Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, spawn};
+pub use crate::relaunch::running_gateway_settings_url;
+pub use crate::runner::{
+    Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, run_printing_url, spawn,
+};
 pub use crate::tray::run_with_tray;
 pub use gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
@@ -313,7 +317,7 @@ impl AppState {
     /// Returns `None` when a profile switch holds the live-state write
     /// lock: the tray's timer skips that tick rather than blocking the
     /// message loop.
-    #[cfg(any(target_os = "windows", target_os = "macos", test))]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", test))]
     pub(crate) fn tray_model_status(&self) -> Option<(usize, f64)> {
         let live = self.live.try_read().ok()?;
         let models = live.routing.models().len();

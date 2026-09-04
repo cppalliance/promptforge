@@ -1,27 +1,31 @@
 //! The `promptforge-gateway` binary:
-//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login]`.
+//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
 //! hands off to [`run_with_tray`], which owns the tokio runtime, provisioning,
 //! and serving while the system tray occupies the main thread. `--no-tray`
 //! keeps the headless Ctrl-C loop ([`run`]) for servers and CI. With no config
 //! path from either source, the gateway runs boot discovery and, on first run,
-//! generates a default config.
+//! generates a default config. A second launch while a gateway is already
+//! running never boots a duplicate: it opens the running gateway's Settings
+//! page (or prints its URL under `--print-url`) and exits.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use gateway::{ProfileName, ServeOptions, run, run_with_tray};
+use gateway::{ProfileName, ServeOptions, run, run_printing_url, run_with_tray};
 
 const USAGE: &str = concat!(
-    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login]\n",
+    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url]\n",
     "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
     "and the profile's .promptforge directory, generating a default config on first run\n",
-    "--no-tray  run headless (Ctrl-C driven); for servers and CI\n",
-    "--login    the launch came from the OS autostart entry; never opens a browser",
+    "--no-tray    run headless (Ctrl-C driven); for servers and CI\n",
+    "--login      the launch came from the OS autostart entry; never opens a browser\n",
+    "--print-url  print the Settings handoff URL once bound, then serve headless;\n",
+    "             with a gateway already running, print its URL instead",
 );
 
 fn main() -> ExitCode {
@@ -49,13 +53,31 @@ fn main() -> ExitCode {
         }
     };
 
-    if invocation.login {
-        // A login-triggered start never opens a browser or window; no
-        // launch path opens one today, so the flag is a marker only.
-        tracing::debug!("launched by the OS autostart entry");
+    // A second launch never boots a duplicate server: when a live gateway
+    // owns the connection file, hand off to it and exit. This runs before
+    // any bind attempt; on the desktop it is also the `.desktop` launcher's
+    // relaunch behavior.
+    if let Some(url) = gateway::running_gateway_settings_url(&invocation.serve) {
+        if invocation.print_url {
+            println!("{url}");
+        } else if invocation.login {
+            // A login-triggered start never opens a browser; the running
+            // gateway leaves this launch nothing to do.
+            tracing::info!("a gateway is already running; the login-triggered launch exits");
+        } else {
+            tracing::info!("a gateway is already running; opening its Settings page");
+            if let Err(error) = open::that(&url) {
+                tracing::warn!(
+                    "could not open the browser: {error}; the running gateway's Settings URL is {url}"
+                );
+            }
+        }
+        return ExitCode::SUCCESS;
     }
 
-    let result = if invocation.tray {
+    let result = if invocation.print_url {
+        run_printing_url(&invocation.serve)
+    } else if invocation.tray {
         run_with_tray(&invocation.serve)
     } else {
         run(&invocation.serve)
@@ -100,6 +122,10 @@ struct Invocation {
     tray: bool,
     /// Whether the launch came from the OS autostart entry (`--login`).
     login: bool,
+    /// Whether to print the Settings handoff URL to stdout (`--print-url`).
+    /// Implies the headless loop: the flag exists for tray-less
+    /// environments.
+    print_url: bool,
 }
 
 /// Parse `serve` arguments into a typed [`Invocation`].
@@ -129,6 +155,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
     let mut config_path: Option<PathBuf> = None;
     let mut tray = true;
     let mut login = false;
+    let mut print_url = false;
 
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -145,6 +172,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
             }
             Some("--no-tray") => tray = false,
             Some("--login") => login = true,
+            Some("--print-url") => print_url = true,
             Some("-h" | "--help") => return Err(ParseError::Help),
             Some(other) if other.starts_with('-') => {
                 return Err(ParseError::Usage(format!("unknown flag {other}")));
@@ -168,6 +196,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
         serve: ServeOptions::new(config_path, profile),
         tray,
         login,
+        print_url,
     })
 }
 
@@ -249,6 +278,29 @@ mod tests {
         let invocation = parse_args(args(&["serve", "--login"])).expect("parse");
         assert!(invocation.login);
         assert!(invocation.tray, "a login launch still shows the tray");
+    }
+
+    #[test]
+    fn print_url_parses_and_leaves_the_other_flags_alone() {
+        let invocation = parse_args(args(&["serve", "--print-url"])).expect("parse");
+        assert!(invocation.print_url);
+        assert!(
+            invocation.tray,
+            "the flag is independent; the dispatch makes it headless"
+        );
+        assert!(!invocation.login);
+    }
+
+    #[test]
+    fn print_url_combines_with_no_tray_and_a_config_path() {
+        let invocation = parse_args(args(&["serve", "gateway.toml", "--no-tray", "--print-url"]))
+            .expect("parse");
+        assert!(invocation.print_url);
+        assert!(!invocation.tray);
+        assert_eq!(
+            invocation.serve.config_path,
+            Some(PathBuf::from("gateway.toml"))
+        );
     }
 
     #[test]

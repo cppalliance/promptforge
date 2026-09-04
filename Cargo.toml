@@ -118,6 +118,17 @@ sysinfo = { version = "0.38", default-features = false, features = ["system", "d
 nvml-wrapper = "0.12"
 # Opens a URL in the system browser for the windowless server frame.
 open = "5"
+# The Linux tray backend: a pure StatusNotifierItem over D-Bus, no GTK.
+# default-features off drops ksni's tokio feature; async-io runs the service
+# on ksni's own executor thread, so the tray never depends on which runtime
+# polls it (the tokio feature's runtime coupling is the documented panic
+# class). 0.3.6 is the floor for assume_sni_available and watcher
+# re-registration.
+ksni = { version = "0.3.6", default-features = false, features = ["async-io"] }
+# The session-bus probes beside ksni (watcher presence, the first-run
+# notification); the same zbus major ksni builds on, on the same async-io
+# executor model.
+zbus = { version = "5", default-features = false, features = ["async-io"] }
 # The gateway's system tray on Windows and macOS.
 # 0.24.1+ is required: it re-registers the icon on TaskbarCreated and keeps
 # a hidden icon hidden across Explorer restarts.

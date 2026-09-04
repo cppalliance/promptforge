@@ -2,13 +2,13 @@
 //!
 //! The gateway has no window - its config SPA is its face - so on an
 //! installed system the tray icon is the daemon's UI. The tray owns the
-//! main thread through a per-OS backend ([`windows`], [`macos`]; Linux
-//! slots in behind the same entry point in its own step), while the tokio
-//! runtime and serving stay on the gateway thread spawned by
-//! [`crate::spawn`]. The platform-independent rules - the menu layout, the
-//! status label, the icon phase machine, the launch-at-login entry - live
-//! in [`logic`] so the idiom cannot drift between platforms, and the muda
-//! menu materialization lives in [`menu`] for the same reason.
+//! main thread through a per-OS backend ([`windows`], [`macos`],
+//! [`linux`]), while the tokio runtime and serving stay on the gateway
+//! thread spawned by [`crate::spawn`]. The platform-independent rules -
+//! the menu layout, the status label, the icon phase machine, the
+//! launch-at-login entry - live in [`logic`] so the idiom cannot drift
+//! between platforms, and the muda menu materialization lives in [`menu`]
+//! for the same reason (Linux materializes through ksni's own menu API).
 //!
 //! [`run_with_tray`] is the binary's default main loop; `--no-tray` keeps
 //! the headless Ctrl-C loop ([`crate::run`]) for servers and CI.
@@ -18,8 +18,12 @@ use crate::runner::ServeOptions;
 
 // Compiled for every backend platform and for tests everywhere: the rules
 // are pure logic, and the test suite exercises them on headless CI.
-#[cfg(any(target_os = "windows", target_os = "macos", test))]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux", test))]
 pub(crate) mod logic;
+// The Linux backend: a pure StatusNotifierItem over the session D-Bus via
+// ksni, no GTK. Safe throughout: the D-Bus boundary is ksni's, not ours.
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 #[expect(
     unsafe_code,
@@ -42,8 +46,10 @@ mod windows;
 ///
 /// On Windows the tray's hidden-window message loop is the main loop and
 /// serving stays on the gateway thread; on macOS the NSApplication run
-/// loop owns the main thread. On platforms without a backend yet, this
-/// falls back to the headless Ctrl-C loop with a warning.
+/// loop owns the main thread; on Linux the tray drives the D-Bus service
+/// from its own current-thread runtime on the main thread. On platforms
+/// without a backend, this falls back to the headless Ctrl-C loop with a
+/// warning.
 ///
 /// # Errors
 /// Returns [`StartupError`] when config loading, provisioning, binding, or
@@ -62,8 +68,13 @@ fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
     macos::run(options)
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
-    tracing::warn!("the system tray has no backend on this platform yet; running headless");
+    linux::run(options)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn run_inner(options: &ServeOptions) -> Result<(), StartupError> {
+    tracing::warn!("the system tray has no backend on this platform; running headless");
     crate::run(options)
 }
