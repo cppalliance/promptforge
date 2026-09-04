@@ -176,3 +176,5 @@ the fix split by cause - four real lints fixed in code, twelve lints inside macr
 
 turn dispatch pushes Thinking (amber LED) and success releases it, but the ModelTurnFailed path only sent an ephemeral error frame, so nothing released the sustained state; the fix pushes a failure status frame, matching the pattern everywhere else. (user reported, assistant reasoned)
 
+## 2026-09-03 Add application icons
+
