@@ -14,8 +14,8 @@ use crate::deadline::{DEFAULT_DEADLINE, with_deadline};
 use crate::gateway::{GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
 use crate::menu::MenuBus;
-use crate::protocol::Activity;
 use crate::push::Push;
+use crate::resolve::ResolvedGateway;
 use crate::routes;
 use crate::session_agents::{AgentSessions, SessionHost};
 use crate::status::StatusBus;
@@ -41,58 +41,17 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds shared state from the loaded configuration.
+    /// Builds shared state from the loaded configuration, resolving the
+    /// gateway endpoint first: a live connection file in the run
+    /// directory wins over explicit `[gateway]` config.
     ///
     /// # Errors
-    /// Returns [`StateError::Gateway`] if the HTTP client cannot be built.
+    /// Returns [`StateError::Resolution`] when no live connection file
+    /// exists and the config carries no explicit gateway, and
+    /// [`StateError::Gateway`] if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
-        let status = StatusBus::new();
-        let catalog = CatalogBus::new();
-        // The per-profile model memory lives in the state directory; a bad
-        // or missing memory file costs the memory, never startup.
-        let state_dir = &config.server.state_dir;
-        // A crash between an atomic write's temp file and its rename
-        // orphans the temp; boot is the one moment the directory is
-        // known and quiet, so it is swept here.
-        crate::atomic::sweep_orphaned_temps(state_dir);
-        let menu = MenuBus::new(catalog.clone(), Some(state_dir));
-        let push = Push::new(status.clone(), catalog.clone(), menu.clone());
-        // Startup phases are reported as they run; with no client connected
-        // yet these land on an empty bus, ready for the first session.
-        push.push_status_update(
-            "Connecting to gateway",
-            format!("base URL {}", config.gateway.base_url),
-            Activity::General,
-        );
-        let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
-            .map_err(StateError::Gateway)?;
-        let progress = Arc::new(ProgressHub::new());
-        let backoff = ReconnectBackoff::new();
-        let workspace = Workspace::new();
-        let agents = AgentSessions::new(
-            config.agents.path.clone(),
-            config.server.state_dir.join("sessions"),
-            crate::session_agents::model_client(&config.gateway.base_url, &config.gateway.api_key),
-            SessionHost {
-                push: push.clone(),
-                backoff: backoff.clone(),
-                menu: menu.clone(),
-                workspace: workspace.clone(),
-                catalog: catalog.clone(),
-            },
-        );
-        push.push_idle();
-        Ok(Self {
-            gateway,
-            status,
-            progress,
-            health: GatewayHealth::new(),
-            backoff,
-            catalog,
-            menu,
-            workspace,
-            agents,
-        })
+        let gateway = crate::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?;
+        state_with_gateway(config, &gateway)
     }
 
     /// The status bus, which every `/ws` session subscribes to so it can
@@ -171,6 +130,61 @@ impl AppState {
     }
 }
 
+/// Builds shared state against an already-resolved gateway endpoint: the
+/// construction phase a host holding its own endpoint enters directly,
+/// skipping connection-file discovery.
+///
+/// # Errors
+/// Returns [`StateError::Gateway`] if the HTTP client cannot be built.
+pub fn state_with_gateway(
+    config: &Config,
+    gateway: &ResolvedGateway,
+) -> Result<AppState, StateError> {
+    let status = StatusBus::new();
+    let catalog = CatalogBus::new();
+    // The per-profile model memory lives in the state directory; a bad
+    // or missing memory file costs the memory, never startup.
+    let state_dir = &config.server.state_dir;
+    // A crash between an atomic write's temp file and its rename
+    // orphans the temp; boot is the one moment the directory is
+    // known and quiet, so it is swept here.
+    crate::atomic::sweep_orphaned_temps(state_dir);
+    let menu = MenuBus::new(catalog.clone(), Some(state_dir));
+    let push = Push::new(status.clone(), catalog.clone(), menu.clone());
+    // Startup phases are reported as they run; with no client connected
+    // yet these land on an empty bus, ready for the first session.
+    crate::resolve::report(gateway, &push);
+    let client =
+        GatewayClient::new(gateway.base_url(), gateway.api_key()).map_err(StateError::Gateway)?;
+    let progress = Arc::new(ProgressHub::new());
+    let backoff = ReconnectBackoff::new();
+    let workspace = Workspace::new();
+    let agents = AgentSessions::new(
+        config.agents.path.clone(),
+        config.server.state_dir.join("sessions"),
+        crate::session_agents::model_client(gateway.base_url(), gateway.api_key()),
+        SessionHost {
+            push: push.clone(),
+            backoff: backoff.clone(),
+            menu: menu.clone(),
+            workspace: workspace.clone(),
+            catalog: catalog.clone(),
+        },
+    );
+    push.push_idle();
+    Ok(AppState {
+        gateway: client,
+        status,
+        progress,
+        health: GatewayHealth::new(),
+        backoff,
+        catalog,
+        menu,
+        workspace,
+        agents,
+    })
+}
+
 /// A shared-state construction failure: rich, init-only, and never sent
 /// over the wire (the HTTP failure type is `crate::error::AppError`).
 #[derive(Debug, thiserror::Error)]
@@ -180,6 +194,12 @@ pub enum StateError {
     #[non_exhaustive]
     #[error("build gateway client")]
     Gateway(#[source] GatewayError),
+
+    /// No gateway endpoint could be resolved: no live connection file and
+    /// no explicit `[gateway]` config.
+    #[non_exhaustive]
+    #[error("resolve the gateway endpoint")]
+    Resolution(#[source] crate::resolve::ResolveError),
 }
 
 /// Returns the workshop server router with every route mounted: each
@@ -233,7 +253,7 @@ pub(crate) mod fixtures {
     use axum::response::Response;
 
     #[cfg(test)]
-    use crate::app::AppState;
+    use crate::app::{AppState, state_with_gateway};
     #[cfg(test)]
     use crate::config::{AgentsConfig, Config, GatewayConfig, ServerConfig};
 
@@ -255,12 +275,14 @@ pub(crate) mod fixtures {
     }
 
     /// Builds state whose state directory is a fresh tempdir, returned
-    /// alongside so the directory outlives the test.
+    /// alongside so the directory outlives the test. Discovery is
+    /// bypassed: a test never consults the real run directory.
     #[cfg(test)]
     pub(crate) fn state_for(base_url: &str) -> (AppState, tempfile::TempDir) {
         let state_dir = tempfile::TempDir::new().expect("tempdir");
         let config = config_for(base_url, state_dir.path());
-        let state = AppState::new(&config).expect("state builds in tests");
+        let gateway = crate::resolve::ResolvedGateway::from_config(&config.gateway);
+        let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
         (state, state_dir)
     }
 
@@ -338,7 +360,8 @@ mod tests {
         let orphan = dir.path().join("workshop-state.json.42-7.pf-tmp");
         std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
         let config = config_for("http://127.0.0.1:1", dir.path());
-        let _state = AppState::new(&config).expect("state builds");
+        let gateway = ResolvedGateway::from_config(&config.gateway);
+        let _state = state_with_gateway(&config, &gateway).expect("state builds");
         assert!(
             !orphan.exists(),
             "state construction sweeps orphaned temp files from the state directory"

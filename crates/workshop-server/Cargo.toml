@@ -31,6 +31,7 @@ reqwest.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shared-sidecar.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -46,6 +47,10 @@ test-fixtures = []
 
 [dev-dependencies]
 workshop-server = { path = ".", features = ["test-fixtures"] }
+# The test-fixtures feature exposes `resolve_for_test`, so the resolution
+# tests can run the real liveness gauntlet against the test binary's own
+# process image.
+shared-sidecar = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true

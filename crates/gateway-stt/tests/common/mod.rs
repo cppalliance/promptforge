@@ -42,7 +42,10 @@ impl TestServer {
             agents: AgentsConfig::default(),
         };
         let route_state = state;
-        let handle = workshop_server::spawn_with_routes(config, move |app| {
+        // Discovery is bypassed: a test never consults the real run
+        // directory.
+        let gateway = workshop_server::ResolvedGateway::from_config(&config.gateway);
+        let handle = workshop_server::spawn_with_routes(config, gateway, move |app| {
             gateway_stt::stt_routes(route_state, app.push())
         })
         .expect("workshop server spawns with STT routes");

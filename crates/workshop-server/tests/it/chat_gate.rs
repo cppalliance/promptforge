@@ -37,9 +37,10 @@ use promptforge_model_client::client::{
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
+use workshop_server::fixtures::state_with_gateway;
 use workshop_server::{
-    AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ServerConfig,
-    UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
+    AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
+    ServerConfig, UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
 };
 
 use crate::agents::{answer, collect_turn, delta_text, next_wait_token, wait_after};
@@ -157,7 +158,9 @@ async fn spawn_chat_server(models: &[&str]) -> GateServer {
             path: dir.path().join("missing-agents"),
         },
     };
-    let state = AppState::new(&config).expect("state builds in tests");
+    // Discovery is bypassed: a test never consults the real run directory.
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
     state.catalog().publish(
         models
             .iter()

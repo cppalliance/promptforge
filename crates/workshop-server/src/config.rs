@@ -6,18 +6,15 @@
 //! `${VAR}` inside comments or keys is never expanded and an interpolated
 //! value containing a quote, backslash, or newline cannot corrupt the
 //! document. `$$` is a literal `$`. An unset variable interpolates to the
-//! empty string, so the generated config's `${PROMPTFORGE_GATEWAY_URL}` and
-//! `${PROMPTFORGE_GATEWAY_API_KEY}` degrade to the built-in defaults instead
-//! of failing startup.
+//! empty string: an empty `gateway.base_url` names no explicit gateway
+//! (endpoint resolution attaches through the connection file or fails
+//! plainly), and an empty `gateway.api_key` sends no `Authorization`
+//! header.
 
 use std::path::{Path, PathBuf};
 
 /// Path [`Config::load`] reads when no override is given.
 pub const DEFAULT_CONFIG_PATH: &str = "workshop.toml";
-
-/// Gateway base URL used when `gateway.base_url` interpolates to an empty
-/// string, for example because `PROMPTFORGE_GATEWAY_URL` is unset.
-pub const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081";
 
 /// Workshop server configuration loaded from `workshop.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
@@ -90,9 +87,8 @@ impl Config {
             path: path.map(Path::to_path_buf),
             source: Box::new(source),
         })?;
-        if config.gateway.base_url.is_empty() {
-            config.gateway.base_url = DEFAULT_GATEWAY_BASE_URL.to_string();
-        }
+        // An empty `gateway.base_url` is kept as-is: it is the not-explicit
+        // signal endpoint resolution reads, so no default is filled here.
         // The path-shaped defaults anchor beside the config file. A config
         // parsed from a string has no file, so the anchor degrades to the
         // working directory.
@@ -124,7 +120,9 @@ impl Config {
 /// authenticate to it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct GatewayConfig {
-    /// Base URL of the gateway, for example `http://127.0.0.1:8081`.
+    /// Base URL of the gateway, for example `http://127.0.0.1:8081`. Empty
+    /// names no explicit gateway: endpoint resolution attaches through the
+    /// connection file, or fails plainly when no live file exists.
     pub base_url: String,
     /// Bearer key for the gateway API; supports `${VAR}` interpolation.
     pub api_key: String,
@@ -446,10 +444,13 @@ open_browser = true
     }
 
     #[test]
-    fn empty_base_url_falls_back_to_the_default() {
+    fn an_empty_base_url_is_kept_as_the_not_explicit_signal() {
         let raw = "[gateway]\nbase_url = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\napi_key = \"k\"\n";
         let config = Config::from_toml_str(raw).expect("fixture parses");
-        assert_eq!(config.gateway.base_url, DEFAULT_GATEWAY_BASE_URL);
+        assert_eq!(
+            config.gateway.base_url, "",
+            "no default is filled: endpoint resolution reads empty as not explicit"
+        );
     }
 
     #[test]

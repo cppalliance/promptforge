@@ -27,7 +27,10 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt as _;
 use tokio_tungstenite::tungstenite;
 
-use workshop_server::{AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router};
+use workshop_server::fixtures::state_with_gateway;
+use workshop_server::{
+    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
+};
 
 const CATALOG: &str =
     r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
@@ -63,7 +66,9 @@ async fn spawn_session_server(base_url: &str) -> (String, tempfile::TempDir, App
         },
         agents: AgentsConfig::default(),
     };
-    let state = AppState::new(&config).expect("state builds in tests");
+    // Discovery is bypassed: a test never consults the real run directory.
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind the session test server");

@@ -43,4 +43,7 @@ pub use crate::paths::{
     CONNECTION_FILE_NAME, LOCK_FILE_NAME, connection_file_path, default_run_dir, lock_file_path,
     run_dir,
 };
+#[cfg(feature = "test-fixtures")]
+#[doc(hidden)]
+pub use crate::stale::resolve_for_test;
 pub use crate::stale::{Resolution, StaleReason, resolve};

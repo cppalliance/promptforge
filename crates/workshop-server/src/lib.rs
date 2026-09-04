@@ -27,6 +27,7 @@ mod progress;
 mod protocol;
 mod push;
 mod relay;
+mod resolve;
 mod routes;
 mod serve;
 mod session;
@@ -44,6 +45,7 @@ mod workspace;
 /// for every test build while production builds do not.
 #[doc(hidden)]
 pub mod fixtures {
+    pub use crate::app::state_with_gateway;
     pub use crate::backoff::ReconnectBackoff;
     pub use crate::catalog::CatalogBus;
     pub use crate::heartbeat::{GatewayHealth, Heartbeat, spawn as spawn_heartbeat};
@@ -58,8 +60,7 @@ pub mod fixtures {
 
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
-    AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL,
-    GatewayConfig, ServerConfig,
+    AgentsConfig, Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig,
 };
 pub use cross_site::{guard as cross_site_guard, origin_allowed};
 pub use gateway::{
@@ -70,5 +71,6 @@ pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
 pub use observer::WorkshopObserver;
 pub use protocol::{Activity, InputFrame, InputResponse};
 pub use push::Push;
+pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
 pub use serve::{ServerHandle, SpawnError, Termination, spawn, spawn_with_routes};
 pub use session_agents::AgentSessions;

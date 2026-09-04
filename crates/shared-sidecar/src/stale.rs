@@ -78,6 +78,15 @@ pub fn resolve(run_dir: &Path) -> Result<Resolution, SidecarError> {
     resolve_named(run_dir, GATEWAY_IMAGE_NAME)
 }
 
+/// [`resolve`] against a caller-named process image, so a consumer's test
+/// binary - never named `promptforge-gateway` - can run the full liveness
+/// gauntlet. Test builds only, behind the `test-fixtures` feature.
+#[cfg(feature = "test-fixtures")]
+#[doc(hidden)]
+pub fn resolve_for_test(run_dir: &Path, image_name: &str) -> Result<Resolution, SidecarError> {
+    resolve_named(run_dir, image_name)
+}
+
 /// [`resolve`] against a caller-named process image, so tests can run the
 /// full liveness gauntlet from a test binary, which is never named
 /// `promptforge-gateway`.

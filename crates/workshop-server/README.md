@@ -32,7 +32,7 @@ Every field of `workshop.toml`:
 
 | Field | Default | Description |
 | --- | --- | --- |
-| `gateway.base_url` | `http://127.0.0.1:8081` when empty | Base URL of the PromptForge gateway; an empty value (for example an unset `${PROMPTFORGE_GATEWAY_URL}`) falls back to the default |
+| `gateway.base_url` | (empty) | Base URL of the PromptForge gateway. A live `gateway.json` connection file in `~/.promptforge/run` (written by a running gateway) wins over this setting; the explicit value is the fallback for a gateway discovery cannot see, such as a LAN gateway. With no live file and no explicit value, startup fails plainly: no gateway configured or running |
 | `gateway.api_key` | (empty) | Bearer key for the gateway API; supports `${VAR}` interpolation; empty sends no `Authorization` header |
 | `server.bind` | `127.0.0.1:7910` | Address the workshop server binds to |
 | `server.open_browser` | `false` | When true, the server binary opens the system browser at its address once serving; the desktop shell ignores it |
@@ -49,9 +49,11 @@ Every field of `workshop.toml`:
 | `GET /ws` | WebSocket upgrade, one persistent socket for the workshop's downstream JSON: unsolicited `{"type":"status","label","description","severity","activity","progress"}` observer updates, `{"type":"models","models":[...]}` catalog pushes, and `{"type":"workbench",...}` Model-menu snapshots out; `{"type":"select_model","model"}` and `{"type":"switch_profile","name"}` menu events in, refusals answered with `{"type":"error","message"}` frames |
 | `GET /agents/ws` | WebSocket upgrade for one agent session: the discovered agent list on connect, `{"type":"launch","agent"}` / `{"type":"attach","session"}` in (acknowledged with `{"type":"agent_session","session","agent"}`), then durable `{"type":"agent_event","index","event",...}` log entries, ephemeral `{"type":"agent_delta","kind","content","reply"}` streaming chunks, and the `input_required` / `input_cancelled` wait frames answered by `{"type":"input_response","token","text"}`; `{"type":"cancel"}` fires turn-cancel |
 
-## Gateway resilience
+## Gateway discovery and resilience
 
-A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, `GET /v1/models` answers 502 `gateway_unreachable` instead of waiting on a dead connection, and the Model menu's `chat_ready` reads false. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. The server boots and serves the UI whether or not the gateway has ever answered.
+At startup the server resolves the gateway endpoint: a live `gateway.json` connection file in the run directory (`~/.promptforge/run`) wins - the gateway writes it after a successful bind, and it is validated by pid, process image, health answer, and bearer key - then explicit `[gateway]` config. A stale file is removed and its reason (dead pid, foreign image, failed health, rejected key) is reported on the status bus and in the log before the config fallback is used. With no live file and no explicit `gateway.base_url`, startup fails plainly: no gateway configured or running.
+
+A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, `GET /v1/models` answers 502 `gateway_unreachable` instead of waiting on a dead connection, and the Model menu's `chat_ready` reads false. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. Once an endpoint has resolved, the server boots and serves the UI whether or not the gateway has ever answered.
 
 ## UI development
 

@@ -116,11 +116,15 @@ mod hosted {
             move |state: &workshop_server::AppState| gateway_stt::stt_routes(stt, state.push());
         #[cfg(not(feature = "stt"))]
         let routes = |_state: &workshop_server::AppState| axum::Router::new();
-        let handle = workshop_server::spawn_with_routes(
-            ws_config(config.server(), workshop, config_path, bound),
-            routes,
-        )
-        .map_err(StartupError::workshop)?;
+        let ws_config = ws_config(config.server(), workshop, config_path, bound);
+        // The host holds the gateway endpoint directly: this process's own
+        // just-written connection file is not serving yet when the
+        // workshop spawns, so discovery would condemn it as stale - and a
+        // foreign gateway's live file must never win over the process's
+        // own gateway.
+        let gateway = workshop_server::ResolvedGateway::from_config(&ws_config.gateway);
+        let handle = workshop_server::spawn_with_routes(ws_config, gateway, routes)
+            .map_err(StartupError::workshop)?;
         tracing::info!("workshop serving on {}", handle.url());
         if workshop.open_browser() {
             // A browser that will not open is not worth failing a serving

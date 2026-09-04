@@ -16,7 +16,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
+use workshop_server::{
+    AgentsConfig, Config, GatewayConfig, ResolvedGateway, ServerConfig, ServerHandle,
+};
 
 /// How long one frame read may take before the test fails: generous enough
 /// for a slow CI runner, far below any test's own deadline.
@@ -34,6 +36,8 @@ pub(crate) struct TestServer {
 
 impl TestServer {
     /// Spawns the server against the gateway at `gateway_base_url`.
+    /// Discovery is bypassed: a test never consults the real run
+    /// directory.
     pub(crate) fn spawn(gateway_base_url: &str) -> Self {
         let state_dir = tempfile::TempDir::new().expect("tempdir");
         let config = Config {
@@ -48,7 +52,9 @@ impl TestServer {
             },
             agents: AgentsConfig::default(),
         };
-        let handle = workshop_server::spawn(config).expect("the workshop server spawns");
+        let gateway = ResolvedGateway::from_config(&config.gateway);
+        let handle = workshop_server::spawn_with_routes(config, gateway, |_| axum::Router::new())
+            .expect("the workshop server spawns");
         Self {
             handle: Some(handle),
             _state_dir: state_dir,

@@ -26,6 +26,12 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Threading",
 ] }
 
+[features]
+# Cross-crate test seam: exposes `resolve_for_test`, so a consumer's test
+# binary (never named `promptforge-gateway`) can run the full liveness
+# gauntlet against its own process image.
+test-fixtures = []
+
 [dev-dependencies]
 tempfile.workspace = true
 

@@ -14,11 +14,12 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::app::{AppState, StateError, router};
+use crate::app::{AppState, StateError, router, state_with_gateway};
 use crate::config::Config;
 use crate::gateway_progress;
 use crate::heartbeat;
 use crate::progress;
+use crate::resolve::ResolvedGateway;
 
 /// How long a signaled shutdown waits for in-flight connections to drain
 /// before the watchdog abandons the graceful path. axum's drain waits on
@@ -122,7 +123,8 @@ impl Drop for ServerHandle {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SpawnError {
-    /// The shared state (the gateway client) could not be built.
+    /// The gateway endpoint could not be resolved, or the shared state
+    /// could not be built.
     #[non_exhaustive]
     #[error("build shared state")]
     State(#[from] StateError),
@@ -141,48 +143,84 @@ pub enum SpawnError {
 /// server is accepting connections at [`ServerHandle::url`].
 ///
 /// # Errors
-/// Returns [`SpawnError::State`] if the shared state cannot be built (an
-/// unbuildable gateway client), and [`SpawnError::Io`] if the bind fails
-/// or the server thread cannot be spawned.
+/// Returns [`SpawnError::State`] if the gateway endpoint cannot be
+/// resolved (no live connection file and no explicit `[gateway]` config)
+/// or the shared state cannot be built, and [`SpawnError::Io`] if the
+/// bind fails or the server thread cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
-    spawn_inner(config, SHUTDOWN_GRACE, Box::new(|_| axum::Router::new()))
+    spawn_inner(
+        config,
+        None,
+        SHUTDOWN_GRACE,
+        Box::new(|_| axum::Router::new()),
+    )
 }
 
-/// Spawns the workshop server with gateway-owned routes merged into its
-/// loopback listener.
+/// Spawns the workshop server against an already-resolved gateway
+/// endpoint, with gateway-owned routes merged into its loopback listener.
 ///
-/// `routes` runs after shared state construction on the server thread. It
-/// receives the state so an owning gateway subsystem can attach to the
-/// Workshop status bus without moving that subsystem into this crate.
+/// `gateway` skips connection-file discovery: a host attaching routes
+/// holds its own endpoint - the merged gateway hosting the workshop
+/// in-process, whose own just-written connection file is not serving yet
+/// when the workshop spawns - and discovery must never condemn that file
+/// or attach the workshop to a foreign gateway. `routes` runs after
+/// shared state construction on the server thread. It receives the state
+/// so an owning gateway subsystem can attach to the Workshop status bus
+/// without moving that subsystem into this crate.
 ///
 /// # Errors
 /// Returns [`SpawnError::State`] if shared state cannot be built, or
 /// [`SpawnError::Io`] if the listener or server thread cannot start.
 pub fn spawn_with_routes(
     config: Config,
+    gateway: ResolvedGateway,
     routes: impl FnOnce(&AppState) -> axum::Router + Send + 'static,
 ) -> Result<ServerHandle, SpawnError> {
-    spawn_inner(config, SHUTDOWN_GRACE, Box::new(routes))
+    spawn_inner(config, Some(gateway), SHUTDOWN_GRACE, Box::new(routes))
 }
 
 /// [`spawn`] with the shutdown grace window injectable, so tests prove the
 /// forced path in milliseconds instead of waiting out the real window.
+/// Discovery is bypassed, so a test never consults the real run directory.
 #[cfg(test)]
 fn spawn_with_grace(config: Config, grace: Duration) -> Result<ServerHandle, SpawnError> {
-    spawn_inner(config, grace, Box::new(|_| axum::Router::new()))
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    spawn_inner(
+        config,
+        Some(gateway),
+        grace,
+        Box::new(|_| axum::Router::new()),
+    )
 }
 
 fn spawn_inner(
     config: Config,
+    gateway: Option<ResolvedGateway>,
     grace: Duration,
     routes: RouteFactory,
 ) -> Result<ServerHandle, SpawnError> {
+    // Discovery runs before the server thread starts: a resolution
+    // failure is the plain no-gateway error, never a bind-then-fail.
+    let gateway = match gateway {
+        Some(gateway) => gateway,
+        None => crate::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?,
+    };
     let (ready_tx, ready_rx) = mpsc::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let (stopped_tx, stopped_rx) = mpsc::channel();
     let thread = std::thread::Builder::new()
         .name("workshop-server".to_string())
-        .spawn(move || serve_thread(config, routes, ready_tx, shutdown_rx, &stopped_tx, grace))?;
+        .spawn(move || {
+            serve_thread(
+                config,
+                gateway,
+                routes,
+                ready_tx,
+                shutdown_rx,
+                &stopped_tx,
+                grace,
+            )
+        })?;
     match ready_rx.recv() {
         Ok(Ok(url)) => Ok(ServerHandle {
             url,
@@ -212,6 +250,7 @@ fn spawn_inner(
 /// become the thread's return value.
 fn serve_thread(
     config: Config,
+    gateway: ResolvedGateway,
     routes: RouteFactory,
     ready: mpsc::Sender<Result<String, SpawnError>>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
@@ -229,7 +268,9 @@ fn serve_thread(
         }
     };
     let (outcome, result) = runtime.block_on(async move {
-        let state = match AppState::new(&config) {
+        let gateway_base_url = gateway.base_url().to_string();
+        let gateway_api_key = gateway.api_key().to_string();
+        let state = match state_with_gateway(&config, &gateway) {
             Ok(state) => state,
             Err(error) => {
                 let _ = ready.send(Err(SpawnError::State(error)));
@@ -261,8 +302,8 @@ fn serve_thread(
         );
         let renderer = progress::spawn(std::sync::Arc::clone(state.progress()), state.push());
         let subscriber = gateway_progress::spawn(
-            config.gateway.base_url.clone(),
-            config.gateway.api_key.clone(),
+            gateway_base_url,
+            gateway_api_key,
             std::sync::Arc::clone(state.progress()),
             state.health().clone(),
         );
@@ -350,7 +391,8 @@ mod tests {
     #[tokio::test]
     async fn readiness_means_the_health_endpoint_answers() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let server = spawn(test_config("127.0.0.1:0", dir.path())).expect("server spawns");
+        let server = spawn_with_grace(test_config("127.0.0.1:0", dir.path()), SHUTDOWN_GRACE)
+            .expect("server spawns");
         let url = server.url().to_string();
         assert!(
             url.starts_with("http://127.0.0.1:"),
@@ -374,7 +416,8 @@ mod tests {
     #[tokio::test]
     async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let server = spawn(test_config("127.0.0.1:0", dir.path())).expect("server spawns");
+        let server = spawn_with_grace(test_config("127.0.0.1:0", dir.path()), SHUTDOWN_GRACE)
+            .expect("server spawns");
         let url = server.url().to_string();
 
         let health = reqwest::get(format!("{url}/health"))
@@ -484,7 +527,8 @@ mod tests {
     #[tokio::test]
     async fn an_idle_shutdown_completes_gracefully_without_spending_the_window() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let server = spawn(test_config("127.0.0.1:0", dir.path())).expect("server spawns");
+        let server = spawn_with_grace(test_config("127.0.0.1:0", dir.path()), SHUTDOWN_GRACE)
+            .expect("server spawns");
 
         let begun = std::time::Instant::now();
         let outcome = server.shutdown().expect("graceful shutdown succeeds");
@@ -531,7 +575,8 @@ mod tests {
     #[tokio::test]
     async fn shutdown_releases_the_bound_port() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let server = spawn(test_config("127.0.0.1:0", dir.path())).expect("server spawns");
+        let server = spawn_with_grace(test_config("127.0.0.1:0", dir.path()), SHUTDOWN_GRACE)
+            .expect("server spawns");
         let address = server
             .url()
             .strip_prefix("http://")
@@ -551,7 +596,8 @@ mod tests {
         let address = blocker.local_addr().expect("blocker address");
         let dir = tempfile::TempDir::new().expect("tempdir");
         let config = test_config(&address.to_string(), dir.path());
-        let error = spawn(config).expect_err("a taken port must fail spawn");
+        let error =
+            spawn_with_grace(config, SHUTDOWN_GRACE).expect_err("a taken port must fail spawn");
         assert!(
             matches!(error, SpawnError::Io(_)),
             "expected Io, got {error:?}"

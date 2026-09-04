@@ -27,8 +27,11 @@
 [modules]
 # `AppState::new` owns only Workshop server state. Gateway-owned STT attaches
 # its routes after construction. Shrank in the chat-relay excision: the
-# session recorder left the state and its construction.
-"app.rs" = 347
+# session recorder left the state and its construction. Grew by the gateway
+# endpoint resolution wiring: the `StateError::Resolution` variant and the
+# `state_with_gateway` extraction a host holding its own endpoint enters
+# directly - the same state-construction responsibility.
+"app.rs" = 370
 "assets.rs" = 69
 "atomic.rs" = 230
 # Re-recorded at measured size: an earlier growth commit missed this
@@ -36,7 +39,10 @@
 # edit here is net zero.
 "backoff.rs" = 235
 "catalog.rs" = 118
-"config.rs" = 541
+# Grew by a doc line recording the empty-`base_url` contract: no
+# default is filled, and an empty value is the not-explicit signal
+# endpoint resolution reads.
+"config.rs" = 542
 "cross_site.rs" = 338
 "deadline.rs" = 112
 # Grew by the revoke seam: the `NotGranted` variant's wire mapping (404,
@@ -106,6 +112,15 @@
 # Shrank in the chat-relay excision: the buffered chat handler and its
 # recorder left with their tests; the catalog passthrough stays.
 "relay.rs" = 175
+# New module: gateway endpoint resolution - the live connection file in
+# the run directory first (via shared-sidecar's stale-detecting probe),
+# explicit `[gateway]` config second, the plain no-gateway error
+# otherwise - plus the startup reporting of the winning source. Over half
+# the count is its in-file unit tests. Grew by the review round's branch
+# coverage: the probe-I/O-failure degradation, the no-run-directory skip,
+# and the explicitly-configured-default-URL pin - same responsibility,
+# more tests.
+"resolve.rs" = 553
 "routes.rs" = 8
 "routes/assets.rs" = 117
 # Grew in the chat-relay excision by the POST /chat absence pin (404),
@@ -119,7 +134,15 @@
 "routes/gateway_config.rs" = 390
 "routes/health.rs" = 50
 "routes/workspace.rs" = 20
-"serve.rs" = 560
+# Grew by the gateway-endpoint wiring: `spawn` resolves the endpoint
+# (connection file first, explicit config second) before the server
+# thread starts, and `spawn_with_routes` takes the host's already-resolved
+# endpoint - the same spawn-surface responsibility, one parameter and its
+# documentation more. The resolution logic itself lives in resolve.rs.
+# Grew again by three lines as the remaining shutdown and bind tests
+# moved onto the discovery-bypassing `spawn_with_grace` - a test never
+# consults the real run directory.
+"serve.rs" = 606
 # Shrank in the chat-relay excision: the socket keeps the menu events,
 # boot snapshots, and bus forwarding; the chat multiplexing left whole.
 "session.rs" = 225

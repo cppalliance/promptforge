@@ -20,7 +20,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde_json::json;
 
-use workshop_server::{AgentsConfig, AppState, Config, GatewayConfig, ServerConfig, router};
+use workshop_server::fixtures::state_with_gateway;
+use workshop_server::{
+    AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
+};
 
 use crate::common::{JsonSocket, spawn_gateway};
 
@@ -96,7 +99,9 @@ async fn spawn_agent_server() -> (String, tempfile::TempDir, AppState) {
         },
         agents: AgentsConfig { path: agents_dir },
     };
-    let state = AppState::new(&config).expect("state builds in tests");
+    // Discovery is bypassed: a test never consults the real run directory.
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    let state = state_with_gateway(&config, &gateway).expect("state builds in tests");
     // The session's model catalog is built from the retained catalog at
     // launch, so the catalog lands before any test launches.
     state
