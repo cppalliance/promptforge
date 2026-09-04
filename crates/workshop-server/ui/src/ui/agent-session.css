@@ -1,7 +1,7 @@
 /* Styles for the agent-session surface: the agent menu and the session
    view (agent-menu.ts and agent-session-view.ts import this file; esbuild
    bundles it once into dist/app.css). Themed values come from the :root
-   tokens in style.css. */
+   tokens in shared-ui/tokens.css. */
 
 /* The panel container fills its dockview leaf; whichever child is not
    hidden owns the space. */

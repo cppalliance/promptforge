@@ -1,12 +1,19 @@
-// The Workshop tree's context menu: a floating list of action buttons
+// The floating action menu shared by both UIs: a list of action buttons
 // anchored below (or, at the viewport's bottom edge, above) a trigger
-// element. Ported from the vendored murm-ui dropdown, cut to what the
-// tree panel uses: no disabled items, no alignment or width options, and
-// the open-menu handle lives on an instance the owner disposes instead of
+// element, rendered on the shared `.menu` / `.menu-item` surface from
+// dropdown.css. The gateway's select listboxes and profile switcher
+// consume the same surface classes with their own behavior; this class
+// is the action-menu behavior the workshop's mode chip and model picker
+// use.
+//
+// Ported from the vendored murm-ui dropdown, cut to what the consumers
+// use: no disabled items, no alignment or width options, and the
+// open-menu handle lives on an instance the owner disposes instead of
 // in module state.
 //
 // Derived from murm-ui 0.2.0 `components/dropdown.ts`, copyright (c) 2026
-// Lev Morozov, MIT License; the full notice is in ui/THIRD_PARTY_NOTICES.md.
+// Lev Morozov, MIT License; the full notice is in THIRD_PARTY_NOTICES.md.
+
 import "./dropdown.css";
 
 /** One action row in a dropdown menu. */
@@ -44,8 +51,8 @@ export class DropdownMenu {
     }
 
     const menu = document.createElement("div");
-    menu.className = "workshop-dropdown";
-    menu.id = `workshop-dropdown-${++this.nextMenuId}`;
+    menu.className = "menu menu-popup";
+    menu.id = `menu-popup-${++this.nextMenuId}`;
     menu.tabIndex = -1;
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-orientation", "vertical");
@@ -55,27 +62,25 @@ export class DropdownMenu {
       const button = document.createElement("button");
       button.type = "button";
       button.className =
-        item.danger === true
-          ? "workshop-dropdown__item workshop-dropdown__item--danger"
-          : "workshop-dropdown__item";
+        item.danger === true ? "menu-item menu-item--danger" : "menu-item";
       button.setAttribute("role", "menuitem");
       if (item.selected === true) {
-        button.classList.add("workshop-dropdown__item--selected");
+        button.classList.add("menu-item--selected");
         button.setAttribute("aria-current", "true");
       }
       if (item.iconHtml !== undefined) {
         const icon = document.createElement("span");
-        icon.className = "workshop-dropdown__icon";
+        icon.className = "menu-item__icon";
         icon.innerHTML = item.iconHtml;
         button.appendChild(icon);
       }
       const label = document.createElement("span");
-      label.className = "workshop-dropdown__label";
+      label.className = "menu-item__label";
       label.textContent = item.label;
       button.appendChild(label);
       if (item.selected === true) {
         const check = document.createElement("span");
-        check.className = "workshop-dropdown__check";
+        check.className = "menu-item__check";
         check.setAttribute("aria-hidden", "true");
         check.textContent = "✓";
         button.appendChild(check);

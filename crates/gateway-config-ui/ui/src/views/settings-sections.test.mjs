@@ -205,13 +205,13 @@ test("used-by chips count dependents and a delete warns naming them", async () =
 
   root.querySelector(".entry-card[data-entry='dominion:gpu0'] .entry-delete").click();
   await settle();
-  const body = dom.window.document.querySelector("#confirm-body");
+  const body = dom.window.document.querySelector("#confirm-message");
   assert.match(
     body.textContent,
     /used by local model 'qwen-common'/,
     "the delete confirm names the dependents",
   );
-  dom.window.document.querySelector(".modal .button-danger").click();
+  dom.window.document.querySelector(".confirm-overlay .button-danger").click();
   await settle();
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1, "the confirmed delete saves the shadow");

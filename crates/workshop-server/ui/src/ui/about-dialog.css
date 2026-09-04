@@ -1,5 +1,5 @@
 /* Styles for about-dialog.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Themed values come from the :root tokens in style.css. */
+   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
 
 /* About dialog: a centered modal over a dimmed backdrop. Structural only,
    like the title-bar popovers in window-menu.css. */

@@ -1,0 +1,38 @@
+/* The toast stack, bottom-right, on the Cursor Dark tokens. A consumer
+   whose chrome occupies the viewport bottom (the workshop's status bar)
+   retunes the offset through --toast-inset-block-end. Rules live in the
+   components layer so consumer overrides win. */
+
+@layer components {
+	.toast-stack {
+		position: fixed;
+		inset-block-end: var(--toast-inset-block-end, 1rem);
+		inset-inline-end: 1rem;
+		z-index: 60;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.toast {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 240px;
+		max-width: 360px;
+		padding: 0.625rem 0.875rem;
+		border: 1px solid var(--border);
+		border-left-width: 3px;
+		border-radius: var(--radius);
+		background: var(--bg-secondary);
+		box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+	}
+	.toast-success {
+		border-left-color: var(--success);
+	}
+	.toast-error {
+		border-left-color: var(--danger);
+	}
+	.toast-info {
+		border-left-color: var(--accent);
+	}
+}

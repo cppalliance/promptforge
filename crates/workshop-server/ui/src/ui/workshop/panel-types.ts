@@ -10,7 +10,7 @@ import { Disposable } from "../../base/lifecycle";
 import type { ModelService } from "../../services/model-service";
 import type { SttStatus } from "../stt";
 import { AgentPanel } from "./agent-panel";
-import { DropdownMenu } from "./dropdown";
+import { DropdownMenu } from "shared-ui/dropdown";
 import { EditorPanel } from "./editor-panel";
 import { GatewayConfigPanel } from "./gateway-config-panel";
 import { WorkshopTreePanel, type TreeStatusSink } from "./workshop-panel";

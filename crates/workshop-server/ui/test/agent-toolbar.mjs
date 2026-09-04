@@ -63,7 +63,7 @@ function check(name, condition) {
 }
 
 function menuEl() {
-  return document.querySelector(".workshop-dropdown");
+  return document.querySelector(".menu-popup");
 }
 
 await assertNoLeaks(lifecycle, async () => {

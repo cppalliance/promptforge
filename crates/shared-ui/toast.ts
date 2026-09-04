@@ -1,5 +1,9 @@
 // Bottom-right toast stack [Adapted: Open WebUI]: success/error/info
-// entries that dismiss themselves after four seconds.
+// entries that dismiss themselves after four seconds. Shared by both
+// UIs: the gateway's composition root mounts one for shell and view
+// notifications, the workshop mounts one for update notifications.
+
+import "./toast.css";
 
 /** How long a toast stays before dismissing itself. */
 const TOAST_LIFETIME_MS = 4000;

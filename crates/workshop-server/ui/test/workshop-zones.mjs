@@ -293,8 +293,8 @@ agentTab.dispatchEvent(
     clientY: 30,
   }),
 );
-const agentTabMenu = window.document.querySelector(".workshop-dropdown");
-const agentTabMenuLabels = [...(agentTabMenu?.querySelectorAll(".workshop-dropdown__label") ?? [])]
+const agentTabMenu = window.document.querySelector(".menu-popup");
+const agentTabMenuLabels = [...(agentTabMenu?.querySelectorAll(".menu-item__label") ?? [])]
   .map((label) => label.textContent)
   .join(",");
 check(
@@ -302,7 +302,7 @@ check(
   agentTabMenuLabels === "Close,Close Others",
 );
 window.document.body.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
-check("an outside pointer closes the agent tab menu", !window.document.querySelector(".workshop-dropdown"));
+check("an outside pointer closes the agent tab menu", !window.document.querySelector(".menu-popup"));
 treePanel.api.setTitle("Renamed");
 check(
   "the permanent tab follows title changes",

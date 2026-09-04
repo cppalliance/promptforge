@@ -96,6 +96,13 @@ fn watch(ui_dir: &Path, config: &UiBuild) {
             ui_dir.join("check-layers.mjs").display()
         );
     }
+    // Both UIs bundle the shared-ui package (a `file:` dependency two
+    // directories up); its sources change the bundle without touching
+    // ui/src.
+    let shared_ui = ui_dir.join("..").join("..").join("shared-ui");
+    if shared_ui.is_dir() {
+        println!("cargo::rerun-if-changed={}", shared_ui.display());
+    }
 }
 
 /// Runs the UI layer-rule walk (`ui/check-layers.mjs`) before bundling, so

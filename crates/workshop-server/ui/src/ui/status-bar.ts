@@ -1,11 +1,13 @@
 // The status bar renderer: consumes the observer's status frames off the
-// persistent socket and paints them into the bar. Info and error frames set
-// the text (the description rides as the tooltip) and drive the right slot,
-// which holds the progress bar or the recording+activity LED indicators
-// group - never both. Debug frames are internal instrumentation: they never
-// touch the text or the slot, but they do pulse the LED.
+// persistent socket and paints them into the shared status bar shell
+// (shared-ui/status-bar), which owns the bar, the text region, and the
+// slot's progress/indicators swap. Info and error frames set the text
+// (the description rides as the tooltip) and drive the slot; debug frames
+// are internal instrumentation: they never touch the text or the slot,
+// but they do pulse the LED. The workshop's indicators group holds the
+// recording and activity LEDs; the shell's extras region stays empty.
 
-import "./status-bar.css";
+import { createStatusBarShell, type StatusBarShell } from "shared-ui/status-bar";
 
 import { Disposable, toDisposable } from "../base/lifecycle";
 import type { StatusFrame } from "../services/protocol";
@@ -17,33 +19,30 @@ type PulseActivity = "thinking" | "generating";
 const DEFAULT_LED_PULSE_MS = 250;
 
 export class StatusBar extends Disposable {
-  private readonly text: HTMLElement;
-  private readonly progress: HTMLProgressElement;
-  private readonly indicators: HTMLElement;
+  private readonly shell: StatusBarShell;
   private readonly led: HTMLElement;
   private readonly rec: HTMLElement;
   private readonly lit = new Set<PulseActivity>();
   private sustained: PulseActivity | null = null;
   private ledTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly root: HTMLElement) {
+  constructor() {
     super();
-    const text = root.querySelector<HTMLElement>(".status-bar__text");
-    const progress = root.querySelector<HTMLProgressElement>(".status-bar__progress");
-    const indicators = root.querySelector<HTMLElement>(".status-bar__indicators");
-    const led = root.querySelector<HTMLElement>(".status-bar__led:not(.status-bar__led--rec)");
-    const rec = root.querySelector<HTMLElement>(".status-bar__led--rec");
-    if (!text || !progress || !indicators || !led || !rec) {
-      throw new Error(
-        "DOM Error: the status bar is missing its text, progress, indicators, activity LED, or recording LED element.",
-      );
-    }
-    this.text = text;
-    this.progress = progress;
-    this.indicators = indicators;
-    this.led = led;
-    this.rec = rec;
-    // The pulse decay timer is the bar's only owned resource.
+    this.shell = createStatusBarShell();
+    // The workshop's indicators: the recording LED carries the --rec
+    // marker; the activity LED is the unmarked one.
+    this.rec = document.createElement("span");
+    this.rec.className = "status-bar__led status-bar__led--rec";
+    this.rec.setAttribute("aria-label", "Recording indicator");
+    this.led = document.createElement("span");
+    this.led.className = "status-bar__led";
+    this.led.setAttribute("aria-hidden", "true");
+    this.shell.indicators.append(this.rec, this.led);
+    this.shell.setText("Ready");
+    // The bar is the body's full-width footer, below the shell.
+    document.body.append(this.shell.element);
+    this._register(toDisposable(() => this.shell.element.remove()));
+    // The pulse decay timer is the bar's only other owned resource.
     this._register(
       toDisposable(() => {
         if (this.ledTimer !== null) {
@@ -76,31 +75,11 @@ export class StatusBar extends Disposable {
       if (this.sustained) this.lit.add(this.sustained);
       this.applyLed();
     }
-    this.text.textContent = frame.label;
-    this.root.title = frame.description;
-    this.text.classList.toggle("status-bar__text--error", frame.severity === "error");
-    this.renderSlot(frame.progress);
-  }
-
-  /**
-   * Swaps the slot between the progress bar and the recording+activity LED
-   * indicators group. Progress wins: a frame carrying progress shows the
-   * bar at that fraction and hides the group; a null progress restores the
-   * group. The swap rides the `hidden` attribute and never touches the
-   * recording state or the LED classes, so a live recording's LED
-   * reappears lit; the slot's fixed width keeps the bar from reflowing.
-   */
-  private renderSlot(progress: StatusFrame["progress"]): void {
-    if (progress) {
-      // A zero total is degenerate; clamp so value/max stay valid.
-      this.progress.max = progress.total > 0 ? progress.total : 1;
-      this.progress.value = progress.current;
-      this.progress.hidden = false;
-      this.indicators.hidden = true;
-    } else {
-      this.progress.hidden = true;
-      this.indicators.hidden = false;
-    }
+    this.shell.setText(frame.label, {
+      tooltip: frame.description,
+      error: frame.severity === "error",
+    });
+    this.shell.renderSlot(frame.progress);
   }
 
   /**
@@ -127,9 +106,7 @@ export class StatusBar extends Disposable {
 
   /** Shows a locally-originated message (e.g. dictation errors). The next observer frame overwrites it. */
   showLocal(label: string, severity: "info" | "error"): void {
-    this.text.textContent = label;
-    this.root.title = "";
-    this.text.classList.toggle("status-bar__text--error", severity === "error");
+    this.shell.setText(label, { error: severity === "error" });
   }
 
   /**
@@ -161,10 +138,8 @@ export class StatusBar extends Disposable {
    */
   reset(): void {
     this.sustained = null;
-    this.text.textContent = "Reconnecting...";
-    this.root.title = "";
-    this.text.classList.remove("status-bar__text--error");
-    this.renderSlot(null);
+    this.shell.setText("Reconnecting...");
+    this.shell.renderSlot(null);
   }
 
   /** Applies the lit set: green wins while generating and thinking coincide. */

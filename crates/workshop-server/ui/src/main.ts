@@ -1,6 +1,8 @@
+import "shared-ui/tokens.css";
 import "dockview/dist/styles/dockview.css";
 
 import { createDockview, themeDark } from "dockview";
+import { createToastStack } from "shared-ui/toast";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService } from "./services/model-service";
@@ -37,14 +39,16 @@ disposables.add(
 // One persistent socket carries the server's downstream JSON - status
 // updates the status bar renders as they arrive, catalog pushes, and
 // workbench snapshots. Chat rides the agent panel's own /agents/ws
-// socket, composed inside the panel.
-const statusBarRoot = document.querySelector(".status-bar") as HTMLElement | null;
-if (!statusBarRoot) {
-  throw new Error("DOM Error: .status-bar not found in the page.");
-}
-const statusBar = disposables.add(new StatusBar(statusBarRoot));
+// socket, composed inside the panel. The status bar builds its own
+// shell (shared-ui) and appends it as the body's full-width footer.
+const statusBar = disposables.add(new StatusBar());
 const updates = disposables.add(new UpdateService());
-disposables.add(new UpdateView(updates));
+// The shared toast stack carries the update notifications; the workshop
+// keeps it clear of the status bar via --toast-inset-block-end.
+const toasts = createToastStack();
+document.body.append(toasts.element);
+disposables.add(toDisposable(() => toasts.element.remove()));
+disposables.add(new UpdateView(updates, toasts));
 updates.startAutoCheck();
 // The custom title bar stays hidden in a plain browser; it only appears
 // when the desktop shell sets its initialization flag.

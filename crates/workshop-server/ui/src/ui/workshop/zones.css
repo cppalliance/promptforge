@@ -2,7 +2,7 @@
    dist/app.css. Covers the dock scaffolding the zones place panels into
    and the Workshop tree, plus the shared panel plumbing rules
    (.panel-unknown from panel-types.ts). Themed values come from the
-   :root tokens in style.css. */
+   :root tokens in shared-ui/tokens.css. */
 
 .shell {
   display: flex;
@@ -176,13 +176,18 @@
   background: rgba(0, 0, 0, 0.5);
 }
 
+/* The shared modal's base skin (shared-ui/modal.css) would size this
+   dialog to a fixed width and add a drop shadow; it stays content-sized
+   and shadowless, as before the extraction. */
 .workspace-add {
+  width: auto;
   min-width: 260px;
   max-width: 90%;
   padding: var(--space-xl);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: none;
 }
 
 .workspace-add__title {
@@ -229,6 +234,9 @@
   display: flex;
   gap: var(--space-md);
   justify-content: flex-end;
+  /* The shared modal's actions row carries a 1rem top margin; the field
+     above already supplies this dialog's spacing. */
+  margin-block-start: 0;
 }
 
 .workspace-add__button {

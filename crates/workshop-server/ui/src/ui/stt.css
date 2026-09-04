@@ -1,5 +1,5 @@
 /* Styles for stt.ts, which imports this file; esbuild bundles it into
-   dist/app.css. Themed values come from the :root tokens in style.css.
+   dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css.
    The host form (agent-session.css) sizes and colors the mic button under
    its own class; these rules add only what recording changes, and win
    over the host's tie-specificity rules because agent-session-view.ts

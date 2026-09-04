@@ -72,7 +72,7 @@ test("the System metric tiles render from the snapshot with the vendor chip", as
   const cpu = root.querySelector(".metric-cpu");
   assert.match(cpu.querySelector(".metric-value").textContent, /2\.50 GHz/);
   assert.match(cpu.querySelector(".metric-sub").textContent, /16 logical \/ 8 physical/);
-  assert.ok(cpu.querySelector(".metric-bar-fill"), "the CPU tile carries a utilization bar");
+  assert.ok(cpu.querySelector(".progress__fill"), "the CPU tile carries a utilization bar");
 
   const ram = root.querySelector(".metric-ram");
   assert.match(ram.querySelector(".metric-value").textContent, /32\.0 \/ 64\.0 GiB/);

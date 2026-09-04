@@ -1,0 +1,21 @@
+{
+  "name": "shared-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PromptForge shared UI primitives: the Cursor Dark token sheet and the behavioral components (modal, dropdown, toast stack, status bar shell, progress bar, button/input bases) consumed by both esbuild-built UIs (gateway-config-ui and workshop-server).",
+  "exports": {
+    "./tokens.css": "./tokens.css",
+    "./controls.css": "./controls.css",
+    "./modal": "./modal.ts",
+    "./modal.css": "./modal.css",
+    "./dropdown": "./dropdown.ts",
+    "./dropdown.css": "./dropdown.css",
+    "./toast": "./toast.ts",
+    "./toast.css": "./toast.css",
+    "./status-bar": "./status-bar.ts",
+    "./status-bar.css": "./status-bar.css",
+    "./progress": "./progress.ts",
+    "./progress.css": "./progress.css"
+  }
+}

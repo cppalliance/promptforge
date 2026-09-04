@@ -60,11 +60,11 @@ function check(name, condition) {
 }
 
 function menuEl() {
-  return document.querySelector(".workshop-dropdown");
+  return document.querySelector(".menu-popup");
 }
 
 function menuItems() {
-  return [...(menuEl()?.querySelectorAll(".workshop-dropdown__item") ?? [])];
+  return [...(menuEl()?.querySelectorAll(".menu-item") ?? [])];
 }
 
 await assertNoLeaks(lifecycle, async () => {
@@ -116,7 +116,7 @@ await assertNoLeaks(lifecycle, async () => {
     check("clicking the chip opens the dropdown", menuEl() !== null);
     const items = menuItems();
     const labels = items.map(
-      (item) => item.querySelector(".workshop-dropdown__label")?.textContent,
+      (item) => item.querySelector(".menu-item__label")?.textContent,
     );
     check(
       "the dropdown lists Cursor's five modes in order",
@@ -125,11 +125,11 @@ await assertNoLeaks(lifecycle, async () => {
     );
     check(
       "the current mode row carries Cursor's trailing check",
-      items[0]?.querySelector(".workshop-dropdown__check")?.textContent === "✓",
+      items[0]?.querySelector(".menu-item__check")?.textContent === "✓",
     );
     check(
       "every mode item renders its icon",
-      items.every((item) => item.querySelector(".workshop-dropdown__icon svg") !== null),
+      items.every((item) => item.querySelector(".menu-item__icon svg") !== null),
     );
     check(
       "the trigger gains the menu's aria wiring",

@@ -454,11 +454,11 @@ await assertNoLeaks(lifecycle, () => {
       toolbar?.querySelector(".model-picker-trigger__label")?.textContent === "alpha",
     );
     toolbar?.querySelector(".model-picker-trigger")?.click();
-    const modelItems = [...document.querySelectorAll(".workshop-dropdown__item")];
+    const modelItems = [...document.querySelectorAll(".menu-item")];
     check(
       "the picker dropdown lists the catalog",
       modelItems.length === 2 &&
-        modelItems[1]?.querySelector(".workshop-dropdown__label")?.textContent === "beta",
+        modelItems[1]?.querySelector(".menu-item__label")?.textContent === "beta",
     );
     modelItems[1]?.click();
     check(
@@ -471,8 +471,8 @@ await assertNoLeaks(lifecycle, () => {
     };
     document.addEventListener("agent-mode-changed", onMode);
     toolbar?.querySelector(".mode-chip")?.click();
-    const planItem = [...document.querySelectorAll(".workshop-dropdown__item")].find(
-      (item) => item.querySelector(".workshop-dropdown__label")?.textContent === "Plan",
+    const planItem = [...document.querySelectorAll(".menu-item")].find(
+      (item) => item.querySelector(".menu-item__label")?.textContent === "Plan",
     );
     planItem?.click();
     document.removeEventListener("agent-mode-changed", onMode);

@@ -12,7 +12,7 @@ import {
 
 import { confirmDialog } from "../components/confirm-modal";
 import { createDropdownControl } from "../components/dropdown-control";
-import type { ToastStack } from "../components/toast";
+import type { ToastStack } from "shared-ui/toast";
 import type {
   ConfigStore,
   ModelEntry,

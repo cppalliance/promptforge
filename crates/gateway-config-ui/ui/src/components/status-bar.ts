@@ -1,15 +1,19 @@
-// The fixed bottom status bar [VS Code]: two mutually exclusive states
-// sharing one strip. Idle shows the endpoint LED strip (green ready,
-// amber provisioning, gray unconfigured) plus the model count and
-// declared VRAM; an active queue command swaps the strip for a
-// full-width progress bar with the command label, a cancel button
-// firing POST /admin/queue/cancel, and one cancel button per pending
-// command firing POST /admin/queue/cancel-pending. Driven by the
-// extended GET /admin/status response. Self-contained on purpose - it
-// owns its poll loop and the body class that keeps page content clear
-// of the fixed strip - so the planned move to shared-ui is a file move.
+// The fixed bottom status bar [VS Code], built on the shared shell
+// (shared-ui/status-bar): the shell owns the bar, the text region, and
+// the slot's progress/indicators swap; this component populates them
+// from the extended GET /admin/status response. Idle shows the endpoint
+// LED strip (green ready, amber provisioning, gray unconfigured) in the
+// indicators group plus the model count and declared VRAM in the extras
+// region; an active queue command swaps the slot to the progress bar,
+// puts the command label in the text, and fills the extras region with
+// the pending count, one cancel button per pending command (POST
+// /admin/queue/cancel-pending), and the active command's cancel button
+// (POST /admin/queue/cancel). Self-contained on purpose - it owns its
+// poll loop and the body class that keeps page content clear of the
+// fixed strip.
 
 import { X, createElement as lucideElement } from "lucide";
+import { createStatusBarShell } from "shared-ui/status-bar";
 
 import type { EndpointStatus, GatewayApi, GatewayStatus } from "../services/gateway-api";
 
@@ -54,45 +58,34 @@ function summaryText(models: number, vramGb: number): string {
 
 /** Creates the status bar. */
 export function createStatusBar(options: StatusBarOptions): StatusBar {
-  const element = document.createElement("footer");
-  element.className = "status-bar";
+  const shell = createStatusBarShell();
+  const element = shell.element;
 
-  // Idle state: the endpoint LED strip plus the model/VRAM summary.
-  const idle = document.createElement("div");
-  idle.className = "status-bar-idle";
+  // Idle state: the endpoint LED strip fills the shell's indicators
+  // group; the model/VRAM summary sits in the extras region.
   const leds = document.createElement("div");
   leds.className = "status-leds";
+  shell.indicators.append(leds);
   const summary = document.createElement("span");
   summary.className = "status-bar-summary";
-  idle.append(leds, summary);
 
-  // Active state: the command label, a full-width progress bar, the
-  // pending count with one cancel button per waiting command, and the
-  // active command's cancel button.
-  const activePane = document.createElement("div");
-  activePane.className = "status-bar-active";
-  activePane.hidden = true;
-  const commandLabel = document.createElement("span");
-  commandLabel.className = "status-bar-command";
-  const progress = document.createElement("div");
-  progress.className = "status-bar-progress";
-  progress.setAttribute("role", "progressbar");
-  progress.setAttribute("aria-valuemin", "0");
-  progress.setAttribute("aria-valuemax", "100");
-  const fill = document.createElement("div");
-  fill.className = "status-bar-progress-fill";
-  progress.append(fill);
+  // Active state: the extras region's queue group holds the pending
+  // count, one cancel button per waiting command, and the active
+  // command's cancel button.
+  const queueGroup = document.createElement("span");
+  queueGroup.className = "status-bar-queue";
+  queueGroup.hidden = true;
   const pendingNote = document.createElement("span");
   pendingNote.className = "status-bar-pending";
   pendingNote.hidden = true;
-  const pendingList = document.createElement("div");
+  const pendingList = document.createElement("span");
   pendingList.className = "status-bar-pending-list";
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.className = "button button-xs button-outline status-bar-cancel";
   cancel.textContent = "Cancel";
-  activePane.append(commandLabel, progress, pendingNote, pendingList, cancel);
-  element.append(idle, activePane);
+  queueGroup.append(pendingNote, pendingList, cancel);
+  shell.extras.append(summary, queueGroup);
 
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -141,13 +134,12 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
     update(status: GatewayStatus): void {
       const active = status.queue.active;
       if (active !== null) {
-        idle.hidden = true;
-        activePane.hidden = false;
         const fraction = Math.min(Math.max(active.fraction, 0), 1);
         const percent = Math.round(fraction * 100);
-        commandLabel.textContent = `${active.name} (${percent}%)`;
-        fill.style.setProperty("--progress", String(fraction));
-        progress.setAttribute("aria-valuenow", String(percent));
+        shell.setText(`${active.name} (${percent}%)`);
+        shell.renderSlot({ current: percent, total: 100 });
+        summary.hidden = true;
+        queueGroup.hidden = false;
         const pendingCount = status.queue.pending.length;
         pendingNote.hidden = pendingCount === 0;
         pendingNote.textContent =
@@ -185,8 +177,10 @@ export function createStatusBar(options: StatusBarOptions): StatusBar {
         );
         return;
       }
-      activePane.hidden = true;
-      idle.hidden = false;
+      shell.setText("");
+      shell.renderSlot(null);
+      summary.hidden = false;
+      queueGroup.hidden = true;
       leds.replaceChildren(
         ...status.endpoints.map((endpoint) => {
           const state = ledState(endpoint);

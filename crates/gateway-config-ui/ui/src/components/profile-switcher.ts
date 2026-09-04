@@ -7,7 +7,7 @@
 import { Check, ChevronDown, createElement as lucideElement } from "lucide";
 
 import type { ConfigStore } from "../services/config-store";
-import type { ToastStack } from "./toast";
+import type { ToastStack } from "shared-ui/toast";
 
 /** Construction dependencies for the switcher. */
 export interface ProfileSwitcherDeps {

@@ -1,7 +1,7 @@
 /* The model picker trigger (model-picker-trigger.ts imports this file;
    esbuild bundles it into dist/app.css). The dropdown it opens is
    styled by workshop/dropdown.css; these rules cover only the trigger.
-   Themed values come from the :root tokens in style.css; every var()
+   Themed values come from the :root tokens in shared-ui/tokens.css; every var()
    carries a fallback so a deleted token degrades instead of breaking. */
 
 .model-picker-trigger {

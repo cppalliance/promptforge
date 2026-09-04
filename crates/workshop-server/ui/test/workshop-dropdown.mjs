@@ -1,5 +1,5 @@
-// Unit test for the Workshop tree's context menu (src/ui/workshop/
-// dropdown.ts), the local port of the vendored murm-ui dropdown. Bundles
+// Unit test for the shared action menu (shared-ui/dropdown.ts), the
+// floating menu the workshop's mode chip and model picker open. Bundles
 // the module with esbuild and drives it against jsdom. Covers: opening
 // renders a role=menu of menuitem buttons and wires the trigger's
 // aria-haspopup/expanded/controls; activating an item runs its action,
@@ -32,7 +32,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
 const bundle = await esbuild.build({
-  entryPoints: [path.join(uiDir, "..", "src", "ui", "workshop", "dropdown.ts")],
+  entryPoints: [path.join(uiDir, "..", "node_modules", "shared-ui", "dropdown.ts")],
   bundle: true,
   write: false,
   format: "esm",
@@ -53,11 +53,11 @@ function check(name, condition) {
 }
 
 function menuEl() {
-  return window.document.querySelector(".workshop-dropdown");
+  return window.document.querySelector(".menu-popup");
 }
 
 function itemsOf(menu) {
-  return [...menu.querySelectorAll(".workshop-dropdown__item")];
+  return [...menu.querySelectorAll(".menu-item")];
 }
 
 function pressKey(target, key) {
@@ -105,12 +105,12 @@ dropdown.show(trigger, [
   check("an item renders its label", items[0]?.textContent === "First");
   check(
     "an iconHtml renders inside the item's icon span",
-    items[0]?.querySelector(".workshop-dropdown__icon svg") !== null,
+    items[0]?.querySelector(".menu-item__icon svg") !== null,
   );
   check(
     "a danger item carries the danger modifier class",
-    items[1]?.classList.contains("workshop-dropdown__item--danger") === true &&
-      items[0]?.classList.contains("workshop-dropdown__item--danger") === false,
+    items[1]?.classList.contains("menu-item--danger") === true &&
+      items[0]?.classList.contains("menu-item--danger") === false,
   );
   check("the trigger gains aria-haspopup=menu", trigger.getAttribute("aria-haspopup") === "menu");
   check("the trigger gains aria-expanded=true", trigger.getAttribute("aria-expanded") === "true");
@@ -192,7 +192,7 @@ dropdown.show(trigger, [
   );
   check(
     "one menu at a time",
-    window.document.querySelectorAll(".workshop-dropdown").length === 1,
+    window.document.querySelectorAll(".menu-popup").length === 1,
   );
 }
 
@@ -211,8 +211,8 @@ dropdown.show(trigger, [
 
 {
   const appCss = await readFile(path.join(uiDir, "..", "dist", "app.css"), "utf8");
-  check("dist/app.css carries the menu's rules", /\.workshop-dropdown\s*\{/.test(appCss));
-  check("dist/app.css carries the item's rules", /\.workshop-dropdown__item\s*\{/.test(appCss));
+  check("dist/app.css carries the menu surface rules", /\.menu-item\s*\{/.test(appCss));
+  check("dist/app.css carries the popup menu's rules", /\.menu-popup\s*\{/.test(appCss));
 }
 
 if (failures.length > 0) {

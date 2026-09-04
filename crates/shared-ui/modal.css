@@ -1,0 +1,32 @@
+/* Default skin for modal.ts's base classes, on the Cursor Dark tokens.
+   Every rule sits in the components layer, so a consumer's own per-prefix
+   dialog styles (the workshop's editor dialogs are absolute-positioned
+   inside their panel) override these defaults regardless of bundle
+   order. */
+
+@layer components {
+	/* Dimmed full-host overlay centering the card. The host defaults to
+	   the viewport; a consumer overlaying a panel re-declares position. */
+	.modal-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: center;
+		background: rgb(0 0 0 / 0.6);
+	}
+	.modal-dialog {
+		width: min(28rem, calc(100vw - 2rem));
+		padding: 1.25rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-xl);
+		background: var(--bg-secondary);
+		box-shadow: 0 16px 48px rgb(0 0 0 / 0.5);
+	}
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		margin-block-start: 1rem;
+	}
+}

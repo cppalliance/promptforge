@@ -13,7 +13,7 @@ import { BadgeCheck, Star, createElement as lucideElement } from "lucide";
 
 import { createDropdownControl } from "../components/dropdown-control";
 import { renderMarkdown, setSanitizedHtml } from "../components/markdown";
-import type { ToastStack } from "../components/toast";
+import type { ToastStack } from "shared-ui/toast";
 import { formatBytes } from "../format";
 import type { ConfigStore } from "../services/config-store";
 import type { GatewayApi, SystemSnapshot } from "../services/gateway-api";

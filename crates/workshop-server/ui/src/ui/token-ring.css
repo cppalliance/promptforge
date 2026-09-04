@@ -1,7 +1,7 @@
 /* The token ring gauge (token-ring.ts imports this file; esbuild
    bundles it into dist/app.css). Geometry (radii, stroke width, dash
    math) lives in the TS; these rules cover only paint and size. Themed
-   values come from the :root tokens in style.css; every var() carries
+   values come from the :root tokens in shared-ui/tokens.css; every var() carries
    a fallback so a deleted token degrades instead of breaking. */
 
 .token-ring {

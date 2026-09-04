@@ -3,7 +3,7 @@
    appends the popup to document.body and writes position, left, and top
    inline from the cursor rect (Floating UI), so this file owns only the
    surface and the list. Themed values come from the :root tokens in
-   style.css, each with a fallback so a missing token degrades instead of
+   shared-ui/tokens.css, each with a fallback so a missing token degrades instead of
    breaking the property. */
 
 .typeahead-popup {

@@ -1,6 +1,9 @@
-/* Foundation stylesheet: cascade layer order, reset, design tokens,
-   typography, and focus defaults. Later selectors stay low-specificity
-   because precedence is settled by the layer order declared here. */
+/* Foundation stylesheet: cascade layer order, reset, typography, and
+   focus defaults. The design tokens come from shared-ui/tokens.css (the
+   Cursor Dark sheet both PromptForge UIs share), imported by main.ts
+   ahead of this file so the layer order below is declared before any
+   layered component rules. Later selectors stay low-specificity because
+   precedence is settled by the layer order declared here. */
 
 @layer reset, base, components, utilities;
 
@@ -45,34 +48,6 @@
 @layer base {
 	:root {
 		color-scheme: dark;
-
-		/* Molten lava on near-black. Muted text #888888 measures 5.41:1
-		   on --bg-primary and 4.91:1 on --bg-secondary (WCAG AA 4.5:1). */
-		--bg-primary: #0F0F0F;
-		--bg-secondary: #1A1A1A;
-		--bg-tertiary: #252525;
-		--text-primary: #E8E8E8;
-		--text-secondary: #888888;
-		--accent: #E05A2B;
-		--accent-hover: #F07030;
-		--accent-subtle: rgba(224, 90, 43, 0.15);
-		--accent-gradient: linear-gradient(90deg, #8B2500, #E05A2B, #F09030, #FFD080);
-		--danger: #DC3545;
-		/* --danger as text on the dark surfaces is 4.24:1 and fails AA;
-		   this lightened companion passes on --bg-primary (8.1:1) and on
-		   the tinted destructive-button fills (5.4:1+). Fills and borders
-		   keep --danger itself. */
-		--danger-text: #F28B93;
-		--success: #28A745;
-		/* --success as text on the dark surfaces fails AA the same way
-		   --danger does; this lightened companion passes on
-		   --bg-secondary (8.4:1). Fills keep --success itself. */
-		--success-text: #6FCF87;
-		--warning: #F09030;
-		--border: #2A2A2A;
-		--radius: 8px;
-		--font: system-ui, -apple-system, sans-serif;
-		--font-mono: ui-monospace, "Cascadia Code", monospace;
 	}
 
 	html {

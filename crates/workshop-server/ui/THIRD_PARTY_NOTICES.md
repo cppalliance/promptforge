@@ -2,33 +2,4 @@
 
 Source in this directory that derives from another project, with the notice its license requires. Packages consumed from `node_modules` carry their own license files and are not listed here.
 
-## murm-ui
-
-`src/ui/workshop/dropdown.ts` and `src/ui/workshop/dropdown.css` are ported from the `components/dropdown.ts` and `styles/dropdown.css` files of murm-ui 0.2.0 (commit `336ff7db79d928373e83c3672db6041a0adbc868`), cut to the Workshop tree's needs and restyled onto the workshop tokens.
-
-- Project: <https://github.com/levmv/murm-ui>
-- License: MIT
-
-```text
-MIT License
-
-Copyright (c) 2026 Lev Morozov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+No derived source at present. The murm-ui dropdown port moved to `crates/shared-ui/` (see its `THIRD_PARTY_NOTICES.md`) when the dropdown became a shared primitive.

@@ -1,5 +1,5 @@
 /* Styles for window-menu.ts, which imports this file; esbuild bundles it
-   into dist/app.css. Themed values come from the :root tokens in style.css. */
+   into dist/app.css. Themed values come from the :root tokens in shared-ui/tokens.css. */
 
 /* Menu buttons: text items flush with the bar's left edge. */
 .window-titlebar__menus {

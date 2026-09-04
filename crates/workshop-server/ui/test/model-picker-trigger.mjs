@@ -64,11 +64,11 @@ function check(name, condition) {
 }
 
 function menuEl() {
-  return document.querySelector(".workshop-dropdown");
+  return document.querySelector(".menu-popup");
 }
 
 function menuItems() {
-  return [...(menuEl()?.querySelectorAll(".workshop-dropdown__item") ?? [])];
+  return [...(menuEl()?.querySelectorAll(".menu-item") ?? [])];
 }
 
 function labelOf(trigger) {

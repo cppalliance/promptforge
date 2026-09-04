@@ -1,7 +1,13 @@
 // Update banner and installation overlay. Native I/O and state stay in the
-// service; this view only translates snapshots into DOM.
+// service; this view only translates snapshots into DOM. Transient update
+// notifications ride the shared toast stack (shared-ui/toast); the banner
+// keeps the actionable "available" state and the overlay the install
+// progress (the shared inline progress bar).
 
 import "./update-view.css";
+
+import { createProgressBar } from "shared-ui/progress";
+import type { ToastStack } from "shared-ui/toast";
 
 import { Disposable, toDisposable } from "../base/lifecycle";
 import { UpdateService, type UpdateSnapshot } from "../services/update-service";
@@ -17,8 +23,12 @@ export class UpdateView extends Disposable {
   private readonly banner = document.createElement("aside");
   private readonly overlay = document.createElement("div");
   private installing = false;
+  private notifiedPhase: UpdateSnapshot["phase"] | null = null;
 
-  constructor(private readonly service: UpdateService) {
+  constructor(
+    private readonly service: UpdateService,
+    private readonly toasts: ToastStack,
+  ) {
     super();
     this.banner.className = "update-banner";
     this.overlay.className = "update-screen";
@@ -30,8 +40,22 @@ export class UpdateView extends Disposable {
   }
 
   private render(snapshot: UpdateSnapshot): void {
+    this.notify(snapshot);
     this.renderBanner(snapshot);
     this.renderScreen(snapshot);
+  }
+
+  /** Toasts the phase transitions a user must notice without watching. */
+  private notify(snapshot: UpdateSnapshot): void {
+    if (snapshot.phase === this.notifiedPhase) {
+      return;
+    }
+    this.notifiedPhase = snapshot.phase;
+    if (snapshot.phase === "available") {
+      this.toasts.show(`PromptForge ${snapshot.version} is available`, "info");
+    } else if (snapshot.phase === "error") {
+      this.toasts.show(`Update failed: ${snapshot.error}`, "error");
+    }
   }
 
   private renderBanner(snapshot: UpdateSnapshot): void {
@@ -92,18 +116,15 @@ export class UpdateView extends Disposable {
     } else {
       status.textContent = `Update failed: ${snapshot.error}`;
     }
-    const progress = document.createElement("progress");
-    progress.max = 100;
-    if (progressValue !== null) {
-      progress.value = progressValue;
-    }
+    const progress = createProgressBar("Update download progress");
+    progress.setFraction(progressValue === null ? null : progressValue / 100);
     const details = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "Update log";
     const log = document.createElement("pre");
     log.textContent = snapshot.log.join("\n");
     details.append(summary, log);
-    panel.append(title, status, progress, details);
+    panel.append(title, status, progress.element, details);
     if (snapshot.phase === "error") {
       const close = document.createElement("button");
       close.type = "button";

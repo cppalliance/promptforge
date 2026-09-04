@@ -16,8 +16,8 @@ import { Disposable, toDisposable } from "../base/lifecycle";
 import type { SttInputTarget } from "./stt";
 import { MentionChip, MentionSuggestionPluginKey } from "./workshop/mention-chip";
 
-// The fallbacks mirror the token defaults in style.css; they apply when
-// the skin is absent (tests) or the token is deleted.
+// The fallbacks mirror the token defaults in shared-ui/tokens.css; they
+// apply when the skin is absent (tests) or the token is deleted.
 const DEFAULT_MIN_HEIGHT_PX = 36;
 const DEFAULT_MAX_HEIGHT_PX = 200;
 

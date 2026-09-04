@@ -39,6 +39,7 @@ const bundle = await esbuild.build({
       } from "./src/ui/workshop/layout-persistence.ts";
       export { installShortcuts } from "./src/ui/workshop/shortcuts.ts";
       export { EditorPanel } from "./src/ui/workshop/editor-panel.ts";
+      export { StatusBar } from "./src/ui/status-bar.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -215,6 +216,7 @@ const {
   LAYOUT_SCHEMA_VERSION,
   installShortcuts,
   EditorPanel,
+  StatusBar,
 } = await import(pathToFileURL(bundlePath).href);
 
 const failures = [];
@@ -292,7 +294,9 @@ check("the envelope records the zone groups",
   typeof envelope.zones.left === "string" && typeof envelope.zones.right === "string" &&
     typeof envelope.zones.main === "string");
 
-// The status bar is not part of the zone system.
+// The status bar is not part of the zone system. main.ts owns the bar;
+// mount one here the way the composition root does.
+new StatusBar();
 check("the status bar is a direct child of body",
   !!window.document.querySelector("body > .status-bar"));
 check("the status bar is outside the shell and the dock",

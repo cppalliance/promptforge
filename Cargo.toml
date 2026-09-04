@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# crates/shared-ui is not a Rust crate: it is the shared TypeScript+CSS
+# package both esbuild-built UIs consume, so the crates/* glob skips it.
+exclude = ["crates/shared-ui"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:

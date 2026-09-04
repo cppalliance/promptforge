@@ -12,8 +12,8 @@ import "./model-picker-trigger.css";
 import { ChevronDown, createElement } from "lucide";
 import { Disposable, toDisposable } from "../base/lifecycle";
 import type { ModelService } from "../services/model-service";
-import { DropdownMenu } from "./workshop/dropdown";
-import type { DropdownItem } from "./workshop/dropdown";
+import { DropdownMenu } from "shared-ui/dropdown";
+import type { DropdownItem } from "shared-ui/dropdown";
 
 /** The trigger label when no model is selected. */
 const NO_SELECTION_LABEL = "Select model";

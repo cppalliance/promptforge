@@ -17,8 +17,8 @@ import {
 } from "lucide";
 import type { IconNode } from "lucide";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import { DropdownMenu } from "./workshop/dropdown";
-import type { DropdownItem } from "./workshop/dropdown";
+import { DropdownMenu } from "shared-ui/dropdown";
+import type { DropdownItem } from "shared-ui/dropdown";
 
 /** The agent interaction modes, keyed by display label. */
 export const UNIFIED_MODES = {

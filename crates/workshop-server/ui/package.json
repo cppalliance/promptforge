@@ -40,6 +40,7 @@
     "dompurify": "^3.4.14",
     "lucide": "^1.37.0",
     "marked": "^18.0.11",
+    "shared-ui": "file:../../shared-ui",
     "shiki": "^4.4.3"
   },
   "devDependencies": {

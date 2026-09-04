@@ -7,7 +7,7 @@
 
 import { Check, X, createElement as lucideElement } from "lucide";
 
-import { scheduleTimeout } from "./toast";
+import { scheduleTimeout } from "shared-ui/toast";
 
 /** How long a failed overlay stays up before removing itself. */
 const ERROR_HOLD_MS = 1500;

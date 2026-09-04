@@ -9,7 +9,11 @@
 // subscribes to the progress stream and instead announces apply and
 // revert actions to the parent.
 
+import "shared-ui/tokens.css";
 import "./styles/base.css";
+import "shared-ui/controls.css";
+import "shared-ui/dropdown.css";
+import "shared-ui/progress.css";
 import "./styles/controls.css";
 import "./styles/layout.css";
 
@@ -20,7 +24,7 @@ import { createProfileSwitcher } from "./components/profile-switcher";
 import { openReviewDiff } from "./components/review-diff";
 import { createStatusBar } from "./components/status-bar";
 import { createTabBar } from "./components/tab-bar";
-import { createToastStack } from "./components/toast";
+import { createToastStack } from "shared-ui/toast";
 import { startRouter } from "./router";
 import { ConfigStore } from "./services/config-store";
 import { GatewayApi } from "./services/gateway-api";

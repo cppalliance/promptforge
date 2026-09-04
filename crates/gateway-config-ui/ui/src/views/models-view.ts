@@ -33,7 +33,7 @@ import {
   settingOptions,
 } from "../components/settings-registry";
 import type { SectionDef, SettingContext, SettingDef } from "../components/settings-registry";
-import type { ToastStack } from "../components/toast";
+import type { ToastStack } from "shared-ui/toast";
 import { fileName, formatBytes } from "../format";
 import type { ConfigStore, ModelEntry } from "../services/config-store";
 import type { GatewayApi, OrphanFile } from "../services/gateway-api";

@@ -16,11 +16,13 @@ const srcUiDir = path.join(uiDir, "..", "src", "ui");
 // The title-bar rules live in per-component CSS files colocated with their
 // owning modules; they ship bundled inside dist/app.css, where the other
 // components' rules would confuse the first-match rule scan below, so this
-// test reads the exact source files instead. Concatenation order mirrors the
-// old single-file order: tokens (dist/style.css), chrome, menus, About dialog.
+// test reads the exact source files instead. The tokens come from the
+// shared Cursor Dark sheet (shared-ui/tokens.css), the single source of
+// truth for both UIs. Concatenation order mirrors the old single-file
+// order: tokens, chrome, menus, About dialog.
 const [html, tokens, chrome, menu, about] = await Promise.all([
   readFile(path.join(distDir, "index.html"), "utf8"),
-  readFile(path.join(distDir, "style.css"), "utf8"),
+  readFile(path.join(uiDir, "..", "..", "..", "shared-ui", "tokens.css"), "utf8"),
   readFile(path.join(srcUiDir, "window-chrome.css"), "utf8"),
   readFile(path.join(srcUiDir, "window-menu.css"), "utf8"),
   readFile(path.join(srcUiDir, "about-dialog.css"), "utf8"),

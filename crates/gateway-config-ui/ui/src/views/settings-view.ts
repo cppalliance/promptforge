@@ -24,7 +24,7 @@ import { createChipInput } from "../components/chip-input";
 import { createDropdownControl } from "../components/dropdown-control";
 import { createSliderControl } from "../components/slider-control";
 import { createToggleControl } from "../components/toggle-control";
-import type { ToastStack } from "../components/toast";
+import type { ToastStack } from "shared-ui/toast";
 import { formatBytes } from "../format";
 import { readPath, writePath } from "../services/config-store";
 import type { ConfigStore, EntryData } from "../services/config-store";
@@ -497,10 +497,12 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   }
 
   function metricBar(fraction: number, segmented = false): HTMLElement {
+    // The shared inline progress bar's classes, applied directly: the
+    // fill scales by --progress and recolors by load state.
     const bar = document.createElement("div");
-    bar.className = segmented ? "metric-bar metric-bar-segmented" : "metric-bar";
+    bar.className = segmented ? "progress metric-bar-segmented" : "progress";
     const fill = document.createElement("div");
-    fill.className = "metric-bar-fill";
+    fill.className = "progress__fill";
     const clamped = Math.min(1, Math.max(0, fraction));
     fill.style.setProperty("--progress", String(clamped));
     if (clamped >= 0.9) {

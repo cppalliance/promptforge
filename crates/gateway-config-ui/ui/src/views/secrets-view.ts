@@ -17,7 +17,7 @@ import { fileName } from "../format";
 import { HfAuthError, UnauthorizedError } from "../services/gateway-api";
 import type { EnvFiles, EnvScope, GatewayApi } from "../services/gateway-api";
 import type { ConfigStore } from "../services/config-store";
-import type { ToastStack } from "../components/toast";
+import type { ToastStack } from "shared-ui/toast";
 
 /** Construction dependencies for the Secrets view. */
 export interface SecretsViewDeps {

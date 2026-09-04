@@ -19,7 +19,8 @@
     "dompurify": "^3.4.14",
     "gray-matter": "^4.0.3",
     "lucide": "^1.37.0",
-    "markdown-it": "^15.0.1"
+    "markdown-it": "^15.0.1",
+    "shared-ui": "file:../../shared-ui"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",

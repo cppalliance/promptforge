@@ -1,0 +1,97 @@
+/* The shared menu surface (.menu, .menu-item) and the floating action
+   menu (.menu-popup) from dropdown.ts, on the Cursor Dark tokens. The
+   gateway's select listboxes and profile switcher consume the surface
+   classes with their own behavior; the workshop's action menus come from
+   dropdown.ts. Converged from the gateway's controls.css menu rules and
+   the workshop's murm-ui-derived dropdown stylesheet; the danger rows
+   keep the neutral hover wash because --danger-text is tuned to pass
+   4.5:1 on --bg-hover. All rules live in the components layer so a
+   consumer's own rules override them.
+
+   Derived from murm-ui 0.2.0 styles/dropdown.css, copyright (c) 2026
+   Lev Morozov, MIT License; the full notice is in THIRD_PARTY_NOTICES.md. */
+
+@layer components {
+	/* The menu surface: a raised card of action rows. */
+	.menu {
+		min-width: 8rem;
+		padding: var(--space-1);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-xl);
+		background: var(--bg-elevated);
+		box-shadow: var(--shadow-popup);
+	}
+	.menu-item {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		width: 100%;
+		min-height: var(--height-base);
+		padding: 0 var(--space-2);
+		border: 0;
+		border-radius: var(--radius);
+		background: transparent;
+		color: var(--text-primary);
+		font: inherit;
+		font-size: var(--font-size-base);
+		text-align: start;
+		cursor: pointer;
+	}
+	.menu-item:hover {
+		background: var(--bg-hover);
+	}
+	/* Keyboard focus reads through the same state background; Cursor
+	   menus draw no focus frame. */
+	.menu-item:focus-visible {
+		outline: none;
+		background: var(--bg-hover);
+	}
+	.menu-item[aria-selected="true"],
+	.menu-item--selected {
+		background: var(--cursor-bg-secondary);
+	}
+	.menu-item--danger {
+		color: var(--danger-text);
+	}
+	.menu-item__icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: var(--space-4);
+		height: var(--space-4);
+		color: inherit;
+	}
+	.menu-item__label {
+		flex: 1;
+		min-width: 0;
+	}
+	.menu-item__check {
+		margin-inline-start: auto;
+		color: var(--cursor-icon-primary);
+	}
+
+	/* The floating action menu: fixed against the viewport, fading in. */
+	.menu-popup {
+		position: fixed;
+		z-index: 9999;
+		display: flex;
+		flex-direction: column;
+		min-width: 210px;
+		animation: menu-popup-fade 0.083s linear forwards;
+	}
+
+	@keyframes menu-popup-fade {
+		0% {
+			opacity: 0;
+		}
+		100% {
+			opacity: 1;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.menu-popup {
+			animation: none;
+		}
+	}
+}

@@ -15,7 +15,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { fetchTree, revokeRoot, type TreeEntry, type TreeListing } from "../../services/workspace-api";
 import { grantPath, WORKSPACE_CHANGED_EVENT } from "../workspace-drops";
-import { DropdownMenu } from "./dropdown";
+import { DropdownMenu } from "shared-ui/dropdown";
 import { showPanelDialog } from "./editor-dialog";
 import { ICON_FOLDER_PLUS, ICON_TRASH_2 } from "./icons";
 import { openInZone } from "./zones";

@@ -1,7 +1,7 @@
 /* Styles for editor-panel.ts, which imports this file; esbuild bundles it
    into dist/app.css. Covers the editor surface and the panel's modal
    dialogs from editor-dialog.ts. Themed values come from the :root tokens
-   in style.css. */
+   in shared-ui/tokens.css. */
 
 /* The editor panel: the CodeMirror surface fills the panel; the editor's
    own theme (colors, gutters, selection, search panel) is applied from JS
@@ -46,13 +46,18 @@
   background: rgba(0, 0, 0, 0.5);
 }
 
+/* The shared modal's base skin (shared-ui/modal.css) would size these
+   dialogs to a fixed width and add a drop shadow; the panel dialogs stay
+   content-sized and shadowless, as before the extraction. */
 .editor-conflict,
 .editor-close {
+  width: auto;
   max-width: 360px;
   padding: var(--space-xl);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: none;
 }
 
 .editor-conflict__title,
@@ -75,6 +80,9 @@
   display: flex;
   gap: var(--space-md);
   justify-content: flex-end;
+  /* The shared modal's actions row carries a 1rem top margin; the line
+     above already supplies this dialog's spacing. */
+  margin-block-start: 0;
 }
 
 .editor-conflict__button,

@@ -1,0 +1,283 @@
+/* ==========================================================================
+   PromptForge shared Cursor Dark token sheet
+
+   The single source of truth for every visual value both UIs (the gateway
+   config UI and the workshop) share: palette, type, spacing, radius, and
+   the status bar's progress and LED effects. Both esbuild builds bundle
+   this file; no component stylesheet hardcodes a color or a themed length.
+
+   The surface, text, border, spacing, radius, shadow, and motion values
+   mirror Cursor's dark theme (extracted from its workbench tokens); the
+   accent stays PromptForge gold. The --cursor-* values are exact copies
+   from Cursor's installed theme - never approximate them, and keep the
+   color-mix() formulas intact (never encode premultiplied RGB as
+   straight-alpha hex).
+
+   The first block is the workshop's original :root sheet, carried over
+   verbatim. The "Generic aliases" block at the end maps the names the
+   gateway config UI's components consume onto the same Cursor Dark
+   values, so both UIs read one sheet.
+   ========================================================================== */
+
+:root {
+  /* Cursor Dark primitives (from cursor-dark-color-theme.json + JS registry) */
+  --cursor-base: #F0F0F0;
+  --cursor-chrome: #141414;
+  --cursor-editor: #181818;
+  --cursor-sidebar: #181818;
+  --cursor-focus: #F0F0F0;
+  --cursor-accent: #599CE7;
+  --cursor-brand: #F54E00;
+  --cursor-blue: #7BAFE9;
+  --cursor-cyan: #81A1C1;
+  --cursor-green: #3FA266;
+  --cursor-red: #FC6B83;
+  --cursor-danger: #E34671;
+  --cursor-yellow: #F1B467;
+  --cursor-magenta: #B48EAD;
+  --cursor-orange: #D08770;
+  --cursor-purple: #9386F2;
+
+  /* Cursor Dark derived surfaces */
+  --cursor-bg-quinary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
+  --cursor-bg-quaternary: color-mix(in srgb, var(--cursor-base) 6%, transparent);
+  --cursor-bg-tertiary: color-mix(in srgb, var(--cursor-base) 8%, transparent);
+  --cursor-bg-secondary: color-mix(in srgb, var(--cursor-base) 14%, transparent);
+  --cursor-bg-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
+  --cursor-bg-active: color-mix(in srgb, var(--cursor-base) 16%, transparent);
+  --cursor-bg-focused: color-mix(in srgb, var(--cursor-base) 22%, transparent);
+  --cursor-bg-card: var(--cursor-bg-quaternary);
+  --cursor-bg-elevated: #181818;
+  --cursor-bg-input-surface: var(--cursor-bg-quaternary);
+
+  /* Cursor Dark derived strokes */
+  --cursor-stroke-quaternary: color-mix(in srgb, var(--cursor-base) 4%, transparent);
+  --cursor-stroke-tertiary: color-mix(in srgb, var(--cursor-base) 8%, transparent);
+  --cursor-stroke-secondary: color-mix(in srgb, var(--cursor-base) 12%, transparent);
+  --cursor-stroke-primary: color-mix(in srgb, var(--cursor-base) 20%, transparent);
+  --cursor-stroke-focused: color-mix(in srgb, var(--cursor-focus, var(--cursor-base)) 15%, transparent);
+
+  /* Cursor Dark derived text */
+  --cursor-text-primary: #F0F0F0;
+  --cursor-text-secondary: color-mix(in srgb, var(--cursor-base) 74%, transparent);
+  --cursor-text-tertiary: color-mix(in srgb, var(--cursor-base) 60%, transparent);
+  --cursor-text-quaternary: color-mix(in srgb, var(--cursor-base) 36%, transparent);
+
+  /* Cursor Dark derived icons */
+  --cursor-icon-primary: #F0F0F0;
+  --cursor-icon-secondary: color-mix(in srgb, var(--cursor-base) 66%, transparent);
+  --cursor-icon-tertiary: color-mix(in srgb, var(--cursor-base) 52%, transparent);
+  --cursor-icon-quaternary: color-mix(in srgb, var(--cursor-base) 28%, transparent);
+
+  /* Cursor Dark shadows */
+  --cursor-shadow-primary: #00000033;
+  --cursor-shadow-secondary: #0000001F;
+  --cursor-shadow-tertiary: #0000000F;
+
+  /* VS Code theme surfaces (white-based alpha, for shell chrome) */
+  --bg: #181818;
+  --bg-raised: #141414;
+  --bg-hover: #F0F0F011;
+  --bg-card: #F0F0F00A;
+  --bg-input: #F0F0F00A;
+  --bg-elevated: #181818;
+
+  /* Text and borders (opacity tiers over the dark surfaces) */
+  --text: #F0F0F0;
+  --text-muted: #F0F0F0BD;
+  --text-tertiary: #F0F0F05C;
+  --text-quaternary: #F0F0F099;
+  --input-placeholder: #F0F0F099;
+  --border: #F0F0F013;
+  --border-subtle: #F0F0F011;
+
+  /* Accent and semantics */
+  --accent: #e4b570;
+  --accent-dim: #b89059;
+  --danger: #E34671;
+  --danger-text: #FC6B83;
+  --on-danger: #ffffff;
+  --hover-glow: var(--accent, #e4b570);
+  --color-red: #FC6B83;
+  --color-green: #3FA266;
+  --color-yellow: #F1B467;
+  --color-cyan: #81A1C1;
+  --color-blue: #7BAFE9;
+  --color-purple: #9386F2;
+
+  /* Type */
+  --font-prose: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", sans-serif;
+  --code-font: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+  --line-height-xs: 14px;
+  --line-height-sm: 16px;
+  --line-height-base: 18px;
+  --line-height-lg: 22px;
+  --letter-spacing-base: -0.08px;
+  --letter-spacing-lg: -0.15px;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 590;
+
+  /* Spacing scale (4px base unit) */
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-9: 36px;
+  --space-10: 40px;
+  --space-11: 44px;
+  --space-12: 48px;
+  --space-13: 52px;
+  --space-14: 56px;
+  --space-15: 60px;
+  --space-16: 64px;
+  --space-17: 68px;
+  --space-18: 72px;
+  --space-19: 76px;
+  --space-20: 80px;
+  /* Legacy aliases: existing component CSS keeps working unchanged */
+  --space-xs: var(--space-1, 4px); /* 4px */
+  --space-sm: var(--space-1-5, 6px); /* 6px */
+  --space-md: var(--space-2, 8px); /* 8px */
+  --space-lg: var(--space-3, 12px); /* 12px */
+  --space-xl: var(--space-4, 16px); /* 16px */
+
+  /* Radius */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Control heights */
+  --height-xs: 20px;
+  --height-sm: 24px;
+  --height-base: 28px;
+  --height-lg: 32px;
+
+  /* Shadows */
+  --shadow-primary: var(--cursor-shadow-primary);
+  --shadow-secondary: var(--cursor-shadow-secondary);
+  --shadow-tertiary: var(--cursor-shadow-tertiary);
+  --shadow-popup: 0 3px 8px var(--cursor-shadow-secondary), 0 2px 5px var(--cursor-shadow-secondary), 0 1px 1px var(--cursor-shadow-secondary);
+
+  /* Syntax highlighting (code blocks) */
+  --syntax-bg: #181818;
+  --syntax-fg: #D6D6DD;
+  --syntax-keyword: #82D2CE;
+  --syntax-string: #E394DC;
+  --syntax-function: #EFB080;
+  --syntax-number: #EBC88C;
+  --syntax-comment: #E4E4E45E;
+  --syntax-constant: #F8C762;
+  --syntax-link: #87C3FF;
+
+  /* Motion */
+  --duration-instant: 50ms;
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 200ms;
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quint: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Component tokens (consumed by the agent-window components) */
+  --mention-bg: color-mix(in srgb, #81A1C1 12%, transparent);
+  --mention-text: #81A1C1;
+  --tool-card-bg: #181818;
+  --tool-card-border: var(--cursor-stroke-tertiary);
+  --tool-card-header-height: 28px;
+  --prompt-input-bg: var(--cursor-bg-input-surface);
+  --prompt-input-border: var(--cursor-stroke-secondary);
+  --prompt-input-border-focus: var(--cursor-stroke-primary);
+  --prompt-input-min-height: 18px;
+  --prompt-input-max-height: 200px;
+  --prompt-input-radius: 6px;
+  --model-trigger-height: 24px;
+  --model-trigger-radius: 9999px;
+  --token-ring-track: var(--cursor-stroke-secondary);
+  --token-ring-fill: var(--cursor-icon-secondary);
+  --agent-max-width: 840px;
+  --agent-card-radius: 12px;
+  --feed-padding-inline: 12px;
+  --feed-row-gap: 14px;
+  --agent-outer-padding: 12px;
+  --bubble-radius: 12px;
+  --assistant-inset: 13px;
+  --space-2-5: 10px;
+  --token-ring-size: 16px;
+
+  /* Status bar */
+  --status-bar-height: 22px;
+  --status-bar-bg: #141414;
+  --status-bar-text: #F0F0F099;
+  --status-bar-text-error: #FC6B83;
+  --status-bar-padding-inline: 7px;
+  --status-bar-gap: 3px;
+
+  /* Status bar progress bar */
+  --progress-width: 96px;
+  --progress-height: 6px;
+  --progress-fill: #3FA266;
+  --progress-track: #F0F0F011;
+  --progress-glow: 4px; /* blur radius of the fill's box-shadow glow */
+
+  /* Status bar activity LED */
+  --led-size: 10px;
+  --led-green: #3FA266;
+  --led-amber: #F1B467;
+  --led-off: #F0F0F011;
+  --led-core: #ffffff;
+  --led-glow-radius: 6px;
+  --led-pulse-ms: 250ms;
+  --led-fade-in-ms: 60ms;
+  --led-lens-highlight: #F0F0F02E;
+  --led-lens-shadow: #00000073;
+
+  /* Window title bar (custom Windows chrome) */
+  --titlebar-height: 35px;
+  --titlebar-bg: #141414;
+  --titlebar-foreground: #F0F0F084;
+  --titlebar-divider: #F0F0F013;
+  --titlebar-accent: var(--accent);
+  --titlebar-glyph: #F0F0F05C;
+  --titlebar-hover: #F0F0F011;
+  --titlebar-control-width: 46px;
+  --titlebar-close-hover: #E34671;
+  --titlebar-close-glyph-hover: #ffffff;
+  --titlebar-icon-size: 20px;
+  --titlebar-font-size: 13px;
+  --titlebar-popover-min-width: 160px;
+  --titlebar-popover-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+
+  /* Scrollbars (applied globally by the consuming UI's base sheet) */
+  --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
+  --scrollbar-thumb: #F0F0F011;
+  --scrollbar-thumb-hover: #F0F0F01E;
+
+  /* ------------------------------------------------------------------
+     Generic aliases: the token names the gateway config UI's components
+     consume, mapped onto the Cursor Dark values above so both UIs read
+     one sheet. The accent stays PromptForge gold in both products.
+     ------------------------------------------------------------------ */
+  --bg-primary: var(--cursor-editor);
+  --bg-secondary: var(--cursor-chrome);
+  --bg-tertiary: var(--cursor-bg-tertiary);
+  --text-primary: var(--cursor-text-primary);
+  --text-secondary: var(--cursor-text-secondary);
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  --accent-subtle: color-mix(in srgb, var(--accent) 15%, transparent);
+  --success: var(--cursor-green);
+  --success-text: color-mix(in srgb, var(--cursor-green) 55%, #ffffff);
+  --warning: var(--cursor-yellow);
+  --border-strong: var(--cursor-stroke-secondary);
+  --font: var(--font-prose);
+  --font-mono: var(--code-font);
+}
