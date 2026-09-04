@@ -178,7 +178,7 @@ impl Gateway {
                 crate::LOCAL_MODELS_UNSUPPORTED,
             )));
         }
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         let stt = {
             let tree = hub.operation();
             let progress = tree.register("startup-stt", 1.0);
@@ -192,7 +192,7 @@ impl Gateway {
             drop(tree);
             started?
         };
-        #[cfg(not(feature = "workshop"))]
+        #[cfg(not(feature = "stt"))]
         if !config.stt_models().is_empty() {
             return Err(StartupError::provisioning(std::io::Error::other(
                 crate::STT_RUNTIME_UNAVAILABLE,
@@ -216,7 +216,7 @@ impl Gateway {
             Arc::new(config.clone()),
             #[cfg(feature = "local")]
             local,
-            #[cfg(feature = "workshop")]
+            #[cfg(feature = "stt")]
             stt,
             #[cfg(feature = "web-search")]
             config.web_search_config(),
@@ -282,7 +282,7 @@ impl Gateway {
 }
 
 #[cfg(test)]
-#[cfg(not(feature = "workshop"))]
+#[cfg(not(feature = "stt"))]
 mod stt_tests {
     use super::*;
 
@@ -305,7 +305,7 @@ mod stt_tests {
             .map(ToString::to_string)
             .unwrap_or_default();
         assert!(
-            detail.contains("workshop"),
+            detail.contains("`stt` feature"),
             "the refusal names the missing feature: {error}: {detail}"
         );
     }
@@ -561,8 +561,13 @@ fn serve_thread(
     // it on every exit path below, graceful shutdown included.
     let _connection_file = connection_file_guard(&config, options, address);
     #[cfg(feature = "workshop")]
-    let workshop =
-        workshop::spawn_if_configured(&config, &config_path, address, gateway.state.stt_state());
+    let workshop = workshop::spawn_if_configured(
+        &config,
+        &config_path,
+        address,
+        #[cfg(feature = "stt")]
+        gateway.state.stt_state(),
+    );
     #[cfg(not(feature = "workshop"))]
     let workshop = workshop::spawn_if_configured(&config, &config_path, address);
     let workshop = match workshop {

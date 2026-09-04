@@ -49,6 +49,8 @@ shared-sidecar.workspace = true
 gateway-routing.workspace = true
 # The serde feature wires the progress event stream onto HTTP.
 shared-progress = { workspace = true, features = ["serde"] }
+# Optional: gateway-hosted speech-to-text (engine lifecycle, the
+# `/v1/audio/transcriptions` route), behind the default-on `stt` feature.
 gateway-stt = { workspace = true, optional = true }
 gateway-web-search = { workspace = true, optional = true }
 workshop-server = { workspace = true, optional = true }
@@ -79,7 +81,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [features]
-default = ["local", "web-search", "config-ui"]
+default = ["local", "web-search", "config-ui", "stt"]
 # Gateway-owned local inference via the `gateway-local` crate.
 local = ["dep:gateway-local"]
 # The Brave-powered `POST /v1/tools/web_search` tool service.
@@ -88,10 +90,16 @@ web-search = ["dep:gateway-web-search"]
 # loopback-only. Default, so plain builds need Node 22 for the SPA's esbuild
 # pipeline; --no-default-features builds skip the SPA crate entirely.
 config-ui = ["dep:gateway-config-ui"]
+# Gateway-hosted speech-to-text via the `gateway-stt` crate: the engine
+# lifecycle and `POST /v1/audio/transcriptions` on the gateway listener,
+# plus the `/stt` socket a hosted workshop merges. Default on, so every
+# default build ships STT; a --no-default-features build stubs the route
+# and refuses a configuration declaring [[stt_model]].
+stt = ["dep:gateway-stt"]
 # Host the workshop UI server on a second loopback listener. The default
-# stays empty so headless gateway builds never pull speech-to-text or the
+# stays empty so headless gateway builds never pull the workshop server's
 # Node UI build into the graph.
-workshop = ["dep:gateway-stt", "dep:workshop-server", "dep:open"]
+workshop = ["dep:workshop-server", "dep:open"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.

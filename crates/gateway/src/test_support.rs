@@ -77,7 +77,7 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
         Arc::clone(&config),
         #[cfg(feature = "local")]
         crate::local::LocalRuntime::empty(),
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         gateway_stt::SttRuntime::empty(gateway_stt::SttState::default()),
         #[cfg(feature = "web-search")]
         config.web_search_config(),

@@ -59,7 +59,9 @@ mod hosted {
     /// `[workshop]` section; `bound` is the gateway listener's address,
     /// already bound. Logs the workshop URL and, when `open_browser` is
     /// set, opens the system browser at it (the headless-server-with-UI
-    /// frame; the desktop shell drives its own window instead).
+    /// frame; the desktop shell drives its own window instead). With the
+    /// `stt` feature, `stt` is merged into the workshop listener as the
+    /// `/stt` socket; without it the workshop hosts no STT routes.
     ///
     /// # Errors
     /// Returns a config-kind [`StartupError`] when the workshop bind is not
@@ -69,9 +71,16 @@ mod hosted {
         config: &Config,
         config_path: &Path,
         bound: SocketAddr,
-        stt: gateway_stt::SttState,
+        #[cfg(feature = "stt")] stt: gateway_stt::SttState,
     ) -> Result<Option<WorkshopHandle>, StartupError> {
-        spawn_with_opener(config, config_path, bound, stt, |url| open::that(url))
+        spawn_with_opener(
+            config,
+            config_path,
+            bound,
+            #[cfg(feature = "stt")]
+            stt,
+            |url| open::that(url),
+        )
     }
 
     /// The testable core of [`spawn_if_configured`], with the browser
@@ -81,7 +90,7 @@ mod hosted {
         config: &Config,
         config_path: &Path,
         bound: SocketAddr,
-        stt: gateway_stt::SttState,
+        #[cfg(feature = "stt")] stt: gateway_stt::SttState,
         open_url: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> Result<Option<WorkshopHandle>, StartupError> {
         let Some(workshop) = config.workshop() else {
@@ -100,9 +109,16 @@ mod hosted {
         // duplication is harmless - each port answers with its own - but it
         // is the known blocker for the documented future option of nesting
         // the workshop under a path on the gateway listener.
+        // The `/stt` socket rides the workshop listener only in `stt`
+        // builds; hosting alone merges no STT routes.
+        #[cfg(feature = "stt")]
+        let routes =
+            move |state: &workshop_server::AppState| gateway_stt::stt_routes(stt, state.push());
+        #[cfg(not(feature = "stt"))]
+        let routes = |_state: &workshop_server::AppState| axum::Router::new();
         let handle = workshop_server::spawn_with_routes(
             ws_config(config.server(), workshop, config_path, bound),
-            move |state| gateway_stt::stt_routes(stt, state.push()),
+            routes,
         )
         .map_err(StartupError::workshop)?;
         tracing::info!("workshop serving on {}", handle.url());
@@ -174,6 +190,7 @@ mod hosted {
         use super::{client_url, spawn_if_configured, spawn_with_opener, ws_config};
         use crate::api_error::StartupErrorKind;
         use gateway_config::Config;
+        #[cfg(feature = "stt")]
         use gateway_stt::SttState;
 
         fn config(toml: &str) -> Config {
@@ -264,6 +281,7 @@ vocabulary = ["MCP", "GGUF"]
                 &config,
                 Path::new("gateway.toml"),
                 bound("127.0.0.1:8081"),
+                #[cfg(feature = "stt")]
                 SttState::default(),
             )
             .expect_err("a non-loopback workshop bind must fail");
@@ -277,6 +295,7 @@ vocabulary = ["MCP", "GGUF"]
                 &config,
                 Path::new("gateway.toml"),
                 bound("127.0.0.1:8081"),
+                #[cfg(feature = "stt")]
                 SttState::default(),
             )
             .expect("no workshop section is not an error");
@@ -304,6 +323,7 @@ vocabulary = ["MCP", "GGUF"]
                 &config,
                 &config_path,
                 bound("127.0.0.1:0"),
+                #[cfg(feature = "stt")]
                 SttState::default(),
                 move |url| {
                     tx.send(url.to_string()).expect("the receiver is alive");
@@ -326,6 +346,7 @@ vocabulary = ["MCP", "GGUF"]
                 &config,
                 &config_path,
                 bound("127.0.0.1:0"),
+                #[cfg(feature = "stt")]
                 SttState::default(),
                 move |url| {
                     tx.send(url.to_string()).expect("the receiver is alive");
@@ -351,6 +372,7 @@ vocabulary = ["MCP", "GGUF"]
                 &config,
                 &config_path,
                 bound("127.0.0.1:0"),
+                #[cfg(feature = "stt")]
                 SttState::default(),
                 |_| Err(std::io::Error::other("no display")),
             )

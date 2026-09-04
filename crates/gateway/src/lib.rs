@@ -30,7 +30,7 @@
 //! `GET /admin/chat-templates` family catalog and per-model effective
 //! resolution view (local builds), a bearer-authed
 //! `POST /v1/audio/transcriptions` OpenAI-compatible multipart STT endpoint
-//! (workshop builds), a bearer-authed
+//! (stt builds), a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
 //! metrics, a bearer-authed `GET /admin/hf/search` and
 //! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
@@ -105,7 +105,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
-#[cfg(feature = "workshop")]
+#[cfg(feature = "stt")]
 use axum::extract::FromRequest;
 use axum::extract::State;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
@@ -129,7 +129,7 @@ use crate::wire::{
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
-#[cfg(feature = "workshop")]
+#[cfg(feature = "stt")]
 use gateway_stt::{SttRuntime, SttState};
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
@@ -148,7 +148,7 @@ struct LiveState {
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
     local: LocalRuntime,
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     stt: Option<SttRuntime>,
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
@@ -206,7 +206,7 @@ pub(crate) struct AppState {
     reveal: Arc<dyn reveal::RevealLauncher>,
     /// Stable STT slot shared by gateway and workshop routes across runtime
     /// replacement.
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     stt_state: SttState,
 }
 
@@ -222,7 +222,7 @@ impl AppState {
         key: Secret,
         config: Arc<Config>,
         #[cfg(feature = "local")] local: LocalRuntime,
-        #[cfg(feature = "workshop")] stt: SttRuntime,
+        #[cfg(feature = "stt")] stt: SttRuntime,
         #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
         config_path: Option<std::path::PathBuf>,
         selection: ProfileSelection,
@@ -231,7 +231,7 @@ impl AppState {
         let started = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_nanos());
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         let stt_state = stt.state();
         AppState {
             live: Arc::new(RwLock::new(LiveState {
@@ -242,7 +242,7 @@ impl AppState {
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 #[cfg(feature = "local")]
                 local,
-                #[cfg(feature = "workshop")]
+                #[cfg(feature = "stt")]
                 stt: Some(stt),
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
@@ -256,7 +256,7 @@ impl AppState {
             metrics: Arc::new(std::sync::Mutex::new(system::SystemSampler::new())),
             hf: Arc::new(hf::HfProxy::from_env()),
             reveal: Arc::new(reveal::SpawnLauncher),
-            #[cfg(feature = "workshop")]
+            #[cfg(feature = "stt")]
             stt_state,
         }
     }
@@ -273,8 +273,10 @@ impl AppState {
         self.live.read().await.local.cache_dir().map(str::to_owned)
     }
 
-    /// Shared STT state mounted on both listeners.
-    #[cfg(feature = "workshop")]
+    /// Shared STT state, handed to the hosted workshop for its `/stt`
+    /// socket; the gateway's own transcription route reads the field
+    /// directly, so the accessor exists only when hosting is compiled in.
+    #[cfg(all(feature = "stt", feature = "workshop"))]
     pub(crate) fn stt_state(&self) -> SttState {
         self.stt_state.clone()
     }
@@ -298,7 +300,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/admin/status", get(admin_status))
         .route("/admin/progress", get(admin_progress))
         .route("/admin/switch-profile", post(admin_switch_profile));
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let router = router.merge(
         Router::new()
             .route("/v1/audio/transcriptions", post(audio_transcriptions))
@@ -417,7 +419,7 @@ async fn health() -> impl IntoResponse {
 ///
 /// Authentication runs before multipart extraction so an unauthorized caller
 /// cannot make the gateway buffer or decode an audio body.
-#[cfg(feature = "workshop")]
+#[cfg(feature = "stt")]
 async fn audio_transcriptions(
     State(state): State<AppState>,
     request: axum::extract::Request,
@@ -445,9 +447,9 @@ const LOCAL_MODELS_UNSUPPORTED: &str =
     "configuration declares [[local_model]] but this build lacks the `local` feature";
 
 /// Error when STT reaches a gateway build without the heavy runtime.
-#[cfg(not(feature = "workshop"))]
+#[cfg(not(feature = "stt"))]
 const STT_RUNTIME_UNAVAILABLE: &str =
-    "the active profile selects [[stt_model]] but this build lacks the `workshop` feature";
+    "the active profile selects [[stt_model]] but this build lacks the `stt` feature";
 
 /// The chat route to a backend.
 async fn chat_completions(
@@ -998,7 +1000,7 @@ async fn run_switch_with_config(
     // Stop every previous VRAM owner before starting replacements. The bearer
     // key, routing, and web-search settings stay untouched, so auth remains
     // stable if a start fails.
-    #[cfg(any(feature = "local", feature = "workshop"))]
+    #[cfg(any(feature = "local", feature = "stt"))]
     let replacement = replace_runtimes(&state, &config, &tree).await?;
     // A headless build cannot honor a profile declaring local models; refuse
     // the switch rather than silently dropping them.
@@ -1038,7 +1040,7 @@ async fn run_switch_with_config(
         {
             live.local = replacement.local;
         }
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         {
             live.stt = Some(replacement.stt);
         }
@@ -1093,7 +1095,7 @@ fn prepare_switch_target(
             return Err(GatewayError::switch_failed("select-profile", error));
         }
     };
-    #[cfg(not(feature = "workshop"))]
+    #[cfg(not(feature = "stt"))]
     if !config.stt_models().is_empty() {
         loading.fail();
         return Err(GatewayError::switch_failed(
@@ -1123,17 +1125,17 @@ async fn drain_inference(state: &AppState) {
     }
 }
 
-#[cfg(any(feature = "local", feature = "workshop"))]
+#[cfg(any(feature = "local", feature = "stt"))]
 struct RuntimeReplacement {
     #[cfg(feature = "local")]
     local: LocalRuntime,
     #[cfg(feature = "local")]
     start_failures: Vec<local::LocalStartFailure>,
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     stt: SttRuntime,
 }
 
-#[cfg(any(feature = "local", feature = "workshop"))]
+#[cfg(any(feature = "local", feature = "stt"))]
 async fn replace_runtimes(
     state: &AppState,
     config: &Config,
@@ -1145,13 +1147,13 @@ async fn replace_runtimes(
         let mut live = state.live.write().await;
         std::mem::replace(&mut live.local, LocalRuntime::empty())
     };
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let old_stt = state.live.write().await.stt.take();
     // The routing table also owns each local upstream. Explicit shutdown
     // disables respawn and frees all old-profile VRAM before replacements
     // start (PFGL-MOD-001).
     match tokio::task::spawn_blocking(move || {
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         if let Some(runtime) = old_stt {
             runtime.shutdown();
         }
@@ -1201,13 +1203,13 @@ async fn replace_runtimes(
     };
     #[cfg(feature = "local")]
     let (runtime, failures) = outcome.into_parts();
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let stt_config = config.clone();
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let stt_state = state.stt_state.clone();
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let stt_progress = starting.clone();
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     let stt = match tokio::task::spawn_blocking(move || {
         SttRuntime::start(&stt_config, stt_state, Some(&stt_progress))
     })
@@ -1236,7 +1238,7 @@ async fn replace_runtimes(
         local: runtime,
         #[cfg(feature = "local")]
         start_failures: failures,
-        #[cfg(feature = "workshop")]
+        #[cfg(feature = "stt")]
         stt,
     })
 }
@@ -1472,7 +1474,7 @@ mod auth_tests {
     }
 }
 
-#[cfg(all(test, feature = "workshop"))]
+#[cfg(all(test, feature = "stt"))]
 mod transcription_auth_tests {
     #![expect(
         clippy::expect_used,

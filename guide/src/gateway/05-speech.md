@@ -34,7 +34,7 @@ The `window_seconds` key sets the seconds of trailing audio transcribed per pass
 
 ## The transcription endpoint
 
-In workshop builds the gateway serves OpenAI-compatible audio transcription at POST /v1/audio/transcriptions. The multipart form accepts `file`, `model`, `language`, `prompt`, `temperature`, `response_format`, and the repeated field `timestamp_granularities[]`.
+With the default-on `stt` feature the gateway serves OpenAI-compatible audio transcription at POST /v1/audio/transcriptions. The multipart form accepts `file`, `model`, `language`, `prompt`, `temperature`, `response_format`, and the repeated field `timestamp_granularities[]`.
 
 Uploads are capped at 25 MiB; an over-limit upload is answered with "audio file exceeds the 25 MiB limit". Only 16 kHz mono WAV audio is accepted. Other sample rates or channel counts are rejected with a message naming what was received.
 

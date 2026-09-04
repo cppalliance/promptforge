@@ -44,12 +44,12 @@ pub(crate) enum GatewayError {
     MalformedRequest(String),
 
     /// The uploaded transcription body exceeded the configured cap.
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     #[error("audio file exceeds the 25 MiB limit")]
     AudioTooLarge,
 
     /// The active STT engine rejected an otherwise valid request.
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     #[non_exhaustive]
     #[error("transcription failed")]
     Transcription(#[source] gateway_stt::TranscriptionError),
@@ -208,7 +208,7 @@ impl From<crate::queue::AdmitError> for GatewayError {
     }
 }
 
-#[cfg(feature = "workshop")]
+#[cfg(feature = "stt")]
 impl From<gateway_stt::TranscriptionError> for GatewayError {
     fn from(value: gateway_stt::TranscriptionError) -> Self {
         if let Some(model) = value.model_not_found() {
@@ -317,13 +317,13 @@ impl GatewayError {
                 "invalid_request_error",
                 "malformed_request",
             ),
-            #[cfg(feature = "workshop")]
+            #[cfg(feature = "stt")]
             GatewayError::AudioTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "invalid_request_error",
                 "file_too_large",
             ),
-            #[cfg(feature = "workshop")]
+            #[cfg(feature = "stt")]
             GatewayError::Transcription(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
@@ -625,7 +625,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "workshop")]
+    #[cfg(feature = "stt")]
     #[test]
     fn unloaded_stt_model_maps_to_openai_model_not_found() {
         let error = GatewayError::from(gateway_stt::TranscriptionError::model_not_found_error(
