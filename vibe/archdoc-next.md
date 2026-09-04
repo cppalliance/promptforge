@@ -120,3 +120,5 @@
 - [2026-09-03-2-enhance-image-endpoint-spec] readiness means usable: A supervised inference child becomes ready only after a representative warm-up succeeds; pre-probe exit is failure regardless of exit code.
 - [2026-09-03-2-enhance-image-endpoint-spec] image retry ambiguity: Preserve structured upstream codes and request IDs; never blindly retry generation that may already have completed and billed.
 - [2026-09-03-3-gateway-sidecar-decomposition] shared-crate seam: Cross-product crates should each encode one dependency-light contract instead of growing a common junk drawer.
+- [2026-09-04-1-async-boot-and-progress] superseding desired state: Repeated profile commands coalesce by target; a newer target cancels stale active work and alone may publish.
+- [2026-09-04-1-async-boot-and-progress] progress surface split: Structured state drives visual progress while terminal output remains ordinary tracing lines.

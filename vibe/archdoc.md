@@ -36,7 +36,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A104. Builds never write generated products into tracked source paths.
 - A105. Model-authored markup is sanitized at the final DOM insertion boundary.
 - A106. Mutable release channels identify an exact source commit and skip unchanged builds.
-- A107. Agent input appears only after its program launches; New Agent starts a fresh session.
 - A108. Native libraries are platform-selected, digest-verified artifacts loaded behind narrow FFI.
 
 - A112. Stream permits live through body termination; stalled reads expire within a bounded interval.
@@ -44,6 +43,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A113. Validate capabilities before queue admission; reject unsupported semantics.
 
 - A114. Only a service owns its connection record; clients validate identity, health, and authority before attaching.
+
+- A115. Control readiness does not await model provisioning; endpoint availability stays explicit.
 
 ## Principles
 
