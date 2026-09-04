@@ -209,7 +209,9 @@ pub enum StateError {
 /// stay outside it so the shell probe, heartbeat, and initial navigation
 /// keep working. Every HTTP route carries a `crate::deadline` tier -
 /// the default here, the relay tier inside `routes::chat` - and the
-/// WebSocket upgrades carry none.
+/// WebSocket upgrades carry none. Every response carries the
+/// `crate::csp` policy: the shell's webview loads the UI as an External
+/// origin, so the server sets the page's Content-Security-Policy.
 pub fn router(state: AppState) -> Router {
     let workspace = state.workspace().clone();
     let api = Router::new()
@@ -225,6 +227,12 @@ pub fn router(state: AppState) -> Router {
         .merge(with_deadline(routes::assets::routes(), DEFAULT_DEADLINE))
         .merge(with_deadline(routes::health::routes(), DEFAULT_DEADLINE))
         .merge(api)
+        // The outermost layer on the server's own routes: every response
+        // carries the CSP, error envelopes included, so the shell's
+        // External-origin webview runs under the policy no matter which
+        // route answered. Routes a host merges through `spawn_with_routes`
+        // are composed after this layer and sit outside it.
+        .layer(axum::middleware::from_fn(crate::csp::header))
 }
 
 /// Shared fixtures for the router tests here and in [`crate::relay`]

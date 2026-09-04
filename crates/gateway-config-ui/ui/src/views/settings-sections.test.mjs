@@ -130,15 +130,17 @@ test("Workshop exposes STT capture tuning without legacy model paths", async () 
   root.querySelector(".workshop-enable").click();
   await settle();
 
-  const bind = root.querySelector(".field-row[data-key='bind'] input");
-  assert.equal(bind.value, "127.0.0.1:7910", "the section arrives with its defaults");
-  assert.ok(
-    root.querySelector(".field-row[data-key='open_browser'] .switch"),
-    "open_browser renders as a toggle",
+  assert.equal(
+    root.querySelector(".field-row[data-key='bind']"),
+    null,
+    "the inert hosting bind stays out of the editor: the gateway hosts no workshop listener",
+  );
+  assert.equal(
+    root.querySelector(".field-row[data-key='open_browser']"),
+    null,
+    "the inert open_browser flag stays out of the editor",
   );
 
-  root.querySelector(".add-stt").click();
-  await settle();
   assert.match(root.querySelector(".workshop-stt").textContent, /STT capture tuning/);
   assert.equal(
     root.querySelector(".field-row[data-key='stt.window_seconds'] input").value,
@@ -153,7 +155,11 @@ test("Workshop exposes STT capture tuning without legacy model paths", async () 
   await settle();
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
-  assert.equal(bodies[0].workshop.bind, "127.0.0.1:7910");
+  assert.equal(
+    bodies[0].workshop.bind,
+    undefined,
+    "a fresh section carries no inert hosting bind",
+  );
   assert.equal(bodies[0].workshop.stt.window_seconds, 15);
   assert.equal(
     bodies[0].server.bind,
@@ -461,8 +467,6 @@ test("blurring a chip input commits the pending text as a chip", async () => {
   await settle();
   root.querySelector(".workshop-enable").click();
   await settle();
-  root.querySelector(".add-stt").click();
-  await settle();
 
   const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");
   assert.ok(chipInput, "the vocabulary chip input renders");
@@ -484,8 +488,6 @@ test("blurring a chip input with an empty value does not add a chip", async () =
   navigate(dom, "#/settings/workshop");
   await settle();
   root.querySelector(".workshop-enable").click();
-  await settle();
-  root.querySelector(".add-stt").click();
   await settle();
 
   const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");

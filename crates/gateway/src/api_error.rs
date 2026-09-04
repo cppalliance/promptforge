@@ -49,9 +49,6 @@ pub enum StartupErrorKind {
     Thread,
     /// Serving requests failed.
     Serve,
-    /// Starting the hosted workshop server failed. Produced only by builds
-    /// with the `workshop` feature.
-    Workshop,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,9 +65,6 @@ enum StartupRepr {
     Thread(#[source] std::io::Error),
     #[error("serve error")]
     Serve(#[source] ServeReprSource),
-    #[cfg(feature = "workshop")]
-    #[error("workshop startup error")]
-    Workshop(#[source] workshop_server::SpawnError),
 }
 
 impl StartupError {
@@ -84,8 +78,6 @@ impl StartupError {
             StartupRepr::Bind(_) => StartupErrorKind::Bind,
             StartupRepr::Thread(_) => StartupErrorKind::Thread,
             StartupRepr::Serve(_) => StartupErrorKind::Serve,
-            #[cfg(feature = "workshop")]
-            StartupRepr::Workshop(_) => StartupErrorKind::Workshop,
         }
     }
 
@@ -111,11 +103,6 @@ impl StartupError {
 
     pub(crate) fn serve(err: ServeError) -> Self {
         StartupError(StartupRepr::Serve(err.0))
-    }
-
-    #[cfg(feature = "workshop")]
-    pub(crate) fn workshop(err: workshop_server::SpawnError) -> Self {
-        StartupError(StartupRepr::Workshop(err))
     }
 }
 

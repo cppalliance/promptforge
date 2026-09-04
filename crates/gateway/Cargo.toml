@@ -26,8 +26,6 @@ indicatif.workspace = true
 # GPU name and VRAM for GET /admin/system; probes NVML at runtime, so builds
 # and machines without an NVIDIA driver keep working.
 nvml-wrapper.workspace = true
-# Optional: opens the system browser at the hosted workshop URL.
-open = { workspace = true, optional = true }
 promptforge-core.workspace = true
 gateway-config.workspace = true
 # Optional: the embedded config UI SPA served at /config/ behind the
@@ -53,7 +51,6 @@ shared-progress = { workspace = true, features = ["serde"] }
 # `/v1/audio/transcriptions` route), behind the default-on `stt` feature.
 gateway-stt = { workspace = true, optional = true }
 gateway-web-search = { workspace = true, optional = true }
-workshop-server = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -91,15 +88,10 @@ web-search = ["dep:gateway-web-search"]
 # pipeline; --no-default-features builds skip the SPA crate entirely.
 config-ui = ["dep:gateway-config-ui"]
 # Gateway-hosted speech-to-text via the `gateway-stt` crate: the engine
-# lifecycle and `POST /v1/audio/transcriptions` on the gateway listener,
-# plus the `/stt` socket a hosted workshop merges. Default on, so every
-# default build ships STT; a --no-default-features build stubs the route
-# and refuses a configuration declaring [[stt_model]].
+# lifecycle and `POST /v1/audio/transcriptions` on the gateway listener.
+# Default on, so every default build ships STT; a --no-default-features
+# build stubs the route and refuses a configuration declaring [[stt_model]].
 stt = ["dep:gateway-stt"]
-# Host the workshop UI server on a second loopback listener. The default
-# stays empty so headless gateway builds never pull the workshop server's
-# Node UI build into the graph.
-workshop = ["dep:workshop-server", "dep:open"]
 
 [dev-dependencies]
 # Encodes the generated test image for the live CUDA projector proof.
@@ -137,10 +129,7 @@ dbg_macro = "warn"
 doc_markdown = "allow"
 
 # Release packaging through cargo-dist (see dist-workspace.toml): the
-# headless Linux gateway also serves the workshop web pages, so the release
-# build turns the workshop feature on; the sample systemd unit rides in the
-# archive.
+# sample systemd unit rides in the archive.
 [package.metadata.dist]
 dist = true
-features = ["workshop"]
 include = ["packaging/gateway.service"]

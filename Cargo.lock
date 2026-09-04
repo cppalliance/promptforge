@@ -1901,7 +1901,6 @@ dependencies = [
  "gateway-web-search",
  "indicatif",
  "nvml-wrapper",
- "open",
  "png 0.18.1",
  "promptforge-core",
  "rand 0.9.5",
@@ -1925,7 +1924,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "windows-sys 0.61.2",
- "workshop-server",
 ]
 
 [[package]]
@@ -8220,7 +8218,6 @@ name = "workshop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "gateway",
  "serde_json",
  "shared-sidecar",
  "tauri",
@@ -8236,6 +8233,7 @@ dependencies = [
  "webkit2gtk",
  "webview2-com",
  "windows-core 0.61.2",
+ "workshop-server",
 ]
 
 [[package]]

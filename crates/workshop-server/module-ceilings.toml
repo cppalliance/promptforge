@@ -44,6 +44,11 @@
 # endpoint resolution reads.
 "config.rs" = 542
 "cross_site.rs" = 338
+# New module: the Content-Security-Policy stamped on every response - the
+# shell's External-origin webview takes its policy from the server, and
+# connect-src carries the Tauri IPC endpoints. Roughly half is the in-file
+# tests.
+"csp.rs" = 129
 "deadline.rs" = 112
 # Grew by the revoke seam: the `NotGranted` variant's wire mapping (404,
 # `not_granted`) and its case in the seam test. Shrank in the chat-relay

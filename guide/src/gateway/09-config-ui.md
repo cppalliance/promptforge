@@ -64,7 +64,7 @@ The Dominions and Endpoints cards show used-by chips that count dependents, and 
 
 The Tools section configures web search with the provider locked to Brave and the defaults documented on the card. The Storage card edits the cache directory beside live cache-drive usage, with a warning that changing the directory does not move existing files.
 
-The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. Enabling Workshop seeds defaults: bind 127.0.0.1:7910, open_browser off, and an STT subsection with window_seconds 15, interval_ms 500, and an empty vocabulary.
+The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. The Workshop card edits the `[workshop]` section's one live content, the STT capture tuning - the gateway hosts no workshop listener, so the section's old `bind` and `open_browser` settings are inert and stay out of the editor. Adding the tuning seeds window_seconds 15, interval_ms 500, and an empty vocabulary.
 
 ## Editing a model
 

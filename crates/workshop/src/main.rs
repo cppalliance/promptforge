@@ -1,18 +1,20 @@
 // Release builds are a GUI app: no console window when launched from the
 // installer. Debug builds keep the console so the eprintln diagnostics show.
-// The tradeoff: in release those diagnostics (boot errors, the first-run
-// config notice) have nowhere to print.
+// The tradeoff: in release those diagnostics (boot errors) have nowhere to
+// print.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
-//! Boots the merged gateway (which hosts the workshop UI on a second
-//! loopback listener) in-process - the gateway discovers its boot config
-//! `gateway.toml` or generates a default on first run - waits for the
-//! workshop's health endpoint to answer, and opens a Tauri window pointed
-//! at it. Closing the window exits the app and shuts the gateway down
-//! cleanly. Development against an external gateway uses the standalone
-//! `workshop-server` binary and its `workshop.toml` instead of this app.
+//! Hosts the workshop server in-process on a loopback listener with an
+//! OS-assigned port - the server resolves the gateway endpoint itself,
+//! attaching to a running gateway through its connection file or to the
+//! gateway a discovered `workshop.toml` names - and opens a Tauri window
+//! pointed at the in-process listener's URL. Closing the window stops the
+//! in-process server only: the gateway is a separate process and keeps
+//! running. With no gateway running and no explicit config, boot fails
+//! with the plain no-gateway error. Development against the standalone
+//! `workshop-server` binary flow is unchanged.
 
 // The only unsafe module in the crate: the WebView2 COM surface that
 // reads real OS paths out of dropped File objects and grants the
@@ -20,6 +22,7 @@
 #[cfg(target_os = "windows")]
 #[expect(unsafe_code, reason = "raw WebView2 COM has no safe wrapper")]
 mod bridge;
+mod config;
 mod drops;
 #[cfg(target_os = "linux")]
 mod linux_media;
@@ -31,21 +34,36 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use gateway::{GatewayHandle, ProfileName, ServeOptions};
+use tauri::ipc::CapabilityBuilder;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt as _;
+use workshop_server::ServerHandle;
 
-/// How long the app waits for the hosted workshop's health endpoint
+/// How long the app waits for the in-process server's health endpoint
 /// before giving up.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The profile the shell boots the gateway into.
-const DEFAULT_PROFILE: &str = "default";
-
-/// The managed slot holding the gateway until the `RunEvent::Exit` handler
+/// The managed slot holding the server until the `RunEvent::Exit` handler
 /// shuts it down. `shutdown` consumes the handle, so the slot hands it over
 /// exactly once.
-type GatewaySlot = Mutex<Option<GatewayHandle>>;
+type ServerSlot = Mutex<Option<ServerHandle>>;
+
+/// The permission set the workshop page holds. The grant itself is built
+/// in setup with the exact bound port: the OS assigns the port at boot, so
+/// no capability file can name the origin.
+const WINDOW_PERMISSIONS: &[&str] = &[
+    "core:default",
+    "core:window:default",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "core:webview:allow-set-webview-zoom",
+    "core:event:default",
+    "dialog:allow-open",
+    "updater:default",
+    "process:allow-restart",
+];
 
 fn main() -> ExitCode {
     if std::env::args_os().any(|arg| arg == "--version") {
@@ -61,7 +79,7 @@ fn main() -> ExitCode {
 }
 
 /// `promptforge-workshop --version`: print the version and exit, without
-/// booting the gateway or opening a window. The release workflows smoke-test
+/// booting the server or opening a window. The release workflows smoke-test
 /// the installed package with it. The release build is GUI-subsystem on
 /// Windows, but a piped or inherited stdout still carries the line.
 fn print_version() -> ExitCode {
@@ -84,7 +102,8 @@ fn desktop_update_supported() -> bool {
 fn run() -> anyhow::Result<()> {
     let builder = tauri::Builder::default()
         // Registered first so a second launch exits inside `build`, before
-        // its own setup could spawn a gateway onto the fixed port bind.
+        // its own setup could spawn a second in-process server and race
+        // the first instance's gateway attach.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -123,28 +142,37 @@ fn run() -> anyhow::Result<()> {
         .context("build the desktop application")?;
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
-            let gateway = handle
-                .try_state::<GatewaySlot>()
+            let server = handle
+                .try_state::<ServerSlot>()
                 .map(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
-            if let Some(Some(gateway)) = gateway
-                && let Err(error) = gateway.shutdown()
-            {
-                eprintln!("could not shut the gateway down cleanly: {error:?}");
+            if let Some(Some(server)) = server {
+                match server.shutdown() {
+                    Ok(workshop_server::Termination::Graceful) => {}
+                    Ok(termination) => {
+                        eprintln!("the workshop server was forced down past its drain window: {termination:?}");
+                    }
+                    Err(error) => {
+                        eprintln!("could not shut the workshop server down cleanly: {error:?}");
+                    }
+                }
             }
         }
     });
     Ok(())
 }
 
-/// The setup hook: boots the gateway, waits for the hosted workshop's
-/// health, and opens the window on it. A boot failure prints its full
-/// error chain and exits the process directly: returning `Err` would
-/// surface as Tauri's "Failed to setup app" panic, losing the chain and
-/// the failure exit code.
+/// The setup hook: boots the in-process server, installs the window's
+/// exact-port capability, and opens the window on the server's URL. A
+/// boot failure prints its full error chain and exits the process
+/// directly: returning `Err` would surface as Tauri's "Failed to setup
+/// app" panic, losing the chain and the failure exit code.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     match boot() {
-        Ok((gateway, url)) => {
-            app.manage(GatewaySlot::new(Some(gateway)));
+        Ok((server, url)) => {
+            // The capability must exist before the window does: the
+            // authority resolves a window's grants at creation.
+            app.add_capability(window_capability(&url))?;
+            app.manage(ServerSlot::new(Some(server)));
             open_window(app, &url)
         }
         Err(error) => {
@@ -154,30 +182,44 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
 }
 
-/// Spawns the merged gateway - it discovers the boot config itself, or
-/// generates a default on first run - and waits out the hosted workshop's
-/// health probe. A failure after the spawn shuts the gateway down before
-/// propagating.
-fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
-    let profile = ProfileName::parse(DEFAULT_PROFILE).context("parse the default profile name")?;
-    let gateway =
-        gateway::spawn(&ServeOptions::new(None, profile)).context("start the merged gateway")?;
-    match workshop_url(&gateway).and_then(|url| {
-        shared_sidecar::wait_for_health(&url, HEALTH_TIMEOUT)
-            .context("wait for the hosted workshop")
-            .map(|()| url)
-    }) {
-        Ok(url) => {
-            let parsed = url::Url::parse(&url).context("parse the workshop URL")?;
-            Ok((gateway, parsed))
+/// Spawns the in-process workshop server - it resolves the gateway
+/// endpoint itself, connection file first, explicit `workshop.toml`
+/// config second - and waits out its health probe. A failure after the
+/// spawn shuts the server down before propagating.
+fn boot() -> anyhow::Result<(ServerHandle, url::Url)> {
+    let config = config::load().context("load the workshop configuration")?;
+    let server = workshop_server::spawn(config).context("start the in-process workshop server")?;
+    match shared_sidecar::wait_for_health(server.url(), HEALTH_TIMEOUT)
+        .context("wait for the in-process workshop server")
+    {
+        Ok(()) => {
+            let url = url::Url::parse(server.url()).context("parse the workshop URL")?;
+            Ok((server, url))
         }
         Err(error) => {
-            if let Err(shutdown_error) = gateway.shutdown() {
+            if let Err(shutdown_error) = server.shutdown() {
                 eprintln!("{shutdown_error:?}");
             }
             Err(error)
         }
     }
+}
+
+/// The `main` window's capability: the permission set granted to the
+/// exact loopback origin the in-process server bound. Building it in
+/// setup is what lets the bind stay an OS-assigned port - a capability
+/// file could name only a wildcard port, which would hand the window's
+/// Tauri API surface to any other loopback server on the machine.
+fn window_capability(url: &url::Url) -> CapabilityBuilder {
+    let builder = CapabilityBuilder::new("workshop-main")
+        .local(false)
+        .remote(url.origin().ascii_serialization())
+        .window("main");
+    WINDOW_PERMISSIONS
+        .iter()
+        .fold(builder, |builder, permission| {
+            builder.permission(*permission)
+        })
 }
 
 /// Creates the workshop window on `url`: hidden while built so the
@@ -231,27 +273,12 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-/// The hosted workshop's URL from the gateway handle. The app compiles
-/// the gateway's `workshop` feature in, so `None` means the discovered
-/// boot config carries no `[workshop]` section - a configuration the
-/// app has no page to open a window on.
-fn workshop_url(gateway: &GatewayHandle) -> anyhow::Result<String> {
-    workshop_url_from(gateway.workshop_url())
-}
-
-/// Maps the gateway's optional hosted-workshop URL to the URL the window
-/// opens, or to the user-facing error for a boot config with no
-/// `[workshop]` section.
-fn workshop_url_from(url: Option<&str>) -> anyhow::Result<String> {
-    url.map(str::to_string).context(
-        "the boot config has no [workshop] section, so the gateway hosts no workshop UI; \
-         add a [workshop] section to gateway.toml",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tauri::ipc::RuntimeCapability as _;
+    use tauri::utils::acl::capability::CapabilityFile;
 
     #[test]
     fn crate_is_named_workshop() {
@@ -271,19 +298,29 @@ mod tests {
     }
 
     #[test]
-    fn workshop_url_from_passes_the_url_through() {
-        assert_eq!(
-            workshop_url_from(Some("http://127.0.0.1:7910/")).unwrap(),
-            "http://127.0.0.1:7910/"
-        );
-    }
-
-    #[test]
-    fn workshop_url_from_names_the_missing_workshop_section() {
-        let error = workshop_url_from(None).unwrap_err();
+    fn the_window_capability_names_the_exact_bound_origin() {
+        let url = url::Url::parse("http://127.0.0.1:49152/").expect("the URL parses");
+        let CapabilityFile::Capability(capability) = window_capability(&url).build() else {
+            panic!("the builder produces a single capability");
+        };
         assert!(
-            error.to_string().contains("[workshop]"),
-            "the error must tell the user which section to add, got: {error}"
+            !capability.local,
+            "the window loads no local content; the grant is remote-only"
         );
+        let remote = capability.remote.expect("the remote origins are set");
+        assert_eq!(
+            remote.urls,
+            vec!["http://127.0.0.1:49152".to_string()],
+            "the grant names the exact bound origin - a wildcard port would hand \
+             the Tauri API surface to any loopback server"
+        );
+        assert_eq!(capability.windows, vec!["main".to_string()]);
+        let permissions = format!("{:?}", capability.permissions);
+        for permission in WINDOW_PERMISSIONS {
+            assert!(
+                permissions.contains(permission),
+                "the capability carries {permission}"
+            );
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (chat runs through `.lua` agent programs over `promptforge-agent`), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, and workspace APIs. The gateway-owned `gateway-stt` runtime attaches `/stt` when this server is embedded. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame without STT.
+The PromptForge Workshop HTTP server. It serves a local UI and API on loopback: agent sessions (chat runs through `.lua` agent programs over `promptforge-agent`), an OpenAI-shaped model catalog passthrough in front of a PromptForge gateway, and workspace APIs. The desktop shell (`workshop`) embeds it in-process; run standalone it is the browser-tab frame. The gateway-owned `gateway-stt` `/stt` socket routes attach through `spawn_with_routes`, but no current host merges them, so dictation stays blocked until voice migrates into this crate.
 
 ## Quick start
 
@@ -22,7 +22,7 @@ cargo run -p workshop-server
 
 The server binds `127.0.0.1:7910` by default and serves the chat UI at `http://127.0.0.1:7910/`. Set `server.open_browser = true` to have it open your system browser once it is serving.
 
-The desktop shell (`workshop`) is the zero-config path: it searches beside its executable, then the current directory, then `~/.promptforge/`, and on first run writes a default `workshop.toml` into `~/.promptforge/` and loads that. The server binary does not generate one - it reads `workshop.toml` from the current directory, or `workbench.toml` there if the canonical name is missing.
+The desktop shell (`workshop`) is the zero-config path: it embeds this server in-process on an OS-assigned loopback port, discovering `workshop.toml` beside its executable, then the current directory, then `~/.promptforge/` - the file supplies only the `[gateway]` connection and the path settings, since the shell owns the listener. The server binary does not generate one - it reads `workshop.toml` from the current directory, or `workbench.toml` there if the canonical name is missing.
 
 String values support `${VAR}` environment interpolation; `$$` is a literal `$`, and an unset variable interpolates to the empty string.
 
@@ -63,7 +63,7 @@ The workflow: edit the TypeScript, then `cargo build` (or `cargo run -p workshop
 
 `npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs `node --test`, which discovers every test under `ui/test/` plus any colocated `src/**/*.test.mjs` files; the suite includes a jsdom smoke test that imports the built `dist/app.js` and asserts the workbench mounts (run `npm run build` first).
 
-The chat surface is the agent-session panel (`ui/src/ui/agent-session-view.ts`), rendered from the durable event stream over `GET /agents/ws`. Its input carries the push-to-talk mic (`ui/src/ui/stt.ts`): dictation streams PCM over the `/stt` WebSocket and splices the transcript into the input at the cursor, and the mic is gated by `GET /stt/capability` (`gpu` and `engine` flags) and by the pending input wait, so a refused click names its reason on the status bar. Both STT routes are gateway-owned (`gateway-stt`), attached to this listener through `spawn_with_routes`; standalone, the probe fails and dictation stays blocked. `ui/style.css` carries the workshop shell (tree, panels, dictation UI, status bar) and overrides.
+The chat surface is the agent-session panel (`ui/src/ui/agent-session-view.ts`), rendered from the durable event stream over `GET /agents/ws`. Its input carries the push-to-talk mic (`ui/src/ui/stt.ts`): dictation streams PCM over the `/stt` WebSocket and splices the transcript into the input at the cursor, and the mic is gated by `GET /stt/capability` (`gpu` and `engine` flags) and by the pending input wait, so a refused click names its reason on the status bar. Both STT routes are gateway-owned (`gateway-stt`), attached to this listener through `spawn_with_routes`; no current host merges them, so the probe fails and dictation stays blocked. `ui/style.css` carries the workshop shell (tree, panels, dictation UI, status bar) and overrides.
 
 The status bar at the bottom of the window renders the observer's `{"type":"status",...}` frames (`ui/src/ui/status-bar.ts`): the label as the bar text, the description as the tooltip, error frames in a distinct color. Debug-severity frames are internal instrumentation and never touch the text. The right slot holds a `<progress>` bar while a frame carries progress, and an activity LED otherwise: a small circle that pulses green on gateway traffic and amber on dictation activity (green wins when both coincide), lit for one pulse window per frame and faded by a CSS transition. The bar's colors, glow radii, and pulse window are CSS custom properties (`--led-green`, `--led-amber`, `--led-off`, `--led-glow-radius`, `--led-pulse-ms`, `--progress-fill`, `--progress-glow`, ...) at the top of `ui/style.css`.
 

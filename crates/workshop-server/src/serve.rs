@@ -157,16 +157,16 @@ pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
 }
 
 /// Spawns the workshop server against an already-resolved gateway
-/// endpoint, with gateway-owned routes merged into its loopback listener.
+/// endpoint, with extra routes merged into its loopback listener.
 ///
 /// `gateway` skips connection-file discovery: a host attaching routes
-/// holds its own endpoint - the merged gateway hosting the workshop
-/// in-process, whose own just-written connection file is not serving yet
-/// when the workshop spawns - and discovery must never condemn that file
+/// holds its own endpoint, and discovery must never condemn that file
 /// or attach the workshop to a foreign gateway. `routes` runs after
 /// shared state construction on the server thread. It receives the state
 /// so an owning gateway subsystem can attach to the Workshop status bus
-/// without moving that subsystem into this crate.
+/// without moving that subsystem into this crate. No product host merges
+/// routes today; the seam exists for the gateway-owned STT socket and is
+/// what the test fixtures drive.
 ///
 /// # Errors
 /// Returns [`SpawnError::State`] if shared state cannot be built, or

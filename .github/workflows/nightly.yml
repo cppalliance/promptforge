@@ -71,7 +71,7 @@ jobs:
           npm ci --prefix crates/workshop-server/ui
           npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
-        run: cargo build --release --locked -p gateway --features workshop
+        run: cargo build --release --locked -p gateway
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
@@ -102,7 +102,7 @@ jobs:
           npm ci --prefix crates/workshop-server/ui
           npm ci --prefix crates/gateway-config-ui/ui
       - name: Build
-        run: cargo build --release --locked -p gateway --features workshop
+        run: cargo build --release --locked -p gateway
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"

@@ -38,10 +38,8 @@ pub enum GatewaySource {
 
 impl ResolvedGateway {
     /// The endpoint explicit config names, with no discovery: the bypass
-    /// for a host that already holds its gateway endpoint - the merged
-    /// gateway hosting the workshop in-process, whose own just-written
-    /// connection file is not serving yet when the workshop spawns - or a
-    /// test fixture.
+    /// for a host that already holds its gateway endpoint, or a test
+    /// fixture.
     #[must_use]
     pub fn from_config(config: &GatewayConfig) -> Self {
         Self {

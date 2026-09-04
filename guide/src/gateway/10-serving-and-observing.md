@@ -24,19 +24,9 @@ Results carry `title`, `url`, `site_name`, and `extra_snippets`. Result text is 
 
 When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the active profile's `[tools.web_search]` section and reloads on profile switch. The provider credential never appears in logs.
 
-## Host the workshop
+## The deprecated [workshop] section
 
-Have the gateway host the workshop UI on a second loopback listener by adding a `[workshop]` section:
-
-````
-[workshop]
-bind = "127.0.0.1:7910"
-open_browser = true
-````
-
-The bind address defaults to 127.0.0.1:7910, and a non-loopback bind is refused at startup. The section is boot-only, like `[server]`. The hosted workshop derives its client URL from the gateway's own `[server]` bind and reuses the same `api_key`, so you configure no second credential. A port-0 bind resolves to the actually bound port in the derived URL. The workshop's state directory and agent-program directory default to the boot config file's directory.
-
-Setting `open_browser = true` opens the system browser at the workshop URL once the gateway is serving; a browser that fails to open only logs a warning. A gateway built without the `workshop` feature logs a warning and hosts nothing when the boot config carries a `[workshop]` section. Both the gateway and workshop listeners answer /health and /v1/models on their own ports. The workshop's stop outcome appears in the logs: graceful, forced down after its drain window, or stopped with an error.
+The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section. The section keeps parsing - an existing config must not fail - and the gateway logs a deprecation warning at startup naming what changed: the section's `bind` and `open_browser` settings are inert, while the `[workshop.stt]` capture tuning still applies to the speech engine.
 
 ## Manage the cache
 

@@ -2,6 +2,8 @@
 
 You can type prompts into the chat surface. This chapter teaches you to speak them instead. Dictation uses a push-to-talk microphone button beside the send button, and the transcript lands in the prompt exactly as if you had typed it. If voice is not available on your machine, this chapter also teaches you how to tell and why.
 
+Dictation is temporarily unavailable in the desktop application: the app no longer merges the gateway's `/stt` speech socket, which migrates into the Workshop's own server in a later change. Until then the microphone button names the blocker on the status bar. This chapter describes the feature as it behaves where the socket is served.
+
 ## Dictating a prompt
 
 To dictate into the chat input:

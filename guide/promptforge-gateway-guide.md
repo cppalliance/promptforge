@@ -50,7 +50,7 @@ curl -H "Authorization: Bearer wrong-token" http://127.0.0.1:8081/v1/models
 
 ## Choose what to build
 
-Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, and `config-ui` are on by default. The `workshop` flag is opt-in. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
+Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
 
 ## Run it as a service on Linux
 
@@ -72,7 +72,7 @@ Startup failures appear on stderr with the full cause chain: one `error:` line f
 
 ## Stop the gateway
 
-Stop the gateway cleanly with Ctrl-C. If the gateway hosts a workshop, the workshop stops first, and then the gateway drains.
+Stop the gateway cleanly with Ctrl-C. The gateway drains in-flight requests before it exits.
 
 ---
 
@@ -347,7 +347,7 @@ Local chat completions accept deterministic sampling parameters such as `tempera
 
 # Speech-to-Text
 
-This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the /stt endpoints serve. Speech builds on local models, because speech models are provisioned and cached the same way.
+This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the transcription endpoint serves. Speech builds on local models, because speech models are provisioned and cached the same way.
 
 ## Declare speech models
 
@@ -391,7 +391,7 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 
 Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. Model artifacts and the runtime are downloaded and verified into the configured cache directory at startup, with progress reporting. Each model file is prewarmed and then loaded, with progress per model.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. You can query GET /stt/capability for a report of whether a speech engine is loaded and whether GPU transcription through CUDA or Metal is available.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs.
 
 ## How a take is transcribed
 
@@ -401,7 +401,9 @@ With a final model configured, completed speech segments are re-transcribed in t
 
 ## The streaming socket
 
-The workshop listener serves a streaming speech-to-text WebSocket at /stt. The client drives it with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
+The streaming speech-to-text WebSocket at /stt exists for the workshop listener, but no product binary currently serves it: the desktop application hosts the workshop server itself, and voice input migrates into that server in a later change. Until then the socket and its `GET /stt/capability` probe go unanswered, and dictation in the Workshop stays blocked. What follows is the wire contract where the socket is served.
+
+The client drives the socket with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
 
 The /stt socket refuses cross-site browser connections: the upgrade performs an Origin allowlist check and answers 403.
 
@@ -663,7 +665,7 @@ The Dominions and Endpoints cards show used-by chips that count dependents, and 
 
 The Tools section configures web search with the provider locked to Brave and the defaults documented on the card. The Storage card edits the cache directory beside live cache-drive usage, with a warning that changing the directory does not move existing files.
 
-The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. Enabling Workshop seeds defaults: bind 127.0.0.1:7910, open_browser off, and an STT subsection with window_seconds 15, interval_ms 500, and an empty vocabulary.
+The About panel shows the medallion, the baked version or "dev", and the Boost Software License link. The Config UI card reports the UI as compiled in by the `config-ui` feature, served on the gateway's own port, loopback only, with the URL derived from the bind. The Workshop card edits the `[workshop]` section's one live content, the STT capture tuning - the gateway hosts no workshop listener, so the section's old `bind` and `open_browser` settings are inert and stay out of the editor. Adding the tuning seeds window_seconds 15, interval_ms 500, and an empty vocabulary.
 
 ## Editing a model
 
@@ -709,19 +711,9 @@ Results carry `title`, `url`, `site_name`, and `extra_snippets`. Result text is 
 
 When no `[tools.web_search]` section is configured, the route answers 404. The route exists only in builds compiled with the `web-search` feature. Search provider failures surface with a `web_search: ` prefix on the error, so you can distinguish search upstream errors from other gateway errors. The search service is built from the active profile's `[tools.web_search]` section and reloads on profile switch. The provider credential never appears in logs.
 
-## Host the workshop
+## The deprecated [workshop] section
 
-Have the gateway host the workshop UI on a second loopback listener by adding a `[workshop]` section:
-
-````
-[workshop]
-bind = "127.0.0.1:7910"
-open_browser = true
-````
-
-The bind address defaults to 127.0.0.1:7910, and a non-loopback bind is refused at startup. The section is boot-only, like `[server]`. The hosted workshop derives its client URL from the gateway's own `[server]` bind and reuses the same `api_key`, so you configure no second credential. A port-0 bind resolves to the actually bound port in the derived URL. The workshop's state directory and agent-program directory default to the boot config file's directory.
-
-Setting `open_browser = true` opens the system browser at the workshop URL once the gateway is serving; a browser that fails to open only logs a warning. A gateway built without the `workshop` feature logs a warning and hosts nothing when the boot config carries a `[workshop]` section. Both the gateway and workshop listeners answer /health and /v1/models on their own ports. The workshop's stop outcome appears in the logs: graceful, forced down after its drain window, or stopped with an error.
+The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section. The section keeps parsing - an existing config must not fail - and the gateway logs a deprecation warning at startup naming what changed: the section's `bind` and `open_browser` settings are inert, while the `[workshop.stt]` capture tuning still applies to the speech engine.
 
 ## Manage the cache
 

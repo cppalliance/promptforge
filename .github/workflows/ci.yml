@@ -108,12 +108,6 @@ jobs:
         working-directory: crates/workshop-server/ui
         run: npm ci
 
-      # workshop pins the gateway's config-ui feature, so its
-      # build script needs the config UI's node_modules.
-      - name: Install config UI dependencies
-        working-directory: crates/gateway-config-ui/ui
-        run: npm ci
-
       - name: Clippy (workshop)
         run: cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings
 
@@ -160,10 +154,6 @@ jobs:
 
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui
-        run: npm ci
-
-      - name: Install config UI dependencies
-        working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Build (workshop, Linux)

@@ -23,7 +23,6 @@ use crate::api_error::{ServeError, StartupError};
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
-use crate::workshop::{self, WorkshopHandle};
 use crate::{AppState, build_router};
 
 /// Options for running the gateway. Built by the binary from parsed args.
@@ -332,16 +331,11 @@ mod stt_tests {
 
 /// A running gateway on its own thread, returned by [`spawn`].
 ///
-/// When the boot config carries a `[workshop]` section and the `workshop`
-/// feature is compiled in, the handle also holds the hosted workshop
-/// server, reachable at [`GatewayHandle::workshop_url`].
-///
 /// Dropping the handle without calling [`GatewayHandle::shutdown`] still
-/// signals both servers to stop, but does not wait for them.
+/// signals the server to stop, but does not wait for it.
 #[derive(Debug)]
 pub struct GatewayHandle {
     url: String,
-    workshop: Option<WorkshopHandle>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<JoinHandle<Result<(), StartupError>>>,
 }
@@ -354,27 +348,12 @@ impl GatewayHandle {
         &self.url
     }
 
-    /// Returns the base URL of the hosted workshop listener, or `None`
-    /// when the gateway hosts no workshop (the `workshop` feature is not
-    /// compiled in, or the boot config has no `[workshop]` section).
-    #[must_use]
-    pub fn workshop_url(&self) -> Option<&str> {
-        self.workshop.as_ref().map(WorkshopHandle::url)
-    }
-
     /// Signals graceful shutdown and waits for the gateway thread to finish.
-    ///
-    /// A hosted workshop stops first - waiting out its own bounded drain -
-    /// while the gateway still serves, so the workshop's final gateway
-    /// calls never hit a dead socket; only then does the gateway drain.
     ///
     /// # Errors
     /// Returns [`StartupError`] when serving failed or the gateway thread
     /// panicked.
     pub fn shutdown(mut self) -> Result<(), StartupError> {
-        if let Some(workshop) = self.workshop.take() {
-            workshop.shutdown();
-        }
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -406,9 +385,6 @@ impl GatewayHandle {
 
 impl Drop for GatewayHandle {
     fn drop(&mut self) {
-        // Same order as shutdown(): the workshop's stop is signaled before
-        // the gateway's, though drop waits for neither.
-        drop(self.workshop.take());
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -416,12 +392,10 @@ impl Drop for GatewayHandle {
 }
 
 /// What the gateway thread reports through the readiness channel: the
-/// bound gateway URL, plus the hosted workshop's handle when the boot
-/// config asked for one.
+/// bound gateway URL.
 #[derive(Debug)]
 struct Ready {
     url: String,
-    workshop: Option<WorkshopHandle>,
 }
 
 /// Spawns the gateway on a dedicated thread and blocks until the listener
@@ -461,7 +435,6 @@ pub fn spawn(options: &ServeOptions) -> Result<GatewayHandle, StartupError> {
     match ready_rx.recv() {
         Ok(Ok(ready)) => Ok(GatewayHandle {
             url: ready.url,
-            workshop: ready.workshop,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         }),
@@ -528,11 +501,6 @@ fn serve_thread(
         }
     };
     let bind = config.bind_addr();
-    // load_startup resolved the boot path (explicit, discovered, or
-    // generated); the hosted workshop anchors its state beside it.
-    let Some(config_path) = profiles.config_path.clone() else {
-        unreachable!("load_startup resolves the boot config path");
-    };
     let hub = Arc::new(shared_progress::ProgressHub::new());
     // The renderer starts before provisioning so boot downloads draw; it is
     // a plain thread because provisioning runs before the runtime exists,
@@ -555,10 +523,9 @@ fn serve_thread(
             return Ok(());
         }
     };
-    // The bind runs apart from the serve future so the workshop can start
-    // between the two: after the gateway listener exists (a failed gateway
-    // bind must not leave a workshop running) and on this plain thread,
-    // where the workshop's blocking startup stalls no executor.
+    // The bind runs on this plain thread, apart from the serve future, so
+    // the bound address is known before serving starts: the readiness
+    // signal and the connection file both carry the real port.
     let listener = match runtime.block_on(TcpListener::bind(bind)) {
         Ok(listener) => listener,
         Err(error) => {
@@ -579,27 +546,9 @@ fn serve_thread(
     // gateway is discoverable the moment `spawn` returns; the guard removes
     // it on every exit path below, graceful shutdown included.
     let _connection_file = connection_file_guard(&config, options, address);
-    #[cfg(feature = "workshop")]
-    let workshop = workshop::spawn_if_configured(
-        &config,
-        &config_path,
-        address,
-        #[cfg(feature = "stt")]
-        gateway.state.stt_state(),
-    );
-    #[cfg(not(feature = "workshop"))]
-    let workshop = workshop::spawn_if_configured(&config, &config_path, address);
-    let workshop = match workshop {
-        Ok(workshop) => workshop,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return Ok(());
-        }
-    };
     tracing::info!("gateway serving on {address}");
     let _ = ready.send(Ok(Ready {
         url: format!("http://{address}"),
-        workshop,
     }));
     runtime
         .block_on(gateway.serve(listener, shutdown_on_send(shutdown)))
@@ -685,22 +634,18 @@ async fn shutdown_on_send(shutdown: tokio::sync::oneshot::Receiver<()>) {
 pub fn run(options: &ServeOptions) -> Result<(), StartupError> {
     let mut handle = spawn(options)?;
     if let Some(shutdown) = handle.shutdown.take() {
-        install_ctrl_c_handler(handle.workshop.take(), shutdown);
+        install_ctrl_c_handler(shutdown);
     }
     handle.join()
 }
 
-/// Installs the Ctrl-C handler on its own thread: a genuine interrupt stops
-/// a hosted workshop first (bounded by the workshop's own drain watchdog)
-/// and then sends the gateway's graceful-shutdown signal, while every
-/// failure path sends nothing - [`shutdown_signal`] never resolves on a
-/// handler-install failure, and a thread or runtime that fails to start
-/// merely drops the sender, which [`shutdown_on_send`] ignores - so no
-/// failure can masquerade as an interrupt and stop the gateway.
-fn install_ctrl_c_handler(
-    workshop: Option<WorkshopHandle>,
-    shutdown: tokio::sync::oneshot::Sender<()>,
-) {
+/// Installs the Ctrl-C handler on its own thread: a genuine interrupt sends
+/// the gateway's graceful-shutdown signal, while every failure path sends
+/// nothing - [`shutdown_signal`] never resolves on a handler-install
+/// failure, and a thread or runtime that fails to start merely drops the
+/// sender, which [`shutdown_on_send`] ignores - so no failure can
+/// masquerade as an interrupt and stop the gateway.
+fn install_ctrl_c_handler(shutdown: tokio::sync::oneshot::Sender<()>) {
     let handler = std::thread::Builder::new()
         .name("gateway-ctrl-c".to_string())
         .spawn(move || {
@@ -713,25 +658,15 @@ fn install_ctrl_c_handler(
                     tracing::error!(
                         "failed to build the Ctrl-C signal runtime: {error}; continuing to serve"
                     );
-                    // Leak the workshop handle: dropping it would signal a
-                    // workshop stop, and a signal-runtime failure must leave
-                    // both listeners serving until the process is killed.
-                    std::mem::forget(workshop);
                     return;
                 }
             };
             runtime.block_on(shutdown_signal());
-            if let Some(workshop) = workshop {
-                workshop.shutdown();
-            }
             let _ = shutdown.send(());
         });
     if let Err(error) = handler {
-        // The dropped closure signals a hosted workshop's stop, so only the
-        // gateway listener is certain to continue.
         tracing::error!(
-            "failed to spawn the Ctrl-C handler thread: {error}; the gateway continues to serve \
-             (a hosted workshop may stop)"
+            "failed to spawn the Ctrl-C handler thread: {error}; the gateway continues to serve"
         );
     }
 }
@@ -793,6 +728,9 @@ fn load_startup_with_environment(
         environment,
     );
     let config = Config::load(config_path, &selection).map_err(StartupError::config)?;
+    if let Some(warning) = workshop_section_deprecation(&config) {
+        tracing::warn!("{warning}");
+    }
     let active = config
         .active_profile()
         .map(|profile| ProfileName::parse(profile.name()))
@@ -804,6 +742,22 @@ fn load_startup_with_environment(
         config,
         ProfilesContext::new(Some(config_path.to_path_buf()), active),
     ))
+}
+
+/// The deprecation warning for a boot config carrying a `[workshop]`
+/// section, or `None` when the section is absent. The gateway no longer
+/// hosts the workshop - the desktop shell embeds the workshop server
+/// itself - so the section's `bind` and `open_browser` settings do
+/// nothing. The section still parses (an existing config must not fail),
+/// and `[workshop.stt]` capture tuning still applies to the STT engine;
+/// the warning is what keeps the inert fields from being silently
+/// ignored.
+fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
+    config.workshop().is_some().then_some(
+        "the [workshop] section is deprecated: the gateway hosts no workshop listener \
+         (the desktop shell embeds the workshop server itself); its bind and open_browser \
+         settings are ignored, while [workshop.stt] capture tuning still applies",
+    )
 }
 
 /// Load an env file into the process environment, skipping missing files.
@@ -936,5 +890,48 @@ models = ["beta-model"]
 
         assert!(text.contains("ghost"), "{text}");
         assert!(text.contains("alpha") && text.contains("beta"), "{text}");
+    }
+
+    #[test]
+    fn a_workshop_section_still_loads_and_earns_the_deprecation_warning() {
+        // Existing configs carry `[workshop]` from the hosted-workshop
+        // era; they must keep parsing, with the warning discharging the
+        // no-silent-ignore rule for the now-inert hosting fields.
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let path = temp.path().join("gateway.toml");
+        std::fs::write(
+            &path,
+            format!("{CATALOG}\n[workshop]\nbind = \"127.0.0.1:7910\"\nopen_browser = true\n"),
+        )
+        .expect("write config");
+        std::fs::write(
+            gateway_config::profile_state_path(&path),
+            "active_profile = \"alpha\"\n",
+        )
+        .expect("write state");
+        let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
+
+        let (config, _) = load_startup_with_environment(&path, &options, None)
+            .expect("a config carrying [workshop] still loads");
+
+        let warning = workshop_section_deprecation(&config)
+            .expect("a carried [workshop] section earns the deprecation warning");
+        assert!(
+            warning.contains("[workshop]"),
+            "the warning names the section: {warning}"
+        );
+        assert!(
+            warning.contains("[workshop.stt]"),
+            "the warning names what still applies: {warning}"
+        );
+    }
+
+    #[test]
+    fn no_workshop_section_earns_no_deprecation_warning() {
+        let (_temp, path) = fixture("alpha");
+        let options = ServeOptions::new(Some(path.clone()), None::<ProfileName>);
+        let (config, _) =
+            load_startup_with_environment(&path, &options, None).expect("startup loads");
+        assert!(workshop_section_deprecation(&config).is_none());
     }
 }

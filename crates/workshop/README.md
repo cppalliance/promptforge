@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workshop desktop window. It boots the merged gateway (`gateway` with the `workshop` feature) in-process, waits for the hosted workshop's health endpoint to answer, and opens a Tauri window (WebView2 on Windows) pointed at the workshop UI served on the gateway's loopback listener. Closing the window shuts the gateway down cleanly. One binary, one process: the window, the gateway, and the workshop it hosts ship together.
+The PromptForge Workshop desktop window. It hosts the workshop server in-process on a loopback listener with an OS-assigned port, waits for its health endpoint to answer, and opens a Tauri window (WebView2 on Windows) pointed at it. The server resolves the gateway endpoint itself: a running gateway's connection file first, explicit `workshop.toml` config second. Closing the window stops the in-process server only - the gateway is a separate process and keeps running.
 
 ## Quick start
 
@@ -12,19 +12,19 @@ cargo run -p workshop
 
 ## Configuration
 
-The shell loads the gateway boot config `gateway.toml` (see the [gateway README](../gateway/README.md) for the field reference), searching three places, first found wins:
+The shell reads no `gateway.toml`; the gateway owns its own configuration. What the shell discovers is `workshop.toml`, searching three places, first found wins:
 
 1. Beside the executable
 2. The current directory
-3. `%USERPROFILE%\.promptforge\gateway.toml`
+3. `%USERPROFILE%\.promptforge\workshop.toml`
 
-On first run - when no file exists at any of these locations - the shell writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\`: a loopback `[server]` bind on 8081 with a freshly generated random `api_key`, and a `[workshop]` section hosting the UI on a second loopback listener with the current voice-model defaults. It also writes `profiles\default.toml` beside it (the gateway boots into a named profile; the generated one includes the boot config), logs the path, and loads the pair. An existing `profiles\default.toml` is never overwritten. The app never exits on missing config.
+The file supplies the `[gateway]` connection (`base_url`, `api_key`) for attaching to a gateway discovery cannot see - a LAN gateway - plus the state and agent-program paths. The listener settings are the shell's own and cannot be configured away: the in-process server always binds `127.0.0.1:0` and never opens a browser. With no `workshop.toml`, state anchors in `%USERPROFILE%\.promptforge\` and the gateway endpoint resolves through the connection file a running gateway writes. With no gateway running and no explicit config, boot fails with the plain no-gateway error naming both remedies.
 
-The shell always boots the `default` profile. Development against an external gateway uses the standalone `workshop-server` binary and its `workshop.toml`; that flow is unchanged.
+Development against the standalone `workshop-server` binary flow is unchanged.
 
 ## Browser opening
 
-The generated config leaves `workshop.open_browser` off. Setting it in a boot config the shell loads opens a browser tab in addition to the desktop window, because the gateway honors the flag wherever it runs; the flag is meant for running the gateway (or the standalone `workshop-server`) without the shell.
+The shell drives its own window and never opens a browser tab. The `open_browser` flag belongs to the standalone `workshop-server` binary.
 
 ## Native runtimes
 

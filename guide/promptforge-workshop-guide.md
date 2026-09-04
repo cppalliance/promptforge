@@ -10,7 +10,7 @@ This chapter teaches you what the Workshop desktop application is, how to instal
 
 PromptForge Workshop is a desktop application for Windows, macOS, and Linux. You launch one program named Workshop. That program boots a small server inside itself and then opens a single window titled "PromptForge". The window shows the Workshop interface, which the built-in server serves on your own machine. There is no separate web server to install and no files to download before the interface can appear; the interface ships bundled inside the application.
 
-The Workshop talks to a PromptForge gateway. The gateway is the part of the system that supplies the model catalog, the profiles, and the model rounds that power chat. In the standard setup the gateway runs in the same process as the Workshop, so starting the application starts everything you need. The window opens at 1024 by 768 pixels the first time, and it remembers its size, position, and maximized state across launches.
+The Workshop talks to a PromptForge gateway. The gateway is the part of the system that supplies the model catalog, the profiles, and the model rounds that power chat. The gateway runs as its own program, separate from the Workshop window: the application's built-in server attaches to a running gateway over HTTP, so closing the window never unloads the gateway or its loaded models. The window opens at 1024 by 768 pixels the first time, and it remembers its size, position, and maximized state across launches.
 
 The application shows the PromptForge program icon in its custom title bar.
 
@@ -30,7 +30,7 @@ To check which version you have without starting anything, run:
 promptforge-workshop --version
 ````
 
-This prints the version and exits. It does not boot the gateway and it does not open a window.
+This prints the version and exits. It does not start the server and it does not open a window.
 
 The installed application can also check for updates and update itself. After startup it automatically checks the latest GitHub Release, and it installs only cryptographically verified updates.
 
@@ -47,40 +47,32 @@ The first time you start the Workshop, the application prepares everything it ne
 
 You never see a window before the interface is ready, and the interface never opens against a dead server. If the server does not answer in time, the error message names the health endpoint and how long the application waited. If startup fails for any reason, the application prints the full error chain and exits with a failure code instead of opening a broken window.
 
-Only one instance of the Workshop runs at a time. If you launch it again while it is already running, the existing window comes into focus instead of a second copy opening. When you close the window, the whole application shuts down cleanly, gateway included. In-flight connections get a 5-second grace window, so a held chat session or a stuck request cannot hang the shutdown, and the port is released so you can restart immediately on the same address. If the configured port is already taken by another program, startup fails with a clear error rather than silently serving nothing.
+Only one instance of the Workshop runs at a time. If you launch it again while it is already running, the existing window comes into focus instead of a second copy opening. When you close the window, the application shuts its built-in server down cleanly and exits; the gateway is a separate program and keeps running. In-flight connections get a 5-second grace window, so a held chat session or a stuck request cannot hang the shutdown. The interface listens on an OS-assigned loopback port, so another program holding a port can never block startup.
 
 The Workshop also keeps working when parts of its environment fail. The interface still loads when the gateway is unreachable, so a gateway outage never prevents the application from opening. If microphone setup fails at startup, you keep working and only voice input stays unavailable. On Windows, if the bridge to Explorer fails to attach, the application keeps running and loses only Explorer drag-and-drop and the microphone grant.
 
-## The boot configuration
+## The gateway configuration
 
-The application reads a boot config named `gateway.toml`. When it starts, it searches three places in order:
-
-1. Beside the executable.
-2. The current directory.
-3. `%USERPROFILE%\.promptforge\gateway.toml`.
-
-The first file found wins. This means you can drop a `gateway.toml` beside the executable or in the current directory to override the profile copy.
-
-On the very first run, when no config exists anywhere, the application does not fail. It writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and prints a message telling you where it wrote the file. It also creates `profiles\default.toml` beside it, and it never overwrites an existing `profiles\default.toml`. The application always boots into the `default` profile.
+The gateway owns its own boot config, `gateway.toml`, and the Workshop never reads it. On the gateway's first run - when no config exists anywhere it searches - the gateway writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and prints a message telling you where it wrote the file. It also creates `profiles\default.toml` beside it, and it never overwrites an existing `profiles\default.toml`. The generated config boots the gateway into the `default` profile.
 
 The generated config is a single editable TOML file with a header that invites edits. Two properties of the generated file are worth knowing:
 
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
-- The gateway listens on the loopback address only, bound to `127.0.0.1:8081`. It is not reachable from other machines. The Workshop UI itself is hosted on a second loopback-only listener at `127.0.0.1:7910`.
+- The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
-If you want the application to also open a browser tab alongside the desktop window, set `workshop.open_browser` in the boot config. The generated config leaves it off. If the boot config has no `[workshop]` section, the application tells you to add one to `gateway.toml`.
+A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, its `bind` and `open_browser` settings do nothing (the Workshop's server now lives inside the desktop application), and only the `[workshop.stt]` capture tuning still applies.
 
-At run time the application also downloads the pinned voice runtime matched to your machine (CUDA on Windows, Metal on Apple Silicon, CPU on the other supported targets), plus the managed `llama-server`. You make no build-time choices for this.
+At run time the gateway also downloads the pinned voice runtime matched to your machine (CUDA on Windows, Metal on Apple Silicon, CPU on the other supported targets), plus the managed `llama-server`. You make no build-time choices for this.
 
 ## The Workshop configuration
 
-Beyond the boot config, you configure the Workshop through a TOML file named `workshop.toml`. The application reads it by default when no other path is given. Every field is optional and the defaults are built in. The zero-config path you saw for `gateway.toml` applies here too: on first run the application writes a default `workshop.toml` into `~/.promptforge/` and loads that. If you have an older `workbench.toml` file, the application picks it up automatically when no `workshop.toml` is present.
+You configure the Workshop through a TOML file named `workshop.toml`. The application searches three places in order: beside the executable, the current directory, and `~/.promptforge/workshop.toml`. The first file found wins. Every field is optional and the defaults are built in. With no file anywhere, the application keeps its state in `~/.promptforge/` and attaches to the gateway through its connection file. The application never writes the file, and the standalone server's `workbench.toml` fallback does not apply to it.
 
 The keys you are most likely to set:
 
-- `gateway.base_url` points the Workshop at a PromptForge gateway. When the value is empty, the Workshop falls back to the built-in default `http://127.0.0.1:8081` instead of failing.
+- `gateway.base_url` points the Workshop at a PromptForge gateway the connection file cannot see, such as one on another machine. When the value is empty, the Workshop attaches to a locally running gateway through its connection file, and with no gateway running, startup fails with an error that names both remedies.
 - `gateway.api_key` supplies the bearer key for the gateway API. An empty key sends no `Authorization` header, which is right for a gateway running with authentication disabled.
-- `server.bind` changes the address the Workshop binds to. The default is `127.0.0.1:7910`.
+- `server.bind` is honored only by the standalone `workshop-server` binary. The desktop application owns its listener and always binds `127.0.0.1` on an OS-assigned port.
 - `server.state_dir` chooses where the Workshop keeps persistent state. Agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written there. It defaults to the config file's own directory.
 - `agents.path` chooses which directory of `.lua` agent programs is launchable. The default is `agents/` beside the config file. A missing directory offers no agents; that is a state, not an error.
 
@@ -477,6 +469,8 @@ You can now hold a full conversation, steer it, and recover from anything that i
 # Voice Input
 
 You can type prompts into the chat surface. This chapter teaches you to speak them instead. Dictation uses a push-to-talk microphone button beside the send button, and the transcript lands in the prompt exactly as if you had typed it. If voice is not available on your machine, this chapter also teaches you how to tell and why.
+
+Dictation is temporarily unavailable in the desktop application: the app no longer merges the gateway's `/stt` speech socket, which migrates into the Workshop's own server in a later change. Until then the microphone button names the blocker on the status bar. This chapter describes the feature as it behaves where the socket is served.
 
 ## Dictating a prompt
 

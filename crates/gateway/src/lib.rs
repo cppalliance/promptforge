@@ -91,7 +91,6 @@ mod shutdown;
 mod system;
 #[cfg(test)]
 mod test_support;
-mod workshop;
 
 // The wire protocol and upstream abstraction live in the protocol crate;
 // these re-exports keep every `crate::wire::*` and `crate::upstream::*`
@@ -220,8 +219,8 @@ pub(crate) struct AppState {
     /// Process-lifetime random salt for the `/auth` handoff's session
     /// proof; a restart or key rotation invalidates every minted cookie.
     handoff_salt: [u8; 32],
-    /// Stable STT slot shared by gateway and workshop routes across runtime
-    /// replacement.
+    /// Stable STT slot shared across runtime replacement on a profile
+    /// switch.
     #[cfg(feature = "stt")]
     stt_state: SttState,
 }
@@ -297,14 +296,6 @@ impl AppState {
     #[cfg(feature = "local")]
     pub(crate) async fn cache_dir(&self) -> Option<String> {
         self.live.read().await.local.cache_dir().map(str::to_owned)
-    }
-
-    /// Shared STT state, handed to the hosted workshop for its `/stt`
-    /// socket; the gateway's own transcription route reads the field
-    /// directly, so the accessor exists only when hosting is compiled in.
-    #[cfg(all(feature = "stt", feature = "workshop"))]
-    pub(crate) fn stt_state(&self) -> SttState {
-        self.stt_state.clone()
     }
 
     /// Registers an inference request under the same lock profile switches use.

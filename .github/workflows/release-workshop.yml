@@ -68,10 +68,6 @@ jobs:
         working-directory: crates/workshop-server/ui
         run: npm ci
 
-      - name: Install config UI dependencies
-        working-directory: crates/gateway-config-ui/ui
-        run: npm ci
-
       - name: Install Tauri system packages
         if: matrix.name == 'linux'
         run: |
@@ -172,25 +168,31 @@ jobs:
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
           New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          # The shell hosts the workshop server in-process on an OS-assigned
+          # loopback port and attaches to a gateway; an explicit dummy
+          # endpoint lets the server boot with no gateway running.
           @'
-          config-version = 2
-          [server]
-          bind = "127.0.0.1:8081"
+          [gateway]
+          base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
-          [workshop]
-          bind = "127.0.0.1:7910"
-          [[profile]]
-          name = "default"
-          models = []
-          '@ | Set-Content (Join-Path $configDir "gateway.toml")
+          '@ | Set-Content (Join-Path $configDir "workshop.toml")
           Start-Process $exe.FullName
           $page = $null
+          $port = $null
           foreach ($i in 1..60) {
-            try { $page = Invoke-WebRequest -Uri "http://127.0.0.1:7910/" -UseBasicParsing -TimeoutSec 2; break } catch { Start-Sleep -Seconds 1 }
+            if (-not $port) {
+              $proc = Get-Process promptforge-workshop -ErrorAction SilentlyContinue | Select-Object -First 1
+              if ($proc) {
+                $conn = Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" } | Select-Object -First 1
+                if ($conn) { $port = $conn.LocalPort }
+              }
+              if (-not $port) { Start-Sleep -Seconds 1; continue }
+            }
+            try { $page = Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 2; break } catch { Start-Sleep -Seconds 1 }
           }
           if (-not $page) { throw "the workshop page never answered" }
           if ($page.Content -notmatch "<title>PromptForge</title>") { throw "unexpected workshop page content" }
-          $js = Invoke-WebRequest -Uri "http://127.0.0.1:7910/app.js" -UseBasicParsing
+          $js = Invoke-WebRequest -Uri "http://127.0.0.1:$port/app.js" -UseBasicParsing
           # The current minified workbench is about 2.5 MB.
           if ($js.RawContentLength -gt 3000000) { throw "app.js is unexpectedly large ($($js.RawContentLength) bytes)" }
           Get-Process promptforge-workshop -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -209,26 +211,26 @@ jobs:
           output=$("$bin" --version)
           echo "$output" | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
-          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
-          config-version = 2
-          [server]
-          bind = "127.0.0.1:8081"
+          # The shell hosts the workshop server in-process on an OS-assigned
+          # loopback port and attaches to a gateway; an explicit dummy
+          # endpoint lets the server boot with no gateway running.
+          cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
+          [gateway]
+          base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
-          [workshop]
-          bind = "127.0.0.1:7910"
-          [[profile]]
-          name = "default"
-          models = []
           EOF
           "$bin" &
           app_pid=$!
           trap 'kill $app_pid 2>/dev/null || true' EXIT
+          port=""
           for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:7910/ -o /tmp/workshop.html; then break; fi
+            port=$(lsof -nP -iTCP -sTCP:LISTEN -a -p "$app_pid" 2>/dev/null | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)
+            if [ -n "$port" ] && curl -sf "http://127.0.0.1:$port/" -o /tmp/workshop.html; then break; fi
             sleep 1
           done
+          [ -n "$port" ] || { echo "the workshop server never listened"; exit 1; }
           grep -F "<title>PromptForge</title>" /tmp/workshop.html
-          size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
+          size=$(curl -sf "http://127.0.0.1:$port/app.js" | wc -c)
           # The current minified workbench is about 2.5 MB.
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
 
@@ -253,24 +255,27 @@ jobs:
           chmod +x "$appimage"
           "$appimage" --version | grep -F "$version"
           mkdir -p "$HOME/.promptforge"
-          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
-          config-version = 2
-          [server]
-          bind = "127.0.0.1:8081"
+          # The shell hosts the workshop server in-process on an OS-assigned
+          # loopback port and attaches to a gateway; an explicit dummy
+          # endpoint lets the server boot with no gateway running.
+          cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
+          [gateway]
+          base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
-          [workshop]
-          bind = "127.0.0.1:7910"
-          [[profile]]
-          name = "default"
-          models = []
           EOF
           xvfb-run -a "$bin" &
+          port=""
           for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:7910/ -o /tmp/workshop.html; then break; fi
+            app_pid=$(pgrep -f promptforge-workshop | head -1)
+            if [ -n "$app_pid" ]; then
+              port=$(lsof -nP -iTCP -sTCP:LISTEN -a -p "$app_pid" 2>/dev/null | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)
+            fi
+            if [ -n "$port" ] && curl -sf "http://127.0.0.1:$port/" -o /tmp/workshop.html; then break; fi
             sleep 1
           done
+          [ -n "$port" ] || { echo "the workshop server never listened"; exit 1; }
           grep -F "<title>PromptForge</title>" /tmp/workshop.html
-          size=$(curl -sf http://127.0.0.1:7910/app.js | wc -c)
+          size=$(curl -sf "http://127.0.0.1:$port/app.js" | wc -c)
           # The current minified workbench is about 2.5 MB.
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
           pkill -f "$(basename "$bin")" || true

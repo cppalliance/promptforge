@@ -1,6 +1,6 @@
 # Speech-to-Text
 
-This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the /stt endpoints serve. Speech builds on local models, because speech models are provisioned and cached the same way.
+This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the transcription endpoint serves. Speech builds on local models, because speech models are provisioned and cached the same way.
 
 ## Declare speech models
 
@@ -44,7 +44,7 @@ Two response shapes are offered. The `json` shape returns text only. The `verbos
 
 Speech-to-text runs on a separately pinned whisper.cpp library bundle, b4938. A library that does not match the pinned layout fails to load, and only 64-bit targets are supported. Model artifacts and the runtime are downloaded and verified into the configured cache directory at startup, with progress reporting. Each model file is prewarmed and then loaded, with progress per model.
 
-STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs. You can query GET /stt/capability for a report of whether a speech engine is loaded and whether GPU transcription through CUDA or Metal is available.
+STT startup failures are named by stage: opening the artifact store, provisioning the whisper library, provisioning a named model, a missing interim partner, an unsupported role, or engine load. Library load failures name the failing path or symbol in the logs.
 
 ## How a take is transcribed
 
@@ -54,7 +54,9 @@ With a final model configured, completed speech segments are re-transcribed in t
 
 ## The streaming socket
 
-The workshop listener serves a streaming speech-to-text WebSocket at /stt. The client drives it with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
+The streaming speech-to-text WebSocket at /stt exists for the workshop listener, but no product binary currently serves it: the desktop application hosts the workshop server itself, and voice input migrates into that server in a later change. Until then the socket and its `GET /stt/capability` probe go unanswered, and dictation in the Workshop stays blocked. What follows is the wire contract where the socket is served.
+
+The client drives the socket with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
 
 The /stt socket refuses cross-site browser connections: the upgrade performs an Origin allowlist check and answers 403.
 

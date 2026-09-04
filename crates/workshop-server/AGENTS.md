@@ -1,6 +1,6 @@
 # workshop-server
 
-This crate owns the workshop HTTP/WebSocket server: loopback listener, status bus, asset serving, session endpoints, and the host-embeddable spawn surface the desktop app and gateway attach to.
+This crate owns the workshop HTTP/WebSocket server: loopback listener, status bus, asset serving, session endpoints, and the host-embeddable spawn surface the desktop app attaches to.
 
 - Two-zone error policy. Zone one (config load and server construction): return rich errors to the host; never panic for configuration, binding, asset, or initialization failures - the host decides how failure surfaces; binary entry points may convert a returned error to a failing exit status. Zone two (request and session handling): never panic, never `unwrap` anything a client sent; errors are values (error frames, 4xx/5xx, status-bus reports, logged degradation); a lock poisoned by a panicking peer recovers the value rather than wedging the process. Degrade-not-crash features (STT provisioning, gateway outages) are zone two by definition.
 - Embedding hygiene deltas for this crate: never unconditionally init global tracing; keep no `OnceLock` singletons that ignore their arguments; the workshop listener binds loopback only - only the gateway's own listener may bind wider. Bind and init failures return through the spawn handshake (workspace `process::exit` / process-global rules still apply).

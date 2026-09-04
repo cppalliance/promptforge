@@ -28,7 +28,7 @@ See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for
 
 ## Profiles
 
-One `gateway.toml` holds the entire catalog, opened by `config-version = 2`: global sections once (`[server]`, `[workshop]`, `[local]`, `[tools]`, `[[endpoint]]`, `[[dominion]]`), remote models as `[[model]]`, local models as `[[local_model]]`, and speech-to-text models as `[[stt_model]]`. Profiles are named checklists over that catalog:
+One `gateway.toml` holds the entire catalog, opened by `config-version = 2`: global sections once (`[server]`, `[local]`, `[tools]`, `[[endpoint]]`, `[[dominion]]`), remote models as `[[model]]`, local models as `[[local_model]]`, and speech-to-text models as `[[stt_model]]`. Profiles are named checklists over that catalog:
 
 ```toml
 [[profile]]
@@ -63,7 +63,7 @@ The boot config's `[server]` section is required and has no defaults. Both field
 | `bind` | required | Socket address the gateway listener binds. |
 | `api_key` | required | Shared bearer key every `/v1/*` request must present. |
 
-Like `[workshop]`, the section is process-owned: a pending edit that changes it is promoted to disk on Apply but takes effect only on restart, reported as `restart_required` in the apply response.
+The section is process-owned: a pending edit that changes it is promoted to disk on Apply but takes effect only on restart, reported as `restart_required` in the apply response.
 
 ## The `[local]` section
 
@@ -75,30 +75,16 @@ Like `[workshop]`, the section is process-owned: a pending edit that changes it 
 
 The `llama-server` executable resolves in a fixed order: `llama_server_path` from the config, then the `PROMPTFORGE_LLAMA_SERVER` environment variable, then the managed download under the cache directory. Both CUDA builds ship their runtime DLLs, so the host needs only the NVIDIA driver. When a download fails and an older install is already in the cache, the gateway uses the cached one and logs a warning rather than failing to start.
 
-## Hosting the workshop
+## Feature flags
 
-Built with the `workshop` feature, the gateway can host the PromptForge Workshop UI server on a second, loopback-only listener in the same process. Hosting is switched on by a `[workshop]` section in the boot config; without the section (or without the feature) the gateway runs headless.
-
-```bash
-cargo build -p gateway --features workshop
-```
-
-Five feature flags exist:
+Four feature flags exist:
 
 - `local` (default) - compiles in gateway-owned local inference via the `gateway-local` crate: GGUF provisioning, managed `llama-server` children, the blob cache behind the `/v1/cache` routes, the `GET /admin/orphans` listing of cache files no loaded `[[local_model]]` entry references (sizes from the filesystem, digests only from cache sidecars - multi-gigabyte blobs are never re-hashed), the `GET /admin/model-info?path=` GGUF-header readout of a cache file's architecture, layer count, and parameter count (the `path` must stay inside the artifact cache; only the header is read, never tensor data), and the bearer-authenticated `GET /admin/chat-templates` catalog used by the Config UI. A `--no-default-features` build is headless of local inference: it links neither the archive/extraction stack nor a blocking HTTP client, and it refuses a configuration declaring `[[local_model]]` at startup and on profile switch.
 - `web-search` (default) - compiles in the Brave-powered `POST /v1/tools/web_search` tool service via the `gateway-web-search` crate. A `--no-default-features` build omits the route entirely.
-- `stt` (default) - compiles in gateway-owned speech-to-text via the `gateway-stt` crate: the transcription engine lifecycle and `POST /v1/audio/transcriptions` on the gateway listener, plus the `/stt` socket a hosted workshop merges into its own listener. A `--no-default-features` build omits the route and refuses a configuration declaring `[[stt_model]]` at startup and on profile switch.
-- `workshop` - compiles the hosted workshop UI server on a second, loopback-only listener.
+- `stt` (default) - compiles in gateway-owned speech-to-text via the `gateway-stt` crate: the transcription engine lifecycle and `POST /v1/audio/transcriptions` on the gateway listener. A `--no-default-features` build omits the route and refuses a configuration declaring `[[stt_model]]` at startup and on profile switch.
 - `config-ui` (default) - compiles in the embedded config SPA via the `gateway-config-ui` crate and serves it at `/config/` on the gateway's own port (no second listener); `GET /config` redirects to `/config/`. The routes are loopback-only and carry no bearer auth (the SPA shell holds no secrets); Node/esbuild and `rust-embed` enter the build only with this feature: Node 22 is needed on the build machine for the UI bundle's esbuild step, not for Rust itself, and a `--no-default-features` build needs no Node at all. With the feature, `GET /auth?key=` is the browser handoff onto the surface: it validates the bearer key, sets a session proof derived from it (SHA-256 over a process-lifetime salt and the key, so the cookie never carries the key and a restart or key rotation revokes it) as an HttpOnly `SameSite=Lax` session cookie, and 302-redirects to the key-free `/config/`, which accepts the cookie in place of the `Authorization` header - a tray or shell can open the UI without leaving the key in browser history. Because the cookie is ambient, the cookie path also requires `Sec-Fetch-Site: same-origin` or `none` fetch metadata, which browsers attach and a cross-origin page cannot strip. Regardless of the feature, the admin config endpoints (config read/write, env, pending state, apply/revert, orphans, system, model-info, chat templates, the HF proxy, profile create/delete, reveal) plus `POST /shutdown` and `GET /auth` sit behind the shared loopback wall from the always-on `shared-loopback` crate: a non-loopback peer gets 403 before bearer auth even runs. `POST /shutdown` is the bearer-authed graceful stop - the same drain Ctrl-C drives - answering 202 before the server goes down; the tray's Quit and the shell's Quit-everything call it. And whenever the listener is bound to a loopback address, every route sits behind the wall's second middleware, a host-authority allowlist that refuses with 403 any request whose `Host` is not the bound socket (`127.0.0.1:port`, `[::1]:port`, or `localhost:port`), closing DNS rebinding; a non-loopback bind enforces no allowlist.
 
-The workshop's toolchain stays opt-in: Node/esbuild enters the gateway build only with `--features workshop`. The speech runtime itself is a pinned managed download selected for the host at run time.
-
-### The `[workshop]` section
-
-| Field | Default | Meaning |
-|---|---|---|
-| `bind` | `127.0.0.1:7910` | Socket address of the workshop listener. Must be a loopback address; a non-loopback bind is refused at startup. |
-| `open_browser` | `false` | Open the system browser at the workshop URL once it is serving. Meant for running the gateway (or hosting the UI) without the desktop shell; a browser that fails to open is logged, never fatal. |
+The speech runtime itself is a pinned managed download selected for the host at run time. Note the build graph: the default-on `stt` feature's `gateway-stt` crate depends on `workshop-server` (the `/stt` socket attach API), whose build script bundles the workshop UI with esbuild - so default builds need Node 22 even though the gateway serves no workshop pages, and only a `--no-default-features` build drops that requirement. The gateway hosts no workshop UI: the desktop shell embeds the workshop server itself, and a boot config carrying a `[workshop]` section still parses but earns a deprecation warning at startup - its `bind` and `open_browser` settings are inert, while `[workshop.stt]` capture tuning still applies to the STT engine.
 
 ### Speech-to-text models
 
@@ -134,8 +120,6 @@ entries above; the active profile enables them by catalog name.
 | `interval_ms` | `500` | Milliseconds between interim passes while a take is recording. |
 | `vocabulary` | `[]` | Domain terms whisper is biased toward. Empty disables biasing. |
 
-Agent sessions persist their event logs as JSONL under the workshop's state directory (`sessions/` beside the boot config).
-
 ## Local model companions
 
 A chat `[[local_model]]` can declare two companions, each provisioned through the same pinned, digest-verified cache machinery as the main model:
@@ -167,11 +151,11 @@ A local chat model's template is chosen at launch with a fixed precedence: an ex
 
 ### Derived client credentials
 
-There is no `[workshop.gateway]` sub-table. The hosted workshop reaches the gateway through its own HTTP client, and that client's `base_url` and `api_key` derive from the `[server]` section: the URL is the `[server]` bind with an unspecified address swapped for loopback (`0.0.0.0` becomes `127.0.0.1`, `[::]` becomes `[::1]`), and the bearer key is the `[server]` `api_key` itself. No credential is duplicated in `[workshop]`, so none can drift.
+An unspecified `[server]` bind IP becomes the matching loopback address in the derived client URL (`0.0.0.0` becomes `127.0.0.1`, `[::]` becomes `[::1]`), so a same-host consumer always gets a dialable URL.
 
 ### Process-owned sections
 
-`[server]` and `[workshop]` are process-owned. Apply promotes edits to them to disk and answers `restart_required: true`; the running process keeps its booted listener and STT capture settings until restart. A profile switch never changes them, because profiles are checklists over the model catalog and carry no sections.
+`[server]` is process-owned. Apply promotes edits to it to disk and answers `restart_required: true`; the running process keeps its booted listener and STT capture settings until restart. A profile switch never changes it, because profiles are checklists over the model catalog and carry no sections.
 
 ## Minimum Rust Version
 

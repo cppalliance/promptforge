@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop desktop app: boots the gateway and opens the workshop window"
+description = "PromptForge Workshop desktop app: hosts the workshop server in-process and opens the workshop window"
 
 [[bin]]
 name = "promptforge-workshop"
@@ -15,9 +15,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-# config-ui is a gateway default already; naming it here pins the desktop
-# exe to carry the config UI even if the default edge is ever severed.
-gateway = { workspace = true, features = ["workshop", "config-ui"] }
+# The in-process workshop server: the shell spawns it on an OS-assigned
+# loopback port and points the window at it.
+workshop-server.workspace = true
 serde_json.workspace = true
 # The health wait comes from the shared connection-file seam.
 shared-sidecar.workspace = true

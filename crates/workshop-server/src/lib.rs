@@ -15,6 +15,7 @@ mod backoff;
 mod catalog;
 mod config;
 mod cross_site;
+mod csp;
 mod deadline;
 mod error;
 mod gateway;

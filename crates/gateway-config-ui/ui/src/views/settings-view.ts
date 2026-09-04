@@ -155,9 +155,12 @@ function configUiUrl(bind: string): string {
   return `http://${host}:${port}/config/`;
 }
 
-/** The `[workshop]` defaults the Enable button seeds. */
+/** The `[workshop]` draft the Add button seeds: the section's one live
+ * content is the STT capture tuning - the gateway hosts no workshop
+ * listener, so `bind` and `open_browser` are inert and stay out of the
+ * editor (existing configs keep them through the save round-trip). */
 function workshopDefaults(): EntryData {
-  return { bind: "127.0.0.1:7910", open_browser: false, stt: null };
+  return { stt: sttDefaults() };
 }
 
 /** The `[workshop.stt]` capture defaults, mirroring the config crate. */
@@ -965,11 +968,12 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       const { card, body } = settingsCard("Workshop");
       const empty = document.createElement("p");
       empty.className = "view-empty";
-      empty.textContent = "Workshop not configured.";
+      empty.textContent =
+        "The gateway hosts no workshop listener - the desktop application embeds the workshop server itself. The [workshop] section remains only for speech capture tuning.";
       const enable = document.createElement("button");
       enable.type = "button";
       enable.className = "button button-primary workshop-enable";
-      enable.textContent = "Enable Workshop";
+      enable.textContent = "Add STT capture tuning";
       enable.addEventListener("click", () => {
         sectionDrafts.set("workshop", workshopDefaults());
         render();
@@ -989,20 +993,6 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
         };
     const { card: box, body } = settingsCard("Workshop ([workshop])");
     body.append(
-      fieldRow(card, {
-        path: "bind",
-        label: "Bind",
-        help: "The socket address the workshop listener binds.",
-        type: "input",
-        fallback: "127.0.0.1:7910",
-      }),
-      fieldRow(card, {
-        path: "open_browser",
-        label: "Open browser",
-        help: "Open the system browser at the workshop URL once it is serving.",
-        type: "toggle",
-        fallback: false,
-      }),
       workshopSubsection(card, "stt", "STT capture tuning", sttDefaults, [
         {
           path: "stt.window_seconds",

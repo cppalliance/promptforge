@@ -46,7 +46,7 @@ curl -H "Authorization: Bearer wrong-token" http://127.0.0.1:8081/v1/models
 
 ## Choose what to build
 
-Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, and `config-ui` are on by default. The `workshop` flag is opt-in. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
+Build-time feature flags decide which capabilities exist in the binary. The flags `local`, `web-search`, `stt`, and `config-ui` are on by default. A headless build without `local` refuses any configuration that declares local models; the refusal happens at startup and again on any profile switch.
 
 ## Run it as a service on Linux
 
@@ -68,5 +68,5 @@ Startup failures appear on stderr with the full cause chain: one `error:` line f
 
 ## Stop the gateway
 
-Stop the gateway cleanly with Ctrl-C. If the gateway hosts a workshop, the workshop stops first, and then the gateway drains.
+Stop the gateway cleanly with Ctrl-C. The gateway drains in-flight requests before it exits.
 
