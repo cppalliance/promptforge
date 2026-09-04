@@ -23,8 +23,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW,
     GetWindowLongPtrW, HWND_MESSAGE, KillTimer, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, SetTimer, SetWindowLongPtrW, TranslateMessage, WM_APP, WM_TIMER,
-    WNDCLASSW,
+    SetTimer, SetWindowLongPtrW, TranslateMessage, WM_APP, WM_TIMER, WNDCLASSW,
 };
 
 use crate::api_error::StartupError;
@@ -571,16 +570,11 @@ fn show_menu(tray: &mut Tray) {
     tray.login_item
         .set_checked(logic::launch_at_login(&WindowsRunKey));
     if let Some(icon) = tray.icon.as_ref() {
-        // SAFETY: tray.hwnd is the message window created on this thread;
-        // SetForegroundWindow is safe for any valid HWND and positions the
-        // next TrackPopupMenu near the cursor instead of floating detached
-        // (the standard KB Q135788 tray menu recipe).
-        unsafe {
-            SetForegroundWindow(tray.hwnd);
-        }
         // TrackPopupMenu runs a modal loop that dispatches this thread's
         // messages reentrantly; the guard keeps the nested dispatch out of
-        // the Tray while this call holds it.
+        // the Tray while this call holds it. The crate's own
+        // SetForegroundWindow + WM_NULL pairing (KB Q135788) handles the
+        // foreground and dismissal.
         MENU_OPEN.with(|open| open.set(true));
         icon.show_menu();
         MENU_OPEN.with(|open| open.set(false));

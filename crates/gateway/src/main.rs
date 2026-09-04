@@ -30,7 +30,23 @@ const USAGE: &str = concat!(
     "                 the installer's first run uses this",
 );
 
+#[expect(
+    unsafe_code,
+    reason = "the one-call DPI-awareness shim at process start; every other unsafe lives in the tray and registry modules"
+)]
 fn main() -> ExitCode {
+    // The process is PerMonitorV2 DPI-aware from the start: the tray menu's
+    // popup position comes from `Shell_NotifyIconGetRect` in physical
+    // pixels, and a DPI-unaware process would have Windows scale the menu
+    // away from the icon on a high-DPI display.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // SAFETY: called once at process start, before any window exists.
+        windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
