@@ -27,7 +27,7 @@ import { createTabBar } from "./components/tab-bar";
 import { createToastStack } from "shared-ui/toast";
 import { startRouter } from "./router";
 import { ConfigStore } from "./services/config-store";
-import { GatewayApi } from "./services/gateway-api";
+import { GatewayApi, GatewayHttpError } from "./services/gateway-api";
 import type { FetchLike } from "./services/gateway-api";
 import { HfApi } from "./services/hf-api";
 import { PanelBridge, parseBridgeOrigin, type BridgeWindow } from "./services/panel-bridge";
@@ -39,6 +39,9 @@ import { createSettingsView } from "./views/settings-view";
 
 export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
 export { matchRoute } from "./router";
+
+/** The toast for an apply the user (or a revert) cancelled before its commit. */
+const APPLY_CANCELLED_MESSAGE = "Apply cancelled - your pending changes are still staged";
 
 /** The window surface boot needs; tests hand in a jsdom window. */
 export interface BootWindow {
@@ -192,7 +195,18 @@ function mountLiveShell(
   bridge: PanelBridge | null,
 ): () => void {
   const toasts = createToastStack();
-  const overlay = createApplyOverlay(root);
+  // The overlay's Cancel fires the queue's active-command cancel; the
+  // apply route then settles as cancelled and runApply's failure path
+  // closes the overlay, so only the cancel request itself needs a toast.
+  const overlay = createApplyOverlay(root, {
+    onCancel: async () => {
+      try {
+        await api.cancelActiveCommand();
+      } catch (error) {
+        toasts.show(error instanceof Error ? error.message : "The cancel failed", "error");
+      }
+    },
+  });
   const store = new ConfigStore(api);
   const switcher = createProfileSwitcher({ store, toasts });
   let applying = false;
@@ -257,7 +271,12 @@ function mountLiveShell(
       );
       bridge?.notifyAction("apply");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The apply failed";
+      const message =
+        error instanceof GatewayHttpError && error.code === "apply_cancelled"
+          ? APPLY_CANCELLED_MESSAGE
+          : error instanceof Error
+            ? error.message
+            : "The apply failed";
       overlay.fail(message);
       toasts.show(message, "error");
     } finally {
@@ -393,20 +412,19 @@ function mountLiveShell(
       // the key prompt via onUnauthorized.
     });
   void store.load();
-  // The live progress stream: while an apply is in flight, stage-shaped
-  // events feed the overlay. Subscribing at boot keeps the shell an
-  // independent subscriber whether or not the workshop is connected.
-  // Panel mode never subscribes: the workshop already consumes the same
-  // stream and owns all progress display.
+  // The live progress stream: while an apply is in flight, the hub's
+  // events feed the overlay, which maps stage leaves itself. The
+  // `applying` guard suffices because an Apply cancels any active
+  // profile load and later loads queue behind it, so during an Apply
+  // the only switch-stage emitter is the Apply. Subscribing at boot
+  // keeps the shell an independent subscriber whether or not the
+  // workshop is connected. Panel mode never subscribes: the workshop
+  // already consumes the same stream and owns all progress display.
   const stopProgress =
     bridge === null
       ? api.subscribeProgress((event) => {
-          if (!applying || event === null || typeof event !== "object") {
-            return;
-          }
-          const stage = (event as Record<string, unknown>)["stage"];
-          if (typeof stage === "string") {
-            overlay.beginStage(stage);
+          if (applying) {
+            overlay.observe(event);
           }
         })
       : () => undefined;

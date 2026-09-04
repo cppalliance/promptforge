@@ -1,8 +1,12 @@
 // Full-screen switch/apply overlay [Adapted: Unsloth]: a dimmed layer
-// centering a card that lists the gateway's SSE stages, each with a
+// centering a card that lists the gateway's switch stages, each with a
 // spinner while active, a check when passed, and an error mark when the
-// switch dies in it. The terminal event closes the overlay - instantly
-// on success, after a short hold on failure so the failed stage is seen
+// switch dies in it. Stages come from the `GET /admin/progress` hub
+// stream through `observe`: a `Begun` leaf whose label is a known stage
+// opens that stage. The card carries a Cancel button (the overlay hides
+// the status bar's own cancel control) that fires the caller's cancel
+// hook once. The terminal event closes the overlay - instantly on
+// success, after a short hold on failure so the failed stage is seen
 // (the toast carries the message onward).
 
 import { Check, X, createElement as lucideElement } from "lucide";
@@ -13,10 +17,11 @@ import { scheduleTimeout } from "shared-ui/toast";
 const ERROR_HOLD_MS = 1500;
 
 /**
- * The stage markers the gateway's switch stream emits today, in
- * execution order, with their display labels (the same wording the
- * workshop's status bar uses). Unknown stages are appended as they
- * arrive, so a gateway that grows stages never breaks the overlay.
+ * The stage leaves the gateway's switch registers on its progress tree,
+ * in execution order, with their display labels (the same wording the
+ * workshop's status bar uses). Unknown stages begun through `beginStage`
+ * are appended as they arrive, so a gateway that grows stages never
+ * breaks the overlay; `observe` only maps these three.
  */
 const KNOWN_STAGES: ReadonlyArray<readonly [id: string, label: string]> = [
   ["loading-profile", "Loading profile"],
@@ -24,23 +29,43 @@ const KNOWN_STAGES: ReadonlyArray<readonly [id: string, label: string]> = [
   ["starting-models", "Starting models"],
 ];
 
-/** The overlay controller handed to the profile switcher. */
+/** The overlay controller handed to the composition root. */
 export interface ApplyOverlay {
   /** Mounts the overlay with the known stages listed as pending. */
   open(title: string): void;
   /** Marks `stage` active; the previously active stage becomes done. */
   beginStage(stage: string): void;
+  /**
+   * Feeds one raw `GET /admin/progress` event. A hub `ProgressEvent`
+   * whose `state` is `Begun` and whose `label` is a known stage begins
+   * that stage; every other shape is ignored.
+   */
+  observe(event: unknown): void;
   /** Terminal success: marks every begun stage done and closes. */
   finish(): void;
   /** Terminal failure: marks the active stage failed, then closes. */
   fail(message: string): void;
 }
 
+/** Construction options for {@link createApplyOverlay}. */
+export interface ApplyOverlayOptions {
+  /**
+   * Runs when the card's Cancel button is clicked, once per opening.
+   * The hook owns its own error reporting; the overlay stays up until
+   * the operation it covers settles through `finish` or `fail`.
+   */
+  onCancel?: () => void | Promise<void>;
+}
+
 /** Creates an overlay controller that mounts into `host` when opened. */
-export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
+export function createApplyOverlay(
+  host: HTMLElement,
+  options: ApplyOverlayOptions = {},
+): ApplyOverlay {
   let element: HTMLElement | null = null;
   let list: HTMLElement | null = null;
   let active: HTMLElement | null = null;
+  let cancel: HTMLButtonElement | null = null;
   let restoreFocus: HTMLElement | null = null;
 
   const close = () => {
@@ -48,6 +73,7 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
     element = null;
     list = null;
     active = null;
+    cancel = null;
     // Hand focus back to where it was when the overlay took it.
     if (restoreFocus?.isConnected) {
       restoreFocus.focus();
@@ -86,6 +112,37 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
     return row;
   };
 
+  const beginStage = (stage: string): void => {
+    if (!list) {
+      return;
+    }
+    if (active) {
+      setState(active, "done");
+    }
+    let row = list.querySelector<HTMLElement>(`[data-stage="${stage}"]`);
+    if (!row) {
+      row = stageRow(stage, stage);
+      list.append(row);
+    }
+    setState(row, "active");
+    active = row;
+  };
+
+  const cancelButton = (onCancel: () => void | Promise<void>): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button-outline apply-overlay-cancel";
+    button.textContent = "Cancel";
+    button.addEventListener("click", () => {
+      // One request per opening: the command settles as cancelled at its
+      // next boundary, and the covered operation's own failure closes
+      // the overlay.
+      button.disabled = true;
+      void onCancel();
+    });
+    return button;
+  };
+
   return {
     open(title: string): void {
       close();
@@ -110,6 +167,13 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
         list.append(stageRow(stage, label));
       }
       card.append(heading, list);
+      if (options.onCancel) {
+        const actions = document.createElement("div");
+        actions.className = "modal-actions";
+        cancel = cancelButton(options.onCancel);
+        actions.append(cancel);
+        card.append(actions);
+      }
       element.append(card);
       host.append(element);
       // Duck-typed: the HTMLElement global is absent under node --test.
@@ -118,20 +182,17 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
       card.focus();
     },
 
-    beginStage(stage: string): void {
-      if (!list) {
+    beginStage,
+
+    observe(event: unknown): void {
+      // serde's externally tagged `EventState`: `{"Begun":{"weight":..}}`.
+      if (!isRecord(event) || !isRecord(event["state"]) || !("Begun" in event["state"])) {
         return;
       }
-      if (active) {
-        setState(active, "done");
+      const label = event["label"];
+      if (typeof label === "string" && KNOWN_STAGES.some(([id]) => id === label)) {
+        beginStage(label);
       }
-      let row = list.querySelector<HTMLElement>(`[data-stage="${stage}"]`);
-      if (!row) {
-        row = stageRow(stage, stage);
-        list.append(row);
-      }
-      setState(row, "active");
-      active = row;
     },
 
     finish(): void {
@@ -148,6 +209,10 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
       if (active) {
         setState(active, "failed");
       }
+      // The operation is over; a cancel during the hold has no target.
+      if (cancel) {
+        cancel.disabled = true;
+      }
       const note = document.createElement("p");
       note.className = "field-error";
       note.textContent = message;
@@ -155,6 +220,11 @@ export function createApplyOverlay(host: HTMLElement): ApplyOverlay {
       scheduleTimeout(close, ERROR_HOLD_MS);
     },
   };
+}
+
+/** Whether an untrusted stream value is a non-array object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Renders a lucide icon as a decorative inline SVG. */

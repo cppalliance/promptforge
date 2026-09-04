@@ -227,11 +227,14 @@ export class HfAuthError extends Error {
 export class GatewayHttpError extends Error {
   /** The response's HTTP status code. */
   readonly status: number;
+  /** The envelope's `error.code` (`apply_cancelled`, ...), when it sent one. */
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "GatewayHttpError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -434,7 +437,10 @@ export class GatewayApi {
   async applyConfig(): Promise<ApplyOutcome> {
     const response = await this.send("/admin/config-apply", { method: "POST" });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      // The code distinguishes a cancelled apply (pending changes still
+      // staged) from a failed one, so the shell can word its toast.
+      const refusal = await refusalDetail(response);
+      throw new GatewayHttpError(response.status, refusal.message, refusal.code);
     }
     const data = requireRecord(await response.json(), "apply outcome");
     return {
@@ -873,22 +879,34 @@ function isAbortError(error: unknown): boolean {
 
 /** Extracts a human-readable message from a buffered refusal response. */
 async function refusalMessage(response: Response): Promise<string> {
+  return (await refusalDetail(response)).message;
+}
+
+/**
+ * Extracts the message and, when the envelope is the gateway's
+ * `{"error": {"message", "code", ...}}` shape, its `code` from a
+ * buffered refusal response.
+ */
+async function refusalDetail(
+  response: Response,
+): Promise<{ message: string; code: string | null }> {
   try {
     const body = requireRecord(await response.json(), "error response");
     const error = body["error"];
     if (typeof error === "string") {
-      return error;
+      return { message: error, code: null };
     }
     if (isRecord(error)) {
       const message = error["message"];
       if (typeof message === "string") {
-        return message;
+        const code = error["code"];
+        return { message, code: typeof code === "string" ? code : null };
       }
     }
   } catch {
     // Fall through to the status line.
   }
-  return `the gateway refused the switch (${response.status})`;
+  return { message: `the gateway refused the switch (${response.status})`, code: null };
 }
 
 /** Whether untrusted JSON is a non-array object. */
