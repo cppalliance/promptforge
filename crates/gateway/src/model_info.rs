@@ -13,9 +13,9 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
 use serde::Deserialize;
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::local::{LocalError, gguf, resolve_cache_root};
 use crate::{AppState, check_auth};
@@ -42,9 +42,9 @@ pub(crate) struct ModelInfoQuery {
 pub(crate) async fn admin_model_info(
     State(state): State<AppState>,
     query: Result<Query<ModelInfoQuery>, QueryRejection>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<gguf::ModelInfo>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps auth first and puts the rejection in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Query(query) =
@@ -92,6 +92,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 
 [local]
 cache_dir = '{cache_dir}'

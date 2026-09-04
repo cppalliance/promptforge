@@ -23,7 +23,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use gateway_config::{
     Config, ProfileName, ProfileSelection, load_pending_config, profile_state_path, shadow_path,
     write_atomic,
@@ -31,6 +30,7 @@ use gateway_config::{
 use shared_progress::ProgressTree;
 use tokio_util::sync::CancellationToken;
 
+use crate::auth::Caller;
 use crate::commands::{APPLY_CONFIG_LABEL, Command, Outcome};
 use crate::config_pending::{canonical_form, config_root, relative_name, shadow_census};
 use crate::config_write::{config_write_error, error_chain};
@@ -59,9 +59,9 @@ use crate::{AppState, StatePersistence, check_auth};
 /// still staged, so a retry of Apply re-runs the whole thing.
 pub(crate) async fn admin_config_apply(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let config_path = crate::config_path(&state)?.to_path_buf();
     let (enqueued, applied, restart_required) = {
         // The lock spans the census, the parse, and the capture (or the
@@ -125,9 +125,9 @@ pub(crate) async fn admin_config_apply(
 /// [`GatewayError::ApplyCancelled`].
 pub(crate) async fn admin_config_revert(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // A revert issued during an apply wins: cancel the apply before its
     // commit can write the snapshot over the files being reverted. The
     // commit re-checks the token under the apply lock, so an apply already

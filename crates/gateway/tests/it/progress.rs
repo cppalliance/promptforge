@@ -12,7 +12,13 @@ async fn progress_requires_the_bearer_token() {
     let server = support::gateway_for(backend).await;
     let http = reqwest::Client::new();
 
-    let refused = send_within(http.get(format!("http://{}/admin/progress", server.addr))).await;
+    // A wrong bearer is refused even from the loopback listener: presenting
+    // a credential opts out of loopback trust.
+    let refused = send_within(
+        http.get(format!("http://{}/admin/progress", server.addr))
+            .bearer_auth("wrong"),
+    )
+    .await;
     assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
 
     let admitted = send_within(

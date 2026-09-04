@@ -12,11 +12,11 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use gateway_config::{
     Config, ProfileSelection, load_pending_config, pending_report, profile_state_path, shadow_path,
 };
@@ -29,9 +29,9 @@ use gateway_config::{
 /// plus `active_profile`; secrets remain redacted.
 pub(crate) async fn admin_config_pending(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let config_path = crate::config_path(&state)?.to_path_buf();
     let running_profile = state.live.read().await.profile_name.clone();
     let reply = tokio::task::spawn_blocking(move || {
@@ -82,9 +82,9 @@ pub(crate) fn load_pending_for_running(
 /// sorted. `.env` shadows count toward `dirty` and `pending_files` only.
 pub(crate) async fn admin_config_dirty(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let config_path = crate::config_path(&state)?.to_path_buf();
     let reply = tokio::task::spawn_blocking(move || dirty_reply(&config_path))
         .await

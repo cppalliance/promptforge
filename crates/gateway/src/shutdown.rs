@@ -12,9 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 
 use crate::AppState;
+use crate::auth::Caller;
 use crate::error::GatewayError;
 
 /// The process-shutdown signal shared by the `POST /shutdown` route and
@@ -59,9 +60,9 @@ impl ShutdownSignal {
 /// deliberately credential-free empty-key configuration.
 pub(crate) async fn admin_shutdown(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<StatusCode, GatewayError> {
-    crate::check_auth(&state, &headers).await?;
+    crate::check_auth(&state, &caller).await?;
     // Cancel the active queue command first: a shutdown during provisioning
     // stops the download, so the serve loop's drain and the process exit
     // stay prompt.
@@ -85,10 +86,13 @@ mod tests {
     use crate::test_support::app_state;
     use crate::{AppState, build_router};
 
+    /// Strict bearer auth (`trust_loopback = false`), so the missing-key
+    /// case below is refused from the planted loopback peer.
     fn state() -> AppState {
         let config = Config::from_toml_str(
             "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             trust_loopback = false\n",
         )
         .expect("config parses");
         app_state(config, None)

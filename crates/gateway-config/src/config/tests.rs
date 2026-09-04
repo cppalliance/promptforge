@@ -111,6 +111,48 @@ endpoints = ["e"]
 }
 
 #[test]
+fn server_trust_loopback_defaults_to_true() {
+    let config = Config::from_toml_str(SAMPLE).unwrap();
+    assert!(
+        config.server().trust_loopback(),
+        "a config naming no `trust_loopback` keeps the keyless-loopback default"
+    );
+}
+
+#[test]
+fn server_trust_loopback_explicit_false_parses() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+trust_loopback = false
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert!(!config.server().trust_loopback());
+}
+
+#[test]
+fn server_trust_loopback_round_trips_through_json() {
+    for (toml, expected) in [
+        (
+            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n",
+            true,
+        ),
+        (
+            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\ntrust_loopback = false\n",
+            false,
+        ),
+    ] {
+        let raw: RawConfig = toml::from_str(toml).unwrap();
+        let json = serde_json::to_value(&raw).unwrap();
+        assert_eq!(json["server"]["trust_loopback"], expected, "{toml}");
+        let back: RawConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(back.server.trust_loopback, expected, "{toml}");
+    }
+}
+
+#[test]
 fn rejects_web_search_default_count_over_max() {
     let toml = r#"
 config-version = 2

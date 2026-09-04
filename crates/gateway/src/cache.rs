@@ -17,14 +17,15 @@ use std::sync::{Arc, Mutex, PoisonError};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, State};
+use axum::http::HeaderValue;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHandle};
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::local::artifacts::{
     DownloadProgress, TreeProgress, filename_from_url, parse_expected_digest,
@@ -50,9 +51,9 @@ async fn live_cache_dir(state: &AppState) -> Option<String> {
 /// appear.
 pub(crate) async fn list_cache(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<Vec<CacheEntry>>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let cache_dir = live_cache_dir(&state).await;
     let entries = tokio::task::spawn_blocking(move || open_cache(cache_dir.as_deref())?.list())
         .await
@@ -95,10 +96,10 @@ fn validate_source(source: &str) -> Result<String, GatewayError> {
 /// `{"status": "error", "message"}`.
 pub(crate) async fn post_cache(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<CacheRequest>,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let label = validate_source(&request.source)?;
     let expected = request
         .sha256
@@ -155,10 +156,10 @@ pub(crate) async fn post_cache(
 /// and 400 when the path parameter is not a 64-character hex digest.
 pub(crate) async fn delete_cache(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Path(sha256): Path<String>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let wanted = parse_expected_digest(&sha256)
         .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
     let cache_dir = live_cache_dir(&state).await;

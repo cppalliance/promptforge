@@ -11,10 +11,10 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 
 use gateway_config::SttModelConfig;
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::local::{cache::orphans, resolve_cache_root};
 use crate::{AppState, check_auth};
@@ -30,9 +30,9 @@ use crate::{AppState, check_auth};
 /// reports an empty list.
 pub(crate) async fn admin_orphans(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // The retained running config carries both the `[local].cache_dir` the
     // scan resolves and the `[[local_model]]` entries it diffs against, so
     // the two can never come from different profiles.
@@ -73,6 +73,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 
 [local]
 cache_dir = '{cache_dir}'

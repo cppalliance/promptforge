@@ -62,13 +62,17 @@
 //! behind the same wall, and `GET /auth?key=` sets a session proof
 //! derived from the bearer key as an HttpOnly cookie and redirects to the
 //! key-free `/config/`, so a browser handoff never leaves the key in
-//! browser history. When the listener is
+//! browser history. With `[server] trust_loopback` on (the default), a
+//! loopback peer presenting no credential is admitted to every route
+//! unless its Fetch Metadata marks a cross-origin page; `trust_loopback =
+//! false` requires the bearer key from every caller. When the listener is
 //! bound to loopback, every route additionally sits behind the shared
 //! host-authority wall, which refuses requests whose `Host` is not the
 //! bound socket (the DNS-rebinding defense). In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
+mod auth;
 mod boot;
 #[cfg(feature = "local")]
 mod cache;
@@ -128,8 +132,8 @@ use axum::body::Body;
 #[cfg(feature = "stt")]
 use axum::extract::FromRequest;
 use axum::extract::State;
+use axum::http::HeaderValue;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 #[cfg(feature = "local")]
 use axum::routing::delete;
@@ -138,6 +142,7 @@ use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
@@ -161,6 +166,10 @@ use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, Progr
 struct LiveState {
     routing: Arc<Routing>,
     key: Secret,
+    /// Whether a loopback peer presenting no credential is admitted
+    /// (`[server] trust_loopback`). Read from the boot config at assembly;
+    /// `[server]` is process-owned, so a change takes effect on restart.
+    trust_loopback: bool,
     /// The running configuration, retained so `GET /admin/config` can render
     /// it; swapped with the rest of the live state on a profile switch.
     config: Arc<Config>,
@@ -292,6 +301,7 @@ impl AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
                 key,
+                trust_loopback: config.server().trust_loopback(),
                 config,
                 #[cfg(feature = "web-search")]
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
@@ -498,10 +508,10 @@ async fn config_ui_redirect() -> axum::response::Redirect {
 #[cfg(feature = "web-search")]
 async fn web_search(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<WebSearchRequest>,
 ) -> Result<Json<WebSearchResponse>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let service = state
         .web_search()
         .await
@@ -521,9 +531,10 @@ async fn health() -> impl IntoResponse {
 #[cfg(feature = "stt")]
 async fn audio_transcriptions(
     State(state): State<AppState>,
+    caller: Caller,
     request: axum::extract::Request,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, request.headers()).await?;
+    check_auth(&state, &caller).await?;
     let multipart = axum::extract::Multipart::from_request(request, &())
         .await
         .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
@@ -586,10 +597,10 @@ async fn resolve_routed_model(
 /// The chat route to a backend.
 async fn chat_completions(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<ChatRequest>,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -597,7 +608,7 @@ async fn chat_completions(
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Chat)?;
     let client_id = crate::queue::ClientId::from_header(
-        headers
+        caller
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
@@ -740,10 +751,10 @@ fn relay_sse(
 /// dominion queue admission as chat, for `kind = "embedding"` models.
 async fn embeddings(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<EmbeddingRequest>,
 ) -> Result<Json<EmbeddingResponse>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -751,7 +762,7 @@ async fn embeddings(
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Embedding)?;
     let client_id = crate::queue::ClientId::from_header(
-        headers
+        caller
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
@@ -773,10 +784,10 @@ async fn embeddings(
 /// dominion queue admission as chat, for `kind = "classifier"` models.
 async fn rerank(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<RerankRequest>,
 ) -> Result<Json<RerankResponse>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     request
         .validate()
         .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
@@ -784,7 +795,7 @@ async fn rerank(
     let model = resolve_routed_model(&state, &request.model).await?;
     crate::routing::require_kind(&model, ModelKind::Classifier)?;
     let client_id = crate::queue::ClientId::from_header(
-        headers
+        caller
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
@@ -805,9 +816,9 @@ async fn rerank(
 /// Bearer-authed catalog of configured models for host bind.
 async fn list_models(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<ModelsResponse>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let data = live
         .routing
@@ -837,9 +848,9 @@ struct SwitchProfileRequest {
 /// Lists profile names from the loaded global catalog.
 async fn admin_list_profiles(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let profiles: Vec<&str> = live
         .config
@@ -900,9 +911,9 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
 /// capability endpoint the gateway can serve.
 async fn admin_status(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
     let live = state.live.read().await;
@@ -1006,9 +1017,9 @@ async fn admin_status(
 /// or phase boundary.
 async fn admin_queue_cancel(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let cancelled = state.commands.cancel_active();
     Ok(Json(serde_json::json!({ "cancelled": cancelled })))
 }
@@ -1024,10 +1035,10 @@ struct CancelPendingRequest {
 /// reply reports whether an entry was removed.
 async fn admin_queue_cancel_pending(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<CancelPendingRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let cancelled = state.commands.cancel_pending(request.index);
     Ok(Json(serde_json::json!({ "cancelled": cancelled })))
 }
@@ -1036,9 +1047,9 @@ async fn admin_queue_cancel_pending(
 /// config plus its active profile in the pending admin shape.
 async fn admin_config(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let live = state.live.read().await;
     let mut document = live.config.to_json();
     if let Some(table) = document.as_object_mut()
@@ -1071,9 +1082,9 @@ const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(1
 /// with the switch stream: the response body owns the receiver.
 async fn admin_progress(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     Ok(progress_sse_response(&state.hub))
 }
 
@@ -1195,10 +1206,10 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// subscription, never the half-finished command.
 async fn admin_switch_profile(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     Json(request): Json<SwitchProfileRequest>,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let name = ProfileName::parse(&request.name)
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
     // Subscribe before enqueueing so no event of this switch is missed; the
@@ -1781,20 +1792,31 @@ fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
         .ok_or(GatewayError::ConfigPathUnavailable)
 }
 
-/// Compare the request's bearer token against the configured token.
+/// Authenticates the caller by any one of three rules, in this order.
 ///
-/// The `/auth` browser handoff sets the key's session proof as an
-/// HttpOnly cookie, so a request presenting that cookie authenticates
-/// identically: the cookie is the key's ambient form, accepted anywhere
-/// the bearer header is. Two guards shape the cookie path that the
-/// bearer path does not need: the proof is recomputed from the
-/// process-lifetime salt and the live key (the cookie never carries the
-/// key itself), and the request must carry Fetch Metadata a cross-origin
-/// page cannot strip, since an ambient credential would otherwise answer
-/// to any same-site loopback page (ports are not part of a site).
-pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
-    let presented = headers
-        .get(AUTHORIZATION)
+/// 1. A presented bearer token equals the live key.
+/// 2. The `/auth` browser handoff's cookie verifies: the cookie is the
+///    key's ambient form, accepted anywhere the bearer header is. Two
+///    guards shape this path that the bearer path does not need: the
+///    proof is recomputed from the process-lifetime salt and the live key
+///    (the cookie never carries the key itself), and the request must
+///    carry Fetch Metadata a cross-origin page cannot strip, since an
+///    ambient credential would otherwise answer to any same-site loopback
+///    page (ports are not part of a site).
+/// 3. Loopback trust: `[server] trust_loopback` is on, the server recorded
+///    a loopback peer for the connection, the request presents no
+///    `Authorization` header at all, and its Fetch Metadata permits
+///    ambient access ([`handoff::fetch_metadata_allows_ambient`]).
+///
+/// Two edges of rule 3 are deliberate. A presented-but-wrong bearer is
+/// refused even on loopback: absence of credentials is what loopback
+/// trusts, and a caller presenting wrong ones meant to authenticate - the
+/// connection-file liveness probe relies on that to detect a stale key.
+/// And a request with no recorded peer address earns no trust: it needs
+/// a credential, the same fail-closed posture as the loopback wall.
+pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), GatewayError> {
+    let authorization = caller.get(AUTHORIZATION);
+    let presented = authorization
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or("");
@@ -1802,12 +1824,19 @@ pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<
     if secret_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
         return Ok(());
     }
-    if let Some(cookie) = handoff::presented_cookie_proof(headers)
-        && handoff::fetch_metadata_allows_cookie(headers)
+    if let Some(cookie) = handoff::presented_cookie_proof(caller)
+        && handoff::fetch_metadata_allows_cookie(caller)
         && secret_eq(
             &cookie,
             &handoff::session_token(&state.handoff_salt, live.key.expose().as_bytes()),
         )
+    {
+        return Ok(());
+    }
+    if live.trust_loopback
+        && authorization.is_none()
+        && shared_loopback::is_loopback_peer(caller.peer())
+        && handoff::fetch_metadata_allows_ambient(caller)
     {
         return Ok(());
     }
@@ -2916,10 +2945,13 @@ mod status_surface_tests {
     /// A state whose catalog declares one local chat model the routing
     /// table never holds: `app_state` routes only the remote catalog, so
     /// `slow-model` stays configured-but-unloaded for the test's run.
+    /// Strict bearer auth (`trust_loopback = false`): the cancel-route
+    /// test pins that a missing key is refused from the loopback listener.
     fn state() -> AppState {
         let config = Config::from_toml_str(
             "config-version = 2\n\
              [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             trust_loopback = false\n\
              [[local_model]]\nname = \"slow-model\"\ndescription = \"d\"\n\
              source = \"/models/slow.gguf\"\ncontext = 4096\n\
              [[profile]]\nname = \"main\"\nmodels = [\"slow-model\"]\n",

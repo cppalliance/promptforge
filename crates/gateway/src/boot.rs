@@ -501,6 +501,9 @@ fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
 [server]
 bind = "127.0.0.1:0"
 api_key = "{api_key}"
+# Loopback callers need no key. On a shared machine any local account can
+# use the gateway - set trust_loopback = false to require the key from all.
+trust_loopback = true
 {stt_models}
 [[profile]]
 name = "default"

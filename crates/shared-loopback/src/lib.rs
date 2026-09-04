@@ -38,10 +38,39 @@ use axum::response::{IntoResponse, Response};
 /// no peer address fails closed: it is refused as non-loopback rather
 /// than admitted on a wiring fault.
 pub async fn require_loopback(request: Request, next: Next) -> Response {
-    match request.extensions().get::<ConnectInfo<SocketAddr>>() {
-        Some(ConnectInfo(peer)) if peer.ip().is_loopback() => next.run(request).await,
-        _ => StatusCode::FORBIDDEN.into_response(),
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(peer)| *peer);
+    if is_loopback_peer(peer) {
+        next.run(request).await
+    } else {
+        StatusCode::FORBIDDEN.into_response()
     }
+}
+
+/// Whether `peer` is a loopback peer address.
+///
+/// This is the one peer predicate behind [`require_loopback`], exposed so
+/// a caller that keeps the peer address instead of the request (the
+/// gateway's keyless-loopback auth rule) asks the same question rather
+/// than spelling its own. `None` - no `ConnectInfo` was recorded - fails
+/// closed as non-loopback, exactly as the middleware does.
+///
+/// # Examples
+/// ```
+/// use std::net::SocketAddr;
+///
+/// let loopback: SocketAddr = "127.0.0.1:50000".parse()?;
+/// let lan: SocketAddr = "198.51.100.7:44821".parse()?;
+/// assert!(shared_loopback::is_loopback_peer(Some(loopback)));
+/// assert!(!shared_loopback::is_loopback_peer(Some(lan)));
+/// assert!(!shared_loopback::is_loopback_peer(None));
+/// # Ok::<(), std::net::AddrParseError>(())
+/// ```
+#[must_use]
+pub fn is_loopback_peer(peer: Option<SocketAddr>) -> bool {
+    peer.is_some_and(|peer| peer.ip().is_loopback())
 }
 
 /// Refuses any request whose authority is not the bound loopback socket

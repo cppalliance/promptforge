@@ -24,9 +24,10 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use serde::Deserialize;
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
@@ -93,10 +94,10 @@ impl RevealLauncher for SpawnLauncher {
 /// [`GatewayError::RevealFailed`] when the file manager cannot spawn.
 pub(crate) async fn admin_reveal(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     body: Result<Json<RevealRequest>, JsonRejection>,
 ) -> Result<StatusCode, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps the guards first and puts the rejection
     // in the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(request) =
@@ -283,6 +284,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 
 [local]
 cache_dir = '{cache}'

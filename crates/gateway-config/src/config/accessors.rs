@@ -420,6 +420,29 @@ impl ServerConfig {
         &self.api_key
     }
 
+    /// Returns whether a loopback peer presenting no credential is admitted
+    /// to every route. On by default; an operator on a shared machine sets
+    /// `trust_loopback = false` to require the bearer key from every caller.
+    ///
+    /// # Examples
+    /// ```
+    /// # use gateway_config::Config;
+    /// # let toml = r#"
+    /// # config-version = 2
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// # trust_loopback = false
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(!config.server().trust_loopback());
+    /// # Ok::<(), gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn trust_loopback(&self) -> bool {
+        self.trust_loopback
+    }
+
     /// Returns the base URL a same-host client uses to reach this server,
     /// loopback-adjusted: an unspecified bind IP (`0.0.0.0` or `::`) is not
     /// a reachable destination, so it becomes the matching loopback address;

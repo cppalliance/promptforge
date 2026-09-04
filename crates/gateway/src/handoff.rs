@@ -99,6 +99,22 @@ pub(crate) fn fetch_metadata_allows_cookie(headers: &HeaderMap) -> bool {
     )
 }
 
+/// Whether the request's Fetch Metadata permits ambient, credential-free
+/// access from a loopback peer. Unlike the cookie rule, an absent header
+/// is admitted: non-browser clients (curl, the SDK, the workshop) never
+/// send `Sec-Fetch-Site`, and they are exactly who keyless loopback is
+/// for. A browser always sends it, so `cross-site` and `same-site` - a
+/// page on any other origin riding the user's loopback peer into
+/// `POST /admin/shutdown` - are refused, as is any value the header
+/// grammar does not name. `same-origin` (the config SPA) and `none` (a
+/// typed URL) pass.
+pub(crate) fn fetch_metadata_allows_ambient(headers: &HeaderMap) -> bool {
+    match headers.get(SEC_FETCH_SITE) {
+        None => true,
+        Some(value) => matches!(value.to_str(), Ok("same-origin" | "none")),
+    }
+}
+
 /// Hex-encodes bytes for the cookie value: cookie-safe by construction.
 #[cfg(feature = "config-ui")]
 fn hex_encode(bytes: &[u8]) -> String {
@@ -311,10 +327,18 @@ mod cookie_tests {
     use gateway_config::Config;
 
     use super::{
-        AUTH_COOKIE, SEC_FETCH_SITE, auth_url, hex_decode, presented_cookie_proof, session_token,
+        AUTH_COOKIE, SEC_FETCH_SITE, auth_url, fetch_metadata_allows_ambient,
+        fetch_metadata_allows_cookie, hex_decode, presented_cookie_proof, session_token,
     };
     use crate::AppState;
+    use crate::auth::Caller;
     use crate::test_support::app_state;
+
+    /// A caller with no recorded peer address: the cookie rules are
+    /// exercised on their own, with loopback trust out of reach.
+    fn peerless(headers: HeaderMap) -> Caller {
+        Caller::new(headers, None)
+    }
 
     #[test]
     fn the_auth_url_targets_the_one_time_handoff() {
@@ -378,6 +402,27 @@ mod cookie_tests {
     }
 
     #[test]
+    fn ambient_fetch_metadata_admits_absent_same_origin_and_none_only() {
+        let with = |site: &str| {
+            HeaderMap::from_iter([(SEC_FETCH_SITE, site.parse().expect("a header value"))])
+        };
+        assert!(
+            fetch_metadata_allows_ambient(&HeaderMap::new()),
+            "a non-browser client sends no Sec-Fetch-Site"
+        );
+        assert!(
+            !fetch_metadata_allows_cookie(&HeaderMap::new()),
+            "the cookie rule stays strict: absent metadata is refused there"
+        );
+        for site in ["same-origin", "none"] {
+            assert!(fetch_metadata_allows_ambient(&with(site)), "{site}");
+        }
+        for site in ["cross-site", "same-site", "garbage", ""] {
+            assert!(!fetch_metadata_allows_ambient(&with(site)), "{site:?}");
+        }
+    }
+
+    #[test]
     fn the_cookie_parses_among_others() {
         let headers = HeaderMap::from_iter([(
             COOKIE,
@@ -426,11 +471,11 @@ mod cookie_tests {
     async fn check_auth_accepts_the_cookie_as_the_bearer_keys_ambient_form() {
         let state = test_token_state();
         let headers = same_origin_with(&minted_cookie(&state, "test-token"));
-        assert!(crate::check_auth(&state, &headers).await.is_ok());
+        assert!(crate::check_auth(&state, &peerless(headers)).await.is_ok());
 
         // A wrong cookie and a wrong bearer both stay refused.
         let wrong = same_origin_with(&format!("{AUTH_COOKIE}={}", hex(b"wrong")));
-        assert!(crate::check_auth(&state, &wrong).await.is_err());
+        assert!(crate::check_auth(&state, &peerless(wrong)).await.is_err());
         let both = HeaderMap::from_iter([
             (
                 AUTHORIZATION,
@@ -448,7 +493,7 @@ mod cookie_tests {
             ),
         ]);
         assert!(
-            crate::check_auth(&state, &both).await.is_ok(),
+            crate::check_auth(&state, &peerless(both)).await.is_ok(),
             "a valid cookie authenticates even alongside a wrong bearer header"
         );
     }
@@ -460,7 +505,7 @@ mod cookie_tests {
         // must not authenticate.
         let bare = same_origin_with(&format!("{AUTH_COOKIE}={}", hex(b"test-token")));
         assert!(
-            crate::check_auth(&state, &bare).await.is_err(),
+            crate::check_auth(&state, &peerless(bare)).await.is_err(),
             "the cookie carries a derived proof, so the key itself is refused"
         );
         // A proof minted under another process's salt is refused: a
@@ -470,7 +515,7 @@ mod cookie_tests {
             hex(&session_token(&[0xAB; 32], b"test-token"))
         ));
         assert!(
-            crate::check_auth(&state, &foreign).await.is_err(),
+            crate::check_auth(&state, &peerless(foreign)).await.is_err(),
             "a proof minted under another salt is refused"
         );
     }
@@ -492,7 +537,7 @@ mod cookie_tests {
                 (SEC_FETCH_SITE, site.parse().expect("a header value")),
             ]);
             assert!(
-                crate::check_auth(&state, &headers).await.is_err(),
+                crate::check_auth(&state, &peerless(headers)).await.is_err(),
                 "Sec-Fetch-Site: {site} marks a cross-origin rider"
             );
         }
@@ -504,7 +549,7 @@ mod cookie_tests {
                 .parse()
                 .expect("a header value"),
         )]);
-        assert!(crate::check_auth(&state, &bare).await.is_err());
+        assert!(crate::check_auth(&state, &peerless(bare)).await.is_err());
         // `none` is the user-driven navigation case and is admitted.
         let navigation = HeaderMap::from_iter([
             (
@@ -515,6 +560,10 @@ mod cookie_tests {
             ),
             (SEC_FETCH_SITE, "none".parse().expect("a header value")),
         ]);
-        assert!(crate::check_auth(&state, &navigation).await.is_ok());
+        assert!(
+            crate::check_auth(&state, &peerless(navigation))
+                .await
+                .is_ok()
+        );
     }
 }

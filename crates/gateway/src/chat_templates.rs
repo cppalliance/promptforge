@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use gateway_config::{Config, LocalModelConfig, ModelKind};
 use gateway_local::artifacts::existing_model_path;
 use gateway_local::chat_templates::{Family, model_family_mappings};
@@ -14,6 +13,7 @@ use gateway_local::{
 };
 use serde::Serialize;
 
+use crate::auth::Caller;
 use crate::config_pending::load_pending_for_running;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
@@ -49,9 +49,9 @@ struct CatalogReply {
 /// Serves bundled families, exact model mappings, and pending-model decisions.
 pub(crate) async fn admin_chat_templates(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let (running, running_profile) = {
         let live = state.live.read().await;
         (Arc::clone(&live.config), live.profile_name.clone())
@@ -157,6 +157,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "template-key"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 
 [[local_model]]
 name = "mapped-auto"

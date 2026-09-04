@@ -12,13 +12,14 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, RawQuery, State};
+use axum::http::HeaderValue;
 use axum::http::header::CONTENT_TYPE;
-use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use gateway_config::Secret;
 use shared_protocol::ProtocolError;
 use shared_protocol::http_util::{self, MAX_ERROR_BODY, read_body_capped};
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
@@ -162,9 +163,9 @@ pub(crate) struct HfSearchQuery {
 pub(crate) async fn admin_hf_search(
     State(state): State<AppState>,
     RawQuery(query): RawQuery,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let query = parse_search_query(query.as_deref())?;
     let renames = [("search", &query.q)];
     let passthrough = [
@@ -269,9 +270,9 @@ fn validate_search_value(
 pub(crate) async fn admin_hf_model(
     State(state): State<AppState>,
     repo: Result<Path<(String, String)>, PathRejection>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let Path((owner, name)) =
         repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");
@@ -288,9 +289,9 @@ pub(crate) async fn admin_hf_model(
 pub(crate) async fn admin_hf_readme(
     State(state): State<AppState>,
     repo: Result<Path<(String, String)>, PathRejection>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Response, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let Path((owner, name)) =
         repo.map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
     let repo = format!("{owner}/{name}");
@@ -348,6 +349,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 "#,
         )
         .expect("the fixture profile parses")

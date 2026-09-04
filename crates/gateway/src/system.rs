@@ -15,11 +15,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use nvml_wrapper::Nvml;
 use serde::Serialize;
 use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
@@ -143,9 +143,9 @@ impl fmt::Debug for SystemSampler {
 /// rather than link time.
 pub(crate) async fn admin_system(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<SystemSnapshot>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let cache_dir = {
         let live = state.live.read().await;
         live.config.local().cache_dir().map(str::to_owned)
@@ -296,6 +296,8 @@ config-version = 2
 [server]
 bind = "127.0.0.1:0"
 api_key = "test-token"
+# Strict bearer auth: the tests below pin that a missing key is refused.
+trust_loopback = false
 
 [local]
 cache_dir = '{cache_dir}'

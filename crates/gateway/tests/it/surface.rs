@@ -1,8 +1,45 @@
 //! The operator HTTP surface: the bearer-authed `POST /shutdown` route,
-//! the loopback host-authority wall on a real listener, and the `/auth`
+//! keyless loopback access and its `trust_loopback = false` opt-out on a
+//! real listener, the loopback host-authority wall, and the `/auth`
 //! browser handoff with its ambient cookie.
 
-use crate::support::{fake_backend, gateway_for, send_within};
+use std::net::SocketAddr;
+
+use gateway::{Config, Gateway, ProfilesContext};
+
+use crate::support::{TestServer, fake_backend, gateway_for, send_within};
+
+/// A gateway like [`gateway_for`] with `[server] trust_loopback = false`,
+/// so every caller must present the bearer key.
+async fn strict_gateway_for(backend: SocketAddr) -> TestServer {
+    let toml = format!(
+        r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+trust_loopback = false
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "test-model"
+description = "a test model for integration"
+context = 8192
+thinking = "never"
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    TestServer::start(gateway).await
+}
 
 #[tokio::test]
 async fn post_shutdown_answers_202_and_stops_the_server() {
@@ -20,8 +57,32 @@ async fn post_shutdown_answers_202_and_stops_the_server() {
 }
 
 #[tokio::test]
-async fn post_shutdown_rejects_a_missing_or_wrong_key_and_keeps_serving() {
+async fn post_shutdown_rejects_a_wrong_key_even_from_loopback_and_keeps_serving() {
     let server = gateway_for(fake_backend().await).await;
+    let client = reqwest::Client::new();
+    let response = send_within(
+        client
+            .post(format!("http://{}/shutdown", server.addr))
+            .bearer_auth("wrong"),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "a presented-but-wrong key is refused even though the peer is loopback"
+    );
+    let health = send_within(client.get(format!("http://{}/health", server.addr))).await;
+    assert_eq!(
+        health.status(),
+        reqwest::StatusCode::OK,
+        "a refused shutdown leaves the server up"
+    );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn post_shutdown_rejects_a_missing_key_when_loopback_trust_is_off() {
+    let server = strict_gateway_for(fake_backend().await).await;
     let client = reqwest::Client::new();
     for key in [None, Some("wrong")] {
         let builder = client.post(format!("http://{}/shutdown", server.addr));
@@ -42,6 +103,47 @@ async fn post_shutdown_rejects_a_missing_or_wrong_key_and_keeps_serving() {
         reqwest::StatusCode::OK,
         "a refused shutdown leaves the server up"
     );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_keyless_loopback_client_reaches_the_inference_and_admin_surfaces() {
+    let server = gateway_for(fake_backend().await).await;
+    let client = reqwest::Client::new();
+    for path in ["/v1/models", "/admin/status"] {
+        let response = send_within(client.get(format!("http://{}{path}", server.addr))).await;
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "GET {path} with no Authorization header from the loopback listener"
+        );
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn trust_loopback_false_refuses_the_keyless_loopback_client() {
+    let server = strict_gateway_for(fake_backend().await).await;
+    let client = reqwest::Client::new();
+    for path in ["/v1/models", "/admin/status"] {
+        let response = send_within(client.get(format!("http://{}{path}", server.addr))).await;
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "GET {path} with no Authorization header under the opt-out"
+        );
+        let keyed = send_within(
+            client
+                .get(format!("http://{}{path}", server.addr))
+                .bearer_auth("test-token"),
+        )
+        .await;
+        assert_eq!(
+            keyed.status(),
+            reqwest::StatusCode::OK,
+            "GET {path} with the key under the opt-out"
+        );
+    }
     server.shutdown().await;
 }
 

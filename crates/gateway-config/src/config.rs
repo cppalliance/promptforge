@@ -443,6 +443,11 @@ pub struct ServerConfig {
     /// The shared bearer key every `/v1/*` request must present.
     #[serde(deserialize_with = "de_secret", serialize_with = "ser_redacted")]
     api_key: Secret,
+    /// Whether a loopback peer presenting no credential is admitted to
+    /// every route. Defaults to `true`; `false` restores strict bearer
+    /// auth for every caller.
+    #[serde(default = "default_true")]
+    trust_loopback: bool,
 }
 
 /// One backend the gateway can forward to.

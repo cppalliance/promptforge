@@ -12,9 +12,9 @@
 use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
-use axum::http::HeaderMap;
 use gateway_config::{ConfigErrorKind, save_config_shadow};
 
+use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
@@ -27,10 +27,10 @@ use crate::{AppState, check_auth};
 /// real files stay untouched and nothing reloads.
 pub(crate) async fn admin_put_config(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     body: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // Deferring the extractor keeps auth first and puts the rejection in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Json(body) =

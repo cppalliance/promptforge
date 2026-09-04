@@ -143,8 +143,14 @@ async fn get_cache_lists_sidecar_bearing_blobs_only() {
 async fn get_cache_requires_auth() {
     let temp = TempDir::new().unwrap();
     let gateway = cache_gateway(temp.path()).await;
-    let response =
-        send_within(reqwest::Client::new().get(format!("http://{}/v1/cache", gateway.addr))).await;
+    // A wrong bearer is refused even from the loopback listener: presenting
+    // a credential opts out of loopback trust.
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/cache", gateway.addr))
+            .bearer_auth("wrong"),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     gateway.shutdown().await;
 }
@@ -365,6 +371,7 @@ async fn post_cache_requires_auth() {
     let response = send_within(
         reqwest::Client::new()
             .post(format!("http://{}/v1/cache", gateway.addr))
+            .bearer_auth("wrong")
             .json(&serde_json::json!({ "source": "http://127.0.0.1:9/model.bin" })),
     )
     .await;
@@ -444,11 +451,15 @@ async fn delete_cache_removes_the_entry_and_then_404s() {
 async fn delete_cache_requires_auth() {
     let temp = TempDir::new().unwrap();
     let gateway = cache_gateway(temp.path()).await;
-    let response = send_within(reqwest::Client::new().delete(format!(
-        "http://{}/v1/cache/{}",
-        gateway.addr,
-        "a".repeat(64)
-    )))
+    let response = send_within(
+        reqwest::Client::new()
+            .delete(format!(
+                "http://{}/v1/cache/{}",
+                gateway.addr,
+                "a".repeat(64)
+            ))
+            .bearer_auth("wrong"),
+    )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     gateway.shutdown().await;

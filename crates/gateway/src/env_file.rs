@@ -15,9 +15,9 @@ use std::path::Path;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
 use gateway_config::{pending_var_references, write_shadow};
 
+use crate::auth::Caller;
 use crate::config_write::config_write_error;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
@@ -34,9 +34,9 @@ use crate::{AppState, check_auth};
 /// is an empty `vars` map.
 pub(crate) async fn admin_get_env(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     let config = crate::config_path(&state)?.to_path_buf();
     let env = config.with_extension("env");
     let reply = tokio::task::spawn_blocking(move || {
@@ -73,11 +73,11 @@ pub(crate) struct EnvPutQuery {
 /// The real `.env` file is never touched.
 pub(crate) async fn admin_put_env(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    caller: Caller,
     scope: Result<Query<EnvPutQuery>, QueryRejection>,
     vars: Result<Json<BTreeMap<String, String>>, JsonRejection>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    check_auth(&state, &headers).await?;
+    check_auth(&state, &caller).await?;
     // Deferring the extractors keeps auth first and puts rejections in
     // the gateway's JSON error envelope instead of axum's plain-text 400.
     let Query(scope) =
