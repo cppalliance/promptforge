@@ -115,7 +115,7 @@ pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthEr
 
 /// Issues one `GET /health` and requires a 200 status line.
 pub(crate) fn probe_health(address: &str) -> Result<(), ProbeError> {
-    let head = get_head(address, "/health", None)?;
+    let head = request_head(address, "GET", "/health", None)?;
     let status_ok = head
         .split_whitespace()
         .nth(1)
@@ -131,7 +131,7 @@ pub(crate) fn probe_health(address: &str) -> Result<(), ProbeError> {
 /// Issues one `GET {path}` presenting `api_key` as the bearer token and
 /// classifies the answer.
 pub(crate) fn probe_bearer(address: &str, path: &str, api_key: &str) -> KeyProbe {
-    match get_head(address, path, Some(api_key)) {
+    match request_head(address, "GET", path, Some(api_key)) {
         Ok(head) => {
             let accepted = head
                 .split_whitespace()
@@ -148,10 +148,15 @@ pub(crate) fn probe_bearer(address: &str, path: &str, api_key: &str) -> KeyProbe
     }
 }
 
-/// One HTTP/1.0 GET returning the response head. The `Host` header carries
-/// the bound address, never `localhost`: the gateway's loopback `Host`
-/// allowlist refuses anything else.
-fn get_head(address: &str, path: &str, bearer: Option<&str>) -> Result<String, ProbeError> {
+/// One HTTP/1.0 request returning the response head. The `Host` header
+/// carries the bound address, never `localhost`: the gateway's loopback
+/// `Host` allowlist refuses anything else.
+pub(crate) fn request_head(
+    address: &str,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+) -> Result<String, ProbeError> {
     let mut stream = TcpStream::connect(address).map_err(|source| ProbeError::Io {
         operation: "connect",
         source,
@@ -168,7 +173,7 @@ fn get_head(address: &str, path: &str, bearer: Option<&str>) -> Result<String, P
             operation: "configure the write timeout",
             source,
         })?;
-    let mut request = format!("GET {path} HTTP/1.0\r\nHost: {address}\r\n");
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: {address}\r\n");
     if let Some(key) = bearer {
         request.push_str("Authorization: Bearer ");
         request.push_str(key);

@@ -1,6 +1,6 @@
 # shared-sidecar
 
-The single shared seam for gateway connection-file discovery: the `gateway.json` format, its atomic owner-only write and shutdown removal, stale detection with cleanup, the `gateway.json.lock` launch-race lock, and the health probe.
+The single shared seam for gateway connection-file discovery: the `gateway.json` format, its atomic owner-only write and shutdown removal, stale detection with cleanup, the `gateway.json.lock` launch-race lock, the health probe, and the `POST /shutdown` request a reader uses to ask the gateway to exit.
 
 - This crate is the only implementation of connection-file discovery: the gateway writes through it, and readers (workshop-server, the workshop shell) attach through it. Never reimplement the file format, the probes, or the lock in a consumer - all sides call through here so the contract cannot drift.
 - Synchronous and runtime-agnostic: serde, serde_json, and thiserror are the only general dependencies. No tokio, axum, reqwest, or async anything - the gateway's lean `--no-default-features` build takes this crate unconditionally. Platform shims (windows-sys on Windows, libc on macOS) are the only exception and are confined to `src/sys/`.

@@ -52,6 +52,10 @@ default = []
 
 [dev-dependencies]
 tempfile.workspace = true
+# The test-fixtures feature exposes `resolve_for_test`, so the boot
+# decision tests run the real liveness gauntlet against the test binary's
+# own process image.
+shared-sidecar = { workspace = true, features = ["test-fixtures"] }
 
 # Not `workspace = true`: the WebView2 file-drop bridge (src/bridge.rs) is
 # raw COM and cannot be written without unsafe, and a workspace `forbid`

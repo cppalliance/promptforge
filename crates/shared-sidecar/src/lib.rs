@@ -21,6 +21,8 @@
 //!    Anything else is stale and the file is deleted.
 //! 3. Launch races take [`launch_or_attach`]: the `gateway.json.lock`
 //!    advisory lock elects one launcher; losers attach to the winner.
+//! 4. A reader asks the gateway to exit with [`request_shutdown`], which
+//!    posts the file's bearer key to `POST /shutdown`.
 //!
 //! URLs normalize to a literal `127.0.0.1`, never `localhost`, and probes
 //! send the bound address as the `Host` header, matching the gateway's
@@ -32,6 +34,7 @@ mod file;
 mod health;
 mod lock;
 mod paths;
+mod shutdown;
 mod stale;
 mod sys;
 
@@ -43,6 +46,7 @@ pub use crate::paths::{
     CONNECTION_FILE_NAME, LOCK_FILE_NAME, connection_file_path, default_run_dir, lock_file_path,
     run_dir,
 };
+pub use crate::shutdown::{ShutdownError, request_shutdown};
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]
 pub use crate::stale::resolve_for_test;

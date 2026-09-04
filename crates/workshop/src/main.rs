@@ -7,13 +7,16 @@
 //! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
 //!
 //! Hosts the workshop server in-process on a loopback listener with an
-//! OS-assigned port - the server resolves the gateway endpoint itself,
-//! attaching to a running gateway through its connection file or to the
-//! gateway a discovered `workshop.toml` names - and opens a Tauri window
-//! pointed at the in-process listener's URL. Closing the window stops the
-//! in-process server only: the gateway is a separate process and keeps
-//! running. With no gateway running and no explicit config, boot fails
-//! with the plain no-gateway error. Development against the standalone
+//! OS-assigned port and opens a Tauri window pointed at the in-process
+//! listener's URL. Boot first connects the gateway: attach to a running
+//! gateway through its connection file, or launch the sibling
+//! `promptforge-gateway` detached when none is running - a Workshop-only
+//! install falls back to the explicit `workshop.toml` `[gateway]` config,
+//! and with neither boot fails loud naming both remedies. The in-process
+//! server then resolves the same endpoint itself. Closing the window
+//! stops the in-process server only: the gateway is a separate process
+//! and keeps running; the window menu's quit item is the one gesture
+//! that also stops a local gateway. Development against the standalone
 //! `workshop-server` binary flow is unchanged.
 
 // The only unsafe module in the crate: the WebView2 COM surface that
@@ -24,8 +27,10 @@
 mod bridge;
 mod config;
 mod drops;
+mod gateway;
 #[cfg(target_os = "linux")]
 mod linux_media;
+mod menu;
 mod navigation;
 
 use std::ffi::OsStr;
@@ -47,6 +52,12 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// shuts it down. `shutdown` consumes the handle, so the slot hands it over
 /// exactly once.
 type ServerSlot = Mutex<Option<ServerHandle>>;
+
+/// The managed slot holding the attached or launched sidecar gateway's
+/// connection file, for the quit-everything menu item's `/shutdown` post.
+/// `None` when the gateway came from explicit config (a LAN gateway the
+/// shell never stops).
+type GatewaySlot = Mutex<Option<shared_sidecar::ConnectionFile>>;
 
 /// The permission set the workshop page holds. The grant itself is built
 /// in setup with the exact bound port: the OS assigns the port at boot, so
@@ -124,6 +135,7 @@ fn run() -> anyhow::Result<()> {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![desktop_update_supported])
+        .on_menu_event(menu::handle_event)
         .setup(boot_and_open);
     // Off Windows, OS file drops arrive as Tauri's own drag-drop event and
     // are dispatched into the same promptforge:file-drop grant flow. On
@@ -161,18 +173,21 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The setup hook: boots the in-process server, installs the window's
-/// exact-port capability, and opens the window on the server's URL. A
-/// boot failure prints its full error chain and exits the process
-/// directly: returning `Err` would surface as Tauri's "Failed to setup
-/// app" panic, losing the chain and the failure exit code.
+/// The setup hook: connects the gateway (attach or launch), boots the
+/// in-process server, installs the window's exact-port capability and the
+/// menu, and opens the window on the server's URL. A boot failure prints
+/// its full error chain and exits the process directly: returning `Err`
+/// would surface as Tauri's "Failed to setup app" panic, losing the chain
+/// and the failure exit code.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     match boot() {
-        Ok((server, url)) => {
+        Ok((server, url, attachment)) => {
             // The capability must exist before the window does: the
             // authority resolves a window's grants at creation.
             app.add_capability(window_capability(&url))?;
+            app.manage(GatewaySlot::new(attachment.sidecar_file().cloned()));
             app.manage(ServerSlot::new(Some(server)));
+            menu::install(app, attachment.sidecar_file())?;
             open_window(app, &url)
         }
         Err(error) => {
@@ -182,19 +197,22 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
 }
 
-/// Spawns the in-process workshop server - it resolves the gateway
-/// endpoint itself, connection file first, explicit `workshop.toml`
-/// config second - and waits out its health probe. A failure after the
-/// spawn shuts the server down before propagating.
-fn boot() -> anyhow::Result<(ServerHandle, url::Url)> {
+/// Connects the gateway (attach to a live connection file, or launch the
+/// sibling `promptforge-gateway` detached), then spawns the in-process
+/// workshop server - which resolves the same endpoint itself, connection
+/// file first, explicit `workshop.toml` config second - and waits out its
+/// health probe. A failure after the spawn shuts the server down before
+/// propagating.
+fn boot() -> anyhow::Result<(ServerHandle, url::Url, gateway::GatewayAttachment)> {
     let config = config::load().context("load the workshop configuration")?;
+    let attachment = gateway::ensure_gateway(&config).context("connect to the gateway")?;
     let server = workshop_server::spawn(config).context("start the in-process workshop server")?;
     match shared_sidecar::wait_for_health(server.url(), HEALTH_TIMEOUT)
         .context("wait for the in-process workshop server")
     {
         Ok(()) => {
             let url = url::Url::parse(server.url()).context("parse the workshop URL")?;
-            Ok((server, url))
+            Ok((server, url, attachment))
         }
         Err(error) => {
             if let Err(shutdown_error) = server.shutdown() {
