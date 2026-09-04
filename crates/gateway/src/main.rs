@@ -273,8 +273,8 @@ mod tests {
 
     #[test]
     fn the_autostart_command_line_parses() {
-        // The Run-key entry is `"<exe>" --login`; a login launch must never
-        // fail on its own flag.
+        // The Run-key entry is `"<exe>" serve --login`; a login launch must
+        // never fail on its own command line.
         let invocation = parse_args(args(&["serve", "--login"])).expect("parse");
         assert!(invocation.login);
         assert!(invocation.tray, "a login launch still shows the tray");
