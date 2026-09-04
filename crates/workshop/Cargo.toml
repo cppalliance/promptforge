@@ -27,6 +27,9 @@ tauri-plugin-process.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-updater.workspace = true
 tauri-plugin-window-state.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 url.workspace = true
 
 # Explorer path drops and the microphone permission grant (src/bridge.rs):

@@ -27,6 +27,7 @@ mod drops;
 mod health;
 #[cfg(target_os = "linux")]
 mod linux_media;
+mod logging;
 mod navigation;
 
 use std::ffi::OsStr;
@@ -50,13 +51,14 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 type GatewaySlot = Mutex<Option<GatewayHandle>>;
 
 fn main() -> ExitCode {
+    let _guard = logging::init_logging();
     if std::env::args_os().any(|arg| arg == "--version") {
         return print_version();
     }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error:?}");
+            tracing::error!("{error:?}");
             ExitCode::FAILURE
         }
     }
@@ -131,7 +133,7 @@ fn run() -> anyhow::Result<()> {
             if let Some(Some(gateway)) = gateway
                 && let Err(error) = gateway.shutdown()
             {
-                eprintln!("could not shut the gateway down cleanly: {error:?}");
+                tracing::error!("could not shut the gateway down cleanly: {error:?}");
             }
         }
     });
@@ -150,7 +152,7 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             open_window(app, &url)
         }
         Err(error) => {
-            eprintln!("{error:?}");
+            tracing::error!("{error:?}");
             std::process::exit(1);
         }
     }
@@ -179,7 +181,7 @@ fn boot() -> anyhow::Result<(GatewayHandle, url::Url)> {
         }
         Err(error) => {
             if let Err(shutdown_error) = gateway.shutdown() {
-                eprintln!("{shutdown_error:?}");
+                tracing::error!("{shutdown_error:?}");
             }
             Err(error)
         }
@@ -202,7 +204,7 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
                 navigation::Navigation::Allow => true,
                 navigation::Navigation::OpenExternally => {
                     if let Err(error) = opener.opener().open_url(target.as_str(), None::<&str>) {
-                        eprintln!("could not open {target} in the system browser: {error}");
+                        tracing::error!("could not open {target} in the system browser: {error}");
                     }
                     false
                 }
@@ -219,13 +221,13 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
     // never the app.
     #[cfg(target_os = "windows")]
     if let Err(error) = bridge::attach(&window) {
-        eprintln!(
+        tracing::error!(
             "could not attach the WebView2 bridge; Explorer drops and the microphone grant are unavailable: {error}"
         );
     }
     #[cfg(target_os = "linux")]
     if let Err(error) = linux_media::grant_media_permissions(&window) {
-        eprintln!(
+        tracing::error!(
             "could not enable WebKitGTK media capture; the microphone is unavailable: {error}"
         );
     }
@@ -261,7 +263,7 @@ fn generate_in_profile() -> anyhow::Result<PathBuf> {
     let home = std::env::home_dir().context("locate the user profile directory")?;
     let path = discover::profile_config_path(&home);
     let path = discover::generate_default(&path).context("write the default configuration")?;
-    eprintln!(
+    tracing::info!(
         "no gateway.toml found; wrote default config to {}",
         path.display()
     );
