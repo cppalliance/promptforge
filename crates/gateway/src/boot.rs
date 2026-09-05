@@ -1,13 +1,14 @@
 //! Boot-time configuration: discovery and first-run provisioning.
 //!
-//! An explicit config path (the CLI positional or `PROMPTFORGE_GATEWAY_CONFIG`,
-//! resolved by the binary) always wins. Without one, the discovery search
-//! looks beside the executable, then in the working directory, then in the
-//! user profile's `.promptforge` directory. When no location holds a
-//! `gateway.toml`, first-run generation writes the sidecar-shaped default -
-//! loopback on an OS-assigned port, a fresh random bearer key, the
-//! recommended STT pair unless the installer declined it - into the profile
-//! location, and the boot proceeds from it.
+//! An explicit config path (the CLI `--config` flag or
+//! `PROMPTFORGE_GATEWAY_CONFIG`, resolved by the binary) always wins.
+//! Without one, the discovery search looks beside the executable, then in
+//! the working directory, then in the user profile's `.promptforge`
+//! directory. When no location holds a `gateway.toml`, first-run
+//! generation writes the sidecar-shaped default - loopback on an
+//! OS-assigned port, a fresh random bearer key, the recommended STT pair
+//! unless the installer declined it - into the profile location, and the
+//! boot proceeds from it.
 
 use std::path::{Path, PathBuf};
 

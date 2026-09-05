@@ -202,14 +202,13 @@ fn wait_for_launched_file(run_dir: &Path, timeout: Duration) -> anyhow::Result<C
     Ok(file)
 }
 
-/// Spawns the gateway detached from the shell's lifetime: the `serve`
-/// subcommand (boot discovery self-provisions the config on first run),
-/// silent stdio, and on Windows broken out of any job object with no
+/// Spawns the gateway detached from the shell's lifetime: the bare
+/// invocation serves (boot discovery self-provisions the config on first
+/// run), silent stdio, and on Windows broken out of any job object with no
 /// console of its own, so the gateway survives the shell's exit.
 fn spawn_detached(exe: &Path) -> std::io::Result<()> {
     let mut command = std::process::Command::new(exe);
     command
-        .arg("serve")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

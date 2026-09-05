@@ -174,16 +174,16 @@ pub(crate) fn launch_at_login(store: &dyn RunKeyStore) -> bool {
 }
 
 /// The login command line for the gateway executable: the quoted path
-/// (install paths contain spaces) plus `serve --login` - the CLI requires
-/// the `serve` subcommand, and `--login` marks a login-triggered start so
-/// it never opens a browser. This is the Windows Run-key shape, whose
+/// (install paths contain spaces) plus `--login` - the bare invocation
+/// serves, and `--login` marks a login-triggered start so it never opens
+/// a browser. This is the Windows Run-key shape, whose
 /// parser has no escape layer; the desktop-entry Exec shape is
 /// `linux::exec_command`. Gated on its callers: the Windows and macOS
 /// backends (macOS's store ignores the command but the call sites share
 /// `set_launch_at_login`), plus the tests.
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub(crate) fn run_key_command(exe: &Path) -> String {
-    format!("\"{}\" serve --login", exe.display())
+    format!("\"{}\" --login", exe.display())
 }
 
 /// Sets or clears the OS autostart entry, returning the state now in
@@ -351,8 +351,8 @@ pub(crate) mod linux {
 
     /// The Exec line's command: the exe path double-quoted with the
     /// desktop-entry spec's reserved characters (`"`, `` ` ``, `$`, `\`)
-    /// backslash-escaped, plus `serve --login` - the CLI requires the
-    /// `serve` subcommand. The shared `run_key_command`
+    /// backslash-escaped, plus `--login` - the bare invocation serves.
+    /// The shared `run_key_command`
     /// quotes for the Windows Run key, whose parser has no escape layer;
     /// the desktop-entry parser does, so an install path containing a
     /// reserved character would misparse without the escaping.
@@ -367,12 +367,12 @@ pub(crate) mod linux {
             quoted.push(ch);
         }
         quoted.push('"');
-        format!("{quoted} serve --login")
+        format!("{quoted} --login")
     }
 
     /// The autostart entry's contents: `Terminal=false` (a daemon, not a
     /// terminal program), and the Exec line is the login command - the
-    /// quoted exe plus `serve --login`, so a login-triggered start never
+    /// quoted exe plus `--login`, so a login-triggered start never
     /// opens a browser. The app-grid launcher is packaging's file; this
     /// writer serves the autostart toggle.
     pub(crate) fn desktop_entry(exec_command: &str) -> String {
@@ -652,7 +652,7 @@ mod tests {
             run_key_command(Path::new(
                 "C:\\Program Files\\PromptForge\\promptforge-gateway.exe"
             )),
-            "\"C:\\Program Files\\PromptForge\\promptforge-gateway.exe\" serve --login"
+            "\"C:\\Program Files\\PromptForge\\promptforge-gateway.exe\" --login"
         );
     }
 
@@ -666,7 +666,7 @@ mod tests {
         assert!(enabled);
         assert_eq!(
             store.value.as_deref(),
-            Some("\"C:\\PromptForge\\promptforge-gateway.exe\" serve --login")
+            Some("\"C:\\PromptForge\\promptforge-gateway.exe\" --login")
         );
         assert!(launch_at_login(&store), "the state reads from the store");
 
@@ -868,27 +868,27 @@ mod tests {
         fn the_exec_command_quotes_spaces_and_escapes_reserved_characters() {
             assert_eq!(
                 exec_command(Path::new("/opt/Prompt Forge/promptforge-gateway")),
-                "\"/opt/Prompt Forge/promptforge-gateway\" serve --login"
+                "\"/opt/Prompt Forge/promptforge-gateway\" --login"
             );
             assert_eq!(
                 exec_command(Path::new("/opt/weird$`\\\"dir/promptforge-gateway")),
-                "\"/opt/weird\\$\\`\\\\\\\"dir/promptforge-gateway\" serve --login",
+                "\"/opt/weird\\$\\`\\\\\\\"dir/promptforge-gateway\" --login",
                 "the desktop-entry parser's reserved characters are backslash-escaped"
             );
         }
 
         #[test]
         fn the_desktop_entry_is_a_daemon_autostart_file() {
-            let entry = desktop_entry("\"/opt/Prompt Forge/promptforge-gateway\" serve --login");
+            let entry = desktop_entry("\"/opt/Prompt Forge/promptforge-gateway\" --login");
             assert_eq!(
                 entry,
                 "[Desktop Entry]\n\
                  Type=Application\n\
                  Name=PromptForge Gateway\n\
                  Comment=PromptForge inference gateway\n\
-                 Exec=\"/opt/Prompt Forge/promptforge-gateway\" serve --login\n\
+                 Exec=\"/opt/Prompt Forge/promptforge-gateway\" --login\n\
                  Terminal=false\n",
-                "the Exec line carries the quoted exe and serve --login; Terminal=false"
+                "the Exec line carries the quoted exe and --login; Terminal=false"
             );
         }
 

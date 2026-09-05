@@ -1,5 +1,5 @@
 //! The `promptforge-gateway` binary:
-//! `promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]`.
+//! `promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]`.
 //!
 //! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
 //! hands off to [`run_with_tray`], which owns the tokio runtime, provisioning,
@@ -25,9 +25,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 const DEFAULT_LOG_FILTER: &str = "info,whisper_cpp=warn,hyper=warn,h2=warn,reqwest=warn,tower=warn";
 
 const USAGE: &str = concat!(
-    "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
+    "usage: promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
     "       promptforge-gateway --version\n",
-    "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable\n",
+    "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable;\n",
+    "--config wins over it\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
     "and the profile's .promptforge directory, generating a default config on first run\n",
     "--no-tray    run headless (Ctrl-C driven); for servers and CI\n",
@@ -72,31 +73,29 @@ fn main() -> ExitCode {
         }
     };
 
-    // Logging starts only for a serve launch: a `--version` or `--help`
-    // call must not rotate the running gateway's log out from under it.
-    init_logging();
-
     // A second launch never boots a duplicate server: when a live gateway
     // owns the connection file, hand off to it and exit. This runs before
-    // any bind attempt; on the desktop it is also the `.desktop` launcher's
-    // relaunch behavior.
+    // logging starts and before any bind attempt - a handoff must not
+    // rotate the running gateway's log out from under it. On the desktop
+    // it is also the `.desktop` launcher's relaunch behavior.
     if let Some(url) = gateway::running_gateway_settings_url(&invocation.serve) {
         if invocation.print_url {
             println!("{url}");
         } else if invocation.login {
             // A login-triggered start never opens a browser; the running
             // gateway leaves this launch nothing to do.
-            tracing::info!("a gateway is already running; the login-triggered launch exits");
-        } else {
-            tracing::info!("a gateway is already running; opening its Settings page");
-            if let Err(error) = open::that(&url) {
-                tracing::warn!(
-                    "could not open the browser: {error}; the running gateway's Settings URL is {url}"
-                );
-            }
+        } else if let Err(error) = open::that(&url) {
+            eprintln!(
+                "could not open the browser: {error}; the running gateway's Settings URL is {url}"
+            );
         }
         return ExitCode::SUCCESS;
     }
+
+    // Logging starts only on the serving path: `--help`, `--version`, and
+    // a second-instance handoff must not rotate the running gateway's log
+    // out from under it.
+    init_logging();
 
     let result = if invocation.print_url {
         run_printing_url(&invocation.serve)
@@ -212,28 +211,17 @@ struct Invocation {
     print_url: bool,
 }
 
-/// Parse `serve` arguments into a typed [`Invocation`].
+/// Parse the command line into a typed [`Invocation`].
 ///
-/// Uses `OsString` operands so non-UTF-8 config paths survive. The config
-/// path (the one optional positional, falling back to
-/// `PROMPTFORGE_GATEWAY_CONFIG`) stays optional: with neither set, the
-/// gateway discovers or generates the boot config itself. `--profile NAME`
-/// is validated into a [`ProfileName`] at parse time.
+/// The bare invocation serves; there are no subcommands. Uses `OsString`
+/// operands so non-UTF-8 config paths survive. The config path
+/// (`--config PATH`, falling back to `PROMPTFORGE_GATEWAY_CONFIG`) stays
+/// optional: with neither set, the gateway discovers or generates the
+/// boot config itself. `--profile NAME` is validated into a
+/// [`ProfileName`] at parse time.
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, ParseError> {
     let mut args = args.into_iter();
     let _binary = args.next();
-
-    match args.next() {
-        Some(command) if command == *"serve" => {}
-        Some(flag) if flag == *"--version" => return Err(ParseError::Version),
-        Some(other) => {
-            return Err(ParseError::Usage(format!(
-                "unknown command {}",
-                other.to_string_lossy()
-            )));
-        }
-        None => return Err(ParseError::Usage("missing 'serve' subcommand".to_string())),
-    }
 
     let mut profile: Option<ProfileName> = None;
     let mut config_path: Option<PathBuf> = None;
@@ -244,6 +232,15 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
 
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some("--config") => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| ParseError::Usage("--config requires a path".to_string()))?;
+                if config_path.is_some() {
+                    return Err(ParseError::Usage("--config accepts one path".to_string()));
+                }
+                config_path = Some(PathBuf::from(path));
+            }
             Some("--profile") => {
                 let name = args
                     .next()
@@ -260,17 +257,15 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
             Some("--print-url") => print_url = true,
             Some("--browser") => browser = true,
             Some("-h" | "--help") => return Err(ParseError::Help),
+            Some("--version") => return Err(ParseError::Version),
             Some(other) if other.starts_with('-') => {
                 return Err(ParseError::Usage(format!("unknown flag {other}")));
             }
             _ => {
-                if config_path.is_some() {
-                    return Err(ParseError::Usage(format!(
-                        "unexpected argument {}",
-                        arg.to_string_lossy()
-                    )));
-                }
-                config_path = Some(PathBuf::from(arg));
+                return Err(ParseError::Usage(format!(
+                    "unexpected argument {}",
+                    arg.to_string_lossy()
+                )));
             }
         }
     }
@@ -288,12 +283,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
     })
 }
 
-/// Resolves the config path: the CLI positional wins, then the
+/// Resolves the config path: the `--config` flag wins, then the
 /// `PROMPTFORGE_GATEWAY_CONFIG` environment variable - but only when it
 /// names an existing file. A stale env var warns and falls through to boot
 /// discovery: ambient state rots in ways a typed CLI path does not, and a
-/// forgotten variable must not hard-fail a first-run boot. A CLI
-/// positional is deliberate, so a missing file there stays an error
+/// forgotten variable must not hard-fail a first-run boot. A `--config`
+/// path is deliberate, so a missing file there stays an error
 /// downstream.
 ///
 /// Tests pass both sources explicitly and never touch the process
@@ -405,9 +400,65 @@ mod tests {
     }
 
     #[test]
+    fn the_root_invocation_serves_with_discovery() {
+        let invocation = parse_args(args(&[])).expect("the bare invocation parses");
+        assert_eq!(
+            invocation.serve.config_path, None,
+            "no --config defers to boot discovery"
+        );
+        assert!(invocation.serve.profile.is_none());
+        assert!(invocation.tray, "the tray is the default main loop");
+        assert!(!invocation.login);
+        assert!(!invocation.print_url);
+        assert!(
+            !invocation.serve.browser,
+            "embedders and ordinary launches never open a browser"
+        );
+    }
+
+    #[test]
+    fn the_serve_verb_is_rejected() {
+        let error = parse_args(args(&["serve"])).unwrap_err();
+        assert!(
+            matches!(error, ParseError::Usage(_)),
+            "the removed subcommand is a usage error, never an alias: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_positional_config_path_is_rejected() {
+        let error = parse_args(args(&["gateway.toml"])).unwrap_err();
+        assert!(
+            matches!(error, ParseError::Usage(_)),
+            "the config path is --config PATH, never a positional: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_config_flag_sets_the_path() {
+        let invocation = parse_args(args(&["--config", "gateway.toml"])).expect("parse");
+        assert_eq!(
+            invocation.serve.config_path,
+            Some(PathBuf::from("gateway.toml"))
+        );
+    }
+
+    #[test]
+    fn the_config_flag_requires_a_value() {
+        let error = parse_args(args(&["--config"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
+    fn the_config_flag_is_given_once() {
+        let error = parse_args(args(&["--config", "a.toml", "--config", "b.toml"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
     fn parses_path_and_profile() {
         let invocation =
-            parse_args(args(&["serve", "gateway.toml", "--profile", "dev"])).expect("parse");
+            parse_args(args(&["--config", "gateway.toml", "--profile", "dev"])).expect("parse");
         assert_eq!(
             invocation.serve.profile.as_ref().map(ProfileName::as_str),
             Some("dev")
@@ -420,30 +471,30 @@ mod tests {
 
     #[test]
     fn the_tray_is_default_and_login_is_off() {
-        let invocation = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        let invocation = parse_args(args(&["--config", "gateway.toml"])).expect("parse");
         assert!(invocation.tray, "the tray is the default main loop");
         assert!(!invocation.login);
     }
 
     #[test]
     fn no_tray_selects_the_headless_loop() {
-        let invocation = parse_args(args(&["serve", "--no-tray"])).expect("parse");
+        let invocation = parse_args(args(&["--no-tray"])).expect("parse");
         assert!(!invocation.tray);
         assert!(!invocation.login);
     }
 
     #[test]
     fn the_autostart_command_line_parses() {
-        // The Run-key entry is `"<exe>" serve --login`; a login launch must
+        // The Run-key entry is `"<exe>" --login`; a login launch must
         // never fail on its own command line.
-        let invocation = parse_args(args(&["serve", "--login"])).expect("parse");
+        let invocation = parse_args(args(&["--login"])).expect("parse");
         assert!(invocation.login);
         assert!(invocation.tray, "a login launch still shows the tray");
     }
 
     #[test]
     fn print_url_parses_and_leaves_the_other_flags_alone() {
-        let invocation = parse_args(args(&["serve", "--print-url"])).expect("parse");
+        let invocation = parse_args(args(&["--print-url"])).expect("parse");
         assert!(invocation.print_url);
         assert!(
             invocation.tray,
@@ -454,8 +505,13 @@ mod tests {
 
     #[test]
     fn print_url_combines_with_no_tray_and_a_config_path() {
-        let invocation = parse_args(args(&["serve", "gateway.toml", "--no-tray", "--print-url"]))
-            .expect("parse");
+        let invocation = parse_args(args(&[
+            "--config",
+            "gateway.toml",
+            "--no-tray",
+            "--print-url",
+        ]))
+        .expect("parse");
         assert!(invocation.print_url);
         assert!(!invocation.tray);
         assert_eq!(
@@ -466,7 +522,7 @@ mod tests {
 
     #[test]
     fn browser_parses_and_rides_the_serve_options() {
-        let invocation = parse_args(args(&["serve", "--browser"])).expect("parse");
+        let invocation = parse_args(args(&["--browser"])).expect("parse");
         assert!(
             invocation.serve.browser,
             "the flag reaches the spawn hook through ServeOptions"
@@ -475,17 +531,8 @@ mod tests {
     }
 
     #[test]
-    fn browser_defaults_off() {
-        let invocation = parse_args(args(&["serve"])).expect("parse");
-        assert!(
-            !invocation.serve.browser,
-            "embedders and ordinary launches never open a browser"
-        );
-    }
-
-    #[test]
     fn login_wins_over_browser() {
-        let invocation = parse_args(args(&["serve", "--login", "--browser"])).expect("parse");
+        let invocation = parse_args(args(&["--login", "--browser"])).expect("parse");
         assert!(
             !invocation.serve.browser,
             "a login launch never opens a browser"
@@ -494,38 +541,39 @@ mod tests {
 
     #[test]
     fn missing_profile_defers_to_environment_or_state() {
-        let invocation = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        let invocation = parse_args(args(&["--config", "gateway.toml"])).expect("parse");
         assert!(invocation.serve.profile.is_none());
     }
 
     #[test]
     fn invalid_profile_name_is_a_usage_error() {
-        let error = parse_args(args(&["serve", "gateway.toml", "--profile", ""])).unwrap_err();
+        let error = parse_args(args(&["--config", "gateway.toml", "--profile", ""])).unwrap_err();
         assert!(matches!(error, ParseError::Usage(_)));
     }
 
     #[test]
     fn rejects_traversal_profile_name() {
-        let error =
-            parse_args(args(&["serve", "gateway.toml", "--profile", "../escape"])).unwrap_err();
+        let error = parse_args(args(&[
+            "--config",
+            "gateway.toml",
+            "--profile",
+            "../escape",
+        ]))
+        .unwrap_err();
         assert!(matches!(error, ParseError::Usage(_)));
     }
 
     #[test]
-    fn rejects_unknown_command() {
+    fn rejects_an_unknown_argument() {
         let error = parse_args(args(&["frobnicate"])).unwrap_err();
         assert!(matches!(error, ParseError::Usage(_)));
     }
 
     #[test]
-    fn requires_serve_subcommand() {
-        let error = parse_args(args(&[])).unwrap_err();
-        assert!(matches!(error, ParseError::Usage(_)));
-    }
-
-    #[test]
     fn help_is_recognized() {
-        let error = parse_args(args(&["serve", "--help"])).unwrap_err();
+        let error = parse_args(args(&["--help"])).unwrap_err();
+        assert_eq!(error, ParseError::Help);
+        let error = parse_args(args(&["-h"])).unwrap_err();
         assert_eq!(error, ParseError::Help);
     }
 
@@ -537,15 +585,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_flag() {
-        let error =
-            parse_args(args(&["serve", "--profiles-dir", "x", "--profile", "dev"])).unwrap_err();
-        assert!(matches!(error, ParseError::Usage(_)));
-    }
-
-    #[test]
-    fn rejects_a_second_positional() {
-        let error =
-            parse_args(args(&["serve", "a.toml", "b.toml", "--profile", "dev"])).unwrap_err();
+        let error = parse_args(args(&["--profiles-dir", "x", "--profile", "dev"])).unwrap_err();
         assert!(matches!(error, ParseError::Usage(_)));
     }
 }

@@ -22,15 +22,15 @@ promptforge-gateway --version
 
 ## Start the gateway
 
-Start the gateway with one subcommand that names a config file and a profile:
+Start the gateway by naming a config file and a profile:
 
 ````
-promptforge-gateway serve gateway.toml --profile main
+promptforge-gateway --config gateway.toml --profile main
 ````
 
-The first argument is the path to the config file. The `--profile` flag names the profile to activate. The gateway always starts from one config file and one active profile.
+The `--config` flag gives the path to the config file. The `--profile` flag names the profile to activate. The gateway always starts from one config file and one active profile.
 
-You can supply both values through environment variables instead of command-line arguments. The config path comes from the positional argument or from `PROMPTFORGE_GATEWAY_CONFIG`; the command line wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
+You can supply both values through environment variables instead of command-line arguments. The config path comes from `--config` or from `PROMPTFORGE_GATEWAY_CONFIG`; the flag wins when both are set. The profile comes from `--profile`, then `PROMPTFORGE_PROFILE`, then the sibling state file the gateway keeps beside the config.
 
 You can also start the gateway with no config file at all. When no `gateway.toml` exists beside the executable, in the working directory, or in the user profile's `.promptforge` directory, the first run writes a default config there - loopback-only on an OS-assigned port, with a fresh random bearer key and `trust_loopback = true` so callers on the same machine need no key - and boots from it. The generated file notes the caveat beside that line: on a shared machine any other OS account can then use the gateway, and `trust_loopback = false` requires the key from everyone. The generated config selects a profile named `default`, so a bare first boot needs no flags.
 
@@ -75,7 +75,7 @@ Build-time feature flags decide which capabilities exist in the binary. The flag
 On Linux the release archive contains a sample systemd unit. The unit runs the gateway as a service with a fixed config path and profile, and restarts it automatically on failure:
 
 ````
-ExecStart=/usr/local/bin/promptforge-gateway serve /etc/promptforge/gateway.toml --profile main
+ExecStart=/usr/local/bin/promptforge-gateway --config /etc/promptforge/gateway.toml --profile main
 Restart=on-failure
 RestartSec=5
 ````

@@ -212,11 +212,11 @@ models = ["missing-model"]
     handle.shutdown().expect("graceful shutdown");
 }
 
-/// A headless `serve` writes its startup line to the log file under the
-/// state dir: the real binary is spawned with the profile directory
-/// redirected into a temp dir (via the home variables `home_dir` reads), so
-/// the run touches nothing outside it - not the connection file, not the
-/// already-running handoff, not the logs.
+/// A headless invocation with `--config` writes its startup line to the
+/// log file under the state dir: the real binary is spawned with the
+/// profile directory redirected into a temp dir (via the home variables
+/// `home_dir` reads), so the run touches nothing outside it - not the
+/// connection file, not the already-running handoff, not the logs.
 #[test]
 fn headless_serve_writes_the_startup_line_to_the_log_file() {
     let temp = tempfile::tempdir().unwrap();
@@ -231,7 +231,7 @@ fn headless_serve_writes_the_startup_line_to_the_log_file() {
         .join("logs")
         .join("gateway.log");
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
-        .arg("serve")
+        .arg("--config")
         .arg(&path)
         .arg("--no-tray")
         .env("USERPROFILE", temp.path())
@@ -262,6 +262,179 @@ fn headless_serve_writes_the_startup_line_to_the_log_file() {
         contents.contains("gateway.log"),
         "the startup line names the log path: {contents}"
     );
+}
+
+/// The bare invocation needs no subcommand: with no `--config` the gateway
+/// runs boot discovery, generates the first-run config into the redirected
+/// profile, and serves - proved by the connection file written after the
+/// bind. The child is killed once the file lands, before the generated
+/// config's boot command can provision anything.
+#[test]
+fn the_root_invocation_serves_with_boot_discovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let connection = temp
+        .path()
+        .join(".promptforge")
+        .join("run")
+        .join("gateway.json");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--no-tray")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the gateway binary spawns");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !connection.is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the discovered boot bound and wrote {}",
+            connection.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        temp.path()
+            .join(".promptforge")
+            .join("gateway.toml")
+            .is_file(),
+        "first-run generation wrote the profile config"
+    );
+}
+
+/// A second launch hands off to the running gateway and exits: under
+/// `--print-url` it prints the running gateway's own Settings URL. Because
+/// the handoff runs before logging starts, the running gateway's log is
+/// never rotated and gains no second startup line.
+#[test]
+fn a_second_instance_hands_off_without_rotating_the_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    );
+    let logs = temp.path().join(".promptforge").join("logs");
+    let connection = temp
+        .path()
+        .join(".promptforge")
+        .join("run")
+        .join("gateway.json");
+    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--profile")
+        .arg("main")
+        .arg("--no-tray")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the first gateway spawns");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !connection.is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first gateway bound and wrote {}",
+            connection.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let file: Value = serde_json::from_str(
+        &std::fs::read_to_string(&connection).expect("read the connection file"),
+    )
+    .expect("the connection file is JSON");
+    let port = file["port"].as_u64().expect("the file carries a port");
+
+    // The second launch: the handoff prints the running gateway's URL and
+    // exits. A regression to a normal boot would serve instead, so the
+    // exit wait is bounded and the kill is the failure path.
+    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--config")
+        .arg(&path)
+        .arg("--profile")
+        .arg("main")
+        .arg("--print-url")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the second gateway spawns");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = second.try_wait().expect("poll the second instance") {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = second.kill();
+            panic!("the second instance booted a duplicate server instead of handing off");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success(), "the handoff exits successfully: {status}");
+    let mut stdout = String::new();
+    std::io::Read::read_to_string(
+        &mut second.stdout.take().expect("piped stdout"),
+        &mut stdout,
+    )
+    .expect("read the second instance's stdout");
+    assert!(
+        stdout.contains(&format!("http://127.0.0.1:{port}/auth?key=")),
+        "the printed URL is the running gateway's own handoff URL: {stdout}"
+    );
+
+    let _ = first.kill();
+    let _ = first.wait();
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "the handoff never rotated the running gateway's log"
+    );
+    let log = std::fs::read_to_string(logs.join("gateway.log")).expect("read the log");
+    assert_eq!(
+        log.matches("logging to").count(),
+        1,
+        "only the serving instance wrote a startup line: {log}"
+    );
+}
+
+/// `--version` and `--help` exit before logging starts: a pre-existing log
+/// is left untouched and never rotated.
+#[test]
+fn version_and_help_never_rotate_the_log() {
+    let temp = tempfile::tempdir().unwrap();
+    let logs = temp.path().join(".promptforge").join("logs");
+    std::fs::create_dir_all(&logs).expect("create the logs dir");
+    std::fs::write(logs.join("gateway.log"), "the running gateway's log").expect("seed the log");
+    for flag in ["--version", "--help"] {
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+            .arg(flag)
+            .env("USERPROFILE", temp.path())
+            .env("HOME", temp.path())
+            .env_remove("RUST_LOG")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("the flag invocation exits");
+        assert!(status.success(), "{flag} exits successfully: {status}");
+        assert_eq!(
+            std::fs::read_to_string(logs.join("gateway.log")).expect("read the log"),
+            "the running gateway's log",
+            "{flag} left the log untouched"
+        );
+        assert!(
+            !logs.join("gateway.log.1").exists(),
+            "{flag} rotated no log"
+        );
+    }
 }
 
 /// A config with two profiles over one backend, so a switch from `main` to

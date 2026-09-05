@@ -54,6 +54,11 @@ pub fn running_gateway_settings_url(options: &ServeOptions) -> Option<String> {
     let resolution = match shared_sidecar::resolve(&run_dir) {
         Ok(resolution) => resolution,
         Err(error) => {
+            // The binary's handoff check runs before `init_logging` (a
+            // relaunch must not rotate the running gateway's log), so with
+            // no subscriber installed this warn is dropped there; the boot
+            // that follows logs its own connection-file failure once
+            // logging is live.
             tracing::warn!(
                 "could not resolve the connection file in {}: {error}; booting normally",
                 run_dir.display()

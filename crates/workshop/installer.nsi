@@ -482,7 +482,7 @@ Function RunMainBinary
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
  ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
- nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --browser"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "--browser"
  ${EndIf}
 FunctionEnd
 
@@ -870,13 +870,13 @@ Section "-Finalize"
  !insertmacro DeleteComponentPayloadIfDeclined ${SecWorkshop} $INSTDIR\${MAINBINARYNAME}.exe
 
  ; Relaunch the gateway when the install stopped one and the component
- ; stays installed. `serve --login` keeps the relaunch headless: no
+ ; stays installed. `--login` keeps the relaunch headless: no
  ; browser, no window.
  ${If} $GatewayWasRunning = 1
  SectionGetFlags ${SecGateway} $0
  IntOp $0 $0 & ${SF_SELECTED}
  ${If} $0 = ${SF_SELECTED}
- nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "serve --login"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "--login"
  ${EndIf}
  ${EndIf}
 
