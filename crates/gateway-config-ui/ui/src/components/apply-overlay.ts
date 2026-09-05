@@ -3,14 +3,20 @@
 // spinner while active, a check when passed, and an error mark when the
 // switch dies in it. Stages come from the `GET /admin/progress` hub
 // stream through `observe`: a `Begun` leaf whose label is a known stage
-// opens that stage. The card carries a Cancel button (the overlay hides
-// the status bar's own cancel control) that fires the caller's cancel
-// hook once. The terminal event closes the overlay - instantly on
-// success, after a short hold on failure so the failed stage is seen
-// (the toast carries the message onward).
+// opens that stage. While a stage runs, a `<stage>/<model>/download`
+// leaf drives a detail row under the active stage - "Downloading
+// <model>" with the shared inline progress bar set by the leaf's
+// `Updated` fractions, "Verifying <model>" once the download leaf
+// finishes, "Starting <model>" when the `<model>/ready` leaf begins -
+// cleared when the stage ends. The card carries a Cancel button (the
+// overlay hides the status bar's own cancel control) that fires the
+// caller's cancel hook once. The terminal event closes the overlay -
+// instantly on success, after a short hold on failure so the failed
+// stage is seen (the toast carries the message onward).
 
 import { Check, X, createElement as lucideElement } from "lucide";
 
+import { createProgressBar, type ProgressBar } from "shared-ui/progress";
 import { scheduleTimeout } from "shared-ui/toast";
 
 /** How long a failed overlay stays up before removing itself. */
@@ -43,7 +49,11 @@ export interface ApplyOverlay {
   /**
    * Feeds one raw `GET /admin/progress` event. A hub `ProgressEvent`
    * whose `state` is `Begun` and whose `label` is a known stage begins
-   * that stage; every other shape is ignored.
+   * that stage. A `Begun` whose `path` is `<stage>/<model>/download`
+   * opens the detail row under the active stage, the leaf's `Updated`
+   * fractions set its bar, the leaf's `Finished` flips the row to the
+   * verifying label, and a `<stage>/<model>/ready` `Begun` flips it to
+   * the starting label. Every other shape is ignored.
    */
   observe(event: unknown): void;
   /** Terminal success: marks every begun stage done and closes. */
@@ -72,6 +82,19 @@ export function createApplyOverlay(
   let active: HTMLElement | null = null;
   let cancel: HTMLButtonElement | null = null;
   let restoreFocus: HTMLElement | null = null;
+  let detail: {
+    row: HTMLElement;
+    text: HTMLElement;
+    bar: ProgressBar;
+    percent: HTMLElement;
+  } | null = null;
+  let downloadPath: string | null = null;
+
+  const clearDetail = () => {
+    detail?.row.remove();
+    detail = null;
+    downloadPath = null;
+  };
 
   const close = () => {
     element?.remove();
@@ -79,6 +102,7 @@ export function createApplyOverlay(
     list = null;
     active = null;
     cancel = null;
+    clearDetail();
     // Hand focus back to where it was when the overlay took it.
     if (restoreFocus?.isConnected) {
       restoreFocus.focus();
@@ -123,6 +147,8 @@ export function createApplyOverlay(
     }
     if (active) {
       setState(active, "done");
+      // A stage change retires the download/verify/start detail row.
+      clearDetail();
     }
     let row = list.querySelector<HTMLElement>(`[data-stage="${stage}"]`);
     if (!row) {
@@ -131,6 +157,55 @@ export function createApplyOverlay(
     }
     setState(row, "active");
     active = row;
+  };
+
+  /**
+   * Shows the detail row under the active stage with `label`, creating
+   * it on first use and updating it in place afterwards, so a flood of
+   * coalesced `Updated` frames never re-creates nodes.
+   */
+  const showDetail = (label: string): void => {
+    if (!active) {
+      return;
+    }
+    if (!detail) {
+      const row = document.createElement("li");
+      row.className = "stage-detail";
+      const text = document.createElement("span");
+      text.className = "stage-detail-label";
+      const bar = createProgressBar("Model download progress");
+      const percent = document.createElement("span");
+      percent.className = "stage-detail-percent";
+      row.append(text, bar.element, percent);
+      detail = { row, text, bar, percent };
+    }
+    detail.text.textContent = label;
+    active.after(detail.row);
+  };
+
+  /** Handles a `Begun` frame for a non-stage leaf of a known stage. */
+  const observeLeafBegun = (path: string): void => {
+    const leaf = splitLeafPath(path);
+    if (!leaf || !KNOWN_STAGES.some(([id]) => id === leaf.stage)) {
+      return;
+    }
+    if (leaf.leaf === "download") {
+      // The most recent download leaf wins: a switch that stages
+      // several models shows one row at a time.
+      downloadPath = path;
+      showDetail(`Downloading ${leaf.model}`);
+      if (detail) {
+        detail.bar.setFraction(0);
+        detail.percent.textContent = "0%";
+      }
+    } else if (leaf.leaf === "ready") {
+      downloadPath = null;
+      showDetail(`Starting ${leaf.model}`);
+      if (detail) {
+        detail.bar.setFraction(null);
+        detail.percent.textContent = "";
+      }
+    }
   };
 
   const cancelButton = (onCancel: () => void | Promise<void>): HTMLButtonElement => {
@@ -191,12 +266,46 @@ export function createApplyOverlay(
 
     observe(event: unknown): void {
       // serde's externally tagged `EventState`: `{"Begun":{"weight":..}}`.
-      if (!isRecord(event) || !isRecord(event["state"]) || !("Begun" in event["state"])) {
+      if (!isRecord(event) || !isRecord(event["state"])) {
         return;
       }
-      const label = event["label"];
-      if (typeof label === "string" && KNOWN_STAGES.some(([id]) => id === label)) {
-        beginStage(label);
+      const state = event["state"];
+      if ("Begun" in state) {
+        const label = event["label"];
+        if (typeof label === "string" && KNOWN_STAGES.some(([id]) => id === label)) {
+          beginStage(label);
+          return;
+        }
+        if (typeof event["path"] === "string") {
+          observeLeafBegun(event["path"]);
+        }
+        return;
+      }
+      // `Updated` and `Finished` move only the tracked download leaf's
+      // row; frames for any other path change nothing.
+      const path = event["path"];
+      if (typeof path !== "string" || path !== downloadPath || !detail) {
+        return;
+      }
+      if ("Updated" in state) {
+        const updated = state["Updated"];
+        const fraction = isRecord(updated) ? updated["fraction"] : null;
+        if (typeof fraction !== "number") {
+          return;
+        }
+        const clamped = Math.min(Math.max(fraction, 0), 1);
+        detail.bar.setFraction(clamped);
+        detail.percent.textContent = `${Math.round(clamped * 100)}%`;
+      } else if ("Finished" in state) {
+        // The verify leaf runs next; the `ready` leaf's `Begun` flips
+        // the row to the starting label.
+        downloadPath = null;
+        const model = splitLeafPath(path)?.model;
+        if (model) {
+          detail.text.textContent = `Verifying ${model}`;
+        }
+        detail.bar.setFraction(null);
+        detail.percent.textContent = "";
       }
     },
 
@@ -230,6 +339,28 @@ export function createApplyOverlay(
 /** Whether an untrusted stream value is a non-array object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Splits a hub leaf path such as `downloading-models/glm-4-9b/download`
+ * into its stage prefix, model name, and leaf name: the stage is the
+ * first segment, the leaf the last, and the model everything between,
+ * so a model name that itself contains a slash (the config validates
+ * only that it is non-empty) still displays in full. Returns null for
+ * anything shallower, so unknown path shapes are ignored.
+ */
+function splitLeafPath(path: string): { stage: string; model: string; leaf: string } | null {
+  const segments = path.split("/");
+  if (segments.length < 3) {
+    return null;
+  }
+  const stage = segments[0] ?? "";
+  const model = segments.slice(1, -1).join("/");
+  const leaf = segments[segments.length - 1] ?? "";
+  if (!stage || !model || !leaf) {
+    return null;
+  }
+  return { stage, model, leaf };
 }
 
 /** Renders a lucide icon as a decorative inline SVG. */
