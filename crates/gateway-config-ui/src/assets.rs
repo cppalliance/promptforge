@@ -14,10 +14,19 @@ pub(crate) struct UiAssets;
 
 /// Serves one UI asset from [`UiAssets`] with the given content type.
 /// A missing asset answers 404 with the build command that produces it.
+///
+/// Every asset goes out with `Cache-Control: no-cache`: the bundle is
+/// unversioned (`app.js` keeps its name across builds), so a heuristic
+/// cache with no validator would serve a stale script against a newer
+/// gateway. `no-cache` forces revalidation on every load while still
+/// allowing a 304 fast path once validators exist.
 pub(crate) fn ui_asset(path: &str, content_type: &'static str) -> Response {
     match UiAssets::get(path) {
         Some(asset) => (
-            [(header::CONTENT_TYPE, content_type)],
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
             asset.data.into_owned(),
         )
             .into_response(),

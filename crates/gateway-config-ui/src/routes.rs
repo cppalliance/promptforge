@@ -92,6 +92,27 @@ mod tests {
         assert!(!body.is_empty(), "{uri} body is non-empty");
     }
 
+    /// Every asset must force revalidation: the bundle is unversioned, so
+    /// a heuristic cache with no validator serves a stale script against a
+    /// newer gateway (the panel then runs old code and cannot connect).
+    #[tokio::test]
+    async fn every_asset_forces_revalidation() {
+        for uri in [
+            "/",
+            "/app.js",
+            "/app.css",
+            "/icons/promptforge-icon.png",
+            "/icons/promptforge-icon@2x.png",
+        ] {
+            let response = get_as_loopback(uri).await;
+            let cache_control = response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .unwrap_or_else(|| panic!("{uri} sets cache-control"));
+            assert_eq!(cache_control, "no-cache", "{uri} cache-control");
+        }
+    }
+
     #[tokio::test]
     async fn index_is_served_at_the_root() {
         assert_ui_asset("/", "text/html; charset=utf-8").await;

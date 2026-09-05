@@ -130,6 +130,9 @@ async fn proxy_config_asset(state: &AppState, path: &str) -> Result<Response, Ap
     if let Some(content_type) = &forwarded.content_type {
         builder = builder.header(header::CONTENT_TYPE, content_type);
     }
+    // The relayed SPA assets are unversioned; force revalidation so the
+    // panel never runs a cached script against a newer gateway.
+    builder = builder.header(header::CACHE_CONTROL, "no-cache");
     Ok(builder
         .body(Body::from(forwarded.body))
         .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response()))
@@ -293,6 +296,40 @@ mod tests {
         assert_eq!(
             json["authorized"], true,
             "the forward carries the workshop's bearer key"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_proxied_config_assets_force_revalidation() {
+        let gateway = axum::Router::new().route(
+            "/config/app.js",
+            axum_get(|| async move {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    "// bundle",
+                )
+            }),
+        );
+        let base_url = spawn_gateway(gateway).await;
+        let (state, _state_dir) = state_for(&base_url);
+        let request = Request::builder()
+            .uri("/gateway/config/app.js")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        // The relayed bundle is unversioned; without this the panel's
+        // WebView2 serves a cached script against a newer gateway.
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-cache"),
+            "the relay forces revalidation"
         );
     }
 

@@ -178,3 +178,7 @@ turn dispatch pushes Thinking (amber LED) and success releases it, but the Model
 
 ## 2026-09-03 Add application icons
 
+## 2026-09-04 Force revalidation on embedded UI assets
+
+the user reported the Gateway Config panel refusing to connect; the panel's WebView2 was serving a stale `app.js` from an 8/31 cache because the unversioned SPA assets carried no cache headers, so the old script could not talk to the new gateway. Every embedded asset now goes out with `Cache-Control: no-cache`, forcing revalidation on every load. (user reported, assistant reasoned)
+
