@@ -124,3 +124,5 @@
 - [2026-09-04-1-async-boot-and-progress] progress surface split: Structured state drives visual progress while terminal output remains ordinary tracing lines.
 - [2026-09-04-2-apply-as-queue-command] asymmetric command ordering: A broader Apply supersedes stale profile loading, while a later profile load waits behind Apply instead of discarding pending configuration.
 - [2026-09-04-2-apply-as-queue-command] ambient loopback trust: Keyless admin access needs verified loopback peer identity plus browser fetch-metadata checks; explicit bad credentials still fail closed.
+- [2026-09-04-3-unlock-inference-during-switches] transitional-state cleanup: A failed or cancelled spawn clears loading markers, tears down partial children, and leaves the surviving routing usable.
+- [2026-09-04-3-unlock-inference-during-switches] bounded operational waits: Worker joins and idle artifact reads need finite bounds so cancellation and shutdown cannot hang indefinitely.
