@@ -128,7 +128,10 @@
 # more tests.
 "resolve.rs" = 553
 "routes.rs" = 8
-"routes/assets.rs" = 117
+# Asset route handlers and their tests are separate responsibilities. The
+# split lowers the production module and records the test module independently.
+"routes/assets.rs" = 62
+"routes/assets/tests.rs" = 93
 # Grew in the chat-relay excision by the POST /chat absence pin (404),
 # while the route itself left.
 "routes/chat.rs" = 72
@@ -137,7 +140,9 @@
 # Grew by the same-origin config SPA proxy (the index and asset routes,
 # the shared `proxy_config_asset` relay, and the dot-segment refusal);
 # the growth commit missed this re-record, banked here at measured size.
-"routes/gateway_config.rs" = 390
+# Its route/forwarding implementation is now separate from route tests.
+"routes/gateway_config.rs" = 190
+"routes/gateway_config/tests.rs" = 243
 "routes/health.rs" = 50
 # New module: the same-origin capability and WebSocket relay from the
 # Workshop listener to the gateway-owned STT routes.
