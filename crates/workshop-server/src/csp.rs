@@ -34,13 +34,27 @@ const POLICY: &str = "default-src 'self'; script-src 'self'; \
                       worker-src 'self'; object-src 'none'; base-uri 'none'; \
                       frame-ancestors 'none'";
 
+/// The same policy with self-framing allowed, for the proxied config SPA
+/// only: the Gateway Config panel iframes `/gateway/config/` from the
+/// workshop window, and `frame-ancestors 'none'` makes Chromium refuse
+/// the frame outright ("refused to connect"). `'self'` admits the
+/// same-origin shell and still forbids every foreign framer.
+const POLICY_FRAMEABLE: &str = "default-src 'self'; script-src 'self'; \
+                      style-src 'self' 'unsafe-inline'; \
+                      connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:* \
+                      ws://localhost:* ws://[::1]:*; img-src 'self' data: blob: https:; \
+                      worker-src 'self'; object-src 'none'; base-uri 'none'; \
+                      frame-ancestors 'self'";
+
 /// Middleware stamping `Content-Security-Policy` on every response,
-/// including error envelopes and the proxied config SPA.
+/// including error envelopes. The proxied config SPA (`/gateway/config/`)
+/// carries the self-frameable variant; everything else forbids framing.
 pub(crate) async fn header(request: Request, next: Next) -> Response {
+    let frameable = request.uri().path().starts_with("/gateway/config/");
     let mut response = next.run(request).await;
     response.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(POLICY),
+        HeaderValue::from_static(if frameable { POLICY_FRAMEABLE } else { POLICY }),
     );
     response
 }
@@ -83,6 +97,22 @@ mod tests {
                 .unwrap_or_else(|| panic!("{uri} carries the policy"));
             assert_eq!(value, POLICY, "{uri} carries the exact policy");
         }
+    }
+
+    #[tokio::test]
+    async fn the_proxied_config_spa_allows_self_framing() {
+        // The Gateway Config panel iframes `/gateway/config/` from the
+        // workshop window; `frame-ancestors 'none'` there makes Chromium
+        // refuse the frame ("refused to connect"). The gateway is
+        // unreachable in this fixture, so the answer is a 502 - the
+        // middleware stamps the header on error envelopes too, which is
+        // the point: the policy must not depend on the proxy's outcome.
+        let response = get("/gateway/config/").await;
+        let value = response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .expect("the proxied config route carries the policy");
+        assert_eq!(value, POLICY_FRAMEABLE, "self-framing for the panel");
     }
 
     #[tokio::test]

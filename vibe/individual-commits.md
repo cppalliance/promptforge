@@ -190,3 +190,7 @@ the launch-time update check died with an ACL rejection toast because the deskto
 
 live endpoint probing during the Gateway Config failure hunt showed the panel's cancel actions failing: `POST /admin/queue/cancel` and `/admin/queue/cancel-pending` had been omitted from the workshop proxy's `forward_allowed` allowlist; added so cancelling operations from the panel works. (assistant found during live probing)
 
+## 2026-09-04 Allow self-framing on the proxied config SPA
+
+the actual root cause of the user's "Gateway Config still doesn't work": the workshop server stamped `frame-ancestors 'none'` on every response including the proxied config SPA, and Chromium renders a frame-ancestors block as "refused to connect"; the proxied config routes get `frame-ancestors 'self'` while every other route keeps `'none'`. (user reported, assistant diagnosed)
+
