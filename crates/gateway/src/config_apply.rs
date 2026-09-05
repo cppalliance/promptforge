@@ -13,10 +13,10 @@
 //! touches nothing else. Saves, the capture step, the commit, and revert
 //! serialize on one mutex, so apply only captures combinations the latest
 //! save validated whole. Both routes reply with plain JSON: the reload's
-//! staged progress (`loading-profile`, `stopping-models`,
-//! `starting-models`) streams to `GET /admin/progress` subscribers, so the
-//! apply response carries the outcome and the progress stream carries the
-//! stages.
+//! staged progress (`loading-profile`, `downloading-models`,
+//! `stopping-models`, `starting-models`) streams to `GET /admin/progress`
+//! subscribers, so the apply response carries the outcome and the progress
+//! stream carries the stages.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

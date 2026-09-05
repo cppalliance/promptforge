@@ -287,6 +287,83 @@ impl LocalRuntime {
             StartPolicy::KeepReady,
         )
     }
+
+    /// Provisions every artifact the configured local models need - the
+    /// pinned `llama-server`, each model's GGUF, and any companion (a
+    /// speculative drafter, a multimodal projector) - without spawning a
+    /// child. A later [`Self::start_partial_with_cancellation`] over the
+    /// same config then finds every blob in the cache and goes straight to
+    /// the spawn, so a caller can keep its old children serving through the
+    /// download and stop them only right before the new ones start.
+    ///
+    /// Per-model provisioning failures are collected and returned, not
+    /// fatal: the start over the same config reports them again as its own
+    /// per-model failures, so the models that did provision still start.
+    /// `progress`, when given, gains the same `llama-server` and per-model
+    /// download/verify subtrees the start would register.
+    ///
+    /// # Errors
+    /// Returns [`LocalError`] when the shared `llama-server` provisioning
+    /// fails, or [`LocalError::Cancelled`] when `token` fires - checked
+    /// before the first request, at download chunk boundaries, and between
+    /// models.
+    pub fn provision_artifacts_with_cancellation(
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+        token: &CancellationToken,
+    ) -> Result<Vec<LocalStartFailure>, LocalError> {
+        provision_artifacts_impl(config, progress, token, |store, selection, server| {
+            store.provision_llama_server_with_cancellation(selection, server, Some(token))
+        })
+    }
+}
+
+/// Shared body of [`LocalRuntime::provision_artifacts_with_cancellation`]
+/// with the pinned-server provision injectable, so a test can drive it over
+/// a mock layout exactly as [`start_impl`] is driven.
+fn provision_artifacts_impl(
+    config: &Config,
+    progress: Option<&ProgressHandle>,
+    token: &CancellationToken,
+    provision: impl FnOnce(
+        &ArtifactStore,
+        &ServerSelection<'_>,
+        Option<&ProgressHandle>,
+    ) -> Result<ProvisionedServer, LocalError>,
+) -> Result<Vec<LocalStartFailure>, LocalError> {
+    if config.local_models().is_empty() {
+        return Ok(Vec::new());
+    }
+    if token.is_cancelled() {
+        return Err(LocalError::Cancelled);
+    }
+    let (store, _server) = provision_server(config, progress, provision)?;
+    let mut failures = Vec::new();
+    for local_model in config.local_models() {
+        // Phase boundary: a cancelled command provisions no further models.
+        if token.is_cancelled() {
+            return Err(LocalError::Cancelled);
+        }
+        let model_tree = progress.map(|handle| handle.child(local_model.name(), 3.0));
+        let provisioned = store
+            .ensure_model_with_cancellation(
+                local_model.source(),
+                local_model.sha256(),
+                model_tree.as_ref(),
+                Some(token),
+            )
+            .and_then(|_path| provision_companion_paths(&store, local_model, Some(token)));
+        match provisioned {
+            Ok(_companions) => {}
+            // Cancellation is the command stopping, never a per-model fault.
+            Err(LocalError::Cancelled) => return Err(LocalError::Cancelled),
+            Err(error) => failures.push(LocalStartFailure {
+                model: local_model.name().to_owned(),
+                error,
+            }),
+        }
+    }
+    Ok(failures)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -672,6 +749,29 @@ fn provision_companions(
     options: &mut LaunchOptions,
     token: Option<&CancellationToken>,
 ) -> Result<(), LocalError> {
+    let companions = provision_companion_paths(store, model, token)?;
+    options.speculative = companions.speculative;
+    options.multimodal_projector = companions.multimodal_projector;
+    Ok(())
+}
+
+/// The owned cache paths of one model's provisioned companions; `None` for
+/// a companion the model does not declare.
+#[derive(Debug, Default)]
+struct CompanionPaths {
+    speculative: Option<SpeculativeLaunch>,
+    multimodal_projector: Option<PathBuf>,
+}
+
+/// The provisioning half of [`provision_companions`]: resolves each declared
+/// companion through `ensure_model` and returns its path without touching
+/// any launch options, so the artifact step can run it ahead of the spawn.
+fn provision_companion_paths(
+    store: &ArtifactStore,
+    model: &LocalModelConfig,
+    token: Option<&CancellationToken>,
+) -> Result<CompanionPaths, LocalError> {
+    let mut companions = CompanionPaths::default();
     if let Some(speculative) = model.speculative() {
         let draft_model = store.ensure_model_with_cancellation(
             speculative.source(),
@@ -684,7 +784,7 @@ fn provision_companions(
             path = %draft_model.display(),
             "provisioned speculative drafter GGUF"
         );
-        options.speculative = Some(SpeculativeLaunch {
+        companions.speculative = Some(SpeculativeLaunch {
             draft_model,
             draft_max: speculative.draft_max().get(),
         });
@@ -701,9 +801,9 @@ fn provision_companions(
             path = %projector_path.display(),
             "provisioned multimodal projector GGUF"
         );
-        options.multimodal_projector = Some(projector_path);
+        companions.multimodal_projector = Some(projector_path);
     }
-    Ok(())
+    Ok(companions)
 }
 
 /// Best-effort: fetch HF metadata and write a sidecar `.md` beside the GGUF.
@@ -1132,6 +1232,145 @@ context = 512
         assert_eq!(nodes[3].fraction, 1.0);
         assert_eq!(nodes[4].fraction, 1.0);
         assert_eq!(nodes[5].fraction, 0.0);
+    }
+
+    #[test]
+    fn provision_artifacts_stages_every_blob_and_spawns_nothing() {
+        use crate::testsupport::hex_sha256;
+
+        // The artifact step provisions for real - the pinned path source is
+        // hashed and its verification marker written - registers the same
+        // download/verify subtree the start would, and never reaches a
+        // spawn: no `ready` leaf exists. A model whose source is missing is
+        // collected as a per-model failure, not a fatal one, so the model
+        // that did provision is not held back.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let model_file = temp.path().join("mock.gguf");
+        std::fs::write(&model_file, b"mock-gguf-bytes").expect("write model");
+        let config = Config::from_toml_str(&format!(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+cache_dir = '{}'
+
+[[local_model]]
+name = "mock"
+description = "a mock local model"
+source = '{}'
+sha256 = "{}"
+context = 512
+
+[[local_model]]
+name = "absent"
+description = "a model whose source is missing"
+source = '{}'
+context = 512
+"#,
+            temp.path().join("cache").display(),
+            model_file.display(),
+            hex_sha256(b"mock-gguf-bytes"),
+            temp.path().join("absent.gguf").display(),
+        ))
+        .expect("config");
+
+        let hub = Arc::new(shared_progress::ProgressHub::new());
+        let tree = hub.operation();
+        let parent = tree.register("downloading-models", 1.0);
+        let failures = provision_artifacts_impl(
+            &config,
+            Some(&parent),
+            &CancellationToken::new(),
+            |_store, _selection, server| {
+                if let Some(handle) = server {
+                    handle.complete();
+                }
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+        )
+        .expect("the artifact step tolerates a per-model failure");
+        assert_eq!(
+            failures
+                .iter()
+                .map(LocalStartFailure::model)
+                .collect::<Vec<_>>(),
+            ["absent"]
+        );
+        assert!(matches!(
+            failures[0].error(),
+            LocalError::InvalidSource { .. }
+        ));
+
+        let key = artifacts::source_cache_key(&model_file.to_string_lossy());
+        assert!(
+            temp.path()
+                .join("cache")
+                .join("markers")
+                .join(format!("{key}.verified"))
+                .is_file(),
+            "the pinned blob is verified into the cache, so the start finds it"
+        );
+        let snapshot = hub.snapshot();
+        let paths: Vec<&str> = snapshot[0]
+            .nodes
+            .iter()
+            .map(|node| node.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "downloading-models",
+                "downloading-models/llama-server",
+                "downloading-models/mock",
+                "downloading-models/mock/download",
+                "downloading-models/mock/verify",
+                "downloading-models/absent",
+                "downloading-models/absent/download",
+                "downloading-models/absent/verify",
+            ],
+            "the artifact step registers no `ready` leaf: nothing spawns"
+        );
+    }
+
+    #[test]
+    fn provision_artifacts_with_a_cancelled_token_provisions_nothing() {
+        // The token is checked before the server binary provisions; the
+        // deliberately missing `llama_server_path` would otherwise fail with
+        // `InvalidSource`.
+        let config = Config::from_toml_str(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+llama_server_path = "/definitely/missing/llama-server"
+
+[[local_model]]
+name = "q"
+description = "a local model"
+source = "/models/q.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let token = CancellationToken::new();
+        token.cancel();
+        let error = LocalRuntime::provision_artifacts_with_cancellation(&config, None, &token)
+            .expect_err("a cancelled artifact step provisions nothing");
+        assert!(
+            matches!(error, LocalError::Cancelled),
+            "the token check precedes provisioning: {error:?}"
+        );
     }
 
     #[tokio::test]

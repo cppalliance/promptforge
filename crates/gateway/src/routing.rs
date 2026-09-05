@@ -14,8 +14,11 @@ use crate::upstream::{OpenAiUpstream, Upstream};
 // these re-exports keep every `crate::routing::*` path resolving unchanged.
 pub(crate) use gateway_routing::{Endpoint, Model, dominion_queues};
 
-/// A resolved routing table.
-#[derive(Debug)]
+/// A resolved routing table. Cloning copies the two indexes of `Arc`
+/// entries, never the endpoints behind them, so a switch can publish the
+/// remote table as its interim state and still merge the local models into
+/// the same table at commit.
+#[derive(Debug, Clone)]
 pub(crate) struct Routing {
     by_name: HashMap<String, Arc<Model>>,
     /// Configured models in `gateway.toml` order, for the catalog listing.

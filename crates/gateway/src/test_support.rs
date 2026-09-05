@@ -58,8 +58,20 @@ async fn serve_with(
 /// injected collaborator (the HF proxy, the reveal launcher) or drive a
 /// handler directly.
 pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
-    let key = config.server_key();
     let routing = Routing::from_config(&config).expect("routing builds");
+    state_over(config, routing, paths)
+}
+
+/// Builds the state the instant-ready boot path serves: an empty routing
+/// table over `config`, no active profile, nothing local running - the
+/// shell the boot `LoadProfile` command fills.
+pub(crate) fn boot_state(config: Config) -> AppState {
+    state_over(config, Routing::empty(), None)
+}
+
+/// The shared body behind [`app_state`] and [`boot_state`].
+fn state_over(config: Config, routing: Routing, paths: Option<AdminPaths>) -> AppState {
+    let key = config.server_key();
     let config = Arc::new(config);
     let (config_path, selection) = match paths {
         Some(paths) => (

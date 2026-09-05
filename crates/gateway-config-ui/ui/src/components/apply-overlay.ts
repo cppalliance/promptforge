@@ -19,12 +19,17 @@ const ERROR_HOLD_MS = 1500;
 /**
  * The stage leaves the gateway's switch registers on its progress tree,
  * in execution order, with their display labels (the same wording the
- * workshop's status bar uses). Unknown stages begun through `beginStage`
- * are appended as they arrive, so a gateway that grows stages never
- * breaks the overlay; `observe` only maps these three.
+ * workshop's status bar uses). The gateway skips the download when the
+ * profile names no local model and the stop when nothing old runs, and
+ * runs the download after the stop-free cut-over on a cold boot, so a
+ * switch may light a subset of these rows, out of this order. Unknown
+ * stages begun through `beginStage` are appended as they arrive, so a
+ * gateway that grows stages never breaks the overlay; `observe` only
+ * maps these four.
  */
 const KNOWN_STAGES: ReadonlyArray<readonly [id: string, label: string]> = [
   ["loading-profile", "Loading profile"],
+  ["downloading-models", "Downloading models"],
   ["stopping-models", "Stopping models"],
   ["starting-models", "Starting models"],
 ];

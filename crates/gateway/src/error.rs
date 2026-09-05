@@ -81,6 +81,15 @@ pub(crate) enum GatewayError {
     #[error("model provisioning in progress: {0}")]
     ModelProvisioning(String),
 
+    /// The named local model belongs to the profile being switched to and
+    /// is downloading or spawning: the switch has already published the
+    /// profile's remote models, and this one follows once its child is
+    /// ready. Maps to 503 with `Retry-After` so a client waits briefly
+    /// instead of treating the model as missing.
+    #[non_exhaustive]
+    #[error("model is loading: {0}")]
+    ModelLoading(String),
+
     /// A queued command was cancelled before it completed: by the user, by a
     /// newer command winning the debounce, or by process shutdown.
     #[non_exhaustive]
@@ -370,6 +379,11 @@ impl GatewayError {
                 "server_error",
                 "model_provisioning",
             ),
+            GatewayError::ModelLoading(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "model_loading",
+            ),
             GatewayError::CommandCancelled(_) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_error",
@@ -468,6 +482,12 @@ impl GatewayError {
     }
 }
 
+/// The `Retry-After` a loading model's 503 carries, in seconds: long enough
+/// that a polling client does not hammer the gateway while a child loads
+/// its weights, short enough that it notices the model within one poll of
+/// the spawn completing.
+const MODEL_LOADING_RETRY_AFTER_SECONDS: u16 = 5;
+
 impl GatewayError {
     /// The OpenAI error envelope body for this error, shared by the JSON
     /// error response and the mid-stream SSE error event.
@@ -477,12 +497,25 @@ impl GatewayError {
             "error": { "message": self.to_string(), "type": kind, "code": code }
         })
     }
+
+    /// The `Retry-After` header value, in seconds, for the errors that
+    /// promise the condition clears on its own.
+    fn retry_after_seconds(&self) -> Option<u16> {
+        matches!(self, GatewayError::ModelLoading(_)).then_some(MODEL_LOADING_RETRY_AFTER_SECONDS)
+    }
 }
 
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
         let (status, ..) = self.classify();
-        (status, Json(self.envelope())).into_response()
+        let retry_after = self.retry_after_seconds();
+        let mut response = (status, Json(self.envelope())).into_response();
+        if let Some(seconds) = retry_after {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, seconds.into());
+        }
+        response
     }
 }
 
@@ -554,9 +587,57 @@ mod tests {
                     "system_metrics_error",
                 ),
             ),
+            (
+                GatewayError::ModelProvisioning("load-profile: main".to_owned()),
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "model_provisioning",
+                ),
+            ),
+            (
+                GatewayError::ModelLoading("local-model".to_owned()),
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "model_loading",
+                ),
+            ),
         ];
         for (error, expected) in cases {
             assert_eq!(error.classify(), expected);
+        }
+    }
+
+    #[test]
+    fn only_a_loading_model_carries_retry_after() {
+        // A loading model is a 503 the client should wait out, so its
+        // response names the wait; the other 503s (a full queue, a cancelled
+        // request) promise nothing about when they clear and carry none.
+        let response = GatewayError::ModelLoading("local-model".to_owned()).into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("5")
+        );
+        for error in [
+            GatewayError::QueueFull,
+            GatewayError::RequestCancelled,
+            GatewayError::ModelProvisioning("load-profile: main".to_owned()),
+            GatewayError::UnknownModel("ghost".to_owned()),
+        ] {
+            let response = error.into_response();
+            assert!(
+                response
+                    .headers()
+                    .get(axum::http::header::RETRY_AFTER)
+                    .is_none(),
+                "{} carries no Retry-After",
+                response.status()
+            );
         }
     }
 

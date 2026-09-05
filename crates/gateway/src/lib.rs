@@ -125,6 +125,7 @@ pub use gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
 };
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::Json;
@@ -182,6 +183,13 @@ struct LiveState {
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
+    /// Local models of the profile being switched to whose children are
+    /// still downloading or spawning. Published with the interim routing
+    /// table at cut-over and cleared by the commit or by the switch
+    /// failing, so a request for one of them earns
+    /// [`GatewayError::ModelLoading`] instead of a 404 while the switch
+    /// runs, and never afterwards.
+    loading: BTreeSet<String>,
 }
 
 impl LiveState {
@@ -272,9 +280,81 @@ pub(crate) struct AppState {
     /// switch.
     #[cfg(feature = "stt")]
     stt_state: SttState,
+    /// Test-only rendezvous the switch awaits at the start of one named
+    /// phase, so a test can hold a switch inside the download, the
+    /// cut-over, the spawn, or the commit and observe the lock and the live
+    /// state there. `None` in production and in every test that does not
+    /// install one.
+    #[cfg(test)]
+    park: Option<Arc<switch_park::PhasePark>>,
+}
+
+/// The test-only phase rendezvous for [`run_switch_with_config`].
+#[cfg(test)]
+pub(crate) mod switch_park {
+    use tokio::sync::Notify;
+
+    /// One phase of the switch a test can park.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum SwitchPhase {
+        /// The artifact download, before or after the cut-over by order.
+        Download,
+        /// The cut-over, once the switch lock is held.
+        CutOver,
+        /// The child spawn, after the interim live state is published.
+        Spawn,
+        /// The commit, once the switch lock is held again.
+        Commit,
+    }
+
+    /// Parks the switch at `phase` until the test releases it. Single use:
+    /// each notify stores one permit, so a release before the switch
+    /// arrives is not lost.
+    #[derive(Debug)]
+    pub(crate) struct PhasePark {
+        phase: SwitchPhase,
+        entered: Notify,
+        release: Notify,
+    }
+
+    impl PhasePark {
+        pub(crate) fn at(phase: SwitchPhase) -> PhasePark {
+            PhasePark {
+                phase,
+                entered: Notify::new(),
+                release: Notify::new(),
+            }
+        }
+
+        /// Resolves once the switch has parked at the phase.
+        pub(crate) async fn entered(&self) {
+            self.entered.notified().await;
+        }
+
+        /// Lets the parked switch continue.
+        pub(crate) fn release(&self) {
+            self.release.notify_one();
+        }
+
+        pub(crate) async fn park(&self, phase: SwitchPhase) {
+            if phase == self.phase {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+        }
+    }
 }
 
 impl AppState {
+    /// Awaits the installed test rendezvous at `phase`; a no-op in
+    /// production and without one installed.
+    #[cfg(test)]
+    async fn park_at(&self, phase: switch_park::SwitchPhase) {
+        if let Some(park) = &self.park {
+            park.park(phase).await;
+        }
+    }
+
     /// Build full runtime state for `Gateway` and integration tests.
     #[must_use]
     #[expect(
@@ -311,6 +391,7 @@ impl AppState {
                 stt: Some(stt),
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
+                loading: BTreeSet::new(),
             })),
             config: config_path.map(|path| Arc::new(AdminConfig { path })),
             config_generation: format!("{}-{started}", std::process::id()).into(),
@@ -334,6 +415,8 @@ impl AppState {
             },
             #[cfg(feature = "stt")]
             stt_state,
+            #[cfg(test)]
+            park: None,
         }
     }
 
@@ -563,10 +646,13 @@ const STT_RUNTIME_UNAVAILABLE: &str =
 
 /// Resolves a request's model name against the live routing table.
 ///
-/// A configured but not-yet-loaded model - one the catalog names while the
-/// routing table is still empty or mid-switch - earns a 503 naming the
-/// active queue command rather than a bare 404, so the caller knows to
-/// retry once the command completes. With no command active the miss is
+/// A local model the running switch has cut over to but not yet spawned
+/// (one in [`LiveState::loading`]) earns [`GatewayError::ModelLoading`]: a
+/// 503 with `Retry-After`, because the switch will land it. A configured
+/// but not-yet-loaded model - one the catalog names while the routing
+/// table is still empty or mid-switch - earns a 503 naming the active
+/// queue command rather than a bare 404, so the caller knows to retry once
+/// the command completes. With no command active the miss is
 /// [`GatewayError::UnknownModel`], exactly as before the queue existed.
 async fn resolve_routed_model(
     state: &AppState,
@@ -576,6 +662,9 @@ async fn resolve_routed_model(
     match live.routing.model(name) {
         Ok(model) => Ok(model),
         Err(unknown) => {
+            if live.loading.contains(name) {
+                return Err(GatewayError::ModelLoading(name.to_owned()));
+            }
             let configured = live
                 .config
                 .catalog_models()
@@ -905,10 +994,11 @@ fn instant_epoch_seconds(instant: std::time::Instant) -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
-/// Current profile name, loaded model names, process config generation,
-/// the profile's model allowlist, the declared VRAM total, the command
-/// queue's active and pending commands, and one readiness entry per
-/// capability endpoint the gateway can serve.
+/// Current profile name, loaded model names, the local models a running
+/// switch is still loading, process config generation, the profile's model
+/// allowlist, the declared VRAM total, the command queue's active and
+/// pending commands, and one readiness entry per capability endpoint the
+/// gateway can serve.
 async fn admin_status(
     State(state): State<AppState>,
     caller: Caller,
@@ -981,6 +1071,7 @@ async fn admin_status(
     Ok(Json(serde_json::json!({
         "profile": live.profile_name,
         "models": models,
+        "loading_models": live.loading.iter().collect::<Vec<_>>(),
         "config_generation": state.config_generation.as_ref(),
         "model_allowlist": live.model_allowlist,
         "local_children": local_children,
@@ -1194,16 +1285,22 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 ///
 /// The reply is `text/event-stream`: a `{"stage": ...}` event opens each
 /// phase in execution order - `loading-profile` around config load and
-/// validation, `stopping-models` before the old local children shut down,
-/// `starting-models` before the new children load their weights into VRAM
-/// (the long pole) - and the stream ends with exactly one terminal event,
-/// `{"status": "ready", "profile": ...}` or `{"status": "error",
-/// "message": ...}`. The bounded drain has no stage of its own, preserving
-/// the existing stage vocabulary. A refusal before the switch starts (bad
-/// auth or a malformed name) stays a buffered JSON error envelope. Builds
-/// without the `local` feature emit no `stopping-models`/`starting-models`
-/// stages, and refuse a profile declaring `[[local_model]]` with a terminal
-/// error event instead of starting children.
+/// validation, `downloading-models` while the new local models' weights
+/// stage into the cache (only when the profile names local models),
+/// `stopping-models` before the old local children and STT engine shut
+/// down (only when there are any to stop), `starting-models` before the new
+/// children load their weights into VRAM (the long pole) - and the stream
+/// ends with exactly one terminal event, `{"status": "ready", "profile":
+/// ...}` or `{"status": "error", "message": ...}`. The download precedes
+/// the stop when old children exist, so they serve through it, and follows
+/// the cut-over otherwise, so the remote models serve through it; see
+/// [`run_switch_with_config`]. The bounded drain has no stage of its own,
+/// preserving the existing stage vocabulary. A refusal before the switch
+/// starts (bad auth or a malformed name) stays a buffered JSON error
+/// envelope. Builds without the `local` feature emit no
+/// `downloading-models`/`stopping-models`/`starting-models` stages, and
+/// refuse a profile declaring `[[local_model]]` with a terminal error event
+/// instead of starting children.
 ///
 /// The switch runs as a `LoadProfile` command on the gateway's command
 /// queue: serialized with every other command, debounced so a burst of
@@ -1253,12 +1350,56 @@ pub(crate) enum StatePersistence {
 
 /// Executes a switch using an optional catalog parsed by Apply.
 ///
+/// The switch runs in five phases and holds the `switch` lock - the one
+/// [`AppState::begin_inference`] takes - only in the two short ones, so
+/// inference on remote models flows while weights download and children
+/// spawn:
+///
+/// 1. **Prepare** (unlocked): the `loading-profile` leaf, the catalog, the
+///    target profile's config and remote routing table.
+/// 2. **Download** (unlocked): every artifact the new local models need,
+///    under a `downloading-models` leaf, through the same artifact store
+///    the `ProvisionModel` command uses. Cancellation lands at chunk
+///    boundaries.
+/// 3. **Cut over** (locked, bounded): the bounded drain, then the old
+///    local and STT runtimes stop under a `stopping-models` leaf (only
+///    registered when there is something to stop), and one `live.write`
+///    publishes the interim state: the new profile's remote models as the
+///    routing table, the surviving runtimes, and the local models about to
+///    spawn as [`LiveState::loading`].
+/// 4. **Spawn** (unlocked): the new children start and reach readiness
+///    under `starting-models`. A request for a model in `loading` earns
+///    [`GatewayError::ModelLoading`] (503, `Retry-After`); remote models
+///    serve.
+/// 5. **Commit** (locked, brief): [`commit_profile_state`], then one
+///    `live.write` swaps in the full routing table, the runtimes, the
+///    profile, and clears `loading`.
+///
+/// Ordering: the cut-over runs as soon as there is nothing old to stop.
+/// When the live state holds no local children and no STT engine (a cold
+/// boot, or a remote-only previous profile) phase 3 follows phase 1
+/// directly, so the remote models are published before the download
+/// starts. Otherwise the download runs first, so the old runtimes keep
+/// serving through it, and the cut-over follows. In both orders the old
+/// runtimes stop only right before the new ones spawn, never before a
+/// download.
+///
+/// Failure or cancellation after the cut-over - in the download (early
+/// order), the spawn, or the commit - clears `loading`, so requests fall
+/// through to a 404 rather than a permanent 503, keeps the interim remote
+/// routing live, and drops any child that did start: after such a switch
+/// the gateway serves the new profile's remote models and no local ones
+/// until the next switch. A partial start (some children ready, others
+/// failed) is not that case: as before, it commits and swaps the ready
+/// children in, and reports the rest through [`GatewayError::PartialStart`].
+/// A failure before the cut-over leaves the live state untouched.
+///
 /// `token` is the command's cancellation: checked at phase boundaries and
-/// honored by the local start, so a cancelled switch stops instead of
-/// running its remaining phases.
-/// `persistence` is evaluated once, at commit time, so a debounced queue
-/// duplicate can upgrade an ephemeral load into a persisted one while the
-/// switch is still running.
+/// honored by the download and the local start, so a cancelled switch
+/// stops instead of running its remaining phases. `persistence` is
+/// evaluated once, at commit time, so a debounced queue duplicate can
+/// upgrade an ephemeral load into a persisted one while the switch is
+/// still running.
 async fn run_switch_with_config(
     state: AppState,
     name: ProfileName,
@@ -1267,136 +1408,459 @@ async fn run_switch_with_config(
     persistence: impl FnOnce() -> StatePersistence,
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<String, GatewayError> {
-    // Serialize switches for the whole operation (LIB-008).
-    let _switch = state.switch.lock().await;
-
     // A cancelled command stops at phase boundaries rather than midway.
     if token.is_cancelled() {
-        return Err(GatewayError::CommandCancelled(format!(
-            "load-profile: {name}"
-        )));
+        return Err(switch_cancelled(&name));
     }
+    let target = prepare_switch(&state, &name, &tree, candidate).await?;
+    if token.is_cancelled() {
+        return Err(switch_cancelled(&name));
+    }
+
+    // Every phase past the first may run after the interim state is
+    // published, so a failure anywhere in them clears `loading`; before the
+    // cut-over the set is still empty and the clear touches nothing.
+    let outcome = run_switch_phases(&state, &name, &tree, target, persistence, token).await;
+    let report = match outcome {
+        Ok(report) => report,
+        Err(error) => {
+            clear_loading(&state).await;
+            return Err(error);
+        }
+    };
+
+    #[cfg(feature = "local")]
+    if !report.failed.is_empty() {
+        return Err(GatewayError::PartialStart {
+            profile: name.to_string(),
+            loaded: report.loaded,
+            failed: report.failed,
+        });
+    }
+    #[cfg(not(feature = "local"))]
+    let StartReport {} = report;
+
+    tracing::info!(profile = %name, "switched profile");
+    Ok(name.to_string())
+}
+
+/// Phases 2 to 5 of [`run_switch_with_config`], in the order the stop set
+/// dictates. Returns the spawn's per-model report once the commit landed.
+async fn run_switch_phases(
+    state: &AppState,
+    name: &ProfileName,
+    tree: &ProgressTree,
+    target: SwitchTarget,
+    persistence: impl FnOnce() -> StatePersistence,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<StartReport, GatewayError> {
+    let stop = stop_set(state).await;
+    if stop.is_empty() {
+        cut_over(state, &target, tree, stop, token).await?;
+        #[cfg(test)]
+        {
+            state.park_at(switch_park::SwitchPhase::Download).await;
+        }
+        download_artifacts(&target, tree, token).await?;
+    } else {
+        #[cfg(test)]
+        {
+            state.park_at(switch_park::SwitchPhase::Download).await;
+        }
+        download_artifacts(&target, tree, token).await?;
+        cut_over(state, &target, tree, stop, token).await?;
+    }
+    // Phase boundary: start no replacement children for a cancelled command.
+    if token.is_cancelled() {
+        return Err(switch_cancelled(name));
+    }
+    #[cfg(test)]
+    {
+        state.park_at(switch_park::SwitchPhase::Spawn).await;
+    }
+    let replacement = spawn_runtimes(
+        &target.config,
+        #[cfg(feature = "stt")]
+        state.stt_state.clone(),
+        tree,
+        token,
+    )
+    .await?;
+    // Phase boundary: a token fired during the start stops before the
+    // persist and the swap; dropping the replacement tears down any
+    // children it started.
+    if token.is_cancelled() {
+        return Err(switch_cancelled(name));
+    }
+    commit_switch(state, name, target, replacement, persistence(), token).await
+}
+
+/// The cancellation a switch reports when its token fires at a phase
+/// boundary.
+fn switch_cancelled(name: &ProfileName) -> GatewayError {
+    GatewayError::CommandCancelled(format!("load-profile: {name}"))
+}
+
+/// Everything phase 1 resolves for the later phases.
+struct SwitchTarget {
+    /// The target profile's selected config.
+    config: Config,
+    /// The target profile's remote models: the interim routing table at
+    /// cut-over, and the base the local models merge into at commit.
+    remote_routing: Routing,
+    #[cfg(feature = "web-search")]
+    web_search: Option<Arc<WebSearchState>>,
+    allowlist: Option<Vec<String>>,
+    /// The local models the spawn will start, published as
+    /// [`LiveState::loading`] at cut-over.
+    loading: BTreeSet<String>,
+}
+
+/// Phase 1: resolves the target profile from the catalog, unlocked.
+async fn prepare_switch(
+    state: &AppState,
+    name: &ProfileName,
+    tree: &ProgressTree,
+    candidate: Option<Config>,
+) -> Result<SwitchTarget, GatewayError> {
     // Each phase registers its leaf as it opens, so the leaf's `Begun` is the
     // stage marker and a failed switch never announces a phase it did not
-    // reach. Weights track expected duration: starting the new children is
-    // the long pole.
+    // reach. Weights track expected duration: the download and the start
+    // are the long poles.
     let loading = tree.register("loading-profile", 1.0);
     let catalog = match candidate {
         Some(config) => config,
         None => state.live.read().await.config.as_ref().clone(),
     };
-    let (config, remote_routing) = prepare_switch_target(&catalog, &name, &loading)?;
-    loading.complete();
-
-    #[cfg(feature = "web-search")]
-    let new_web_search = config
-        .web_search_config()
-        .map(WebSearchState::new)
-        .map(Arc::new);
-    let new_allowlist = config
-        .active_profile()
-        .map(|profile| profile.models().to_vec());
-
-    if token.is_cancelled() {
-        return Err(GatewayError::CommandCancelled(format!(
-            "load-profile: {name}"
-        )));
-    }
-    // A cancelled command stops waiting on the drain: the replacement
-    // switch (or the shutdown path) re-drains what it needs.
-    tokio::select! {
-        () = drain_inference(&state) => {}
-        () = token.cancelled() => {
-            return Err(GatewayError::CommandCancelled(format!(
-                "load-profile: {name}"
-            )));
-        }
-    }
-
-    // Stop every previous VRAM owner before starting replacements. The bearer
-    // key, routing, and web-search settings stay untouched, so auth remains
-    // stable if a start fails.
-    #[cfg(any(feature = "local", feature = "stt"))]
-    let replacement = replace_runtimes(&state, &config, &tree, token).await?;
-    // Phase boundary: a token fired during the start stops before the
-    // persist and the swap; dropping the replacement tears down any
-    // children it started.
-    if token.is_cancelled() {
-        return Err(GatewayError::CommandCancelled(format!(
-            "load-profile: {name}"
-        )));
-    }
+    let (config, remote_routing) = prepare_switch_target(&catalog, name, &loading)?;
     // A headless build cannot honor a profile declaring local models; refuse
     // the switch rather than silently dropping them.
     #[cfg(not(feature = "local"))]
     if !config.local_models().is_empty() {
+        loading.fail();
         return Err(GatewayError::switch_failed(
             "start-local",
             std::io::Error::other(LOCAL_MODELS_UNSUPPORTED),
         ));
     }
+    loading.complete();
 
+    #[cfg(feature = "web-search")]
+    let web_search = config
+        .web_search_config()
+        .map(WebSearchState::new)
+        .map(Arc::new);
+    let allowlist = config
+        .active_profile()
+        .map(|profile| profile.models().to_vec());
+    let loading = config
+        .local_models()
+        .iter()
+        .map(|model| model.name().to_owned())
+        .collect();
+    Ok(SwitchTarget {
+        config,
+        remote_routing,
+        #[cfg(feature = "web-search")]
+        web_search,
+        allowlist,
+        loading,
+    })
+}
+
+/// Which old runtimes the cut-over must stop.
+#[derive(Debug, Clone, Copy)]
+struct StopSet {
     #[cfg(feature = "local")]
-    let routing = remote_routing
+    local: bool,
+    #[cfg(feature = "stt")]
+    stt: bool,
+}
+
+impl StopSet {
+    /// Whether nothing old is running: the cut-over then costs no stop and
+    /// runs before the download.
+    fn is_empty(self) -> bool {
+        let any = false;
+        #[cfg(feature = "local")]
+        let any = any || self.local;
+        #[cfg(feature = "stt")]
+        let any = any || self.stt;
+        !any
+    }
+}
+
+/// Reads which old runtimes the live state holds.
+#[cfg(any(feature = "local", feature = "stt"))]
+async fn stop_set(state: &AppState) -> StopSet {
+    #[cfg(feature = "local")]
+    let live = state.live.read().await;
+    StopSet {
+        #[cfg(feature = "local")]
+        local: live.local.child_count() > 0,
+        #[cfg(feature = "stt")]
+        stt: state.stt_state.is_active(),
+    }
+}
+
+/// A headless build runs no local or STT runtime, so there is never
+/// anything to stop.
+#[cfg(not(any(feature = "local", feature = "stt")))]
+async fn stop_set(_state: &AppState) -> StopSet {
+    StopSet {}
+}
+
+/// Phase 2: stages every artifact the target's local models need, unlocked,
+/// through the same store and entry points the `ProvisionModel` command and
+/// the local start use, so the start that follows finds every blob cached.
+///
+/// A per-model provisioning failure is not fatal here: the start re-runs
+/// the same ensure, fails the same way, and reports it through
+/// `PartialStart`, so the models that did provision still start. The leaf
+/// records the fault so the stage shows it.
+#[cfg(feature = "local")]
+async fn download_artifacts(
+    target: &SwitchTarget,
+    tree: &ProgressTree,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<(), GatewayError> {
+    if target.config.local_models().is_empty() {
+        return Ok(());
+    }
+    let downloading = tree.register("downloading-models", 5.0);
+    let config = target.config.clone();
+    let progress = downloading.clone();
+    let worker_token = token.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        local::LocalRuntime::provision_artifacts_with_cancellation(
+            &config,
+            Some(&progress),
+            &worker_token,
+        )
+    })
+    .await;
+    match result {
+        Ok(Ok(failures)) if failures.is_empty() => {
+            downloading.complete();
+            Ok(())
+        }
+        Ok(Ok(failures)) => {
+            for failure in &failures {
+                tracing::warn!(
+                    model = failure.model(),
+                    error = %failure.error(),
+                    "local model artifact did not provision; the start reports it"
+                );
+            }
+            downloading.fail();
+            Ok(())
+        }
+        Ok(Err(error)) => {
+            downloading.fail();
+            Err(GatewayError::switch_failed("download-models", error))
+        }
+        Err(error) => {
+            downloading.fail();
+            Err(GatewayError::switch_failed("download-models-task", error))
+        }
+    }
+}
+
+/// Phase 2 in a headless build: nothing to stage, since phase 1 already
+/// refused a profile naming local models.
+#[cfg(not(feature = "local"))]
+async fn download_artifacts(
+    _target: &SwitchTarget,
+    _tree: &ProgressTree,
+    _token: &tokio_util::sync::CancellationToken,
+) -> Result<(), GatewayError> {
+    Ok(())
+}
+
+/// Phase 3: the cut-over, under the switch lock. Drains in-flight
+/// inference (bounded), publishes the interim live state in one write -
+/// the target's remote models as the routing table, the old runtimes taken
+/// out, the local models to come as `loading` - and then stops the old
+/// runtimes it took out, under `stopping-models`. With nothing to stop the
+/// leaf is not registered and the write is the whole phase.
+///
+/// The drain precedes the stop: in-flight requests hold their own `Arc` of
+/// the old table entries, so the swap does not disturb them, but the stop
+/// would kill the children under them.
+async fn cut_over(
+    state: &AppState,
+    target: &SwitchTarget,
+    tree: &ProgressTree,
+    stop: StopSet,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<(), GatewayError> {
+    let _switch = state.switch.lock().await;
+    #[cfg(test)]
+    {
+        state.park_at(switch_park::SwitchPhase::CutOver).await;
+    }
+    // A cancelled command stops waiting on the drain: the replacement
+    // switch (or the shutdown path) re-drains what it needs.
+    tokio::select! {
+        () = drain_inference(state) => {}
+        () = token.cancelled() => {
+            return Err(GatewayError::CommandCancelled("profile switch".to_owned()));
+        }
+    }
+    let stopping = if stop.is_empty() {
+        None
+    } else {
+        Some(tree.register("stopping-models", 2.0))
+    };
+    let old = {
+        let mut live = state.live.write().await;
+        live.routing = Arc::new(target.remote_routing.clone());
+        live.loading.clone_from(&target.loading);
+        if stopping.is_none() {
+            None
+        } else {
+            Some(OldRuntimes {
+                #[cfg(feature = "local")]
+                local: std::mem::replace(&mut live.local, LocalRuntime::empty()),
+                #[cfg(feature = "stt")]
+                stt: live.stt.take(),
+            })
+        }
+    };
+    let (Some(stopping), Some(old)) = (stopping, old) else {
+        return Ok(());
+    };
+    // The routing table also owns each local upstream. Explicit shutdown
+    // disables respawn and frees all old-profile VRAM before replacements
+    // start (PFGL-MOD-001).
+    match tokio::task::spawn_blocking(move || old.shutdown()).await {
+        Ok(Ok(())) => {
+            stopping.complete();
+            Ok(())
+        }
+        Ok(Err(error)) => {
+            stopping.fail();
+            Err(GatewayError::switch_failed("shutdown-local", error))
+        }
+        Err(error) => {
+            stopping.fail();
+            Err(GatewayError::switch_failed("shutdown-local-task", error))
+        }
+    }
+}
+
+/// The runtimes the cut-over took out of the live state, to stop off the
+/// async executor.
+struct OldRuntimes {
+    #[cfg(feature = "local")]
+    local: LocalRuntime,
+    #[cfg(feature = "stt")]
+    stt: Option<SttRuntime>,
+}
+
+impl OldRuntimes {
+    /// Stops every old runtime, STT first so its engine memory is released
+    /// before the local children's teardown is awaited.
+    fn shutdown(self) -> Result<(), shared_protocol::ShutdownError> {
+        #[cfg(feature = "stt")]
+        if let Some(runtime) = self.stt {
+            runtime.shutdown();
+        }
+        #[cfg(feature = "local")]
+        let result = self.local.shutdown();
+        #[cfg(not(feature = "local"))]
+        let result = Ok(());
+        result
+    }
+}
+
+/// Clears [`LiveState::loading`] after a switch failed past its cut-over,
+/// so the models it promised fall through to a 404 instead of a permanent
+/// 503. Before the cut-over the set is empty and this changes nothing.
+async fn clear_loading(state: &AppState) {
+    state.live.write().await.loading.clear();
+}
+
+/// Phase 5: the commit, under the switch lock. Merges the started local
+/// models into the remote table, persists the profile selection, and swaps
+/// the whole new profile into the live state in one write, clearing
+/// `loading`. Persistence precedes the swap: once the state file commits
+/// the swap is infallible, so another switch can never overwrite pending
+/// state between activation and persistence.
+async fn commit_switch(
+    state: &AppState,
+    name: &ProfileName,
+    target: SwitchTarget,
+    replacement: RuntimeReplacement,
+    persistence: StatePersistence,
+    token: &tokio_util::sync::CancellationToken,
+) -> Result<StartReport, GatewayError> {
+    let _switch = state.switch.lock().await;
+    #[cfg(test)]
+    {
+        state.park_at(switch_park::SwitchPhase::Commit).await;
+    }
+    #[cfg(feature = "local")]
+    let routing = target
+        .remote_routing
         .merge(replacement.local.models().iter().cloned())
         .map_err(|e| GatewayError::switch_failed("merge-routing", e))?;
     #[cfg(not(feature = "local"))]
-    let routing = remote_routing;
-
-    // Persistence is part of the serialized switch. Once the state file
-    // commits, the in-memory swap below is infallible, so another switch can
-    // never overwrite pending state between activation and persistence.
-    commit_profile_state(&state, &name, persistence(), token).await?;
-
-    // Atomic swap: commit the whole new profile at once.
-    {
-        let mut live = state.live.write().await;
-        live.routing = Arc::new(routing);
-        // The listener and bearer key are process-owned `[server]` state.
-        // Apply reports their edits as restart-required, so a profile reload
-        // must not change authentication before that restart.
-        live.config = Arc::new(config);
-        #[cfg(feature = "web-search")]
-        {
-            live.web_search = new_web_search;
-        }
-        #[cfg(feature = "local")]
-        {
-            live.local = replacement.local;
-        }
-        #[cfg(feature = "stt")]
-        {
-            live.stt = Some(replacement.stt);
-        }
-        live.profile_name = Some(name.to_string());
-        live.model_allowlist = new_allowlist;
-    }
+    let routing = target.remote_routing;
+    #[cfg(not(any(feature = "local", feature = "stt")))]
+    let RuntimeReplacement {} = replacement;
+    commit_profile_state(state, name, persistence, token).await?;
 
     #[cfg(feature = "local")]
-    if !replacement.start_failures.is_empty() {
-        let loaded = state
-            .live
-            .read()
-            .await
+    let report = StartReport {
+        loaded: replacement
             .local
             .models()
             .iter()
             .map(|model| model.name.clone())
-            .collect();
-        let failed = replacement
+            .collect(),
+        failed: replacement
             .start_failures
-            .into_iter()
+            .iter()
             .map(|failure| format!("{}: {}", failure.model(), failure.error()))
-            .collect();
-        return Err(GatewayError::PartialStart {
-            profile: name.to_string(),
-            loaded,
-            failed,
-        });
-    }
+            .collect(),
+    };
+    #[cfg(not(feature = "local"))]
+    let report = StartReport {};
 
-    tracing::info!(profile = %name, "switched profile");
-    Ok(name.to_string())
+    // Atomic swap: commit the whole new profile at once.
+    let mut live = state.live.write().await;
+    live.routing = Arc::new(routing);
+    // The listener and bearer key are process-owned `[server]` state.
+    // Apply reports their edits as restart-required, so a profile reload
+    // must not change authentication before that restart.
+    live.config = Arc::new(target.config);
+    #[cfg(feature = "web-search")]
+    {
+        live.web_search = target.web_search;
+    }
+    #[cfg(feature = "local")]
+    {
+        live.local = replacement.local;
+    }
+    #[cfg(feature = "stt")]
+    {
+        live.stt = Some(replacement.stt);
+    }
+    live.profile_name = Some(name.to_string());
+    live.model_allowlist = target.allowlist;
+    live.loading.clear();
+    Ok(report)
+}
+
+/// What the spawn reported once the commit landed: the local models that
+/// reached readiness and the ones that failed, rendered for
+/// [`GatewayError::PartialStart`].
+struct StartReport {
+    #[cfg(feature = "local")]
+    loaded: Vec<String>,
+    #[cfg(feature = "local")]
+    failed: Vec<String>,
 }
 
 fn prepare_switch_target(
@@ -1449,7 +1913,7 @@ async fn drain_inference(state: &AppState) {
     }
 }
 
-#[cfg(any(feature = "local", feature = "stt"))]
+/// The runtimes phase 4 started, swapped into the live state at commit.
 struct RuntimeReplacement {
     #[cfg(feature = "local")]
     local: LocalRuntime,
@@ -1459,60 +1923,28 @@ struct RuntimeReplacement {
     stt: SttRuntime,
 }
 
+/// Phase 4 in a headless build: no local or STT runtime exists to start,
+/// and no `starting-models` leaf is registered.
+#[cfg(not(any(feature = "local", feature = "stt")))]
+async fn spawn_runtimes(
+    _config: &Config,
+    _tree: &ProgressTree,
+    _token: &tokio_util::sync::CancellationToken,
+) -> Result<RuntimeReplacement, GatewayError> {
+    Ok(RuntimeReplacement {})
+}
+
+/// Phase 4: starts the target's local children and STT engine and waits
+/// for readiness under `starting-models`, unlocked. The artifacts were
+/// staged by phase 2, so the start's own ensure calls are cache hits and
+/// the phase is the spawn and the weight load.
 #[cfg(any(feature = "local", feature = "stt"))]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the stop-then-start phase shape repeats per runtime behind cfg gates; splitting it would multiply the cfg matrix across call sites"
-)]
-async fn replace_runtimes(
-    state: &AppState,
+async fn spawn_runtimes(
     config: &Config,
+    #[cfg(feature = "stt")] stt_state: SttState,
     tree: &ProgressTree,
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<RuntimeReplacement, GatewayError> {
-    let stopping = tree.register("stopping-models", 2.0);
-    #[cfg(feature = "local")]
-    let old_local = {
-        let mut live = state.live.write().await;
-        std::mem::replace(&mut live.local, LocalRuntime::empty())
-    };
-    #[cfg(feature = "stt")]
-    let old_stt = state.live.write().await.stt.take();
-    // The routing table also owns each local upstream. Explicit shutdown
-    // disables respawn and frees all old-profile VRAM before replacements
-    // start (PFGL-MOD-001).
-    match tokio::task::spawn_blocking(move || {
-        #[cfg(feature = "stt")]
-        if let Some(runtime) = old_stt {
-            runtime.shutdown();
-        }
-        #[cfg(feature = "local")]
-        {
-            let result = old_local.shutdown();
-            drop(old_local);
-            result
-        }
-        #[cfg(not(feature = "local"))]
-        Ok::<(), std::convert::Infallible>(())
-    })
-    .await
-    {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            stopping.fail();
-            return Err(GatewayError::switch_failed("shutdown-local", error));
-        }
-        Err(error) => {
-            stopping.fail();
-            return Err(GatewayError::switch_failed("shutdown-local-task", error));
-        }
-    }
-
-    stopping.complete();
-    // Phase boundary: start no replacement children for a cancelled command.
-    if token.is_cancelled() {
-        return Err(GatewayError::CommandCancelled("profile switch".to_owned()));
-    }
     let starting = tree.register("starting-models", 5.0);
     #[cfg(feature = "local")]
     let start_config = config.clone();
@@ -1566,8 +1998,6 @@ async fn replace_runtimes(
     }
     #[cfg(feature = "stt")]
     let stt_config = config.clone();
-    #[cfg(feature = "stt")]
-    let stt_state = state.stt_state.clone();
     #[cfg(feature = "stt")]
     let stt_progress = starting.clone();
     #[cfg(feature = "stt")]
@@ -2112,12 +2542,12 @@ mod provisioning_tests {
         worker.await.expect("the worker exits on shutdown");
     }
 
-    /// A token fired after the start phase opens stops the switch before the
-    /// persist and the routing-table swap. The canceller fires on the
+    /// A token fired after the spawn phase opens stops the switch before the
+    /// persist and the final routing-table swap. The canceller fires on the
     /// `starting-models` phase opening; the start itself is a no-op (the
-    /// profile selects only a remote model), and the phase boundaries after
-    /// the local start and after `replace_runtimes` keep the cancelled
-    /// switch from committing.
+    /// profile selects only a remote model), and the phase boundary after
+    /// the spawn keeps the cancelled switch from committing: the profile
+    /// is never recorded as active, and `loading` is left clear.
     #[tokio::test]
     async fn a_token_fired_during_the_start_stops_the_persist_and_the_swap() {
         let config = Config::from_toml_str(
@@ -2168,7 +2598,487 @@ mod provisioning_tests {
         let live = state.live.read().await;
         assert!(
             live.profile_name.is_none(),
-            "the cancelled switch never swapped the live state"
+            "the cancelled switch never committed the profile"
+        );
+        assert!(
+            live.loading.is_empty(),
+            "a cancelled switch leaves no model promised as loading"
+        );
+    }
+
+    /// The remote-only catalog the lock tests switch within: `alpha` and
+    /// `beta` each select one remote model on an endpoint nothing listens
+    /// on, and the harness state starts with `alpha` live.
+    fn two_remote_profiles() -> AppState {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
+             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\n\
+             context = 8192\nupstream = \"a\"\nendpoints = [\"e\"]\n\
+             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\n\
+             context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
+             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
+             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n",
+        )
+        .expect("config parses");
+        app_state(config, None)
+    }
+
+    /// Runs the switch to `profile` on its own task with no persistence.
+    fn spawn_switch(
+        state: &AppState,
+        profile: &str,
+        token: &CancellationToken,
+    ) -> tokio::task::JoinHandle<Result<String, crate::error::GatewayError>> {
+        let state = state.clone();
+        let name = ProfileName::parse(profile).expect("profile name");
+        let token = token.clone();
+        tokio::spawn(async move {
+            let tree = state.hub.operation();
+            crate::run_switch_with_config(
+                state,
+                name,
+                tree,
+                None,
+                || crate::StatePersistence::None,
+                &token,
+            )
+            .await
+        })
+    }
+
+    /// Polls `condition` with a bounded wait.
+    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !condition() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
+    /// Inference registration waits behind the switch lock only in the
+    /// cut-over: a request held in flight parks the switch in its bounded
+    /// drain, in phase 3, with the lock held, and a new registration does
+    /// not complete until the held request ends and the switch moves on.
+    /// Pinned in-process because the cut-over is the one phase with no
+    /// stage of its own to observe over HTTP when nothing old is stopping.
+    #[tokio::test]
+    async fn request_registration_waits_behind_the_switch_lock() {
+        let state = two_remote_profiles();
+        let held = state.in_flight.register();
+        let token = CancellationToken::new();
+        let switch = spawn_switch(&state, "beta", &token);
+
+        // The drain parks the switch in the cut-over with the lock held.
+        wait_until("the switch to take its lock in the cut-over", || {
+            state.switch.try_lock().is_err()
+        })
+        .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), state.begin_inference())
+                .await
+                .is_err(),
+            "a registration arriving during the cut-over waits behind the lock"
+        );
+
+        drop(held);
+        let outcome = tokio::time::timeout(Duration::from_secs(10), switch)
+            .await
+            .expect("the switch completes once the held request ends")
+            .expect("the switch task joins");
+        assert_eq!(outcome.expect("the switch succeeds"), "beta");
+        let _registered = tokio::time::timeout(Duration::from_secs(1), state.begin_inference())
+            .await
+            .expect("registration flows once the switch released its lock");
+        assert!(
+            state.live.read().await.routing.model("beta-model").is_ok(),
+            "the switch landed beta's routing"
+        );
+    }
+
+    /// A profile over one remote model on `backend` and one local model
+    /// whose source is a real file but whose `llama-server` is a plain text
+    /// file, so the artifact step succeeds and the spawn fails per model.
+    fn local_profile_config(temp: &tempfile::TempDir, backend: &str) -> Config {
+        let fake_server = temp.path().join("fake-llama-server");
+        std::fs::write(&fake_server, b"not a server").expect("write fake server");
+        let model_file = temp.path().join("local.gguf");
+        std::fs::write(&model_file, b"not a gguf").expect("write model");
+        let slash = |path: &std::path::Path| path.display().to_string().replace('\\', "/");
+        Config::from_toml_str(&format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [local]\ncache_dir = '{}'\nllama_server_path = '{}'\n\
+             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
+             base_url = \"{backend}\"\napi_key = \"\"\n\
+             [[model]]\nname = \"remote-model\"\ndescription = \"d\"\n\
+             context = 8192\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
+             [[local_model]]\nname = \"local-model\"\ndescription = \"l\"\n\
+             source = '{}'\ncontext = 4096\n\
+             [[profile]]\nname = \"main\"\nmodels = [\"remote-model\", \"local-model\"]\n",
+            slash(&temp.path().join("cache")),
+            slash(&fake_server),
+            slash(&model_file),
+        ))
+        .expect("config parses")
+    }
+
+    /// [`local_profile_config`] served by the harness with nothing local
+    /// running and an endpoint nothing listens on, so the switch takes the
+    /// nothing-to-stop order: cut-over, then download, then spawn.
+    fn local_profile_state(temp: &tempfile::TempDir) -> AppState {
+        app_state(local_profile_config(temp, "http://127.0.0.1:9"), None)
+    }
+
+    /// A fake OpenAI backend on an ephemeral loopback port answering every
+    /// chat completion with a canned reply, so a routed request completes
+    /// end to end.
+    async fn fake_chat_backend() -> std::net::SocketAddr {
+        async fn completions(
+            axum::Json(body): axum::Json<serde_json::Value>,
+        ) -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "id": "cmpl-test",
+                "object": "chat.completion",
+                "model": body["model"].as_str().unwrap_or(""),
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "pong" },
+                    "finish_reason": "stop"
+                }]
+            }))
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the backend listener binds");
+        let addr = listener.local_addr().expect("the bound address");
+        tokio::spawn(async move {
+            let _ignored = axum::serve(
+                listener,
+                axum::Router::new().route("/chat/completions", axum::routing::post(completions)),
+            )
+            .await;
+        });
+        addr
+    }
+
+    async fn status(state: AppState) -> serde_json::Value {
+        let response = build_router(state, None)
+            .oneshot(
+                Request::builder()
+                    .uri("/admin/status")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body reads"),
+        )
+        .expect("the status body is JSON")
+    }
+
+    /// What every unlocked phase after the cut-over must look like: the
+    /// lock is free and registration flows, the remote model routes, the
+    /// local model is promised as loading and answers 503 with the wait,
+    /// the status names it, and the catalog lists only what routes.
+    async fn assert_interim_state(state: &AppState, phase: &str) {
+        assert!(
+            state.switch.try_lock().is_ok(),
+            "the switch lock is free during the {phase}"
+        );
+        let _registered = tokio::time::timeout(Duration::from_secs(1), state.begin_inference())
+            .await
+            .unwrap_or_else(|_| panic!("registration flows during the {phase}"));
+        {
+            let live = state.live.read().await;
+            assert!(
+                live.routing.model("remote-model").is_ok(),
+                "the cut-over published the remote model before the {phase}"
+            );
+            assert_eq!(
+                live.loading.iter().collect::<Vec<_>>(),
+                ["local-model"],
+                "the local model is promised as loading during the {phase}"
+            );
+        }
+        let response = chat(state.clone(), "local-model").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a loading model is a 503 during the {phase}"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+            Some("5"),
+            "the 503 names the wait"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "model_loading");
+        let status = status(state.clone()).await;
+        assert_eq!(
+            status["loading_models"],
+            serde_json::json!(["local-model"]),
+            "the status names the loading model during the {phase}"
+        );
+        assert_eq!(
+            status["models"],
+            serde_json::json!(["remote-model"]),
+            "only routable models are listed during the {phase}"
+        );
+    }
+
+    /// After the spawn failed: nothing is promised as loading, the local
+    /// model is a plain 404, and the remote model keeps routing.
+    async fn assert_settled_after_failed_spawn(state: &AppState) {
+        {
+            let live = state.live.read().await;
+            assert!(
+                live.loading.is_empty(),
+                "a failed spawn clears the loading set"
+            );
+            assert!(
+                live.routing.model("remote-model").is_ok(),
+                "the remote routing stays live after the failed spawn"
+            );
+        }
+        let response = chat(state.clone(), "local-model").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "a model whose spawn failed is a 404, never a lingering 503"
+        );
+        assert_eq!(
+            status(state.clone()).await["loading_models"],
+            serde_json::json!([]),
+            "the status lists nothing as loading after the spawn"
+        );
+    }
+
+    /// Cold-boot order: with nothing old to stop, the cut-over runs before
+    /// the download, so the remote model serves and the local model
+    /// answers 503 while the artifacts stage, with the switch lock free.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn the_download_runs_unlocked_after_the_cut_over_published_the_remote_models() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut state = local_profile_state(&temp);
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Download,
+        ));
+        state.park = Some(Arc::clone(&park));
+        let token = CancellationToken::new();
+        let switch = spawn_switch(&state, "main", &token);
+
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
+            .await
+            .expect("the switch parks in the download");
+        assert_interim_state(&state, "download").await;
+
+        park.release();
+        let outcome = tokio::time::timeout(Duration::from_secs(30), switch)
+            .await
+            .expect("the switch settles")
+            .expect("the switch task joins");
+        assert!(
+            matches!(
+                &outcome,
+                Err(crate::error::GatewayError::PartialStart { failed, .. })
+                    if failed.iter().any(|entry| entry.starts_with("local-model"))
+            ),
+            "the fake llama-server cannot start the local model: {outcome:?}"
+        );
+        assert_settled_after_failed_spawn(&state).await;
+    }
+
+    /// The spawn runs unlocked after the cut-over: the remote model
+    /// serves, the local model answers 503 with `Retry-After`, the status
+    /// names it, and once the spawn fails the promise is withdrawn to a 404.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn the_spawn_runs_unlocked_and_a_loading_model_answers_503_until_it_settles() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut state = local_profile_state(&temp);
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Spawn,
+        ));
+        state.park = Some(Arc::clone(&park));
+        let token = CancellationToken::new();
+        let switch = spawn_switch(&state, "main", &token);
+
+        tokio::time::timeout(Duration::from_secs(30), park.entered())
+            .await
+            .expect("the switch parks in the spawn");
+        assert_interim_state(&state, "spawn").await;
+
+        park.release();
+        let outcome = tokio::time::timeout(Duration::from_secs(30), switch)
+            .await
+            .expect("the switch settles")
+            .expect("the switch task joins");
+        assert!(
+            matches!(
+                &outcome,
+                Err(crate::error::GatewayError::PartialStart { .. })
+            ),
+            "the fake llama-server cannot start the local model: {outcome:?}"
+        );
+        assert_settled_after_failed_spawn(&state).await;
+    }
+
+    /// The headline regression, on the boot command itself: the boot
+    /// `LoadProfile` runs on the real queue worker over the instant-ready
+    /// empty shell and parks inside its download. With nothing old to stop,
+    /// the cut-over already published the remote model, so a chat request
+    /// for it completes end to end against the fake backend while the
+    /// local model downloads; the local model answers 503 `model_loading`
+    /// with the wait and is listed as loading. Once released, the spawn
+    /// fails and the promise is withdrawn to a plain 404.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn a_remote_model_serves_while_the_boot_command_is_parked_in_its_download() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut state = crate::test_support::boot_state(local_profile_config(
+            &temp,
+            &format!("http://{backend}"),
+        ));
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Download,
+        ));
+        state.park = Some(Arc::clone(&park));
+        let worker = state
+            .commands
+            .spawn_worker(&state)
+            .expect("the production worker spawns");
+        let _boot = state.commands.enqueue(Command::load_profile(
+            ProfileName::parse("main").expect("profile name"),
+            false,
+            CancellationToken::new(),
+        ));
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
+            .await
+            .expect("the boot command parks in its download");
+
+        let response = chat(state.clone(), "remote-model").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "the remote model serves while the boot command downloads the local one"
+        );
+        assert_interim_state(&state, "boot download").await;
+        assert_eq!(
+            status(state.clone()).await["queue"]["active"]["name"],
+            "load-profile: main",
+            "the boot command is the active command"
+        );
+
+        park.release();
+        wait_until("the boot command to settle", || {
+            state.commands.active_command().is_none()
+        })
+        .await;
+        assert_settled_after_failed_spawn(&state).await;
+        assert_eq!(
+            chat(state.clone(), "remote-model").await.status(),
+            StatusCode::OK,
+            "the remote model keeps serving after the partial start"
+        );
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    /// A cancellation of the boot command while its download is parked
+    /// (cold-boot order) withdraws the loading promise and keeps the
+    /// published remote routing: the remote model serves, the local model
+    /// is a 404, not a lingering 503.
+    #[cfg(feature = "local")]
+    #[tokio::test]
+    async fn a_cancellation_during_the_download_clears_loading_and_keeps_the_remote_routing() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut state = crate::test_support::boot_state(local_profile_config(
+            &temp,
+            &format!("http://{backend}"),
+        ));
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Download,
+        ));
+        state.park = Some(Arc::clone(&park));
+        let worker = state
+            .commands
+            .spawn_worker(&state)
+            .expect("the production worker spawns");
+        let boot = state.commands.enqueue(Command::load_profile(
+            ProfileName::parse("main").expect("profile name"),
+            false,
+            CancellationToken::new(),
+        ));
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
+            .await
+            .expect("the boot command parks in its download");
+        assert_eq!(
+            state.live.read().await.loading.iter().collect::<Vec<_>>(),
+            ["local-model"]
+        );
+
+        assert!(state.commands.cancel_active(), "the boot command is active");
+        park.release();
+        let outcome = tokio::time::timeout(Duration::from_secs(10), boot.outcome)
+            .await
+            .expect("the cancelled command settles")
+            .expect("the worker settles the command");
+        assert!(
+            matches!(
+                &*outcome,
+                Err(crate::error::GatewayError::CommandCancelled(_))
+            ),
+            "the download honors the cancellation: {outcome:?}"
+        );
+        assert_settled_after_failed_spawn(&state).await;
+        assert_eq!(
+            chat(state.clone(), "remote-model").await.status(),
+            StatusCode::OK,
+            "the remote routing published at cut-over survives the cancellation"
+        );
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    /// The resolver's miss ladder: a name in `loading` is `ModelLoading`,
+    /// a name the catalog does not know stays `UnknownModel`.
+    #[tokio::test]
+    async fn a_routing_miss_on_a_loading_model_is_model_loading_not_not_found() {
+        let state = two_remote_profiles();
+        state
+            .live
+            .write()
+            .await
+            .loading
+            .insert("pending-model".to_owned());
+        let loading = crate::resolve_routed_model(&state, "pending-model").await;
+        assert!(
+            matches!(&loading, Err(crate::error::GatewayError::ModelLoading(name)) if name == "pending-model"),
+            "a loading model resolves to ModelLoading: {loading:?}"
+        );
+        let unknown = crate::resolve_routed_model(&state, "ghost").await;
+        assert!(
+            matches!(unknown, Err(crate::error::GatewayError::UnknownModel(_))),
+            "a name outside loading keeps its 404: {unknown:?}"
         );
     }
 }
@@ -3085,6 +3995,11 @@ mod status_surface_tests {
         let body = get_status(state()).await;
         assert_eq!(body["queue"]["active"], serde_json::Value::Null);
         assert_eq!(body["queue"]["pending"], serde_json::json!([]));
+        assert_eq!(
+            body["loading_models"],
+            serde_json::json!([]),
+            "with no switch running, nothing is loading: {body}"
+        );
         assert!(
             body["vram_gb"].is_number(),
             "the declared VRAM total is always present: {body}"

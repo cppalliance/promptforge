@@ -131,6 +131,10 @@ async fn unknown_profile_is_refused_from_the_loaded_catalog() {
     server.shutdown().await;
 }
 
+/// A remote-only switch from a remote-only profile has nothing to download
+/// and nothing to stop, so it registers neither the `downloading-models`
+/// nor the `stopping-models` stage; the stages it does emit keep their
+/// names and order, and the success persists.
 #[cfg(feature = "local")]
 #[tokio::test]
 async fn switch_preserves_stage_names_and_persists_success() {
@@ -144,7 +148,6 @@ async fn switch_preserves_stage_names_and_persists_success() {
         events,
         [
             serde_json::json!({"stage": "loading-profile"}),
-            serde_json::json!({"stage": "stopping-models"}),
             serde_json::json!({"stage": "starting-models"}),
             serde_json::json!({"status": "ready", "profile": "beta"}),
         ]
@@ -211,6 +214,11 @@ async fn switch_waits_for_an_in_flight_request() {
     server.shutdown().await;
 }
 
+/// A request arriving while the switch is parked in its cut-over drain
+/// behind a held request does not register against the old routing; it
+/// waits for the switch lock and lands on the new table. The in-process
+/// test of the same name in the gateway crate pins that the wait is the
+/// cut-over's, with the lock observed directly.
 #[tokio::test]
 async fn request_registration_waits_behind_the_switch_lock() {
     let (backend, mut arrivals) = slow_fake_backend().await;
