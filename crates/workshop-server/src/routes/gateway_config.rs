@@ -76,7 +76,11 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
         Method::PUT => matches!(path, "/admin/config" | "/admin/env"),
         Method::POST => matches!(
             path,
-            "/admin/config-apply" | "/admin/config-revert" | "/admin/reveal"
+            "/admin/config-apply"
+                | "/admin/config-revert"
+                | "/admin/reveal"
+                | "/admin/queue/cancel"
+                | "/admin/queue/cancel-pending"
         ),
         Method::DELETE => path.strip_prefix("/v1/cache/").is_some_and(|digest| {
             digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -202,6 +206,9 @@ mod tests {
             (Method::GET, "/admin/chat-templates"),
             (Method::PUT, "/admin/config"),
             (Method::POST, "/admin/config-apply"),
+            (Method::POST, "/admin/config-revert"),
+            (Method::POST, "/admin/queue/cancel"),
+            (Method::POST, "/admin/queue/cancel-pending"),
             (Method::GET, "/admin/status"),
             (Method::GET, "/admin/hf/search"),
             (Method::GET, "/v1/cache"),

@@ -186,3 +186,7 @@ the user reported the Gateway Config panel refusing to connect; the panel's WebV
 
 the launch-time update check died with an ACL rejection toast because the desktop webview lacked IPC permission for the `desktop_update_supported` command; the permission is generated via `tauri_build::AppManifest` and granted through `WINDOW_PERMISSIONS`. (assistant reasoned from the rejection toast)
 
+## 2026-09-04 Allow queue cancel routes in workshop gateway proxy
+
+live endpoint probing during the Gateway Config failure hunt showed the panel's cancel actions failing: `POST /admin/queue/cancel` and `/admin/queue/cancel-pending` had been omitted from the workshop proxy's `forward_allowed` allowlist; added so cancelling operations from the panel works. (assistant found during live probing)
+
