@@ -74,6 +74,7 @@ const WINDOW_PERMISSIONS: &[&str] = &[
     "dialog:allow-open",
     "updater:default",
     "process:allow-restart",
+    "allow-desktop-update-supported",
 ];
 
 fn main() -> ExitCode {

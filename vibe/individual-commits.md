@@ -182,3 +182,7 @@ turn dispatch pushes Thinking (amber LED) and success releases it, but the Model
 
 the user reported the Gateway Config panel refusing to connect; the panel's WebView2 was serving a stale `app.js` from an 8/31 cache because the unversioned SPA assets carried no cache headers, so the old script could not talk to the new gateway. Every embedded asset now goes out with `Cache-Control: no-cache`, forcing revalidation on every load. (user reported, assistant reasoned)
 
+## 2026-09-04 Grant desktop_update_supported command permission
+
+the launch-time update check died with an ACL rejection toast because the desktop webview lacked IPC permission for the `desktop_update_supported` command; the permission is generated via `tauri_build::AppManifest` and granted through `WINDOW_PERMISSIONS`. (assistant reasoned from the rejection toast)
+
