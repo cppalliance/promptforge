@@ -4,6 +4,7 @@
 // in a fresh jsdom window and calls the exported `boot` with injected
 // dependencies - a stub fetch standing in for the gateway, jsdom's
 // window for location, sessionStorage, and hashchange.
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
@@ -683,6 +684,165 @@ export async function bootApp({ url = CONFIG_URL, key, stub, options } = {}) {
   app.boot(root, { win: dom.window, fetchFn: stub?.fetchFn, ...(options ?? {}) });
   await settle();
   return { dom, root };
+}
+
+let displayRulesPromise;
+
+/**
+ * Every `display` declaration in the built dist/app.css, in cascade
+ * order: `@layer` blocks flattened in their declared order, unlayered
+ * rules last (they beat every layer), source order within. Rules under
+ * a media condition are skipped: jsdom has no viewport, so the
+ * mobile-first base styles are the ones a narrow window would apply.
+ */
+function loadDisplayRules() {
+  if (!displayRulesPromise) {
+    displayRulesPromise = (async () => {
+      const css = await readFile(path.join(distDir, "app.css"), "utf8");
+      const scratch = new JSDOM(BLANK_PAGE);
+      const style = scratch.window.document.createElement("style");
+      style.textContent = css;
+      scratch.window.document.head.append(style);
+      const layerOrder = [];
+      const layered = new Map();
+      const unlayered = [];
+      for (const rule of style.sheet.cssRules) {
+        if (rule.constructor.name === "CSSLayerStatementRule") {
+          layerOrder.push(...rule.nameList);
+        } else if (rule.constructor.name === "CSSLayerBlockRule") {
+          const list = layered.get(rule.name) ?? [];
+          layered.set(rule.name, list);
+          list.push(...rule.cssRules);
+        } else {
+          unlayered.push(rule);
+        }
+      }
+      // The model covers normal declarations in statement-ordered layers
+      // only; anything outside that (an unlisted layer, an !important
+      // display) would be silently mis-ranked, so refuse it instead.
+      for (const name of layered.keys()) {
+        if (!layerOrder.includes(name)) {
+          throw new Error(`bundledDisplay: layer "${name}" is not in the @layer statement`);
+        }
+      }
+      const ordered = [...layerOrder.flatMap((name) => layered.get(name) ?? []), ...unlayered];
+      return ordered.flatMap((rule) => {
+        const display = rule.style?.getPropertyValue("display");
+        if (!display) {
+          return [];
+        }
+        if (rule.style.getPropertyPriority("display") === "important") {
+          throw new Error(`bundledDisplay: "${rule.selectorText}" sets display !important`);
+        }
+        return [{ selector: rule.selectorText, display }];
+      });
+    })();
+  }
+  return displayRulesPromise;
+}
+
+/**
+ * Specificity (ids, classes-attributes-pseudo-classes, types) of one
+ * complex selector. Covers the constructs the sheets use; `:not()` and
+ * `:is()` count their argument, which is exact for a single argument.
+ */
+function specificity(selector) {
+  let ids = 0;
+  let classes = 0;
+  let types = 0;
+  selector
+    .replace(/::[\w-]+/g, () => {
+      types += 1;
+      return " ";
+    })
+    .replace(/:(?:not|is|where|has)\(/g, "(")
+    .replace(/\[[^\]]*\]/g, () => {
+      classes += 1;
+      return " ";
+    })
+    .replace(/#[\w-]+/g, () => {
+      ids += 1;
+      return " ";
+    })
+    .replace(/\.[\w-]+/g, () => {
+      classes += 1;
+      return " ";
+    })
+    .replace(/:[\w-]+(?:\([^)]*\))?/g, () => {
+      classes += 1;
+      return " ";
+    })
+    .replace(/(?<![\w-])[a-zA-Z][\w-]*/g, () => {
+      types += 1;
+      return " ";
+    });
+  return [ids, classes, types];
+}
+
+/** Splits a selector list on its top-level commas. */
+function selectorParts(selectorText) {
+  const parts = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < selectorText.length; i += 1) {
+    const ch = selectorText[i];
+    if (ch === "(" || ch === "[") {
+      depth += 1;
+    } else if (ch === ")" || ch === "]") {
+      depth -= 1;
+    } else if (ch === "," && depth === 0) {
+      parts.push(selectorText.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(selectorText.slice(start).trim());
+  return parts;
+}
+
+function matchesPart(element, part) {
+  // Pseudo-element selectors never match the element itself; anything
+  // else jsdom cannot parse must surface rather than drop the rule.
+  return part.includes("::") ? false : element.matches(part);
+}
+
+/**
+ * The `display` a browser would compute for the element from the built
+ * stylesheet: the winning author declaration by cascade order, else the
+ * UA default (`none` for a `hidden` element, `block` otherwise).
+ *
+ * jsdom's own getComputedStyle cannot answer this: it skips `@layer`
+ * blocks, and its UA `[hidden]` rule outranks author classes by raw
+ * specificity, so it reports `none` for a hidden element whose class
+ * sets an explicit `display` - exactly the case a browser renders.
+ */
+export async function bundledDisplay(element) {
+  const rules = await loadDisplayRules();
+  let winner = null;
+  for (const rule of rules) {
+    const matching = selectorParts(rule.selector).filter((part) => matchesPart(element, part));
+    if (matching.length === 0) {
+      continue;
+    }
+    const best = matching
+      .map(specificity)
+      .reduce((a, b) => (compareSpecificity(a, b) >= 0 ? a : b));
+    if (winner === null || compareSpecificity(best, winner.specificity) >= 0) {
+      winner = { specificity: best, display: rule.display };
+    }
+  }
+  if (winner !== null) {
+    return winner.display;
+  }
+  return element.hidden ? "none" : "block";
+}
+
+function compareSpecificity(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) {
+      return a[i] - b[i];
+    }
+  }
+  return 0;
 }
 
 /** Sets the hash and fires hashchange synchronously for the router. */

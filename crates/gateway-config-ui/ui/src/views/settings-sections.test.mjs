@@ -11,7 +11,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../harness.mjs";
+import {
+  bootApp,
+  bundledDisplay,
+  gatewayStub,
+  modelsFixture,
+  navigate,
+  settle,
+} from "../harness.mjs";
 
 function fixtureStub(extra = {}) {
   return gatewayStub({
@@ -489,14 +496,32 @@ test("the restart banner clears when config generation advances", async () => {
 
   const banner = root.querySelector(".banner-restart");
   assert.ok(banner.hidden, "the restart banner starts hidden");
+  // The hidden property alone does not prove the banner is off screen:
+  // the .banner class sets an explicit display, which beats the UA
+  // [hidden] rule unless the stylesheet carries a [hidden] counterpart.
+  assert.equal(
+    await bundledDisplay(banner),
+    "none",
+    "the stylesheet keeps the hidden restart banner out of the layout",
+  );
   root.querySelector(".apply-button").click();
   await settle();
   assert.ok(!banner.hidden, "a restart-required apply reveals the banner");
+  assert.equal(
+    await bundledDisplay(banner),
+    "flex",
+    "the revealed restart banner lays out as a flex row",
+  );
   assert.match(banner.textContent, /Restart the gateway/);
   stub.state.configGeneration = "generation-2";
   await new Promise((resolve) => setTimeout(resolve, 1_050));
   await settle();
   assert.ok(banner.hidden, "a new gateway generation dismisses the stale restart banner");
+  assert.equal(
+    await bundledDisplay(banner),
+    "none",
+    "the dismissed restart banner leaves the layout again",
+  );
 });
 
 test("blurring a chip input commits the pending text as a chip", async () => {

@@ -105,7 +105,9 @@
 		}
 	}
 
-	/* Persistent banners (pending changes, restart required). */
+	/* Persistent banners (pending changes, restart required). The
+	   explicit display beats the UA [hidden] rule, so the hidden state
+	   needs its own counterpart. */
 	.banner {
 		display: flex;
 		align-items: center;
@@ -114,6 +116,9 @@
 		border-left: 3px solid var(--accent);
 		background: var(--bg-secondary);
 		color: var(--text-primary);
+	}
+	.banner[hidden] {
+		display: none;
 	}
 	.banner-pending {
 		border-left-color: var(--accent);
@@ -568,6 +573,9 @@
 		gap: 0.875rem;
 		padding-block-start: 0.5rem;
 	}
+	.section-body[hidden] {
+		display: none;
+	}
 	.section-add {
 		margin-block: 0.25rem;
 	}
@@ -601,6 +609,9 @@
 	}
 	.chat-template-custom {
 		width: 100%;
+	}
+	.chat-template-custom[hidden] {
+		display: none;
 	}
 	.chat-template-custom .input {
 		width: min(100%, 36rem);

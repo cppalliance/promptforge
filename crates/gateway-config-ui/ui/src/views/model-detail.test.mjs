@@ -8,7 +8,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bootApp, gatewayStub, modelsFixture, navigate, settle } from "../harness.mjs";
+import {
+  bootApp,
+  bundledDisplay,
+  gatewayStub,
+  modelsFixture,
+  navigate,
+  settle,
+} from "../harness.mjs";
 
 function fixtureStub(extra = {}) {
   return gatewayStub({ key: "k", config: modelsFixture(), models: ["qwen-common"], ...extra });
@@ -127,18 +134,47 @@ test("the chat-template dropdown lists the Rust catalog and writes a built-in fa
   assert.equal(model.chat_template_file, "builtin:qwen-3");
 });
 
+test("collapsing a section takes its body out of the layout", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/local/qwen-common");
+  await settle();
+
+  const section = root.querySelector(".detail-section[data-section='gpu']");
+  const toggle = section.querySelector(".section-toggle");
+  const body = section.querySelector(".section-body");
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(await bundledDisplay(body), "flex", "an expanded section body lays out");
+
+  toggle.click();
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.ok(body.hidden, "the toggle hides the body");
+  assert.equal(
+    await bundledDisplay(body),
+    "none",
+    "the stylesheet keeps the collapsed body out of the layout",
+  );
+});
+
 test("Custom path reveals a labeled text field and writes its path", async () => {
   const stub = fixtureStub();
   const { dom, root } = await bootApp({ key: "k", stub });
   navigate(dom, "#/local/llama-leaf");
   await settle();
 
+  const custom = root.querySelector(".chat-template-custom");
+  assert.equal(custom.hidden, true, "a builtin template keeps the path field hidden");
+  assert.equal(
+    await bundledDisplay(custom),
+    "none",
+    "the stylesheet keeps the hidden path field out of the layout",
+  );
   dropdownValues(root, "chat_template_file");
   root
     .querySelector(".field-row[data-key='chat_template_file'] [data-value='__custom_path__']")
     .click();
-  const custom = root.querySelector(".chat-template-custom");
   assert.equal(custom.hidden, false);
+  assert.equal(await bundledDisplay(custom), "flex", "the revealed path field lays out");
   assert.equal(custom.querySelector("label").htmlFor, "field-chat_template_file-custom");
   typeInto(dom, custom.querySelector("input"), "templates/llama.jinja");
   await settle();
