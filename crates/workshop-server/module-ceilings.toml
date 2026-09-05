@@ -58,8 +58,9 @@
 # `ForwardedResponse`, and the `forward` relay the /gateway/api route
 # calls - one more request shape on the same gateway HTTP client. Shrank
 # in the chat-relay excision: the chat completion methods and `ChatStream`
-# left with their tests.
-"gateway.rs" = 1232
+# left with their tests. Grew by the authenticated gateway WebSocket
+# connector used by the same-origin STT relay.
+"gateway.rs" = 1295
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
 # RemoteOperation while the heartbeat reads the gateway as reachable.
@@ -138,6 +139,9 @@
 # the growth commit missed this re-record, banked here at measured size.
 "routes/gateway_config.rs" = 390
 "routes/health.rs" = 50
+# New module: the same-origin capability and WebSocket relay from the
+# Workshop listener to the gateway-owned STT routes.
+"routes/stt.rs" = 298
 "routes/workspace.rs" = 20
 # Grew by the gateway-endpoint wiring: `spawn` resolves the endpoint
 # (connection file first, explicit config second) before the server

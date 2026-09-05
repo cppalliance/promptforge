@@ -5,4 +5,5 @@ pub(crate) mod assets;
 pub(crate) mod chat;
 pub(crate) mod gateway_config;
 pub(crate) mod health;
+pub(crate) mod stt;
 pub(crate) mod workspace;

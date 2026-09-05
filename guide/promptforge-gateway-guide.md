@@ -436,7 +436,7 @@ With a final model configured, completed speech segments are re-transcribed in t
 
 ## The streaming socket
 
-The streaming speech-to-text WebSocket at /stt exists for the workshop listener, but no product binary currently serves it: the desktop application hosts the workshop server itself, and voice input migrates into that server in a later change. Until then the socket and its `GET /stt/capability` probe go unanswered, and dictation in the Workshop stays blocked. What follows is the wire contract where the socket is served.
+The gateway serves the authenticated streaming speech-to-text WebSocket at `/stt` and its `GET /stt/capability` probe. The desktop application's Workshop listener relays those routes under the same paths, so the webview remains same-origin and never receives the gateway credential.
 
 The client drives the socket with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
 

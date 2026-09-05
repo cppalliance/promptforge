@@ -561,7 +561,13 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
     // carries no gateway state.
     #[cfg(feature = "config-ui")]
     let router = router.nest_service("/config/", gateway_config_ui::routes());
-    let router = router.with_state(state);
+    #[cfg(feature = "stt")]
+    let stt_state = state.stt_state.clone();
+    let router = router.with_state(state.clone());
+    #[cfg(feature = "stt")]
+    let router = router.merge(gateway_stt::gateway_routes(stt_state).route_layer(
+        axum::middleware::from_fn_with_state(state, authorize_stt_route),
+    ));
     // The host-authority wall is the outermost layer, so a rebound
     // hostname is refused before any route logic runs.
     match bound {
@@ -628,6 +634,17 @@ async fn audio_transcriptions(
         }
         () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
     }
+}
+
+#[cfg(feature = "stt")]
+async fn authorize_stt_route(
+    State(state): State<AppState>,
+    caller: Caller,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, &caller).await?;
+    Ok(next.run(request).await)
 }
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
@@ -2359,6 +2376,37 @@ mod transcription_auth_tests {
             StatusCode::UNAUTHORIZED,
             "auth refuses the request before its malformed body is extracted"
         );
+    }
+
+    #[tokio::test]
+    async fn stt_capability_is_mounted_behind_bearer_auth() {
+        let unauthorized = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .uri("/stt/capability")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .uri("/stt/capability")
+                    .header("host", "gateway.lan:8080")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(authorized.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(authorized.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        assert_eq!(&body[..], br#"{"gpu":false,"engine":false}"#);
     }
 
     #[tokio::test]

@@ -194,3 +194,5 @@ live endpoint probing during the Gateway Config failure hunt showed the panel's 
 
 the actual root cause of the user's "Gateway Config still doesn't work": the workshop server stamped `frame-ancestors 'none'` on every response including the proxied config SPA, and Chromium renders a frame-ancestors block as "refused to connect"; the proxied config routes get `frame-ancestors 'self'` while every other route keeps `'none'`. (user reported, assistant diagnosed)
 
+## 2026-09-05 Restore desktop dictation through Gateway relay
+

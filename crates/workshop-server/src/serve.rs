@@ -164,9 +164,9 @@ pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
 /// or attach the workshop to a foreign gateway. `routes` runs after
 /// shared state construction on the server thread. It receives the state
 /// so an owning gateway subsystem can attach to the Workshop status bus
-/// without moving that subsystem into this crate. No product host merges
-/// routes today; the seam exists for the gateway-owned STT socket and is
-/// what the test fixtures drive.
+/// without moving that subsystem into this crate. Product hosts currently
+/// need no extra routes; integration fixtures use the seam to exercise
+/// externally-owned route groups.
 ///
 /// # Errors
 /// Returns [`SpawnError::State`] if shared state cannot be built, or

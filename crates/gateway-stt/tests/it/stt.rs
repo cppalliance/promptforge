@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use futures_util::{SinkExt as _, StreamExt as _};
 use gateway_stt::{SttRuntime, SttState};
 use gateway_transcribe::fixtures::{jfk_samples, require_model};
 use serde_json::json;
@@ -84,6 +85,54 @@ async fn a_take_counts_pcm_frames_and_tags_the_final_with_its_generation() {
         "frames are counted, the partial sample is dropped, and no engine means an empty transcript"
     );
     socket.close().await;
+}
+
+#[tokio::test]
+async fn the_workshop_relay_can_request_private_status_frames() {
+    let server = TestServer::spawn();
+    let mut request = server
+        .ws_url("/stt")
+        .into_client_request()
+        .expect("request builds");
+    request.headers_mut().insert(
+        "x-promptforge-workshop-status",
+        "1".parse().expect("status header parses"),
+    );
+    let (mut socket, _response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("socket connects");
+    socket
+        .send(tungstenite::Message::Text("start".into()))
+        .await
+        .expect("start sends");
+    let stream = socket
+        .next()
+        .await
+        .expect("stream frame arrives")
+        .expect("stream frame is valid")
+        .into_text()
+        .expect("stream frame is text");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&stream).expect("stream frame is JSON"),
+        json!({"type": "stream", "generation": 1})
+    );
+    let status = socket
+        .next()
+        .await
+        .expect("status frame arrives")
+        .expect("status frame is valid")
+        .into_text()
+        .expect("status frame is text");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&status).expect("status frame is JSON"),
+        json!({
+            "type": "workshop_status",
+            "label": "Listening...",
+            "description": "a push-to-talk take is recording",
+            "severity": "info"
+        })
+    );
+    socket.close(None).await.expect("socket closes");
 }
 
 #[tokio::test]

@@ -217,6 +217,7 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .merge(routes::chat::routes(state.clone()))
         .merge(crate::session_agents::socket::routes(state.clone()))
+        .merge(routes::stt::routes(state.clone()))
         .merge(routes::gateway_config::routes(state))
         .merge(with_deadline(
             routes::workspace::routes(workspace),

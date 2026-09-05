@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use gateway_transcribe::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail};
 use serde::Serialize;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use workshop_server::{Activity, Push};
 
 use crate::runtime::SttState;
@@ -21,11 +21,102 @@ static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
 const STT_START: &str = "start";
 const STT_STOP: &str = "stop";
+const WORKSHOP_STATUS_HEADER: &str = "x-promptforge-workshop-status";
 
 #[derive(Debug, Clone)]
 struct RouteState {
     stt: SttState,
-    push: Push,
+    reporter: Reporter,
+}
+
+#[derive(Debug, Clone)]
+enum Reporter {
+    Workshop(Push),
+    Socket(mpsc::UnboundedSender<String>),
+    Silent,
+}
+
+#[derive(Debug, Serialize)]
+struct RelayedStatusFrame {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    label: String,
+    description: String,
+    severity: &'static str,
+}
+
+impl Reporter {
+    fn push_status_update(
+        &self,
+        label: impl Into<String>,
+        description: impl Into<String>,
+        activity: Activity,
+    ) {
+        match self {
+            Self::Workshop(push) => push.push_status_update(label, description, activity),
+            Self::Socket(statuses) => {
+                relay_status(statuses, label, description, "info");
+            }
+            Self::Silent => {}
+        }
+    }
+
+    fn push_failure(
+        &self,
+        label: impl Into<String>,
+        description: impl Into<String>,
+        activity: Activity,
+    ) {
+        match self {
+            Self::Workshop(push) => push.push_failure(label, description, activity),
+            Self::Socket(statuses) => {
+                relay_status(statuses, label, description, "error");
+            }
+            Self::Silent => {}
+        }
+    }
+
+    fn push_activity(
+        &self,
+        label: impl Into<String>,
+        description: impl Into<String>,
+        activity: Activity,
+    ) {
+        match self {
+            Self::Workshop(push) => push.push_activity(label, description, activity),
+            Self::Socket(statuses) => {
+                relay_status(statuses, label, description, "debug");
+            }
+            Self::Silent => {}
+        }
+    }
+
+    fn push_idle(&self) {
+        match self {
+            Self::Workshop(push) => push.push_idle(),
+            Self::Socket(statuses) => {
+                relay_status(statuses, "Ready", "idle", "info");
+            }
+            Self::Silent => {}
+        }
+    }
+}
+
+fn relay_status(
+    statuses: &mpsc::UnboundedSender<String>,
+    label: impl Into<String>,
+    description: impl Into<String>,
+    severity: &'static str,
+) {
+    let frame = RelayedStatusFrame {
+        kind: "workshop_status",
+        label: label.into(),
+        description: description.into(),
+        severity,
+    };
+    if let Ok(message) = serde_json::to_string(&frame) {
+        let _ = statuses.send(message);
+    }
 }
 
 /// Builds the workshop-listener STT routes.
@@ -34,11 +125,24 @@ struct RouteState {
 /// cross-site guard protects both routes, and the upgrade performs the
 /// existing explicit Origin check as a second WebSocket-specific layer.
 pub fn routes(stt: SttState, push: Push) -> Router {
+    routes_with_reporter(stt, Reporter::Workshop(push))
+        .route_layer(axum::middleware::from_fn(workshop_server::cross_site_guard))
+}
+
+/// Builds the gateway-listener STT routes.
+///
+/// Session activity is multiplexed as private `workshop_status` frames for
+/// the Workshop relay to consume. Its host is responsible for authenticating
+/// both routes before merging them.
+pub fn gateway_routes(stt: SttState) -> Router {
+    routes_with_reporter(stt, Reporter::Silent)
+}
+
+fn routes_with_reporter(stt: SttState, reporter: Reporter) -> Router {
     Router::new()
         .route("/stt/capability", get(capability))
         .route("/stt", get(upgrade))
-        .route_layer(axum::middleware::from_fn(workshop_server::cross_site_guard))
-        .with_state(RouteState { stt, push })
+        .with_state(RouteState { stt, reporter })
 }
 
 async fn capability(State(state): State<RouteState>) -> impl IntoResponse {
@@ -61,7 +165,19 @@ async fn upgrade(
     if !workshop_server::origin_allowed(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    ws.on_upgrade(move |socket| run_session(socket, state.stt, state.push))
+    let relay_status = headers
+        .get(WORKSHOP_STATUS_HEADER)
+        .is_some_and(|value| value == "1");
+    ws.on_upgrade(move |socket| {
+        let (reporter, statuses) = match (state.reporter, relay_status) {
+            (Reporter::Silent, true) => {
+                let (tx, rx) = mpsc::unbounded_channel();
+                (Reporter::Socket(tx), Some(rx))
+            }
+            (reporter, _) => (reporter, None),
+        };
+        run_session(socket, state.stt, reporter, statuses)
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -204,12 +320,19 @@ async fn next_interim(take: &mut Option<ActiveTake>) -> Option<String> {
     }
 }
 
+async fn next_status(statuses: &mut Option<mpsc::UnboundedReceiver<String>>) -> Option<String> {
+    match statuses {
+        Some(statuses) => statuses.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
 fn spawn_interim(
     session: u64,
     generation: u64,
     engine: Arc<SttEngine>,
     state: Arc<TakeState>,
-    push: Push,
+    reporter: Reporter,
 ) -> ActiveTake {
     let (interim_tx, interims) = watch::channel(None);
     let task = InterimTask(tokio::spawn(async move {
@@ -230,7 +353,7 @@ fn spawn_interim(
             let tentative = if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
                 String::new()
             } else {
-                push.push_activity(
+                reporter.push_activity(
                     "Transcribing...",
                     "an interim pass over the uncommitted audio",
                     Activity::General,
@@ -238,7 +361,7 @@ fn spawn_interim(
                 match engine.transcribe(window).await {
                     Ok(text) => text,
                     Err(error) => {
-                        push.push_activity(
+                        reporter.push_activity(
                             "Transcription failed",
                             error.to_string(),
                             Activity::General,
@@ -279,7 +402,7 @@ async fn final_transcript(
     engine: &SttEngine,
     state: &TakeState,
     segmenter: &Segmenter,
-    push: &Push,
+    reporter: &Reporter,
 ) -> String {
     let window = state.uncommitted_snapshot(segmenter.consumed(), engine.window_samples());
     if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
@@ -288,7 +411,7 @@ async fn final_transcript(
     match engine.transcribe(window).await {
         Ok(text) => text,
         Err(error) => {
-            push.push_failure("Transcription failed", error.to_string(), Activity::General);
+            reporter.push_failure("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final transcription failed");
             String::new()
         }
@@ -324,7 +447,7 @@ fn warn_if_truncated(
     engine: &SttEngine,
     state: &TakeState,
     segmenter: &Segmenter,
-    push: &Push,
+    reporter: &Reporter,
 ) {
     let uncommitted = {
         let guard = state.lock_buffer();
@@ -340,7 +463,7 @@ fn warn_if_truncated(
         window_samples = window,
         "take exceeded the interim window; leading audio dropped from the transcript"
     );
-    push.push_failure(
+    reporter.push_failure(
         "Transcript truncated",
         truncation_message(window, dropped),
         Activity::General,
@@ -352,7 +475,7 @@ async fn stop_transcript(
     engine: Option<&SttEngine>,
     state: &TakeState,
     segmenter: &Segmenter,
-    push: &Push,
+    reporter: &Reporter,
 ) -> String {
     let Some(engine) = engine else {
         return String::new();
@@ -364,22 +487,22 @@ async fn stop_transcript(
     let tail = match engine.final_finish(tail).await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
-            push.push_failure("Transcription failed", error.to_string(), Activity::General);
+            reporter.push_failure("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(
                 session,
                 %error,
                 "final-pass transcription failed; falling back to the interim model"
             );
-            warn_if_truncated(session, engine, state, segmenter, push);
-            final_transcript(session, engine, state, segmenter, push).await
+            warn_if_truncated(session, engine, state, segmenter, reporter);
+            final_transcript(session, engine, state, segmenter, reporter).await
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            warn_if_truncated(session, engine, state, segmenter, push);
-            final_transcript(session, engine, state, segmenter, push).await
+            warn_if_truncated(session, engine, state, segmenter, reporter);
+            final_transcript(session, engine, state, segmenter, reporter).await
         }
     };
     let mut guard = state.lock_committed();
@@ -394,7 +517,7 @@ fn begin_take(
     engine: Option<&Arc<SttEngine>>,
     state: &Arc<TakeState>,
     segmenter: &mut Segmenter,
-    push: &Push,
+    reporter: &Reporter,
 ) -> Option<ActiveTake> {
     segmenter.reset();
     let segments = engine
@@ -411,10 +534,10 @@ fn begin_take(
             generation,
             Arc::clone(engine),
             Arc::clone(state),
-            push.clone(),
+            reporter.clone(),
         )
     });
-    push.push_status_update(
+    reporter.push_status_update(
         "Listening...",
         "a push-to-talk take is recording",
         Activity::General,
@@ -453,12 +576,12 @@ async fn send_text(socket: &mut WebSocket, text: String) -> bool {
 
 struct SessionClose {
     session: u64,
-    push: Push,
+    reporter: Reporter,
 }
 
 impl Drop for SessionClose {
     fn drop(&mut self) {
-        self.push.push_idle();
+        self.reporter.push_idle();
         tracing::info!(session = self.session, "stt session closed");
     }
 }
@@ -480,7 +603,7 @@ impl SessionAudio {
         }
     }
 
-    fn receive(&mut self, payload: &[u8], engine: Option<&SttEngine>, push: &Push) {
+    fn receive(&mut self, payload: &[u8], engine: Option<&SttEngine>, reporter: &Reporter) {
         let samples: Vec<f32> = payload
             .as_chunks::<4>()
             .0
@@ -494,7 +617,7 @@ impl SessionAudio {
             .is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL)
         {
             self.last_mic_pulse = Some(Instant::now());
-            push.push_activity(
+            reporter.push_activity(
                 "Listening...",
                 "microphone audio is arriving",
                 Activity::General,
@@ -508,12 +631,17 @@ impl SessionAudio {
     }
 }
 
-async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
+async fn run_session(
+    mut socket: WebSocket,
+    stt: SttState,
+    reporter: Reporter,
+    mut statuses: Option<mpsc::UnboundedReceiver<String>>,
+) {
     let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     tracing::info!(session, "stt session opened");
     let _closed = SessionClose {
         session,
-        push: push.clone(),
+        reporter: reporter.clone(),
     };
 
     let mut audio = SessionAudio::new();
@@ -541,9 +669,16 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                     break;
                 }
             }
+            status = next_status(&mut statuses) => {
+                if let Some(text) = status
+                    && !send_text(&mut socket, text).await
+                {
+                    break;
+                }
+            }
             inbound = socket.recv() => match inbound {
                 Some(Ok(Message::Binary(payload))) => {
-                    audio.receive(&payload, engine.as_deref(), &push);
+                    audio.receive(&payload, engine.as_deref(), &reporter);
                 }
                 Some(Ok(Message::Text(text))) => match text.as_str() {
                     STT_START => {
@@ -560,12 +695,12 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                             engine.as_ref(),
                             &audio.state,
                             &mut audio.segmenter,
-                            &push,
+                            &reporter,
                         );
                     }
                     STT_STOP => {
                         take = None;
-                        push.push_status_update(
+                        reporter.push_status_update(
                             "Finalizing transcript...",
                             "the final pass over the take",
                             Activity::General,
@@ -575,7 +710,7 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                             engine.as_deref(),
                             &audio.state,
                             &audio.segmenter,
-                            &push,
+                            &reporter,
                         )
                         .await;
                         tracing::info!(session, frames = audio.frames, "stt capture stopped");
@@ -587,7 +722,7 @@ async fn run_session(mut socket: WebSocket, stt: SttState, push: Push) {
                         {
                             break;
                         }
-                        push.push_idle();
+                        reporter.push_idle();
                     }
                     _ => tracing::debug!(session, "ignoring an unknown stt control message"),
                 },

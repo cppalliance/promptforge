@@ -14,6 +14,11 @@ use std::time::Duration;
 
 use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+/// An authenticated WebSocket connection to the gateway's STT stream.
+pub(crate) type GatewaySttSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Default bound on a single `GET /health` probe: a gateway that accepts
 /// the connection but never answers must still read as unreachable, and two
@@ -353,6 +358,64 @@ impl GatewayClient {
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Opens the gateway's authenticated `/stt` WebSocket.
+    ///
+    /// The Workshop browser never receives the gateway key. Its same-origin
+    /// socket terminates at workshop-server, which uses this connection for
+    /// the upstream half of the relay.
+    pub(crate) async fn connect_stt(&self) -> Result<GatewaySttSocket, GatewayError> {
+        let mut url = url::Url::parse(&self.base_url)
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        let scheme = match url.scheme() {
+            "http" => "ws",
+            "https" => "wss",
+            scheme => {
+                return Err(GatewayError::Transport(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("gateway URL scheme {scheme:?} cannot carry a WebSocket"),
+                ))));
+            }
+        };
+        url.set_scheme(scheme).map_err(|()| {
+            GatewayError::Transport(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "gateway URL scheme cannot be converted to WebSocket",
+            )))
+        })?;
+        let path = format!("{}/stt", url.path().trim_end_matches('/'));
+        url.set_path(&path);
+        url.set_query(None);
+        url.set_fragment(None);
+        let mut request = url
+            .as_str()
+            .into_client_request()
+            .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+        if !self.api_key.is_empty() {
+            let value = format!("Bearer {}", self.api_key)
+                .parse()
+                .map_err(|source| GatewayError::Transport(Box::new(source)))?;
+            request.headers_mut().insert(
+                tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+                value,
+            );
+        }
+        request.headers_mut().insert(
+            "x-promptforge-workshop-status",
+            "1".parse()
+                .map_err(|source| GatewayError::Transport(Box::new(source)))?,
+        );
+        match tokio::time::timeout(
+            self.request_timeout,
+            tokio_tungstenite::connect_async(request),
+        )
+        .await
+        {
+            Ok(Ok((socket, _response))) => Ok(socket),
+            Ok(Err(source)) => Err(GatewayError::Transport(Box::new(source))),
+            Err(elapsed) => Err(GatewayError::Transport(Box::new(elapsed))),
+        }
     }
 
     /// Forwards one request to the gateway: `method` on

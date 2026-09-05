@@ -35,6 +35,7 @@ shared-sidecar.workspace = true
 socket2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -53,7 +54,6 @@ workshop-server = { path = ".", features = ["test-fixtures"] }
 shared-sidecar = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
-tokio-tungstenite.workspace = true
 tower.workspace = true
 
 # The build script bundles the UI with esbuild into OUT_DIR through the

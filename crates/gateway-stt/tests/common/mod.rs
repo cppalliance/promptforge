@@ -12,14 +12,13 @@ use gateway_stt::{SttRuntime, SttState};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use workshop_server::{AgentsConfig, Config, GatewayConfig, ServerConfig, ServerHandle};
 
 pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) struct TestServer {
-    handle: Option<ServerHandle>,
+    url: String,
+    task: tokio::task::JoinHandle<()>,
     _runtime: Option<SttRuntime>,
-    _state_dir: tempfile::TempDir,
 }
 
 impl TestServer {
@@ -28,39 +27,33 @@ impl TestServer {
     }
 
     pub(crate) fn spawn_with(state: SttState, runtime: Option<SttRuntime>) -> Self {
-        let state_dir = tempfile::TempDir::new().expect("tempdir");
-        let config = Config {
-            gateway: GatewayConfig {
-                base_url: "http://127.0.0.1:1".to_owned(),
-                api_key: "test-key".to_owned(),
-            },
-            server: ServerConfig {
-                bind: "127.0.0.1:0".to_owned(),
-                open_browser: false,
-                state_dir: state_dir.path().to_path_buf(),
-            },
-            agents: AgentsConfig::default(),
-        };
-        let route_state = state;
-        // Discovery is bypassed: a test never consults the real run
-        // directory.
-        let gateway = workshop_server::ResolvedGateway::from_config(&config.gateway);
-        let handle = workshop_server::spawn_with_routes(config, gateway, move |app| {
-            gateway_stt::stt_routes(route_state, app.push())
-        })
-        .expect("workshop server spawns with STT routes");
+        let std_listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("gateway listener binds");
+        std_listener
+            .set_nonblocking(true)
+            .expect("gateway listener becomes nonblocking");
+        let address = std_listener
+            .local_addr()
+            .expect("gateway listener has an address");
+        let listener =
+            tokio::net::TcpListener::from_std(std_listener).expect("tokio adopts the listener");
+        let app = gateway_stt::gateway_routes(state);
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("gateway STT fixture serves");
+        });
         Self {
-            handle: Some(handle),
+            url: format!("http://{address}"),
+            task,
             _runtime: runtime,
-            _state_dir: state_dir,
         }
     }
 
     pub(crate) fn ws_url(&self, path: &str) -> String {
-        let url = self.handle.as_ref().expect("handle held until drop").url();
         format!(
             "ws{}{}",
-            url.strip_prefix("http").expect("server URL is http"),
+            self.url.strip_prefix("http").expect("server URL is http"),
             path
         )
     }
@@ -68,9 +61,7 @@ impl TestServer {
 
 impl Drop for TestServer {
     fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.shutdown();
-        }
+        self.task.abort();
     }
 }
 
