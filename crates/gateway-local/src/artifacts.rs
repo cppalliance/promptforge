@@ -70,11 +70,13 @@ const INSTALL_MARKER: &str = ".promptforge-install";
 const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Whole-request timeout for an artifact download (ART-003).
 ///
-/// The pinned blocking reqwest client exposes no per-read (idle) timeout, so a
-/// stalled body is bounded by a generous whole-request ceiling instead: large
-/// enough for multi-gigabyte GGUF weights on a slow link, but finite so a peer
-/// that accepts the connection and then sends nothing can never pin the
-/// provisioning thread forever.
+/// The pinned blocking reqwest client (0.12) exposes no per-read timeout,
+/// so the read loop enforces the idle bound itself (see `download.rs`); this
+/// generous ceiling stays as the final backstop: large enough for
+/// multi-gigabyte GGUF weights on a slow link, but finite so a peer that
+/// accepts the connection and then sends nothing can never pin the
+/// provisioning thread forever - and a reader thread parked past the idle
+/// bound reaps when the ceiling drops its body.
 const DOWNLOAD_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
 
 type Result<T> = std::result::Result<T, LocalError>;
@@ -790,7 +792,7 @@ pub fn existing_model_path(cache_root: &Path, source: &str) -> Result<Option<Pat
 
 /// The blocking HTTP client shared by artifact provisioning and the blob
 /// cache: gateway user agent, bounded connect, and a generous whole-request
-/// ceiling (ART-003) in place of a per-read idle timeout.
+/// ceiling (ART-003) behind the read loop's own idle bound.
 ///
 /// # Errors
 /// Returns [`LocalError::HttpClient`] when the client cannot be built.

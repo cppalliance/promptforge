@@ -11,10 +11,18 @@
 //! page (or prints its URL under `--print-url`) and exits.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use gateway::{ProfileName, ServeOptions, run, run_printing_url, run_with_tray};
+use tracing_subscriber::Layer as _;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+/// The log filter when `RUST_LOG` is unset: the gateway crates at `info`
+/// (a download or a switch must say what it is doing), the chatty HTTP
+/// dependencies at `warn`. `RUST_LOG` overrides the whole string.
+const DEFAULT_LOG_FILTER: &str = "info,whisper_cpp=warn,hyper=warn,h2=warn,reqwest=warn,tower=warn";
 
 const USAGE: &str = concat!(
     "usage: promptforge-gateway serve [config.toml] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
@@ -47,13 +55,6 @@ fn main() -> ExitCode {
         );
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("whisper_cpp=warn")),
-        )
-        .init();
-
     let invocation = match parse_args(std::env::args_os()) {
         Ok(invocation) => invocation,
         Err(ParseError::Help) => {
@@ -70,6 +71,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // Logging starts only for a serve launch: a `--version` or `--help`
+    // call must not rotate the running gateway's log out from under it.
+    init_logging();
 
     // A second launch never boots a duplicate server: when a live gateway
     // owns the connection file, hand off to it and exit. This runs before
@@ -107,6 +112,67 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Installs the global subscriber: the filtered stream on stdout, plus the
+/// same stream in `<state dir>/logs/gateway.log`, where the state dir is the
+/// `.promptforge` directory the run directory's resolver already knows
+/// (it holds `gateway.toml`, `run/`, and `models/`). A log file that cannot
+/// be opened warns on stdout and never stops the gateway.
+fn init_logging() {
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
+    };
+    let stdout = tracing_subscriber::fmt::layer().with_filter(filter());
+    let log_file = shared_sidecar::default_run_dir()
+        .and_then(|run_dir| run_dir.parent().map(Path::to_path_buf))
+        .map(|state_dir| open_log_file(&state_dir));
+    match log_file {
+        Some(Ok((path, file))) => {
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file))
+                .with_filter(filter());
+            tracing_subscriber::registry()
+                .with(stdout)
+                .with(file_layer)
+                .init();
+            tracing::info!("logging to {}", path.display());
+        }
+        Some(Err(error)) => {
+            tracing_subscriber::registry().with(stdout).init();
+            tracing::warn!("could not open the log file: {error}; logging to stdout only");
+        }
+        None => {
+            tracing_subscriber::registry().with(stdout).init();
+            tracing::warn!("no user profile directory found; logging to stdout only");
+        }
+    }
+}
+
+/// Opens `<state_dir>/logs/gateway.log` fresh for this run, first rotating
+/// an existing log to `gateway.log.1` and overwriting any older rotation,
+/// so one previous run is kept and disk use stays bounded.
+///
+/// # Errors
+/// Returns the I/O failure from creating the directory, rotating the
+/// existing log, or opening the fresh one.
+fn open_log_file(state_dir: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    let logs = state_dir.join("logs");
+    std::fs::create_dir_all(&logs)?;
+    let current = logs.join("gateway.log");
+    let previous = logs.join("gateway.log.1");
+    if current.is_file() {
+        // A rename cannot overwrite an existing destination on Windows, so
+        // the older rotation is removed first.
+        if previous.is_file() {
+            std::fs::remove_file(&previous)?;
+        }
+        std::fs::rename(&current, &previous)?;
+    }
+    let file = std::fs::File::create(&current)?;
+    Ok((current, file))
 }
 
 /// Print the error and its full `source()` chain to stderr.
@@ -250,6 +316,54 @@ fn resolve_config_path(cli: Option<PathBuf>, env: Option<OsString>) -> Option<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_default_filter_keeps_gateway_info_and_quiets_whisper_cpp() {
+        let filter = tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER);
+        assert_eq!(
+            filter.max_level_hint(),
+            Some(tracing::level_filters::LevelFilter::INFO),
+            "gateway crates log at info and nothing enables debug"
+        );
+        assert!(
+            DEFAULT_LOG_FILTER.contains("whisper_cpp=warn"),
+            "the noisy STT dependency stays at warn: {DEFAULT_LOG_FILTER}"
+        );
+        assert!(
+            !DEFAULT_LOG_FILTER.contains("debug") && !DEFAULT_LOG_FILTER.contains("trace"),
+            "the default never enables debug or trace: {DEFAULT_LOG_FILTER}"
+        );
+    }
+
+    #[test]
+    fn the_log_rotation_keeps_one_previous_run() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("logs")).expect("logs dir");
+        std::fs::write(temp.path().join("logs/gateway.log"), "first run").expect("seed log");
+
+        let (path, file) = open_log_file(temp.path()).expect("first rotation opens");
+        drop(file);
+        assert_eq!(path, temp.path().join("logs/gateway.log"));
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("logs/gateway.log.1")).expect("rotated log"),
+            "first run",
+            "the previous run's log rotates to .1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("fresh log"),
+            "",
+            "the new run starts on a fresh file"
+        );
+
+        std::fs::write(&path, "second run").expect("write second run");
+        let (_path, file) = open_log_file(temp.path()).expect("second rotation opens");
+        drop(file);
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("logs/gateway.log.1")).expect("rotated log"),
+            "second run",
+            "a second rotation overwrites the older .1"
+        );
+    }
 
     fn args(items: &[&str]) -> Vec<OsString> {
         std::iter::once("promptforge-gateway")

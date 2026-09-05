@@ -212,6 +212,58 @@ models = ["missing-model"]
     handle.shutdown().expect("graceful shutdown");
 }
 
+/// A headless `serve` writes its startup line to the log file under the
+/// state dir: the real binary is spawned with the profile directory
+/// redirected into a temp dir (via the home variables `home_dir` reads), so
+/// the run touches nothing outside it - not the connection file, not the
+/// already-running handoff, not the logs.
+#[test]
+fn headless_serve_writes_the_startup_line_to_the_log_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = write_config(
+        &temp,
+        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n"
+            .to_string(),
+    );
+    let log = temp
+        .path()
+        .join(".promptforge")
+        .join("logs")
+        .join("gateway.log");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("serve")
+        .arg(&path)
+        .arg("--no-tray")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("RUST_LOG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the gateway binary spawns");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let contents = loop {
+        if log.is_file() {
+            let text = std::fs::read_to_string(&log).expect("read the log file");
+            if text.contains("logging to") {
+                break text;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the startup line landed in {}",
+            log.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        contents.contains("gateway.log"),
+        "the startup line names the log path: {contents}"
+    );
+}
+
 /// A config with two profiles over one backend, so a switch from `main` to
 /// `other` exercises the switch machinery against the slow backend.
 fn two_profile_config(backend: std::net::SocketAddr) -> String {

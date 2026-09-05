@@ -1048,6 +1048,80 @@ fn download_read_timeout_fails_on_a_stalled_body() {
 }
 
 #[test]
+fn an_idle_body_fails_within_the_read_bound_and_keeps_the_partial() {
+    // A peer that sends headers and then goes silent must surface as a
+    // timed-out read at the chunk boundary: the error lands inside twice the
+    // idle bound, and the staged partial plus its provenance marker stay on
+    // disk for a later resume.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent server");
+    let addr = listener.local_addr().expect("addr");
+    let handle = thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = [0_u8; 1024];
+        let _ = stream.read(&mut buf); // consume the request head
+        let head = "HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.flush();
+        // Headers sent, body never comes. The socket read is bounded so the
+        // fixture always exits, even if the client never drops.
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+        let _ = stream.read(&mut buf);
+    });
+
+    let idle = Duration::from_secs(1);
+    // The client's whole-request ceiling sits past the idle bound, exactly
+    // as in production: the idle error under test fires first, and the
+    // ceiling later drops the parked body so the fixture thread can exit.
+    let client = Client::builder().timeout(idle * 3).build().expect("client");
+    let temp = TempDir::new().expect("tempdir");
+    let dest = temp.path().join("silent.bin");
+    let url = format!("http://{addr}/silent.bin");
+    let started = std::time::Instant::now();
+    let err = super::download::download_with_idle(
+        &client,
+        &url,
+        &dest,
+        &RecordingProgress::new(),
+        None,
+        idle,
+    )
+    .expect_err("a silent peer must fail the download");
+    let elapsed = started.elapsed();
+    let LocalError::DownloadRead { source, .. } = &err else {
+        panic!("the stall surfaces as a read error: {err:?}");
+    };
+    assert_eq!(
+        source.kind(),
+        io::ErrorKind::TimedOut,
+        "the stall is an idle timeout: {err:?}"
+    );
+    assert!(
+        elapsed >= idle,
+        "the peer is given the whole idle bound: {elapsed:?}"
+    );
+    assert!(
+        elapsed < idle * 2,
+        "the timeout fires within twice the idle bound: {elapsed:?}"
+    );
+    assert_eq!(
+        std::fs::read(&dest).expect("partial kept"),
+        b"",
+        "no bytes were staged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(source_marker_path(&dest)).expect("marker kept"),
+        url,
+        "the provenance marker survives the failure"
+    );
+    // Dropping the client shuts down its runtime, which closes the stalled
+    // connection and lets the fixture thread exit.
+    drop(client);
+    let _ = handle.join();
+}
+
+#[test]
 fn downloads_verifies_and_reuses_cached_blob() {
     let body = b"tiny-gguf-fixture";
     let digest = hex_sha256(body);

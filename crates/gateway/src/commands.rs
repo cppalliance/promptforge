@@ -244,6 +244,23 @@ struct QueueState {
     pending: VecDeque<PendingEntry>,
     next_id: u64,
     closed: bool,
+    /// Test hook replacing the command body a spawned worker runs, so a
+    /// `serve` test can park the worker on a command that ignores its
+    /// cancellation token.
+    #[cfg(test)]
+    executor_override: Option<ExecutorOverride>,
+}
+
+/// The test hook's held executor; a `dyn Fn` has no `Debug`, so the
+/// wrapper prints a placeholder.
+#[cfg(test)]
+struct ExecutorOverride(Arc<Executor>);
+
+#[cfg(test)]
+impl std::fmt::Debug for ExecutorOverride {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ExecutorOverride(..)")
+    }
 }
 
 /// A point-in-time readout of the running command.
@@ -583,10 +600,21 @@ impl CommandQueue {
     /// Spawns the worker task draining the queue, running the production
     /// command bodies. Returns `None` when a worker was already taken.
     pub(crate) fn spawn_worker(&self, state: &AppState) -> Option<tokio::task::JoinHandle<()>> {
+        #[cfg(test)]
+        if let Some(executor) = self.lock().executor_override.as_ref() {
+            return self.spawn_worker_with(state, Arc::clone(&executor.0));
+        }
         self.spawn_worker_with(
             state,
             Arc::new(|state, command, tree| Box::pin(run_command(state, command, tree))),
         )
+    }
+
+    /// Test hook: workers spawned after this call run `executor` as the
+    /// command body instead of the production commands.
+    #[cfg(test)]
+    pub(crate) fn override_executor(&self, executor: Arc<Executor>) {
+        self.lock().executor_override = Some(ExecutorOverride(executor));
     }
 
     /// [`Self::spawn_worker`] with the command body injected, so a test can

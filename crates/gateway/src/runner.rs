@@ -37,10 +37,20 @@ const GRACEFUL_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// serving ends. Dropping a tokio runtime waits indefinitely for its
 /// blocking pool, and a request the drain abandoned may still sit in a
 /// blocking call, so the runtime is abandoned after this bound and the
-/// leftover work dies with the process. The command worker is not covered
-/// here: `serve` joins it before returning, so a command body that ignored
-/// its token would pin that join first.
+/// leftover work dies with the process. The command worker is joined by
+/// `serve` under [`WORKER_JOIN_TIMEOUT`] before this teardown runs, so a
+/// command body that ignored its token is already abandoned by then.
 const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long `serve` waits for the command worker after the queue closes.
+/// A command body that ignores its cancellation token (a stalled download
+/// or spawn) would otherwise pin the join forever; after this bound the
+/// worker is abandoned and [`RUNTIME_SHUTDOWN_TIMEOUT`] reaps what is
+/// left. The bound can never abandon a half-written state file: the
+/// switch's commit section (`commit_profile_state`) is a brief
+/// `spawn_blocking` of file renames that no token can interrupt anyway, so
+/// only a download or a spawn can outlive it.
+const WORKER_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Options for running the gateway. Built by the binary from parsed args.
 #[non_exhaustive]
@@ -387,7 +397,10 @@ impl Gateway {
     /// closes the queue (so the active command cancels and nothing pending
     /// starts), then drains in-flight requests for at most
     /// [`GRACEFUL_DRAIN_TIMEOUT`]; a connection that outlives the drain is
-    /// dropped with the runtime rather than pinning the exit.
+    /// dropped with the runtime rather than pinning the exit. The command
+    /// worker is then joined for at most [`WORKER_JOIN_TIMEOUT`]: a command
+    /// body that ignored its cancellation token is abandoned to the runtime
+    /// teardown instead of pinning the exit.
     ///
     /// # Errors
     /// Returns [`ServeError`] when the bound address cannot be read or the
@@ -443,9 +456,21 @@ impl Gateway {
         };
         // Close the queue and reap the worker, so a gateway served on a
         // caller-owned runtime (tests, embedders) leaves no task behind.
+        // The join is bounded: a command body that ignored its token is
+        // abandoned here and left to the runtime teardown bound.
         commands_after.shutdown();
-        if let Some(worker) = worker {
-            let _ = worker.await;
+        if let Some(worker) = worker
+            && tokio::time::timeout(WORKER_JOIN_TIMEOUT, worker)
+                .await
+                .is_err()
+        {
+            let command = commands_after
+                .active_command()
+                .map_or_else(|| "unknown".to_owned(), |status| status.name);
+            tracing::warn!(
+                command = %command,
+                "the command worker did not stop within {WORKER_JOIN_TIMEOUT:?}; abandoning it"
+            );
         }
         result
     }
@@ -573,6 +598,66 @@ mod drain_tests {
             started.elapsed()
         );
         stalled.abort();
+    }
+
+    /// A command body that ignores its cancellation token cannot pin the
+    /// exit: `serve` gives the worker join exactly [`WORKER_JOIN_TIMEOUT`],
+    /// then returns without it.
+    #[tokio::test]
+    async fn serve_abandons_a_worker_that_ignores_cancellation_after_the_join_bound() {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
+        )
+        .expect("config parses");
+        let gateway =
+            Gateway::from_config(&config, ProfilesContext::default()).expect("gateway assembles");
+        let (entered, mut parked) = tokio::sync::mpsc::unbounded_channel();
+        gateway
+            .state
+            .commands
+            .override_executor(std::sync::Arc::new(move |_state, _command, _tree| {
+                let entered = entered.clone();
+                Box::pin(async move {
+                    let _ = entered.send(());
+                    // The token never fires this body: it parks forever.
+                    std::future::pending().await
+                })
+                    as futures_util::future::BoxFuture<'static, crate::commands::Outcome>
+            }));
+        let _command = gateway
+            .state
+            .commands
+            .enqueue(crate::commands::Command::load_profile(
+                ProfileName::parse("main").expect("profile name"),
+                false,
+                tokio_util::sync::CancellationToken::new(),
+            ));
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the listener binds");
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let serve = tokio::spawn(gateway.serve(listener, async move {
+            let _ = shutdown_rx.await;
+        }));
+        // The rendezvous: the worker is parked inside the command body.
+        tokio::time::timeout(Duration::from_secs(10), parked.recv())
+            .await
+            .expect("the worker picks up the command")
+            .expect("the command body reports it started");
+
+        let started = Instant::now();
+        let _ = shutdown.send(());
+        tokio::time::timeout(WORKER_JOIN_TIMEOUT * 2, serve)
+            .await
+            .expect("serve returns within twice the join bound")
+            .expect("the serve task did not panic")
+            .expect("serve returns Ok after abandoning the worker");
+        assert!(
+            started.elapsed() >= WORKER_JOIN_TIMEOUT,
+            "the worker is given the whole join bound: {:?}",
+            started.elapsed()
+        );
     }
 }
 

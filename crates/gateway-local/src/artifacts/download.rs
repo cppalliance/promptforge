@@ -4,6 +4,8 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
@@ -20,6 +22,13 @@ use crate::error::LocalError;
 /// Hard ceiling on a single artifact, guarding the cache volume against a
 /// malicious or mistaken endpoint. Generous enough for large GGUF weights.
 const MAX_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024 * 1024;
+
+/// Idle bound on a single body read: a peer that stops sending mid-body
+/// surfaces as a timed-out read within this window, so Cancel and Quit are
+/// honored at the next chunk boundary instead of waiting out the client's
+/// whole-request ceiling. A healthy slow transfer never trips it: any byte
+/// inside the window resets it.
+const DOWNLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether `url` is an HTTPS Hugging Face host eligible for the hub bearer token.
 ///
@@ -250,6 +259,71 @@ fn open_transfer(
         })
 }
 
+/// Streams a blocking response body through a channel so the download loop
+/// receives each chunk under an idle deadline. The pinned blocking reqwest
+/// client (0.12) exposes no per-read timeout, so the reader thread owns the
+/// response and forwards every read; a peer that goes silent past the
+/// deadline surfaces as [`std::io::ErrorKind::TimedOut`] at the chunk
+/// boundary where the cancellation token is already checked, and the staged
+/// partial stays resumable. A read parked past the deadline stays parked
+/// until the client's whole-request ceiling drops the body, which ends the
+/// thread - the wait is bounded and the thread always reaps.
+struct IdleReader {
+    chunks: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    idle: Duration,
+}
+
+impl IdleReader {
+    /// Spawns the reader thread draining `response`.
+    ///
+    /// # Errors
+    /// Returns the thread-spawn failure.
+    fn new(mut response: Response, idle: Duration) -> std::io::Result<IdleReader> {
+        let (sender, chunks) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("artifact-download-reader".to_owned())
+            .spawn(move || {
+                let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+                loop {
+                    let chunk = response
+                        .read(&mut buffer)
+                        .map(|count| buffer[..count].to_vec());
+                    // An empty chunk is the end of the stream; after an error
+                    // or EOF there is nothing more to send.
+                    let terminal =
+                        chunk.is_err() || matches!(&chunk, Ok(bytes) if bytes.is_empty());
+                    if sender.send(chunk).is_err() || terminal {
+                        break;
+                    }
+                }
+            })?;
+        Ok(IdleReader { chunks, idle })
+    }
+
+    /// The next body chunk; an empty chunk is the end of the stream.
+    ///
+    /// # Errors
+    /// Returns the read error the thread forwarded, or
+    /// [`std::io::ErrorKind::TimedOut`] when no chunk arrived inside the
+    /// idle window.
+    fn read_chunk(&self) -> std::io::Result<Vec<u8>> {
+        match self.chunks.recv_timeout(self.idle) {
+            Ok(chunk) => chunk,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "the peer sent nothing for {:?}; the transfer stalled",
+                    self.idle
+                ),
+            )),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "the download reader thread stopped without reporting",
+            )),
+        }
+    }
+}
+
 /// Streams `url` to `destination`, reporting to `progress`, enforcing the
 /// [`MAX_ARTIFACT_BYTES`] ceiling on both the declared and streamed length.
 ///
@@ -266,7 +340,8 @@ fn open_transfer(
 /// [`LocalError::Cancelled`] when `token` fires; the check runs at entry and
 /// between chunks, so a cancelled transfer makes no request at all or stops
 /// at the next chunk boundary, and the staged partial stays in place for a
-/// later resume.
+/// later resume. A body read is bounded by [`DOWNLOAD_IDLE_TIMEOUT`]: a
+/// stalled peer fails the transfer instead of parking the token check.
 pub(crate) fn download_with_progress(
     client: &Client,
     url: &str,
@@ -274,12 +349,32 @@ pub(crate) fn download_with_progress(
     progress: &dyn DownloadProgress,
     token: Option<&CancellationToken>,
 ) -> Result<String> {
+    download_with_idle(
+        client,
+        url,
+        destination,
+        progress,
+        token,
+        DOWNLOAD_IDLE_TIMEOUT,
+    )
+}
+
+/// [`download_with_progress`] with the idle read bound explicit, so a test
+/// can shrink it.
+pub(super) fn download_with_idle(
+    client: &Client,
+    url: &str,
+    destination: &Path,
+    progress: &dyn DownloadProgress,
+    token: Option<&CancellationToken>,
+    idle: Duration,
+) -> Result<String> {
     // A token already fired makes no request and stages no file.
     if token.is_some_and(CancellationToken::is_cancelled) {
         return Err(LocalError::Cancelled);
     }
     let (response, resume_from) = negotiate_resume(client, url, resumable_len(destination, url)?)?;
-    let mut response = response
+    let response = response
         .error_for_status()
         .map_err(|source| LocalError::Download {
             url: url.to_owned(),
@@ -309,6 +404,10 @@ pub(crate) fn download_with_progress(
         progress,
     )?;
     let mut writer = BufWriter::new(file);
+    let reader = IdleReader::new(response, idle).map_err(|source| LocalError::DownloadRead {
+        url: url.to_owned(),
+        source,
+    })?;
     loop {
         // The cancellation check sits between chunks: a fired token stops the
         // transfer at the next boundary, keeping the staged partial and its
@@ -316,31 +415,29 @@ pub(crate) fn download_with_progress(
         if token.is_some_and(CancellationToken::is_cancelled) {
             return Err(LocalError::Cancelled);
         }
-        let count = response
-            .read(&mut buffer)
+        let chunk = reader
+            .read_chunk()
             .map_err(|source| LocalError::DownloadRead {
                 url: url.to_owned(),
                 source,
             })?;
-        if count == 0 {
+        if chunk.is_empty() {
             break;
         }
-        downloaded = downloaded.saturating_add(count as u64);
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
         if downloaded > MAX_ARTIFACT_BYTES {
             return Err(LocalError::ArtifactTooLarge {
                 url: url.to_owned(),
                 limit: MAX_ARTIFACT_BYTES,
             });
         }
-        writer
-            .write_all(&buffer[..count])
-            .map_err(|source| LocalError::Io {
-                operation: "write partial download",
-                path: destination.to_owned(),
-                source,
-            })?;
-        hasher.update(&buffer[..count]);
-        progress.inc(count as u64);
+        writer.write_all(&chunk).map_err(|source| LocalError::Io {
+            operation: "write partial download",
+            path: destination.to_owned(),
+            source,
+        })?;
+        hasher.update(&chunk);
+        progress.inc(chunk.len() as u64);
     }
     writer.flush().map_err(|source| LocalError::Io {
         operation: "flush partial download",
