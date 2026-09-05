@@ -1875,6 +1875,7 @@ dependencies = [
  "axum",
  "block2",
  "dotenvy",
+ "embed-resource",
  "futures-util",
  "gateway-config",
  "gateway-config-ui",

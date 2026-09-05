@@ -1,5 +1,9 @@
 # Icons Directory - Agent Rules
 
+## Derived Copies
+
+`crates/gateway-config-ui/ui/icons/promptforge-icon.png` and `crates/workshop-server/ui/icons/promptforge-icon.png` are copies of `128x128.png`, and the `promptforge-icon@2x.png` beside each is a copy of `128x128@2x.png`. When this set is regenerated, refresh those four files in the same change. `promptforge-gateway.exe` embeds `icon.ico` through the gateway crate's `build.rs`.
+
 ## Do Not Touch
 
 The following files are hand-crafted installer chrome assets. Do not regenerate, resize, overwrite, or modify them:

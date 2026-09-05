@@ -7,8 +7,8 @@ use axum::routing::get;
 use crate::assets;
 
 /// The UI asset routes: the index page, the bundled script and styles,
-/// the PCM worklet, and the program icon. Stateless: every response comes
-/// straight from [`crate::assets::UiAssets`].
+/// the PCM worklet, and the program icon at 1x and 2x. Stateless: every
+/// response comes straight from [`crate::assets::UiAssets`].
 pub(crate) fn routes() -> Router {
     Router::new()
         .route("/", get(ui_index))
@@ -16,7 +16,8 @@ pub(crate) fn routes() -> Router {
         .route("/app.css", get(ui_app_css))
         .route("/style.css", get(ui_style_css))
         .route("/pcm-worklet.js", get(ui_pcm_worklet))
-        .route("/icons/promptforge-icon-1.png", get(ui_program_icon))
+        .route("/icons/promptforge-icon.png", get(ui_program_icon))
+        .route("/icons/promptforge-icon@2x.png", get(ui_program_icon_2x))
 }
 
 /// Serves the chat UI's `index.html`.
@@ -45,11 +46,16 @@ async fn ui_pcm_worklet() -> Response {
     assets::ui_asset("pcm-worklet.js", "text/javascript; charset=utf-8")
 }
 
-/// Serves the program icon shown in the custom title bar (the cold
-/// medallion frame; the heat stages are reserved for a future activity
-/// animation).
+/// Serves the program icon shown in the custom title bar at 1x (128 px),
+/// the `src` of the title bar `<img>`.
 async fn ui_program_icon() -> Response {
-    assets::ui_asset("icons/promptforge-icon-1.png", "image/png")
+    assets::ui_asset("icons/promptforge-icon.png", "image/png")
+}
+
+/// Serves the program icon at 2x (256 px), the title bar's `srcset`
+/// entry for high-DPI displays.
+async fn ui_program_icon_2x() -> Response {
+    assets::ui_asset("icons/promptforge-icon@2x.png", "image/png")
 }
 
 #[cfg(test)]
@@ -112,6 +118,11 @@ mod tests {
 
     #[tokio::test]
     async fn program_icon_is_served_as_png() {
-        assert_ui_asset("/icons/promptforge-icon-1.png", "image/png").await;
+        assert_ui_asset("/icons/promptforge-icon.png", "image/png").await;
+    }
+
+    #[tokio::test]
+    async fn program_icon_2x_is_served_as_png() {
+        assert_ui_asset("/icons/promptforge-icon@2x.png", "image/png").await;
     }
 }

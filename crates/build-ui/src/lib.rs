@@ -17,11 +17,16 @@ pub const WORKSHOP_STATIC_FILES: &[&str] = &[
     "index.html",
     "style.css",
     "pcm-worklet.js",
-    "icons/promptforge-icon-1.png",
+    "icons/promptforge-icon.png",
+    "icons/promptforge-icon@2x.png",
 ];
 
 /// Static files copied next to the config UI bundle, relative to `ui/`.
-pub const CONFIG_UI_STATIC_FILES: &[&str] = &["index.html", "icons/promptforge-icon-1.png"];
+pub const CONFIG_UI_STATIC_FILES: &[&str] = &[
+    "index.html",
+    "icons/promptforge-icon.png",
+    "icons/promptforge-icon@2x.png",
+];
 
 /// One crate's UI build configuration.
 #[derive(Clone, Copy, Debug)]

@@ -168,6 +168,9 @@ block2 = "0.6"
 # already in the tree transitively.
 libc = "0.2"
 windows-sys = { version = "0.61", default-features = false }
+# Compiles the gateway exe's Windows icon resource in its build script;
+# already in the tree through tauri-build (via tauri-winres).
+embed-resource = "3"
 # Encodes PNG fixtures in the gateway's integration tests.
 png = "0.18"
 # Tauri v2 desktop framework for workshop. tauri is pinned to the

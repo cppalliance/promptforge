@@ -4,6 +4,7 @@
 // the shell mounts; a rejected key shows the inline error.
 
 import type { GatewayApi } from "../services/gateway-api";
+import { programIcon } from "./program-icon";
 
 /** Construction dependencies for the key prompt. */
 export interface KeyPromptDeps {
@@ -22,11 +23,7 @@ export function mountKeyPrompt(root: HTMLElement, deps: KeyPromptDeps): void {
   card.className = "key-card";
 
   // Decorative: the title beside it names the product.
-  const medallion = document.createElement("img");
-  medallion.src = "icons/promptforge-icon-1.png";
-  medallion.alt = "";
-  medallion.width = 64;
-  medallion.height = 64;
+  const medallion = programIcon(64, "");
 
   const title = document.createElement("h1");
   title.textContent = "PromptForge Gateway";

@@ -7,16 +7,18 @@ use axum::routing::get;
 use crate::{assets, require_loopback};
 
 /// The config UI asset routes - the index page, the bundled script and
-/// stylesheet, and the program icon - with [`require_loopback`] already
-/// applied, so every asset answers 403 to a non-loopback peer. The
-/// gateway nests this router at `/config`; the index references its
-/// assets by relative path, so the mount point needs no configuration.
+/// stylesheet, and the program icon at 1x and 2x - with
+/// [`require_loopback`] already applied, so every asset answers 403 to a
+/// non-loopback peer. The gateway nests this router at `/config`; the
+/// index references its assets by relative path, so the mount point
+/// needs no configuration.
 pub fn routes() -> Router {
     Router::new()
         .route("/", get(ui_index))
         .route("/app.js", get(ui_app_js))
         .route("/app.css", get(ui_app_css))
-        .route("/icons/promptforge-icon-1.png", get(ui_program_icon))
+        .route("/icons/promptforge-icon.png", get(ui_program_icon))
+        .route("/icons/promptforge-icon@2x.png", get(ui_program_icon_2x))
         .layer(axum::middleware::from_fn(require_loopback))
 }
 
@@ -36,9 +38,15 @@ async fn ui_app_css() -> Response {
     assets::ui_asset("app.css", "text/css; charset=utf-8")
 }
 
-/// Serves the program icon (the cold medallion frame).
+/// Serves the program icon at 1x (128 px), the `src` of every `<img>`.
 async fn ui_program_icon() -> Response {
-    assets::ui_asset("icons/promptforge-icon-1.png", "image/png")
+    assets::ui_asset("icons/promptforge-icon.png", "image/png")
+}
+
+/// Serves the program icon at 2x (256 px), the `srcset` entry for
+/// high-DPI displays.
+async fn ui_program_icon_2x() -> Response {
+    assets::ui_asset("icons/promptforge-icon@2x.png", "image/png")
 }
 
 #[cfg(test)]
@@ -101,12 +109,23 @@ mod tests {
 
     #[tokio::test]
     async fn program_icon_is_served_as_png() {
-        assert_ui_asset("/icons/promptforge-icon-1.png", "image/png").await;
+        assert_ui_asset("/icons/promptforge-icon.png", "image/png").await;
+    }
+
+    #[tokio::test]
+    async fn program_icon_2x_is_served_as_png() {
+        assert_ui_asset("/icons/promptforge-icon@2x.png", "image/png").await;
     }
 
     #[tokio::test]
     async fn a_lan_peer_is_refused_by_every_asset_route() {
-        for uri in ["/", "/app.js", "/app.css", "/icons/promptforge-icon-1.png"] {
+        for uri in [
+            "/",
+            "/app.js",
+            "/app.css",
+            "/icons/promptforge-icon.png",
+            "/icons/promptforge-icon@2x.png",
+        ] {
             let mut request = Request::builder()
                 .uri(uri)
                 .body(Body::empty())

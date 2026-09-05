@@ -22,6 +22,7 @@ import {
 import { confirmDialog } from "../components/confirm-modal";
 import { createChipInput } from "../components/chip-input";
 import { createDropdownControl } from "../components/dropdown-control";
+import { programIcon } from "../components/program-icon";
 import { createSliderControl } from "../components/slider-control";
 import { createToggleControl } from "../components/toggle-control";
 import type { ToastStack } from "shared-ui/toast";
@@ -1676,11 +1677,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
 
   function renderAbout(panel: HTMLElement): void {
     const { card, body } = settingsCard("About");
-    const medallion = document.createElement("img");
-    medallion.src = "icons/promptforge-icon-1.png";
-    medallion.alt = "";
-    medallion.width = 64;
-    medallion.height = 64;
+    const medallion = programIcon(64, "");
     medallion.className = "about-medallion";
     const name = document.createElement("p");
     name.className = "about-name";

@@ -27,7 +27,7 @@ async function crateVersion() {
 const version = await crateVersion();
 
 // Mirrored in the build-ui crate's CONFIG_UI_STATIC_FILES.
-const STATIC_FILES = ["index.html", "icons/promptforge-icon-1.png"];
+const STATIC_FILES = ["index.html", "icons/promptforge-icon.png", "icons/promptforge-icon@2x.png"];
 
 // Always minified: the bundle is never inspected by hand, and matching the
 // release profile keeps the jsdom tests exercising what ships.

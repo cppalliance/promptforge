@@ -165,7 +165,14 @@ test("the About panel renders the medallion, version, and license link", async (
 
   navigate(dom, "#/settings/about");
   await settle();
-  assert.ok(root.querySelector(".about-medallion"), "the medallion renders");
+  const medallion = root.querySelector("img.about-medallion");
+  assert.ok(medallion, "the medallion renders");
+  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon.png");
+  assert.equal(
+    medallion.getAttribute("srcset"),
+    "icons/promptforge-icon.png 1x, icons/promptforge-icon@2x.png 2x",
+    "the About medallion names the @2x render for high-DPI displays",
+  );
   assert.match(root.querySelector(".about-name").textContent, /PromptForge Gateway/);
   assert.match(
     root.querySelector(".about-version").textContent,

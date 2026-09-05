@@ -644,7 +644,7 @@ The gateway serves a browser UI for configuration: you reach it over HTTP, sign 
 
 ## Reach the UI
 
-The gateway serves the configuration UI at /config on its own port; there is no second listener. The UI is an optional feature you compile in with `config-ui`, which is on by default. GET /config redirects permanently to /config/. Four asset endpoints live under /config: the index page at /, the bundled script at /app.js, the stylesheet at /app.css, and the program icon at /icons/promptforge-icon-1.png.
+The gateway serves the configuration UI at /config on its own port; there is no second listener. The UI is an optional feature you compile in with `config-ui`, which is on by default. GET /config redirects permanently to /config/. Five asset endpoints live under /config: the index page at /, the bundled script at /app.js, the stylesheet at /app.css, and the program icon at /icons/promptforge-icon.png with its high-DPI render at /icons/promptforge-icon@2x.png.
 
 The UI pages need no bearer token, but every asset route answers 403 Forbidden to any peer that is not loopback. The UI is reachable only from the gateway machine itself, and the check fails closed.
 

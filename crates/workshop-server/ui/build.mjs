@@ -28,7 +28,13 @@ async function crateVersion() {
 const version = await crateVersion();
 
 // Mirrored in the build-ui crate's WORKSHOP_STATIC_FILES.
-const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js", "icons/promptforge-icon-1.png"];
+const STATIC_FILES = [
+  "index.html",
+  "style.css",
+  "pcm-worklet.js",
+  "icons/promptforge-icon.png",
+  "icons/promptforge-icon@2x.png",
+];
 
 // The layer rule (defined once, in check-layers.mjs) enforced while
 // bundling, so `esbuild.build` and watch mode fail on a violating import.

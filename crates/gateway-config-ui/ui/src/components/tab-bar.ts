@@ -16,6 +16,7 @@ import {
 import type { IconNode } from "lucide";
 
 import type { ViewId } from "../router";
+import { programIcon } from "./program-icon";
 
 // The crate version, substituted by the esbuild define in build.mjs; a
 // bundle built without the define shows the "dev" fallback instead of
@@ -67,11 +68,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
   element.className = "tab-bar";
 
   if (options.showMedallion) {
-    const medallion = document.createElement("img");
-    medallion.src = "icons/promptforge-icon-1.png";
-    medallion.alt = "PromptForge";
-    medallion.width = 24;
-    medallion.height = 24;
+    const medallion = programIcon(24, "PromptForge");
     medallion.className = "tab-medallion";
     element.append(medallion);
   }

@@ -34,8 +34,11 @@ await bootWorkbench("the title bar works in browser mode without ipc", async ({ 
     if (!icon) {
       failures.push("title bar program icon missing");
     } else {
-      if (icon.getAttribute("src") !== "/icons/promptforge-icon-1.png") {
+      if (icon.getAttribute("src") !== "/icons/promptforge-icon.png") {
         failures.push(`title bar icon src is "${icon.getAttribute("src")}"`);
+      }
+      if (icon.getAttribute("srcset") !== "/icons/promptforge-icon.png 1x, /icons/promptforge-icon@2x.png 2x") {
+        failures.push(`title bar icon srcset is "${icon.getAttribute("srcset")}"; it must name the @2x render`);
       }
       if (icon.getAttribute("alt") !== "") {
         failures.push("the decorative title bar icon must carry an empty alt");

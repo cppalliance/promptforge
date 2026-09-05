@@ -37,6 +37,12 @@ test("standalone mode shows the medallion and a working skip link", async () => 
 
   const medallion = root.querySelector("img.tab-medallion");
   assert.ok(medallion, "the medallion is shown standalone");
+  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon.png");
+  assert.equal(
+    medallion.getAttribute("srcset"),
+    "icons/promptforge-icon.png 1x, icons/promptforge-icon@2x.png 2x",
+    "the header medallion names the @2x render for high-DPI displays",
+  );
   assert.equal(medallion.getAttribute("width"), "24");
   assert.equal(medallion.getAttribute("height"), "24");
 

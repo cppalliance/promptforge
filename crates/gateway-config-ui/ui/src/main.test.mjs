@@ -28,7 +28,12 @@ test("booting the bundle without a stored key renders the key prompt", async () 
 
   const medallion = doc.querySelector("#app .key-prompt img");
   assert.ok(medallion, "the medallion is on the card");
-  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon-1.png");
+  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon.png");
+  assert.equal(
+    medallion.getAttribute("srcset"),
+    "icons/promptforge-icon.png 1x, icons/promptforge-icon@2x.png 2x",
+    "the medallion names the @2x render for high-DPI displays",
+  );
   assert.equal(medallion.getAttribute("alt"), "", "the medallion is decorative");
   assert.ok(medallion.getAttribute("width"), "the medallion reserves its width");
   assert.ok(medallion.getAttribute("height"), "the medallion reserves its height");
