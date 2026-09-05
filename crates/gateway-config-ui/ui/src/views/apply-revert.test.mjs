@@ -323,3 +323,33 @@ test("Revert All discards the Settings view's unsaved edits", async () => {
     "the field shows the running value again",
   );
 });
+
+test("a Revert All that lands while the Settings view is unmounted clears it for the next mount", async () => {
+  const stub = dirtyStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  const bind = root.querySelector(".field-row[data-key='bind'] input");
+  const original = bind.value;
+  bind.value = "0.0.0.0:9999";
+  bind.dispatchEvent(new dom.window.Event("change"));
+  await settle();
+  assert.ok(root.querySelector(".dirty-dot"), "the unsaved edit raises the dirty dot");
+  assert.equal(root.querySelector(".card-save").disabled, false, "Save arms for the edit");
+
+  navigate(dom, "#/local");
+  await settle();
+  await confirmRevert(root, dom.window.document);
+  assert.equal(root.querySelector(".apply-button"), null, "the revert landed while unmounted");
+
+  navigate(dom, "#/settings/gateway");
+  await settle();
+  assert.equal(root.querySelector(".dirty-dot"), null, "the unmounted revert cleared the edit");
+  assert.equal(root.querySelector(".card-save").disabled, true, "Save stays disarmed");
+  assert.equal(
+    root.querySelector(".field-row[data-key='bind'] input").value,
+    original,
+    "the field shows the running value again",
+  );
+});

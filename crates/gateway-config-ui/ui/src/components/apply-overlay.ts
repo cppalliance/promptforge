@@ -19,6 +19,8 @@ import { Check, X, createElement as lucideElement } from "lucide";
 import { createProgressBar, type ProgressBar } from "shared-ui/progress";
 import { scheduleTimeout } from "shared-ui/toast";
 
+import { isRecord } from "../services/json";
+
 /** How long a failed overlay stays up before removing itself. */
 const ERROR_HOLD_MS = 1500;
 
@@ -334,11 +336,6 @@ export function createApplyOverlay(
       scheduleTimeout(close, ERROR_HOLD_MS);
     },
   };
-}
-
-/** Whether an untrusted stream value is a non-array object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**

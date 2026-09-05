@@ -37,7 +37,7 @@ import { createProfilesView } from "./views/profiles-view";
 import { createSecretsView } from "./views/secrets-view";
 import { createSettingsView } from "./views/settings-view";
 
-export { API_KEY_STORAGE_KEY } from "./services/gateway-api";
+export { API_KEY_STORAGE_KEY, GatewayApi, GatewayHttpError } from "./services/gateway-api";
 export { matchRoute } from "./router";
 
 /** The toast for an apply the user (or a revert) cancelled before its commit. */

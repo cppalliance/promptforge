@@ -8,6 +8,8 @@
 // EventSource cannot send the Authorization header the admin routes
 // require, and the switch route is a POST besides.
 
+import { isRecord } from "./json";
+
 /** The sessionStorage slot holding the gateway bearer key. */
 export const API_KEY_STORAGE_KEY = "gateway-api-key";
 
@@ -375,7 +377,7 @@ export class GatewayApi {
   async cancelActiveCommand(): Promise<void> {
     const response = await this.send("/admin/queue/cancel", { method: "POST" });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -390,7 +392,7 @@ export class GatewayApi {
       body: JSON.stringify({ index }),
     });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -429,7 +431,7 @@ export class GatewayApi {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -439,8 +441,7 @@ export class GatewayApi {
     if (!response.ok) {
       // The code distinguishes a cancelled apply (pending changes still
       // staged) from a failed one, so the shell can word its toast.
-      const refusal = await refusalDetail(response);
-      throw new GatewayHttpError(response.status, refusal.message, refusal.code);
+      throw await refusalError(response);
     }
     const data = requireRecord(await response.json(), "apply outcome");
     return {
@@ -454,7 +455,7 @@ export class GatewayApi {
   async revertConfig(): Promise<void> {
     const response = await this.send("/admin/config-revert", { method: "POST" });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -499,7 +500,7 @@ export class GatewayApi {
       body: JSON.stringify(vars),
     });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -613,7 +614,7 @@ export class GatewayApi {
       body: JSON.stringify({ path }),
     });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -649,7 +650,7 @@ export class GatewayApi {
   async deleteCached(sha256: string): Promise<void> {
     const response = await this.send(`/v1/cache/${sha256}`, { method: "DELETE" });
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
   }
 
@@ -775,7 +776,7 @@ export class GatewayApi {
       throw new UnauthorizedError();
     }
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
     return response.text();
   }
@@ -820,7 +821,7 @@ export class GatewayApi {
       throw new UnauthorizedError();
     }
     if (!response.ok) {
-      throw new GatewayHttpError(response.status, await refusalMessage(response));
+      throw await refusalError(response);
     }
     return response;
   }
@@ -877,9 +878,13 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-/** Extracts a human-readable message from a buffered refusal response. */
-async function refusalMessage(response: Response): Promise<string> {
-  return (await refusalDetail(response)).message;
+/**
+ * Builds the {@link GatewayHttpError} for a refused request, carrying
+ * the envelope's `error.code` when the gateway sent one.
+ */
+async function refusalError(response: Response): Promise<GatewayHttpError> {
+  const refusal = await refusalDetail(response);
+  return new GatewayHttpError(response.status, refusal.message, refusal.code);
 }
 
 /**
@@ -907,11 +912,6 @@ async function refusalDetail(
     // Fall through to the status line.
   }
   return { message: `the gateway refused the switch (${response.status})`, code: null };
-}
-
-/** Whether untrusted JSON is a non-array object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Requires an object at an external JSON boundary. */

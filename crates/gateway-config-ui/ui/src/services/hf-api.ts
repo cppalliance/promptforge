@@ -5,6 +5,7 @@
 // quants with exact summed sizes) for the quant picker.
 
 import type { GatewayApi } from "./gateway-api";
+import { isRecord } from "./json";
 
 /** The Discover sort orders, in dropdown order. */
 export type HfSort = "downloads" | "trending" | "newest";
@@ -399,8 +400,4 @@ function isSafeFilePath(path: string): boolean {
   return path
     .split("/")
     .every((segment) => segment !== "" && segment !== "." && segment !== "..");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

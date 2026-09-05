@@ -17,6 +17,7 @@ import type {
   GatewayApi,
   OrphanFile,
 } from "./gateway-api";
+import { isRecord } from "./json";
 
 /** Which TOML catalog array a model entry lives in. */
 export type ModelSource = "local" | "remote" | "stt";
@@ -717,8 +718,6 @@ export class ConfigStore {
   pendingDiff(): DiffRow[] {
     const keyed = new Map<string, string>(KEYED_ARRAYS);
     const rows: DiffRow[] = [];
-    const isRecord = (value: unknown): value is EntryData =>
-      value !== null && typeof value === "object" && !Array.isArray(value);
     const compare = (running: unknown, pending: unknown, path: string[]): void => {
       if (sameValue(running, pending)) {
         return;
