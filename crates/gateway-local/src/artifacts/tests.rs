@@ -470,6 +470,77 @@ fn concurrent_provisioning_of_same_url_is_safe() {
     assert!(server.requests() >= 1);
 }
 
+#[test]
+fn whoami_user_parser_accepts_an_ordinary_account_sid() {
+    let sid = super::confine::parse_whoami_user_sid(
+        true,
+        br#""DESKTOP-EXAMPLE\alice","S-1-5-21-111111111-222222222-333333333-1001"
+"#,
+        b"",
+    )
+    .expect("ordinary account parses");
+
+    assert_eq!(sid, "S-1-5-21-111111111-222222222-333333333-1001");
+}
+
+#[test]
+fn whoami_user_parser_accepts_a_well_known_service_sid() {
+    let sid = super::confine::parse_whoami_user_sid(
+        true,
+        b"\"NT AUTHORITY\\NETWORK SERVICE\",\"S-1-5-20\"\r\n",
+        b"",
+    )
+    .expect("service account parses");
+
+    assert_eq!(sid, "S-1-5-20");
+}
+
+#[test]
+fn whoami_user_parser_rejects_malformed_or_multiple_csv_records() {
+    for output in [
+        b"DESKTOP-EXAMPLE\\alice,S-1-5-21-1-2-3-1001".as_slice(),
+        b"\"alice\",\"S-1-5-21-1-2-3-1001\",\"extra\"".as_slice(),
+        b"\"alice\",\"S-1-5-21-1-2-3-1001\"\r\n\"bob\",\"S-1-5-21-1-2-3-1002\"\r\n".as_slice(),
+        b"\"\",\"S-1-5-20\"".as_slice(),
+        b"\"alice\",\"s-1-5-20\"".as_slice(),
+        b"\"alice\",\"S-1-5-020\"".as_slice(),
+        b"\"alice\",\"S-1-5\"".as_slice(),
+        b"\"alice\",\"S-1-5-4294967296\"".as_slice(),
+    ] {
+        assert!(
+            super::confine::parse_whoami_user_sid(true, output, b"").is_err(),
+            "unexpectedly accepted {output:?}"
+        );
+    }
+}
+
+#[test]
+fn whoami_user_parser_rejects_a_missing_sid() {
+    assert!(super::confine::parse_whoami_user_sid(true, b"\"alice\",\"\"\r\n", b"").is_err());
+    assert!(super::confine::parse_whoami_user_sid(true, b"", b"").is_err());
+}
+
+#[test]
+fn whoami_user_parser_rejects_command_failure() {
+    let error = super::confine::parse_whoami_user_sid(
+        false,
+        b"\"alice\",\"S-1-5-21-1-2-3-1001\"\r\n",
+        b"ERROR: access denied\r\n",
+    )
+    .expect_err("failed whoami must not yield a SID");
+
+    assert!(error.contains("whoami identity query failed"));
+    assert!(error.contains("access denied"));
+}
+
+#[test]
+fn windows_sid_grant_uses_the_icacls_sid_prefix() {
+    assert_eq!(
+        super::confine::windows_sid_grant("S-1-5-20"),
+        "*S-1-5-20:(OI)(CI)F"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn artifact_store_enforces_private_windows_dacl() {
@@ -480,6 +551,8 @@ fn artifact_store_enforces_private_windows_dacl() {
     let root = dir.path().join("cache");
     std::fs::create_dir(&root).expect("mkdir");
     let _store = ArtifactStore::new(&root).expect("store");
+    std::fs::write(root.join("owner-write-probe"), b"private")
+        .expect("current process retains cache write access");
 
     let output = std::process::Command::new("icacls")
         .arg(&root)

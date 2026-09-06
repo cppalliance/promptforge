@@ -18,8 +18,8 @@
 //! party able to write inside the root, a local actor able to race directory
 //! creation there already holds the operator's privileges, so the confinement's
 //! job is to stop malicious *names*, not to defend a shared-tenant cache. On
-//! Windows the equivalent restriction is the per-user profile ACL that the
-//! default `%USERPROFILE%\.promptforge` inherits.
+//! Windows the equivalent restriction is a DACL granted only to the current
+//! process token's SID.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -33,7 +33,7 @@ use crate::error::LocalError;
 /// This is a real, verified restriction on every platform (ART-006), never a
 /// silent no-op:
 /// - Unix: `chmod 0700`, then verify no group/world mode bits remain.
-/// - Windows: strip inherited ACEs and grant the current account full control
+/// - Windows: strip inherited ACEs and grant the current process SID full control
 ///   (`icacls /inheritance:r /grant:r`), then verify no broad principal
 ///   (Everyone / Authenticated Users / Users) still appears in the DACL.
 ///
@@ -87,42 +87,142 @@ const BROAD_WINDOWS_PRINCIPALS: [&str; 5] = [
 
 #[cfg(windows)]
 pub(crate) fn enforce_private_cache_root(root: &Path) -> Result<()> {
-    let account = current_windows_account(root)?;
-    set_owner_only_windows_dacl(root, &account)?;
+    let sid = current_windows_sid(root)?;
+    set_owner_only_windows_dacl(root, &sid)?;
     verify_private_windows_dacl(root)
 }
 
-/// The `DOMAIN\user` (or bare `user`) icacls principal for the current process.
+/// Resolves the current process token's SID through the standard Windows CLI.
 #[cfg(windows)]
-fn current_windows_account(root: &Path) -> Result<String> {
-    let Some(user) = std::env::var("USERNAME")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return Err(LocalError::CacheNotPrivate {
+fn current_windows_sid(root: &Path) -> Result<String> {
+    let mut cmd = std::process::Command::new("whoami");
+    cmd.args(["/user", "/fo", "csv", "/nh"]);
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let output = cmd.output().map_err(|source| LocalError::Io {
+        operation: "run whoami to resolve cache owner SID",
+        path: root.to_owned(),
+        source,
+    })?;
+    parse_whoami_user_sid(output.status.success(), &output.stdout, &output.stderr).map_err(
+        |reason| LocalError::CacheNotPrivate {
             path: root.to_owned(),
-            reason: "USERNAME is not set, cannot restrict the cache DACL".to_owned(),
-        });
-    };
-    Ok(
-        match std::env::var("USERDOMAIN")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-        {
-            Some(domain) => format!("{domain}\\{user}"),
-            None => user,
+            reason,
         },
     )
 }
 
-/// Removes inherited ACEs and grants the current account sole full control.
+/// Parses one `whoami /user /fo csv /nh` record into its canonical SID.
+#[cfg(any(windows, test))]
+pub(super) fn parse_whoami_user_sid(
+    command_succeeded: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> std::result::Result<String, String> {
+    if !command_succeeded {
+        let detail = String::from_utf8_lossy(stderr);
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            "whoami identity query failed".to_owned()
+        } else {
+            format!("whoami identity query failed: {detail}")
+        });
+    }
+
+    let record = stdout
+        .strip_suffix(b"\r\n")
+        .or_else(|| stdout.strip_suffix(b"\n"))
+        .unwrap_or(stdout);
+    if record.is_empty() {
+        return Err("whoami identity output is empty".to_owned());
+    }
+    if record.contains(&b'\r') || record.contains(&b'\n') {
+        return Err("whoami identity output contains multiple records".to_owned());
+    }
+
+    let Some(inner) = record
+        .strip_prefix(b"\"")
+        .and_then(|value| value.strip_suffix(b"\""))
+    else {
+        return Err("whoami identity output is not quoted CSV".to_owned());
+    };
+    let mut separators = inner
+        .windows(3)
+        .enumerate()
+        .filter(|(_, window)| *window == b"\",\"");
+    let Some((separator, _)) = separators.next() else {
+        return Err("whoami identity output does not contain two fields".to_owned());
+    };
+    if separators.next().is_some() {
+        return Err("whoami identity output contains extra fields".to_owned());
+    }
+
+    let account = &inner[..separator];
+    let sid_bytes = &inner[separator + 3..];
+    if !account.iter().any(|byte| !byte.is_ascii_whitespace()) || account.contains(&b'"') {
+        return Err("whoami identity output has an invalid account".to_owned());
+    }
+    let sid = std::str::from_utf8(sid_bytes)
+        .map_err(|_| "whoami identity output has a non-UTF-8 SID".to_owned())?;
+    if !is_canonical_windows_sid(sid) {
+        return Err("whoami identity output has a non-canonical SID".to_owned());
+    }
+    Ok(sid.to_owned())
+}
+
+#[cfg(any(windows, test))]
+fn is_canonical_windows_sid(sid: &str) -> bool {
+    fn canonical_decimal(value: &str) -> bool {
+        !value.is_empty()
+            && value.bytes().all(|byte| byte.is_ascii_digit())
+            && (value == "0" || !value.starts_with('0'))
+    }
+
+    let mut components = sid.split('-');
+    if components.next() != Some("S") || components.next() != Some("1") {
+        return false;
+    }
+    let Some(authority) = components.next() else {
+        return false;
+    };
+    if !canonical_decimal(authority)
+        || authority
+            .parse::<u64>()
+            .map_or(true, |value| value > 0xFFFF_FFFF_FFFF)
+    {
+        return false;
+    }
+
+    let mut subauthority_count = 0;
+    for subauthority in components {
+        subauthority_count += 1;
+        if subauthority_count > 15
+            || !canonical_decimal(subauthority)
+            || subauthority.parse::<u32>().is_err()
+        {
+            return false;
+        }
+    }
+    subauthority_count != 0
+}
+
+/// Renders a validated SID as an `icacls /grant:r` access specification.
+#[cfg(any(windows, test))]
+#[must_use]
+pub(super) fn windows_sid_grant(sid: &str) -> String {
+    format!("*{sid}:(OI)(CI)F")
+}
+
+/// Removes inherited ACEs and grants the current process SID sole full control.
 #[cfg(windows)]
-fn set_owner_only_windows_dacl(root: &Path, account: &str) -> Result<()> {
+fn set_owner_only_windows_dacl(root: &Path, sid: &str) -> Result<()> {
     let mut cmd = std::process::Command::new("icacls");
     cmd.arg(root)
         .arg("/inheritance:r")
         .arg("/grant:r")
-        .arg(format!("{account}:(OI)(CI)F"));
+        .arg(windows_sid_grant(sid));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
