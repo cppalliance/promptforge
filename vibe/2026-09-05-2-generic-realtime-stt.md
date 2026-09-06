@@ -584,7 +584,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 20; cancellation-at-every-await and rollback outcomes gate route mounting.
 
-### Step 22: Separate origin predicates
+### Step 22: Separate origin predicates [completed]
 
 - Artifacts: add named Gateway loopback-Origin and Workshop same-origin-authority predicates with predicate-only tests in `shared-loopback/src/lib.rs`; update `crates/shared-loopback/AGENTS.md`; do not mount sockets or change Workshop yet.
 - Scope: cover absent native Origin, HTTP loopback forms, malformed, foreign, wrong-port, and mismatched authorities while keeping the two policies distinct. Remove rule text that describes the crate as Gateway-only or limited to two middlewares, then retain one concise rule that the Gateway and Workshop predicates are separately named, fail closed, and never share policy semantics.
