@@ -21,6 +21,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt as _;
 
 pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn fixture_runtime(with_final: bool) -> (SttState, SttRuntime) {
     let source = gateway_stt_engine::fixtures::require_model();
@@ -156,11 +157,19 @@ impl TestServer {
 
     pub(crate) async fn shutdown(mut self) {
         self.task.abort();
-        let _ = (&mut self.task).await;
+        let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut self.task)
+            .await
+            .expect("gateway STT fixture server stops before the cleanup deadline");
         if let Some(runtime) = self.runtime.take() {
-            tokio::task::spawn_blocking(move || runtime.shutdown())
+            let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+            std::thread::spawn(move || {
+                runtime.shutdown();
+                let _ = finished_tx.send(());
+            });
+            tokio::time::timeout(SHUTDOWN_TIMEOUT, finished_rx)
                 .await
-                .expect("fixture runtime shutdown task succeeds");
+                .expect("fixture runtime stops before the cleanup deadline")
+                .expect("fixture runtime cleanup thread reports completion");
         }
     }
 }

@@ -19,6 +19,7 @@ const PREWARM_CHUNK: usize = 4 * 1024 * 1024;
 /// One transcription request handed to the worker thread.
 struct Job {
     samples: Vec<f32>,
+    guidance: Vec<String>,
     reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
 }
 
@@ -41,25 +42,16 @@ impl Transcriber {
     pub(super) fn spawn(
         library: WhisperLibrary,
         model_path: &Path,
-        vocabulary: &[String],
         progress: Option<ProgressHandle>,
     ) -> Result<(Self, std::sync::mpsc::Receiver<Result<(), TranscribeError>>), TranscribeError>
     {
         let (job_tx, job_rx) = std::sync::mpsc::channel::<Job>();
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
         let path = model_path.to_path_buf();
-        let vocabulary = vocabulary.to_vec();
         let worker = std::thread::Builder::new()
             .name("whisper-transcribe".to_string())
             .spawn(move || {
-                worker_loop(
-                    &library,
-                    &path,
-                    &vocabulary,
-                    progress.as_ref(),
-                    &job_rx,
-                    &init_tx,
-                );
+                worker_loop(&library, &path, progress.as_ref(), &job_rx, &init_tx);
             })
             .map_err(TranscribeError::SpawnWorker)?;
         Ok((
@@ -71,14 +63,22 @@ impl Transcriber {
         ))
     }
 
-    /// Queues `samples` for transcription and awaits the trimmed text.
-    pub(super) async fn transcribe(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
+    /// Queues one independent decode and awaits the trimmed text.
+    pub(super) async fn transcribe(
+        &self,
+        samples: Vec<f32>,
+        guidance: Vec<String>,
+    ) -> Result<String, TranscribeError> {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
         let Some(job_tx) = &self.job_tx else {
             return Err(TranscribeError::WorkerGone);
         };
         job_tx
-            .send(Job { samples, reply })
+            .send(Job {
+                samples,
+                guidance,
+                reply,
+            })
             .map_err(|_| TranscribeError::WorkerGone)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }
@@ -95,12 +95,11 @@ impl Drop for Transcriber {
     }
 }
 
-/// The worker thread's body: load the model, fit the glossary prompt, then
-/// transcribe jobs in arrival order until every sender is dropped.
+/// The worker thread's body: load the model, then execute independent jobs
+/// in arrival order until every sender is dropped.
 fn worker_loop(
     library: &WhisperLibrary,
     path: &Path,
-    vocabulary: &[String],
     progress: Option<&ProgressHandle>,
     job_rx: &std::sync::mpsc::Receiver<Job>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
@@ -108,10 +107,10 @@ fn worker_loop(
     let Some((ctx, mut state)) = load_state(library, path, progress, init_tx) else {
         return;
     };
-    // The interim pass carries no transcript, so the glossary gets the full
-    // prompt budget.
-    let glossary = fit_glossary(&ctx, vocabulary, MAX_PROMPT_TOKENS);
     while let Ok(job) = job_rx.recv() {
+        // The interim pass carries no history, so this job's guidance gets
+        // the full prompt budget.
+        let glossary = fit_glossary(&ctx, &job.guidance, MAX_PROMPT_TOKENS);
         // The receiver may be gone (session closed mid-pass); the transcript
         // is computed anyway and the send failure ignored.
         let _ = job.reply.send(transcribe_blocking(

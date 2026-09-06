@@ -3,11 +3,11 @@
 //! [`SttEngine`] owns two worker threads: the interim worker holds the
 //! streaming model and transcribes sliding windows, and the final-pass
 //! worker (`FinalTranscriber`, present when [`EngineConfig::final_model`] is
-//! set) holds the larger model and transcribes completed speech segments in
-//! the background while the user is still talking. Callers hand owned sample
-//! buffers through channels and await transcripts on oneshots, so the
-//! blocking CPU-bound inference never touches the tokio executor. The pure
-//! helpers ([`is_silence`], [`tail`]) are the session's silence gate:
+//! set) holds the larger model and executes independent decode jobs. Callers
+//! hand owned samples, guidance, and finalized history through channels and
+//! await transcripts on oneshots, so blocking inference never touches the
+//! tokio executor. The pure helpers ([`is_silence`], [`tail`]) are the
+//! session's silence gate:
 //! whisper hallucinates plausible text on silent input, so quiet windows are
 //! never sent to the model.
 
@@ -15,13 +15,11 @@ mod engine;
 mod error;
 mod final_pass;
 mod prompt;
-mod segment;
 mod slot;
 mod worker;
 
 pub use engine::{EngineConfig, SttEngine};
 pub use error::TranscribeError;
-pub use segment::Segmenter;
 pub use slot::SttSlot;
 
 /// PCM sample rate the streaming wire format and whisper both require.

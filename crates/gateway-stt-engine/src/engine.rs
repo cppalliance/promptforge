@@ -24,10 +24,6 @@ pub struct EngineConfig {
     /// `None` disables the final pass; the final transcript then comes from
     /// the interim model.
     pub final_model: Option<PathBuf>,
-    /// Domain terms whisper is biased toward (for example `MCP`, `GGUF`,
-    /// `Lua`), formatted into a glossary conditioning prompt on both
-    /// workers. Empty disables biasing.
-    pub vocabulary: Vec<String>,
     /// Seconds of trailing audio each interim pass transcribes.
     pub window_seconds: u64,
     /// Milliseconds between interim passes while a take is recording.
@@ -122,18 +118,13 @@ impl SttEngine {
         };
         // Both workers prewarm and load concurrently; the waits below only
         // collect the outcomes, with the interim outcome reported first.
-        let (transcriber, interim_init) = Transcriber::spawn(
-            library.clone(),
-            &config.interim_model,
-            &config.vocabulary,
-            interim_progress,
-        )?;
+        let (transcriber, interim_init) =
+            Transcriber::spawn(library.clone(), &config.interim_model, interim_progress)?;
         let final_spawned = match &config.final_model {
             None => None,
             Some(final_model) => Some(FinalTranscriber::spawn(
                 library,
                 final_model,
-                &config.vocabulary,
                 final_progress,
             )?),
         };
@@ -200,11 +191,16 @@ impl SttEngine {
     /// Returns [`TranscribeError::Inference`] when the model rejects the
     /// audio and [`TranscribeError::WorkerGone`] when the worker thread has
     /// exited.
-    pub async fn transcribe(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
-        self.transcriber.transcribe(samples).await
+    pub async fn transcribe(
+        &self,
+        samples: Vec<f32>,
+        guidance: Vec<String>,
+    ) -> Result<String, TranscribeError> {
+        self.transcriber.transcribe(samples, guidance).await
     }
 
-    /// Transcribes one independent buffer with the final model.
+    /// Transcribes one independent buffer with the final model using only
+    /// the guidance and finalized history supplied on this job.
     ///
     /// This request does not read or change the active streaming take.
     ///
@@ -214,48 +210,12 @@ impl SttEngine {
     pub async fn transcribe_final(
         &self,
         samples: Vec<f32>,
+        guidance: Vec<String>,
+        finalized: String,
     ) -> Option<Result<String, TranscribeError>> {
         match &self.final_pass {
-            Some(final_pass) => Some(final_pass.transcribe(samples).await),
+            Some(final_pass) => Some(final_pass.transcribe(samples, guidance, finalized).await),
             None => None,
-        }
-    }
-
-    /// Starts a new take on the final-pass worker, discarding the previous
-    /// take's accumulated transcript and installing `on_segment` as the
-    /// take's completion channel: each background segment's text is sent on
-    /// it as the segment finishes. A no-op without a final model.
-    pub fn final_reset(&self, on_segment: std::sync::mpsc::Sender<String>) {
-        if let Some(final_pass) = &self.final_pass {
-            final_pass.reset(on_segment);
-        }
-    }
-
-    /// Queues a completed speech segment for background final-pass
-    /// transcription, conditioned on the take's accumulated transcript. A
-    /// no-op without a final model.
-    pub fn final_submit(&self, samples: Vec<f32>) {
-        if let Some(final_pass) = &self.final_pass {
-            final_pass.submit(samples);
-        }
-    }
-
-    /// Queues the take's unprocessed tail and awaits the tail's own
-    /// transcription - not the take's full assembled transcript, which the
-    /// session already holds as crystallized segment text. The text is
-    /// empty when the tail is silent or too short to decode (the worker
-    /// skips those rather than hallucinating). Returns `None` when no
-    /// final model is configured and the caller should fall back to the
-    /// interim model.
-    ///
-    /// # Errors
-    /// Returns [`TranscribeError::Inference`] when the model rejects the
-    /// audio and [`TranscribeError::WorkerGone`] when the worker thread has
-    /// exited.
-    pub async fn final_finish(&self, samples: Vec<f32>) -> Option<Result<String, TranscribeError>> {
-        match &self.final_pass {
-            None => None,
-            Some(final_pass) => Some(final_pass.finish(samples).await),
         }
     }
 }
@@ -293,7 +253,7 @@ mod tests {
         };
         let engine = SttEngine::new(&config).expect("engine loads the fixture model");
         let text = engine
-            .transcribe(fixtures::jfk_samples())
+            .transcribe(fixtures::jfk_samples(), Vec::new())
             .await
             .expect("transcription succeeds");
         assert!(
@@ -340,7 +300,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
-    async fn final_pass_entry_points_are_no_ops_without_a_final_model() {
+    async fn final_decode_is_absent_without_a_final_model() {
         let config = EngineConfig {
             library: fixtures::require_library(),
             interim_model: fixtures::require_model(),
@@ -349,11 +309,11 @@ mod tests {
             ..EngineConfig::default()
         };
         let engine = SttEngine::new(&config).expect("engine loads the fixture model");
-        let (segment_tx, _segment_rx) = std::sync::mpsc::channel();
-        engine.final_reset(segment_tx);
-        engine.final_submit(fixtures::jfk_samples());
         assert!(
-            engine.final_finish(fixtures::jfk_samples()).await.is_none(),
+            engine
+                .transcribe_final(fixtures::jfk_samples(), Vec::new(), String::new())
+                .await
+                .is_none(),
             "no final model means the caller falls back"
         );
     }

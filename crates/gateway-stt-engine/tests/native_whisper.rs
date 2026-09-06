@@ -1,7 +1,5 @@
 //! Native characterization of the packaged Whisper runtime contract.
 
-use std::time::Duration;
-
 use gateway_stt_engine::{EngineConfig, SttEngine, fixtures};
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
@@ -26,20 +24,19 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
         library: library.clone(),
         interim_model: model.clone(),
         final_model: Some(model.clone()),
-        vocabulary: Vec::new(),
         window_seconds: 12,
         interval_ms: 500,
     })
     .expect("packaged runtime and model load");
 
     let interim = unprompted
-        .transcribe(samples.clone())
+        .transcribe(samples.clone(), Vec::new())
         .await
         .expect("interim decode succeeds");
     assert_eq!(interim, JFK_TRANSCRIPT, "interim decode policy stays fixed");
 
     let unprompted_clip = unprompted
-        .transcribe_final(prompt_sensitive_clip.clone())
+        .transcribe_final(prompt_sensitive_clip.clone(), Vec::new(), String::new())
         .await
         .expect("a final model is configured")
         .expect("unprompted final decode succeeds");
@@ -48,17 +45,20 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
         "the prompt-sensitive clip has a fixed unprompted control"
     );
 
-    let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-    unprompted.final_reset(segment_tx);
-    unprompted.final_submit(conditioning_clip);
+    let conditioning_transcript = unprompted
+        .transcribe_final(conditioning_clip, Vec::new(), String::new())
+        .await
+        .expect("a final model is configured")
+        .expect("conditioning decode succeeds");
     let conditioned_clip = unprompted
-        .final_finish(prompt_sensitive_clip.clone())
+        .transcribe_final(
+            prompt_sensitive_clip.clone(),
+            Vec::new(),
+            conditioning_transcript.clone(),
+        )
         .await
         .expect("a final model is configured")
         .expect("transcript-conditioned final decode succeeds");
-    let conditioning_transcript = segment_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("conditioning segment reports its transcript");
     assert_eq!(
         conditioning_transcript, CONDITIONING_TRANSCRIPT,
         "the accumulated transcript that conditions the tail stays fixed"
@@ -76,22 +76,28 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
         library,
         interim_model: model.clone(),
         final_model: Some(model.clone()),
-        vocabulary: vec!["one tree".to_string()],
         window_seconds: 12,
         interval_ms: 500,
     })
     .expect("glossary-prompted engine loads");
-    let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-    glossary_prompted.final_reset(segment_tx);
-    glossary_prompted.final_submit(prompt_sensitive_clip);
-    let silent_tail = glossary_prompted
-        .final_finish(vec![0.0; 16_000])
+    let glossary_clip = glossary_prompted
+        .transcribe_final(
+            prompt_sensitive_clip,
+            vec!["one tree".to_string()],
+            String::new(),
+        )
         .await
         .expect("a final model is configured")
-        .expect("the silent tail drains the glossary-conditioned segment");
-    let glossary_clip = segment_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("glossary-conditioned segment reports its transcript");
+        .expect("the glossary-conditioned segment decodes");
+    let silent_tail = glossary_prompted
+        .transcribe_final(
+            vec![0.0; 16_000],
+            vec!["one tree".to_string()],
+            glossary_clip.clone(),
+        )
+        .await
+        .expect("a final model is configured")
+        .expect("the silent tail decodes");
     assert!(silent_tail.is_empty(), "silence remains gated");
     assert_eq!(
         glossary_clip, GLOSSARY_CLIP_TRANSCRIPT,

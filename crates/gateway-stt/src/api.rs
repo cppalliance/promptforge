@@ -102,14 +102,14 @@ pub async fn transcribe(
     multipart: Multipart,
 ) -> Result<Response, TranscriptionError> {
     let form = parse_form(multipart).await?;
-    let Some((engine, role)) = state.select(&form.model) else {
+    let Some((engine, role, guidance)) = state.select(&form.model) else {
         return Err(TranscriptionError::ModelNotFound(form.model));
     };
     let (samples, duration) = decode_wav(&form.file)?;
     let text = match role {
-        LoadedModelRole::Interim => engine.transcribe(samples).await,
+        LoadedModelRole::Interim => engine.transcribe(samples, guidance).await,
         LoadedModelRole::Final => engine
-            .transcribe_final(samples)
+            .transcribe_final(samples, guidance, String::new())
             .await
             .ok_or_else(|| TranscriptionError::ModelNotFound(form.model.clone()))?,
     }

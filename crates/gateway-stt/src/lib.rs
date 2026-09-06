@@ -9,8 +9,11 @@
 
 mod api;
 mod runtime;
+mod segment;
 mod stt;
+mod take;
 
 pub use api::{MAX_AUDIO_BYTES, TranscriptionError, transcribe};
 pub use runtime::{SttRuntime, SttRuntimeError, SttState};
+pub use segment::Segmenter;
 pub use stt::{gateway_routes, routes as stt_routes};

@@ -11,7 +11,7 @@
 
 use std::ops::Range;
 
-use crate::{SAMPLE_RATE, is_silence};
+use gateway_stt_engine::{SAMPLE_RATE, is_silence};
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
 const FRAME_SAMPLES: usize = SAMPLE_RATE * 30 / 1000;

@@ -1,7 +1,7 @@
 //! The `/stt` WebSocket endpoint with its existing streaming wire contract.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -10,12 +10,13 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter, SttEngine, is_silence, tail};
+use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, SttEngine, is_silence};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 use workshop_server::{Activity, Push};
 
 use crate::runtime::SttState;
+use crate::take::Take;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
@@ -236,65 +237,6 @@ impl FinalFrame {
     }
 }
 
-fn append_transcript(text: &mut String, piece: &str) {
-    if piece.is_empty() {
-        return;
-    }
-    if !text.is_empty() {
-        text.push(' ');
-    }
-    text.push_str(piece);
-}
-
-#[derive(Debug, Default)]
-struct Committed {
-    text: String,
-    segments: Option<std::sync::mpsc::Receiver<String>>,
-}
-
-impl Committed {
-    fn drain(&mut self) {
-        if let Some(segments) = &self.segments {
-            while let Ok(text) = segments.try_recv() {
-                append_transcript(&mut self.text, &text);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct TakeState {
-    buffer: Mutex<Vec<f32>>,
-    committed: Mutex<Committed>,
-    consumed: AtomicUsize,
-}
-
-impl TakeState {
-    fn lock_buffer(&self) -> MutexGuard<'_, Vec<f32>> {
-        self.buffer.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn lock_committed(&self) -> MutexGuard<'_, Committed> {
-        self.committed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn reset(&self, segments: Option<std::sync::mpsc::Receiver<String>>) {
-        self.lock_buffer().clear();
-        self.consumed.store(0, Ordering::Relaxed);
-        let mut committed = self.lock_committed();
-        committed.text.clear();
-        committed.segments = segments;
-    }
-
-    fn uncommitted_snapshot(&self, consumed: usize, window_samples: usize) -> Vec<f32> {
-        let guard = self.lock_buffer();
-        let uncommitted = &guard[consumed.min(guard.len())..];
-        tail(uncommitted, window_samples).to_vec()
-    }
-}
-
 #[derive(Debug)]
 struct ActiveTake {
     interims: watch::Receiver<Option<String>>,
@@ -331,25 +273,14 @@ fn spawn_interim(
     session: u64,
     generation: u64,
     engine: Arc<SttEngine>,
-    state: Arc<TakeState>,
+    state: Arc<Take>,
     reporter: Reporter,
 ) -> ActiveTake {
     let (interim_tx, interims) = watch::channel(None);
     let task = InterimTask(tokio::spawn(async move {
-        let mut last_committed = String::new();
-        let mut last_tentative = String::new();
-        let mut committed_at_last_speech = String::new();
         loop {
             tokio::time::sleep(engine.interval()).await;
-            let committed_text = {
-                let mut guard = state.lock_committed();
-                guard.drain();
-                guard.text.clone()
-            };
-            let window = state.uncommitted_snapshot(
-                state.consumed.load(Ordering::Relaxed),
-                engine.window_samples(),
-            );
+            let window = state.uncommitted_snapshot(engine.window_samples());
             let tentative = if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
                 String::new()
             } else {
@@ -358,7 +289,7 @@ fn spawn_interim(
                     "an interim pass over the uncommitted audio",
                     Activity::General,
                 );
-                match engine.transcribe(window).await {
+                match engine.transcribe(window, state.guidance().to_vec()).await {
                     Ok(text) => text,
                     Err(error) => {
                         reporter.push_activity(
@@ -371,18 +302,11 @@ fn spawn_interim(
                     }
                 }
             };
-            if !tentative.is_empty() {
-                committed_at_last_speech.clone_from(&committed_text);
-            } else if committed_text.len() <= committed_at_last_speech.len() {
+            let Some((finalized, tentative)) = state.next_interim(&tentative) else {
                 continue;
-            }
-            if committed_text == last_committed && tentative == last_tentative {
-                continue;
-            }
-            last_committed.clone_from(&committed_text);
-            last_tentative.clone_from(&tentative);
+            };
             let Ok(message) =
-                serde_json::to_string(&InterimFrame::new(committed_text, tentative, generation))
+                serde_json::to_string(&InterimFrame::new(finalized, tentative, generation))
             else {
                 continue;
             };
@@ -400,15 +324,14 @@ fn spawn_interim(
 async fn final_transcript(
     session: u64,
     engine: &SttEngine,
-    state: &TakeState,
-    segmenter: &Segmenter,
+    take: &Take,
     reporter: &Reporter,
 ) -> String {
-    let window = state.uncommitted_snapshot(segmenter.consumed(), engine.window_samples());
+    let window = take.fallback_snapshot(engine.window_samples());
     if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
         return String::new();
     }
-    match engine.transcribe(window).await {
+    match engine.transcribe(window, take.guidance().to_vec()).await {
         Ok(text) => text,
         Err(error) => {
             reporter.push_failure("Transcription failed", error.to_string(), Activity::General);
@@ -442,17 +365,8 @@ fn truncation_message(window_samples: usize, dropped: usize) -> String {
 /// The interim-window fallback transcribes only the take's last window of
 /// audio; a longer take loses its leading audio. Name the truncation on the
 /// status bar and in the log instead of dropping it silently.
-fn warn_if_truncated(
-    session: u64,
-    engine: &SttEngine,
-    state: &TakeState,
-    segmenter: &Segmenter,
-    reporter: &Reporter,
-) {
-    let uncommitted = {
-        let guard = state.lock_buffer();
-        guard.len().saturating_sub(segmenter.consumed())
-    };
+fn warn_if_truncated(session: u64, engine: &SttEngine, take: &Take, reporter: &Reporter) {
+    let uncommitted = take.fallback_len();
     let window = engine.window_samples();
     let Some(dropped) = truncation_drop(uncommitted, window) else {
         return;
@@ -473,67 +387,50 @@ fn warn_if_truncated(
 async fn stop_transcript(
     session: u64,
     engine: Option<&SttEngine>,
-    state: &TakeState,
-    segmenter: &Segmenter,
+    take: &Take,
     reporter: &Reporter,
 ) -> String {
     let Some(engine) = engine else {
         return String::new();
     };
-    let tail = {
-        let guard = state.lock_buffer();
-        guard[segmenter.consumed()..].to_vec()
-    };
-    let tail = match engine.final_finish(tail).await {
+    match take.complete().await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
-            reporter.push_failure("Transcription failed", error.to_string(), Activity::General);
+            reporter.push_failure("Transcription failed", error.clone(), Activity::General);
             tracing::warn!(
                 session,
                 %error,
                 "final-pass transcription failed; falling back to the interim model"
             );
-            warn_if_truncated(session, engine, state, segmenter, reporter);
-            final_transcript(session, engine, state, segmenter, reporter).await
+            warn_if_truncated(session, engine, take, reporter);
+            let tail = final_transcript(session, engine, take, reporter).await;
+            take.fallback_transcript(&tail)
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            warn_if_truncated(session, engine, state, segmenter, reporter);
-            final_transcript(session, engine, state, segmenter, reporter).await
+            warn_if_truncated(session, engine, take, reporter);
+            final_transcript(session, engine, take, reporter).await
         }
-    };
-    let mut guard = state.lock_committed();
-    guard.drain();
-    append_transcript(&mut guard.text, &tail);
-    guard.text.clone()
+    }
 }
 
 fn begin_take(
     session: u64,
     generation: u64,
     engine: Option<&Arc<SttEngine>>,
-    state: &Arc<TakeState>,
-    segmenter: &mut Segmenter,
+    guidance: Vec<String>,
     reporter: &Reporter,
-) -> Option<ActiveTake> {
-    segmenter.reset();
-    let segments = engine
-        .filter(|engine| engine.has_final_pass())
-        .map(|engine| {
-            let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-            engine.final_reset(segment_tx);
-            segment_rx
-        });
-    state.reset(segments);
-    let take = engine.map(|engine| {
+) -> (Arc<Take>, Option<ActiveTake>) {
+    let state = Arc::new(Take::new(guidance, engine.cloned()));
+    let active = engine.map(|engine| {
         spawn_interim(
             session,
             generation,
             Arc::clone(engine),
-            Arc::clone(state),
+            Arc::clone(&state),
             reporter.clone(),
         )
     });
@@ -543,24 +440,7 @@ fn begin_take(
         Activity::General,
     );
     tracing::info!(session, "stt capture started");
-    take
-}
-
-fn submit_closed_segments(engine: &SttEngine, state: &TakeState, segmenter: &mut Segmenter) {
-    loop {
-        let segment = {
-            let guard = state.lock_buffer();
-            segmenter.poll(&guard).map(|range| guard[range].to_vec())
-        };
-        match segment {
-            Some(samples) => engine.final_submit(samples),
-            None => break,
-        }
-    }
-    state
-        .consumed
-        .store(segmenter.consumed(), Ordering::Relaxed);
-    state.lock_committed().drain();
+    (state, active)
 }
 
 async fn send_frame<F: Serialize>(socket: &mut WebSocket, frame: &F) -> bool {
@@ -587,8 +467,7 @@ impl Drop for SessionClose {
 }
 
 struct SessionAudio {
-    state: Arc<TakeState>,
-    segmenter: Segmenter,
+    take: Arc<Take>,
     frames: u64,
     last_mic_pulse: Option<Instant>,
 }
@@ -596,8 +475,7 @@ struct SessionAudio {
 impl SessionAudio {
     fn new() -> Self {
         Self {
-            state: Arc::new(TakeState::default()),
-            segmenter: Segmenter::new(),
+            take: Arc::new(Take::new(Vec::new(), None)),
             frames: 0,
             last_mic_pulse: None,
         }
@@ -611,7 +489,7 @@ impl SessionAudio {
             .map(|bytes| f32::from_le_bytes(*bytes))
             .collect();
         self.frames += samples.len() as u64;
-        self.state.lock_buffer().extend_from_slice(&samples);
+        self.take.append(&samples);
         if self
             .last_mic_pulse
             .is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL)
@@ -626,7 +504,7 @@ impl SessionAudio {
         if let Some(engine) = engine
             && engine.has_final_pass()
         {
-            submit_closed_segments(engine, &self.state, &mut self.segmenter);
+            self.take.submit_closed_segments();
         }
     }
 }
@@ -658,8 +536,7 @@ async fn run_session(
                     break;
                 }
                 take = None;
-                audio.state.reset(None);
-                audio.segmenter.reset();
+                audio.take = Arc::new(Take::new(Vec::new(), None));
                 engine = stt.engine();
             }
             interim = next_interim(&mut take) => {
@@ -689,14 +566,15 @@ async fn run_session(
                         if !send_frame(&mut socket, &StreamFrame::new(generation)).await {
                             break;
                         }
-                        take = begin_take(
+                        let (next_take, active) = begin_take(
                             session,
                             generation,
                             engine.as_ref(),
-                            &audio.state,
-                            &mut audio.segmenter,
+                            stt.guidance(),
                             &reporter,
                         );
+                        audio.take = next_take;
+                        take = active;
                     }
                     STT_STOP => {
                         take = None;
@@ -708,8 +586,7 @@ async fn run_session(
                         let text = stop_transcript(
                             session,
                             engine.as_deref(),
-                            &audio.state,
-                            &audio.segmenter,
+                            &audio.take,
                             &reporter,
                         )
                         .await;
@@ -810,25 +687,6 @@ mod tests {
         let message = truncation_message(15 * SAMPLE_RATE, 5 * SAMPLE_RATE);
         assert!(message.contains("15 s"), "{message}");
         assert!(message.contains("5.0 s"), "{message}");
-    }
-
-    #[test]
-    fn committed_drain_appends_segments_in_arrival_order() {
-        let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-        let mut committed = Committed {
-            text: String::new(),
-            segments: Some(segment_rx),
-        };
-        segment_tx
-            .send("ask not".to_owned())
-            .expect("receiver held");
-        committed.drain();
-        assert_eq!(committed.text, "ask not");
-        segment_tx
-            .send("what you can do".to_owned())
-            .expect("receiver held");
-        committed.drain();
-        assert_eq!(committed.text, "ask not what you can do");
     }
 
     #[tokio::test]

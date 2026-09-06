@@ -366,7 +366,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
 - Consumes and gates: consumes Steps 1 and 2; all renamed consumers and the post-rename native target must pass in this commit.
 
-### Step 5: Move take ownership into gateway-stt
+### Step 5: Move take ownership into gateway-stt - dff68665
 
 - Artifacts: create `crates/gateway-stt/src/take.rs`, move segmentation and LocalAgreement state from `src/stt.rs` and `gateway-stt-engine/src/segment.rs` into gateway-stt modules, make `gateway-stt-engine/src/final_pass.rs` and `src/worker.rs` execute stateless decode jobs, and adapt the legacy stream in `gateway-stt/src/stt.rs` to the single `take::Take`.
 - Scope: `Take` exclusively owns guidance, finalized history, segment aggregation, completion, and failure; remove engine reset channels and accumulated transcript state, create no engine `FinalTake`, and update every engine API consumer in the same commit.

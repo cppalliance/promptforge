@@ -128,3 +128,11 @@
 - [2026-09-04-3-unlock-inference-during-switches] bounded operational waits: Worker joins and idle artifact reads need finite bounds so cancellation and shutdown cannot hang indefinitely.
 N1 | observation | Violates A2 @ crates/gateway-stt/tests/fixtures/realtime: not determinable from diff | Freeze the realtime transcription wire contract
 N2 | observation | Violates A96 @ crates/workshop-server/ui/test/realtime-wire-fixtures.mjs: not determinable from diff | Freeze the realtime transcription wire contract
+N3 | observation | shared-parameter-cluster @ crates/gateway-stt-engine/src/engine.rs::SttEngine::transcribe_final: repeats samples, guidance, and finalized history across decode signatures | Move take ownership into gateway STT
+N4 | observation | shared-parameter-cluster @ crates/gateway-stt-engine/src/final_pass.rs::FinalTranscriber::transcribe: repeats samples, guidance, and finalized history across decode signatures | Move take ownership into gateway STT
+N5 | observation | shared-mutable-state @ crates/gateway-stt/src/take.rs::TakeState: shares mutex-protected take state between the socket and final pipeline tasks | Move take ownership into gateway STT
+N6 | observation | oversized-unit @ crates/gateway-stt/src/take.rs: adds a 651-line take module | Move take ownership into gateway STT
+N7 | observation | oversized-unit @ crates/gateway-stt/tests/common/mod.rs: adds bounded shutdown logic to an already oversized test support module | Move take ownership into gateway STT
+N8 | observation | oversized-unit @ crates/gateway-stt/tests/it/legacy_stream.rs: adds explicit shutdown calls to an already oversized integration suite | Move take ownership into gateway STT
+N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT
+N10 | observation | Violates A96 @ crates/gateway-stt/src/api.rs: not determinable from diff | Move take ownership into gateway STT

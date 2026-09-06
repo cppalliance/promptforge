@@ -8,8 +8,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
+use gateway_stt::Segmenter;
 use gateway_stt_engine::fixtures::jfk_samples;
-use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter};
+use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE};
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -146,6 +147,7 @@ async fn a_take_counts_pcm_frames_and_tags_the_final_with_its_generation() {
         "frames are counted, the partial sample is dropped, and no engine means an empty transcript"
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -194,6 +196,7 @@ async fn the_workshop_relay_can_request_private_status_frames() {
         })
     );
     socket.close(None).await.expect("socket closes");
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -234,6 +237,7 @@ async fn a_restart_increments_the_generation_and_a_new_connection_resets_it() {
     );
     socket.close().await;
     second.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -256,6 +260,7 @@ async fn stt_upgrade_keeps_the_loopback_origin_allowlist() {
         }
         other => panic!("expected HTTP refusal, got {other:?}"),
     }
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -275,6 +280,7 @@ async fn unknown_text_is_ignored_without_changing_the_take() {
         json!({"type": "final", "text": "", "frames": 10, "generation": 1})
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -320,6 +326,7 @@ async fn speech_produces_generation_tagged_interim_and_final_frames() {
         "the final transcript names the fixture's words: {text:?}"
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -341,6 +348,7 @@ async fn interim_only_stop_keeps_speech_before_a_silence_gap() {
         "the fallback decodes the whole take, nothing consumed early: {text:?}"
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -359,6 +367,7 @@ async fn silence_produces_no_interims_and_an_empty_final() {
         "the first message after silence is the stop reply, not an interim"
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 async fn wait_for_committed(socket: &mut JsonSocket, expected_word: &str) -> String {
@@ -479,6 +488,7 @@ async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
         "no uncommitted speech means no tail transcription"
     );
     socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -533,4 +543,5 @@ async fn interim_frames_keep_committed_text_append_only() {
         "the assembled transcript opens with the last committed prefix"
     );
     socket.close().await;
+    server.shutdown().await;
 }

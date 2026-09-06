@@ -18,6 +18,7 @@ pub(crate) enum LoadedModelRole {
 struct LoadedNames {
     interim: Option<String>,
     final_model: Option<String>,
+    guidance: Vec<String>,
 }
 
 /// Shared active STT state used by both gateway HTTP surfaces.
@@ -53,29 +54,48 @@ impl SttState {
         self.slot.is_active()
     }
 
-    pub(crate) fn select(&self, name: &str) -> Option<(Arc<SttEngine>, LoadedModelRole)> {
-        let role = {
+    pub(crate) fn select(
+        &self,
+        name: &str,
+    ) -> Option<(Arc<SttEngine>, LoadedModelRole, Vec<String>)> {
+        let (role, guidance) = {
             let names = self.names.read().unwrap_or_else(PoisonError::into_inner);
-            if names.interim.as_deref() == Some(name) {
+            let role = if names.interim.as_deref() == Some(name) {
                 Some(LoadedModelRole::Interim)
             } else if names.final_model.as_deref() == Some(name) {
                 Some(LoadedModelRole::Final)
             } else {
                 None
-            }
-        }?;
-        self.slot.engine().map(|engine| (engine, role))
+            }?;
+            (role, names.guidance.clone())
+        };
+        self.slot.engine().map(|engine| (engine, role, guidance))
     }
 
     pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changes.subscribe()
     }
 
-    fn activate(&self, engine: SttEngine, interim: String, final_model: Option<String>) {
+    pub(crate) fn guidance(&self) -> Vec<String> {
+        self.names
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .guidance
+            .clone()
+    }
+
+    fn activate(
+        &self,
+        engine: SttEngine,
+        interim: String,
+        final_model: Option<String>,
+        guidance: Vec<String>,
+    ) {
         self.slot.activate(engine);
         *self.names.write().unwrap_or_else(PoisonError::into_inner) = LoadedNames {
             interim: Some(interim),
             final_model,
+            guidance,
         };
         self.changes.send_modify(|generation| *generation += 1);
     }
@@ -144,6 +164,7 @@ impl SttRuntime {
             .and_then(gateway_config::WorkshopConfig::stt)
             .cloned()
             .unwrap_or_default();
+        let guidance = capture.vocabulary().to_vec();
         let engine_config =
             engine_config(&capture, library, interim_path, models.final_model.as_ref());
         let engine = SttEngine::new_with_progress(
@@ -152,7 +173,7 @@ impl SttRuntime {
         )
         .map_err(SttRuntimeError::Engine)?;
         let final_name = models.final_model.map(|(name, _)| name);
-        state.activate(engine, interim_name, final_name);
+        state.activate(engine, interim_name, final_name, guidance);
         Ok(SttRuntime {
             state,
             active: true,
@@ -236,7 +257,6 @@ fn engine_config(
         library,
         interim_model,
         final_model: final_model.map(|(_, path)| path.clone()),
-        vocabulary: capture.vocabulary().to_vec(),
         window_seconds: capture.window_seconds(),
         interval_ms: capture.interval_ms(),
     }
@@ -359,6 +379,7 @@ mod tests {
         *state.names.write().unwrap_or_else(PoisonError::into_inner) = LoadedNames {
             interim: Some("old".to_owned()),
             final_model: None,
+            guidance: Vec::new(),
         };
         let runtime = SttRuntime::empty(state.clone());
         assert!(state.select("old").is_none());
