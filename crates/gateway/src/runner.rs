@@ -396,9 +396,9 @@ impl Gateway {
     /// Shutdown fires the route signal (so every open-ended stream ends),
     /// closes the queue (so the active command cancels and nothing pending
     /// starts), then drains in-flight requests for at most
-    /// [`GRACEFUL_DRAIN_TIMEOUT`]; a connection that outlives the drain is
+    /// `GRACEFUL_DRAIN_TIMEOUT`; a connection that outlives the drain is
     /// dropped with the runtime rather than pinning the exit. The command
-    /// worker is then joined for at most [`WORKER_JOIN_TIMEOUT`]: a command
+    /// worker is then joined for at most `WORKER_JOIN_TIMEOUT`: a command
     /// body that ignored its cancellation token is abandoned to the runtime
     /// teardown instead of pinning the exit.
     ///
