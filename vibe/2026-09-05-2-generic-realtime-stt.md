@@ -28,7 +28,7 @@ todos:
     status: completed
   - id: ci-workshop-sidecars
     content: Stage target-named Gateway sidecars before Windows and Linux Workshop CI builds
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -488,7 +488,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: this repairs the reproducible Linux CI failure where Cargo 1.98 rejects the pinned module tool's removed `--lockfile-path` metadata argument. It is independent of Realtime behavior and must pass before later steps rely on the architecture driver.
 
-### Step 14: Stage Workshop sidecars in compile CI
+### Step 14: Stage Workshop sidecars in compile CI [completed]
 
 - Artifacts: add `tools/stage-gateway-sidecar.mjs` and `tools/stage-gateway-sidecar.test.mjs`; update only the `check-workshop` and `check-workshop-linux` jobs in `.github/workflows/ci.yml`.
 - Scope: before Workshop Clippy, tests, or build, compile `gateway` without default features and copy the real executable to `crates/workshop/binaries/promptforge-gateway-<target-triple><exe-suffix>` for the current Windows or Linux host. Remove the staged file after the Workshop commands. Keep the directory gitignored, reject missing or mismatched source binaries, and do not modify base Tauri configuration, release packaging, nightly packaging, or shipped sidecar features.
