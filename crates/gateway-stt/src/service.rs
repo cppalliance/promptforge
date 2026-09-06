@@ -11,7 +11,7 @@ use crate::status::SpeechStatus;
 /// Cloneable Gateway handle for all speech behavior.
 #[derive(Debug, Clone, Default)]
 pub struct SpeechService {
-    state: GenerationState,
+    pub(crate) state: GenerationState,
 }
 
 impl SpeechService {
@@ -33,10 +33,10 @@ impl SpeechService {
         artifacts::prepare(config, progress)
     }
 
-    /// Loads a prepared worker generation without publishing it.
+    /// Serializes replacement, drains old ownership, and loads a staged generation.
     ///
     /// # Errors
-    /// Returns a backend, policy, or worker startup error.
+    /// Returns a drain deadline, backend, policy, or worker startup error.
     pub fn begin_replacement(
         &self,
         prepared: PreparedSpeech,
@@ -47,8 +47,7 @@ impl SpeechService {
     /// Publishes every fact in a staged generation through one transition.
     ///
     /// # Errors
-    /// Returns an ownership error for a foreign token or when the caller did
-    /// not shut down the prior generation first.
+    /// Returns an ownership error for a foreign or shutdown-invalidated token.
     pub fn commit_replacement(&self, replacement: SpeechReplacement) -> Result<(), SpeechError> {
         self.state.commit(replacement)
     }
@@ -93,12 +92,13 @@ impl SpeechService {
         &self,
         engine: gateway_stt_engine::SttEngine,
         final_model: Option<String>,
-    ) -> SpeechReplacement {
-        self.state.stage_scripted(
+    ) -> Result<SpeechReplacement, SpeechError> {
+        self.state.stage_loaded_scripted(
             engine,
             "scripted-interim".to_owned(),
             final_model,
             Vec::new(),
+            std::time::Duration::from_secs(30),
         )
     }
 }

@@ -2,7 +2,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 
 use crate::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
 
@@ -17,8 +17,13 @@ struct Job {
 /// Handle to a decoder confined to its worker thread.
 #[derive(Debug)]
 pub(crate) struct Transcriber {
-    job_tx: Option<mpsc::SyncSender<Job>>,
+    state: Mutex<TranscriberState>,
     stopping: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+struct TranscriberState {
+    job_tx: Option<mpsc::SyncSender<Job>>,
     worker: Option<std::thread::JoinHandle<()>>,
     join_panicked: bool,
 }
@@ -43,10 +48,12 @@ impl Transcriber {
             .map_err(TranscribeError::SpawnWorker)?;
         Ok((
             Self {
-                job_tx: Some(job_tx),
+                state: Mutex::new(TranscriberState {
+                    job_tx: Some(job_tx),
+                    worker: Some(worker),
+                    join_panicked: false,
+                }),
                 stopping,
-                worker: Some(worker),
-                join_panicked: false,
             },
             init_rx,
         ))
@@ -58,7 +65,8 @@ impl Transcriber {
     ) -> Result<tokio::sync::oneshot::Receiver<Result<String, TranscribeError>>, TranscribeError>
     {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
-        let Some(job_tx) = &self.job_tx else {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(job_tx) = &state.job_tx else {
             return Err(TranscribeError::WorkerGone);
         };
         job_tx
@@ -78,26 +86,28 @@ impl Transcriber {
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }
 
-    pub(super) fn shutdown(&mut self) -> Result<(), TranscribeError> {
+    pub(super) fn shutdown(&self) -> Result<(), TranscribeError> {
         self.stopping.store(true, Ordering::Release);
-        drop(self.job_tx.take());
-        if let Some(worker) = self.worker.take() {
-            self.join_panicked = worker.join().is_err();
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(state.job_tx.take());
+        if let Some(worker) = state.worker.take() {
+            state.join_panicked = worker.join().is_err();
         }
-        if self.join_panicked {
+        if state.join_panicked {
             Err(TranscribeError::ShutdownPanicked)
         } else {
             Ok(())
         }
     }
 
-    pub(super) fn abandon_startup(&mut self) {
+    pub(super) fn abandon_startup(&self) {
         self.stopping.store(true, Ordering::Release);
-        drop(self.job_tx.take());
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(state.job_tx.take());
         // Construction is non-preemptible. Dropping this handle explicitly
         // abandons only a timed-out startup worker so the host can classify
         // the fatal outcome without claiming the thread was stopped.
-        drop(self.worker.take());
+        drop(state.worker.take());
     }
 
     pub(super) fn startup_failure(
@@ -298,7 +308,7 @@ mod tests {
     }
 
     fn assert_queue_boundary(mode: DecodeMode, capacity: usize) {
-        let (mut worker, control) = parked_worker(mode, capacity);
+        let (worker, control) = parked_worker(mode, capacity);
         let running = worker
             .submit(request(mode))
             .expect("running job is admitted");
@@ -354,7 +364,7 @@ mod tests {
     #[cfg(feature = "test-fixtures")]
     #[test]
     fn miri_shutdown_releases_worker_ownership_once() {
-        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        let (worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
         worker.shutdown().expect("first shutdown joins");
         worker.shutdown().expect("second shutdown is idempotent");
 
@@ -371,7 +381,7 @@ mod tests {
 
     #[test]
     fn cancellation_while_running_discards_only_that_reply() {
-        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        let (worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
         let cancelled = worker
             .submit(request(DecodeMode::Interim))
             .expect("running job is admitted");
@@ -401,7 +411,7 @@ mod tests {
 
     #[test]
     fn shutdown_joins_the_worker_and_is_idempotent() {
-        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        let (worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
         worker.shutdown().expect("first shutdown joins");
         worker.shutdown().expect("second shutdown is idempotent");
         control.wait_for(
@@ -424,7 +434,6 @@ mod tests {
         let stopping = Arc::clone(&worker.stopping);
         let (returned_tx, returned_rx) = mpsc::channel();
         let shutdown = std::thread::spawn(move || {
-            let mut worker = worker;
             worker.shutdown().expect("worker joins");
             let _ignored = returned_tx.send(());
         });

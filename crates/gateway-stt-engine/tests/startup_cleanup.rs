@@ -189,7 +189,7 @@ fn shutdown_surfaces_interim_first_panic_and_still_joins_final() {
     let interim = ScriptedDecoder::new();
     interim.panic_on_drop();
     let final_decoder = ScriptedDecoder::new();
-    let Ok(mut engine) = SttEngine::new(
+    let Ok(engine) = SttEngine::new(
         ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
         policy(),
     ) else {
@@ -212,7 +212,7 @@ fn shutdown_surfaces_final_panic_after_interim_first_cleanup() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
     final_decoder.panic_on_drop();
-    let Ok(mut engine) = SttEngine::new(
+    let Ok(engine) = SttEngine::new(
         ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
         policy(),
     ) else {
@@ -244,7 +244,7 @@ fn shutdown_aggregates_both_panics_and_repeats_the_complete_failure_set() {
     interim.panic_on_drop();
     let final_decoder = ScriptedDecoder::new();
     final_decoder.panic_on_drop();
-    let Ok(mut engine) = SttEngine::new(
+    let Ok(engine) = SttEngine::new(
         ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
         policy(),
     ) else {

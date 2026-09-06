@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use gateway_stt_engine::SttEngine;
-
 use crate::audio::{AudioBuffer, AudioError};
+use crate::generation::GenerationLease;
 use crate::take::Take;
 
 const INPUT_FORMAT: &str = "audio/pcm";
@@ -70,7 +67,7 @@ impl UncommittedInput {
     pub(crate) fn new(
         item_id: String,
         snapshot: InputSnapshot,
-        engine: Option<Arc<SttEngine>>,
+        engine: Option<GenerationLease>,
     ) -> Self {
         Self::from_audio(item_id, snapshot, engine, AudioBuffer::default())
     }
@@ -78,7 +75,7 @@ impl UncommittedInput {
     pub(crate) fn first_append(
         item_id: String,
         snapshot: InputSnapshot,
-        engine: Option<Arc<SttEngine>>,
+        engine: Option<GenerationLease>,
         payload: &str,
     ) -> Result<Self, AudioError> {
         let mut audio = AudioBuffer::default();
@@ -89,7 +86,7 @@ impl UncommittedInput {
     fn from_audio(
         item_id: String,
         snapshot: InputSnapshot,
-        engine: Option<Arc<SttEngine>>,
+        engine: Option<GenerationLease>,
         mut audio: AudioBuffer,
     ) -> Self {
         let guidance = if snapshot.prompt.is_empty() {

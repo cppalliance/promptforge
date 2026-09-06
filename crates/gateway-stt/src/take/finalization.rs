@@ -3,8 +3,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gateway_stt_engine::{DecodeMode, DecodeRequest, SttEngine, TranscribeError};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
+
+use crate::generation::GenerationLease;
 
 use super::state::TakeState;
 
@@ -103,7 +105,7 @@ pub(super) fn reserve_segment(pending_segments: &AtomicUsize) -> bool {
 }
 
 pub(super) fn spawn_final_pipeline(
-    engine: Arc<SttEngine>,
+    engine: GenerationLease,
     guidance: Arc<[String]>,
     state: Arc<TakeState>,
 ) -> FinalPipeline {
@@ -115,7 +117,7 @@ pub(super) fn spawn_final_pipeline(
         state,
         Arc::clone(&pending_segments),
         move |samples, guidance, finalized| {
-            let engine = Arc::clone(&engine);
+            let engine = engine.clone();
             async move {
                 if !engine.has_final_pass() {
                     return None;

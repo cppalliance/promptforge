@@ -445,6 +445,26 @@ fn validate_migration_targets(crate_name: &str, config: &CeilingsFile) -> Result
     Ok(())
 }
 
+fn validate_module_ceiling(
+    lines: usize,
+    ceiling: usize,
+    settled_limit: Option<usize>,
+) -> Result<(), String> {
+    if lines != ceiling {
+        return Err(format!(
+            "measured {lines} physical lines but the exact ceiling is {ceiling}"
+        ));
+    }
+    if let Some(limit) = settled_limit
+        && lines > limit
+    {
+        return Err(format!(
+            "settled module has {lines} physical lines above the {limit}-line limit"
+        ));
+    }
+    Ok(())
+}
+
 #[test]
 fn module_ceilings_cover_sources_and_name_migration_targets() {
     for crate_name in STT_CRATES {
@@ -471,13 +491,26 @@ fn module_ceilings_cover_sources_and_name_migration_targets() {
         );
         for (module, lines) in measured {
             let ceiling = config.modules[&module];
-            assert!(
-                lines <= ceiling,
-                "{crate_name}/{module} grew to {lines} lines past its exact ceiling {ceiling}"
-            );
+            let settled_limit = (crate_name == "gateway-stt"
+                && !config.migration_targets.contains_key(&module))
+            .then_some(500);
+            validate_module_ceiling(lines, ceiling, settled_limit).unwrap_or_else(|error| {
+                panic!("{crate_name}/{module} violates its source policy: {error}")
+            });
         }
         validate_migration_targets(crate_name, &config).unwrap_or_else(|error| panic!("{error}"));
     }
+}
+
+#[test]
+fn exact_module_ceiling_policy_rejects_spare_growth_and_settled_oversize() {
+    assert!(validate_module_ceiling(499, 500, Some(500)).is_err());
+    assert!(validate_module_ceiling(501, 501, Some(500)).is_err());
+    assert!(validate_module_ceiling(500, 500, Some(500)).is_ok());
+    assert!(
+        validate_module_ceiling(501, 501, None).is_ok(),
+        "a named migration may retain an exact temporary oversize"
+    );
 }
 
 #[test]
@@ -510,6 +543,117 @@ fn completed_step_18_migrations_are_removed() {
     assert!(!expected.contains_key("api.rs"));
     assert!(!expected.contains_key("runtime.rs"));
     assert_eq!(expected.keys().collect::<Vec<_>>(), ["stt.rs"]);
+}
+
+const REFCOUNT_INTROSPECTION_OWNERS: [&str; 3] = ["Arc", "Rc", "Weak"];
+const REFCOUNT_INTROSPECTION_METHODS: [&str; 11] = [
+    "decrement_strong_count",
+    "get_mut",
+    "get_mut_unchecked",
+    "increment_strong_count",
+    "into_inner",
+    "is_unique",
+    "make_mut",
+    "strong_count",
+    "try_unwrap",
+    "unwrap_or_clone",
+    "weak_count",
+];
+
+fn calls_associated_method(source: &str, owner: &str, method: &str) -> bool {
+    let compact = source
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let marker = format!("{owner}::");
+    let mut remainder = compact.as_str();
+    while let Some(position) = remainder.find(&marker) {
+        let mut candidate = &remainder[position + marker.len()..];
+        if let Some(generic) = candidate.strip_prefix('<') {
+            let mut depth = 1_usize;
+            let mut end = None;
+            for (index, character) in generic.char_indices() {
+                match character {
+                    '<' => depth += 1,
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(index + character.len_utf8());
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let Some(end) = end else {
+                return false;
+            };
+            let Some(after_generic) = generic[end..].strip_prefix("::") else {
+                return false;
+            };
+            candidate = after_generic;
+        }
+        if candidate.starts_with(&format!("{method}(")) {
+            return true;
+        }
+        remainder = &remainder[position + marker.len()..];
+    }
+    false
+}
+
+fn refcount_introspection(source: &str) -> Option<(&'static str, &'static str)> {
+    REFCOUNT_INTROSPECTION_OWNERS
+        .into_iter()
+        .flat_map(|owner| {
+            REFCOUNT_INTROSPECTION_METHODS
+                .into_iter()
+                .map(move |method| (owner, method))
+        })
+        .find(|(owner, method)| calls_associated_method(source, owner, method))
+}
+
+#[test]
+fn every_reference_count_introspection_form_is_rejected() {
+    for owner in REFCOUNT_INTROSPECTION_OWNERS {
+        for method in REFCOUNT_INTROSPECTION_METHODS {
+            let direct = format!("let _ = {owner}::{method}(&value);");
+            assert_eq!(refcount_introspection(&direct), Some((owner, method)));
+            let generic = format!("let _ = {owner}::<Vec<u8>>::{method}(&value);");
+            assert_eq!(refcount_introspection(&generic), Some((owner, method)));
+        }
+    }
+    assert_eq!(refcount_introspection("Arc::clone(&value)"), None);
+    assert_eq!(refcount_introspection("Arc::ptr_eq(&left, &right)"), None);
+    assert_eq!(refcount_introspection("Weak::upgrade(&owner)"), None);
+}
+
+#[test]
+fn generation_quiescence_uses_explicit_ownership_without_item_transfer() {
+    let generation = read(&crate_root("gateway-stt").join("src/generation.rs"));
+    let replacement = read(&crate_root("gateway-stt").join("src/replacement.rs"));
+    for source in rust_sources(&crate_root("gateway-stt").join("src")) {
+        let contents = read(&source);
+        assert!(
+            refcount_introspection(&contents).is_none(),
+            "{} must not infer lifecycle ownership from reference counts",
+            source.display()
+        );
+    }
+    for policy in [
+        "requests: usize",
+        "jobs: usize",
+        "struct SessionEpoch",
+        "struct ReplacementCoordinator",
+    ] {
+        assert!(
+            replacement.contains(policy),
+            "replacement policy must retain {policy}"
+        );
+    }
+    assert!(
+        !generation.contains("CommittedItem") && !replacement.contains("CommittedItem"),
+        "Realtime sessions retain committed-item failure ownership"
+    );
 }
 
 #[test]

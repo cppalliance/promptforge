@@ -1,56 +1,31 @@
-//! Native fixtures used only by this crate's unit tests.
+//! Deterministic fixtures split by service responsibility.
 
-#[cfg(test)]
-use std::path::{Path, PathBuf};
+#[cfg(feature = "test-fixtures")]
+use std::future::Future;
+
+#[cfg(feature = "test-fixtures")]
+use crate::realtime::{CommitReceipt, InterimEpoch, ItemResult, Session, SessionRegistry};
+
+#[cfg(feature = "test-fixtures")]
+mod generation;
+#[cfg(all(test, not(miri)))]
+mod native;
+#[cfg(feature = "test-fixtures")]
+mod segment;
 
 #[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::DecodeMode;
 #[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
-
 #[cfg(feature = "test-fixtures")]
-use crate::realtime::{CommitReceipt, InterimEpoch, ItemResult, Session, SessionRegistry};
+pub use generation::{
+    GenerationOwnershipFixture, GenerationWorkerJobFixture, begin_scripted_replacement,
+    generation_counts, generation_ownership, scripted_service,
+};
+#[cfg(all(test, not(miri)))]
+pub(crate) use native::{jfk_samples, require_model};
 #[cfg(feature = "test-fixtures")]
-use crate::{SpeechError, SpeechService};
-#[cfg(feature = "test-fixtures")]
-use gateway_stt_engine::{EnginePolicy, SttEngine};
-#[cfg(feature = "test-fixtures")]
-use std::future::Future;
-#[cfg(feature = "test-fixtures")]
-use std::sync::Arc;
-
-/// Builds a speech service around deterministic scripted workers.
-///
-/// # Errors
-/// Returns engine policy, startup, or worker construction failures.
-#[cfg(feature = "test-fixtures")]
-pub fn scripted_service(
-    factory: ScriptedModelFactory,
-    window_seconds: u64,
-    interval_ms: u64,
-) -> Result<SpeechService, SpeechError> {
-    let gpu_available = factory.gpu_available();
-    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)
-        .map_err(SpeechError::Engine)?;
-    let engine = SttEngine::new(factory, policy).map_err(SpeechError::Engine)?;
-    let final_name = engine.has_final_pass().then(|| "scripted-final".to_owned());
-    let service = SpeechService::new();
-    let replacement = service.scripted_replacement(engine, final_name);
-    service.commit_replacement(replacement)?;
-    Ok(service)
-}
-
-/// Returns every closed speech range produced by the service segmenter.
-#[cfg(feature = "test-fixtures")]
-#[must_use]
-pub fn segment_ranges(samples: &[f32]) -> Vec<std::ops::Range<usize>> {
-    let mut segmenter = crate::segment::Segmenter::new();
-    let mut ranges = Vec::new();
-    while let Some(range) = segmenter.poll(samples) {
-        ranges.push(range);
-    }
-    ranges
-}
+pub use segment::segment_ranges;
 
 /// A deterministic registry for focused Realtime session integration tests.
 #[cfg(feature = "test-fixtures")]
@@ -81,11 +56,13 @@ impl RealtimeSessionRegistryFixture {
         factory: ScriptedModelFactory,
     ) -> Result<RealtimeSessionFixture, String> {
         let registration = self.inner.register().map_err(|error| error.to_string())?;
-        let policy = EnginePolicy::new(15, 500, factory.gpu_available())
-            .map_err(|error| error.to_string())?;
-        let engine = SttEngine::new(factory, policy).map_err(|error| error.to_string())?;
+        let service = scripted_service(factory, 15, 500).map_err(|error| error.to_string())?;
+        let engine = service
+            .state
+            .active()
+            .ok_or_else(|| "scripted generation did not publish".to_owned())?;
         Ok(RealtimeSessionFixture {
-            session: Session::new(registration, Some(Arc::new(engine))),
+            session: Session::new(registration, Some(engine)),
         })
     }
 
@@ -440,41 +417,4 @@ fn result_value(result: ItemResult) -> serde_json::Value {
             "message": message,
         }),
     }
-}
-
-#[cfg(test)]
-pub(crate) fn require_model() -> PathBuf {
-    require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin")
-}
-
-#[cfg(test)]
-pub(crate) fn jfk_samples() -> Vec<f32> {
-    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
-    let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
-    let spec = reader.spec();
-    assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
-    assert_eq!(spec.channels, 1, "fixture must be mono");
-    assert_eq!(spec.bits_per_sample, 16, "fixture must be 16-bit PCM");
-    reader
-        .samples::<i16>()
-        .map(|sample| f32::from(sample.expect("fixture sample decodes")) / 32_768.0)
-        .collect()
-}
-
-#[cfg(test)]
-fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
-    let path = std::env::var_os(variable).map_or_else(
-        || {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../gateway-stt-backend-whisper/tests/fixtures")
-                .join(fallback)
-        },
-        PathBuf::from,
-    );
-    assert!(
-        path.is_file(),
-        "native test fixture is missing: {}",
-        path.display()
-    );
-    path
 }

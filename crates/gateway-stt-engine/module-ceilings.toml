@@ -1,6 +1,6 @@
 # Exact source and public-root ratchets for the backend-neutral STT engine.
-# Physical lines include comments and blanks. A source file may shrink but
-# may not exceed its recorded ceiling.
+# Physical lines include comments and blanks. Every recorded ceiling equals
+# the measured file size, so any size change updates this manifest explicitly.
 
 public_root_budget = 7
 
@@ -15,4 +15,4 @@ public_root_budget = 7
 "startup.rs" = 48
 "test_fixtures.rs" = 638
 "translation.rs" = 28
-"worker.rs" = 451
+"worker.rs" = 460

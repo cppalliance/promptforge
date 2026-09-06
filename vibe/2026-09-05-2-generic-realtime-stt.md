@@ -562,7 +562,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo clippy -p gateway-local -p gateway-stt --all-targets --all-features -- -D warnings`
 - Consumes and gates: this repairs native tests under the self-hosted Windows `NetworkService` account, where `WORKGROUP\<machine>$` cannot be mapped by `icacls`. Parser tests cover ordinary users, well-known service SIDs, malformed CSV, missing SID, command failure, and SID-prefix rendering. The real Windows DACL test and native STT targets must pass without changing runner identity or bypassing cache privacy.
 
-### Step 20: Quiesce generations with explicit ownership
+### Step 20: Quiesce generations with explicit ownership [completed]
 
 - Artifacts: extend `gateway-stt/src/{generation.rs,service.rs}`, create `replacement.rs`, create `tests/it/generation.rs`, register it in `tests/it/main.rs`, and update ceilings and Miri filters.
 - Scope: serialize replacement, close admission, count requests and worker jobs, install fresh rollback epochs, drain without reference counts, reopen on deadline, and race replacement against shutdown.

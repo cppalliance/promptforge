@@ -1,6 +1,6 @@
 # Exact source and public-root ratchets for the Whisper FFI leaf.
-# Physical lines include comments and blanks. A source file may shrink but
-# may not exceed its recorded ceiling.
+# Physical lines include comments and blanks. Every recorded ceiling equals
+# the measured file size, so any size change updates this manifest explicitly.
 
 public_root_budget = 6
 

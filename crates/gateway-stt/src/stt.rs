@@ -10,12 +10,12 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 use workshop_server::{Activity, Push};
 
-use crate::generation::{Generation, GenerationState};
+use crate::generation::{GenerationLease, GenerationState};
 use crate::take::Take;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -260,7 +260,7 @@ async fn next_status(statuses: &mut Option<mpsc::UnboundedReceiver<String>>) -> 
 fn spawn_interim(
     session: u64,
     generation: u64,
-    engine: Arc<SttEngine>,
+    engine: GenerationLease,
     state: Arc<Take>,
     reporter: Reporter,
 ) -> ActiveTake {
@@ -321,7 +321,7 @@ fn spawn_interim(
 
 async fn final_transcript(
     session: u64,
-    engine: &SttEngine,
+    engine: &GenerationLease,
     take: &Take,
     reporter: &Reporter,
 ) -> String {
@@ -371,7 +371,7 @@ fn truncation_message(window_samples: usize, dropped: usize) -> String {
 /// The interim-window fallback transcribes only the take's last window of
 /// audio; a longer take loses its leading audio. Name the truncation on the
 /// status bar and in the log instead of dropping it silently.
-fn warn_if_truncated(session: u64, engine: &SttEngine, take: &Take, reporter: &Reporter) {
+fn warn_if_truncated(session: u64, engine: &GenerationLease, take: &Take, reporter: &Reporter) {
     let uncommitted = take.fallback_len();
     let window = engine.window_samples();
     let Some(dropped) = truncation_drop(uncommitted, window) else {
@@ -392,7 +392,7 @@ fn warn_if_truncated(session: u64, engine: &SttEngine, take: &Take, reporter: &R
 
 async fn stop_transcript(
     session: u64,
-    engine: Option<&SttEngine>,
+    engine: Option<&GenerationLease>,
     take: &Take,
     reporter: &Reporter,
 ) -> String {
@@ -426,10 +426,10 @@ async fn stop_transcript(
 fn begin_take(
     session: u64,
     generation: u64,
-    active: Option<&Arc<Generation>>,
+    active: Option<&GenerationLease>,
     reporter: &Reporter,
 ) -> (Arc<Take>, Option<ActiveTake>) {
-    let engine = active.map(|generation| generation.engine_handle());
+    let engine = active.cloned();
     let guidance = active.map_or_else(Vec::new, |generation| generation.guidance().to_vec());
     let state = Arc::new(Take::new(guidance, engine.clone()));
     let active = engine.map(|engine| {
@@ -488,7 +488,7 @@ impl SessionAudio {
         }
     }
 
-    fn receive(&mut self, payload: &[u8], engine: Option<&SttEngine>, reporter: &Reporter) {
+    fn receive(&mut self, payload: &[u8], engine: Option<&GenerationLease>, reporter: &Reporter) {
         let samples: Vec<f32> = payload
             .as_chunks::<4>()
             .0
@@ -516,8 +516,8 @@ impl SessionAudio {
     }
 }
 
-fn active_engine(generation: Option<&Arc<Generation>>) -> Option<&SttEngine> {
-    generation.map(|generation| generation.engine())
+fn active_engine(generation: Option<&GenerationLease>) -> Option<&GenerationLease> {
+    generation
 }
 
 async fn run_session(

@@ -1,0 +1,341 @@
+//! Generation replacement and ownership integration tests.
+
+#![expect(
+    clippy::expect_used,
+    reason = "integration tests panic with the failed ownership invariant"
+)]
+
+use std::sync::{Arc, Barrier, mpsc};
+use std::time::Duration;
+
+use gateway_stt::SpeechService;
+use gateway_stt::test_fixtures::{
+    ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, generation_counts,
+    generation_ownership, scripted_service,
+};
+
+use crate::common::transcribe_batch;
+
+const WAIT: Duration = Duration::from_secs(2);
+
+fn factory(decoder: &ScriptedDecoder) -> ScriptedModelFactory {
+    ScriptedModelFactory::new(decoder.clone())
+}
+
+fn service(decoder: &ScriptedDecoder) -> SpeechService {
+    scripted_service(factory(decoder), 15, 500).expect("scripted generation starts")
+}
+
+#[test]
+fn request_and_worker_job_ownership_are_counted_independently() {
+    let decoder = ScriptedDecoder::new();
+    let service = service(&decoder);
+    let request = generation_ownership(&service).expect("open generation admits a request");
+    assert_eq!(generation_counts(&service), Some((1, 0)));
+
+    let job = request
+        .own_worker_job()
+        .expect("the admitted request owns a worker job");
+    assert_eq!(generation_counts(&service), Some((1, 1)));
+
+    drop(request);
+    assert_eq!(
+        generation_counts(&service),
+        Some((0, 1)),
+        "request cancellation cannot report false worker idleness"
+    );
+    drop(job);
+    assert_eq!(generation_counts(&service), Some((0, 0)));
+    service.shutdown();
+}
+
+#[test]
+fn a_quiescence_deadline_reopens_the_same_snapshot_with_a_fresh_epoch() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let stale = generation_ownership(&service).expect("old generation admits");
+    let stale_epoch = stale.epoch();
+    let replacement = ScriptedDecoder::new();
+
+    let error = begin_scripted_replacement(
+        &service,
+        factory(&replacement),
+        false,
+        Duration::from_millis(20),
+    )
+    .expect_err("owned old request prevents bounded quiescence");
+
+    assert!(error.to_string().contains("quiescence deadline"));
+    assert!(stale.is_replaced(), "closing cancels the old session epoch");
+    assert!(
+        replacement.creation_thread().is_none(),
+        "a failed drain never loads replacement model memory"
+    );
+    let fresh = generation_ownership(&service).expect("deadline reopens admission");
+    assert_ne!(fresh.epoch(), stale_epoch);
+    assert!(!fresh.is_replaced());
+    assert!(service.status().ready());
+
+    drop((fresh, stale));
+    service.shutdown();
+}
+
+#[test]
+fn an_unrepresentable_deadline_leaves_the_same_snapshot_open() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let admitted = generation_ownership(&service).expect("old generation admits");
+    let epoch = admitted.epoch();
+    let replacement = ScriptedDecoder::new();
+
+    let error = begin_scripted_replacement(&service, factory(&replacement), false, Duration::MAX)
+        .expect_err("an unrepresentable deadline rejects replacement");
+
+    assert!(error.to_string().contains("quiescence deadline"));
+    assert!(
+        !admitted.is_replaced(),
+        "deadline validation happens before admission or epoch mutation"
+    );
+    assert!(
+        replacement.creation_thread().is_none(),
+        "invalid control-plane input never loads replacement model memory"
+    );
+    let fresh = generation_ownership(&service).expect("the original snapshot remains open");
+    assert_eq!(fresh.epoch(), epoch);
+    assert!(!fresh.is_replaced());
+    assert!(service.status().ready());
+
+    drop((fresh, admitted));
+    service.shutdown();
+}
+
+#[test]
+fn replacement_is_serial_and_publishes_one_complete_snapshot() {
+    let service = SpeechService::new();
+    let first_decoder = ScriptedDecoder::new();
+    let first = begin_scripted_replacement(&service, factory(&first_decoder), false, WAIT)
+        .expect("first stages");
+    let second_interim = ScriptedDecoder::new();
+    let second_final = ScriptedDecoder::new();
+    let second_factory = factory(&second_interim)
+        .with_final(second_final.clone())
+        .with_gpu_available(true);
+    let contender_service = service.clone();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let contender = std::thread::spawn(move || {
+        drop(finished_tx.send(begin_scripted_replacement(
+            &contender_service,
+            second_factory,
+            true,
+            WAIT,
+        )));
+    });
+
+    assert!(
+        matches!(
+            finished_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ),
+        "a second replacement waits for ownership of the first transaction"
+    );
+    assert!(second_interim.creation_thread().is_none());
+
+    service.abort_replacement(first);
+    let second = finished_rx
+        .recv_timeout(WAIT)
+        .expect("second replacement resumes")
+        .expect("second replacement stages");
+    contender.join().expect("replacement contender joins");
+    service
+        .commit_replacement(second)
+        .expect("complete generation publishes");
+
+    let status = service.status();
+    assert!(status.ready());
+    assert!(status.gpu());
+    assert_eq!(
+        service
+            .models()
+            .iter()
+            .map(gateway_stt::SpeechModelInfo::name)
+            .collect::<Vec<_>>(),
+        ["scripted-interim", "scripted-final"]
+    );
+    assert!(first_decoder.worker_dropped());
+    service.shutdown();
+    assert!(second_interim.worker_dropped());
+    assert!(second_final.worker_dropped());
+}
+
+#[tokio::test]
+async fn active_replacement_drains_request_and_job_before_unload_and_publication() {
+    let old = ScriptedDecoder::new();
+    old.park_next();
+    let service = service(&old);
+    let request_service = service.clone();
+    let request = tokio::spawn(async move {
+        transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
+    });
+    let parked = old.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(WAIT))
+            .await
+            .expect("park observer joins"),
+        "the old generation owns one running native-equivalent job"
+    );
+    assert_eq!(generation_counts(&service), Some((1, 1)));
+
+    let next_interim = ScriptedDecoder::new();
+    let next_final = ScriptedDecoder::new();
+    let next_factory = factory(&next_interim)
+        .with_final(next_final.clone())
+        .with_gpu_available(true);
+    let replacement_service = service.clone();
+    let replacement = tokio::task::spawn_blocking(move || {
+        begin_scripted_replacement(&replacement_service, next_factory, true, WAIT)
+    });
+
+    tokio::time::timeout(WAIT, async {
+        while generation_counts(&service) != Some((0, 1)) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("request ownership drains while the parked job remains");
+    tokio::time::timeout(WAIT, request)
+        .await
+        .expect("canceled old request returns")
+        .expect("old request task joins");
+    assert!(!service.status().ready(), "closed admission is not ready");
+    assert!(
+        next_interim.creation_thread().is_none() && next_final.creation_thread().is_none(),
+        "replacement construction waits for every old worker job"
+    );
+    assert!(
+        !old.worker_dropped(),
+        "the running old worker remains owned until native work returns"
+    );
+
+    old.release();
+    let replacement = tokio::time::timeout(WAIT, replacement)
+        .await
+        .expect("active replacement finishes after old work drains")
+        .expect("replacement task joins")
+        .expect("replacement stages");
+    assert!(
+        old.worker_dropped(),
+        "old workers unload before the staged replacement returns"
+    );
+    assert!(next_interim.creation_thread().is_some());
+    assert!(next_final.creation_thread().is_some());
+
+    service
+        .commit_replacement(replacement)
+        .expect("the complete replacement publishes");
+    assert_eq!(generation_counts(&service), Some((0, 0)));
+    assert!(service.status().ready());
+    assert!(service.status().gpu());
+    assert_eq!(
+        service
+            .models()
+            .iter()
+            .map(gateway_stt::SpeechModelInfo::name)
+            .collect::<Vec<_>>(),
+        ["scripted-interim", "scripted-final"]
+    );
+
+    service.shutdown();
+    assert!(next_interim.worker_dropped());
+    assert!(next_final.worker_dropped());
+}
+
+#[tokio::test]
+async fn canceled_request_keeps_its_worker_job_owned_until_decode_returns() {
+    let old = ScriptedDecoder::new();
+    old.park_next();
+    let service = service(&old);
+    let request_service = service.clone();
+    let request = tokio::spawn(async move {
+        transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
+    });
+    let parked = old.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(WAIT))
+            .await
+            .expect("park observer joins"),
+        "decode reaches the native-equivalent rendezvous"
+    );
+    assert_eq!(generation_counts(&service), Some((1, 1)));
+
+    request.abort();
+    assert!(
+        request
+            .await
+            .expect_err("request is canceled")
+            .is_cancelled()
+    );
+    tokio::time::timeout(WAIT, async {
+        while generation_counts(&service) != Some((0, 1)) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("request ownership drops while worker ownership remains");
+    assert_eq!(generation_counts(&service), Some((0, 1)));
+
+    let replacement = ScriptedDecoder::new();
+    let replacement_control = replacement.clone();
+    let replacement_service = service.clone();
+    let attempt = tokio::task::spawn_blocking(move || {
+        begin_scripted_replacement(
+            &replacement_service,
+            factory(&replacement_control),
+            false,
+            Duration::from_millis(20),
+        )
+    })
+    .await
+    .expect("replacement attempt joins");
+    let error = attempt.expect_err("the live worker job prevents quiescence");
+    assert!(error.to_string().contains("quiescence deadline"));
+    assert!(replacement.creation_thread().is_none());
+
+    old.release();
+    tokio::time::timeout(WAIT, async {
+        while generation_counts(&service) != Some((0, 0)) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("worker ownership drains after native decode returns");
+    service.shutdown();
+}
+
+#[test]
+fn shutdown_wins_a_race_with_staged_publication() {
+    for _ in 0..8 {
+        let service = SpeechService::new();
+        let decoder = ScriptedDecoder::new();
+        let replacement = begin_scripted_replacement(&service, factory(&decoder), false, WAIT)
+            .expect("generation stages");
+        let barrier = Arc::new(Barrier::new(2));
+        let commit_barrier = Arc::clone(&barrier);
+        let commit_service = service.clone();
+        let commit = std::thread::spawn(move || {
+            commit_barrier.wait();
+            commit_service.commit_replacement(replacement)
+        });
+
+        barrier.wait();
+        service.shutdown();
+        let outcome = commit.join().expect("commit contender joins");
+        if let Err(error) = outcome {
+            assert!(error.to_string().contains("invalidated"));
+        }
+        assert!(
+            !service.status().ready(),
+            "shutdown never permits a stale staged generation to survive"
+        );
+        assert!(decoder.worker_dropped());
+    }
+}

@@ -373,7 +373,7 @@ mod tests {
         interim.push_text("interim");
         let final_decoder = ScriptedDecoder::new();
         final_decoder.push_text("final");
-        let mut engine = SttEngine::new(
+        let engine = SttEngine::new(
             ScriptedModelFactory::new(interim.clone())
                 .with_final(final_decoder.clone())
                 .with_gpu_available(true),
@@ -486,7 +486,7 @@ mod tests {
         let waiter =
             std::thread::spawn(move || waiter_decoder.wait_for_requests(1, Duration::from_secs(1)));
         wait_until_waiter_is_registered(&interim);
-        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
+        let engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
             .expect("scripted worker starts");
 
         engine
@@ -512,7 +512,7 @@ mod tests {
 
         let interim = ScriptedDecoder::new();
         interim.push_error(SENTINEL);
-        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
+        let engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
             .expect("scripted worker starts");
         let error = engine
             .decode(request(DecodeMode::Interim, vec![0.25], Vec::new(), ""))
@@ -622,7 +622,7 @@ mod tests {
     fn shutdown_surfaces_join_panic_and_remains_idempotent() {
         let interim = ScriptedDecoder::new();
         interim.panic_on_drop();
-        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
+        let engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
             .expect("scripted worker starts");
 
         assert!(matches!(

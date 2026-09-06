@@ -1,12 +1,10 @@
 use std::future::Future;
-use std::sync::Arc;
-
-use gateway_stt_engine::SttEngine;
 
 use super::input::{InputSnapshot, UncommittedInput};
 use super::item::CommittedItem;
 use super::registry::SessionRegistration;
 use super::wire::{ClientError, EffectiveSession, IdGenerator, ServerEvent};
+use crate::generation::GenerationLease;
 
 mod items;
 mod state;
@@ -17,7 +15,7 @@ use state::SESSION_CANCEL_JOIN_CAPACITY;
 pub(crate) use state::{InterimEpoch, Session, SessionError};
 
 impl Session {
-    pub(crate) fn new(registration: SessionRegistration, engine: Option<Arc<SttEngine>>) -> Self {
+    pub(crate) fn new(registration: SessionRegistration, engine: Option<GenerationLease>) -> Self {
         let ids = IdGenerator::default();
         let effective = EffectiveSession::new(ids.session());
         Self::empty(registration, engine, ids, effective)
@@ -42,7 +40,7 @@ impl Session {
         let input = UncommittedInput::first_append(
             self.ids.item(),
             snapshot,
-            self.engine.as_ref().map(Arc::clone),
+            self.engine.clone(),
             payload,
         )?;
         self.input = Some(input);

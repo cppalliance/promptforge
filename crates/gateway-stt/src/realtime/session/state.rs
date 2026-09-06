@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use gateway_stt_engine::SttEngine;
 use tokio::task::JoinHandle;
 
 use crate::audio::AudioError;
+use crate::generation::GenerationLease;
 use crate::realtime::input::UncommittedInput;
 use crate::realtime::item::CommittedItem;
 use crate::realtime::registry::SessionRegistration;
@@ -43,7 +42,7 @@ pub(crate) enum SessionError {
 #[derive(Debug)]
 pub(crate) struct Session {
     pub(super) registration: Option<SessionRegistration>,
-    pub(super) engine: Option<Arc<SttEngine>>,
+    pub(super) engine: Option<GenerationLease>,
     pub(super) ids: IdGenerator,
     pub(super) effective: EffectiveSession,
     pub(super) input: Option<UncommittedInput>,
@@ -60,7 +59,7 @@ pub(crate) struct Session {
 impl Session {
     pub(super) fn empty(
         registration: SessionRegistration,
-        engine: Option<Arc<SttEngine>>,
+        engine: Option<GenerationLease>,
         ids: IdGenerator,
         effective: EffectiveSession,
     ) -> Self {

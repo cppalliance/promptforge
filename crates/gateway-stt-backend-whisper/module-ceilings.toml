@@ -1,6 +1,6 @@
 # Exact source and public-root ratchets for the safe Whisper backend.
-# Physical lines include comments and blanks. A source file may shrink but
-# may not exceed its recorded ceiling.
+# Physical lines include comments and blanks. Every recorded ceiling equals
+# the measured file size, so any size change updates this manifest explicitly.
 
 public_root_budget = 2
 
@@ -9,5 +9,5 @@ public_root_budget = 2
 [modules]
 "config.rs" = 32
 "lib.rs" = 8
-"model.rs" = 301
+"model.rs" = 293
 "prompt.rs" = 233

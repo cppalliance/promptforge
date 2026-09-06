@@ -1,6 +1,6 @@
 # Exact source and public-root ratchets for the gateway STT facade.
-# Physical lines include comments and blanks. A source file may shrink but
-# may not exceed its recorded ceiling.
+# Physical lines include comments and blanks. Every recorded ceiling equals
+# the measured file size, so any size change updates this manifest explicitly.
 
 public_root_budget = 6
 
@@ -9,35 +9,41 @@ target_step = "Step 30"
 destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
 
 [modules]
-"artifacts.rs" = 294
+"artifacts.rs" = 302
 "audio.rs" = 397
-"batch.rs" = 349
+"batch.rs" = 347
 "batch/native_tests.rs" = 113
 "batch/tests.rs" = 160
-"generation.rs" = 247
-"lib.rs" = 40
+"generation.rs" = 336
+"generation/lease.rs" = 126
+"generation/snapshot.rs" = 98
+"lib.rs" = 41
 "model.rs" = 55
 "realtime/mod.rs" = 16
-"realtime/input.rs" = 198
+"realtime/input.rs" = 195
 "realtime/item.rs" = 157
 "realtime/query.rs" = 70
 "realtime/registry.rs" = 200
 "realtime/result_mailbox.rs" = 207
-"realtime/session.rs" = 438
+"realtime/session.rs" = 436
 "realtime/session/items.rs" = 134
-"realtime/session/state.rs" = 83
+"realtime/session/state.rs" = 82
 "realtime/wire.rs" = 24
 "realtime/wire/client.rs" = 363
-"realtime/wire/server.rs" = 389
-"realtime/wire/shared.rs" = 218
+"realtime/wire/server.rs" = 388
+"realtime/wire/shared.rs" = 217
 "realtime/wire/tests.rs" = 278
+"replacement.rs" = 473
 "segment.rs" = 239
 "service.rs" = 104
 "status.rs" = 54
 "stt.rs" = 725
 "take.rs" = 420
 "take/agreement.rs" = 116
-"take/finalization.rs" = 175
+"take/finalization.rs" = 177
 "take/state.rs" = 82
-"take/text.rs" = 10
-"test_fixtures.rs" = 480
+"take/text.rs" = 9
+"test_fixtures.rs" = 420
+"test_fixtures/generation.rs" = 104
+"test_fixtures/native.rs" = 42
+"test_fixtures/segment.rs" = 12

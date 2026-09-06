@@ -9,6 +9,8 @@ mod architecture;
 #[cfg(not(miri))]
 mod batch;
 #[cfg(not(miri))]
+mod generation;
+#[cfg(not(miri))]
 mod legacy_stream;
 #[cfg(not(miri))]
 mod realtime_fixtures;

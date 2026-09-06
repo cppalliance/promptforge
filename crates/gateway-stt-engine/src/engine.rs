@@ -48,13 +48,13 @@ impl SttEngine {
             .ok_or_else(|| {
                 TranscribeError::InvalidConfig("stt.startup_timeout is too large".to_owned())
             })?;
-        let (mut transcriber, interim_init) = spawn(
+        let (transcriber, interim_init) = spawn(
             "stt-interim",
             Arc::clone(&factory),
             DecodeMode::Interim,
             INTERIM_JOB_CAPACITY,
         )?;
-        let (mut final_worker, final_init) = match spawn(
+        let (final_worker, final_init) = match spawn(
             "stt-final",
             Arc::clone(&factory),
             DecodeMode::Final,
@@ -164,12 +164,12 @@ impl SttEngine {
     /// [`TranscribeError::ShutdownFailures`] for multiple panicked workers.
     /// Both workers are still joined and every failure remains visible on
     /// repeated calls.
-    pub fn shutdown(&mut self) -> Result<(), TranscribeError> {
+    pub fn shutdown(&self) -> Result<(), TranscribeError> {
         let mut cleanup = Vec::with_capacity(2);
         if let Err(error) = self.transcriber.shutdown() {
             cleanup.push(error);
         }
-        if let Some(final_pass) = &mut self.final_pass
+        if let Some(final_pass) = &self.final_pass
             && let Err(error) = final_pass.shutdown()
         {
             cleanup.push(error);

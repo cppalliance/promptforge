@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use gateway_stt_engine::SttEngine;
 #[cfg(test)]
 use gateway_stt_engine::TranscribeError;
+
+use crate::generation::GenerationLease;
 
 mod agreement;
 mod finalization;
@@ -32,11 +33,11 @@ pub(crate) struct Take {
 }
 
 impl Take {
-    pub(crate) fn new(guidance: Vec<String>, engine: Option<Arc<SttEngine>>) -> Self {
+    pub(crate) fn new(guidance: Vec<String>, engine: Option<GenerationLease>) -> Self {
         let guidance = Arc::<[String]>::from(guidance);
         let state = Arc::new(TakeState::default());
         let final_pipeline = engine
-            .filter(|engine| engine.has_final_pass())
+            .filter(GenerationLease::has_final_pass)
             .map(|engine| spawn_final_pipeline(engine, Arc::clone(&guidance), Arc::clone(&state)));
         Self {
             guidance,

@@ -11,6 +11,7 @@ mod generation;
 mod model;
 #[allow(dead_code)]
 mod realtime;
+mod replacement;
 mod segment;
 mod service;
 mod status;

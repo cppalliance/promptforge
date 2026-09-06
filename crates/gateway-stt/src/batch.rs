@@ -128,7 +128,6 @@ async fn transcribe(
     };
     let (samples, duration) = decode_wav(&form.file)?;
     let text = generation
-        .engine()
         .decode(DecodeRequest::new(
             mode,
             samples,

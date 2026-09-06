@@ -147,6 +147,14 @@ pub enum SpeechError {
     #[error("an active speech generation must be shut down before replacement")]
     GenerationActive,
 
+    /// Old-generation ownership did not drain before replacement's deadline.
+    #[error("speech generation quiescence deadline expired")]
+    QuiescenceDeadline,
+
+    /// Shutdown invalidated a replacement before it could publish.
+    #[error("speech replacement was invalidated by shutdown")]
+    ReplacementInvalidated,
+
     /// Multipart framing could not be decoded.
     #[non_exhaustive]
     #[error("invalid multipart transcription request")]
