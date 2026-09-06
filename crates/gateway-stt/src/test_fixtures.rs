@@ -72,10 +72,21 @@ impl RealtimeSessionRegistryFixture {
         self.inner.active()
     }
 
-    /// Returns owned admission without polling retiring task destructors.
+    /// Returns the number of registry cleanup events emitted.
     #[must_use]
-    pub fn owned_without_reaping(&self) -> usize {
-        self.inner.owned_without_reaping()
+    pub fn cleanup_event_count(&self) -> usize {
+        self.inner.cleanup_event_count()
+    }
+
+    /// Returns the number of retired tasks whose joins failed after cancellation.
+    #[must_use]
+    pub fn retired_task_failures(&self) -> usize {
+        self.inner.retired_task_failures()
+    }
+
+    /// Waits for the next registry-owned session cleanup.
+    pub fn cleanup_notified(&self) -> impl Future<Output = ()> + '_ {
+        self.inner.cleanup_notified()
     }
 }
 
@@ -274,6 +285,19 @@ impl RealtimeSessionFixture {
     #[must_use]
     pub fn finalizing_count(&self) -> usize {
         self.session.finalizing_count()
+    }
+
+    /// Replaces one committed item's accurate finalization with controlled work.
+    ///
+    /// # Errors
+    /// Returns an error when the committed item does not exist.
+    pub fn replace_finalization<F>(&mut self, item_id: &str, task: F) -> Result<(), String>
+    where
+        F: Future<Output = Result<String, String>> + Send + 'static,
+    {
+        self.session
+            .replace_finalization(item_id, task)
+            .map_err(|error| error.to_string())
     }
 
     /// Returns the committed immutable prompt and take guidance.

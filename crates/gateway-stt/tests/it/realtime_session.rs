@@ -81,6 +81,16 @@ impl Future for BlockingPoll {
     }
 }
 
+struct BlockingFinalization(BlockingPoll);
+
+impl Future for BlockingFinalization {
+    type Output = Result<String, String>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(context).map(Ok)
+    }
+}
+
 fn wait_until_started(started: &Arc<(Mutex<bool>, Condvar)>) {
     let state = started
         .0
@@ -94,13 +104,19 @@ fn wait_until_started(started: &Arc<(Mutex<bool>, Condvar)>) {
 }
 
 async fn wait_until(predicate: impl Fn() -> bool) {
-    for _ in 0..1_000 {
-        if predicate() {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    panic!("condition did not become true within the bounded yield budget");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if predicate() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok(),
+        "condition reaches its wall-clock deadline"
+    );
 }
 
 #[test]
@@ -189,6 +205,9 @@ async fn dropping_session_retains_admission_until_interim_cleanup_joins() {
         .expect("test lock is not poisoned");
     let registry = RealtimeSessionRegistryFixture::default();
     let mut session = registry.register().expect("session registers");
+    let other_sessions = (1..SESSION_CAPACITY)
+        .map(|_| registry.register().expect("capacity is admitted"))
+        .collect::<Vec<_>>();
     session
         .append_base64(&encoded(&[0, 0]))
         .expect("input appends");
@@ -202,14 +221,159 @@ async fn dropping_session_retains_admission_until_interim_cleanup_joins() {
         .expect("interim starts");
 
     wait_until_started(&started);
+    let cleanup_events = registry.cleanup_event_count();
     drop(session);
+    let cleanup = registry.cleanup_notified();
+    tokio::pin!(cleanup);
+    assert!(
+        cleanup.as_mut().now_or_never().is_none(),
+        "cleanup waiter starts before task release"
+    );
     assert_eq!(
-        registry.owned_without_reaping(),
-        1,
+        registry.active(),
+        SESSION_CAPACITY,
         "retiring work keeps admission owned"
     );
+    assert_eq!(
+        registry.register().expect_err("capacity remains occupied"),
+        "the realtime transcription session limit is reached"
+    );
+
     release.store(true, Ordering::Release);
-    wait_until(|| registry.active() == 0).await;
+    tokio::time::timeout(Duration::from_secs(1), cleanup)
+        .await
+        .expect("registry cleanup reaches its wall-clock deadline");
+    assert_eq!(
+        registry.cleanup_event_count(),
+        cleanup_events + 1,
+        "one retirement emits exactly one cleanup event"
+    );
+    assert_eq!(registry.active(), SESSION_CAPACITY - 1);
+    let replacement = registry
+        .register()
+        .expect("completed cleanup immediately reopens admission");
+    drop(replacement);
+    drop(other_sessions);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(
+    clippy::await_holding_lock,
+    reason = "the process-wide test lock serializes deliberately blocked runtime workers"
+)]
+async fn dropping_session_retains_admission_until_finalization_cleanup_joins() {
+    let _serial = BLOCKING_TASK_TEST
+        .lock()
+        .expect("test lock is not poisoned");
+    let registry = RealtimeSessionRegistryFixture::default();
+    let mut session = registry.register().expect("session registers");
+    let other_sessions = (1..SESSION_CAPACITY)
+        .map(|_| registry.register().expect("capacity is admitted"))
+        .collect::<Vec<_>>();
+    let item = {
+        append_committable(&mut session);
+        session.commit().expect("item commits")
+    };
+    let started = Arc::new((Mutex::new(false), Condvar::new()));
+    let release = Arc::new(AtomicBool::new(false));
+    session
+        .replace_finalization(
+            item.item_id(),
+            BlockingFinalization(BlockingPoll {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+        )
+        .expect("controlled finalization starts");
+
+    wait_until_started(&started);
+    let cleanup_events = registry.cleanup_event_count();
+    let cleanup = registry.cleanup_notified();
+    tokio::pin!(cleanup);
+    assert!(
+        cleanup.as_mut().now_or_never().is_none(),
+        "cleanup waiter starts before session retirement"
+    );
+    drop(session);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), cleanup.as_mut())
+            .await
+            .is_err(),
+        "parked finalization keeps cleanup pending"
+    );
+    assert_eq!(
+        registry.active(),
+        SESSION_CAPACITY,
+        "retiring finalization keeps admission owned"
+    );
+    assert_eq!(
+        registry.register().expect_err("capacity remains occupied"),
+        "the realtime transcription session limit is reached"
+    );
+
+    release.store(true, Ordering::Release);
+    tokio::time::timeout(Duration::from_secs(1), cleanup.as_mut())
+        .await
+        .expect("finalization cleanup reaches its wall-clock deadline");
+    assert_eq!(
+        registry.cleanup_event_count(),
+        cleanup_events + 1,
+        "one finalization retirement emits exactly one cleanup event"
+    );
+    assert_eq!(registry.active(), SESSION_CAPACITY - 1);
+    let replacement = registry
+        .register()
+        .expect("completed finalization cleanup immediately reopens admission");
+    drop(replacement);
+    drop(other_sessions);
+}
+
+#[tokio::test]
+async fn retired_task_join_failures_are_preserved() {
+    let registry = RealtimeSessionRegistryFixture::default();
+    let mut session = registry.register().expect("session registers");
+    session
+        .append_base64(&encoded(&[0, 0]))
+        .expect("input appends");
+    let (started, started_rx) = tokio::sync::oneshot::channel();
+    session
+        .spawn_interim(async move {
+            let _ = started.send(());
+            panic!("retired interim task panic")
+        })
+        .expect("interim starts");
+    tokio::time::timeout(Duration::from_secs(1), started_rx)
+        .await
+        .expect("panicking task starts before retirement")
+        .expect("panicking task reports startup");
+    let cleanup = registry.cleanup_notified();
+    tokio::pin!(cleanup);
+    assert!(
+        cleanup.as_mut().now_or_never().is_none(),
+        "cleanup waiter starts before retirement"
+    );
+
+    drop(session);
+    tokio::time::timeout(Duration::from_secs(1), cleanup)
+        .await
+        .expect("failed task cleanup reaches its wall-clock deadline");
+    assert_eq!(
+        registry.retired_task_failures(),
+        1,
+        "retired task panic remains observable after admission release"
+    );
+}
+
+#[tokio::test]
+async fn missing_cleanup_notification_reaches_wall_clock_deadline() {
+    let registry = RealtimeSessionRegistryFixture::default();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), registry.cleanup_notified())
+            .await
+            .is_err(),
+        "missing cleanup reaches the bounded wall-clock timeout"
+    );
 }
 
 #[tokio::test]

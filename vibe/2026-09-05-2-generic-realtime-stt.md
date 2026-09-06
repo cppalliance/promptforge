@@ -37,7 +37,7 @@ todos:
     status: completed
   - id: ci-session-retirement
     content: Make session retirement verification event-driven instead of scheduler-yield-counted
-    status: pending
+    status: completed
   - id: ci-gateway-platform-warnings
     content: Restore warnings-denied Gateway builds on non-Windows hosts
     status: pending
@@ -622,7 +622,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Steps 12 through 23; the independent Gateway fixture path gates Workshop relay work.
 
-### Step 25: Make session retirement verification event-driven
+### Step 25: Make session retirement verification event-driven [completed]
 
 - Artifacts: update `gateway-stt/src/realtime/registry.rs`, its test-only facade as needed, `gateway-stt/tests/it/realtime_session.rs`, exact ceilings, and architecture policy.
 - Scope: replace the fixed scheduler-yield budget used to observe retired session cleanup with an explicit notification emitted when registry-owned canceled tasks finish joining and admission is released. Await that signal under a real wall-clock deadline used only as a hang guard. Preserve production ownership, exact capacity, cancellation safety, immediate reuse after completed cleanup, and Miri-compatible pure state.

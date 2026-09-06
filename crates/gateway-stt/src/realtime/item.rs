@@ -120,6 +120,13 @@ impl CommittedItem {
         self.finalization.take()
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn replace_finalization(&mut self, task: FinalizationTask) {
+        if let Some(previous) = self.finalization.replace(task) {
+            previous.abort();
+        }
+    }
+
     pub(crate) fn completed(&mut self, transcript: String) -> Option<ItemResult> {
         if std::mem::replace(&mut self.terminal, true) {
             return None;

@@ -1,3 +1,6 @@
+#[cfg(feature = "test-fixtures")]
+use std::future::Future;
+
 use super::state::{
     MAX_COMMITTED_ITEMS_PER_SESSION, SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError,
 };
@@ -50,6 +53,23 @@ impl Session {
             .values()
             .filter(|item| item.is_finalizing())
             .count()
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn replace_finalization<F>(
+        &mut self,
+        item_id: &str,
+        task: F,
+    ) -> Result<(), SessionError>
+    where
+        F: Future<Output = Result<String, String>> + Send + 'static,
+    {
+        let item = self
+            .committed
+            .get_mut(item_id)
+            .ok_or(MailboxError::UnknownItem)?;
+        item.replace_finalization(tokio::spawn(task));
+        Ok(())
     }
 
     pub(crate) fn committed_prompt_and_guidance(&self, item_id: &str) -> Option<(&str, &[String])> {

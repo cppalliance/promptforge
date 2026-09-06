@@ -657,6 +657,88 @@ fn generation_quiescence_uses_explicit_ownership_without_item_transfer() {
 }
 
 #[test]
+fn realtime_retirement_is_registry_owned_event_driven_and_keeps_state_pure() {
+    let registry = read(&crate_root("gateway-stt").join("src/realtime/registry.rs"));
+    let state = registry
+        .split_once("struct RegistryState {")
+        .and_then(|(_, rest)| rest.split_once('}'))
+        .map_or_else(
+            || panic!("Realtime registry must retain explicit state"),
+            |(body, _)| body,
+        );
+
+    assert!(state.contains("active: usize"));
+    for runtime_type in ["JoinHandle", "Notify", "AtomicUsize"] {
+        assert!(
+            !state.contains(runtime_type),
+            "pure registry accounting must not contain {runtime_type}"
+        );
+    }
+    for policy in [
+        "tokio::spawn(async move",
+        "task.abort();",
+        "task.await",
+        "join_retired_tasks(finalization_tasks)",
+        "error.is_cancelled()",
+        "record_retired_task_failures",
+        "self.release_admission();",
+        "self.cleanup.emit();",
+    ] {
+        assert!(
+            registry.contains(policy),
+            "registry-owned retirement must retain {policy}"
+        );
+    }
+    for polling in ["noop_waker", "poll_join", "reap_retired"] {
+        assert!(
+            !registry.contains(polling),
+            "registry retirement must not use scheduler polling through {polling}"
+        );
+    }
+    let Some(release_position) = registry.find("self.release_admission();") else {
+        panic!("registry retirement must release admission");
+    };
+    let Some(notification_position) = registry.find("self.cleanup.emit();") else {
+        panic!("registry retirement must emit cleanup notification");
+    };
+    assert!(
+        release_position < notification_position,
+        "admission must release before cleanup notification"
+    );
+
+    let session_tests = read(&crate_root("gateway-stt").join("tests/it/realtime_session.rs"));
+    let retirement_test = session_tests
+        .split_once("async fn dropping_session_retains_admission_until_interim_cleanup_joins()")
+        .and_then(|(_, rest)| rest.split_once("#[tokio::test]"))
+        .map_or_else(
+            || panic!("Realtime retirement regression must remain focused"),
+            |(body, _)| body,
+        );
+    for evidence in ["cleanup_notified()", "tokio::time::timeout"] {
+        assert!(
+            retirement_test.contains(evidence),
+            "Realtime retirement regression must retain {evidence}"
+        );
+    }
+    assert!(
+        !retirement_test.contains("wait_until(")
+            && !retirement_test.contains("tokio::task::yield_now"),
+        "Realtime retirement verification must not count scheduler yields"
+    );
+
+    for regression in [
+        "cleanup_event_count()",
+        "dropping_session_retains_admission_until_finalization_cleanup_joins",
+        "retired_task_join_failures_are_preserved",
+    ] {
+        assert!(
+            session_tests.contains(regression),
+            "Realtime retirement regression must retain {regression}"
+        );
+    }
+}
+
+#[test]
 fn profile_replacement_policy_requires_restartable_rollback_and_fatal_shutdown() {
     let generation = read(&crate_root("gateway-stt").join("src/generation.rs"));
     let gateway = read(&crate_root("gateway").join("src/lib.rs"));
