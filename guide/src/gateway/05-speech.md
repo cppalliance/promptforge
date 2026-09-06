@@ -21,16 +21,18 @@ A profile may select at most one interim and one final STT model. A final model 
 
 ## Tune push-to-talk capture
 
-Tune capture in the optional `[workshop.stt]` section:
+Tune the pipeline in the optional `[stt]` section:
 
 ````
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
 
 The `window_seconds` key sets the seconds of trailing audio transcribed per pass (default 15), and `interval_ms` sets the milliseconds between passes (default 500). Each must be at least 1; a zero value fails startup. The `vocabulary` lists domain terms that bias both transcription workers toward those terms. An empty list disables biasing. A vocabulary that exceeds the model's prompt budget is truncated, and a warning is logged.
+
+Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. Defining both is rejected, and saved configuration uses only `[stt]`.
 
 ## The transcription endpoint
 

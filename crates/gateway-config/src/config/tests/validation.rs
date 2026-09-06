@@ -197,6 +197,43 @@ fn parses_config_without_tools_section() {
 }
 
 #[test]
+fn rejects_canonical_and_legacy_stt_sections_together() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[stt]
+window_seconds = 8
+
+[workshop.stt]
+interval_ms = 250
+"#;
+    assert!(matches!(
+        Config::from_toml_str(toml),
+        Err(error) if error.kind() == crate::ConfigErrorKind::Validation
+    ));
+}
+
+#[test]
+fn rejects_zero_stt_pipeline_bounds() {
+    for field in ["window_seconds = 0", "interval_ms = 0"] {
+        let toml = format!(
+            "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"t\"\n\
+             [stt]\n{field}\n"
+        );
+        assert!(
+            matches!(
+                Config::from_toml_str(&toml),
+                Err(error) if error.kind() == crate::ConfigErrorKind::Validation
+            ),
+            "zero STT bound must fail: {field}"
+        );
+    }
+}
+
+#[test]
 fn secret_redacts() {
     let s = Secret::new("hunter2".to_string());
     assert_eq!(format!("{s}"), "redacted");

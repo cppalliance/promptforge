@@ -9,8 +9,8 @@ use std::net::SocketAddr;
 use super::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LlamaBackend, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, ProfileConfig, Protocol, QueuePolicy, SearchProvider,
-    Secret, ServerConfig, SttModelConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
-    WorkshopConfig,
+    Secret, ServerConfig, SttModelConfig, SttPipelineConfig, ThinkingMode, ToolDialect,
+    ToolsConfig, WebSearchConfig, WorkshopConfig,
 };
 
 impl Config {
@@ -316,6 +316,15 @@ impl Config {
     #[must_use]
     pub fn tools(&self) -> Option<&ToolsConfig> {
         self.tools.as_ref()
+    }
+
+    /// Returns canonical `[stt]` pipeline tuning, or `None` when absent.
+    ///
+    /// Legacy `[workshop.stt]` input is migrated to this accessor during
+    /// parsing and is never exposed through [`WorkshopConfig`].
+    #[must_use]
+    pub fn stt(&self) -> Option<&SttPipelineConfig> {
+        self.stt.as_ref()
     }
 
     /// Returns the `[workshop]` configuration, or `None` when the section is

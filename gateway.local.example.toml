@@ -15,14 +15,15 @@ api_key = "change-me-to-a-secret"
 # to require the bearer key from every caller.
 trust_loopback = true
 
-# Optional embedded Workshop listener.
+# Deprecated Workshop hosting settings. They still parse so older files load,
+# but the gateway ignores them and logs a warning.
 [workshop]
 bind = "127.0.0.1:7910"
 open_browser = false
 
-# Optional speech capture tuning. STT model files and roles belong in
+# Optional speech pipeline tuning. STT model files and roles belong in
 # [[stt_model]], not this table.
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 vocabulary = ["PromptForge", "WG21", "GGUF"]

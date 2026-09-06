@@ -134,7 +134,7 @@ N5 | observation | shared-mutable-state @ crates/gateway-stt/src/take.rs::TakeSt
 N6 | observation | oversized-unit @ crates/gateway-stt/src/take.rs: adds a 651-line take module | Move take ownership into gateway STT
 N7 | observation | oversized-unit @ crates/gateway-stt/tests/common/mod.rs: adds bounded shutdown logic to an already oversized test support module | Move take ownership into gateway STT
 N8 | observation | oversized-unit @ crates/gateway-stt/tests/it/legacy_stream.rs: adds explicit shutdown calls to an already oversized integration suite | Move take ownership into gateway STT
-N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT; Separate Whisper from the STT engine; Harden STT workers and extend release gates
+N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT; Separate Whisper from the STT engine; Harden STT workers and extend release gates; Migrate STT tuning to canonical configuration
 N10 | observation | Violates A96 @ crates/gateway-stt/src/api.rs: not determinable from diff | Move take ownership into gateway STT; Harden STT workers and extend release gates
 N11 | observation | flag-parameter @ crates/gateway-stt-backend-whisper/src/model.rs::WhisperDecoder::load: selects interim or final decode policy through final_pass | Separate Whisper from the STT engine
 N12 | observation | flag-parameter @ crates/gateway-stt-engine/src/worker.rs::worker_loop: selects interim or final factory construction through final_model | Separate Whisper from the STT engine; Bound transcription workers and expose test fixtures; Harden STT workers and extend release gates
@@ -152,4 +152,6 @@ N23 | observation | feature-flag @ crates/gateway-stt/Cargo.toml::test-fixtures:
 N24 | observation | surface-growth @ crates/gateway-stt/src/lib.rs::test_fixtures: exposes scripted speech runtime construction to downstream consumers | Bound transcription workers and expose test fixtures
 N25 | observation | facade @ crates/gateway-stt/src/lib.rs::test_fixtures: combines engine fixtures with speech runtime construction | Bound transcription workers and expose test fixtures
 N26 | observation | constructor-injection @ crates/gateway-stt/src/runtime.rs::SttRuntime::from_scripted_engine: receives the scripted engine and runtime settings as parameters | Bound transcription workers and expose test fixtures
-N27 | observation | Violates A115 @ crates/gateway-stt/src/runtime.rs: control readiness during model startup is not determinable from diff | Harden STT workers and extend release gates
+N27 | observation | Violates A115 @ crates/gateway-stt/src/runtime.rs: control readiness during model startup is not determinable from diff | Harden STT workers and extend release gates; Migrate STT tuning to canonical configuration
+N28 | observation | Violates A116 @ crates/gateway/src/config_apply.rs::stt_pipeline_change_reloads_without_restart: publication consistency is not determinable from diff | Migrate STT tuning to canonical configuration
+N29 | observation | Violates A96 @ crates/gateway-config-ui/ui/src/services/config-store.ts::canonicalizeStt: bounded third-party model content is not determinable from diff | Migrate STT tuning to canonical configuration

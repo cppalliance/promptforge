@@ -409,16 +409,18 @@ A profile may select at most one interim and one final STT model. A final model 
 
 ## Tune push-to-talk capture
 
-Tune capture in the optional `[workshop.stt]` section:
+Tune the pipeline in the optional `[stt]` section:
 
 ````
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
 
 The `window_seconds` key sets the seconds of trailing audio transcribed per pass (default 15), and `interval_ms` sets the milliseconds between passes (default 500). Each must be at least 1; a zero value fails startup. The `vocabulary` lists domain terms that bias both transcription workers toward those terms. An empty list disables biasing. A vocabulary that exceeds the model's prompt budget is truncated, and a warning is logged.
+
+Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. Defining both is rejected, and saved configuration uses only `[stt]`.
 
 ## The transcription endpoint
 
@@ -758,7 +760,7 @@ When no `[tools.web_search]` section is configured, the route answers 404. The r
 
 ## The deprecated [workshop] section
 
-The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section. The section keeps parsing - an existing config must not fail - and the gateway logs a deprecation warning at startup naming what changed: the section's `bind` and `open_browser` settings are inert, while the `[workshop.stt]` capture tuning still applies to the speech engine.
+The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section. The section keeps parsing - an existing config must not fail - and the gateway logs a deprecation warning at startup because its `bind` and `open_browser` settings are inert. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
 
 ## Manage the cache
 

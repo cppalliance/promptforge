@@ -156,15 +156,7 @@ function configUiUrl(bind: string): string {
   return `http://${host}:${port}/config/`;
 }
 
-/** The `[workshop]` draft the Add button seeds: the section's one live
- * content is the STT capture tuning - the gateway hosts no workshop
- * listener, so `bind` and `open_browser` are inert and stay out of the
- * editor (existing configs keep them through the save round-trip). */
-function workshopDefaults(): EntryData {
-  return { stt: sttDefaults() };
-}
-
-/** The `[workshop.stt]` capture defaults, mirroring the config crate. */
+/** The canonical `[stt]` pipeline defaults, mirroring the config crate. */
 function sttDefaults(): EntryData {
   return {
     window_seconds: 15,
@@ -206,7 +198,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   let section: SectionId = "system";
   /** Unsaved edits: card key -> field path -> value. */
   const edits = new Map<string, Map<string, unknown>>();
-  /** Browser-created section drafts (`workshop`, `tools`). */
+  /** Browser-created section drafts (`stt`, `tools`). */
   const sectionDrafts = new Map<string, EntryData>();
   /** Browser-created keyed-array drafts, not yet saved. */
   const arrayDrafts: Record<"dominion" | "endpoint", EntryData[]> = {
@@ -882,7 +874,7 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   /**
    * Saves one global section through the single configuration shadow.
    */
-  async function saveGlobalCard(card: Card, sectionKey: "server" | "workshop"): Promise<void> {
+  async function saveGlobalCard(card: Card, sectionKey: "server" | "stt"): Promise<void> {
     const payload = store.buildConfigPayload();
     payload[sectionKey] = effective(card);
     await store.savePayload(payload);
@@ -983,20 +975,20 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
   }
 
   function renderWorkshop(panel: HTMLElement): void {
-    const pending = store.sectionValue("workshop");
-    const draft = sectionDrafts.get("workshop");
+    const pending = store.sectionValue("stt");
+    const draft = sectionDrafts.get("stt");
     if ((pending === null || pending === undefined) && !draft) {
-      const { card, body } = settingsCard("Workshop");
+      const { card, body } = settingsCard("Speech");
       const empty = document.createElement("p");
       empty.className = "view-empty";
       empty.textContent =
-        "The gateway hosts no workshop listener - the desktop application embeds the workshop server itself. The [workshop] section remains only for speech capture tuning.";
+        "Speech pipeline tuning is optional. Model files and roles remain in the global STT model catalog.";
       const enable = document.createElement("button");
       enable.type = "button";
       enable.className = "button button-primary workshop-enable";
       enable.textContent = "Add STT capture tuning";
       enable.addEventListener("click", () => {
-        sectionDrafts.set("workshop", workshopDefaults());
+        sectionDrafts.set("stt", sttDefaults());
         render();
       });
       body.append(empty, enable);
@@ -1004,95 +996,51 @@ export function createSettingsView(deps: SettingsViewDeps): SettingsView {
       return;
     }
     const card: Card = draft
-      ? { key: "workshop", base: draft, draft: true, pendingFields: new Set() }
+      ? { key: "stt", base: draft, draft: true, pendingFields: new Set() }
       : {
-          key: "workshop",
+          key: "stt",
           base: pending as EntryData,
           draft: false,
-          pendingFields: bootPendingFields("workshop"),
-          runningPrefix: "workshop",
+          pendingFields: bootPendingFields("stt"),
+          runningPrefix: "stt",
         };
-    const { card: box, body } = settingsCard("Workshop ([workshop])");
+    const { card: box, body } = settingsCard("Speech ([stt])");
+    const tuning = document.createElement("section");
+    tuning.className = "workshop-stt";
+    const tuningHeading = document.createElement("h3");
+    tuningHeading.className = "section-heading";
+    tuningHeading.textContent = "STT capture tuning";
+    tuning.append(
+      tuningHeading,
+      fieldRow(card, {
+        path: "window_seconds",
+        label: "Window seconds",
+        help: "Seconds of trailing audio each interim pass transcribes.",
+        type: "input",
+        numeric: true,
+        placeholder: "15",
+      }),
+      fieldRow(card, {
+        path: "interval_ms",
+        label: "Interval (ms)",
+        help: "Milliseconds between interim passes while a take is recording.",
+        type: "input",
+        numeric: true,
+        placeholder: "500",
+      }),
+      fieldRow(card, {
+        path: "vocabulary",
+        label: "Vocabulary",
+        help: "Domain terms whisper is biased toward.",
+        type: "chips",
+      }),
+    );
     body.append(
-      workshopSubsection(card, "stt", "STT capture tuning", sttDefaults, [
-        {
-          path: "stt.window_seconds",
-          label: "Window seconds",
-          help: "Seconds of trailing audio each interim pass transcribes.",
-          type: "input",
-          numeric: true,
-          placeholder: "15",
-        },
-        {
-          path: "stt.interval_ms",
-          label: "Interval (ms)",
-          help: "Milliseconds between interim passes while a take is recording.",
-          type: "input",
-          numeric: true,
-          placeholder: "500",
-        },
-        {
-          path: "stt.vocabulary",
-          label: "Vocabulary",
-          help: "Domain terms whisper is biased toward.",
-          type: "chips",
-        },
-      ]),
+      tuning,
       restoreRecommendedButton(),
-      restartNote(),
-      saveButton(card, () => saveGlobalCard(card, "workshop")),
+      saveButton(card, () => saveGlobalCard(card, "stt")),
     );
     panel.append(box);
-  }
-
-  /** A collapsible `[workshop.stt]` subsection. */
-  function workshopSubsection(
-    card: Card,
-    key: string,
-    label: string,
-    seed: () => EntryData,
-    fields: FieldSpec[],
-  ): HTMLElement {
-    const wrap = document.createElement("section");
-    wrap.className = `workshop-sub workshop-${key}`;
-    if (value(card, key) == null) {
-      const add = document.createElement("button");
-      add.type = "button";
-      add.className = `button button-outline section-add add-${key}`;
-      add.textContent = `Add ${label.toLowerCase()} settings`;
-      add.addEventListener("click", () => {
-        expanded.add(`workshop:${key}`);
-        commit(card, key, seed());
-      });
-      wrap.append(add);
-      return wrap;
-    }
-    const heading = document.createElement("h3");
-    heading.className = "section-heading";
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "section-toggle";
-    const collapseKey = `workshop:${key}`;
-    toggle.setAttribute("aria-expanded", String(expanded.has(collapseKey)));
-    toggle.textContent = label;
-    heading.append(toggle);
-    const body = document.createElement("div");
-    body.className = "section-body";
-    body.hidden = !expanded.has(collapseKey);
-    toggle.addEventListener("click", () => {
-      if (expanded.has(collapseKey)) {
-        expanded.delete(collapseKey);
-      } else {
-        expanded.add(collapseKey);
-      }
-      body.hidden = !expanded.has(collapseKey);
-      toggle.setAttribute("aria-expanded", String(!body.hidden));
-    });
-    for (const spec of fields) {
-      body.append(fieldRow(card, spec));
-    }
-    wrap.append(heading, body);
-    return wrap;
   }
 
   function restoreRecommendedButton(): HTMLElement {

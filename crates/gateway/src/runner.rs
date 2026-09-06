@@ -1185,15 +1185,14 @@ fn load_startup_with_environment(
 /// section, or `None` when the section is absent. The gateway no longer
 /// hosts the workshop - the desktop shell embeds the workshop server
 /// itself - so the section's `bind` and `open_browser` settings do
-/// nothing. The section still parses (an existing config must not fail),
-/// and `[workshop.stt]` capture tuning still applies to the STT engine;
-/// the warning is what keeps the inert fields from being silently
+/// nothing. The section still parses so existing hosting settings do not
+/// break startup; the warning keeps those inert fields from being silently
 /// ignored.
 fn workshop_section_deprecation(config: &Config) -> Option<&'static str> {
     config.workshop().is_some().then_some(
         "the [workshop] section is deprecated: the gateway hosts no workshop listener \
          (the desktop shell embeds the workshop server itself); its bind and open_browser \
-         settings are ignored, while [workshop.stt] capture tuning still applies",
+         settings are ignored",
     )
 }
 
@@ -1358,8 +1357,8 @@ models = ["beta-model"]
             "the warning names the section: {warning}"
         );
         assert!(
-            warning.contains("[workshop.stt]"),
-            "the warning names what still applies: {warning}"
+            !warning.contains("[workshop.stt]"),
+            "the warning must not advertise the legacy STT section: {warning}"
         );
     }
 

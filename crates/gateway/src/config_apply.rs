@@ -673,6 +673,33 @@ models = ["beta-model"]
     }
 
     #[tokio::test]
+    async fn stt_pipeline_change_reloads_without_restart() {
+        let (_temp, config, paths) = fixture();
+        write_shadow(
+            &paths.config_path,
+            &format!(
+                "{CONFIG}\n[stt]\nwindow_seconds = 8\ninterval_ms = 250\n\
+                 vocabulary = [\"WG21\"]\n"
+            ),
+        )
+        .expect("stage STT-only shadow");
+        let (addr, _state) = serve_fixture(config, paths).await;
+        let dirty = get_json(addr, "admin/config-dirty").await;
+        assert_eq!(dirty["changed_sections"], serde_json::json!(["stt"]));
+
+        let response = post(addr, "admin/config-apply").await;
+
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let reply: serde_json::Value = response.json().await.expect("apply body");
+        assert_eq!(reply["reloaded"], true);
+        assert_eq!(reply["restart_required"], false);
+        let applied = get_json(addr, "admin/config").await;
+        assert_eq!(applied["stt"]["window_seconds"], 8);
+        assert_eq!(applied["stt"]["interval_ms"], 250);
+        assert_eq!(applied["stt"]["vocabulary"], serde_json::json!(["WG21"]));
+    }
+
+    #[tokio::test]
     async fn revert_removes_all_shadows_without_touching_real_files() {
         let (_temp, config, paths) = fixture();
         let config_path = paths.config_path.clone();

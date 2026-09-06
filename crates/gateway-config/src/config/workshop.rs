@@ -1,5 +1,5 @@
-//! The optional `[workshop]` section: the embedded workshop UI server the
-//! gateway can host on a second loopback listener.
+//! Deprecated `[workshop]` hosting settings retained so older boot
+//! configurations still parse.
 //!
 //! There is deliberately no `[workshop.gateway]` sub-table: the hosting
 //! gateway derives the workshop's client URL from its own
@@ -11,20 +11,11 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-/// Default sliding-window length for interim transcription, in seconds.
-/// Mirrors the workshop server's own default.
-const DEFAULT_STT_WINDOW_SECONDS: u64 = 15;
-
-/// Default interval between interim transcriptions, in milliseconds.
-/// Mirrors the workshop server's own default.
-const DEFAULT_STT_INTERVAL_MS: u64 = 500;
-
 fn default_workshop_bind() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 7910))
 }
 
-/// The `[workshop]` section: settings for the workshop UI server hosted by
-/// the gateway.
+/// The deprecated `[workshop]` hosting section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -37,10 +28,6 @@ pub struct WorkshopConfig {
     /// it is serving. Defaults to false.
     #[serde(default)]
     open_browser: bool,
-    /// Speech-to-text capture settings. Absent when no `[workshop.stt]`
-    /// section is present.
-    #[serde(default)]
-    stt: Option<WorkshopSttConfig>,
 }
 
 impl WorkshopConfig {
@@ -90,147 +77,6 @@ impl WorkshopConfig {
     pub fn open_browser(&self) -> bool {
         self.open_browser
     }
-
-    /// Returns the `[workshop.stt]` settings, or `None` when the section
-    /// is absent.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.stt]
-    /// # window_seconds = 8
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let workshop = config.workshop().expect("workshop section present");
-    /// assert!(workshop.stt().is_some());
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn stt(&self) -> Option<&WorkshopSttConfig> {
-        self.stt.as_ref()
-    }
-}
-
-/// The `[workshop.stt]` section: speech capture window, cadence, and bias.
-///
-/// Model sources and roles live in global `[[stt_model]]` catalog entries and
-/// profiles enable them through membership.
-///
-/// # Examples
-/// ```
-/// use gateway_config::Config;
-///
-/// let config = Config::from_toml_str(
-///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
-///      [workshop.stt]\nwindow_seconds = 8\n",
-/// )?;
-/// assert_eq!(
-///     config.workshop().and_then(|workshop| workshop.stt()).map(|stt| stt.window_seconds()),
-///     Some(8)
-/// );
-/// # Ok::<(), gateway_config::ConfigError>(())
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-#[non_exhaustive]
-pub struct WorkshopSttConfig {
-    /// Seconds of trailing audio each interim pass transcribes.
-    window_seconds: u64,
-    /// Milliseconds between interim passes while a take is recording.
-    interval_ms: u64,
-    /// Domain terms whisper is biased toward. Empty disables biasing.
-    vocabulary: Vec<String>,
-}
-
-impl Default for WorkshopSttConfig {
-    fn default() -> WorkshopSttConfig {
-        WorkshopSttConfig {
-            window_seconds: DEFAULT_STT_WINDOW_SECONDS,
-            interval_ms: DEFAULT_STT_INTERVAL_MS,
-            vocabulary: Vec::new(),
-        }
-    }
-}
-
-impl WorkshopSttConfig {
-    /// Returns the seconds of trailing audio each interim pass transcribes.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.stt]
-    /// # window_seconds = 8
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
-    /// assert_eq!(stt.window_seconds(), 8);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn window_seconds(&self) -> u64 {
-        self.window_seconds
-    }
-
-    /// Returns the milliseconds between interim passes while a take is
-    /// recording.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.stt]
-    /// # interval_ms = 250
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
-    /// assert_eq!(stt.interval_ms(), 250);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn interval_ms(&self) -> u64 {
-        self.interval_ms
-    }
-
-    /// Returns the domain terms whisper is biased toward.
-    ///
-    /// # Examples
-    /// ```
-    /// # use gateway_config::Config;
-    /// # let toml = r#"
-    /// # config-version = 2
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [workshop.stt]
-    /// # vocabulary = ["MCP", "GGUF"]
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// let stt = config.workshop().and_then(|w| w.stt()).expect("stt present");
-    /// assert_eq!(stt.vocabulary(), ["MCP", "GGUF"]);
-    /// # Ok::<(), gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn vocabulary(&self) -> &[String] {
-        &self.vocabulary
-    }
 }
 
 #[cfg(test)]
@@ -256,7 +102,6 @@ mod tests {
         let workshop = config.workshop().expect("workshop section present");
         assert_eq!(workshop.bind().to_string(), "127.0.0.1:7910");
         assert!(!workshop.open_browser());
-        assert!(workshop.stt().is_none());
     }
 
     #[test]
@@ -266,32 +111,11 @@ mod tests {
 [workshop]
 bind = "127.0.0.1:7999"
 open_browser = true
-
-[workshop.stt]
-window_seconds = 8
-interval_ms = 250
-vocabulary = ["MCP", "GGUF"]
 "#,
         );
         let workshop = config.workshop().expect("workshop section present");
         assert_eq!(workshop.bind().to_string(), "127.0.0.1:7999");
         assert!(workshop.open_browser());
-        let stt = workshop.stt().expect("stt present");
-        assert_eq!(stt.window_seconds(), 8);
-        assert_eq!(stt.interval_ms(), 250);
-        assert_eq!(stt.vocabulary(), ["MCP", "GGUF"]);
-    }
-
-    #[test]
-    fn workshop_stt_defaults_match_capture_defaults() {
-        let config = parse("[workshop.stt]\n");
-        let stt = config
-            .workshop()
-            .and_then(WorkshopConfig::stt)
-            .expect("stt present");
-        assert_eq!(stt.window_seconds(), 15);
-        assert_eq!(stt.interval_ms(), 500);
-        assert!(stt.vocabulary().is_empty());
     }
 
     #[test]
@@ -338,10 +162,6 @@ vocabulary = ["MCP", "GGUF"]
 [workshop]
 bind = "127.0.0.1:7999"
 open_browser = true
-
-[workshop.stt]
-window_seconds = 8
-vocabulary = ["MCP", "GGUF"]
 "#,
         );
         let workshop = config.workshop().expect("workshop section present");

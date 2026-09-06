@@ -11,7 +11,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use super::{Config, RawConfig, Secret, WebSearchConfig, interpolate_value};
+use super::{Config, RawConfig, RawSttPipelineConfig, Secret, WebSearchConfig, interpolate_value};
 use crate::error::ConfigError;
 use crate::profile::{ProfileName, ProfileSelection, resolve_selection};
 
@@ -96,6 +96,7 @@ impl Config {
             stt_models: self.catalog_stt_models.clone(),
             profiles: self.profiles.clone(),
             tools: self.tools.clone(),
+            stt: self.stt.as_ref().map(RawSttPipelineConfig::from),
             workshop: self.workshop.clone(),
         }
     }
@@ -225,15 +226,43 @@ impl Config {
     /// parsed TOML document.
     pub(crate) fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
         interpolate_value(&mut document)?;
+        migrate_legacy_stt(&mut document)?;
         let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
             path: None,
             source: Box::new(source),
         })?;
-        let mut config = Config::from(raw);
+        let mut config = Config::try_from(raw)?;
         config.imply_projector_images();
         config.validate()?;
         Ok(config)
     }
+}
+
+fn migrate_legacy_stt(document: &mut toml::Value) -> Result<(), ConfigError> {
+    let Some(root) = document.as_table_mut() else {
+        return Ok(());
+    };
+    let legacy = root
+        .get_mut("workshop")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|workshop| workshop.remove("stt"));
+    let Some(legacy) = legacy else {
+        return Ok(());
+    };
+    if root.contains_key("stt") {
+        return Err(ConfigError::Validation(
+            "[stt] and [workshop.stt] cannot both be present".to_owned(),
+        ));
+    }
+    root.insert("stt".to_owned(), legacy);
+    if root
+        .get("workshop")
+        .and_then(toml::Value::as_table)
+        .is_some_and(toml::map::Map::is_empty)
+    {
+        root.remove("workshop");
+    }
+    Ok(())
 }
 
 pub(crate) fn reject_profiles_directory(path: &Path) -> Result<(), ConfigError> {
@@ -320,7 +349,7 @@ fn reject_removed_layout(raw: &str, path: Option<&Path>) -> Result<(), ConfigErr
                     path,
                     line_for_span(raw, value.span()),
                     key,
-                    "use [workshop.stt] tuning and a global [[stt_model]] entry",
+                    "use [stt] tuning and a global [[stt_model]] entry",
                 ));
             }
         }
@@ -328,7 +357,7 @@ fn reject_removed_layout(raw: &str, path: Option<&Path>) -> Result<(), ConfigErr
             path,
             find_voice_header_line(raw).unwrap_or(1),
             "workshop.voice",
-            "rename capture tuning to [workshop.stt] and define models as [[stt_model]]",
+            "move capture tuning to [stt] and define models as [[stt_model]]",
         ));
     }
 

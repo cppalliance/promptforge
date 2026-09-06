@@ -13,7 +13,7 @@ config-version = 2
 bind = "127.0.0.1:8081"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 
@@ -33,15 +33,18 @@ Use this canonical section order to minimize merge noise:
 
 1. `config-version`
 2. `[server]`
-3. `[workshop]`, `[workshop.stt]`
-4. `[local]`
-5. `[tools]` and child tables
-6. `[[dominion]]`
-7. `[[endpoint]]`
-8. `[[model]]`
-9. `[[local_model]]` and companion tables
-10. `[[stt_model]]`
-11. `[[profile]]`
+3. `[stt]`
+4. `[workshop]`
+5. `[local]`
+6. `[tools]` and child tables
+7. `[[dominion]]`
+8. `[[endpoint]]`
+9. `[[model]]`
+10. `[[local_model]]` and companion tables
+11. `[[stt_model]]`
+12. `[[profile]]`
+
+Legacy `[workshop.stt]` input migrates to `[stt]` only when the canonical section is absent. Defining both is rejected, and every serialized configuration uses only `[stt]`.
 
 `include`, a sibling `profiles/` directory, the top-level `models` allowlist, and `[workshop.voice]` are rejected. Hard-break diagnostics name the file, removed key, source line, and replacement layout.
 

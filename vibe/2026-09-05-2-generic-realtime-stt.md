@@ -431,7 +431,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 8 scripted workers; later pure service targets join this pinned workflow.
 
-### Step 10: Migrate canonical configuration and every consumer
+### Step 10: Migrate canonical configuration and every consumer [completed]
 
 - Artifacts: replace `WorkshopSttConfig` with `SttPipelineConfig` across `gateway-config/src/config/{workshop.rs,stt.rs,tests.rs,tests/schema.rs,tests/serialize.rs,tests/validation.rs}`, `config.rs`, and `lib.rs`; update `gateway-stt/src/runtime.rs`; Gateway warnings and tests in `src/runner.rs`; `gateway.local.example.toml`; `crates/gateway-config/README.md`; `crates/gateway/README.md`; `crates/gateway/AGENTS.md`; config UI `services/config-store.ts`, `views/settings-view.ts`, `views/settings-sections.test.mjs`; source guides `guide/src/gateway/05-speech.md`, `guide/src/gateway/10-serving-and-observing.md`, `guide/src/workshop/01-application.md`, and `guide/src/workshop/07-voice.md`; generated `guide/src/SUMMARY.md`, `guide/src/gateway/index.md`, `guide/src/workshop/index.md`, `guide/promptforge-gateway-guide.md`, and `guide/promptforge-workshop-guide.md`.
 - Scope: accept legacy `[workshop.stt]` only during parsing when `[stt]` is absent, reject both, serialize only `[stt]`, update all direct consumers in one commit, and provide no type or accessor alias. In `crates/gateway/AGENTS.md`, delete the stale statement that `[workshop.stt]` remains live and do not replace it with configuration detail already enforced by `gateway-config`.

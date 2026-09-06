@@ -99,7 +99,7 @@ fn fixture_runtime_with_models_on_dedicated_thread(
         "config-version = 2\n\
          [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
          [local]\ncache_dir = {cache_path:?}\n\
-         [workshop.stt]\nwindow_seconds = 8\ninterval_ms = 400\n\
+         [stt]\nwindow_seconds = 8\ninterval_ms = 400\n\
          [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {interim_source:?}\nvram_gb = 1.0\n\
          {final_model}[[profile]]\nname = \"work\"\nmodels = {profile_models}\n"
     ))

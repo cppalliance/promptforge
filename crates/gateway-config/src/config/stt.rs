@@ -1,6 +1,133 @@
 //! Speech-to-text catalog entries and the digest-pinned recommended pair.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Default sliding-window length for interim transcription, in seconds.
+const DEFAULT_STT_WINDOW_SECONDS: u64 = 15;
+
+/// Default interval between interim transcriptions, in milliseconds.
+const DEFAULT_STT_INTERVAL_MS: u64 = 500;
+
+/// The canonical `[stt]` pipeline tuning section.
+///
+/// Model sources and roles live in global `[[stt_model]]` catalog entries and
+/// profiles enable them through membership.
+///
+/// # Examples
+/// ```
+/// use gateway_config::Config;
+///
+/// let config = Config::from_toml_str(
+///     "config-version = 2\n[server]\nbind = \"127.0.0.1:8080\"\napi_key = \"secret\"\n\
+///      [stt]\nwindow_seconds = 8\n",
+/// )?;
+/// assert_eq!(
+///     config.stt().map(|stt| stt.window_seconds()),
+///     Some(8)
+/// );
+/// # Ok::<(), gateway_config::ConfigError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct SttPipelineConfig {
+    /// Seconds of trailing audio each interim pass transcribes.
+    window_seconds: u64,
+    /// Milliseconds between interim passes while a take is recording.
+    interval_ms: u64,
+    /// Domain terms whisper is biased toward. Empty disables biasing.
+    vocabulary: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct RawSttPipelineConfig {
+    window_seconds: u64,
+    interval_ms: u64,
+    vocabulary: Vec<String>,
+}
+
+impl Default for RawSttPipelineConfig {
+    fn default() -> Self {
+        Self {
+            window_seconds: DEFAULT_STT_WINDOW_SECONDS,
+            interval_ms: DEFAULT_STT_INTERVAL_MS,
+            vocabulary: Vec::new(),
+        }
+    }
+}
+
+impl Default for SttPipelineConfig {
+    fn default() -> Self {
+        Self {
+            window_seconds: DEFAULT_STT_WINDOW_SECONDS,
+            interval_ms: DEFAULT_STT_INTERVAL_MS,
+            vocabulary: Vec::new(),
+        }
+    }
+}
+
+impl TryFrom<RawSttPipelineConfig> for SttPipelineConfig {
+    type Error = &'static str;
+
+    fn try_from(raw: RawSttPipelineConfig) -> Result<Self, Self::Error> {
+        if raw.window_seconds == 0 {
+            return Err("stt.window_seconds must be at least 1");
+        }
+        if raw.interval_ms == 0 {
+            return Err("stt.interval_ms must be at least 1");
+        }
+        let seconds =
+            usize::try_from(raw.window_seconds).map_err(|_| "stt.window_seconds is too large")?;
+        seconds
+            .checked_mul(16_000)
+            .ok_or("stt.window_seconds is too large")?;
+        Ok(Self {
+            window_seconds: raw.window_seconds,
+            interval_ms: raw.interval_ms,
+            vocabulary: raw.vocabulary,
+        })
+    }
+}
+
+impl From<&SttPipelineConfig> for RawSttPipelineConfig {
+    fn from(config: &SttPipelineConfig) -> Self {
+        Self {
+            window_seconds: config.window_seconds,
+            interval_ms: config.interval_ms,
+            vocabulary: config.vocabulary.clone(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SttPipelineConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawSttPipelineConfig::deserialize(deserializer)?;
+        Self::try_from(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl SttPipelineConfig {
+    /// Returns the seconds of trailing audio each interim pass transcribes.
+    #[must_use]
+    pub fn window_seconds(&self) -> u64 {
+        self.window_seconds
+    }
+
+    /// Returns the milliseconds between interim passes while a take is recording.
+    #[must_use]
+    pub fn interval_ms(&self) -> u64 {
+        self.interval_ms
+    }
+
+    /// Returns the domain terms whisper is biased toward.
+    #[must_use]
+    pub fn vocabulary(&self) -> &[String] {
+        &self.vocabulary
+    }
+}
 
 /// The engine slot a speech-to-text model fills.
 ///
@@ -285,6 +412,34 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
+
+    #[test]
+    fn public_deserialization_rejects_invalid_pipeline_bounds() {
+        for json in [
+            r#"{"window_seconds":0}"#,
+            r#"{"interval_ms":0}"#,
+            r#"{"window_seconds":18446744073709551615}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<SttPipelineConfig>(json).is_err(),
+                "invalid public STT pipeline input must fail: {json}"
+            );
+        }
+
+        assert!(
+            toml::from_str::<SttPipelineConfig>("window_seconds = 0").is_err(),
+            "format-specific TOML deserialization must use the same validation boundary"
+        );
+    }
+
+    #[test]
+    fn public_deserialization_applies_valid_defaults() {
+        let config: SttPipelineConfig =
+            serde_json::from_str("{}").expect("default STT pipeline is valid");
+        assert_eq!(config.window_seconds(), DEFAULT_STT_WINDOW_SECONDS);
+        assert_eq!(config.interval_ms(), DEFAULT_STT_INTERVAL_MS);
+        assert!(config.vocabulary().is_empty());
+    }
 
     #[test]
     fn recommended_pair_is_complete_and_digest_pinned() {

@@ -23,7 +23,7 @@ use crate::common::{
 
 #[test]
 fn legacy_stream_policy_constants_stay_pinned() {
-    let capture = gateway_config::WorkshopSttConfig::default();
+    let capture = gateway_config::SttPipelineConfig::default();
     assert_eq!(
         EnginePolicy::SAMPLE_RATE,
         16_000,

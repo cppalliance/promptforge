@@ -60,7 +60,7 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
-A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, its `bind` and `open_browser` settings do nothing (the Workshop's server now lives inside the desktop application), and only the `[workshop.stt]` capture tuning still applies.
+A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, and its `bind` and `open_browser` settings do nothing because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
 
 At run time the gateway also downloads the pinned voice runtime matched to your machine (CUDA on Windows, Metal on Apple Silicon, CPU on the other supported targets), plus the managed `llama-server`. You make no build-time choices for this.
 
@@ -513,10 +513,10 @@ If microphone setup fails at startup, you can keep working in the application an
 
 ## Voice configuration
 
-Voice input comes pre-tuned with a 15-second transcription window and a 500 ms interval, set in the `[workshop.stt]` section of the boot config:
+Voice input comes pre-tuned with a 15-second transcription window and a 500 ms interval, set in the `[stt]` section of the gateway boot config:
 
 ````
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 ````
@@ -526,6 +526,8 @@ You can add a `vocabulary` list of domain terms to bias recognition:
 ````
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
+
+Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. The gateway saves only the canonical `[stt]` form.
 
 First run provisions two recommended speech-to-text models: `whisper-base-en` for interim results and `whisper-small-en` for final results. They download from Hugging Face with pinned sha256 checksums and stated VRAM requirements of 1.0 GB and 2.0 GB. The generated configuration boots the gateway into a profile named `default` that activates both provisioned whisper models.
 

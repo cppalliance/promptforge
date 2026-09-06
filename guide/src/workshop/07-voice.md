@@ -45,10 +45,10 @@ If microphone setup fails at startup, you can keep working in the application an
 
 ## Voice configuration
 
-Voice input comes pre-tuned with a 15-second transcription window and a 500 ms interval, set in the `[workshop.stt]` section of the boot config:
+Voice input comes pre-tuned with a 15-second transcription window and a 500 ms interval, set in the `[stt]` section of the gateway boot config:
 
 ````
-[workshop.stt]
+[stt]
 window_seconds = 15
 interval_ms = 500
 ````
@@ -58,6 +58,8 @@ You can add a `vocabulary` list of domain terms to bias recognition:
 ````
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
+
+Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. The gateway saves only the canonical `[stt]` form.
 
 First run provisions two recommended speech-to-text models: `whisper-base-en` for interim results and `whisper-small-en` for final results. They download from Hugging Face with pinned sha256 checksums and stated VRAM requirements of 1.0 GB and 2.0 GB. The generated configuration boots the gateway into a profile named `default` that activates both provisioned whisper models.
 

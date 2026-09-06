@@ -207,11 +207,7 @@ impl SttRuntime {
         let Some((interim_name, interim_path)) = models.interim else {
             return Err(SttRuntimeError::MissingInterim);
         };
-        let capture = config
-            .workshop()
-            .and_then(gateway_config::WorkshopConfig::stt)
-            .cloned()
-            .unwrap_or_default();
+        let capture = config.stt().cloned().unwrap_or_default();
         let guidance = capture.vocabulary().to_vec();
         let backend_config = WhisperConfig::new(
             library,

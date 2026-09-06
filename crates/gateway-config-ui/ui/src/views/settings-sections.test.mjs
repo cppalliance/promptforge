@@ -1,7 +1,7 @@
 // Pins the Settings view's editable panels: the Gateway card's
 // single-config save (untouched secrets ride through as "***", a typed
 // key leaves the DOM after the save, the restart and new-key notes),
-// the Workshop Enable flow with the STT subsection, dominion cards
+// the Workshop Enable flow with hot-applied STT tuning, dominion cards
 // (kind-dependent vram_gb, used-by chips, dependent-naming delete, the
 // focused draft), endpoint cards (Change-reveal secret, remote-only
 // dominion options), the Storage save, the Tools Enable flow, the
@@ -168,8 +168,14 @@ test("a saved new api_key leaves the DOM and the masked readout returns", async 
   );
 });
 
-test("Workshop exposes STT capture tuning without legacy model paths", async () => {
-  const stub = fixtureStub();
+test("Workshop exposes canonical STT tuning without legacy model paths", async () => {
+  const stub = fixtureStub({
+    applyOutcome: {
+      applied: ["gateway.toml"],
+      reloaded: true,
+      restart_required: false,
+    },
+  });
   const { dom, root } = await bootApp({ key: "k", stub });
 
   navigate(dom, "#/settings/workshop");
@@ -190,29 +196,66 @@ test("Workshop exposes STT capture tuning without legacy model paths", async () 
 
   assert.match(root.querySelector(".workshop-stt").textContent, /STT capture tuning/);
   assert.equal(
-    root.querySelector(".field-row[data-key='stt.window_seconds'] input").value,
+    root.querySelector(".field-row[data-key='window_seconds'] input").value,
     "15",
     "the STT capture defaults mirror the config crate",
   );
-  assert.ok(root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input, .field-row[data-key='stt.vocabulary'] input"));
+  assert.ok(root.querySelector(".field-row[data-key='vocabulary'] .chip-input, .field-row[data-key='vocabulary'] input"));
   assert.equal(root.querySelector("[data-key='stt.interim_model']"), null);
   assert.equal(root.querySelector("[data-key='stt.final_source']"), null);
+  assert.equal(
+    root.querySelector(".restart-note"),
+    null,
+    "speech tuning does not claim a gateway restart is required",
+  );
 
   root.querySelector(".card-save").click();
   await settle();
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1);
   assert.equal(
-    bodies[0].workshop.bind,
+    bodies[0].workshop?.bind,
     undefined,
     "a fresh section carries no inert hosting bind",
   );
-  assert.equal(bodies[0].workshop.stt.window_seconds, 15);
+  assert.equal(bodies[0].stt.window_seconds, 15);
+  assert.equal(bodies[0].workshop?.stt, undefined, "the UI never writes legacy workshop.stt");
   assert.equal(
     bodies[0].server.bind,
     "127.0.0.1:8081",
     "a Workshop save still carries the global [server] section",
   );
+
+  root.querySelector(".apply-button").click();
+  await settle();
+  assert.ok(
+    stub.calls.some((call) => call.url.endsWith("/admin/config-apply")),
+    "Apply sends the staged STT configuration through the live reload path",
+  );
+  assert.ok(
+    root.querySelector(".banner-restart").hidden,
+    "a reloaded STT apply does not ask the operator to restart",
+  );
+});
+
+test("a legacy Workshop STT payload is saved only as canonical STT", async () => {
+  const config = modelsFixture();
+  config.workshop = {
+    stt: { window_seconds: 8, interval_ms: 250, vocabulary: ["WG21"] },
+  };
+  const stub = fixtureStub({ config });
+  const { dom, root } = await bootApp({ key: "k", stub });
+
+  navigate(dom, "#/settings/workshop");
+  await settle();
+  changeValue(dom, root.querySelector(".field-row[data-key='window_seconds'] input"), "9");
+  await settle();
+  root.querySelector(".card-save").click();
+  await settle();
+
+  const body = putBodies(stub, "/admin/config")[0];
+  assert.equal(body.stt.window_seconds, 9);
+  assert.equal(body.workshop, undefined);
 });
 
 test("a local dominion shows vram_gb, and switching kind to remote hides it", async () => {
@@ -533,13 +576,13 @@ test("blurring a chip input commits the pending text as a chip", async () => {
   root.querySelector(".workshop-enable").click();
   await settle();
 
-  const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");
+  const chipInput = root.querySelector(".field-row[data-key='vocabulary'] .chip-input input");
   assert.ok(chipInput, "the vocabulary chip input renders");
   chipInput.value = "GGUF";
   chipInput.dispatchEvent(new dom.window.Event("blur"));
   await settle();
 
-  const chips = [...root.querySelectorAll(".field-row[data-key='stt.vocabulary'] .pill")];
+  const chips = [...root.querySelectorAll(".field-row[data-key='vocabulary'] .pill")];
   assert.ok(
     chips.some((chip) => chip.textContent.includes("GGUF")),
     "blurring commits the typed value as a chip",
@@ -555,12 +598,12 @@ test("blurring a chip input with an empty value does not add a chip", async () =
   root.querySelector(".workshop-enable").click();
   await settle();
 
-  const chipInput = root.querySelector(".field-row[data-key='stt.vocabulary'] .chip-input input");
+  const chipInput = root.querySelector(".field-row[data-key='vocabulary'] .chip-input input");
   chipInput.value = "";
   chipInput.dispatchEvent(new dom.window.Event("blur"));
   await settle();
 
-  const chips = [...root.querySelectorAll(".field-row[data-key='stt.vocabulary'] .pill")];
+  const chips = [...root.querySelectorAll(".field-row[data-key='vocabulary'] .pill")];
   assert.equal(chips.length, 0, "blurring an empty input adds no chip");
 });
 

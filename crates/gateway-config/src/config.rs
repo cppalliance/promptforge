@@ -22,10 +22,12 @@ pub(crate) use imp::reject_profiles_directory;
 #[cfg(test)]
 pub(crate) use interpolate::interpolate;
 pub(crate) use interpolate::interpolate_value;
-pub use stt::{RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttRole};
-pub use workshop::{WorkshopConfig, WorkshopSttConfig};
+use stt::RawSttPipelineConfig;
+pub use stt::{
+    RECOMMENDED_STT_MODELS, RecommendedSttModel, SttModelConfig, SttPipelineConfig, SttRole,
+};
+pub use workshop::WorkshopConfig;
 
-#[cfg(test)]
 use crate::error::ConfigError;
 
 #[cfg(test)]
@@ -173,8 +175,9 @@ pub struct Config {
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     tools: Option<ToolsConfig>,
-    /// Optional hosted-workshop configuration. Absent when no `[workshop]`
-    /// section is present. Boot-only, like `[server]`.
+    /// Optional canonical speech pipeline tuning.
+    stt: Option<SttPipelineConfig>,
+    /// Deprecated workshop hosting settings retained for boot compatibility.
     workshop: Option<WorkshopConfig>,
 }
 
@@ -205,15 +208,24 @@ pub(crate) struct RawConfig {
     #[serde(default)]
     tools: Option<ToolsConfig>,
     #[serde(default)]
+    stt: Option<RawSttPipelineConfig>,
+    #[serde(default)]
     workshop: Option<WorkshopConfig>,
 }
 
-impl From<RawConfig> for Config {
-    fn from(raw: RawConfig) -> Config {
+impl TryFrom<RawConfig> for Config {
+    type Error = ConfigError;
+
+    fn try_from(raw: RawConfig) -> Result<Config, Self::Error> {
         let models = raw.models.clone();
         let local_models = raw.local_models.clone();
         let stt_models = raw.stt_models.clone();
-        Config {
+        let stt = raw
+            .stt
+            .map(SttPipelineConfig::try_from)
+            .transpose()
+            .map_err(|message| ConfigError::Validation(message.to_owned()))?;
+        Ok(Config {
             version: raw.config_version,
             server: raw.server,
             local: raw.local,
@@ -228,8 +240,9 @@ impl From<RawConfig> for Config {
             profiles: raw.profiles,
             active_profile: None,
             tools: raw.tools,
+            stt,
             workshop: raw.workshop,
-        }
+        })
     }
 }
 
