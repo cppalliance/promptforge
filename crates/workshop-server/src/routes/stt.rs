@@ -142,7 +142,6 @@ mod tests {
     use axum::extract::ws::{Message, WebSocketUpgrade};
     use axum::http::{Request, header};
     use axum::routing::get;
-    use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::Message as ClientMessage;
     use tower::ServiceExt as _;
 
