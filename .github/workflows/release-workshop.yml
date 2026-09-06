@@ -66,6 +66,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: crates/*/ui/package-lock.json
 
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui
@@ -88,7 +90,7 @@ jobs:
           # xdg-utils: the AppImage bundler shells out to xdg-open, which the
           # ARM runner images do not preinstall (the x64 image does).
           # https://github.com/tauri-apps/tauri-action/issues/1319
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev xdg-utils
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev xdg-utils
 
       # SIGNING (Windows): import the Authenticode certificate here once an
       # EV/OV cert exists; tauri-action picks it up from the machine store.

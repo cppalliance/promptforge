@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Pre-push hook: Comprehensive validation before pushing to remote.
+set -e
+
+echo "==> Checking headless gateway (AGENTS.md rule)..."
+cargo check -p gateway --no-default-features
+
+echo "==> Running Clippy on workspace..."
+cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings
+
+if command -v cargo-deny >/dev/null 2>&1; then
+    echo "==> Running cargo deny check..."
+    cargo deny check
+fi
+
+echo "==> Pre-push checks passed successfully."

@@ -113,6 +113,12 @@ Rust 1.89 or later.
 
 Build, format, and test before you open a PR. CI runs `cargo fmt --check`, `clippy -D warnings`, and `cargo test --workspace`.
 
+To enable automatic local pre-commit and pre-push validation hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ![Creator](images/promptforge-portrait.png)
 
 ## License

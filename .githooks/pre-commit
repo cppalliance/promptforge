@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Pre-commit hook: Fast formatting check before creating commits.
+set -e
+
+echo "==> Running cargo fmt --all --check..."
+cargo fmt --all --check

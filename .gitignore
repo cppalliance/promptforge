@@ -21,3 +21,4 @@
 # The gateway sidecar staged for bundle.externalBin by CI before
 # `tauri build` (crates/workshop/tauri.conf.json); a build artifact.
 /crates/workshop/binaries/
+/plan-dist-manifest.json

@@ -66,6 +66,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: crates/*/ui/package-lock.json
       - name: Install UI dependencies
         run: |
           npm ci --prefix crates/workshop-server/ui
@@ -97,6 +99,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: crates/*/ui/package-lock.json
       - name: Install UI dependencies
         run: |
           npm ci --prefix crates/workshop-server/ui
@@ -157,6 +161,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: crates/*/ui/package-lock.json
 
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui
