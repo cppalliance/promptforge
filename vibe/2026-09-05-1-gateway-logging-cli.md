@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: logging-verify
     content: Update rules/docs and complete full verification
-    status: pending
+    status: completed
   - id: baseline-ratchet
     content: Repair the pre-existing Workshop module ratchets
     status: completed
