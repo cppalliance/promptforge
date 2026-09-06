@@ -1,0 +1,16 @@
+# Exact source and public-root ratchets for the Whisper FFI leaf.
+# Physical lines include comments and blanks. A source file may shrink but
+# may not exceed its recorded ceiling.
+
+public_root_budget = 6
+
+[migration_targets]
+
+[modules]
+"context.rs" = 226
+"error.rs" = 114
+"lib.rs" = 79
+"library.rs" = 204
+"log.rs" = 116
+"params.rs" = 189
+"raw.rs" = 151

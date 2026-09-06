@@ -142,3 +142,4 @@ N13 | observation | global-state @ crates/gateway-stt-backend-whisper/src/prompt
 N14 | observation | global-state @ crates/gateway-stt-backend-whisper/tests/native_whisper.rs::NATIVE_TEST: serializes native backend tests with a process-wide mutex | Separate Whisper from the STT engine
 N15 | observation | clone-block @ crates/gateway-stt/src/test_fixtures.rs: duplicates native fixture loading across unit and integration test support | Separate Whisper from the STT engine
 N16 | observation | clone-block @ crates/gateway-stt/tests/common/mod.rs: duplicates native fixture loading across integration and unit test support | Separate Whisper from the STT engine
+N17 | observation | Violates A2 @ crates/gateway-stt/tests/it/architecture.rs: not determinable from diff | Enforce exact STT architecture ratchets

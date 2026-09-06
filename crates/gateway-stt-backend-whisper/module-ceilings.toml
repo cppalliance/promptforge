@@ -1,0 +1,13 @@
+# Exact source and public-root ratchets for the safe Whisper backend.
+# Physical lines include comments and blanks. A source file may shrink but
+# may not exceed its recorded ceiling.
+
+public_root_budget = 2
+
+[migration_targets]
+
+[modules]
+"config.rs" = 32
+"lib.rs" = 8
+"model.rs" = 301
+"prompt.rs" = 233

@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod architecture;
 mod batch;
 mod legacy_stream;
 mod realtime_fixtures;

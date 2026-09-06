@@ -1,0 +1,30 @@
+# Exact source and public-root ratchets for the gateway STT facade.
+# Physical lines include comments and blanks. A source file may shrink but
+# may not exceed its recorded ceiling.
+
+public_root_budget = 9
+
+[migration_targets."api.rs"]
+target_step = "Step 15"
+destination = "batch.rs"
+
+[migration_targets."runtime.rs"]
+target_step = "Step 15"
+destination = "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
+
+[migration_targets."stt.rs"]
+target_step = "Step 26"
+destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
+
+[migration_targets."take.rs"]
+target_step = "Step 14"
+destination = "independent committed-item finalization"
+
+[modules]
+"api.rs" = 625
+"lib.rs" = 21
+"runtime.rs" = 439
+"segment.rs" = 233
+"stt.rs" = 712
+"take.rs" = 663
+"test_fixtures.rs" = 37

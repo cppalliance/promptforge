@@ -175,7 +175,7 @@ isProject: false
   - Build packaged Windows binaries and perform the new-path microphone gate before legacy removal, then repeat final record, second-take, cancel, and permission or device-failure acceptance before completion.
 - Regression, security, and performance:
   - Enforce an exact workspace dependency allowlist for Gateway, all four STT crates, shared loopback, and Workshop server. Temporary rename-only engine edges to FFI and progress expire when the safe backend takes ownership; the Workshop edge expires at legacy removal.
-  - Enforce acyclic internal module graphs for all four STT crates and line-count ceilings for every STT source module. Register each new module when created and never grow the legacy monolith before deleting it.
+  - Enforce acyclic production-library module graphs for all four STT crates with compiler-resolved `cargo-modules` output, and line-count ceilings for every STT source module. Register each new module when created and never grow the legacy monolith before deleting it.
   - Keep architecture checks in the default Gateway CI path so Workshop job exclusions cannot skip them. Prove Gateway-only builds no longer invoke Workshop UI tooling after legacy removal.
   - Pin and wire Miri in a dedicated earlier step, then run pure ownership, queue, audio-state, agreement, and replacement-state targets under it. Keep sockets, dynamic FFI, native callbacks, and model loading on native CI.
   - Test foreign, malformed, wrong-port, and mismatched loopback origins; missing Origin for native clients; trusted-loopback and strict-auth modes; duplicate or conflicting query parameters; and payload privacy.
@@ -216,6 +216,7 @@ isProject: false
   - Use explicit generation admission, request and job guards, session epochs, and a two-phase replacement token instead of strong-reference counts or lock guards crossing awaits.
   - Treat non-preemptible native startup timeout and indeterminate profile persistence as fatal controlled-shutdown cases rather than claiming unsafe rollback.
   - Use Miri from pinned `nightly-2026-09-05` for pure STT ownership, queue, audio, agreement, and replacement tests. A dedicated workflow and Cargo feature-filtered targets establish this repository-selected UB interpreter before the final verification step.
+  - Architecture enforcement uses authoritative tools instead of interpreting full Rust syntax itself. Cargo metadata supplies workspace edges, the inherited compiler lint `unsafe_code = "forbid"` supplies unsafe isolation, `cargo-modules` 0.25.0 supplies expanded production-library module edges, and `cargo-public-api` 0.52.0 supplies effective public exports. A small Node 22 driver checks tool versions, module cycles, and public-root budgets; the Rust integration test owns only dependency policy, strict ceiling files, exact migration targets, and lint inheritance. Falsifier: either pinned tool disagrees with rustdoc or Cargo on an adversarial fixture, fails on a supported CI platform, or requires a newer compiler than Rust 1.89.
 - Rejected alternatives:
   - Keeping Workshop status frames, headers, guards, or types in Gateway because it preserves the forbidden product dependency.
   - Exposing the Gateway key to the webview because it expands browser credential exposure.
@@ -328,7 +329,7 @@ isProject: false
 
 Use Windows PowerShell 5.1. Every command below has an explicit working directory and runs separately, so no shell state or success chaining is assumed. Before Step 1, run `npm ci` separately in `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui` and `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`. Before native tests, extract `https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip` to `C:\Users\Vinnie\cursor\promptforge\local\stt-fixtures\`; place `ggml-tiny.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin` and `jfk.wav` from `https://github.com/ggerganov/whisper.cpp/raw/master/samples/jfk.wav` in the current engine fixture directory; and let each native command set `$env:PATH` and `$env:PROMPTFORGE_WHISPER_LIBRARY` itself. Begin from a clean worktree and green baseline. Each step is one commit; formatting, warnings-denied linting for touched packages, and its listed commands must pass before the next step. When architecture changes invalidate an `AGENTS.md` rule, delete that text in the same commit and add only a minimal replacement when the new boundary would otherwise be unenforced. Do not restate root rules or this design plan in nested rule files.
 
-The architecture harness enforces exact workspace-package edges across normal, development, and build dependencies, ignoring self-dependencies. Phase A, Steps 7 through 20: `gateway -> {gateway-config,gateway-config-ui,gateway-local,gateway-logging,gateway-routing,gateway-stt,gateway-web-search,promptforge-core,shared-loopback,shared-progress,shared-protocol,shared-sidecar}`; `gateway-stt -> {gateway-config,gateway-local,gateway-stt-backend-whisper,gateway-stt-engine,shared-progress,workshop-server}`; `gateway-stt-engine -> {}`; `gateway-stt-backend-whisper -> {gateway-stt-engine,gateway-whisper-ffi,shared-progress}`; `gateway-whisper-ffi -> {}`; `shared-loopback -> {}`; `workshop-server -> {build-ui,promptforge-agent,promptforge-core-support,promptforge-model-client,promptforge-store,promptforge-tools,shared-progress,shared-sidecar}`. Phase B, Steps 21 through 25, adds only `workshop-server -> shared-loopback`. Final Phase C, Step 26 onward, is Phase B with only `gateway-stt -> workshop-server` removed. No normal or development edge from `gateway` to `workshop-server`, and no new such edge from `gateway-stt`, may be added; the current `gateway-stt -> workshop-server` edge is solely a temporary removal target. Beginning with Step 7, every later step touching an STT source file, manifest, crate-root export, or ceiling runs the unfiltered architecture harness.
+The architecture harness enforces exact workspace-package edges across normal, development, and build dependencies, ignoring self-dependencies. Phase A, Steps 7 through 20: `gateway -> {gateway-config,gateway-config-ui,gateway-local,gateway-logging,gateway-routing,gateway-stt,gateway-web-search,promptforge-core,shared-loopback,shared-progress,shared-protocol,shared-sidecar}`; `gateway-stt -> {gateway-config,gateway-local,gateway-stt-backend-whisper,gateway-stt-engine,shared-progress,workshop-server}`; `gateway-stt-engine -> {}`; `gateway-stt-backend-whisper -> {gateway-stt-engine,gateway-whisper-ffi,shared-progress}`; `gateway-whisper-ffi -> {}`; `shared-loopback -> {}`; `workshop-server -> {build-ui,promptforge-agent,promptforge-core-support,promptforge-model-client,promptforge-store,promptforge-tools,shared-progress,shared-sidecar}`. Phase B, Steps 21 through 25, adds only `workshop-server -> shared-loopback`. Final Phase C, Step 26 onward, is Phase B with only `gateway-stt -> workshop-server` removed. No normal or development edge from `gateway` to `workshop-server`, and no new such edge from `gateway-stt`, may be added; the current `gateway-stt -> workshop-server` edge is solely a temporary removal target. Beginning with Step 7, every later step touching an STT source file, manifest, crate-root export, or ceiling runs `node tools/check-stt-architecture.mjs` followed by the unfiltered Rust architecture test.
 
 ### Step 1: Characterize current speech behavior - c6198001
 
@@ -389,11 +390,15 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
 - Consumes and gates: consumes Step 5 stateless jobs; matching native output and green reverse consumers gate bounded workers.
 
-### Step 7: Establish exact architecture ratchets
+### Step 7: Establish exact architecture ratchets - 0cbeb1b2
 
-- Artifacts: create `crates/gateway-stt/tests/it/architecture.rs`, register it in `tests/it/main.rs`, and create `module-ceilings.toml` in all four STT crates.
-- Scope: enforce the stated temporary and final workspace-edge allowlists, unsafe leaf, no cycles, current ceilings, and public budgets; temporary exceptions name their removal step.
+- Artifacts: create `tools/check-stt-architecture.mjs`; reduce `crates/gateway-stt/tests/it/architecture.rs` to Cargo metadata edge policy, strict ceiling and migration policy, and inherited lint checks; register it in `tests/it/main.rs`; create `module-ceilings.toml` in all four STT crates; remove the unused `syn` workspace and development dependencies; and add pinned tool installation plus both gates to the normal CI job.
+- Scope: enforce the stated temporary and final workspace-edge allowlists through Cargo metadata, unsafe isolation through the existing compiler lint, production-library module cycles through filtered `cargo-modules` 0.25.0 DOT output collapsed to module nodes, effective public-root budgets through `cargo-public-api` 0.52.0 output, and current ceilings through strict policy files. The driver rejects wrong tool versions and malformed output. Temporary exceptions name their removal step. Do not retain source-level Rust syntax analysis.
 - Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo modules --version`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo public-api --version`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node --test tools/check-stt-architecture.test.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 6 final crate topology; the unfiltered command becomes mandatory after every later STT edit.
 
@@ -405,6 +410,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-engine --features test-fixtures`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --features test-fixtures`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 7; scripted injection gates deterministic lifecycle and socket tests without widening the six-type production facade.
 
@@ -416,6 +422,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `rustup toolchain install nightly-2026-09-05 --component miri`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri setup`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 8 scripted workers; later pure service targets join this pinned workflow.
 
@@ -430,6 +437,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `npm run build`
   - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `node --test src/views/settings-sections.test.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 6 backend configuration; canonical schema and generated documentation gate the facade.
 
@@ -442,6 +450,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo tree -p gateway-stt -i base64`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo deny check`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt audio`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 10 tuning and Step 7 budgets; dependency review and byte fixtures gate Rust and JavaScript audio consumers.
 
@@ -452,6 +461,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt realtime::wire`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Steps 3 and 11; exact fixture round trips gate session state.
 
@@ -462,6 +472,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_session`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes scripted decoding, audio, wire, and the sole `take.rs`; snapshot and cancellation isolation gate commit.
 
@@ -472,6 +483,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_session`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 13; complete item ownership gates facade replacement and generation quiescence.
 
@@ -483,6 +495,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --features test-fixtures`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Steps 10 and 14; every current reverse consumer compiles and tests in this API-changing commit.
 
@@ -493,6 +506,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it generation`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes bounded jobs, committed items, and complete snapshots; bounded drain gates destructive staging.
 
@@ -503,6 +517,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it generation`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it profiles`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 16; cancellation-at-every-await and rollback outcomes gate route mounting.
 
@@ -522,6 +537,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it surface`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 15 facade and Step 17 lifecycle; status correctness gates route publication.
 
@@ -531,6 +547,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Scope: add `WS /v1/realtime?intent=transcription` while retaining batch and legacy routes; test bearer, cookie, trusted-loopback, absent and hostile socket Origins, query conflicts, send deadlines, privacy, overload, and close 1012 through scripted decoders.
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it realtime_stt`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Steps 12 through 19; the independent Gateway fixture path gates Workshop relay work.
 
@@ -594,6 +611,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it`
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes the passing installed-package record; failed replacement coverage blocks deletion.
 
@@ -602,6 +620,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
 - Artifacts: finalize the architecture harness and all four ceilings; audit root `AGENTS.md` plus the targeted `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway`, `shared-loopback`, and `workshop-server` rule files for stale pre-migration text; update `.github/workflows/ci.yml`, `.github/workflows/stt-miri.yml`, `crates/gateway/README.md`, `crates/gateway-config/README.md`, `crates/workshop-server/README.md`, source guides `guide/src/gateway/05-speech.md`, `guide/src/gateway/10-serving-and-observing.md`, `guide/src/workshop/01-application.md`, and `guide/src/workshop/07-voice.md`; generated `guide/src/SUMMARY.md`, `guide/src/gateway/index.md`, `guide/src/workshop/index.md`, `guide/src/language/index.md`, `guide/src/agent/index.md`, `guide/promptforge-gateway-guide.md`, `guide/promptforge-workshop-guide.md`, `guide/promptforge-language-guide.md`, and `guide/promptforge-agent-guide.md`; `design/generic-realtime-stt.md`; and `design/generic-realtime-stt-acceptance.md`.
 - Scope: remove temporary allowlist edges, enforce exact final dependencies, cycles, public counts, every 500-line ceiling, Gateway-only build isolation, normal-CI scripted coverage, and before or after debt counts. The rules audit deletes obsolete or duplicated lines first and edits only files with a concrete contradiction. Keep root `AGENTS.md`, `gateway-whisper-ffi/AGENTS.md`, `gateway-config/AGENTS.md`, and `workshop-server/ui/AGENTS.md` unchanged unless the final implementation proves one of their current constraints false.
 - Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
   - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install mdbook --version 0.4.44 --locked`
@@ -625,6 +644,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-stt-backend-whisper --test native_whisper -- --ignored`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run build`

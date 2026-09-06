@@ -1,0 +1,21 @@
+# Exact source and public-root ratchets for the backend-neutral STT engine.
+# Physical lines include comments and blanks. A source file may shrink but
+# may not exceed its recorded ceiling.
+
+public_root_budget = 7
+
+[migration_targets."engine.rs"]
+target_step = "Step 8"
+destination = "bounded worker dispatch"
+
+[migration_targets."worker.rs"]
+target_step = "Step 8"
+destination = "bounded worker command queues"
+
+[modules]
+"decoder.rs" = 42
+"engine.rs" = 381
+"error.rs" = 67
+"lib.rs" = 16
+"policy.rs" = 52
+"worker.rs" = 115

@@ -41,6 +41,11 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install architecture tools
+        run: |
+          cargo install cargo-modules --version 0.25.0 --locked
+          cargo install cargo-public-api --version 0.52.0 --locked
+
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui
         run: npm ci
@@ -48,6 +53,15 @@ jobs:
       - name: Install config UI dependencies
         working-directory: crates/gateway-config-ui/ui
         run: npm ci
+
+      - name: Test STT architecture driver
+        run: node --test tools/check-stt-architecture.test.mjs
+
+      - name: Check STT module and public API architecture
+        run: node tools/check-stt-architecture.mjs
+
+      - name: Check STT Cargo and ceiling architecture
+        run: cargo test -p gateway-stt --test it architecture
 
       - name: Format
         run: cargo fmt --all --check
