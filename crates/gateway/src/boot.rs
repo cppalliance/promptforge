@@ -369,6 +369,36 @@ fn resolve_in(
     Ok(path)
 }
 
+/// The config path a diagnostics report names: the explicit path when
+/// given, else the first discovery candidate that exists, else the
+/// profile location first-run generation would write. Reads only - it
+/// never generates. `None` when no location can be determined at all.
+pub(crate) fn discover_for_report(explicit: Option<PathBuf>) -> Option<PathBuf> {
+    discover_in(explicit, Locations::gather)
+}
+
+/// The testable discovery chain: like [`resolve_in`], `gather` runs only
+/// when `explicit` is `None`, so an explicit-path report never depends on
+/// location lookups. Unlike `resolve_in` this never generates: the
+/// profile location is named, not written.
+fn discover_in(
+    explicit: Option<PathBuf>,
+    gather: impl FnOnce() -> Result<Locations, BootError>,
+) -> Option<PathBuf> {
+    if explicit.is_some() {
+        return explicit;
+    }
+    let locations = gather().ok()?;
+    Some(
+        first_existing(&candidates_from(
+            &locations.exe_dir,
+            &locations.cwd,
+            &locations.home,
+        ))
+        .unwrap_or_else(|| profile_config_path(&locations.home)),
+    )
+}
+
 /// The profile candidate: `<home>/.promptforge/gateway.toml`. This is the
 /// one place that knows where the profile configuration lives, so
 /// first-run generation writes where discovery reads.
@@ -498,6 +528,7 @@ fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
 # PromptForge gateway configuration
 # Generated on first run. Edit as needed.
 # See: crates/gateway/README.md
+# Diagnostics: promptforge-gateway diagnostics
 
 [server]
 bind = "127.0.0.1:0"
@@ -624,6 +655,47 @@ mod tests {
     }
 
     #[test]
+    fn the_report_discovery_returns_an_explicit_path_without_a_lookup() {
+        let discovered = discover_in(Some(PathBuf::from("explicit/gateway.toml")), || {
+            panic!("an explicit path skips the location lookup")
+        });
+        assert_eq!(discovered, Some(PathBuf::from("explicit/gateway.toml")));
+    }
+
+    #[test]
+    fn the_report_discovery_names_an_existing_candidate() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let dirs = locations(&temp);
+        std::fs::create_dir_all(&dirs.cwd).expect("create cwd");
+        let in_cwd = dirs.cwd.join(CONFIG_FILE_NAME);
+        std::fs::write(&in_cwd, "").expect("write fixture");
+
+        let discovered = discover_in(None, || Ok(locations(&temp)));
+
+        assert_eq!(discovered, Some(in_cwd));
+    }
+
+    #[test]
+    fn the_report_discovery_falls_back_to_the_profile_without_generating() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let dirs = locations(&temp);
+
+        let discovered = discover_in(None, || Ok(locations(&temp)));
+
+        assert_eq!(discovered, Some(profile_config_path(&dirs.home)));
+        assert!(
+            !dirs.home.join(".promptforge").exists(),
+            "the report names the profile location but never writes it"
+        );
+    }
+
+    #[test]
+    fn the_report_discovery_reads_an_unlocatable_process_as_none() {
+        let discovered = discover_in(None, || Err(BootError::NoHome));
+        assert_eq!(discovered, None);
+    }
+
+    #[test]
     fn first_run_generates_a_bootable_config_into_the_profile() {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let dirs = locations(&temp);
@@ -690,6 +762,21 @@ mod tests {
             raw.contains("models = [\"whisper-base-en\", \"whisper-small-en\"]"),
             "the default profile selects the pair"
         );
+    }
+
+    #[test]
+    fn the_generated_config_carries_the_diagnostics_hint_as_a_comment() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let path = generate_default(&temp.path().join(CONFIG_FILE_NAME), InstallerStt::Included)
+            .expect("generates");
+        let raw = std::fs::read_to_string(&path).expect("read back");
+
+        assert!(
+            raw.contains("# Diagnostics: promptforge-gateway diagnostics\n"),
+            "the hint is a comment, never a config field: {raw}"
+        );
+        gateway_config::Config::from_toml_str(&raw)
+            .expect("a commented hint leaves the config parseable");
     }
 
     #[test]

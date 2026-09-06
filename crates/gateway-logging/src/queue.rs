@@ -509,4 +509,82 @@ mod tests {
         assert_eq!(records.len(), 1, "admission is closed");
         assert_eq!(&*records[0].line, "before-close");
     }
+
+    #[test]
+    fn saturation_under_load_never_evicts_or_duplicates_warn_or_error() {
+        const PRODUCERS: u64 = 4;
+        const PER_PRODUCER: u64 = 10000;
+        let queue = Arc::new(LogQueue::new());
+        let (drained_tx, drained_rx) = mpsc::channel();
+        let worker_queue = Arc::clone(&queue);
+        let worker = std::thread::spawn(move || {
+            loop {
+                let batch = worker_queue.take_batch();
+                for record in batch.records {
+                    drained_tx
+                        .send(record.line)
+                        .expect("report the drained line");
+                }
+                if batch.done {
+                    break;
+                }
+                // A slow sink: the producers outpace the drain, so the queue
+                // fills and the eviction and blocking paths fire. The worker
+                // never stops draining, so a blocked producer always wakes.
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        });
+
+        // Four producers push five times the capacity across every lane.
+        let producers: Vec<_> = (0..PRODUCERS)
+            .map(|id| {
+                let queue = Arc::clone(&queue);
+                std::thread::spawn(move || {
+                    for index in 0..PER_PRODUCER {
+                        let priority = match index % 5 {
+                            0 => LogPriority::Debug,
+                            1 => LogPriority::Trace,
+                            2 => LogPriority::Info,
+                            3 => LogPriority::Warn,
+                            _ => LogPriority::Error,
+                        };
+                        queue.enqueue(priority, line(&format!("p{id}-{priority:?}-{index}")));
+                    }
+                })
+            })
+            .collect();
+        for producer in producers {
+            producer.join().expect("the producer joins");
+        }
+        queue.close();
+        worker.join().expect("the worker joins");
+
+        let drained: Vec<String> = drained_rx.iter().map(|line| line.to_string()).collect();
+        let unique: std::collections::HashSet<&String> = drained.iter().collect();
+        assert_eq!(
+            drained.len(),
+            unique.len(),
+            "no record is written twice under saturation"
+        );
+        assert!(
+            (drained.len() as u64) < PRODUCERS * PER_PRODUCER,
+            "saturation really evicted: {} of {} records retained",
+            drained.len(),
+            PRODUCERS * PER_PRODUCER
+        );
+        for id in 0..PRODUCERS {
+            for index in (3..PER_PRODUCER).step_by(5) {
+                let warn = format!("p{id}-Warn-{index}");
+                let error = format!("p{id}-Error-{}", index + 1);
+                assert!(
+                    unique.contains(&warn),
+                    "Warn survives saturation: missing {warn}"
+                );
+                assert!(
+                    unique.contains(&error),
+                    "Error survives saturation: missing {error}"
+                );
+            }
+        }
+    }
 }

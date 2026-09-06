@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: logging-diagnostics
     content: Add diagnostics, retention, fatal-chain capture, privacy, and pressure behavior
-    status: pending
+    status: completed
   - id: logging-verify
     content: Update rules/docs and complete full verification
     status: pending

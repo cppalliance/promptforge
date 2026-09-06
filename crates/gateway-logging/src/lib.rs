@@ -13,6 +13,7 @@
 mod config;
 mod error;
 mod queue;
+mod redact;
 mod runtime;
 mod worker;
 mod writer;

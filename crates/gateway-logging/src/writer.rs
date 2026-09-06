@@ -7,12 +7,14 @@ use tracing::Metadata;
 use tracing_subscriber::fmt::MakeWriter;
 
 use crate::queue::{LogPriority, LogQueue};
+use crate::redact::redact_line;
 
 /// A cloneable factory that hands the fmt layer per-event writers feeding
 /// the queue.
 ///
-/// Priority comes only from the event's tracing metadata; the writer never
-/// inspects the formatted text. Obtained from
+/// Priority comes only from the event's tracing metadata; the formatted
+/// text passes through the privacy redaction before it can reach the
+/// queue. Obtained from
 /// [`LogRuntime::writer`](crate::LogRuntime::writer).
 ///
 /// # Examples
@@ -95,12 +97,13 @@ impl Drop for LogEventWriter {
         // The formatter's output is almost always valid UTF-8, so move the
         // buffer into the record and pay the lossy copy only when it is not.
         let line = match String::from_utf8(std::mem::take(&mut self.buffer)) {
-            Ok(text) => text.into_boxed_str(),
-            Err(error) => String::from_utf8_lossy(error.as_bytes())
-                .into_owned()
-                .into_boxed_str(),
+            Ok(text) => text,
+            Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
         };
-        self.queue.enqueue(self.priority, line);
+        // The privacy chokepoint: every record crosses here, so the
+        // well-shaped secrets are masked before they can reach the queue.
+        self.queue
+            .enqueue(self.priority, redact_line(&line).into_boxed_str());
     }
 }
 
@@ -169,6 +172,44 @@ mod tests {
         assert!(
             batch.records[0].line.contains("an error"),
             "the record carries the formatted event: {}",
+            batch.records[0].line
+        );
+    }
+
+    #[test]
+    fn a_secret_in_an_event_is_masked_before_it_reaches_the_queue() {
+        let queue = Arc::new(LogQueue::new());
+        let writer = LogWriter::new(Arc::clone(&queue));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(writer)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(
+                authorization = "Bearer tok_secret_9f8c",
+                "upstream rejected the key"
+            );
+            tracing::info!("sending Cookie: session=abc123 to the upstream");
+        });
+        queue.close();
+        let batch = queue.take_batch();
+        assert_eq!(batch.records.len(), 2);
+        for record in &batch.records {
+            assert!(
+                !record.line.contains("tok_secret_9f8c"),
+                "a bearer token in event fields never reaches a record: {}",
+                record.line
+            );
+            assert!(
+                !record.line.contains("abc123"),
+                "a cookie value in a message never reaches a record: {}",
+                record.line
+            );
+        }
+        assert!(
+            batch.records[0].line.contains("[redacted]"),
+            "the mask marks where the secret stood: {}",
             batch.records[0].line
         );
     }

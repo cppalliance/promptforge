@@ -27,11 +27,14 @@ const DEFAULT_LOG_FILTER: &str = "info,whisper_cpp=warn,hyper=warn,h2=warn,reqwe
 
 const USAGE: &str = concat!(
     "usage: promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
+    "       promptforge-gateway diagnostics [--config PATH]\n",
     "       promptforge-gateway --version\n",
     "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable;\n",
     "--config wins over it\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
     "and the profile's .promptforge directory, generating a default config on first run\n",
+    "diagnostics  print a JSON report of the state dir, config, logs, and connection file;\n",
+    "             never serves, rotates logs, or parses the config\n",
     "--no-tray    run headless (Ctrl-C driven); for servers and CI\n",
     "--login      the launch came from the OS autostart entry; never opens a browser\n",
     "--print-url  print the Settings handoff URL once bound, then serve headless;\n",
@@ -73,6 +76,17 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // The diagnostics report is not a boot: it runs before the handoff
+    // check and before logging starts, and never rotates a log, parses a
+    // config, or mutates the state directory.
+    if invocation.command == Command::Diagnostics {
+        print!(
+            "{}",
+            gateway::diagnostics_json(invocation.serve.config_path)
+        );
+        return ExitCode::SUCCESS;
+    }
 
     // A second launch never boots a duplicate server: when a live gateway
     // owns the connection file, hand off to it and exit. This runs before
@@ -204,10 +218,22 @@ enum ParseError {
     Usage(String),
 }
 
+/// What this launch does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Command {
+    /// Serve (the default and only serving mode).
+    Serve,
+    /// Print the diagnostics report and exit.
+    Diagnostics,
+}
+
 /// The parsed invocation: the serve options plus how the main thread runs.
 #[derive(Debug)]
 struct Invocation {
-    /// What to serve.
+    /// What the launch does.
+    command: Command,
+    /// What to serve. Under [`Command::Diagnostics`] only the config path
+    /// is meaningful: the report names it.
     serve: ServeOptions,
     /// Whether the system tray occupies the main thread (default).
     /// `--no-tray` keeps the headless Ctrl-C loop for servers and CI.
@@ -231,6 +257,13 @@ struct Invocation {
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, ParseError> {
     let mut args = args.into_iter();
     let _binary = args.next();
+
+    // `diagnostics` is the only subcommand and must come first.
+    let mut args = args.peekable();
+    if args.peek().and_then(|arg| arg.to_str()) == Some("diagnostics") {
+        args.next();
+        return parse_diagnostics_args(args);
+    }
 
     let mut profile: Option<ProfileName> = None;
     let mut config_path: Option<PathBuf> = None;
@@ -283,12 +316,49 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Pa
         resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
 
     Ok(Invocation {
+        command: Command::Serve,
         // `--login`'s contract is absolute - a login launch never opens a
         // browser - so it wins over `--browser`.
         serve: ServeOptions::new(config_path, profile).with_browser(browser && !login),
         tray,
         login,
         print_url,
+    })
+}
+
+/// Parses what may follow `diagnostics`: at most `--config PATH`. Every
+/// other flag belongs to a serving launch and is a usage error here.
+fn parse_diagnostics_args(args: impl Iterator<Item = OsString>) -> Result<Invocation, ParseError> {
+    let mut args = args;
+    let mut config_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--config") => {
+                let path = args
+                    .next()
+                    .ok_or_else(|| ParseError::Usage("--config requires a path".to_string()))?;
+                if config_path.is_some() {
+                    return Err(ParseError::Usage("--config accepts one path".to_string()));
+                }
+                config_path = Some(PathBuf::from(path));
+            }
+            Some("-h" | "--help") => return Err(ParseError::Help),
+            _ => {
+                return Err(ParseError::Usage(format!(
+                    "diagnostics accepts only --config PATH, got {}",
+                    arg.to_string_lossy()
+                )));
+            }
+        }
+    }
+    let config_path =
+        resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
+    Ok(Invocation {
+        command: Command::Diagnostics,
+        serve: ServeOptions::new(config_path, None),
+        tray: false,
+        login: false,
+        print_url: false,
     })
 }
 
@@ -566,5 +636,99 @@ mod tests {
     fn rejects_unknown_flag() {
         let error = parse_args(args(&["--profiles-dir", "x", "--profile", "dev"])).unwrap_err();
         assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
+    fn diagnostics_is_the_only_subcommand() {
+        let invocation = parse_args(args(&["diagnostics"])).expect("parses");
+        assert_eq!(invocation.command, Command::Diagnostics);
+        assert_eq!(invocation.serve.config_path, None);
+        let invocation = parse_args(args(&[])).expect("the bare invocation parses");
+        assert_eq!(invocation.command, Command::Serve);
+    }
+
+    #[test]
+    fn diagnostics_accepts_a_config_path() {
+        let invocation =
+            parse_args(args(&["diagnostics", "--config", "gateway.toml"])).expect("parses");
+        assert_eq!(invocation.command, Command::Diagnostics);
+        assert_eq!(
+            invocation.serve.config_path,
+            Some(PathBuf::from("gateway.toml"))
+        );
+    }
+
+    #[test]
+    fn diagnostics_rejects_serving_flags() {
+        for rest in ["--no-tray", "--login", "--print-url", "--browser"] {
+            let error = parse_args(args(&["diagnostics", rest])).unwrap_err();
+            assert!(
+                matches!(error, ParseError::Usage(_)),
+                "diagnostics rejects {rest}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostics_after_a_flag_is_not_a_subcommand() {
+        let error = parse_args(args(&["--no-tray", "diagnostics"])).unwrap_err();
+        assert!(
+            matches!(error, ParseError::Usage(_)),
+            "the subcommand must come first: {error:?}"
+        );
+    }
+
+    /// A fatal returned error is logged once with its complete source
+    /// chain, and the queue drains to disk before the process exits.
+    #[test]
+    fn a_fatal_error_is_logged_once_with_its_full_chain_then_drained() {
+        #[derive(Debug)]
+        struct Chain(&'static str, Option<Box<Chain>>);
+
+        impl std::fmt::Display for Chain {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.0)
+            }
+        }
+
+        impl std::error::Error for Chain {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.1
+                    .as_deref()
+                    .map(|cause| cause as &dyn std::error::Error)
+            }
+        }
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = LogRuntime::start(LogConfig::new(temp.path().join("state")))
+            .expect("start the log pipeline");
+        let log_path = runtime.path().to_path_buf();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(runtime.writer())
+            .finish();
+        let error = Chain(
+            "serve the gateway",
+            Some(Box::new(Chain(
+                "bind 127.0.0.1:8081",
+                Some(Box::new(Chain("address already in use", None))),
+            ))),
+        );
+        tracing::subscriber::with_default(subscriber, || log_error_chain(&error));
+        // The logger shuts down last, which is what drains the chain.
+        runtime.shutdown().expect("the queue drains before exit");
+
+        let log = std::fs::read_to_string(&log_path).expect("read the log");
+        for link in [
+            "error: serve the gateway",
+            "caused by: bind 127.0.0.1:8081",
+            "caused by: address already in use",
+        ] {
+            assert_eq!(
+                log.matches(link).count(),
+                1,
+                "each chain link lands exactly once: {link}\n{log}"
+            );
+        }
     }
 }

@@ -82,6 +82,7 @@ mod commands;
 mod config_apply;
 mod config_pending;
 mod config_write;
+mod diagnostics;
 mod dialect;
 mod drain;
 mod env_file;
@@ -116,6 +117,7 @@ pub(crate) use gateway_routing::queue;
 pub(crate) use gateway_local as local;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
+pub use crate::diagnostics::diagnostics_json;
 pub use crate::relaunch::running_gateway_settings_url;
 pub use crate::runner::{
     Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, run_printing_url, spawn,

@@ -178,8 +178,33 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(temp.0.join("logs/gateway.log.1")).expect("rotated log"),
             "previous run",
-            "start performs the same rotation the binary used to"
+            "start rotates the previous run's log to .1"
         );
         runtime.shutdown().expect("shutdown");
+    }
+
+    #[test]
+    fn shutdown_writes_every_record_in_sequence_before_the_join_returns() {
+        let temp = TempStateDir::new("shutdown-order");
+        let runtime = LogRuntime::start(LogConfig::new(&temp.0)).expect("start the runtime");
+        let path = runtime.path().to_path_buf();
+        for index in 0..300 {
+            let mut event = runtime.writer().make_writer();
+            writeln!(event, "ordered-{index}").expect("buffered write");
+        }
+        // After shutdown returns, the drain, the flush, and the join have
+        // all completed: the file holds every record in enqueue order.
+        runtime.shutdown().expect("shutdown drains and joins");
+
+        let contents = std::fs::read_to_string(&path).expect("read the log");
+        let lines: Vec<&str> = contents.lines().collect();
+        assert_eq!(lines.len(), 300, "the flush preceded the join's return");
+        for (position, line) in lines.iter().enumerate() {
+            assert_eq!(
+                *line,
+                format!("ordered-{position}"),
+                "the file's order is the global enqueue sequence"
+            );
+        }
     }
 }

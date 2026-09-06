@@ -109,6 +109,26 @@ pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resoluti
     }
 }
 
+/// Whether the connection file in `run_dir` names a live gateway right
+/// now, with no cleanup: the read-only check a diagnostics report runs.
+/// Stale-file deletion is the prospective owner's privilege, so a stale
+/// file reads as not-running and stays on disk for the next launch to
+/// clean.
+#[must_use]
+pub fn is_running(run_dir: &Path) -> bool {
+    is_running_named(run_dir, GATEWAY_IMAGE_NAME)
+}
+
+/// [`is_running`] against a caller-named process image, so a test binary -
+/// never named `promptforge-gateway` - can run the full liveness gauntlet.
+pub(crate) fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
+    match ConnectionFile::read(run_dir) {
+        Ok(Some(file)) => is_live(&file, image_name),
+        // A missing, unreadable, or invalid file reads as not-running.
+        Ok(None) | Err(_) => false,
+    }
+}
+
 /// Whether the file's gateway is live right now, with no cleanup: the
 /// check a launch-race loser runs, since deleting is the lock holder's
 /// privilege.
@@ -356,6 +376,61 @@ mod tests {
         assert!(
             connection_file_path(dir.path()).exists(),
             "a live file is left in place"
+        );
+    }
+
+    #[test]
+    fn is_running_reports_a_live_gateway_without_touching_the_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let port = fixture_gateway("right");
+        live_file(port, "right")
+            .write_to(dir.path())
+            .expect("write");
+
+        assert!(
+            is_running_named(dir.path(), &own_image_name()),
+            "a fully live file reads as running"
+        );
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "the read-only check never deletes"
+        );
+    }
+
+    #[test]
+    fn is_running_leaves_a_stale_file_in_place() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let file = ConnectionFile {
+            pid: dead_pid(),
+            ..live_file(1, "key")
+        };
+        file.write_to(dir.path()).expect("write");
+
+        assert!(
+            !is_running_named(dir.path(), &own_image_name()),
+            "a dead pid reads as not-running"
+        );
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "stale-file deletion is the prospective owner's privilege"
+        );
+    }
+
+    #[test]
+    fn is_running_reads_absent_and_corrupt_files_as_not_running() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        assert!(
+            !is_running_named(dir.path(), &own_image_name()),
+            "no connection file reads as not-running"
+        );
+        fs::write(connection_file_path(dir.path()), b"not json").expect("write fixture");
+        assert!(
+            !is_running_named(dir.path(), &own_image_name()),
+            "a corrupt file reads as not-running and is left alone"
+        );
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "the corrupt file was not deleted"
         );
     }
 }

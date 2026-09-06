@@ -50,4 +50,4 @@ pub use crate::shutdown::{ShutdownError, request_shutdown};
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]
 pub use crate::stale::resolve_for_test;
-pub use crate::stale::{Resolution, StaleReason, resolve};
+pub use crate::stale::{Resolution, StaleReason, is_running, resolve};
