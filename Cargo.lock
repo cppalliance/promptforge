@@ -2000,6 +2000,7 @@ dependencies = [
  "futures-util",
  "gateway-config",
  "gateway-local",
+ "gateway-stt",
  "gateway-stt-backend-whisper",
  "gateway-stt-engine",
  "hound",

@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pure-worker-state:
+  pure-stt-state:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -36,6 +36,11 @@ jobs:
       # their native CI targets because the interpreter cannot execute them.
       - name: Check pure STT worker ownership and queues
         run: cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_
+
+      # Session filters cover only registry, immutable input ownership, audio
+      # state, and epoch transitions. Socket and spawned-task tests stay native.
+      - name: Check pure STT session ownership
+        run: cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_
 
   native-whisper:
     runs-on: [self-hosted, windows, cuda]

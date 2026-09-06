@@ -22,17 +22,20 @@ destination = "independent committed-item finalization"
 
 [modules]
 "api.rs" = 625
-"audio.rs" = 380
-"lib.rs" = 28
-"realtime/mod.rs" = 2
+"audio.rs" = 390
+"lib.rs" = 30
+"realtime/mod.rs" = 10
+"realtime/input.rs" = 160
 "realtime/query.rs" = 70
+"realtime/registry.rs" = 180
+"realtime/session.rs" = 409
 "realtime/wire.rs" = 24
 "realtime/wire/client.rs" = 363
-"realtime/wire/server.rs" = 367
-"realtime/wire/shared.rs" = 212
+"realtime/wire/server.rs" = 389
+"realtime/wire/shared.rs" = 218
 "realtime/wire/tests.rs" = 278
 "runtime.rs" = 459
 "segment.rs" = 239
 "stt.rs" = 733
 "take.rs" = 677
-"test_fixtures.rs" = 73
+"test_fixtures.rs" = 271

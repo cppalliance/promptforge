@@ -500,7 +500,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`
 - Consumes and gates: this repairs the same missing `externalBin` failure observed as `promptforge-gateway-x86_64-pc-windows-msvc.exe` on Windows and `promptforge-gateway-x86_64-unknown-linux-gnu` on Linux. Target-mapping tests cover both hosts, and the existing CI clean-tree checks remain green.
 
-### Step 15: Own sessions and uncommitted input
+### Step 15: Own sessions and uncommitted input [completed]
 
 - Artifacts: create `gateway-stt/src/realtime/{session.rs,input.rs,registry.rs}`, `tests/it/realtime_session.rs`, register it in `tests/it/main.rs`, and update ceilings and Miri workflow filters.
 - Scope: enforce `MAX_ACTIVE_REALTIME_SESSIONS = 8` with no wait queue and immediate ninth rejection, `SESSION_CANCEL_JOIN_CAPACITY = 8`, immutable first-append snapshots, clear, resampler reset, interim epochs, and capacity and capacity-plus-one tests.

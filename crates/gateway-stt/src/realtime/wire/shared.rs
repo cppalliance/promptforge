@@ -42,7 +42,7 @@ pub(super) enum Correlation {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(in crate::realtime) struct ClientError {
+pub(crate) struct ClientError {
     code: &'static str,
     message: String,
     param: Option<String>,
@@ -86,7 +86,7 @@ impl ClientError {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(in crate::realtime) enum RequiredNullable<T> {
+pub(crate) enum RequiredNullable<T> {
     Null,
     Value(T),
 }
@@ -203,6 +203,11 @@ impl IdGenerator {
 
     pub(in crate::realtime) fn item(&self) -> String {
         self.next("item", &self.items)
+    }
+
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(in crate::realtime) fn event_count(&self) -> u64 {
+        self.events.load(Ordering::Relaxed).saturating_sub(1)
     }
 
     fn next(&self, kind: &str, counter: &AtomicU64) -> String {

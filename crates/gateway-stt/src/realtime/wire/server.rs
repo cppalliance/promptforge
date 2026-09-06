@@ -9,7 +9,7 @@ use super::shared::{
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(in crate::realtime) struct EffectiveSession {
+pub(crate) struct EffectiveSession {
     id: String,
     object: String,
     r#type: String,
@@ -94,6 +94,14 @@ impl EffectiveSession {
         Ok(())
     }
 
+    pub(in crate::realtime) fn prompt(&self) -> &str {
+        &self.audio.input.transcription.prompt
+    }
+
+    pub(in crate::realtime) fn includes_hypothesis(&self) -> bool {
+        !self.include.is_empty()
+    }
+
     fn validate(&self) -> Result<(), String> {
         if self.id.is_empty()
             || self.object != SESSION_OBJECT
@@ -114,7 +122,7 @@ impl EffectiveSession {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
-pub(in crate::realtime) enum ServerEvent {
+pub(crate) enum ServerEvent {
     #[serde(rename = "session.created")]
     SessionCreated {
         event_id: String,
@@ -182,7 +190,7 @@ pub(in crate::realtime) enum ServerEvent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(in crate::realtime) struct ConversationItem {
+pub(crate) struct ConversationItem {
     id: String,
     r#type: String,
     status: String,
@@ -200,14 +208,14 @@ struct InputAudioContent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(in crate::realtime) struct DurationUsage {
+pub(crate) struct DurationUsage {
     r#type: String,
     seconds: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(in crate::realtime) struct WireError {
+pub(crate) struct WireError {
     r#type: String,
     code: String,
     message: String,
@@ -218,6 +226,19 @@ pub(in crate::realtime) struct WireError {
 }
 
 impl ServerEvent {
+    pub(in crate::realtime) fn transcription_delta(
+        event_id: String,
+        item_id: String,
+        delta: String,
+    ) -> Self {
+        Self::TranscriptionDelta {
+            event_id,
+            item_id,
+            content_index: 0,
+            delta,
+        }
+    }
+
     pub(in crate::realtime) fn from_value(value: Value) -> Result<Self, String> {
         let event: Self = serde_json::from_value(value).map_err(|error| error.to_string())?;
         event.validate()?;

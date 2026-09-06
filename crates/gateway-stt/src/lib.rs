@@ -14,6 +14,7 @@ mod audio;
 mod realtime;
 mod runtime;
 mod segment;
+#[cfg(not(miri))]
 mod stt;
 mod take;
 #[cfg(all(test, not(feature = "test-fixtures")))]
@@ -24,4 +25,5 @@ pub mod test_fixtures;
 pub use api::{MAX_AUDIO_BYTES, TranscriptionError, transcribe};
 pub use runtime::{SttRuntime, SttRuntimeError, SttState};
 pub use segment::Segmenter;
+#[cfg(not(miri))]
 pub use stt::{gateway_routes, routes as stt_routes};

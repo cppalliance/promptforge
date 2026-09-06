@@ -114,6 +114,10 @@ impl AudioBuffer {
         *self = Self::default();
     }
 
+    pub(super) fn take_resampled(&mut self) -> Vec<f32> {
+        std::mem::take(&mut self.resampler.output)
+    }
+
     #[allow(clippy::cast_precision_loss)]
     pub(super) fn buffered_duration_seconds(&self) -> f64 {
         self.input_samples as f64 / INPUT_SAMPLE_RATE as f64
@@ -149,17 +153,18 @@ struct Resampler24To16 {
     next_output_twice: usize,
     previous: Option<f32>,
     output: Vec<f32>,
+    output_samples: usize,
 }
 
 impl Resampler24To16 {
     fn push(&mut self, sample: f32) {
         let input_twice = self.input_index * 2;
         if self.next_output_twice == input_twice {
-            self.output.push(sample);
+            self.emit(sample);
             self.next_output_twice += 3;
         } else if self.next_output_twice < input_twice {
             let previous = self.previous.unwrap_or(sample);
-            self.output.push(previous.midpoint(sample));
+            self.emit(previous.midpoint(sample));
             self.next_output_twice += 3;
         }
         self.previous = Some(sample);
@@ -170,13 +175,18 @@ impl Resampler24To16 {
         if self.next_output_twice < self.input_index * 2
             && let Some(previous) = self.previous
         {
-            self.output.push(previous);
+            self.emit(previous);
             self.next_output_twice += 3;
         }
         debug_assert_eq!(
-            self.output.len(),
+            self.output_samples,
             (self.input_index * OUTPUT_SAMPLE_RATE).div_ceil(INPUT_SAMPLE_RATE)
         );
+    }
+
+    fn emit(&mut self, sample: f32) {
+        self.output.push(sample);
+        self.output_samples += 1;
     }
 }
 
