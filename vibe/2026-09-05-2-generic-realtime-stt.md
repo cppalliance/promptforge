@@ -535,7 +535,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `$cargoBin=Join-Path $env:USERPROFILE '.cargo\bin'; $rustup=Join-Path $cargoBin 'rustup.exe'; $cargo=Join-Path $cargoBin 'cargo.exe'; if (-not (Test-Path $rustup -PathType Leaf) -or -not (Test-Path $cargo -PathType Leaf)) { throw 'self-hosted runner Rust is not provisioned' }; & $rustup toolchain list; & $cargo '+stable' '--version'`
 - Consumes and gates: this repairs the self-hosted `NetworkService` failure where the toolchain action did not find the existing Cargo bin directory, attempted to reinstall rustup, and collided with an existing `rust-analyzer.exe`. The source test must prove the native job performs preflight before cache and contains no Rust installer action, while the hosted Miri job still installs its pinned nightly.
 
-### Step 18: Replace runtime and route APIs atomically
+### Step 18: Replace runtime and route APIs atomically [completed]
 
 - Artifacts: replace `gateway-stt/src/runtime.rs` with `service.rs`, `artifacts.rs`, `generation.rs`, `status.rs`, and `model.rs`; rename `api.rs` to `batch.rs`; replace `SttRuntime`, `SttState`, free route APIs, and old exports in `lib.rs`; update `gateway/src/{lib.rs,runner.rs,test_support.rs}` and all gateway-stt tests and common fixtures in the same commit.
 - Scope: expose only `SpeechService` plus five supporting types, preserve batch and temporary legacy routes through methods, publish one complete snapshot, and retain test-only scripted construction behind `test-fixtures`.

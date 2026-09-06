@@ -2,24 +2,21 @@
 # Physical lines include comments and blanks. A source file may shrink but
 # may not exceed its recorded ceiling.
 
-public_root_budget = 9
-
-[migration_targets."api.rs"]
-target_step = "Step 18"
-destination = "batch.rs"
-
-[migration_targets."runtime.rs"]
-target_step = "Step 18"
-destination = "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
+public_root_budget = 6
 
 [migration_targets."stt.rs"]
 target_step = "Step 29"
 destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
 
 [modules]
-"api.rs" = 625
+"artifacts.rs" = 294
 "audio.rs" = 397
-"lib.rs" = 30
+"batch.rs" = 349
+"batch/native_tests.rs" = 113
+"batch/tests.rs" = 160
+"generation.rs" = 247
+"lib.rs" = 40
+"model.rs" = 55
 "realtime/mod.rs" = 16
 "realtime/input.rs" = 198
 "realtime/item.rs" = 157
@@ -34,12 +31,13 @@ destination = "removal after the Realtime route and Workshop relay replace the l
 "realtime/wire/server.rs" = 389
 "realtime/wire/shared.rs" = 218
 "realtime/wire/tests.rs" = 278
-"runtime.rs" = 459
 "segment.rs" = 239
-"stt.rs" = 733
+"service.rs" = 104
+"status.rs" = 54
+"stt.rs" = 725
 "take.rs" = 420
 "take/agreement.rs" = 116
 "take/finalization.rs" = 175
 "take/state.rs" = 82
 "take/text.rs" = 10
-"test_fixtures.rs" = 470
+"test_fixtures.rs" = 480

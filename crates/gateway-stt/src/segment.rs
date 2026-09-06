@@ -32,7 +32,7 @@ const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
 /// a cursor into it and each [`poll`](Segmenter::poll) scans only frames
 /// completed since the last call. Ranges are indices into that buffer.
 #[derive(Debug, Default)]
-pub struct Segmenter {
+pub(crate) struct Segmenter {
     /// Next unscanned sample index.
     cursor: usize,
     /// Start of the speech run currently being tracked, if any.
@@ -47,27 +47,27 @@ pub struct Segmenter {
 impl Segmenter {
     /// A fresh segmenter positioned at the start of a take buffer.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
-
     /// Rewinds the segmenter for a new take; the caller clears the buffer at
     /// the same time, so indices stay aligned.
-    pub fn reset(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn reset(&mut self) {
         *self = Self::new();
     }
 
     /// Index past which all audio has been segmented; the unprocessed tail
     /// of the take is `buffer[self.consumed()..]`.
     #[must_use]
-    pub fn consumed(&self) -> usize {
+    pub(crate) fn consumed(&self) -> usize {
         self.consumed
     }
 
     /// Scans newly arrived frames and returns the range of the next
     /// completed speech segment, if one closed. Call in a loop: a large
     /// arrival can complete more than one segment.
-    pub fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
+    pub(crate) fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
         while self.cursor + FRAME_SAMPLES <= buffer.len() {
             let frame = &buffer[self.cursor..self.cursor + FRAME_SAMPLES];
             let silent = EnginePolicy::is_silence(frame);

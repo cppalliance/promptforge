@@ -9,36 +9,47 @@ pub use gateway_stt_engine::DecodeMode;
 pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
 #[cfg(feature = "test-fixtures")]
-use crate::SttRuntime;
-#[cfg(feature = "test-fixtures")]
 use crate::realtime::{CommitReceipt, InterimEpoch, ItemResult, Session, SessionRegistry};
 #[cfg(feature = "test-fixtures")]
-use gateway_stt_engine::{EnginePolicy, SttEngine, TranscribeError};
+use crate::{SpeechError, SpeechService};
+#[cfg(feature = "test-fixtures")]
+use gateway_stt_engine::{EnginePolicy, SttEngine};
 #[cfg(feature = "test-fixtures")]
 use std::future::Future;
 #[cfg(feature = "test-fixtures")]
 use std::sync::Arc;
 
-/// Builds a speech runtime around deterministic scripted workers.
+/// Builds a speech service around deterministic scripted workers.
 ///
 /// # Errors
 /// Returns engine policy, startup, or worker construction failures.
 #[cfg(feature = "test-fixtures")]
-pub fn scripted_runtime(
+pub fn scripted_service(
     factory: ScriptedModelFactory,
     window_seconds: u64,
     interval_ms: u64,
-) -> Result<SttRuntime, TranscribeError> {
+) -> Result<SpeechService, SpeechError> {
     let gpu_available = factory.gpu_available();
-    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)?;
-    let engine = SttEngine::new(factory, policy)?;
+    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)
+        .map_err(SpeechError::Engine)?;
+    let engine = SttEngine::new(factory, policy).map_err(SpeechError::Engine)?;
     let final_name = engine.has_final_pass().then(|| "scripted-final".to_owned());
-    Ok(SttRuntime::from_scripted_engine(
-        engine,
-        "scripted-interim".to_owned(),
-        final_name,
-        Vec::new(),
-    ))
+    let service = SpeechService::new();
+    let replacement = service.scripted_replacement(engine, final_name);
+    service.commit_replacement(replacement)?;
+    Ok(service)
+}
+
+/// Returns every closed speech range produced by the service segmenter.
+#[cfg(feature = "test-fixtures")]
+#[must_use]
+pub fn segment_ranges(samples: &[f32]) -> Vec<std::ops::Range<usize>> {
+    let mut segmenter = crate::segment::Segmenter::new();
+    let mut ranges = Vec::new();
+    while let Some(range) = segmenter.poll(samples) {
+        ranges.push(range);
+    }
+    ranges
 }
 
 /// A deterministic registry for focused Realtime session integration tests.

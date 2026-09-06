@@ -3,7 +3,7 @@
 use axum::http::StatusCode;
 
 use crate::common::{
-    copy_model_replacing_token, fixture_runtime_with_models, jfk_samples, require_model,
+    copy_model_replacing_token, fixture_service_with_models, jfk_samples, require_model,
     transcribe_batch,
 };
 
@@ -14,11 +14,11 @@ async fn batch_selects_each_loaded_physical_model_by_name() {
     let fixture_dir = tempfile::tempdir().expect("distinct model tempdir");
     let final_model =
         copy_model_replacing_token(&interim_model, fixture_dir.path(), b"country", b"kingdom");
-    let (state, runtime) = fixture_runtime_with_models(&interim_model, Some(final_model.as_path()));
+    let service = fixture_service_with_models(&interim_model, Some(final_model.as_path()));
     let samples = jfk_samples();
 
     let (interim_status, interim_response) =
-        transcribe_batch(state.clone(), "speech", &samples).await;
+        transcribe_batch(service.clone(), "speech", &samples).await;
     assert_eq!(
         interim_status,
         StatusCode::OK,
@@ -34,7 +34,7 @@ async fn batch_selects_each_loaded_physical_model_by_name() {
     );
 
     let (final_status, final_response) =
-        transcribe_batch(state.clone(), "speech-final", &samples).await;
+        transcribe_batch(service.clone(), "speech-final", &samples).await;
     assert_eq!(
         final_status,
         StatusCode::OK,
@@ -49,5 +49,5 @@ async fn batch_selects_each_loaded_physical_model_by_name() {
         "speech-final reaches the vocabulary-distinguished final worker: {final_text:?}"
     );
 
-    runtime.shutdown();
+    service.shutdown();
 }

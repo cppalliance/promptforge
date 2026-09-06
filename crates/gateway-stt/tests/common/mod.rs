@@ -9,12 +9,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::{Multipart, State};
 use axum::http::{Request, StatusCode};
-use axum::response::{IntoResponse as _, Response};
-use axum::routing::post;
 use futures_util::{SinkExt, StreamExt};
-use gateway_stt::{SttRuntime, SttState};
+use gateway_stt::SpeechService;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -57,28 +54,28 @@ fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
     path
 }
 
-pub(crate) fn fixture_runtime(with_final: bool) -> (SttState, SttRuntime) {
+pub(crate) fn fixture_service(with_final: bool) -> SpeechService {
     let source = require_model();
-    fixture_runtime_with_models(&source, with_final.then_some(source.as_path()))
+    fixture_service_with_models(&source, with_final.then_some(source.as_path()))
 }
 
-pub(crate) fn fixture_runtime_with_models(
+pub(crate) fn fixture_service_with_models(
     interim_model: &Path,
     final_model: Option<&Path>,
-) -> (SttState, SttRuntime) {
+) -> SpeechService {
     let interim_model = interim_model.to_path_buf();
     let final_model = final_model.map(Path::to_path_buf);
     std::thread::spawn(move || {
-        fixture_runtime_with_models_on_dedicated_thread(&interim_model, final_model.as_deref())
+        fixture_service_with_models_on_dedicated_thread(&interim_model, final_model.as_deref())
     })
     .join()
-    .expect("fixture runtime startup thread succeeds")
+    .expect("fixture service startup thread succeeds")
 }
 
-fn fixture_runtime_with_models_on_dedicated_thread(
+fn fixture_service_with_models_on_dedicated_thread(
     interim_model: &Path,
     final_model: Option<&Path>,
-) -> (SttState, SttRuntime) {
+) -> SpeechService {
     let cache = tempfile::tempdir().expect("cache tempdir");
     let interim_source = interim_model.display().to_string().replace('\\', "/");
     let final_source = final_model.map(|path| path.display().to_string().replace('\\', "/"));
@@ -107,9 +104,17 @@ fn fixture_runtime_with_models_on_dedicated_thread(
     let config = catalog
         .select_profile(&gateway_config::ProfileName::parse("work").expect("profile name"))
         .expect("fixture profile selects");
-    let state = SttState::default();
-    let runtime = SttRuntime::start(&config, state.clone(), None).expect("fixture engine loads");
-    (state, runtime)
+    let service = SpeechService::new();
+    let prepared = service
+        .prepare(&config, None)
+        .expect("fixture artifacts prepare");
+    let replacement = service
+        .begin_replacement(prepared)
+        .expect("fixture engine loads");
+    service
+        .commit_replacement(replacement)
+        .expect("fixture generation publishes");
+    service
 }
 
 pub(crate) fn copy_model_replacing_token(
@@ -142,22 +147,21 @@ pub(crate) fn copy_model_replacing_token(
 }
 
 pub(crate) fn fixture_server(with_final: bool) -> TestServer {
-    let (state, runtime) = fixture_runtime(with_final);
-    TestServer::spawn_with(state, Some(runtime))
+    TestServer::spawn_with(fixture_service(with_final))
 }
 
 pub(crate) struct TestServer {
     url: String,
     task: tokio::task::JoinHandle<()>,
-    runtime: Option<SttRuntime>,
+    service: SpeechService,
 }
 
 impl TestServer {
     pub(crate) fn spawn() -> Self {
-        Self::spawn_with(SttState::default(), None)
+        Self::spawn_with(SpeechService::new())
     }
 
-    pub(crate) fn spawn_with(state: SttState, runtime: Option<SttRuntime>) -> Self {
+    pub(crate) fn spawn_with(service: SpeechService) -> Self {
         let std_listener =
             std::net::TcpListener::bind("127.0.0.1:0").expect("gateway listener binds");
         std_listener
@@ -168,7 +172,7 @@ impl TestServer {
             .expect("gateway listener has an address");
         let listener =
             tokio::net::TcpListener::from_std(std_listener).expect("tokio adopts the listener");
-        let app = gateway_stt::gateway_routes(state);
+        let app = service.routes();
         let task = tokio::spawn(async move {
             axum::serve(listener, app)
                 .await
@@ -177,7 +181,7 @@ impl TestServer {
         Self {
             url: format!("http://{address}"),
             task,
-            runtime,
+            service,
         }
     }
 
@@ -194,17 +198,16 @@ impl TestServer {
         let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut self.task)
             .await
             .expect("gateway STT fixture server stops before the cleanup deadline");
-        if let Some(runtime) = self.runtime.take() {
-            let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
-            std::thread::spawn(move || {
-                runtime.shutdown();
-                let _ = finished_tx.send(());
-            });
-            tokio::time::timeout(SHUTDOWN_TIMEOUT, finished_rx)
-                .await
-                .expect("fixture runtime stops before the cleanup deadline")
-                .expect("fixture runtime cleanup thread reports completion");
-        }
+        let service = self.service.clone();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            service.shutdown();
+            let _ = finished_tx.send(());
+        });
+        tokio::time::timeout(SHUTDOWN_TIMEOUT, finished_rx)
+            .await
+            .expect("fixture service stops before the cleanup deadline")
+            .expect("fixture service cleanup thread reports completion");
     }
 }
 
@@ -277,25 +280,14 @@ fn multipart_body(file: &[u8], model: &str) -> (String, Vec<u8>) {
     (BOUNDARY.to_owned(), body)
 }
 
-async fn batch_endpoint(State(state): State<SttState>, multipart: Multipart) -> Response {
-    match gateway_stt::transcribe(&state, multipart).await {
-        Ok(response) => response,
-        Err(error) if error.model_not_found().is_some() => {
-            (StatusCode::NOT_FOUND, error.to_string()).into_response()
-        }
-        Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
-    }
-}
-
 pub(crate) async fn transcribe_batch(
-    state: SttState,
+    service: SpeechService,
     model: &str,
     samples: &[f32],
 ) -> (StatusCode, serde_json::Value) {
     let (boundary, body) = multipart_body(&wav_f32(samples), model);
-    let response = axum::Router::new()
-        .route("/v1/audio/transcriptions", post(batch_endpoint))
-        .with_state(state)
+    let response = service
+        .routes()
         .oneshot(
             Request::builder()
                 .method("POST")

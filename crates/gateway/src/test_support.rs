@@ -64,16 +64,14 @@ pub(crate) fn app_state(config: Config, paths: Option<AdminPaths>) -> AppState {
 
 /// Builds state with deterministic speech workers for Gateway route tests.
 #[cfg(feature = "stt")]
-pub(crate) async fn app_state_with_scripted_stt(
+pub(crate) fn app_state_with_scripted_stt(
     config: Config,
     factory: gateway_stt::test_fixtures::ScriptedModelFactory,
 ) -> Result<AppState, String> {
-    let runtime = gateway_stt::test_fixtures::scripted_runtime(factory, 15, 500)
+    let service = gateway_stt::test_fixtures::scripted_service(factory, 15, 500)
         .map_err(|error| error.to_string())?;
-    let stt_state = runtime.state();
     let mut state = app_state(config, None);
-    state.live.write().await.stt = Some(runtime);
-    state.stt_state = stt_state;
+    state.speech = service;
     Ok(state)
 }
 
@@ -105,7 +103,7 @@ fn state_over(config: Config, routing: Routing, paths: Option<AdminPaths>) -> Ap
         #[cfg(feature = "local")]
         crate::local::LocalRuntime::empty(),
         #[cfg(feature = "stt")]
-        gateway_stt::SttRuntime::empty(gateway_stt::SttState::default()),
+        gateway_stt::SpeechService::new(),
         #[cfg(feature = "web-search")]
         config.web_search_config(),
         config_path,
@@ -173,7 +171,6 @@ mod tests {
         let decoder = ScriptedDecoder::new();
         decoder.push_text(TRANSCRIPT);
         let state = app_state_with_scripted_stt(config, ScriptedModelFactory::new(decoder.clone()))
-            .await
             .expect("scripted state builds");
         let (boundary, body) = transcription_body();
 
@@ -208,5 +205,52 @@ mod tests {
         assert_eq!(requests[0].samples(), &[0.25]);
         assert!(requests[0].guidance().is_empty());
         assert!(requests[0].finalized().is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_inference_preserves_the_gateway_error_message_contract() {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
+        )
+        .expect("config parses");
+        let decoder = ScriptedDecoder::new();
+        decoder.push_error("scripted inference sentinel");
+        let state = app_state_with_scripted_stt(config, ScriptedModelFactory::new(decoder))
+            .expect("scripted state builds");
+        let (boundary, body) = transcription_body();
+
+        let response = build_router(state, None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/transcriptions")
+                    .header("authorization", "Bearer test-token")
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body reads");
+        let response: serde_json::Value =
+            serde_json::from_slice(&body).expect("response body is JSON");
+        assert_eq!(
+            response,
+            serde_json::json!({
+                "error": {
+                    "message": "transcription failed",
+                    "type": "server_error",
+                    "code": "transcription_error",
+                }
+            })
+        );
     }
 }

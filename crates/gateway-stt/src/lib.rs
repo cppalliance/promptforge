@@ -1,19 +1,19 @@
-//! Gateway-owned speech-to-text runtime and HTTP endpoints.
+//! Gateway-owned speech facade and HTTP endpoints.
 //!
-//! [`SttRuntime`] provisions the selected profile's speech models through
-//! [`ArtifactStore`](gateway_local::artifacts::ArtifactStore),
-//! loads [`SttEngine`](gateway_stt_engine::SttEngine), and unloads it on
-//! profile switch. [`gateway_routes`] serves the gateway's streaming STT
-//! surface, [`stt_routes`] remains the Workshop-listener attachment seam,
-//! and [`transcribe`] implements OpenAI-compatible multipart transcription.
+//! [`SpeechService`] owns artifact preparation, complete generation
+//! publication, batch transcription, and the temporary legacy socket.
 
-mod api;
+mod artifacts;
 #[allow(dead_code)]
 mod audio;
+mod batch;
+mod generation;
+mod model;
 #[allow(dead_code)]
 mod realtime;
-mod runtime;
 mod segment;
+mod service;
+mod status;
 #[cfg(not(miri))]
 mod stt;
 mod take;
@@ -22,8 +22,19 @@ mod test_fixtures;
 #[cfg(feature = "test-fixtures")]
 pub mod test_fixtures;
 
-pub use api::{MAX_AUDIO_BYTES, TranscriptionError, transcribe};
-pub use runtime::{SttRuntime, SttRuntimeError, SttState};
-pub use segment::Segmenter;
-#[cfg(not(miri))]
-pub use stt::{gateway_routes, routes as stt_routes};
+pub use artifacts::{PreparedSpeech, SpeechError};
+pub use generation::SpeechReplacement;
+pub use model::SpeechModelInfo;
+pub use service::SpeechService;
+pub use status::SpeechStatus;
+
+#[cfg(all(test, miri))]
+mod miri_tests {
+    use super::SpeechService;
+
+    #[test]
+    fn miri_facade_target_executes_without_native_route_fixtures() {
+        let service = SpeechService::new();
+        assert!(!service.status().ready());
+    }
+}

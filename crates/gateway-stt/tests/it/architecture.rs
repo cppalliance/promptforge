@@ -13,6 +13,13 @@ const STT_CRATES: [&str; 4] = [
     "gateway-whisper-ffi",
 ];
 
+const PUBLIC_ROOT_BUDGETS: [(&str, usize); 4] = [
+    ("gateway-stt", 6),
+    ("gateway-stt-engine", 7),
+    ("gateway-stt-backend-whisper", 2),
+    ("gateway-whisper-ffi", 6),
+];
+
 const PHASE_A_CRATES: [&str; 7] = [
     "gateway",
     "gateway-stt",
@@ -121,23 +128,11 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
 const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
     MigrationPolicy {
         crate_name: "gateway-stt",
-        targets: &[
-            MigrationPolicyTarget {
-                module: "api.rs",
-                target_step: "Step 18",
-                destination: "batch.rs",
-            },
-            MigrationPolicyTarget {
-                module: "runtime.rs",
-                target_step: "Step 18",
-                destination: "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs",
-            },
-            MigrationPolicyTarget {
-                module: "stt.rs",
-                target_step: "Step 29",
-                destination: "removal after the Realtime route and Workshop relay replace the legacy socket",
-            },
-        ],
+        targets: &[MigrationPolicyTarget {
+            module: "stt.rs",
+            target_step: "Step 29",
+            destination: "removal after the Realtime route and Workshop relay replace the legacy socket",
+        }],
     },
     MigrationPolicy {
         crate_name: "gateway-stt-engine",
@@ -425,6 +420,13 @@ fn expected_migration_targets(crate_name: &str) -> BTreeMap<String, MigrationTar
         .collect()
 }
 
+fn expected_public_root_budget(crate_name: &str) -> usize {
+    PUBLIC_ROOT_BUDGETS
+        .iter()
+        .find_map(|(name, budget)| (*name == crate_name).then_some(*budget))
+        .unwrap_or_else(|| panic!("public-root policy must cover {crate_name}"))
+}
+
 fn validate_migration_targets(crate_name: &str, config: &CeilingsFile) -> Result<(), String> {
     let expected = expected_migration_targets(crate_name);
     if config.migration_targets != expected {
@@ -448,9 +450,10 @@ fn module_ceilings_cover_sources_and_name_migration_targets() {
     for crate_name in STT_CRATES {
         let src = crate_root(crate_name).join("src");
         let config = ceilings(crate_name);
-        assert!(
-            config.public_root_budget > 0,
-            "{crate_name} public root budget must be a strict positive ceiling"
+        assert_eq!(
+            config.public_root_budget,
+            expected_public_root_budget(crate_name),
+            "{crate_name} public root budget drifted from the exact phase policy"
         );
         let measured = rust_sources(&src)
             .into_iter()
@@ -502,23 +505,11 @@ fn misspelled_migration_section_is_rejected() {
 }
 
 #[test]
-fn gateway_step_15_migrations_are_pinned_to_their_destinations() {
+fn completed_step_18_migrations_are_removed() {
     let expected = expected_migration_targets("gateway-stt");
-    assert_eq!(
-        expected["api.rs"],
-        MigrationTarget {
-            target_step: "Step 18".to_owned(),
-            destination: "batch.rs".to_owned(),
-        }
-    );
-    assert_eq!(
-        expected["runtime.rs"],
-        MigrationTarget {
-            target_step: "Step 18".to_owned(),
-            destination: "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
-                .to_owned(),
-        }
-    );
+    assert!(!expected.contains_key("api.rs"));
+    assert!(!expected.contains_key("runtime.rs"));
+    assert_eq!(expected.keys().collect::<Vec<_>>(), ["stt.rs"]);
 }
 
 #[test]

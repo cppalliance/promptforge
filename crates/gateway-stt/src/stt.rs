@@ -15,7 +15,7 @@ use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 use workshop_server::{Activity, Push};
 
-use crate::runtime::SttState;
+use crate::generation::{Generation, GenerationState};
 use crate::take::Take;
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -26,7 +26,7 @@ const WORKSHOP_STATUS_HEADER: &str = "x-promptforge-workshop-status";
 
 #[derive(Debug, Clone)]
 struct RouteState {
-    stt: SttState,
+    speech: GenerationState,
     reporter: Reporter,
 }
 
@@ -120,38 +120,26 @@ fn relay_status(
     }
 }
 
-/// Builds the workshop-listener STT routes.
-///
-/// The routes serve `/stt` and `/stt/capability`. The shared workshop
-/// cross-site guard protects both routes, and the upgrade performs the
-/// existing explicit Origin check as a second WebSocket-specific layer.
-pub fn routes(stt: SttState, push: Push) -> Router {
-    routes_with_reporter(stt, Reporter::Workshop(push))
+pub(crate) fn workshop_router(speech: GenerationState, push: Push) -> Router {
+    routes_with_reporter(speech, Reporter::Workshop(push))
         .route_layer(axum::middleware::from_fn(workshop_server::cross_site_guard))
 }
 
-/// Builds the gateway-listener STT routes.
-///
-/// Session activity is multiplexed as private `workshop_status` frames for
-/// the Workshop relay to consume. Its host is responsible for authenticating
-/// both routes before merging them.
-pub fn gateway_routes(stt: SttState) -> Router {
-    routes_with_reporter(stt, Reporter::Silent)
+pub(crate) fn gateway_router(speech: GenerationState) -> Router {
+    routes_with_reporter(speech, Reporter::Silent)
 }
 
-fn routes_with_reporter(stt: SttState, reporter: Reporter) -> Router {
+fn routes_with_reporter(speech: GenerationState, reporter: Reporter) -> Router {
     Router::new()
         .route("/stt/capability", get(capability))
         .route("/stt", get(upgrade))
-        .with_state(RouteState { stt, reporter })
+        .with_state(RouteState { speech, reporter })
 }
 
 async fn capability(State(state): State<RouteState>) -> impl IntoResponse {
-    let engine = state.stt.engine();
-    let gpu = engine
-        .as_ref()
-        .is_some_and(|engine| engine.gpu_transcription_available());
-    let engine = engine.is_some();
+    let status = state.speech.status();
+    let gpu = status.gpu();
+    let engine = status.ready();
     (
         [(header::CONTENT_TYPE, "application/json")],
         format!(r#"{{"gpu":{gpu},"engine":{engine}}}"#),
@@ -177,7 +165,7 @@ async fn upgrade(
             }
             (reporter, _) => (reporter, None),
         };
-        run_session(socket, state.stt, reporter, statuses)
+        run_session(socket, state.speech, reporter, statuses)
     })
 }
 
@@ -438,16 +426,17 @@ async fn stop_transcript(
 fn begin_take(
     session: u64,
     generation: u64,
-    engine: Option<&Arc<SttEngine>>,
-    guidance: Vec<String>,
+    active: Option<&Arc<Generation>>,
     reporter: &Reporter,
 ) -> (Arc<Take>, Option<ActiveTake>) {
-    let state = Arc::new(Take::new(guidance, engine.cloned()));
+    let engine = active.map(|generation| generation.engine_handle());
+    let guidance = active.map_or_else(Vec::new, |generation| generation.guidance().to_vec());
+    let state = Arc::new(Take::new(guidance, engine.clone()));
     let active = engine.map(|engine| {
         spawn_interim(
             session,
             generation,
-            Arc::clone(engine),
+            engine,
             Arc::clone(&state),
             reporter.clone(),
         )
@@ -527,9 +516,13 @@ impl SessionAudio {
     }
 }
 
+fn active_engine(generation: Option<&Arc<Generation>>) -> Option<&SttEngine> {
+    generation.map(|generation| generation.engine())
+}
+
 async fn run_session(
     mut socket: WebSocket,
-    stt: SttState,
+    speech: GenerationState,
     reporter: Reporter,
     mut statuses: Option<mpsc::UnboundedReceiver<String>>,
 ) {
@@ -542,8 +535,8 @@ async fn run_session(
 
     let mut audio = SessionAudio::new();
     let mut take: Option<ActiveTake> = None;
-    let mut engine = stt.engine();
-    let mut engine_changes = stt.subscribe();
+    let mut generation_state = speech.active();
+    let mut engine_changes = speech.subscribe();
     let mut generation = 0u64;
 
     loop {
@@ -555,7 +548,7 @@ async fn run_session(
                 }
                 take = None;
                 audio.take = Arc::new(Take::new(Vec::new(), None));
-                engine = stt.engine();
+                generation_state = speech.active();
             }
             interim = next_interim(&mut take) => {
                 if let Some(text) = interim
@@ -573,7 +566,7 @@ async fn run_session(
             }
             inbound = socket.recv() => match inbound {
                 Some(Ok(Message::Binary(payload))) => {
-                    audio.receive(&payload, engine.as_deref(), &reporter);
+                    audio.receive(&payload, active_engine(generation_state.as_ref()), &reporter);
                 }
                 Some(Ok(Message::Text(text))) => match text.as_str() {
                     STT_START => {
@@ -587,8 +580,7 @@ async fn run_session(
                         let (next_take, active) = begin_take(
                             session,
                             generation,
-                            engine.as_ref(),
-                            stt.guidance(),
+                            generation_state.as_ref(),
                             &reporter,
                         );
                         audio.take = next_take;
@@ -603,7 +595,7 @@ async fn run_session(
                         );
                         let text = stop_transcript(
                             session,
-                            engine.as_deref(),
+                            active_engine(generation_state.as_ref()),
                             &audio.take,
                             &reporter,
                         )

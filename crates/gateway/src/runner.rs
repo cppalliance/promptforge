@@ -205,7 +205,7 @@ impl Gateway {
             #[cfg(feature = "local")]
             LocalRuntime::empty(),
             #[cfg(feature = "stt")]
-            gateway_stt::SttRuntime::empty(gateway_stt::SttState::default()),
+            gateway_stt::SpeechService::new(),
             #[cfg(feature = "web-search")]
             config.web_search_config(),
             profiles.config_path,
@@ -297,11 +297,17 @@ impl Gateway {
             )));
         }
         #[cfg(feature = "stt")]
-        let stt = {
+        let speech = {
             let tree = hub.operation();
             let progress = tree.register("startup-stt", 1.0);
-            let state = gateway_stt::SttState::default();
-            let started = gateway_stt::SttRuntime::start(config, state, Some(&progress))
+            let service = gateway_stt::SpeechService::new();
+            let started = service
+                .prepare(config, Some(&progress))
+                .and_then(|prepared| service.begin_replacement(prepared))
+                .and_then(|replacement| {
+                    service.commit_replacement(replacement)?;
+                    Ok(service)
+                })
                 .map_err(StartupError::provisioning);
             match &started {
                 Ok(_) => progress.complete(),
@@ -335,7 +341,7 @@ impl Gateway {
             #[cfg(feature = "local")]
             local,
             #[cfg(feature = "stt")]
-            stt,
+            speech,
             #[cfg(feature = "web-search")]
             config.web_search_config(),
             profiles.config_path,

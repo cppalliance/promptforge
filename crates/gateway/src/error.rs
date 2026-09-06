@@ -43,17 +43,6 @@ pub(crate) enum GatewayError {
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
-    /// The uploaded transcription body exceeded the configured cap.
-    #[cfg(feature = "stt")]
-    #[error("audio file exceeds the 25 MiB limit")]
-    AudioTooLarge,
-
-    /// The active STT engine rejected an otherwise valid request.
-    #[cfg(feature = "stt")]
-    #[non_exhaustive]
-    #[error("transcription failed")]
-    Transcription(#[source] gateway_stt::TranscriptionError),
-
     /// A transport- or protocol-level failure from the upstream seam. The
     /// variants live in [`ProtocolError`]; the gateway wraps them so a route
     /// handler deals with one error type.
@@ -237,23 +226,6 @@ impl From<crate::queue::AdmitError> for GatewayError {
     }
 }
 
-#[cfg(feature = "stt")]
-impl From<gateway_stt::TranscriptionError> for GatewayError {
-    fn from(value: gateway_stt::TranscriptionError) -> Self {
-        if let Some(model) = value.model_not_found() {
-            return GatewayError::UnknownModel(model.to_owned());
-        }
-        if value.is_file_too_large() {
-            return GatewayError::AudioTooLarge;
-        }
-        if value.is_inference() {
-            GatewayError::Transcription(value)
-        } else {
-            GatewayError::MalformedRequest(value.to_string())
-        }
-    }
-}
-
 #[cfg(feature = "web-search")]
 impl From<gateway_web_search::WebSearchError> for GatewayError {
     fn from(value: gateway_web_search::WebSearchError) -> Self {
@@ -345,18 +317,6 @@ impl GatewayError {
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "malformed_request",
-            ),
-            #[cfg(feature = "stt")]
-            GatewayError::AudioTooLarge => (
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "invalid_request_error",
-                "file_too_large",
-            ),
-            #[cfg(feature = "stt")]
-            GatewayError::Transcription(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "transcription_error",
             ),
             GatewayError::Protocol(error) => error.classify(),
             GatewayError::QueueFull => (
@@ -746,24 +706,6 @@ mod tests {
         assert_eq!(
             error.source().map(ToString::to_string).as_deref(),
             Some("bad json")
-        );
-    }
-
-    #[cfg(feature = "stt")]
-    #[test]
-    fn unloaded_stt_model_maps_to_openai_model_not_found() {
-        let error = GatewayError::from(gateway_stt::TranscriptionError::model_not_found_error(
-            "ghost",
-        ));
-        assert!(matches!(error, GatewayError::UnknownModel(model) if model == "ghost"));
-        let error = GatewayError::UnknownModel("ghost".to_owned());
-        assert_eq!(
-            error.classify(),
-            (
-                StatusCode::NOT_FOUND,
-                "invalid_request_error",
-                "model_not_found"
-            )
         );
     }
 

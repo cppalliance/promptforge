@@ -132,8 +132,6 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
-#[cfg(feature = "stt")]
-use axum::extract::FromRequest;
 use axum::extract::State;
 use axum::http::HeaderValue;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
@@ -158,7 +156,7 @@ use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
 #[cfg(feature = "stt")]
-use gateway_stt::{SttRuntime, SttState};
+use gateway_stt::{SpeechReplacement, SpeechService};
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
@@ -180,8 +178,6 @@ struct LiveState {
     web_search: Option<Arc<WebSearchState>>,
     #[cfg(feature = "local")]
     local: LocalRuntime,
-    #[cfg(feature = "stt")]
-    stt: Option<SttRuntime>,
     profile_name: Option<String>,
     /// The active profile's `models` allowlist, when it declared one.
     model_allowlist: Option<Vec<String>>,
@@ -278,10 +274,9 @@ pub(crate) struct AppState {
     /// Process-lifetime random salt for the `/auth` handoff's session
     /// proof; a restart or key rotation invalidates every minted cookie.
     handoff_salt: [u8; 32],
-    /// Stable STT slot shared across runtime replacement on a profile
-    /// switch.
+    /// Process-lifetime speech facade shared by routes and profile switches.
     #[cfg(feature = "stt")]
-    stt_state: SttState,
+    speech: SpeechService,
     /// Test-only rendezvous the switch awaits at the start of one named
     /// phase, so a test can hold a switch inside the download, the
     /// cut-over, the spawn, or the commit and observe the lock and the live
@@ -368,7 +363,7 @@ impl AppState {
         key: Secret,
         config: Arc<Config>,
         #[cfg(feature = "local")] local: LocalRuntime,
-        #[cfg(feature = "stt")] stt: SttRuntime,
+        #[cfg(feature = "stt")] speech: SpeechService,
         #[cfg(feature = "web-search")] web_search: Option<&WebSearchConfig>,
         config_path: Option<std::path::PathBuf>,
         selection: ProfileSelection,
@@ -377,8 +372,6 @@ impl AppState {
         let started = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_nanos());
-        #[cfg(feature = "stt")]
-        let stt_state = stt.state();
         AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
@@ -389,8 +382,6 @@ impl AppState {
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 #[cfg(feature = "local")]
                 local,
-                #[cfg(feature = "stt")]
-                stt: Some(stt),
                 profile_name: selection.name,
                 model_allowlist: selection.model_allowlist,
                 loading: BTreeSet::new(),
@@ -416,7 +407,7 @@ impl AppState {
                 salt
             },
             #[cfg(feature = "stt")]
-            stt_state,
+            speech,
             #[cfg(test)]
             park: None,
         }
@@ -479,14 +470,6 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
             "/admin/queue/cancel-pending",
             post(admin_queue_cancel_pending),
         );
-    #[cfg(feature = "stt")]
-    let router = router.merge(
-        Router::new()
-            .route("/v1/audio/transcriptions", post(audio_transcriptions))
-            .layer(axum::extract::DefaultBodyLimit::max(
-                gateway_stt::MAX_AUDIO_BYTES + 1024 * 1024,
-            )),
-    );
     // The web-search tool route delegates to the service crate, so it exists
     // only in builds with the `web-search` feature.
     #[cfg(feature = "web-search")]
@@ -564,12 +547,15 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
     #[cfg(feature = "config-ui")]
     let router = router.nest_service("/config/", gateway_config_ui::routes());
     #[cfg(feature = "stt")]
-    let stt_state = state.stt_state.clone();
+    let speech_routes = state.speech.routes();
     let router = router.with_state(state.clone());
     #[cfg(feature = "stt")]
-    let router = router.merge(gateway_stt::gateway_routes(stt_state).route_layer(
-        axum::middleware::from_fn_with_state(state, authorize_stt_route),
-    ));
+    let router = router.merge(
+        speech_routes.route_layer(axum::middleware::from_fn_with_state(
+            state,
+            authorize_stt_route,
+        )),
+    );
     // The host-authority wall is the outermost layer, so a rebound
     // hostname is refused before any route logic runs.
     match bound {
@@ -615,29 +601,6 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "serving" }))
 }
 
-/// OpenAI-compatible request-response transcription.
-///
-/// Authentication runs before multipart extraction so an unauthorized caller
-/// cannot make the gateway buffer or decode an audio body.
-#[cfg(feature = "stt")]
-async fn audio_transcriptions(
-    State(state): State<AppState>,
-    caller: Caller,
-    request: axum::extract::Request,
-) -> Result<Response, GatewayError> {
-    check_auth(&state, &caller).await?;
-    let multipart = axum::extract::Multipart::from_request(request, &())
-        .await
-        .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
-    let in_flight = state.begin_inference().await;
-    tokio::select! {
-        result = gateway_stt::transcribe(&state.stt_state, multipart) => {
-            result.map(IntoResponse::into_response).map_err(GatewayError::from)
-        }
-        () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
-    }
-}
-
 #[cfg(feature = "stt")]
 async fn authorize_stt_route(
     State(state): State<AppState>,
@@ -646,7 +609,11 @@ async fn authorize_stt_route(
     next: axum::middleware::Next,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &caller).await?;
-    Ok(next.run(request).await)
+    let in_flight = state.begin_inference().await;
+    tokio::select! {
+        response = next.run(request) => Ok(response),
+        () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
+    }
 }
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
@@ -1082,7 +1049,7 @@ async fn admin_status(
             "/v1/audio/transcriptions",
             "Audio transcriptions",
             !live.config.stt_models().is_empty(),
-            state.stt_state.is_active(),
+            state.speech.status().ready(),
             command_active,
         ));
         endpoints
@@ -1306,7 +1273,7 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// phase in execution order - `loading-profile` around config load and
 /// validation, `downloading-models` while the new local models' weights
 /// stage into the cache (only when the profile names local models),
-/// `stopping-models` before the old local children and STT engine shut
+/// `stopping-models` before the old local children and speech generation shut
 /// down (only when there are any to stop), `starting-models` before the new
 /// children load their weights into VRAM (the long pole) - and the stream
 /// ends with exactly one terminal event, `{"status": "ready", "profile":
@@ -1381,7 +1348,8 @@ pub(crate) enum StatePersistence {
 ///    the `ProvisionModel` command uses. Cancellation lands at chunk
 ///    boundaries.
 /// 3. **Cut over** (locked, bounded): the bounded drain, then the old
-///    local and STT runtimes stop under a `stopping-models` leaf (only
+///    local runtimes and the active speech generation stop under a
+///    `stopping-models` leaf (only
 ///    registered when there is something to stop), and one `live.write`
 ///    publishes the interim state: the new profile's remote models as the
 ///    routing table, the surviving runtimes, and the local models about to
@@ -1395,7 +1363,7 @@ pub(crate) enum StatePersistence {
 ///    profile, and clears `loading`.
 ///
 /// Ordering: the cut-over runs as soon as there is nothing old to stop.
-/// When the live state holds no local children and no STT engine (a cold
+/// When the live state holds no local children and no speech generation (a cold
 /// boot, or a remote-only previous profile) phase 3 follows phase 1
 /// directly, so the remote models are published before the download
 /// starts. Otherwise the download runs first, so the old runtimes keep
@@ -1500,7 +1468,7 @@ async fn run_switch_phases(
     let replacement = spawn_runtimes(
         &target.config,
         #[cfg(feature = "stt")]
-        state.stt_state.clone(),
+        state.speech.clone(),
         tree,
         token,
     )
@@ -1618,11 +1586,11 @@ async fn stop_set(state: &AppState) -> StopSet {
         #[cfg(feature = "local")]
         local: live.local.child_count() > 0,
         #[cfg(feature = "stt")]
-        stt: state.stt_state.is_active(),
+        stt: state.speech.status().ready(),
     }
 }
 
-/// A headless build runs no local or STT runtime, so there is never
+/// A headless build runs no local runtime or speech service, so there is never
 /// anything to stop.
 #[cfg(not(any(feature = "local", feature = "stt")))]
 async fn stop_set(_state: &AppState) -> StopSet {
@@ -1742,7 +1710,7 @@ async fn cut_over(
                 #[cfg(feature = "local")]
                 local: std::mem::replace(&mut live.local, LocalRuntime::empty()),
                 #[cfg(feature = "stt")]
-                stt: live.stt.take(),
+                speech: stop.stt.then(|| state.speech.clone()),
             })
         }
     };
@@ -1774,7 +1742,7 @@ struct OldRuntimes {
     #[cfg(feature = "local")]
     local: LocalRuntime,
     #[cfg(feature = "stt")]
-    stt: Option<SttRuntime>,
+    speech: Option<SpeechService>,
 }
 
 impl OldRuntimes {
@@ -1782,8 +1750,8 @@ impl OldRuntimes {
     /// before the local children's teardown is awaited.
     fn shutdown(self) -> Result<(), shared_protocol::ShutdownError> {
         #[cfg(feature = "stt")]
-        if let Some(runtime) = self.stt {
-            runtime.shutdown();
+        if let Some(speech) = self.speech {
+            speech.shutdown();
         }
         #[cfg(feature = "local")]
         let result = self.local.shutdown();
@@ -1829,6 +1797,11 @@ async fn commit_switch(
     #[cfg(not(any(feature = "local", feature = "stt")))]
     let RuntimeReplacement {} = replacement;
     commit_profile_state(state, name, persistence, token).await?;
+    #[cfg(feature = "stt")]
+    state
+        .speech
+        .commit_replacement(replacement.speech)
+        .map_err(|error| GatewayError::switch_failed("publish-stt", error))?;
 
     #[cfg(feature = "local")]
     let report = StartReport {
@@ -1861,10 +1834,6 @@ async fn commit_switch(
     #[cfg(feature = "local")]
     {
         live.local = replacement.local;
-    }
-    #[cfg(feature = "stt")]
-    {
-        live.stt = Some(replacement.stt);
     }
     live.profile_name = Some(name.to_string());
     live.model_allowlist = target.allowlist;
@@ -1939,10 +1908,10 @@ struct RuntimeReplacement {
     #[cfg(feature = "local")]
     start_failures: Vec<local::LocalStartFailure>,
     #[cfg(feature = "stt")]
-    stt: SttRuntime,
+    speech: SpeechReplacement,
 }
 
-/// Phase 4 in a headless build: no local or STT runtime exists to start,
+/// Phase 4 in a headless build: no local runtime or speech generation exists,
 /// and no `starting-models` leaf is registered.
 #[cfg(not(any(feature = "local", feature = "stt")))]
 async fn spawn_runtimes(
@@ -1953,14 +1922,14 @@ async fn spawn_runtimes(
     Ok(RuntimeReplacement {})
 }
 
-/// Phase 4: starts the target's local children and STT engine and waits
+/// Phase 4: starts the target's local children and staged speech generation and waits
 /// for readiness under `starting-models`, unlocked. The artifacts were
 /// staged by phase 2, so the start's own ensure calls are cache hits and
 /// the phase is the spawn and the weight load.
 #[cfg(any(feature = "local", feature = "stt"))]
 async fn spawn_runtimes(
     config: &Config,
-    #[cfg(feature = "stt")] stt_state: SttState,
+    #[cfg(feature = "stt")] speech: SpeechService,
     tree: &ProgressTree,
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<RuntimeReplacement, GatewayError> {
@@ -2008,7 +1977,7 @@ async fn spawn_runtimes(
     };
     #[cfg(feature = "local")]
     let (runtime, failures) = outcome.into_parts();
-    // Phase boundary: a cancelled command starts no STT runtime behind the
+    // Phase boundary: a cancelled command starts no speech generation behind the
     // cancellation; the local runtime built above drops, killing its
     // children.
     #[cfg(feature = "stt")]
@@ -2016,12 +1985,13 @@ async fn spawn_runtimes(
         return Err(GatewayError::CommandCancelled("profile switch".to_owned()));
     }
     #[cfg(feature = "stt")]
-    let stt_config = config.clone();
+    let speech_config = config.clone();
     #[cfg(feature = "stt")]
     let stt_progress = starting.clone();
     #[cfg(feature = "stt")]
-    let stt = match tokio::task::spawn_blocking(move || {
-        SttRuntime::start(&stt_config, stt_state, Some(&stt_progress))
+    let speech = match tokio::task::spawn_blocking(move || {
+        let prepared = speech.prepare(&speech_config, Some(&stt_progress))?;
+        speech.begin_replacement(prepared)
     })
     .await
     {
@@ -2049,7 +2019,7 @@ async fn spawn_runtimes(
         #[cfg(feature = "local")]
         start_failures: failures,
         #[cfg(feature = "stt")]
-        stt,
+        speech,
     })
 }
 
@@ -2377,6 +2347,75 @@ mod transcription_auth_tests {
             response.status(),
             StatusCode::UNAUTHORIZED,
             "auth refuses the request before its malformed body is extracted"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticated_multipart_rejection_uses_the_openai_error_envelope() {
+        let response = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/transcriptions")
+                    .header("authorization", "Bearer test-token")
+                    .header("content-type", "not-multipart")
+                    .body(Body::from("not multipart"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "error": {
+                    "message": "malformed request: Invalid `boundary` for `multipart/form-data` request",
+                    "type": "invalid_request_error",
+                    "code": "malformed_request",
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_validation_preserves_the_gateway_error_message_contract() {
+        let body = "--empty\r\n\
+                    Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n\
+                    Content-Type: audio/wav\r\n\r\n\
+                    bytes\r\n\
+                    --empty--\r\n";
+        let response = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/transcriptions")
+                    .header("authorization", "Bearer test-token")
+                    .header("content-type", "multipart/form-data; boundary=empty")
+                    .body(Body::from(body))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "error": {
+                    "message": "malformed request: missing multipart field model",
+                    "type": "invalid_request_error",
+                    "code": "malformed_request",
+                }
+            })
         );
     }
 

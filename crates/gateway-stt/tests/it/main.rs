@@ -14,3 +14,5 @@ mod legacy_stream;
 mod realtime_fixtures;
 #[cfg(not(miri))]
 mod realtime_session;
+#[cfg(not(miri))]
+mod service;

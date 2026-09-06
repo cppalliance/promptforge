@@ -9,16 +9,16 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use gateway_stt::Segmenter;
+use gateway_stt::test_fixtures::segment_ranges;
 use gateway_stt_engine::EnginePolicy;
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use crate::common::{
-    JsonSocket, TestServer, copy_model_replacing_token, fixture_runtime,
-    fixture_runtime_with_models, fixture_server, jfk_samples, require_model, send_pcm,
-    send_samples, send_samples_once, transcribe_batch,
+    JsonSocket, TestServer, copy_model_replacing_token, fixture_server, fixture_service,
+    fixture_service_with_models, jfk_samples, require_model, send_pcm, send_samples,
+    send_samples_once, transcribe_batch,
 };
 
 #[test]
@@ -73,22 +73,18 @@ async fn closed_segments_are_reported_in_input_order() {
     samples.extend(vec![0.0; 3 * EnginePolicy::SAMPLE_RATE]);
     samples.extend_from_slice(&speech[2 * third..]);
     samples.extend(vec![0.0; 3 * EnginePolicy::SAMPLE_RATE]);
-    let mut segmenter = Segmenter::new();
-    let mut ranges = Vec::new();
-    while let Some(range) = segmenter.poll(&samples) {
-        ranges.push(range);
-    }
+    let ranges = segment_ranges(&samples);
     assert_eq!(
         ranges.len(),
         2,
         "the native fixture halves form two closed speech segments"
     );
 
-    let (state, runtime) = fixture_runtime(true);
+    let service = fixture_service(true);
     let (first_status, first_response) =
-        transcribe_batch(state.clone(), "speech-final", &samples[ranges[0].clone()]).await;
+        transcribe_batch(service.clone(), "speech-final", &samples[ranges[0].clone()]).await;
     let (second_status, second_response) =
-        transcribe_batch(state.clone(), "speech-final", &samples[ranges[1].clone()]).await;
+        transcribe_batch(service.clone(), "speech-final", &samples[ranges[1].clone()]).await;
     assert_eq!(first_status, axum::http::StatusCode::OK);
     assert_eq!(second_status, axum::http::StatusCode::OK);
     let first = first_response["text"]
@@ -100,7 +96,7 @@ async fn closed_segments_are_reported_in_input_order() {
     let first_marker = distinguishing_word(first, second);
     let second_marker = distinguishing_word(second, first);
 
-    let server = TestServer::spawn_with(state, Some(runtime));
+    let server = TestServer::spawn_with(service);
     let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
@@ -395,8 +391,8 @@ async fn final_model_segments_and_tail_are_authoritative_at_stop() {
     let fixture_dir = tempfile::tempdir().expect("distinct model tempdir");
     let final_model =
         copy_model_replacing_token(&interim_model, fixture_dir.path(), b"country", b"kingdom");
-    let (state, runtime) = fixture_runtime_with_models(&interim_model, Some(final_model.as_path()));
-    let server = TestServer::spawn_with(state, Some(runtime));
+    let service = fixture_service_with_models(&interim_model, Some(final_model.as_path()));
+    let server = TestServer::spawn_with(service);
     let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
