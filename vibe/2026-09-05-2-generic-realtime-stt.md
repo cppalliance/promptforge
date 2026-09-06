@@ -338,7 +338,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it`
 - Consumes and gates: consumes the green baseline; these assertions must be preserved by replacement fixtures before legacy tests retire.
 
-### Step 2: Pin the pre-rename native target
+### Step 2: Pin the pre-rename native target - f7afccf6
 
 - Artifacts: create `crates/gateway-transcribe/tests/native_whisper.rs` and preserve `tests/fixtures/ggml-tiny.en.bin`, `tests/fixtures/jfk.wav`, and their ignore rule.
 - Scope: pin packaged-runtime loading, transcript text, decode policy, prompt behavior, and cleanup in one explicit ignored integration target.
