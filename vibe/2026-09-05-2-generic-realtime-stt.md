@@ -1,0 +1,646 @@
+---
+name: generic-realtime-stt
+overview: Replace Workshop-specific speech transcription with a generic OpenAI Realtime-compatible subsystem built around a small Gateway facade, a backend-neutral engine, a safe Whisper backend, and isolated bounded session ownership.
+todos:
+  - id: characterize
+    content: Pin current batch and two-model realtime behavior with deterministic and native fixtures
+    status: pending
+  - id: backend-boundary
+    content: Split the backend-neutral engine from the safe Whisper adapter and bound model workers
+    status: pending
+  - id: session-lifecycle
+    content: Isolate per-item finalization and implement atomic cancellation-safe generation replacement
+    status: pending
+  - id: realtime-contract
+    content: Implement the OpenAI Realtime transcription subset and hypothesis extension
+    status: pending
+  - id: workshop-adapter
+    content: Convert Workshop to a payload-opaque relay with local capture and status ownership
+    status: pending
+  - id: verify-document
+    content: Enforce architecture and debt budgets, complete acceptance, and document final boundaries
+    status: pending
+isProject: false
+---
+
+# Generic Realtime STT
+
+## Product Requirements
+
+- Problem and users:
+  - PromptForge Gateway speech transcription is coupled to Workshop through custom routes, status frames, guards, and crate dependencies.
+  - The current two-model realtime implementation has global final-pass state, unbounded queues, backend-specific engine code, and profile-switch waits that cannot prove isolation or bounded completion.
+  - Workshop users need responsive dictation, external clients need a stable OpenAI-shaped transcription protocol, and Gateway maintainers need compiler-visible product and backend boundaries.
+- Goals:
+  - Preserve `POST /v1/audio/transcriptions` for batch transcription by physical model name.
+  - Replace `/stt` and `/stt/capability` with `WS /v1/realtime?intent=transcription` using the supported OpenAI Realtime transcription event subset plus one documented hypothesis extension.
+  - Preserve the existing fast interim model, LocalAgreement-2, and accurate segment-final model behavior while making every session and committed item independent.
+  - Let clients share one loaded interim worker and at most one loaded final worker without copying models per client.
+  - Make Gateway depend on one small speech facade, keep the engine backend-neutral, and preserve the unsafe-only Whisper FFI leaf.
+  - Make Workshop a payload-opaque authenticated relay whose UI owns microphone capture, hypothesis presentation, and status wording.
+  - Reduce and enforce technical debt through dependency allowlists, module-cycle checks, bounded queues, public-surface budgets, and line-count ratchets.
+- Non-goals:
+  - Dynamic backend plugins before a second backend exists.
+  - AlignAtt, attention-specific APIs, native streaming encoders, speculative decoding, batching, denoising, generic VAD tuning, or a new WER framework.
+  - A fifth STT crate or STT wire types in `shared-protocol`.
+  - Gateway CLI behavior, diagnostics, logging queues, sink lifecycle, log rotation, or the already-owned Workshop baseline-ratchet repair.
+  - Browser-direct OpenAI authentication or WebRTC. Workshop remains the browser authentication proxy.
+- Success criteria:
+  - The forbidden `gateway-stt -> workshop-server` dependency falls from one to zero and no Gateway STT crate contains Workshop-specific status or guard symbols.
+  - The final subsystem has exactly four STT crates: service, engine, safe Whisper backend, and unsafe-only FFI.
+  - All STT queues and session mailboxes are bounded, named, and tested; global mutable final-take state is zero.
+  - Multiple clients and overlapping committed items cannot exchange transcript history, completion channels, prompts, or stale results.
+  - The only live transcription endpoint is `/v1/realtime?intent=transcription`; batch transcription remains compatible.
+  - Default Gateway builds no longer transitively build Workshop UI assets.
+  - `gateway-stt` exports no free functions and at most six facade types; `gateway-stt-engine` exports at most eight root items; `gateway-stt-backend-whisper` exports exactly its backend and checked configuration.
+  - Every final STT source module is at most 500 physical lines, with ratchets preventing regrowth.
+  - Model-independent critical behavior runs in normal CI, native characterization passes with the packaged Whisper runtime, and synthetic Gateway, Workshop browser, packaged Windows microphone, cancellation, and second-take acceptance pass.
+- Constraints:
+  - `gateway-whisper-ffi` remains the only STT crate permitted to contain unsafe code, load C symbols, own native pointers, or encode ABI layout.
+  - The public wire format is signed little-endian mono PCM16 at 24 kHz; the engine receives 16 kHz mono `f32` after one stateful conversion.
+  - Native decode and model loading are non-preemptible. Profile replacement must never pretend to kill native work or load a second generation beside live old-generation model state.
+  - New profile admission, old-generation draining, persistence, activation, rollback, and fatal shutdown must have explicit ownership and bounded control-plane behavior.
+  - The existing two-second closing silence, 500 ms interim cadence, 15-second interim window, 500 ms minimum decode, model pair, and decode policy remain unchanged during this structural migration.
+- Open questions:
+  - None.
+
+## Functional Specification
+
+- Actors and workflows:
+  - A batch client uploads audio to `POST /v1/audio/transcriptions` and selects one active physical interim or final model.
+  - A Realtime client connects with exactly one transcription intent, receives `session.created`, optionally updates the effective transcription session, appends Base64 PCM16, observes negotiated live hypotheses, commits an input turn, and receives immediate item creation followed by asynchronous delta, completed, or failed events.
+  - Workshop accepts a same-origin browser socket, attaches the Gateway bearer upstream, forwards text and binary payloads without parsing JSON, and preserves close code and reason.
+  - The Workshop UI captures 24 kHz PCM16, renders each hypothesis as a replacement snapshot, replaces it with the authoritative completed transcript, and derives status locally.
+  - A profile switch closes generation admission, notifies old sessions, drains request and worker ownership, stages the replacement, coordinates profile persistence, then activates, rolls back, or performs controlled shutdown.
+- Inputs and outputs:
+  - Supported client events are `session.update`, `input_audio_buffer.append`, `input_audio_buffer.commit`, and `input_audio_buffer.clear`.
+  - Supported server events are `session.created`, `session.updated`, `input_audio_buffer.committed`, `input_audio_buffer.cleared`, `conversation.item.created`, transcription delta, completed, failed, hypothesis, and error events.
+  - Session responses include `id`, `object: "realtime.transcription_session"`, `type: "transcription"`, the complete effective audio configuration, and `include`.
+  - Completion includes authoritative transcript and duration usage. Client event IDs are optional opaque strings echoed only in correlated errors; server event, session, and item IDs are independently generated opaque strings.
+  - The hypothesis extension contains revision, full transcript, finalized, agreed, tentative, and audio-span fields. Its transcript equals the exact concatenation of its three text components.
+- States and validation:
+  - A connection starts ready with the advertised default logical model, 24 kHz PCM, null turn detection, and no optional includes. A valid update atomically replaces the session default and returns the full effective configuration.
+  - Each input buffer snapshots immutable format, model, prompt, and include configuration on its first append. Prompt changes affect the next buffer and never mutate an existing input or committed item.
+  - `turn_detection: null` is the sole supported turn-detection value. Non-null VAD, noise reduction, keywords, languages, delay, logprobs, unsupported models, and unknown include values are rejected without partially applying an update.
+  - The custom hypothesis include value is a PromptForge extension. When it is negotiated, Workshop ignores standard deltas for rendering and uses hypothesis replacement until completion.
+  - An input buffer owns its provisional item ID, audio and resampler state, interim task, LocalAgreement state, hypothesis, accurate final take, and any pending precommit failure.
+  - Commit reserves committed-item, terminal-mailbox, and bounded task-join capacity before changing the input. On success it seals interim work, promotes the same provisional item ID, records `previous_item_id` from durable commit order, emits committed and item-created immediately, and finalizes asynchronously.
+  - Up to four committed items per connection may finalize concurrently. Completion order may differ from commit order, and durable lineage survives removal of completed items.
+  - Clear cancels and retires only uncommitted work, resets partial PCM and resampler state, emits cleared, and leaves committed items untouched.
+  - Appends are limited to 15 MiB decoded audio; commits require at least 100 ms; unfinalized audio is capped at 30 seconds; excessive queue lag, item count, buffer size, or queue occupancy produces explicit overload behavior.
+- Errors and recovery:
+  - Malformed JSON, unsupported fields, invalid PCM, short commits, unknown models, and safe overloads emit correlated errors while keeping the connection usable when state remains valid.
+  - If accurate precommit work fails, the input records a pending failure and rejects further appends. Commit first establishes the item and then emits exactly one item-scoped failure; clear discards the pending failure without inventing an item.
+  - A committed item whose authoritative segment cannot be admitted fails atomically rather than completing with a transcript hole.
+  - Socket sends have deadlines. Hypotheses may coalesce newest-wins, but accepted delta and terminal results are not internally dropped while the peer remains writable. End-to-end receipt is not claimed without peer acknowledgment.
+  - Engine replacement fails every committed in-flight item, emits a general error for uncommitted audio, and closes the session with code 1012 and reason `engine_replaced`.
+  - If old-generation work does not drain by the switch deadline, the old generation reopens with a fresh session epoch and replacement fails without closing worker ingress or loading new model memory.
+  - Ordinary staged-load or persistence failure rolls back by shutting the new generation down and reconstructing the old generation. Non-preemptible startup timeout or indeterminate persistence outcome leaves rollback unsafe and triggers controlled Gateway shutdown.
+- Security and privacy behavior:
+  - Gateway applies its existing bearer, verified-cookie, or trusted-loopback authentication policy. Workshop always attaches the bearer upstream.
+  - Gateway accepts only absent Origin for native clients or HTTP loopback origins under its named loopback policy. Workshop separately requires the normalized browser Origin authority to match its validated request authority.
+  - Missing, duplicate, unknown, or conflicting Realtime routing parameters are rejected before upgrade. Workshop constructs the fixed upstream transcription target rather than forwarding arbitrary query text.
+  - The relay preserves message type, close code, and close reason, defines ping and pong ownership, and rejects unsupported subprotocol negotiation.
+  - PCM, Base64 audio, transcript text, prompts, vocabulary, credentials, cookies, request headers, and full local model paths never enter tracing fields.
+- Acceptance criteria:
+  - Canonical event fixtures round-trip in Rust and are consumed unchanged by Workshop UI tests.
+  - Sequence tests prove first-event readiness, optional client IDs, immediate commit acknowledgment, provisional-ID promotion, configuration snapshot isolation, durable lineage, reversed completion order, clear semantics, and saturated-commit retry.
+  - Two clients sharing one engine remain isolated under interleaved interim, final, clear, commit, failure, and profile-switch activity.
+  - Packaged Windows Workshop records, revises hypotheses, completes, starts a second take, cancels a take, and reports permission or device failure as recoverable.
+
+## Technical Design
+
+- Architecture:
+  - `gateway` owns route mounting, authentication policy, profile-switch orchestration, operational status, and model catalog integration.
+  - `gateway-stt` owns artifact preparation, the `SpeechService` facade, active-generation lifecycle, batch and Realtime routes, session and item orchestration, take guidance, finalized history, segmentation, LocalAgreement state, transcript aggregation, completion and failure, wire translation, and error mapping.
+  - `gateway-stt-engine` owns backend-neutral decoder contracts, one bounded serialized worker per loaded physical model, stateless bounded decode jobs, worker cancellation, and engine policy. It owns no session, item, take, guidance history, transcript aggregation, completion channel, or item failure state.
+  - `gateway-stt-backend-whisper` owns safe Whisper model construction, prompt fitting, decode parameters, native-load progress, and backend error translation.
+  - `gateway-whisper-ffi` remains the unchanged unsafe-only runtime-loaded ABI leaf.
+  - `workshop-server` owns only the authenticated payload-opaque relay and generic speech-status mapping. Its UI owns capture and presentation.
+  - Core dependency direction is `gateway -> gateway-stt -> gateway-stt-engine`, `gateway-stt -> gateway-stt-backend-whisper`, and `gateway-stt-backend-whisper -> gateway-stt-engine + gateway-whisper-ffi`. No edge points from a Gateway STT crate to Workshop.
+- Modules and interfaces:
+  - `SpeechService` is the cloneable Gateway handle. Its public supporting types are `PreparedSpeech`, opaque `SpeechReplacement`, `SpeechError`, `SpeechStatus`, and `SpeechModelInfo`; route handlers, wire structs, state, engines, and constants stay private.
+  - The speech lifecycle surface prepares verified artifacts, begins a serialized staged replacement, commits or aborts that replacement, invalidates staged state during fatal shutdown, reports status and models, returns routes, and shuts down. Gateway never selects workers or constructs wire events.
+  - The engine exports only `SttEngine`, `EnginePolicy`, one-method `ModelFactory`, one-method `Decoder`, `DecodeRequest`, `DecodeMode`, and `TranscribeError`.
+  - `DecodeRequest` carries one stateless decode job. `gateway-stt` owns immutable user guidance and finalized transcript history, derives the request prompt for each job, and never leaves that state in a decoder or worker. A decoder need not be sendable; construction and every decode occur on its owning worker thread.
+  - The safe Whisper backend exports only its backend and checked configuration. It exposes no FFI pointer, C symbol, session, route, profile, or Workshop type.
+  - Cross-crate access uses explicit crate-root re-exports. Internal modules remain private and public fields remain private.
+  - Shared loopback code owns separately named Gateway loopback-Origin and Workshop same-origin-authority predicates. Their security semantics are not conflated.
+- File and public API changes:
+  - Rename `crates/gateway-transcribe` to `crates/gateway-stt-engine` without a compatibility crate. Move its native fixtures and ignore rule with it.
+  - Add `crates/gateway-stt-backend-whisper` and move safe model construction, prompts, native parameters, and progress reporting out of the engine.
+  - Preserve `crates/gateway-whisper-ffi` API and ABI tests. Do not move scheduling, prompt policy, model roles, or HTTP concepts into it.
+  - Replace the `gateway-stt` monolith with responsibility-named runtime, batch, Realtime session, audio, wire, and take modules. Add shared canonical Realtime fixtures under its tests.
+  - Replace `SttRuntime`, `SttState`, independent model-name locks, and slot publication with the speech facade and one complete engine snapshot.
+  - Move tuning from runtime use of `WorkshopSttConfig` and `[workshop.stt]` to `SttPipelineConfig` and canonical `[stt]`. Legacy input is accepted only when canonical input is absent, both forms together are invalid, and serialization writes only canonical form.
+  - Extend model metadata with transcription kind. Active physical names remain selectable for batch use and one logical `realtime-transcribe` model is advertised only while the pair is active.
+  - Extend generic Gateway operational status with configured, ready, GPU, and generation speech fields. A build without STT reports no speech object.
+  - Add Workshop `routes/realtime.rs` and a Realtime Gateway connector beside `routes/stt.rs`, the old connector, status parsing, and old UI. Convert the worklet to little-endian PCM16 and migrate the UI only after the additive relay passes; remove the old path only after installed-package microphone acceptance.
+  - Replace Workshop's old STT capability proxy with a Workshop-local dictation capability derived from generic Gateway speech status.
+  - Remove `/stt`, `/stt/capability`, Workshop status frames, custom status headers, legacy route exports, and the Workshop dependency only after the new Gateway route and Workshop consumer pass automated and physical-microphone acceptance.
+  - Treat `AGENTS.md` files as concise local constraints, not duplicate architecture documents. Delete obsolete ownership, dependency, route, configuration, and compatibility rules in the commit that makes them false; add only the minimum crate-specific rule needed to protect a new boundary.
+  - Keep root `AGENTS.md` and already-correct nested rules unchanged unless implementation exposes a concrete contradiction. The final rules audit prefers removing stale text over expanding rule files.
+- Data, persistence, failure, security, and privacy constraints:
+  - One interim worker and optional final worker are shared by all clients. `gateway-stt-engine` owns `INTERIM_JOB_CAPACITY = 8` and `FINAL_JOB_CAPACITY = 8`; both are bounded synchronous queues with nonblocking overload responses, and opening sessions never creates OS threads.
+  - Each admitted worker job owns a generation work guard until cancellation is observed before decode or native decode returns. Request cancellation cannot make quiescence report false idleness.
+  - `gateway-stt::take::Take` is the only take abstraction. Each input or committed item owns one `Take` containing immutable guidance, finalized history, segment aggregation, completion, and failure. Final-model workers remain stateless between jobs.
+  - `gateway-stt` owns `MAX_ACTIVE_REALTIME_SESSIONS = 8` with no waiting admission queue and immediate rejection of the ninth session, plus `MAX_COMMITTED_ITEMS_PER_SESSION = 4`.
+  - Interim task epochs prevent post-commit or post-clear results from allocating event IDs or mutating later items. `gateway-stt` owns `SESSION_CANCEL_JOIN_CAPACITY = 8`; cancelled task handles are retained and joined through that bounded session-owned capacity.
+  - `gateway-stt` owns `SESSION_RESULT_CAPACITY = 16` plus one separately reserved terminal slot per committed item, one replaceable newest-wins hypothesis slot per item, and `FINAL_SEGMENT_CAPACITY = 4` per item. Authoritative segments and terminal outcomes do not use lossy admission.
+  - Audio decoding preserves odd-byte state, decodes little-endian samples explicitly, resamples continuously from 24 kHz to 16 kHz, flushes on commit, and fully resets on clear.
+  - Active snapshot publication includes generation, physical names, backend, engine, and admission state in one lock-bounded transition. Batch and Realtime admission borrow one complete generation.
+  - Every generation has an admission gate, explicit request and job ownership counts, and a replaceable session epoch. Quiescence installs a fresh epoch for possible rollback, cancels the old epoch, and waits for all old ownership to drain.
+  - Replacement is serialized. Artifact preparation starts no worker. After old work drains, old workers shut down without detachment, the new generation loads under one startup deadline, and it remains unpublished until profile persistence succeeds.
+  - Profile persistence prepares and syncs a temporary file before destructive replacement, atomically replaces the authoritative file after staging, and syncs the parent where supported. Profile reads remain serialized with publication.
+  - Determinate failure aborts the staged generation and reconstructs the old specification. Indeterminate persistence or non-preemptible startup timeout consumes staged state, invalidates the replacement token, and initiates controlled process shutdown.
+  - Profile replacement never detaches a live native worker. Final process exit may abandon a non-preemptible call only as an explicitly reported last resort, without claiming model memory or callbacks were released.
+  - Every named bound has capacity and capacity-plus-one tests owned by its defining module. The fixed bounds also retain 15 MiB per append, 30 seconds unfinalized audio, and two seconds acceptable audio lag. Bounds remain code policy until measurements justify configuration.
+
+## Testing Plan
+
+- Unit:
+  - Pin current batch and two-model behavior before moving code, including append-only accurate segments, replaceable provisional text, final authority, silence, segment ordering, and policy constants.
+  - Use role-specific scripted fake decoders to test thread confinement, exact request mode, guidance and history propagation, queue admission, cancellation, worker loss, factory error, panic, startup timeout classification, and partial-construction cleanup.
+  - Test LocalAgreement token comparison, exact whitespace ownership, hypothesis revision and duplicate suppression, final authority, stale epoch rejection, and revision overflow handling.
+  - Test little-endian PCM known bytes, Base64 boundaries, odd-byte appends, continuous resampling, commit flush, clear reset, duration calculation, append limit, short commit, and maximum buffered audio.
+  - Test immutable configuration snapshots, null-only turn detection, unsupported fields, optional client IDs, exact query validation, item lineage, reserve-before-detach, saturated retry, pending precommit failure, and one terminal outcome.
+  - Test generation admission races, fresh epoch after rollback, queued and running job guards, replacement cancellation at every await, replace against replace, replace against shutdown, determinate rollback, fatal token invalidation, and idempotent shutdown.
+- Integration and end-to-end:
+  - Round-trip every canonical client and server fixture and drive sequence fixtures for ready creation, update, append, clear, commit acknowledgment, item creation, overlapping items, reversed completion, failure, and error correlation.
+  - Run native Whisper characterization before and after the engine and backend split using the same packaged runtime, model, audio, and expected transcript.
+  - Exercise batch physical-model selection, authentication, body limits, operational status, model listing, loopback and same-origin checks, and featureless Gateway compilation.
+  - Start Gateway with a scripted engine and verify the mounted Realtime route from connect through hypothesis and completion while legacy `/stt` still works.
+  - Drive Gateway and Workshop independently from the same canonical fixture sequences. Gateway tests inject scripted decoders without depending on `workshop-server`; Workshop relay tests inject an upstream fixture without depending on `gateway` or `gateway-stt`. The installed Windows package is the real dual-server acceptance.
+  - Drive the real Workshop dictation UI with fake media and worklet inputs, including second take, clear, overlapping finalization, hypothesis replacement, completion replacement, recoverable errors, status, and cleanup.
+  - Build packaged Windows binaries and perform the new-path microphone gate before legacy removal, then repeat final record, second-take, cancel, and permission or device-failure acceptance before completion.
+- Regression, security, and performance:
+  - Enforce an exact workspace dependency allowlist for Gateway, all four STT crates, shared loopback, and Workshop server. Temporary rename-only engine edges to FFI and progress expire when the safe backend takes ownership; the Workshop edge expires at legacy removal.
+  - Enforce acyclic internal module graphs for all four STT crates and line-count ceilings for every STT source module. Register each new module when created and never grow the legacy monolith before deleting it.
+  - Keep architecture checks in the default Gateway CI path so Workshop job exclusions cannot skip them. Prove Gateway-only builds no longer invoke Workshop UI tooling after legacy removal.
+  - Pin and wire Miri in a dedicated earlier step, then run pure ownership, queue, audio-state, agreement, and replacement-state targets under it. Keep sockets, dynamic FFI, native callbacks, and model loading on native CI.
+  - Test foreign, malformed, wrong-port, and mismatched loopback origins; missing Origin for native clients; trusted-loopback and strict-auth modes; duplicate or conflicting query parameters; and payload privacy.
+  - Test exact saturation boundaries for session, committed-item, interim, final, segment, mailbox, and cancellation-join capacities. Park native-equivalent fake work to prove bounded switch and shutdown behavior without sleeps.
+  - Capture first-provisional, first-agreed, endpoint, queue, compute, and final latency plus maximum queue depth and overload counts. Changes to constants require measured latency, memory, and transcript-quality evidence.
+- Exit criteria:
+  - Formatting, linting with warnings denied, workspace tests, documentation tests, dependency audit, module architecture checks, both UI suites, Gateway and Workshop builds, featureless Gateway check, native Whisper tests, and synthetic full-path tests pass.
+  - Debt budgets are recorded before and after and every zero or cap target is met rather than deferred.
+  - Gateway-only builds contain no Workshop UI build edge, Gateway STT crates contain no Workshop dependency, and custom live STT routes and status messages are absent.
+  - Browser dictation and packaged Windows microphone acceptance pass before legacy removal and again at final completion.
+
+## Decision Record
+
+- Decisions:
+  - The operator requirement, "I want to make sure that whatever we build is generic because what you've done is you've, now you've tied Gateway to Workshop," settles the product boundary: Gateway exposes generic speech facts and Workshop remains only a consumer.
+  - The operator requirement, "I want you to prove that the technical debt's going to go down," settles measurable debt budgets, exact dependency enforcement, queue bounds, public API caps, and module ratchets as completion criteria.
+  - The operator requirement, "I want to have a well-defined boundary between all those syntax code and the gateway," settles the service, backend-neutral engine, safe Whisper backend, and unsafe-only FFI split.
+  - Use an OpenAI Realtime transcription subset for standard clients and one optional hypothesis snapshot extension for PromptForge's three-level live transcript.
+  - Name the extension negotiation value `item.input_audio_transcription.hypothesis` and its server event `conversation.item.input_audio_transcription.hypothesis`; these literals are version-one public wire commitments pinned by canonical fixtures.
+  - Pin the public contract to the OpenAI Realtime transcription schema retrieved 2026-09-05 from `https://developers.openai.com/api/docs/guides/realtime-transcription` and the generated OpenAI Node schema at commit `e228aaad`, especially `src/resources/realtime/realtime.ts` and `src/resources/realtime/client-secrets.ts`. This plan implements only the strict subset below; unknown fields are rejected on client events, unsupported upstream options are rejected as specified, and unsupported optional server fields are omitted.
+  - Standard client event `session.update`: required `type: "session.update"` and `session`; optional opaque client `event_id`. `session` requires `type: "transcription"` and may contain `audio` and `include`. `audio` may contain only `input`; `input` may contain `format: {"type":"audio/pcm","rate":24000}`, `noise_reduction: null`, `transcription` with `model: "realtime-transcribe"` and string `prompt`, and `turn_detection: null`. `include` may contain only `item.input_audio_transcription.hypothesis`. Omitted supported values retain their previous effective values. Non-null noise reduction or turn detection, `language`, logprobs, keywords, delay, another model, another format, an unknown include, and every other upstream field are rejected atomically.
+  - Standard client event `input_audio_buffer.append`: required `type: "input_audio_buffer.append"` and Base64 `audio`; optional opaque client `event_id`; no other fields.
+  - Standard client event `input_audio_buffer.commit`: required `type: "input_audio_buffer.commit"`; optional opaque client `event_id`; no other fields.
+  - Standard client event `input_audio_buffer.clear`: required `type: "input_audio_buffer.clear"`; optional opaque client `event_id`; no other fields.
+  - Standard server events `session.created` and `session.updated`: required `event_id`, the respective `type` literal, and complete effective `session`; no optional event fields. The effective session requires `id`, `object: "realtime.transcription_session"`, `type: "transcription"`, `audio: {"input":...}`, and `include`. Effective input requires the fixed PCM format object, `noise_reduction: null`, `transcription` with logical model and current prompt, and `turn_detection: null`; `include` is an array containing zero or one negotiated hypothesis value. `expires_at`, client secrets, modalities, output audio, language, logprobs, and other upstream session fields are omitted.
+  - Standard server event `input_audio_buffer.committed`: required `event_id`, `type: "input_audio_buffer.committed"`, provisional `item_id`, and `previous_item_id` as an opaque item ID or null; no optional fields.
+  - Standard server event `input_audio_buffer.cleared`: required `event_id` and `type: "input_audio_buffer.cleared"`; no optional fields.
+  - Standard server event `conversation.item.created`: required `event_id`, `type: "conversation.item.created"`, `previous_item_id` as an opaque item ID or null, and `item`. The item requires the same committed `id`, `type: "message"`, `status: "completed"`, `role: "user"`, and one `content` entry `{"type":"input_audio","transcript":null}`; audio bytes and all other conversation item variants or fields are omitted.
+  - Standard server event `conversation.item.input_audio_transcription.delta`: required `event_id`, its exact `type`, `item_id`, `content_index: 0`, and string `delta`; logprobs and other optional upstream fields are omitted.
+  - Standard server event `conversation.item.input_audio_transcription.completed`: required `event_id`, its exact `type`, `item_id`, `content_index: 0`, authoritative string `transcript`, and `usage` with `type: "duration"` and nonnegative numeric `seconds`; token usage, languages, logprobs, and other optional upstream fields are omitted.
+  - Standard server event `conversation.item.input_audio_transcription.failed`: required `event_id`, its exact `type`, `item_id`, `content_index: 0`, and `error`. The nested error requires string `type`, string `code`, and string `message`; optional `param` is a string or null. No transcript or usage is emitted.
+  - Standard server event `error`: required server `event_id`, `type: "error"`, and `error`. The nested error requires string `type`, string `code`, and string `message`; optional `param` is a string or null and optional `event_id` is the opaque client event ID or null. Client event IDs appear nowhere else.
+  - Custom server event `conversation.item.input_audio_transcription.hypothesis`: required `event_id`, its exact `type`, `item_id`, `content_index: 0`, monotonically increasing unsigned `revision`, full `transcript`, `finalized`, `agreed`, `tentative`, nonnegative `audio_start_ms`, and nonnegative `audio_end_ms`; no optional fields. The three text components concatenate byte-for-byte to `transcript`, the span is half-open, and this event is emitted only when its include value was negotiated.
+  - Server event, session, and item IDs are independently generated, nonempty opaque strings. A provisional item ID is allocated before commit and promoted unchanged; durable commit order alone determines `previous_item_id`; server IDs are never derived from or equal by contract to a client event ID.
+  - Preserve four STT crates. A second backend may implement the engine contracts later without changing HTTP or WebSocket endpoints.
+  - Share one serialized worker per loaded physical model while owning audio, agreement, history, finalization, and failures per input or committed item.
+  - Keep Workshop's Rust relay payload-opaque and derive all UI status locally from capture and protocol events.
+  - Use explicit generation admission, request and job guards, session epochs, and a two-phase replacement token instead of strong-reference counts or lock guards crossing awaits.
+  - Treat non-preemptible native startup timeout and indeterminate profile persistence as fatal controlled-shutdown cases rather than claiming unsafe rollback.
+  - Use Miri from pinned `nightly-2026-09-05` for pure STT ownership, queue, audio, agreement, and replacement tests. A dedicated workflow and Cargo feature-filtered targets establish this repository-selected UB interpreter before the final verification step.
+- Rejected alternatives:
+  - Keeping Workshop status frames, headers, guards, or types in Gateway because it preserves the forbidden product dependency.
+  - Exposing the Gateway key to the webview because it expands browser credential exposure.
+  - Adding STT wire types to `shared-protocol` because the relay does not parse payloads and shared fixtures provide sufficient Rust and TypeScript compatibility.
+  - Merging FFI and safe backend code because it expands the unsafe-capable surface and obscures ownership.
+  - Loading model copies per client because it violates the memory and worker-count constraints.
+  - Using strong-reference counts for quiescence because unrelated references do not prove admitted work ownership.
+  - Detaching native workers during profile replacement because live model memory and callbacks would outlast the generation while replacement proceeds.
+  - Emitting standard item deltas before item creation because standard clients cannot reconcile an unpublished item.
+  - Blocking or dropping an authoritative final segment on queue pressure because either can stall socket ownership or produce a false completed transcript.
+  - Expanding algorithm scope during the boundary migration because structural and protocol changes need a stable behavioral baseline.
+- Assumptions, risks, and notes:
+  - The current packaged Whisper runtime, model pair, and native JFK fixture remain available for characterization. Missing native assets block equivalence claims.
+  - Native model loading and decode may hang inside code Rust cannot preempt. Bounded control-plane response therefore sometimes requires refusing replacement or terminating the process rather than reclaiming the thread.
+  - Reconstructing the old generation can fail after a determinate staged failure; this is reported as rollback failure and leaves speech unavailable.
+  - OpenAI's Realtime schema can evolve. Canonical fixtures define the implemented subset, and compatibility claims must be rechecked when the upstream contract changes.
+  - The custom hypothesis include value is intentionally outside official SDK closed enums and may require extension-aware client code.
+  - A WebSocket server cannot prove peer receipt without acknowledgment. The no-loss guarantee covers internal accepted terminal events while the connection remains writable.
+  - Manual microphone acceptance is a real release gate and cannot be replaced by synthetic audio alone.
+
+## Project survey
+
+- Build commands:
+  - Prerequisite: Rust 1.89 or later and Node.js 22, then `npm ci --prefix crates/workshop-server/ui` and `npm ci --prefix crates/gateway-config-ui/ui` once per checkout.
+  - `cargo build` builds the default workspace member, `gateway`, including the default config UI and STT features.
+  - `cargo build -p workshop` builds the Tauri desktop product and its in-process `workshop-server`.
+  - The two UI bundles build independently with `npm run build` in `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`; Cargo build scripts place generated bundles in `OUT_DIR`.
+- Focused test command patterns:
+  - Rust unit or named test: `cargo test -p <crate> <test-name>`.
+  - Rust integration harness: `cargo test -p <crate> --test it <test-name>`. Current Gateway, `gateway-stt`, and `workshop-server` integration suites use `tests/it/main.rs` as the harness and responsibility-named modules below it.
+  - STT package gates: `cargo test -p gateway-transcribe`, `cargo test -p gateway-stt --test it`, `cargo test -p gateway-whisper-ffi`, `cargo test -p gateway`, and `cargo test -p workshop-server --test it`.
+  - Native Whisper tests are ignored by default and use the same package command with `-- --ignored`; they require `PROMPTFORGE_WHISPER_LIBRARY` plus the gitignored `gateway-transcribe/tests/fixtures/ggml-tiny.en.bin` and `jfk.wav`, or `PROMPTFORGE_WHISPER_MODEL` and `PROMPTFORGE_WHISPER_AUDIO` overrides.
+  - Workshop UI focused tests run directly from `crates/workshop-server/ui`, for example `node --test test/stt-stream.mjs`; the complete UI discovery command is the package's `npm test`.
+  - Config UI focused tests run from `crates/gateway-config-ui/ui` with `node --test src/<area>.test.mjs`; `npm test` runs its complete discovered suite.
+- Full-suite test commands:
+  - Rust: `cargo test --workspace`. CI splits this into `cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features` on Linux and `cargo test --locked -p workshop -p workshop-server` on Windows.
+  - Workshop UI: run `npm run typecheck`, then `npm run build`, then `npm test` as separate commands in `crates/workshop-server/ui`.
+  - Config UI: run `npm run typecheck`, then `npm run build`, then `npm test` as separate commands in `crates/gateway-config-ui/ui`; its tests import the built `dist/app.js`, so build precedes test.
+- Linter and formatter commands:
+  - Rust formatting: `cargo fmt --all --check`.
+  - Rust linting: `cargo clippy --workspace --all-targets --all-features -- -D warnings`; CI excludes `workshop` and `workshop-server` in the Linux job and lints those two packages on Windows.
+  - Documentation gates: `cargo test --workspace --all-features --doc` and then `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features`.
+  - Feature boundary gate: `cargo check -p gateway --no-default-features`.
+  - Workshop UI layering and types: `npm run typecheck`, which runs `tsc --noEmit` and `check-layers.mjs`. Config UI uses `npm run typecheck` and runs `check-layers.mjs` through `npm test`. Neither UI package defines a standalone formatter command.
+- Test placement and naming:
+  - Rust unit tests are colocated in source modules under `#[cfg(test)]`; async tests use `#[tokio::test]`.
+  - Cross-module and socket tests live under `tests/it/`, with shared fixtures in `tests/common/`. Test function names are lower snake case behavior statements.
+  - Native and large-download tests are explicitly `#[ignore]` and name their required fixture or live dependency.
+  - Workshop UI tests are either `ui/test/**/*.mjs` or colocated `ui/src/**/*.test.mjs`. Names are plain English behavior statements, and disposable-owning tests use `test/helpers/leak-check.mjs`.
+- Directory map:
+  - `.cargo/` contains repository Cargo configuration; `.github/` contains CI, release, nightly, native Whisper, and guide workflows plus reusable actions.
+  - `crates/` is the product and library workspace. Current Gateway speech code is in `gateway-stt`, `gateway-transcribe`, and `gateway-whisper-ffi`; the planned `gateway-stt-engine` and `gateway-stt-backend-whisper` directories do not yet exist.
+  - Gateway product crates are `gateway`, `gateway-config`, `gateway-config-ui`, `gateway-local`, `gateway-logging`, `gateway-routing`, `gateway-stt`, `gateway-transcribe`, `gateway-web-search`, and `gateway-whisper-ffi`.
+  - Workshop product crates are `workshop` and `workshop-server`; the browser application is under `crates/workshop-server/ui`.
+  - Cross-product substrate is in `shared-loopback`, `shared-progress`, `shared-protocol`, `shared-sidecar`, and the non-Rust `shared-ui` package.
+  - PromptForge library crates use the `promptforge-*` prefix, while `build-*` crates are compile-time and CI tooling.
+  - `design/` holds design material, `guide/` holds mdBook documentation, `images/` holds repository media, `prompts/` holds prompt programs, `tools/` holds repository tooling, and `vibe/` holds execution plans and `vibe/archdoc.md`.
+- Current STT paths and component boundaries:
+  - `crates/gateway/src/lib.rs` mounts authenticated `POST /v1/audio/transcriptions`, `/stt`, and `/stt/capability`; `crates/gateway/src/runner.rs` owns STT startup and profile-switch calls.
+  - `crates/gateway-stt/src/runtime.rs` provisions artifacts and owns active engine publication, `src/api.rs` handles OpenAI multipart batch transcription, and the 850-line `src/stt.rs` owns the Workshop-specific streaming socket, take state, interim loop, finalization, and status frames. Its integration characterization is in `tests/it/stt.rs`.
+  - `gateway-stt` currently depends on `gateway-transcribe`, `gateway-local`, `gateway-config`, `shared-progress`, and `workshop-server`. This is the current boundary to dismantle, not the target boundary already described above.
+  - `crates/gateway-transcribe/src/` is the current engine package: `engine.rs` and `worker.rs` own model workers, `final_pass.rs` owns accurate-pass state, `segment.rs` owns segmentation, `prompt.rs` owns Whisper prompt fitting, `slot.rs` owns active engine publication, and `lib.rs` owns silence and window policy. It currently depends directly on `gateway-whisper-ffi`.
+  - `crates/gateway-whisper-ffi/src/` is the runtime-loaded ABI leaf. `library.rs`, `context.rs`, `params.rs`, `raw.rs`, and `log.rs` contain the only STT native loading, pointer ownership, ABI layout, and unsafe calls.
+  - `crates/gateway-config/src/config/stt.rs` owns STT model catalog entries and roles. Capture tuning still lives in `crates/gateway-config/src/config/workshop.rs` as `WorkshopSttConfig` under `[workshop.stt]`.
+  - `crates/workshop-server/src/routes/stt.rs` currently proxies capability and relays `/stt`; `src/gateway.rs` owns the authenticated upstream socket connector. The relay currently parses private `workshop_status` frames rather than remaining payload opaque.
+  - `crates/workshop-server/ui/src/ui/stt.ts` currently owns 16 kHz `f32` microphone capture, old start/stop framing, transcript insertion, and local capture errors; `ui/test/stt-stream.mjs` characterizes generation handling.
+  - `vibe/archdoc.md` is the architecture anchor. It defines gateway, Workshop UI, executor, store, Lua boundary, and shared-substrate components, with dependencies flowing toward gateway, store, and shared substrate. Relevant invariants include gateway-only credential ownership, Workshop cross-site and WebSocket-origin rejection, descendant cancellation, service-owned connection records, explicit endpoint readiness, and config apply publication consistency.
+- Visible conventions:
+  - Crate prefixes encode product ownership. A shared dependency must live in a `shared-*` crate, and build-only tooling in `build-*`.
+  - Cargo features gate real constraints only. Gateway `local`, `web-search`, `config-ui`, and `stt` features are additive and default on; the featureless Gateway check must remain green.
+  - Rust modules are private by default with deliberate crate-root re-exports. Every public item requires rustdoc, public fields are avoided, libraries use typed errors, and behavior changes carry tests.
+  - Runtime paths do not compile native code. Whisper is loaded from packaged runtime artifacts, worker threads own native contexts, and async callers exchange owned buffers through channels and oneshots.
+  - Unsafe code, C symbols, ABI layouts, and raw Whisper pointers stay in `gateway-whisper-ffi`; each unsafe block has an adjacent `SAFETY` justification and pointers stay behind `Drop`-owning wrappers.
+  - Workshop server route groups expose `routes(state) -> Router`; `app.rs` composes them. One task owns each ordinary socket, request/session errors are values, and in-process tests use `Router::oneshot` or spawn fixtures.
+  - Workshop UI imports flow `ui -> services -> base`; `main.ts` is the composition root. The rule is enforced by `check-layers.mjs` during build, typecheck, and Cargo bundling.
+  - Generated UI bundles are never checked in. `crates/workshop-server/module-ceilings.toml`, enforced by `cargo test -p workshop-server --test it`, is the only current source-module size ratchet.
+- Rules manifest:
+  - `AGENTS.md` governs the repository root.
+  - `crates/gateway/AGENTS.md` governs `crates/gateway/`.
+  - `crates/gateway-config/AGENTS.md` governs `crates/gateway-config/`.
+  - `crates/gateway-local/AGENTS.md` governs `crates/gateway-local/`.
+  - `crates/gateway-logging/AGENTS.md` governs `crates/gateway-logging/`.
+  - `crates/gateway-routing/AGENTS.md` governs `crates/gateway-routing/`.
+  - `crates/gateway-stt/AGENTS.md` governs `crates/gateway-stt/`.
+  - `crates/gateway-transcribe/AGENTS.md` governs `crates/gateway-transcribe/`.
+  - `crates/gateway-web-search/AGENTS.md` governs `crates/gateway-web-search/`.
+  - `crates/gateway-whisper-ffi/AGENTS.md` governs `crates/gateway-whisper-ffi/`.
+  - `crates/promptforge/AGENTS.md` governs `crates/promptforge/`.
+  - `crates/promptforge-agent/AGENTS.md` governs `crates/promptforge-agent/`.
+  - `crates/promptforge-core/AGENTS.md` governs `crates/promptforge-core/`.
+  - `crates/promptforge-core-support/AGENTS.md` governs `crates/promptforge-core-support/`.
+  - `crates/promptforge-lua/AGENTS.md` governs `crates/promptforge-lua/`.
+  - `crates/promptforge-model-client/AGENTS.md` governs `crates/promptforge-model-client/`.
+  - `crates/promptforge-parser/AGENTS.md` governs `crates/promptforge-parser/`.
+  - `crates/promptforge-store/AGENTS.md` governs `crates/promptforge-store/`.
+  - `crates/promptforge-tools/AGENTS.md` governs `crates/promptforge-tools/`.
+  - `crates/promptforge-web-search/AGENTS.md` governs `crates/promptforge-web-search/`.
+  - `crates/promptforge-webfetch/AGENTS.md` governs `crates/promptforge-webfetch/`.
+  - `crates/shared-loopback/AGENTS.md` governs `crates/shared-loopback/`.
+  - `crates/shared-progress/AGENTS.md` governs `crates/shared-progress/`.
+  - `crates/shared-protocol/AGENTS.md` governs `crates/shared-protocol/`.
+  - `crates/shared-sidecar/AGENTS.md` governs `crates/shared-sidecar/`.
+  - `crates/shared-ui/AGENTS.md` governs `crates/shared-ui/`.
+  - `crates/workshop/AGENTS.md` governs `crates/workshop/`.
+  - `crates/workshop/icons/AGENTS.md` additionally governs `crates/workshop/icons/`.
+  - `crates/workshop-server/AGENTS.md` governs `crates/workshop-server/`.
+  - `crates/workshop-server/ui/AGENTS.md` additionally governs `crates/workshop-server/ui/`.
+
+## Execution Instructions
+
+Use Windows PowerShell 5.1. Every command below has an explicit working directory and runs separately, so no shell state or success chaining is assumed. Before Step 1, run `npm ci` separately in `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui` and `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`. Before native tests, extract `https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip` to `C:\Users\Vinnie\cursor\promptforge\local\stt-fixtures\`; place `ggml-tiny.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin` and `jfk.wav` from `https://github.com/ggerganov/whisper.cpp/raw/master/samples/jfk.wav` in the current engine fixture directory; and let each native command set `$env:PATH` and `$env:PROMPTFORGE_WHISPER_LIBRARY` itself. Begin from a clean worktree and green baseline. Each step is one commit; formatting, warnings-denied linting for touched packages, and its listed commands must pass before the next step. When architecture changes invalidate an `AGENTS.md` rule, delete that text in the same commit and add only a minimal replacement when the new boundary would otherwise be unenforced. Do not restate root rules or this design plan in nested rule files.
+
+The architecture harness enforces exact workspace-package edges across normal, development, and build dependencies, ignoring self-dependencies. Phase A, Steps 7 through 20: `gateway -> {gateway-config,gateway-config-ui,gateway-local,gateway-logging,gateway-routing,gateway-stt,gateway-web-search,promptforge-core,shared-loopback,shared-progress,shared-protocol,shared-sidecar}`; `gateway-stt -> {gateway-config,gateway-local,gateway-stt-backend-whisper,gateway-stt-engine,shared-progress,workshop-server}`; `gateway-stt-engine -> {}`; `gateway-stt-backend-whisper -> {gateway-stt-engine,gateway-whisper-ffi,shared-progress}`; `gateway-whisper-ffi -> {}`; `shared-loopback -> {}`; `workshop-server -> {build-ui,promptforge-agent,promptforge-core-support,promptforge-model-client,promptforge-store,promptforge-tools,shared-progress,shared-sidecar}`. Phase B, Steps 21 through 25, adds only `workshop-server -> shared-loopback`. Final Phase C, Step 26 onward, is Phase B with only `gateway-stt -> workshop-server` removed. No normal or development edge from `gateway` to `workshop-server`, and no new such edge from `gateway-stt`, may be added; the current `gateway-stt -> workshop-server` edge is solely a temporary removal target. Beginning with Step 7, every later step touching an STT source file, manifest, crate-root export, or ceiling runs the unfiltered architecture harness.
+
+### Step 1: Characterize current speech behavior - c6198001
+
+- Artifacts: split `crates/gateway-stt/tests/it/stt.rs` into `tests/it/batch.rs` and `tests/it/legacy_stream.rs`, extend `tests/common/mod.rs`, and register both modules in `tests/it/main.rs`.
+- Scope: pin batch physical-model selection, current two-model streaming, policy constants, segment order, final authority, and cross-client failure behavior without changing production code.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it`
+- Consumes and gates: consumes the green baseline; these assertions must be preserved by replacement fixtures before legacy tests retire.
+
+### Step 2: Pin the pre-rename native target
+
+- Artifacts: create `crates/gateway-transcribe/tests/native_whisper.rs` and preserve `tests/fixtures/ggml-tiny.en.bin`, `tests/fixtures/jfk.wav`, and their ignore rule.
+- Scope: pin packaged-runtime loading, transcript text, decode policy, prompt behavior, and cleanup in one explicit ignored integration target.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-transcribe --test native_whisper -- --ignored`
+- Consumes and gates: consumes Step 1 and the named external fixtures; the same assets and expected transcript gate Steps 4 and 6.
+
+### Step 3: Freeze canonical Realtime fixtures
+
+- Artifacts: create `crates/gateway-stt/tests/fixtures/realtime/*.json`, `tests/it/realtime_fixtures.rs`, and `crates/workshop-server/ui/test/realtime-wire-fixtures.mjs`; register `realtime_fixtures` in `crates/gateway-stt/tests/it/main.rs`.
+- Scope: encode every event, effective session, error, usage, ID, hypothesis, and valid or invalid sequence from the Decision Record without mounting a route.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/realtime-wire-fixtures.mjs`
+- Consumes and gates: consumes the complete 2026-09-05 wire contract; fixture parity gates every wire implementation and consumer.
+
+### Step 4: Rename the engine without changing APIs
+
+- Artifacts: rename `crates/gateway-transcribe/` to `crates/gateway-stt-engine/`; update root `Cargo.toml`, `Cargo.lock`, root `.gitignore`, the moved `AGENTS.md`, `crates/gateway-stt/Cargo.toml`, `crates/gateway-stt/AGENTS.md`, imports, and verified textual references in `tools/document.md`; do not touch `.github/workflows/whisper-lib.yml`, which has no crate reference.
+- Scope: preserve behavior and current APIs, move fixtures and the existing engine rules with the crate, add no compatibility crate, and compile every current reverse consumer. This mechanical commit changes names only; Step 6 removes rules invalidated by the new boundary.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-engine`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-stt-engine --test native_whisper -- --ignored`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+- Consumes and gates: consumes Steps 1 and 2; all renamed consumers and the post-rename native target must pass in this commit.
+
+### Step 5: Move take ownership into gateway-stt
+
+- Artifacts: create `crates/gateway-stt/src/take.rs`, move segmentation and LocalAgreement state from `src/stt.rs` and `gateway-stt-engine/src/segment.rs` into gateway-stt modules, make `gateway-stt-engine/src/final_pass.rs` and `src/worker.rs` execute stateless decode jobs, and adapt the legacy stream in `gateway-stt/src/stt.rs` to the single `take::Take`.
+- Scope: `Take` exclusively owns guidance, finalized history, segment aggregation, completion, and failure; remove engine reset channels and accumulated transcript state, create no engine `FinalTake`, and update every engine API consumer in the same commit.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-engine`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it legacy_stream`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+- Consumes and gates: consumes characterization and the renamed engine; legacy ownership isolation gates Realtime reuse of `take.rs`.
+
+### Step 6: Extract contracts and safe backend atomically
+
+- Artifacts: create `gateway-stt-engine/src/decoder.rs` and `policy.rs`; create `crates/gateway-stt-backend-whisper/{Cargo.toml,AGENTS.md,src/lib.rs,src/config.rs,src/model.rs,src/prompt.rs,tests/native_whisper.rs}`; update root manifests, `gateway-stt` manifest and runtime, all imports, crate-root exports, `crates/gateway-stt/AGENTS.md`, and the moved `crates/gateway-stt-engine/AGENTS.md`.
+- Scope: replace `EngineConfig` and constructors once, update every current gateway-stt and Gateway consumer in this commit, expose only the seven engine items and two backend items, and leave no FFI or prompt policy in the engine and no compatibility shim. Delete the moved engine rules that assign Whisper loading, prompt fitting, segmentation, take state, or FFI integration to the engine; retain only backend-neutral bounded-worker constraints. Reduce the service rules to facade, lifecycle, batch, Realtime, and sole take ownership. The new backend rule file contains only safe Whisper construction, prompt and decode policy, progress, and the prohibition on unsafe or host types.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-engine`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-backend-whisper`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-stt-backend-whisper --test native_whisper -- --ignored`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-whisper-ffi`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+- Consumes and gates: consumes Step 5 stateless jobs; matching native output and green reverse consumers gate bounded workers.
+
+### Step 7: Establish exact architecture ratchets
+
+- Artifacts: create `crates/gateway-stt/tests/it/architecture.rs`, register it in `tests/it/main.rs`, and create `module-ceilings.toml` in all four STT crates.
+- Scope: enforce the stated temporary and final workspace-edge allowlists, unsafe leaf, no cycles, current ceilings, and public budgets; temporary exceptions name their removal step.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 6 final crate topology; the unfiltered command becomes mandatory after every later STT edit.
+
+### Step 8: Bound workers and expose scripted tests
+
+- Artifacts: revise engine `worker.rs`, `engine.rs`, `error.rs`, and manifest; add `test-fixtures` scripted `ModelFactory` and `Decoder`; forward test features in backend and `gateway-stt` manifests; add Gateway development wiring and `crates/gateway/src/test_support.rs` injection without a new production facade type.
+- Scope: enforce `INTERIM_JOB_CAPACITY = 8` and `FINAL_JOB_CAPACITY = 8`, capacity and capacity-plus-one admission, cancellation, panic, factory failure, startup outcomes, cleanup, thread confinement, and non-detaching idempotent shutdown.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt-engine --features test-fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --features test-fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 7; scripted injection gates deterministic lifecycle and socket tests without widening the six-type production facade.
+
+### Step 9: Select and wire Miri
+
+- Artifacts: create `.github/workflows/stt-miri.yml`, add Miri-safe pure worker tests under the engine `test-fixtures` feature, and document exclusions beside unsupported socket and FFI tests.
+- Scope: pin `nightly-2026-09-05`, run only pure ownership and queue targets, and establish the repository-selected UB interpreter before service state exists.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `rustup toolchain install nightly-2026-09-05 --component miri`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri setup`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 8 scripted workers; later pure service targets join this pinned workflow.
+
+### Step 10: Migrate canonical configuration and every consumer
+
+- Artifacts: replace `WorkshopSttConfig` with `SttPipelineConfig` across `gateway-config/src/config/{workshop.rs,stt.rs,tests.rs,tests/schema.rs,tests/serialize.rs,tests/validation.rs}`, `config.rs`, and `lib.rs`; update `gateway-stt/src/runtime.rs`; Gateway warnings and tests in `src/runner.rs`; `gateway.local.example.toml`; `crates/gateway-config/README.md`; `crates/gateway/README.md`; `crates/gateway/AGENTS.md`; config UI `services/config-store.ts`, `views/settings-view.ts`, `views/settings-sections.test.mjs`; source guides `guide/src/gateway/05-speech.md`, `guide/src/gateway/10-serving-and-observing.md`, `guide/src/workshop/01-application.md`, and `guide/src/workshop/07-voice.md`; generated `guide/src/SUMMARY.md`, `guide/src/gateway/index.md`, `guide/src/workshop/index.md`, `guide/promptforge-gateway-guide.md`, and `guide/promptforge-workshop-guide.md`.
+- Scope: accept legacy `[workshop.stt]` only during parsing when `[stt]` is absent, reject both, serialize only `[stt]`, update all direct consumers in one commit, and provide no type or accessor alias. In `crates/gateway/AGENTS.md`, delete the stale statement that `[workshop.stt]` remains live and do not replace it with configuration detail already enforced by `gateway-config`.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-config`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `node --test src/views/settings-sections.test.mjs`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 6 backend configuration; canonical schema and generated documentation gate the facade.
+
+### Step 11: Add audio ingestion and shared PCM bytes
+
+- Artifacts: add `base64 = "0.22"` to root `Cargo.toml` and `base64.workspace = true` to `crates/gateway-stt/Cargo.toml`; create `gateway-stt/src/audio.rs` and language-neutral `tests/fixtures/audio/pcm16le-24khz.json`; update ceilings.
+- Scope: review Base64 license, Rust 1.89 support, and transitive tree before acceptance; implement endian decoding, Base64 boundaries, odd-byte state, continuous 24 kHz to 16 kHz conversion, flush, reset, durations, and size bounds.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install cargo-deny --locked`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo tree -p gateway-stt -i base64`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo deny check`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt audio`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 10 tuning and Step 7 budgets; dependency review and byte fixtures gate Rust and JavaScript audio consumers.
+
+### Step 12: Implement the private wire
+
+- Artifacts: create `gateway-stt/src/realtime/{mod.rs,wire.rs,query.rs}`, bind them to canonical fixtures, update ceilings, and keep every type private.
+- Scope: implement only the Decision Record subset, atomic updates, strict unknown-field rejection, opaque IDs, exact errors and usage, and query validation without opening a socket.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt realtime::wire`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Steps 3 and 11; exact fixture round trips gate session state.
+
+### Step 13: Own sessions and uncommitted input
+
+- Artifacts: create `gateway-stt/src/realtime/{session.rs,input.rs,registry.rs}`, `tests/it/realtime_session.rs`, register it in `tests/it/main.rs`, and update ceilings and Miri workflow filters.
+- Scope: enforce `MAX_ACTIVE_REALTIME_SESSIONS = 8` with no wait queue and immediate ninth rejection, `SESSION_CANCEL_JOIN_CAPACITY = 8`, immutable first-append snapshots, clear, resampler reset, interim epochs, and capacity and capacity-plus-one tests.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_session`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes scripted decoding, audio, wire, and the sole `take.rs`; snapshot and cancellation isolation gate commit.
+
+### Step 14: Finalize committed items independently
+
+- Artifacts: create `gateway-stt/src/realtime/{item.rs,result_mailbox.rs}`, extend `src/take.rs` and `tests/it/realtime_session.rs`, and update ceilings and Miri targets.
+- Scope: enforce `MAX_COMMITTED_ITEMS_PER_SESSION = 4`, `SESSION_RESULT_CAPACITY = 16` plus one reserved terminal slot per item, one replaceable hypothesis slot per item, and `FINAL_SEGMENT_CAPACITY = 4` per item; add capacity and capacity-plus-one, durable lineage, reversed completion, saturated retry, pending failure, and one-terminal tests.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it realtime_session`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 13; complete item ownership gates facade replacement and generation quiescence.
+
+### Step 15: Replace runtime and route APIs atomically
+
+- Artifacts: replace `gateway-stt/src/runtime.rs` with `service.rs`, `artifacts.rs`, `generation.rs`, `status.rs`, and `model.rs`; rename `api.rs` to `batch.rs`; replace `SttRuntime`, `SttState`, free route APIs, and old exports in `lib.rs`; update `gateway/src/{lib.rs,runner.rs,test_support.rs}` and all gateway-stt tests and common fixtures in the same commit.
+- Scope: expose only `SpeechService` plus five supporting types, preserve batch and temporary legacy routes through methods, publish one complete snapshot, and retain test-only scripted construction behind `test-fixtures`.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --features test-fixtures`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Steps 10 and 14; every current reverse consumer compiles and tests in this API-changing commit.
+
+### Step 16: Quiesce generations with explicit ownership
+
+- Artifacts: extend `gateway-stt/src/{generation.rs,service.rs}`, create `replacement.rs`, create `tests/it/generation.rs`, register it in `tests/it/main.rs`, and update ceilings and Miri filters.
+- Scope: serialize replacement, close admission, count requests and worker jobs, install fresh rollback epochs, drain without reference counts, reopen on deadline, and race replacement against shutdown.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it generation`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes bounded jobs, committed items, and complete snapshots; bounded drain gates destructive staging.
+
+### Step 17: Make profile replacement transactional
+
+- Artifacts: complete `gateway-stt/src/{replacement.rs,artifacts.rs}`; update STT-only integration in `gateway/src/{runner.rs,config_apply.rs,config_pending.rs,config_write.rs,shutdown.rs}` and `gateway/tests/it/profiles.rs`.
+- Scope: sync temporary persistence before replacement, stop old workers without detachment, stage under one deadline, publish after persistence, reconstruct on determinate failure, and invalidate tokens plus request controlled shutdown on fatal outcomes.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it generation`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it profiles`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 16; cancellation-at-every-await and rollback outcomes gate route mounting.
+
+### Step 18: Separate origin predicates
+
+- Artifacts: add named Gateway loopback-Origin and Workshop same-origin-authority predicates with predicate-only tests in `shared-loopback/src/lib.rs`; update `crates/shared-loopback/AGENTS.md`; do not mount sockets or change Workshop yet.
+- Scope: cover absent native Origin, HTTP loopback forms, malformed, foreign, wrong-port, and mismatched authorities while keeping the two policies distinct. Remove rule text that describes the crate as Gateway-only or limited to two middlewares, then retain one concise rule that the Gateway and Workshop predicates are separately named, fail closed, and never share policy semantics.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p shared-loopback`
+- Consumes and gates: consumes no route state; pure predicate behavior gates Gateway sockets and later Workshop manifest adoption.
+
+### Step 19: Integrate generic speech facts
+
+- Artifacts: update `gateway/src/{model_info.rs,system.rs,lib.rs}`, `gateway/tests/it/surface.rs`, and gateway-stt status and model modules.
+- Scope: expose configured, ready, GPU, and generation status; advertise physical batch names and logical `realtime-transcribe` only when ready; omit speech without the feature.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it surface`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Step 15 facade and Step 17 lifecycle; status correctness gates route publication.
+
+### Step 20: Mount the additive Gateway route
+
+- Artifacts: create `gateway-stt/src/realtime/route.rs`, update `realtime/mod.rs` and `service.rs`, mount it in `gateway/src/lib.rs`, create `gateway/tests/it/realtime_stt.rs`, and register it in `gateway/tests/it/main.rs`.
+- Scope: add `WS /v1/realtime?intent=transcription` while retaining batch and legacy routes; test bearer, cookie, trusted-loopback, absent and hostile socket Origins, query conflicts, send deadlines, privacy, overload, and close 1012 through scripted decoders.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it realtime_stt`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes Steps 12 through 19; the independent Gateway fixture path gates Workshop relay work.
+
+### Step 21: Add the Workshop relay beside legacy
+
+- Artifacts: add `workshop-server/src/routes/realtime.rs`, a separate Realtime connector in `src/gateway.rs`, route composition in `src/routes.rs` and `src/app.rs`, `shared-loopback.workspace = true` in `workshop-server/Cargo.toml`, `tests/it/realtime_relay.rs`, and its registration in `tests/it/main.rs`.
+- Scope: retain `routes/stt.rs`, old connector, status parsing, old UI, and every old test; the new relay fixes the upstream target, attaches the bearer, stays payload-opaque, and preserves type, close, ping, pong, origin, and subprotocol semantics.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it realtime_relay`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it stt`
+- Consumes and gates: consumes Step 18 Workshop predicate and Step 20 public fixtures, but adds no dependency on Gateway or gateway-stt.
+
+### Step 22: Prove the actual worklet bytes
+
+- Artifacts: revise `workshop-server/ui/pcm-worklet.js`, create `ui/src/services/speech-capture.ts`, create `ui/test/pcm-worklet.mjs`, and consume `gateway-stt/tests/fixtures/audio/pcm16le-24khz.json`.
+- Scope: make the dedicated JavaScript harness load the real worklet in a processor shim and assert little-endian bytes, clipping, transferred `ArrayBuffer` type, partial-buffer carry, and 24 kHz output; `stt-stream.mjs` is not evidence for worklet encoding.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/pcm-worklet.mjs`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
+- Consumes and gates: consumes Step 11 language-neutral bytes and Step 21 additive relay; byte parity gates browser migration.
+
+### Step 23: Migrate Workshop browser speech
+
+- Artifacts: create `workshop-server/ui/src/services/realtime-transcription.ts`; update `src/ui/stt.ts`, `src/ui/prompt-input.ts`, and `src/main.ts`; replace assertions in `test/agent-stt.mjs`, `agent-stt-boot.mjs`, and `stt-stream.mjs`; retain server legacy seams and `test/stt-capability.mjs`.
+- Scope: switch the browser to Realtime, hypothesis replacement, authoritative completion, local status, second take, clear, overlapping items, and recoverable errors while the server fallback remains removable only after physical acceptance.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/agent-stt.mjs test/agent-stt-boot.mjs test/stt-stream.mjs test/realtime-wire-fixtures.mjs test/pcm-worklet.mjs`
+- Consumes and gates: consumes Steps 3, 21, and 22; browser acceptance gates independent full-path automation.
+
+### Step 24: Prove both fixture-driven halves
+
+- Artifacts: extend `gateway/tests/it/realtime_stt.rs`, `workshop-server/tests/it/realtime_relay.rs`, and Workshop UI sequence fixtures; add no dual-server Gateway test and no cross-product development dependency.
+- Scope: Gateway independently drives canonical sequences through scripted decoders; Workshop independently drives the same sequences through a fake upstream and fake media; only installed-package acceptance claims the real dual-server path.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway --test it realtime_stt`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it realtime_relay`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
+- Consumes and gates: consumes Steps 20 through 23; both independent halves must pass before packaging.
+
+### Step 25: Pass installed Windows microphone acceptance
+
+- Artifacts: stage `crates/workshop/binaries/promptforge-gateway-x86_64-pc-windows-msvc.exe`, build `target/release/bundle/nsis/*-setup.exe`, install `promptforge-workshop.exe` and its sibling `promptforge-gateway.exe`, and create `design/generic-realtime-stt-acceptance.md`.
+- Scope: follow `.github/workflows/release-workshop.yml` steps `Build and stage the gateway sidecar`, `Build the app`, and `Install and check (Windows)`, then record installed-package microphone revision, completion, second take, clear, cancellation, and recoverable permission or device failure with binary hashes and timestamps.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo build --release --locked -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$triple='x86_64-pc-windows-msvc'; New-Item -ItemType Directory -Path 'crates\workshop\binaries' -Force | Out-Null; Copy-Item 'target\release\promptforge-gateway.exe' "crates\workshop\binaries\promptforge-gateway-$triple.exe" -Force`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install tauri-cli --locked`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop`: `if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY is required by the release workflow' }; if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required by the release workflow' }; $env:RUSTUP_TOOLCHAIN='stable'; cargo tauri build --bundles nsis`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$setup=Get-ChildItem -Recurse 'target\release\bundle\nsis' -Filter '*-setup.exe' | Select-Object -First 1; if (-not $setup) { throw 'no NSIS installer' }; Start-Process $setup.FullName -ArgumentList '/S' -Wait`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$workshop=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-workshop.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; $gateway=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-gateway.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; if (-not $workshop -or -not $gateway) { throw 'installed Workshop or Gateway missing' }; Start-Process $workshop.FullName`
+- Consumes and gates: consumes Step 24; the operator must exercise the installed application and record passing evidence, which alone gates legacy removal.
+
+### Step 26: Remove legacy seams and tests
+
+- Artifacts: remove gateway-stt legacy route/status code from `src/stt.rs` after moving retained `Take` behavior, remove old exports and Gateway mounts, remove Workshop `routes/stt.rs`, old connector/status parsing and capability proxy, update route composition, remove `workshop-server` from `gateway-stt/Cargo.toml`, update `Cargo.lock`, update `crates/gateway/AGENTS.md` and `crates/workshop-server/AGENTS.md`, and retire `tests/it/legacy_stream.rs`, old `tests/it/stt.rs` registrations, and UI `test/stt-capability.mjs`.
+- Scope: map every retired legacy assertion to Step 3, 20, 21, 23, or 24 replacement evidence in the commit rationale; deletion is justified only because those fixtures preserve the behavior, and the final allowlist, zero legacy symbols, and only batch plus Realtime routes are enforced. Delete Gateway's temporary `gateway-stt -> workshop-server` exception and Workshop's `spawn_with_routes`, Gateway-owned socket attachment, status-bus, and Whisper-job language. Add only one Workshop-local rule if needed: its Realtime relay authenticates upstream, validates browser origin, and never parses speech payloads or owns speech state.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+- Consumes and gates: consumes the passing installed-package record; failed replacement coverage blocks deletion.
+
+### Step 27: Finalize architecture and documentation
+
+- Artifacts: finalize the architecture harness and all four ceilings; audit root `AGENTS.md` plus the targeted `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway`, `shared-loopback`, and `workshop-server` rule files for stale pre-migration text; update `.github/workflows/ci.yml`, `.github/workflows/stt-miri.yml`, `crates/gateway/README.md`, `crates/gateway-config/README.md`, `crates/workshop-server/README.md`, source guides `guide/src/gateway/05-speech.md`, `guide/src/gateway/10-serving-and-observing.md`, `guide/src/workshop/01-application.md`, and `guide/src/workshop/07-voice.md`; generated `guide/src/SUMMARY.md`, `guide/src/gateway/index.md`, `guide/src/workshop/index.md`, `guide/src/language/index.md`, `guide/src/agent/index.md`, `guide/promptforge-gateway-guide.md`, `guide/promptforge-workshop-guide.md`, `guide/promptforge-language-guide.md`, and `guide/promptforge-agent-guide.md`; `design/generic-realtime-stt.md`; and `design/generic-realtime-stt-acceptance.md`.
+- Scope: remove temporary allowlist edges, enforce exact final dependencies, cycles, public counts, every 500-line ceiling, Gateway-only build isolation, normal-CI scripted coverage, and before or after debt counts. The rules audit deletes obsolete or duplicated lines first and edits only files with a concrete contradiction. Keep root `AGENTS.md`, `gateway-whisper-ffi/AGENTS.md`, `gateway-config/AGENTS.md`, and `workshop-server/ui/AGENTS.md` unchanged unless the final implementation proves one of their current constraints false.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install mdbook --version 0.4.44 --locked`
+  - `C:\Users\Vinnie\cursor\promptforge`: `mdbook build guide`
+- Consumes and gates: consumes Step 26 final topology; final verification starts only with zero temporary exceptions.
+
+### Step 28: Run every release gate and repeat acceptance
+
+- Artifacts: append command results, hashes, ratchet counts, native equivalence, generated-doc cleanliness, and repeated installed-microphone evidence to `design/generic-realtime-stt-acceptance.md`; change no implementation.
+- Scope: run every exit criterion independently under PowerShell 5.1 and stop on any failure.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo fmt --all --check`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test --workspace`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test --workspace --all-features --doc`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo deny check`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo build -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo build -p workshop`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo check -p gateway --no-default-features`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-stt-backend-whisper --test native_whisper -- --ignored`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `npm run typecheck`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`: `npm test`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
+  - `C:\Users\Vinnie\cursor\promptforge`: `mdbook build guide`
+  - `C:\Users\Vinnie\cursor\promptforge`: `git diff --exit-code -- guide/src/SUMMARY.md guide/src/gateway/index.md guide/src/workshop/index.md guide/src/language/index.md guide/src/agent/index.md guide/promptforge-gateway-guide.md guide/promptforge-workshop-guide.md guide/promptforge-language-guide.md guide/promptforge-agent-guide.md`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo build --release --locked -p gateway`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$triple='x86_64-pc-windows-msvc'; New-Item -ItemType Directory -Path 'crates\workshop\binaries' -Force | Out-Null; Copy-Item 'target\release\promptforge-gateway.exe' "crates\workshop\binaries\promptforge-gateway-$triple.exe" -Force`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install tauri-cli --locked`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop`: `if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'TAURI_SIGNING_PRIVATE_KEY is required by the release workflow' }; if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required by the release workflow' }; $env:RUSTUP_TOOLCHAIN='stable'; cargo tauri build --bundles nsis`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$setup=Get-ChildItem -Recurse 'target\release\bundle\nsis' -Filter '*-setup.exe' | Select-Object -First 1; if (-not $setup) { throw 'no NSIS installer' }; Start-Process $setup.FullName -ArgumentList '/S' -Wait`
+  - `C:\Users\Vinnie\cursor\promptforge`: `$workshop=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-workshop.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; $gateway=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-gateway.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; if (-not $workshop -or -not $gateway) { throw 'installed Workshop or Gateway missing' }; Start-Process $workshop.FullName`
+- Consumes and gates: consumes Step 27, then repeats the Step 25 installed-package microphone scenarios. Completion requires every command, ratchet, generated-doc check, and physical scenario to pass with no open finding.
+
+Stop and revise after repeated same-signature failures, an upstream wire incompatibility, an unacceptable dependency license, Rust 1.89 incompatibility, unsafe or transitive expansion, or evidence that two generations cannot satisfy memory constraints. Do not modify Gateway CLI, diagnostics, logging queues, sinks, rotation, logging lifecycle, or completed Workshop baseline-ratchet work. VAD tuning, alignment, decode-quality changes, native streaming, batching, denoising, a new WER harness, dynamic plugins, a fifth STT crate, shared STT wire types, browser credentials, WebRTC, and automatic turn detection remain outside this plan.

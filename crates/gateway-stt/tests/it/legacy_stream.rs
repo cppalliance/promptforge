@@ -8,60 +8,121 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use gateway_stt::{SttRuntime, SttState};
-use gateway_transcribe::fixtures::{jfk_samples, require_model};
+use gateway_transcribe::fixtures::jfk_samples;
+use gateway_transcribe::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, Segmenter};
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use crate::common::{JsonSocket, TestServer};
+use crate::common::{
+    JsonSocket, TestServer, copy_model_replacing_token, fixture_runtime,
+    fixture_runtime_with_models, fixture_server, send_pcm, send_samples, send_samples_once,
+    transcribe_batch,
+};
 
-async fn send_pcm(socket: &mut JsonSocket, frames: usize) {
-    socket.send_binary(vec![0u8; frames * 4]).await;
+#[test]
+fn legacy_stream_policy_constants_stay_pinned() {
+    let capture = gateway_config::WorkshopSttConfig::default();
+    assert_eq!(SAMPLE_RATE, 16_000, "wire PCM stays at 16 kHz");
+    assert_eq!(
+        MIN_WINDOW_SAMPLES,
+        SAMPLE_RATE / 2,
+        "interim decoding still requires half a second"
+    );
+    assert_eq!(
+        capture.window_seconds(),
+        15,
+        "the default interim window stays fifteen seconds"
+    );
+    assert_eq!(
+        capture.interval_ms(),
+        500,
+        "the default interim cadence stays 500 ms"
+    );
 }
 
-async fn send_samples(socket: &mut JsonSocket, samples: &[f32]) {
-    const BLOCK: usize = 4096;
-    for chunk in samples.chunks(BLOCK) {
-        let mut bytes = Vec::with_capacity(chunk.len() * 4);
-        for sample in chunk {
-            bytes.extend_from_slice(&sample.to_le_bytes());
-        }
-        socket.send_binary(bytes).await;
+fn transcript_words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| {
+            word.trim_matches(|character: char| !character.is_ascii_alphanumeric())
+                .to_ascii_lowercase()
+        })
+        .filter(|word| word.len() >= 4)
+        .collect()
+}
+
+fn distinguishing_word(text: &str, other: &str) -> String {
+    let other = transcript_words(other);
+    transcript_words(text)
+        .into_iter()
+        .find(|word| !other.contains(word))
+        .expect("the two speech segments have distinguishable words")
+}
+
+#[tokio::test]
+#[ignore = "requires whisper test fixtures (tests/fixtures/)"]
+async fn closed_segments_are_reported_in_input_order() {
+    let speech = jfk_samples();
+    let third = speech.len() / 3;
+    let mut samples = speech[..third].to_vec();
+    samples.extend(vec![0.0; 3 * SAMPLE_RATE]);
+    samples.extend_from_slice(&speech[2 * third..]);
+    samples.extend(vec![0.0; 3 * SAMPLE_RATE]);
+    let mut segmenter = Segmenter::new();
+    let mut ranges = Vec::new();
+    while let Some(range) = segmenter.poll(&samples) {
+        ranges.push(range);
     }
-}
+    assert_eq!(
+        ranges.len(),
+        2,
+        "the native fixture halves form two closed speech segments"
+    );
 
-fn fixture_server(with_final: bool) -> TestServer {
-    let cache = tempfile::tempdir().expect("cache tempdir");
-    let source = require_model().display().to_string().replace('\\', "/");
-    let cache_path = cache.path().display().to_string().replace('\\', "/");
-    let final_model = if with_final {
-        format!(
-            "[[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {source:?}\nvram_gb = 1.0\n"
-        )
-    } else {
-        String::new()
-    };
-    let profile_models = if with_final {
-        "[\"speech\", \"speech-final\"]"
-    } else {
-        "[\"speech\"]"
-    };
-    let catalog = gateway_config::Config::from_toml_str(&format!(
-        "config-version = 2\n\
-         [server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n\
-         [local]\ncache_dir = {cache_path:?}\n\
-         [workshop.stt]\nwindow_seconds = 8\ninterval_ms = 400\n\
-         [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {source:?}\nvram_gb = 1.0\n\
-         {final_model}[[profile]]\nname = \"work\"\nmodels = {profile_models}\n"
-    ))
-    .expect("fixture catalog parses");
-    let config = catalog
-        .select_profile(&gateway_config::ProfileName::parse("work").expect("profile name"))
-        .expect("fixture profile selects");
-    let state = SttState::default();
-    let runtime = SttRuntime::start(&config, state.clone(), None).expect("fixture engine loads");
-    TestServer::spawn_with(state, Some(runtime))
+    let (state, runtime) = fixture_runtime(true);
+    let (first_status, first_response) =
+        transcribe_batch(state.clone(), "speech-final", &samples[ranges[0].clone()]).await;
+    let (second_status, second_response) =
+        transcribe_batch(state.clone(), "speech-final", &samples[ranges[1].clone()]).await;
+    assert_eq!(first_status, axum::http::StatusCode::OK);
+    assert_eq!(second_status, axum::http::StatusCode::OK);
+    let first = first_response["text"]
+        .as_str()
+        .expect("first segment transcript is a string");
+    let second = second_response["text"]
+        .as_str()
+        .expect("second segment transcript is a string");
+    let first_marker = distinguishing_word(first, second);
+    let second_marker = distinguishing_word(second, first);
+
+    let server = TestServer::spawn_with(state, Some(runtime));
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
+    socket.send_text("start").await;
+    assert_eq!(socket.recv_json().await["type"], "stream");
+    send_samples_once(&mut socket, &samples).await;
+    socket.send_text("stop").await;
+    let reply = socket
+        .recv_until(Duration::from_secs(240), |frame| frame["type"] == "final")
+        .await;
+    let final_text = reply["text"]
+        .as_str()
+        .expect("streaming final transcript is a string");
+    let final_words = transcript_words(final_text);
+    let first_position = final_words
+        .iter()
+        .position(|word| word == &first_marker)
+        .expect("the streaming final contains the first segment marker");
+    let second_position = final_words
+        .iter()
+        .position(|word| word == &second_marker)
+        .expect("the streaming final contains the second segment marker");
+    assert!(
+        first_position < second_position,
+        "the /stt final preserves submitted segment order: {first_marker:?} before \
+         {second_marker:?} in {final_text:?}"
+    );
+    socket.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -300,13 +361,13 @@ async fn silence_produces_no_interims_and_an_empty_final() {
     socket.close().await;
 }
 
-async fn wait_for_committed(socket: &mut JsonSocket) -> String {
+async fn wait_for_committed(socket: &mut JsonSocket, expected_word: &str) -> String {
     socket
         .recv_until(Duration::from_secs(120), |frame| {
             frame["type"] == "interim"
                 && frame["committed"]
                     .as_str()
-                    .is_some_and(|text| text.to_lowercase().contains("country"))
+                    .is_some_and(|text| text.to_lowercase().contains(expected_word))
         })
         .await["committed"]
         .as_str()
@@ -316,15 +377,40 @@ async fn wait_for_committed(socket: &mut JsonSocket) -> String {
 
 #[tokio::test]
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
-async fn final_frame_is_the_committed_prefix_plus_the_tail() {
-    let server = fixture_server(true);
+async fn final_model_segments_and_tail_are_authoritative_at_stop() {
+    let interim_model = gateway_transcribe::fixtures::require_model();
+    let fixture_dir = tempfile::tempdir().expect("distinct model tempdir");
+    let final_model =
+        copy_model_replacing_token(&interim_model, fixture_dir.path(), b"country", b"kingdom");
+    let (state, runtime) = fixture_runtime_with_models(&interim_model, Some(final_model.as_path()));
+    let server = TestServer::spawn_with(state, Some(runtime));
     let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
     socket.send_text("start").await;
     assert_eq!(socket.recv_json().await["type"], "stream");
     let samples = jfk_samples();
     send_samples(&mut socket, &samples).await;
+    let interim = socket
+        .recv_until(Duration::from_secs(90), |frame| {
+            frame["type"] == "interim"
+                && frame["tentative"]
+                    .as_str()
+                    .is_some_and(|text| text.to_lowercase().contains("country"))
+        })
+        .await;
+    assert!(
+        !interim["tentative"]
+            .as_str()
+            .expect("interim tentative text is a string")
+            .to_lowercase()
+            .contains("kingdom"),
+        "the provisional transcript comes from the unmodified interim worker"
+    );
     send_pcm(&mut socket, 3 * 16_000).await;
-    let committed = wait_for_committed(&mut socket).await;
+    let committed = wait_for_committed(&mut socket, "kingdom").await;
+    assert!(
+        !committed.to_lowercase().contains("country"),
+        "the closed segment comes from the vocabulary-distinguished final worker: {committed:?}"
+    );
     send_samples(&mut socket, &samples).await;
     socket.send_text("stop").await;
     let reply = socket
@@ -339,10 +425,39 @@ async fn final_frame_is_the_committed_prefix_plus_the_tail() {
         .strip_prefix(' ')
         .expect("a single space joins the committed prefix and tail");
     assert!(
-        tail.to_lowercase().contains("country"),
-        "the tail contributes its own text: {text:?}"
+        tail.to_lowercase().contains("kingdom") && !tail.to_lowercase().contains("country"),
+        "the tail comes from the vocabulary-distinguished final worker: {text:?}"
     );
     socket.close().await;
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "requires whisper test fixtures (tests/fixtures/)"]
+async fn a_disconnected_client_does_not_break_the_next_final_take() {
+    let server = fixture_server(true);
+    let mut abandoned = JsonSocket::connect(&server.ws_url("/stt")).await;
+    abandoned.send_text("start").await;
+    assert_eq!(abandoned.recv_json().await["type"], "stream");
+    send_samples(&mut abandoned, &jfk_samples()).await;
+    send_pcm(&mut abandoned, 3 * SAMPLE_RATE).await;
+    abandoned.close().await;
+
+    let mut survivor = JsonSocket::connect(&server.ws_url("/stt")).await;
+    survivor.send_text("start").await;
+    assert_eq!(survivor.recv_json().await["type"], "stream");
+    send_samples(&mut survivor, &jfk_samples()).await;
+    survivor.send_text("stop").await;
+    let reply = survivor
+        .recv_until(Duration::from_secs(180), |frame| frame["type"] == "final")
+        .await;
+    let text = reply["text"].as_str().expect("final text is a string");
+    assert!(
+        text.to_lowercase().contains("country"),
+        "a dropped completion receiver does not poison the shared final worker: {text:?}"
+    );
+    survivor.close().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
@@ -354,7 +469,7 @@ async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
     assert_eq!(socket.recv_json().await["type"], "stream");
     send_samples(&mut socket, &jfk_samples()).await;
     send_pcm(&mut socket, 3 * 16_000).await;
-    let committed = wait_for_committed(&mut socket).await;
+    let committed = wait_for_committed(&mut socket, "country").await;
     socket.send_text("stop").await;
     let reply = socket
         .recv_until(Duration::from_secs(180), |frame| frame["type"] == "final")

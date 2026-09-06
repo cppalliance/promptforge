@@ -3,4 +3,5 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-mod stt;
+mod batch;
+mod legacy_stream;
