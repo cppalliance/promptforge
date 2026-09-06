@@ -91,6 +91,22 @@ impl AudioBuffer {
     }
 
     pub(super) fn commit(&mut self) -> Result<CommittedAudio, AudioError> {
+        self.validate_commit()?;
+        Ok(self.commit_validated())
+    }
+
+    pub(super) fn commit_validated(&mut self) -> CommittedAudio {
+        self.resampler.flush();
+        let samples = std::mem::take(&mut self.resampler.output);
+        let input_samples = self.input_samples;
+        self.clear();
+        CommittedAudio {
+            samples,
+            input_samples,
+        }
+    }
+
+    pub(super) fn validate_commit(&self) -> Result<(), AudioError> {
         if self.odd_byte.is_some() {
             return Err(AudioError::IncompletePcm16Sample);
         }
@@ -99,15 +115,7 @@ impl AudioBuffer {
                 minimum_ms: MIN_COMMIT_MILLISECONDS,
             });
         }
-
-        self.resampler.flush();
-        let samples = std::mem::take(&mut self.resampler.output);
-        let input_samples = self.input_samples;
-        self.clear();
-        Ok(CommittedAudio {
-            samples,
-            input_samples,
-        })
+        Ok(())
     }
 
     pub(super) fn clear(&mut self) {

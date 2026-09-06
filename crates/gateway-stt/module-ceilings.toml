@@ -5,30 +5,30 @@
 public_root_budget = 9
 
 [migration_targets."api.rs"]
-target_step = "Step 17"
+target_step = "Step 18"
 destination = "batch.rs"
 
 [migration_targets."runtime.rs"]
-target_step = "Step 17"
+target_step = "Step 18"
 destination = "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
 
 [migration_targets."stt.rs"]
-target_step = "Step 28"
+target_step = "Step 29"
 destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
-
-[migration_targets."take.rs"]
-target_step = "Step 16"
-destination = "independent committed-item finalization"
 
 [modules]
 "api.rs" = 625
-"audio.rs" = 390
+"audio.rs" = 397
 "lib.rs" = 30
-"realtime/mod.rs" = 10
-"realtime/input.rs" = 160
+"realtime/mod.rs" = 16
+"realtime/input.rs" = 198
+"realtime/item.rs" = 157
 "realtime/query.rs" = 70
-"realtime/registry.rs" = 180
-"realtime/session.rs" = 409
+"realtime/registry.rs" = 200
+"realtime/result_mailbox.rs" = 207
+"realtime/session.rs" = 438
+"realtime/session/items.rs" = 134
+"realtime/session/state.rs" = 83
 "realtime/wire.rs" = 24
 "realtime/wire/client.rs" = 363
 "realtime/wire/server.rs" = 389
@@ -37,5 +37,9 @@ destination = "independent committed-item finalization"
 "runtime.rs" = 459
 "segment.rs" = 239
 "stt.rs" = 733
-"take.rs" = 677
-"test_fixtures.rs" = 271
+"take.rs" = 420
+"take/agreement.rs" = 116
+"take/finalization.rs" = 175
+"take/state.rs" = 82
+"take/text.rs" = 10
+"test_fixtures.rs" = 470

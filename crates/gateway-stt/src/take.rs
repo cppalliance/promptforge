@@ -1,189 +1,26 @@
 //! Per-take speech state and finalization ownership.
 
-use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 
-use gateway_stt_engine::{SttEngine, TranscribeError};
-use tokio::sync::{mpsc, oneshot};
+use gateway_stt_engine::SttEngine;
+#[cfg(test)]
+use gateway_stt_engine::TranscribeError;
 
-use crate::segment::Segmenter;
+mod agreement;
+mod finalization;
+mod state;
+mod text;
 
-#[derive(Debug, PartialEq, Eq)]
-struct AgreementSnapshot {
-    agreed: String,
-    tentative: String,
-}
-
-#[derive(Debug, Default)]
-struct LocalAgreement {
-    previous: String,
-}
-
-impl LocalAgreement {
-    fn observe(&mut self, hypothesis: &str) -> AgreementSnapshot {
-        let agreed_end = if self.previous.is_empty() {
-            0
-        } else {
-            matching_token_prefix_end(&self.previous, hypothesis)
-        };
-        self.previous.clear();
-        self.previous.push_str(hypothesis);
-        AgreementSnapshot {
-            agreed: hypothesis[..agreed_end].to_owned(),
-            tentative: hypothesis[agreed_end..].to_owned(),
-        }
-    }
-}
-
-fn matching_token_prefix_end(previous: &str, current: &str) -> usize {
-    let previous = token_spans(previous);
-    let current = token_spans(current);
-    previous
-        .iter()
-        .zip(&current)
-        .take_while(|((left, _, _), (right, _, _))| left == right)
-        .map(|(_, (_, _, end))| *end)
-        .last()
-        .unwrap_or(0)
-}
-
-fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
-    let mut tokens = Vec::new();
-    let mut start = None;
-    for (index, character) in text
-        .char_indices()
-        .chain(std::iter::once((text.len(), ' ')))
-    {
-        match (start, character.is_whitespace()) {
-            (None, false) => start = Some(index),
-            (Some(begin), true) => {
-                tokens.push((&text[begin..index], begin, index));
-                start = None;
-            }
-            _ => {}
-        }
-    }
-    tokens
-}
-
-fn after_token_prefix(text: &str, tokens: usize) -> &str {
-    if tokens == 0 {
-        return text;
-    }
-    token_spans(text)
-        .get(tokens - 1)
-        .map_or("", |(_, _, end)| &text[*end..])
-}
-
-fn append_transcript(text: &mut String, piece: &str) {
-    if piece.is_empty() {
-        return;
-    }
-    if !text.is_empty() {
-        text.push(' ');
-    }
-    text.push_str(piece);
-}
+#[cfg(test)]
+use agreement::LocalAgreement;
+#[cfg(test)]
+use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, reserve_segment, run_final_pipeline};
+use finalization::{FinalPipeline, spawn_final_pipeline};
+use state::TakeState;
+use text::append_transcript;
 
 fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
-}
-
-#[derive(Debug, Default)]
-struct FinalizedState {
-    text: String,
-    failure: Option<String>,
-    samples: usize,
-}
-
-#[derive(Debug, Default)]
-struct InterimState {
-    agreement: LocalAgreement,
-    promoted: String,
-    agreement_finalized: String,
-    committed: String,
-    last_committed: String,
-    last_tentative: String,
-    finalized_at_last_speech: String,
-}
-
-#[derive(Debug, Default)]
-struct TakeState {
-    buffer: Mutex<Vec<f32>>,
-    segmenter: Mutex<Segmenter>,
-    finalized: Mutex<FinalizedState>,
-    interim: Mutex<InterimState>,
-}
-
-impl TakeState {
-    fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-        mutex.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn finalized(&self) -> String {
-        Self::lock(&self.finalized).text.clone()
-    }
-
-    fn record_finalized(&self, result: Result<String, TranscribeError>, samples: Option<usize>) {
-        let mut state = Self::lock(&self.finalized);
-        match result {
-            Ok(text) if state.failure.is_none() => {
-                append_transcript(&mut state.text, &text);
-                if let Some(samples) = samples {
-                    state.samples = samples;
-                }
-            }
-            Err(error) if state.failure.is_none() => state.failure = Some(error.to_string()),
-            Ok(_) | Err(_) => {}
-        }
-    }
-
-    fn record_failure(&self, failure: String) {
-        let mut state = Self::lock(&self.finalized);
-        if state.failure.is_none() {
-            state.failure = Some(failure);
-        }
-    }
-
-    fn has_failure(&self) -> bool {
-        Self::lock(&self.finalized).failure.is_some()
-    }
-
-    fn finalized_samples(&self) -> usize {
-        Self::lock(&self.finalized).samples
-    }
-
-    fn completion(&self) -> Result<String, String> {
-        let mut state = Self::lock(&self.finalized);
-        match state.failure.take() {
-            Some(failure) => Err(failure),
-            None => Ok(state.text.clone()),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum FinalCommand {
-    Segment {
-        samples: Vec<f32>,
-        end: usize,
-    },
-    Complete {
-        tail: Vec<f32>,
-        reply: oneshot::Sender<Result<String, String>>,
-    },
-}
-
-#[derive(Debug)]
-struct FinalPipeline {
-    commands: mpsc::UnboundedSender<FinalCommand>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Drop for FinalPipeline {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
 }
 
 /// All mutable and immutable state belonging to one speech take.
@@ -222,28 +59,8 @@ impl Take {
     }
 
     pub(crate) fn submit_closed_segments(&self) {
-        let Some(pipeline) = &self.final_pipeline else {
-            return;
-        };
-        loop {
-            let segment = {
-                let buffer = TakeState::lock(&self.state.buffer);
-                TakeState::lock(&self.state.segmenter)
-                    .poll(&buffer)
-                    .map(|range| (buffer[range.clone()].to_vec(), range.end))
-            };
-            let Some((samples, end)) = segment else {
-                break;
-            };
-            if pipeline
-                .commands
-                .send(FinalCommand::Segment { samples, end })
-                .is_err()
-            {
-                self.state
-                    .record_failure("final transcription pipeline exited".to_owned());
-                break;
-            }
+        if let Some(pipeline) = &self.final_pipeline {
+            pipeline.submit_closed_segments(&self.state);
         }
     }
 
@@ -287,137 +104,42 @@ impl Take {
         self.state.record_finalized(result, None);
     }
 
-    #[cfg(test)]
-    fn record_failure(&self, failure: impl Into<String>) {
+    pub(crate) fn record_failure(&self, failure: impl Into<String>) {
         self.state.record_failure(failure.into());
+    }
+
+    pub(crate) fn pending_failure(&self) -> Option<String> {
+        self.state.pending_failure()
+    }
+
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(crate) fn pending_final_segments(&self) -> usize {
+        self.final_pipeline
+            .as_ref()
+            .map_or(0, FinalPipeline::pending_segments)
     }
 
     #[cfg(test)]
     fn take_failure(&self) -> Option<String> {
-        TakeState::lock(&self.state.finalized).failure.take()
+        self.state.take_failure()
     }
 
     pub(crate) fn next_interim(&self, hypothesis: &str) -> Option<(String, String)> {
         let finalized = self.finalized();
-        let mut state = TakeState::lock(&self.state.interim);
-        if state.agreement_finalized != finalized {
-            let finalized_delta = finalized
-                .strip_prefix(&state.agreement_finalized)
-                .unwrap_or_default();
-            let unpromoted =
-                after_token_prefix(finalized_delta, token_spans(&state.promoted).len());
-            append_transcript(&mut state.committed, unpromoted.trim());
-            state.agreement = LocalAgreement::default();
-            state.promoted.clear();
-            state.agreement_finalized.clone_from(&finalized);
-        }
-        let suffix_start = matching_token_prefix_end(&state.promoted, hypothesis);
-        let suffix = hypothesis[suffix_start..].trim_start();
-        let agreement = state.agreement.observe(suffix);
-        let tentative = agreement.tentative.trim_start().to_owned();
-        state.agreement.previous.clone_from(&tentative);
-        let promoted = agreement.agreed.trim();
-        append_transcript(&mut state.promoted, promoted);
-        append_transcript(&mut state.committed, promoted);
-        if !hypothesis.is_empty() {
-            state.finalized_at_last_speech.clone_from(&finalized);
-        } else if finalized.len() <= state.finalized_at_last_speech.len() {
-            return None;
-        }
-        let committed = state.committed.clone();
-        if committed == state.last_committed && tentative == state.last_tentative {
-            return None;
-        }
-        state.last_committed.clone_from(&committed);
-        state.last_tentative.clone_from(&tentative);
-        Some((committed, tentative))
+        TakeState::lock(&self.state.interim).next(&finalized, hypothesis)
+    }
+
+    pub(crate) fn finalization(&self) -> Option<finalization::TakeFinalization> {
+        let pipeline = self.final_pipeline.as_ref()?;
+        let consumed = self.consumed();
+        let buffer = TakeState::lock(&self.state.buffer);
+        let tail = buffer[consumed.min(buffer.len())..].to_vec();
+        Some(pipeline.finalization(tail))
     }
 
     pub(crate) async fn complete(&self) -> Option<Result<String, String>> {
-        let pipeline = self.final_pipeline.as_ref()?;
-        let tail = {
-            let consumed = self.consumed();
-            let buffer = TakeState::lock(&self.state.buffer);
-            buffer[consumed.min(buffer.len())..].to_vec()
-        };
-        let (reply, reply_rx) = oneshot::channel();
-        if pipeline
-            .commands
-            .send(FinalCommand::Complete { tail, reply })
-            .is_err()
-        {
-            return Some(Err("final transcription pipeline exited".to_owned()));
-        }
-        Some(
-            reply_rx
-                .await
-                .unwrap_or_else(|_| Err("final transcription pipeline exited".to_owned())),
-        )
+        Some(self.finalization()?.await)
     }
-}
-
-fn spawn_final_pipeline(
-    engine: Arc<SttEngine>,
-    guidance: Arc<[String]>,
-    state: Arc<TakeState>,
-) -> FinalPipeline {
-    let (commands, receiver) = mpsc::unbounded_channel();
-    let task = tokio::spawn(run_final_pipeline(
-        receiver,
-        guidance,
-        state,
-        move |samples, guidance, finalized| {
-            let engine = Arc::clone(&engine);
-            async move {
-                if !engine.has_final_pass() {
-                    return None;
-                }
-                Some(
-                    engine
-                        .decode(gateway_stt_engine::DecodeRequest::new(
-                            gateway_stt_engine::DecodeMode::Final,
-                            samples,
-                            guidance,
-                            finalized,
-                        ))
-                        .await,
-                )
-            }
-        },
-    ));
-    FinalPipeline { commands, task }
-}
-
-async fn run_final_pipeline<D, F>(
-    mut receiver: mpsc::UnboundedReceiver<FinalCommand>,
-    guidance: Arc<[String]>,
-    state: Arc<TakeState>,
-    mut decode: D,
-) where
-    D: FnMut(Vec<f32>, Vec<String>, String) -> F,
-    F: Future<Output = Option<Result<String, TranscribeError>>>,
-{
-    while let Some(command) = receiver.recv().await {
-        let (samples, finalized_samples, completion) = match command {
-            FinalCommand::Segment { samples, end } => (samples, Some(end), None),
-            FinalCommand::Complete { tail, reply } => (tail, None, Some(reply)),
-        };
-        if !state.has_failure() {
-            let finalized = state.finalized();
-            match decode(samples, guidance.to_vec(), finalized).await {
-                Some(result) => state.record_finalized(result, finalized_samples),
-                None => {
-                    state.record_failure("final transcription worker is unavailable".to_owned());
-                }
-            }
-        }
-        if let Some(reply) = completion {
-            let _ = reply.send(state.completion());
-            break;
-        }
-    }
-    drop(guidance);
-    drop(state);
 }
 
 #[cfg(test)]
@@ -428,7 +150,20 @@ mod tests {
 
     use tokio::sync::{mpsc, oneshot};
 
-    use super::{FinalCommand, LocalAgreement, Take, run_final_pipeline};
+    use super::{FinalCommand, LocalAgreement, Take, reserve_segment, run_final_pipeline};
+
+    #[test]
+    fn miri_final_segment_reservation_is_exact() {
+        let pending = AtomicUsize::new(0);
+        for _ in 0..super::FINAL_SEGMENT_CAPACITY {
+            assert!(reserve_segment(&pending));
+        }
+        assert!(!reserve_segment(&pending));
+        assert_eq!(
+            pending.load(Ordering::Acquire),
+            super::FINAL_SEGMENT_CAPACITY
+        );
+    }
 
     #[test]
     fn tail_returns_the_trailing_window() {
@@ -572,13 +307,14 @@ mod tests {
             .concat(),
         );
 
-        let (commands, receiver) = mpsc::unbounded_channel();
+        let (commands, receiver) = mpsc::channel(super::FINAL_SEGMENT_CAPACITY);
         let calls = Arc::new(AtomicUsize::new(0));
         let decode_calls = Arc::clone(&calls);
         let task = tokio::spawn(run_final_pipeline(
             receiver,
             Arc::from([]),
             Arc::clone(&take.state),
+            Arc::new(AtomicUsize::new(3)),
             move |_, _, _| {
                 let call = decode_calls.fetch_add(1, Ordering::SeqCst);
                 async move {
@@ -595,18 +331,21 @@ mod tests {
                 samples: successful,
                 end: 4,
             })
+            .await
             .expect("the successful segment queues");
         commands
             .send(FinalCommand::Segment {
                 samples: failed.clone(),
                 end: 7,
             })
+            .await
             .expect("the failed segment queues");
         commands
             .send(FinalCommand::Segment {
                 samples: skipped.clone(),
                 end: 9,
             })
+            .await
             .expect("the skipped segment queues");
         let (reply, completion) = oneshot::channel();
         commands
@@ -614,6 +353,7 @@ mod tests {
                 tail: tail.clone(),
                 reply,
             })
+            .await
             .expect("completion queues");
 
         assert!(
@@ -635,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn completed_pipeline_releases_its_retained_dependency() {
-        let (commands, receiver) = mpsc::unbounded_channel();
+        let (commands, receiver) = mpsc::channel(super::FINAL_SEGMENT_CAPACITY);
         let state = Arc::new(super::TakeState::default());
         let retained = Arc::new(());
         let weak: Weak<()> = Arc::downgrade(&retained);
@@ -644,6 +384,7 @@ mod tests {
             receiver,
             Arc::from([]),
             state,
+            Arc::new(AtomicUsize::new(0)),
             move |_, _, _| {
                 let retained = Arc::clone(&pipeline_retained);
                 async move {
@@ -659,6 +400,7 @@ mod tests {
                 tail: Vec::new(),
                 reply,
             })
+            .await
             .expect("completion queues");
 
         assert_eq!(

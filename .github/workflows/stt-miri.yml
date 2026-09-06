@@ -37,9 +37,10 @@ jobs:
       - name: Check pure STT worker ownership and queues
         run: cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_
 
-      # Session filters cover only registry, immutable input ownership, audio
-      # state, and epoch transitions. Socket and spawned-task tests stay native.
-      - name: Check pure STT session ownership
+      # Session filters cover registry, immutable input and committed-item
+      # ownership, result and final-segment bounds, audio state, and epochs.
+      # Socket and spawned-task tests stay native.
+      - name: Check pure STT session and item ownership
         run: cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_
 
   native-whisper:

@@ -11,11 +11,13 @@ pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactor
 #[cfg(feature = "test-fixtures")]
 use crate::SttRuntime;
 #[cfg(feature = "test-fixtures")]
-use crate::realtime::{InterimEpoch, Session, SessionRegistry};
+use crate::realtime::{CommitReceipt, InterimEpoch, ItemResult, Session, SessionRegistry};
 #[cfg(feature = "test-fixtures")]
 use gateway_stt_engine::{EnginePolicy, SttEngine, TranscribeError};
 #[cfg(feature = "test-fixtures")]
 use std::future::Future;
+#[cfg(feature = "test-fixtures")]
+use std::sync::Arc;
 
 /// Builds a speech runtime around deterministic scripted workers.
 ///
@@ -59,10 +61,33 @@ impl RealtimeSessionRegistryFixture {
         })
     }
 
+    /// Registers one session backed by deterministic scripted workers.
+    ///
+    /// # Errors
+    /// Returns a stable registration, policy, or worker startup error.
+    pub fn register_with_scripted_engine(
+        &self,
+        factory: ScriptedModelFactory,
+    ) -> Result<RealtimeSessionFixture, String> {
+        let registration = self.inner.register().map_err(|error| error.to_string())?;
+        let policy = EnginePolicy::new(15, 500, factory.gpu_available())
+            .map_err(|error| error.to_string())?;
+        let engine = SttEngine::new(factory, policy).map_err(|error| error.to_string())?;
+        Ok(RealtimeSessionFixture {
+            session: Session::new(registration, Some(Arc::new(engine))),
+        })
+    }
+
     /// Returns active and still-retiring session ownership.
     #[must_use]
     pub fn active(&self) -> usize {
         self.inner.active()
+    }
+
+    /// Returns owned admission without polling retiring task destructors.
+    #[must_use]
+    pub fn owned_without_reaping(&self) -> usize {
+        self.inner.owned_without_reaping()
     }
 }
 
@@ -78,6 +103,26 @@ pub struct RealtimeInputSnapshotFixture {
     item_id: String,
     prompt: String,
     include_hypothesis: bool,
+}
+
+/// The IDs established by one successful fixture commit.
+#[cfg(feature = "test-fixtures")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RealtimeCommitFixture(CommitReceipt);
+
+#[cfg(feature = "test-fixtures")]
+impl RealtimeCommitFixture {
+    /// Returns the promoted provisional item ID.
+    #[must_use]
+    pub fn item_id(&self) -> &str {
+        self.0.item_id()
+    }
+
+    /// Returns the preceding durable committed-item ID.
+    #[must_use]
+    pub fn previous_item_id(&self) -> Option<&str> {
+        self.0.previous_item_id()
+    }
 }
 
 #[cfg(feature = "test-fixtures")]
@@ -156,6 +201,121 @@ impl RealtimeSessionFixture {
             .map(|input| input.take().uncommitted_snapshot(usize::MAX))
     }
 
+    /// Commits the current input after reserving all item capacities.
+    ///
+    /// # Errors
+    /// Returns validation or bounded-capacity failures without detaching input.
+    pub fn commit(&mut self) -> Result<RealtimeCommitFixture, String> {
+        self.session
+            .commit()
+            .map(RealtimeCommitFixture)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Records a final-segment failure before commit.
+    ///
+    /// # Errors
+    /// Returns an error when there is no uncommitted input.
+    pub fn fail_precommit(&mut self, failure: &str) -> Result<(), String> {
+        self.session
+            .record_pending_failure(failure.to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Adds one accepted nonterminal result to bounded session capacity.
+    ///
+    /// # Errors
+    /// Returns item-state or capacity errors.
+    pub fn push_delta(&mut self, item_id: &str, transcript: &str) -> Result<(), String> {
+        self.session
+            .push_delta(item_id, transcript.to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Replaces the item's newest-wins hypothesis slot.
+    ///
+    /// # Errors
+    /// Returns item-state errors.
+    pub fn replace_hypothesis(
+        &mut self,
+        item_id: &str,
+        revision: u64,
+        transcript: &str,
+    ) -> Result<(), String> {
+        self.session
+            .replace_hypothesis(item_id, revision, transcript.to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Records the item's sole successful terminal outcome.
+    ///
+    /// # Errors
+    /// Returns item-state errors, including duplicate terminal attempts.
+    pub fn finalize_completed(&mut self, item_id: &str, transcript: &str) -> Result<(), String> {
+        self.session
+            .finalize_completed(item_id, transcript.to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Records the item's sole failed terminal outcome.
+    ///
+    /// # Errors
+    /// Returns item-state errors, including duplicate terminal attempts.
+    pub fn finalize_failed(&mut self, item_id: &str, message: &str) -> Result<(), String> {
+        self.session
+            .finalize_failed(item_id, message.to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Drains bounded results and releases terminal item ownership.
+    pub fn drain_results(&mut self) -> Vec<serde_json::Value> {
+        self.session
+            .drain_results()
+            .into_iter()
+            .map(result_value)
+            .collect()
+    }
+
+    /// Returns committed items, including terminal events awaiting drain.
+    #[must_use]
+    pub fn committed_count(&self) -> usize {
+        self.session.committed_count()
+    }
+
+    /// Returns committed items with active accurate finalization tasks.
+    #[must_use]
+    pub fn finalizing_count(&self) -> usize {
+        self.session.finalizing_count()
+    }
+
+    /// Returns the committed immutable prompt and take guidance.
+    pub fn committed_prompt_and_guidance(&self, item_id: &str) -> Option<(String, Vec<String>)> {
+        self.session
+            .committed_prompt_and_guidance(item_id)
+            .map(|(prompt, guidance)| (prompt.to_owned(), guidance.to_vec()))
+    }
+
+    /// Returns the sole take-owned pending precommit failure.
+    pub fn pending_failure(&self) -> Option<String> {
+        self.session.pending_failure()
+    }
+
+    /// Returns final segments admitted by the current take but not yet processed.
+    pub fn pending_final_segments(&self) -> Option<usize> {
+        self.session.pending_final_segments()
+    }
+
+    /// Awaits one item's independently owned accurate finalization.
+    ///
+    /// # Errors
+    /// Returns item-state, task, decode, or result-mailbox errors.
+    pub async fn finish_finalization(&mut self, item_id: &str) -> Result<(), String> {
+        self.session
+            .finish_finalization(item_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Begins an interim epoch without spawning work.
     ///
     /// # Errors
@@ -229,6 +389,45 @@ impl RealtimeSessionFixture {
     /// Returns the number of allocated server event IDs.
     pub fn allocated_event_count(&self) -> u64 {
         self.session.allocated_event_count()
+    }
+}
+
+#[cfg(feature = "test-fixtures")]
+fn result_value(result: ItemResult) -> serde_json::Value {
+    match result {
+        ItemResult::Delta {
+            item_id,
+            transcript,
+        } => serde_json::json!({
+            "type": "delta",
+            "item_id": item_id,
+            "transcript": transcript,
+        }),
+        ItemResult::Hypothesis {
+            item_id,
+            revision,
+            transcript,
+        } => serde_json::json!({
+            "type": "hypothesis",
+            "item_id": item_id,
+            "revision": revision,
+            "transcript": transcript,
+        }),
+        ItemResult::Completed {
+            item_id,
+            transcript,
+            seconds,
+        } => serde_json::json!({
+            "type": "completed",
+            "item_id": item_id,
+            "transcript": transcript,
+            "seconds": seconds,
+        }),
+        ItemResult::Failed { item_id, message } => serde_json::json!({
+            "type": "failed",
+            "item_id": item_id,
+            "message": message,
+        }),
     }
 }
 

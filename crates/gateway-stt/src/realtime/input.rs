@@ -58,6 +58,14 @@ pub(crate) struct UncommittedInput {
     take: Take,
 }
 
+#[derive(Debug)]
+pub(crate) struct SealedInput {
+    pub(crate) item_id: String,
+    pub(crate) snapshot: InputSnapshot,
+    pub(crate) take: Take,
+    pub(crate) duration_seconds: f64,
+}
+
 impl UncommittedInput {
     pub(crate) fn new(
         item_id: String,
@@ -91,17 +99,19 @@ impl UncommittedInput {
         };
         let take = Take::new(guidance, engine);
         take.append(&audio.take_resampled());
-        Self {
+        let mut input = Self {
             item_id,
             snapshot,
             audio,
             take,
-        }
+        };
+        input.submit_resampled();
+        input
     }
 
     pub(crate) fn append_base64(&mut self, payload: &str) -> Result<(), AudioError> {
         self.audio.append_base64(payload)?;
-        self.take.append(&self.audio.take_resampled());
+        self.submit_resampled();
         Ok(())
     }
 
@@ -119,6 +129,34 @@ impl UncommittedInput {
 
     pub(crate) fn buffered_duration_seconds(&self) -> f64 {
         self.audio.buffered_duration_seconds()
+    }
+
+    pub(crate) fn pending_failure(&self) -> Option<String> {
+        self.take.pending_failure()
+    }
+
+    pub(crate) fn record_pending_failure(&mut self, failure: String) {
+        self.take.record_failure(failure);
+    }
+
+    pub(crate) fn validate_commit(&self) -> Result<(), AudioError> {
+        self.audio.validate_commit()
+    }
+
+    pub(crate) fn seal(mut self) -> SealedInput {
+        let committed = self.audio.commit_validated();
+        self.take.append(committed.samples());
+        SealedInput {
+            item_id: self.item_id,
+            snapshot: self.snapshot,
+            take: self.take,
+            duration_seconds: committed.duration_seconds(),
+        }
+    }
+
+    fn submit_resampled(&mut self) {
+        self.take.append(&self.audio.take_resampled());
+        self.take.submit_closed_segments();
     }
 }
 

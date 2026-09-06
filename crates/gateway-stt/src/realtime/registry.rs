@@ -96,6 +96,14 @@ impl SessionRegistry {
         state.reap_retired();
         state.active
     }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn owned_without_reaping(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .active
+    }
 }
 
 #[derive(Debug)]
@@ -104,14 +112,21 @@ pub(crate) struct SessionRegistration {
 }
 
 impl SessionRegistration {
-    pub(crate) fn retire<T>(&mut self, mut tasks: Vec<JoinHandle<T>>)
-    where
+    pub(crate) fn retire<T, U>(
+        &mut self,
+        mut interim_tasks: Vec<JoinHandle<T>>,
+        mut finalization_tasks: Vec<JoinHandle<U>>,
+    ) where
         T: Send + 'static,
+        U: Send + 'static,
     {
-        for task in &tasks {
+        for task in &interim_tasks {
             task.abort();
         }
-        if tasks.is_empty() {
+        for task in &finalization_tasks {
+            task.abort();
+        }
+        if interim_tasks.is_empty() && finalization_tasks.is_empty() {
             return;
         }
         let Some(state) = self.state.take() else {
@@ -122,9 +137,14 @@ impl SessionRegistration {
             .unwrap_or_else(PoisonError::into_inner)
             .retiring
             .push(RetiringSession {
-                tasks: tasks
+                tasks: interim_tasks
                     .drain(..)
                     .map(|task| Box::new(task) as Box<dyn RetiredTask>)
+                    .chain(
+                        finalization_tasks
+                            .drain(..)
+                            .map(|task| Box::new(task) as Box<dyn RetiredTask>),
+                    )
                     .collect(),
             });
         // The registry keeps this admission occupied until reap_retired

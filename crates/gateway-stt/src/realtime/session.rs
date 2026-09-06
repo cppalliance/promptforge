@@ -2,63 +2,25 @@ use std::future::Future;
 use std::sync::Arc;
 
 use gateway_stt_engine::SttEngine;
-use tokio::task::JoinHandle;
 
 use super::input::{InputSnapshot, UncommittedInput};
+use super::item::CommittedItem;
 use super::registry::SessionRegistration;
 use super::wire::{ClientError, EffectiveSession, IdGenerator, ServerEvent};
-use crate::audio::AudioError;
 
-pub(crate) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
-type InterimTask = JoinHandle<(InterimEpoch, String)>;
+mod items;
+mod state;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct InterimEpoch(u64);
-
-#[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum SessionError {
-    #[error(transparent)]
-    Audio(#[from] AudioError),
-    #[error("the canceled interim task join capacity is reached")]
-    CancelJoinAtCapacity,
-    #[error("the interim epoch space is exhausted")]
-    EpochExhausted,
-    #[error("a canceled interim task failed while joining")]
-    CanceledTaskFailed,
-    #[error("there is no uncommitted input")]
-    NoInput,
-}
-
-#[derive(Debug)]
-pub(crate) struct Session {
-    registration: Option<SessionRegistration>,
-    engine: Option<Arc<SttEngine>>,
-    ids: IdGenerator,
-    effective: EffectiveSession,
-    input: Option<UncommittedInput>,
-    current_epoch: Option<InterimEpoch>,
-    next_epoch: u64,
-    interim_task: Option<InterimTask>,
-    canceled_tasks: Vec<InterimTask>,
-    canceled_task_failed: bool,
-}
+#[cfg(test)]
+use state::MAX_COMMITTED_ITEMS_PER_SESSION;
+use state::SESSION_CANCEL_JOIN_CAPACITY;
+pub(crate) use state::{InterimEpoch, Session, SessionError};
 
 impl Session {
     pub(crate) fn new(registration: SessionRegistration, engine: Option<Arc<SttEngine>>) -> Self {
         let ids = IdGenerator::default();
         let effective = EffectiveSession::new(ids.session());
-        Self {
-            registration: Some(registration),
-            engine,
-            ids,
-            effective,
-            input: None,
-            current_epoch: None,
-            next_epoch: 1,
-            interim_task: None,
-            canceled_tasks: Vec::with_capacity(SESSION_CANCEL_JOIN_CAPACITY),
-            canceled_task_failed: false,
-        }
+        Self::empty(registration, engine, ids, effective)
     }
 
     pub(crate) fn update_text(&mut self, text: &str) -> Result<(), ClientError> {
@@ -67,6 +29,9 @@ impl Session {
 
     pub(crate) fn append_base64(&mut self, payload: &str) -> Result<(), SessionError> {
         if let Some(input) = &mut self.input {
+            if let Some(failure) = input.pending_failure() {
+                return Err(SessionError::PendingPrecommitFailure(failure));
+            }
             return input.append_base64(payload).map_err(SessionError::from);
         }
 
@@ -165,6 +130,26 @@ impl Session {
         self.canceled_tasks.len()
     }
 
+    pub(crate) fn record_pending_failure(&mut self, failure: String) -> Result<(), SessionError> {
+        let input = self.input.as_mut().ok_or(SessionError::NoInput)?;
+        input.record_pending_failure(failure);
+        Ok(())
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn pending_failure(&self) -> Option<String> {
+        self.input
+            .as_ref()
+            .and_then(UncommittedInput::pending_failure)
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn pending_final_segments(&self) -> Option<usize> {
+        self.input
+            .as_ref()
+            .map(|input| input.take().pending_final_segments())
+    }
+
     #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn allocated_event_count(&self) -> u64 {
         self.ids.event_count()
@@ -198,13 +183,18 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let mut tasks = Vec::with_capacity(self.canceled_tasks.len() + 1);
+        let mut interim_tasks = Vec::with_capacity(self.canceled_tasks.len() + 1);
         if let Some(task) = self.interim_task.take() {
-            tasks.push(task);
+            interim_tasks.push(task);
         }
-        tasks.append(&mut self.canceled_tasks);
+        interim_tasks.append(&mut self.canceled_tasks);
+        let finalization_tasks = self
+            .committed
+            .values_mut()
+            .filter_map(CommittedItem::take_finalization)
+            .collect();
         if let Some(mut registration) = self.registration.take() {
-            registration.retire(tasks);
+            registration.retire(interim_tasks, finalization_tasks);
         }
     }
 }
@@ -215,7 +205,9 @@ mod tests {
 
     use base64::Engine as _;
 
-    use super::{SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError};
+    use super::{
+        MAX_COMMITTED_ITEMS_PER_SESSION, SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError,
+    };
     use crate::realtime::registry::SessionRegistry;
 
     fn encoded(samples: &[i16]) -> String {
@@ -344,6 +336,44 @@ mod tests {
                 .accept_interim(current, "current".to_owned())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn miri_commit_reserves_capacity_promotes_ids_and_keeps_lineage() {
+        let mut session = session();
+        let mut previous = None;
+        let mut committed = Vec::new();
+        for _ in 0..MAX_COMMITTED_ITEMS_PER_SESSION {
+            session
+                .append_base64(&encoded(&vec![0; 2_400]))
+                .expect("committable input appends");
+            let provisional = session.input().expect("input exists").item_id().to_owned();
+            let receipt = session.commit().expect("item commits within capacity");
+            assert_eq!(receipt.item_id(), provisional);
+            assert_eq!(receipt.previous_item_id(), previous.as_deref());
+            previous = Some(provisional.clone());
+            committed.push(provisional);
+        }
+
+        session
+            .append_base64(&encoded(&vec![0; 2_400]))
+            .expect("retry input appends");
+        let retry_id = session
+            .input()
+            .expect("retry input exists")
+            .item_id()
+            .to_owned();
+        assert_eq!(
+            session.commit(),
+            Err(SessionError::CommittedItemsAtCapacity)
+        );
+        assert_eq!(session.input().expect("input remains").item_id(), retry_id);
+
+        session
+            .finalize_completed(&committed[0], "done".to_owned())
+            .expect("item finalizes");
+        session.drain_results();
+        assert_eq!(session.commit().expect("retry commits").item_id(), retry_id);
     }
 
     #[tokio::test]
