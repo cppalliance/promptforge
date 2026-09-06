@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use gateway_stt_engine::{SttEngine, TranscribeError, tail};
+use gateway_stt_engine::{SttEngine, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::segment::Segmenter;
@@ -83,6 +83,10 @@ fn append_transcript(text: &mut String, piece: &str) {
         text.push(' ');
     }
     text.push_str(piece);
+}
+
+fn tail(buffer: &[f32], window: usize) -> &[f32] {
+    &buffer[buffer.len().saturating_sub(window)..]
 }
 
 #[derive(Debug, Default)]
@@ -411,6 +415,14 @@ mod tests {
     use tokio::sync::{mpsc, oneshot};
 
     use super::{FinalCommand, LocalAgreement, Take, run_final_pipeline};
+
+    #[test]
+    fn tail_returns_the_trailing_window() {
+        let buffer: Vec<f32> = (0u8..10).map(f32::from).collect();
+        assert_eq!(super::tail(&buffer, 4), &[6.0, 7.0, 8.0, 9.0]);
+        assert_eq!(super::tail(&buffer, 100), &buffer);
+        assert_eq!(super::tail(&[], 4), &[] as &[f32]);
+    }
 
     #[test]
     fn local_agreement_requires_two_hypotheses_and_preserves_whitespace() {

@@ -1,9 +1,7 @@
 # gateway-stt
 
-This crate owns gateway-hosted speech-to-text runtime behavior: artifact provisioning, active-profile engine lifecycle, the `/stt` WebSocket, and the OpenAI-compatible transcription endpoint.
+This crate is the gateway speech facade: artifact provisioning, engine lifecycle, batch transcription, and Realtime behavior.
 
-- Runtime ownership only. Whisper inference primitives stay in `gateway-stt-engine`; artifact download and verification stay in `gateway-local::artifacts::ArtifactStore`.
 - `take::Take` solely owns per-take guidance, finalized history, segmentation, LocalAgreement state, transcript aggregation, completion, and failure.
-- The gateway selects profiles and supplies validated config. This crate provisions only the selected `Config::stt_models()` pair.
-- The whisper.cpp runtime is provisioned through `ArtifactStore` and handed to `gateway-stt-engine` as a path. Native backends are never Cargo features.
+- Artifact download and verification stay in `gateway-local::artifacts::ArtifactStore`.
 - `/stt` keeps its existing wire path and frame contract. OpenAI multipart input is capped at 25 MiB before decode.

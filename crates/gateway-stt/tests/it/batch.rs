@@ -1,14 +1,16 @@
 //! Characterization tests for physical-model batch transcription.
 
 use axum::http::StatusCode;
-use gateway_stt_engine::fixtures::jfk_samples;
 
-use crate::common::{copy_model_replacing_token, fixture_runtime_with_models, transcribe_batch};
+use crate::common::{
+    copy_model_replacing_token, fixture_runtime_with_models, jfk_samples, require_model,
+    transcribe_batch,
+};
 
 #[tokio::test]
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn batch_selects_each_loaded_physical_model_by_name() {
-    let interim_model = gateway_stt_engine::fixtures::require_model();
+    let interim_model = require_model();
     let fixture_dir = tempfile::tempdir().expect("distinct model tempdir");
     let final_model =
         copy_model_replacing_token(&interim_model, fixture_dir.path(), b"country", b"kingdom");

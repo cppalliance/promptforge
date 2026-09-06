@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use gateway_config::{Config, SttRole, WorkshopSttConfig};
+use gateway_config::{Config, SttRole};
 use gateway_local::artifacts::ArtifactStore;
-use gateway_stt_engine::{EngineConfig, SttEngine, SttSlot};
+use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
+use gateway_stt_engine::SttEngine;
 use shared_progress::ProgressHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +20,38 @@ struct LoadedNames {
     interim: Option<String>,
     final_model: Option<String>,
     guidance: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SttSlot {
+    engine: Arc<RwLock<Option<Arc<SttEngine>>>>,
+}
+
+impl SttSlot {
+    fn engine(&self) -> Option<Arc<SttEngine>> {
+        self.engine
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn is_active(&self) -> bool {
+        self.engine
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    fn activate(&self, engine: SttEngine) {
+        *self.engine.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(engine));
+    }
+
+    fn take(&self) -> Option<Arc<SttEngine>> {
+        self.engine
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
 }
 
 /// Shared active STT state used by both gateway HTTP surfaces.
@@ -165,13 +198,15 @@ impl SttRuntime {
             .cloned()
             .unwrap_or_default();
         let guidance = capture.vocabulary().to_vec();
-        let engine_config =
-            engine_config(&capture, library, interim_path, models.final_model.as_ref());
-        let engine = SttEngine::new_with_progress(
-            &engine_config,
+        let backend_config = WhisperConfig::new(
+            library,
+            interim_path,
+            models.final_model.as_ref().map(|(_, path)| path.clone()),
             progress.map(|handle| handle.child("engine", 1.0)),
-        )
-        .map_err(SttRuntimeError::Engine)?;
+        );
+        let factory = WhisperModelFactory::new(backend_config).map_err(SttRuntimeError::Engine)?;
+        let engine = SttEngine::new(factory, capture.window_seconds(), capture.interval_ms())
+            .map_err(SttRuntimeError::Engine)?;
         let final_name = models.final_model.map(|(name, _)| name);
         state.activate(engine, interim_name, final_name, guidance);
         Ok(SttRuntime {
@@ -245,21 +280,6 @@ fn provision_models(
         }
     }
     Ok(provisioned)
-}
-
-fn engine_config(
-    capture: &WorkshopSttConfig,
-    library: PathBuf,
-    interim_model: PathBuf,
-    final_model: Option<&(String, PathBuf)>,
-) -> EngineConfig {
-    EngineConfig {
-        library,
-        interim_model,
-        final_model: final_model.map(|(_, path)| path.clone()),
-        window_seconds: capture.window_seconds(),
-        interval_ms: capture.interval_ms(),
-    }
 }
 
 /// An STT runtime startup failure.
@@ -390,7 +410,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn switch_in_loads_and_switch_out_fully_unloads_the_engine() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let source = gateway_stt_engine::fixtures::require_model()
+        let source = crate::test_fixtures::require_model()
             .display()
             .to_string()
             .replace('\\', "/");

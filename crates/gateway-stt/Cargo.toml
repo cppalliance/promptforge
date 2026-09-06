@@ -16,6 +16,7 @@ hound.workspace = true
 gateway-config.workspace = true
 gateway-local.workspace = true
 shared-progress.workspace = true
+gateway-stt-backend-whisper.workspace = true
 gateway-stt-engine.workspace = true
 workshop-server.workspace = true
 serde.workspace = true
@@ -24,12 +25,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
-[features]
-default = []
-test-fixtures = ["gateway-stt-engine/test-fixtures"]
-
 [dev-dependencies]
-gateway-stt = { path = ".", features = ["test-fixtures"] }
 sha2.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true

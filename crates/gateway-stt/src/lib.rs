@@ -12,6 +12,8 @@ mod runtime;
 mod segment;
 mod stt;
 mod take;
+#[cfg(test)]
+mod test_fixtures;
 
 pub use api::{MAX_AUDIO_BYTES, TranscriptionError, transcribe};
 pub use runtime::{SttRuntime, SttRuntimeError, SttState};

@@ -40,6 +40,7 @@ promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.2.0"
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.2.0" }
 promptforge-tools = { path = "crates/promptforge-tools", version = "0.2.0" }
 gateway-stt-engine = { path = "crates/gateway-stt-engine", version = "0.2.0" }
+gateway-stt-backend-whisper = { path = "crates/gateway-stt-backend-whisper", version = "0.2.0" }
 promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.2.0" }
 gateway-web-search = { path = "crates/gateway-web-search", version = "0.2.0" }
 workshop-server = { path = "crates/workshop-server", version = "0.2.0" }

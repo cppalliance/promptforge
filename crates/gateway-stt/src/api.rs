@@ -564,7 +564,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn verbose_round_trip_accepts_literal_timestamp_granularities_field() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let source = gateway_stt_engine::fixtures::require_model()
+        let source = crate::test_fixtures::require_model()
             .display()
             .to_string()
             .replace('\\', "/");
@@ -584,7 +584,7 @@ mod tests {
             .expect("profile selects");
         let state = SttState::default();
         let runtime = crate::SttRuntime::start(&config, state.clone(), None).expect("engine loads");
-        let samples = gateway_stt_engine::fixtures::jfk_samples();
+        let samples = crate::test_fixtures::jfk_samples();
         let (boundary, body) = multipart_body(
             &wav_f32(&samples),
             &[

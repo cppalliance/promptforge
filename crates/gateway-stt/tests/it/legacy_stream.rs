@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
 use gateway_stt::Segmenter;
-use gateway_stt_engine::fixtures::jfk_samples;
 use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE};
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
@@ -17,8 +16,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use crate::common::{
     JsonSocket, TestServer, copy_model_replacing_token, fixture_runtime,
-    fixture_runtime_with_models, fixture_server, send_pcm, send_samples, send_samples_once,
-    transcribe_batch,
+    fixture_runtime_with_models, fixture_server, jfk_samples, require_model, send_pcm,
+    send_samples, send_samples_once, transcribe_batch,
 };
 
 #[test]
@@ -387,7 +386,7 @@ async fn wait_for_committed(socket: &mut JsonSocket, expected_word: &str) -> Str
 #[tokio::test]
 #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
 async fn final_model_segments_and_tail_are_authoritative_at_stop() {
-    let interim_model = gateway_stt_engine::fixtures::require_model();
+    let interim_model = require_model();
     let fixture_dir = tempfile::tempdir().expect("distinct model tempdir");
     let final_model =
         copy_model_replacing_token(&interim_model, fixture_dir.path(), b"country", b"kingdom");

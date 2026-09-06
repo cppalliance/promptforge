@@ -7,30 +7,11 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Whisper transcription engine: model ownership, stateless decode workers, and silence gating"
+description = "Backend-neutral PromptForge speech decoding workers and audio policy"
 
 [dependencies]
-shared-progress.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tracing.workspace = true
-gateway-whisper-ffi.workspace = true
-# Optional: only the test-fixtures feature decodes the WAV voice fixtures.
-hound = { workspace = true, optional = true }
-
-[features]
-default = []
-# Compiles the crate-internal test fixtures and re-exports them to consumers'
-# integration-test binaries; enabled for every test build by the self
-# dev-dependency below, never by production consumers.
-test-fixtures = ["dep:hound"]
-
-[dev-dependencies]
-# The crate dev-depends on itself so every test target builds the library
-# with test-fixtures enabled, without gate commands needing a --features flag.
-gateway-stt-engine = { path = ".", features = ["test-fixtures"] }
-tempfile.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

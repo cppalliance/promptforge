@@ -134,5 +134,11 @@ N5 | observation | shared-mutable-state @ crates/gateway-stt/src/take.rs::TakeSt
 N6 | observation | oversized-unit @ crates/gateway-stt/src/take.rs: adds a 651-line take module | Move take ownership into gateway STT
 N7 | observation | oversized-unit @ crates/gateway-stt/tests/common/mod.rs: adds bounded shutdown logic to an already oversized test support module | Move take ownership into gateway STT
 N8 | observation | oversized-unit @ crates/gateway-stt/tests/it/legacy_stream.rs: adds explicit shutdown calls to an already oversized integration suite | Move take ownership into gateway STT
-N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT
+N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT; Separate Whisper from the STT engine
 N10 | observation | Violates A96 @ crates/gateway-stt/src/api.rs: not determinable from diff | Move take ownership into gateway STT
+N11 | observation | flag-parameter @ crates/gateway-stt-backend-whisper/src/model.rs::WhisperDecoder::load: selects interim or final decode policy through final_pass | Separate Whisper from the STT engine
+N12 | observation | flag-parameter @ crates/gateway-stt-engine/src/worker.rs::worker_loop: selects interim or final factory construction through final_model | Separate Whisper from the STT engine
+N13 | observation | global-state @ crates/gateway-stt-backend-whisper/src/prompt.rs::NATIVE_TEST: serializes fixture-dependent prompt tests with a process-wide mutex | Separate Whisper from the STT engine
+N14 | observation | global-state @ crates/gateway-stt-backend-whisper/tests/native_whisper.rs::NATIVE_TEST: serializes native backend tests with a process-wide mutex | Separate Whisper from the STT engine
+N15 | observation | clone-block @ crates/gateway-stt/src/test_fixtures.rs: duplicates native fixture loading across unit and integration test support | Separate Whisper from the STT engine
+N16 | observation | clone-block @ crates/gateway-stt/tests/common/mod.rs: duplicates native fixture loading across integration and unit test support | Separate Whisper from the STT engine

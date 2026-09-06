@@ -1999,7 +1999,7 @@ dependencies = [
  "futures-util",
  "gateway-config",
  "gateway-local",
- "gateway-stt",
+ "gateway-stt-backend-whisper",
  "gateway-stt-engine",
  "hound",
  "serde",
@@ -2016,7 +2016,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-stt-engine"
+name = "gateway-stt-backend-whisper"
 version = "0.2.0"
 dependencies = [
  "gateway-stt-engine",
@@ -2024,9 +2024,16 @@ dependencies = [
  "hound",
  "shared-progress",
  "tempfile",
- "thiserror 2.0.19",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "gateway-stt-engine"
+version = "0.2.0"
+dependencies = [
+ "thiserror 2.0.19",
+ "tokio",
 ]
 
 [[package]]

@@ -1,0 +1,24 @@
+[package]
+name = "gateway-stt-backend-whisper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "Safe Whisper decoder backend for the PromptForge STT engine"
+
+[dependencies]
+gateway-stt-engine.workspace = true
+gateway-whisper-ffi.workspace = true
+shared-progress.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hound.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

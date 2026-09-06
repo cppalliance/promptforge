@@ -1,4 +1,4 @@
-//! STT engine construction and transcription failures.
+//! Backend-neutral STT engine construction and transcription failures.
 
 use std::path::PathBuf;
 
@@ -6,24 +6,18 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TranscribeError {
-    /// The provisioned whisper.cpp shared library could not be loaded.
+    /// The selected transcription backend could not be initialized.
     #[non_exhaustive]
-    #[error("load whisper library {}", path.display())]
-    LoadLibrary {
-        /// Shared library path passed to the platform loader.
-        path: PathBuf,
-        /// The underlying loader or symbol-resolution error.
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    #[error("initialize transcription backend")]
+    InitializeBackend(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// The whisper model file could not be loaded.
+    /// The transcription model file could not be loaded.
     #[non_exhaustive]
-    #[error("load whisper model {}", path.display())]
+    #[error("load transcription model {}", path.display())]
     LoadModel {
         /// The model path that failed to load.
         path: PathBuf,
-        /// The underlying whisper.cpp error, boxed to hide the dependency.
+        /// The underlying backend error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -33,7 +27,7 @@ pub enum TranscribeError {
     #[error("spawn transcription worker")]
     SpawnWorker(#[source] std::io::Error),
 
-    /// The model rejected an audio window.
+    /// The decoder rejected an audio window.
     #[non_exhaustive]
     #[error("transcribe audio window")]
     Inference(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -47,4 +41,27 @@ pub enum TranscribeError {
     #[non_exhaustive]
     #[error("invalid STT configuration: {0}")]
     InvalidConfig(String),
+}
+
+impl TranscribeError {
+    /// Translates a backend initialization source.
+    pub fn initialize_backend(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::InitializeBackend(Box::new(source))
+    }
+
+    /// Translates a model construction source while preserving its path.
+    pub fn load_model(
+        path: PathBuf,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::LoadModel {
+            path,
+            source: Box::new(source),
+        }
+    }
+
+    /// Translates a backend inference source.
+    pub fn inference(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Inference(Box::new(source))
+    }
 }

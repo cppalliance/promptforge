@@ -8,7 +8,7 @@
 /guide/scratch/
 *.env
 # Voice test fixtures, downloaded out of band (see design/design-promptforge-workshop.md).
-/crates/gateway-stt-engine/tests/fixtures/
+/crates/gateway-stt-backend-whisper/tests/fixtures/
 # UI build pipeline: npm install target and the esbuild output. The build
 # scripts write the bundle to OUT_DIR; `npm run build`/`--watch` still write
 # dist/ in place for the jsdom tests, and none of it is tracked.

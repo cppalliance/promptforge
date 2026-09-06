@@ -376,7 +376,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
 - Consumes and gates: consumes characterization and the renamed engine; legacy ownership isolation gates Realtime reuse of `take.rs`.
 
-### Step 6: Extract contracts and safe backend atomically
+### Step 6: Extract contracts and safe backend atomically - 5acbd7ed
 
 - Artifacts: create `gateway-stt-engine/src/decoder.rs` and `policy.rs`; create `crates/gateway-stt-backend-whisper/{Cargo.toml,AGENTS.md,src/lib.rs,src/config.rs,src/model.rs,src/prompt.rs,tests/native_whisper.rs}`; update root manifests, `gateway-stt` manifest and runtime, all imports, crate-root exports, `crates/gateway-stt/AGENTS.md`, and the moved `crates/gateway-stt-engine/AGENTS.md`.
 - Scope: replace `EngineConfig` and constructors once, update every current gateway-stt and Gateway consumer in this commit, expose only the seven engine items and two backend items, and leave no FFI or prompt policy in the engine and no compatibility shim. Delete the moved engine rules that assign Whisper loading, prompt fitting, segmentation, take state, or FFI integration to the engine; retain only backend-neutral bounded-worker constraints. Reduce the service rules to facade, lifecycle, batch, Realtime, and sole take ownership. The new backend rule file contains only safe Whisper construction, prompt and decode policy, progress, and the prohibition on unsafe or host types.
