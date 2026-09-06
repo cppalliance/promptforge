@@ -31,6 +31,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: dtolnay/rust-toolchain@1.89
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -43,8 +45,8 @@ jobs:
 
       - name: Install architecture tools
         run: |
-          cargo install cargo-modules --version 0.25.0 --locked
-          cargo install cargo-public-api --version 0.52.0 --locked
+          RUSTUP_TOOLCHAIN=1.89 cargo install cargo-modules --version 0.25.0 --locked
+          RUSTUP_TOOLCHAIN=1.89 cargo install cargo-public-api --version 0.52.0 --locked
 
       - name: Install UI dependencies
         working-directory: crates/workshop-server/ui

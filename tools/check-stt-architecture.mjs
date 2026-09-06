@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const CARGO_MODULES_VERSION = "0.25.0";
 const CARGO_PUBLIC_API_VERSION = "0.52.0";
+const CARGO_VERSION = "1.89.0";
+const RUSTUP_TOOLCHAIN = "1.89";
 const STT_CRATES = [
   "gateway-stt",
   "gateway-stt-engine",
@@ -20,6 +22,13 @@ export function requireToolVersion(tool, output, expected) {
   const actual = output.trim();
   if (actual !== `${tool} ${expected}`) {
     fail(`architecture gate requires ${tool} ${expected}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+export function requireCargoVersion(output) {
+  const actual = output.trim();
+  if (!actual.startsWith(`cargo ${CARGO_VERSION} `)) {
+    fail(`architecture gate requires Cargo ${CARGO_VERSION}, got ${JSON.stringify(actual)}`);
   }
 }
 
@@ -214,10 +223,15 @@ function publicRootBudget(source, crateName) {
   return Number(matches[0][1]);
 }
 
-function runCargo(root, args) {
-  const result = spawnSync("cargo", args, {
+export function runCargo(
+  root,
+  args,
+  { spawn = spawnSync, env = process.env } = {},
+) {
+  const result = spawn("cargo", args, {
     cwd: root,
     encoding: "utf8",
+    env: { ...env, RUSTUP_TOOLCHAIN },
     maxBuffer: 64 * 1024 * 1024,
     windowsHide: true,
   });
@@ -242,6 +256,7 @@ function checkNodeVersion() {
 function main() {
   checkNodeVersion();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  requireCargoVersion(runCargo(root, ["--version"]));
   requireToolVersion(
     "cargo-modules",
     runCargo(root, ["modules", "--version"]),

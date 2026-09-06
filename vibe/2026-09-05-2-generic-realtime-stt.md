@@ -25,7 +25,7 @@ todos:
     status: pending
   - id: ci-architecture-toolchain
     content: Run pinned architecture tools under the repository Cargo version inside stable CI
-    status: pending
+    status: completed
   - id: ci-workshop-sidecars
     content: Stage target-named Gateway sidecars before Windows and Linux Workshop CI builds
     status: pending
@@ -478,7 +478,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Steps 3 and 11; exact fixture round trips gate session state.
 
-### Step 13: Isolate architecture tools from ambient stable
+### Step 13: Isolate architecture tools from ambient stable [completed]
 
 - Artifacts: update `tools/check-stt-architecture.mjs`, `tools/check-stt-architecture.test.mjs`, and the architecture-tool setup in `.github/workflows/ci.yml`.
 - Scope: install Rust 1.89 alongside the job's current stable toolchain, then make every `cargo-modules` 0.25.0 and `cargo-public-api` 0.52.0 child run with `RUSTUP_TOOLCHAIN=1.89` while leaving formatting, Clippy, tests, and documentation on stable. Preserve pinned versions and fail closed when Rust 1.89 or either tool is absent. Add child-environment tests proving ambient Cargo 1.98 cannot leak into architecture commands.

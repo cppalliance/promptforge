@@ -5,7 +5,9 @@ import {
   assertAcyclic,
   countEffectiveRootNames,
   parseCargoModulesDot,
+  requireCargoVersion,
   requireToolVersion,
+  runCargo,
 } from "./check-stt-architecture.mjs";
 
 test("DOT parser collapses item edges to their owning modules", () => {
@@ -92,5 +94,78 @@ test("tool version parser rejects an unpinned version", () => {
   assert.throws(
     () => requireToolVersion("cargo-modules", "cargo-modules 0.26.0\n", "0.25.0"),
     /requires cargo-modules 0\.25\.0/,
+  );
+});
+
+test("Cargo version parser rejects ambient Cargo 1.98", () => {
+  assert.throws(
+    () => requireCargoVersion("cargo 1.98.0 (797e8a9bc 2026-08-05)\n"),
+    /requires Cargo 1\.89\.0/,
+  );
+});
+
+test("cargo-modules child cannot inherit ambient Cargo 1.98", () => {
+  let child;
+  runCargo("repo", ["modules", "--version"], {
+    env: { AMBIENT_CARGO_VERSION: "1.98.0", PATH: "rustup", RUSTUP_TOOLCHAIN: "stable" },
+    spawn(command, args, options) {
+      child = { command, args, options };
+      return { status: 0, stdout: "cargo-modules 0.25.0\n", stderr: "" };
+    },
+  });
+
+  assert.equal(child.command, "cargo");
+  assert.deepEqual(child.args, ["modules", "--version"]);
+  assert.equal(child.options.env.AMBIENT_CARGO_VERSION, "1.98.0");
+  assert.equal(child.options.env.PATH, "rustup");
+  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "1.89");
+});
+
+test("cargo-public-api child cannot inherit ambient Cargo 1.98", () => {
+  let child;
+  runCargo("repo", ["public-api", "--version"], {
+    env: { AMBIENT_CARGO_VERSION: "1.98.0", PATH: "rustup", RUSTUP_TOOLCHAIN: "stable" },
+    spawn(command, args, options) {
+      child = { command, args, options };
+      return { status: 0, stdout: "cargo-public-api 0.52.0\n", stderr: "" };
+    },
+  });
+
+  assert.equal(child.command, "cargo");
+  assert.deepEqual(child.args, ["public-api", "--version"]);
+  assert.equal(child.options.env.AMBIENT_CARGO_VERSION, "1.98.0");
+  assert.equal(child.options.env.PATH, "rustup");
+  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "1.89");
+});
+
+test("architecture cargo fails closed when Rust 1.89 is absent", () => {
+  assert.throws(
+    () =>
+      runCargo("repo", ["--version"], {
+        spawn() {
+          return {
+            status: 1,
+            stdout: "",
+            stderr: "toolchain '1.89' is not installed",
+          };
+        },
+      }),
+    /failed with status 1.*toolchain '1\.89' is not installed/s,
+  );
+});
+
+test("architecture cargo fails closed when a required tool is absent", () => {
+  assert.throws(
+    () =>
+      runCargo("repo", ["modules", "--version"], {
+        spawn() {
+          return {
+            status: 101,
+            stdout: "",
+            stderr: "no such command: `modules`",
+          };
+        },
+      }),
+    /failed with status 101.*no such command: `modules`/s,
   );
 });
