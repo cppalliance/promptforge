@@ -5,7 +5,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use gateway_config::{Config, SttRole, WorkshopSttConfig};
 use gateway_local::artifacts::ArtifactStore;
-use gateway_transcribe::{EngineConfig, SttEngine, SttSlot};
+use gateway_stt_engine::{EngineConfig, SttEngine, SttSlot};
 use shared_progress::ProgressHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,7 +282,7 @@ pub enum SttRuntimeError {
     /// The provisioned whisper pair could not be loaded.
     #[non_exhaustive]
     #[error("load STT engine")]
-    Engine(#[source] gateway_transcribe::TranscribeError),
+    Engine(#[source] gateway_stt_engine::TranscribeError),
 }
 
 #[cfg(test)]
@@ -369,7 +369,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn switch_in_loads_and_switch_out_fully_unloads_the_engine() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let source = gateway_transcribe::fixtures::require_model()
+        let source = gateway_stt_engine::fixtures::require_model()
             .display()
             .to_string()
             .replace('\\', "/");

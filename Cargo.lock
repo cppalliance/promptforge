@@ -2000,7 +2000,7 @@ dependencies = [
  "gateway-config",
  "gateway-local",
  "gateway-stt",
- "gateway-transcribe",
+ "gateway-stt-engine",
  "hound",
  "serde",
  "serde_json",
@@ -2016,10 +2016,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-transcribe"
+name = "gateway-stt-engine"
 version = "0.2.0"
 dependencies = [
- "gateway-transcribe",
+ "gateway-stt-engine",
  "gateway-whisper-ffi",
  "hound",
  "shared-progress",

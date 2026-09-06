@@ -355,7 +355,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/realtime-wire-fixtures.mjs`
 - Consumes and gates: consumes the complete 2026-09-05 wire contract; fixture parity gates every wire implementation and consumer.
 
-### Step 4: Rename the engine without changing APIs
+### Step 4: Rename the engine without changing APIs - e2c8dcc3
 
 - Artifacts: rename `crates/gateway-transcribe/` to `crates/gateway-stt-engine/`; update root `Cargo.toml`, `Cargo.lock`, root `.gitignore`, the moved `AGENTS.md`, `crates/gateway-stt/Cargo.toml`, `crates/gateway-stt/AGENTS.md`, imports, and verified textual references in `tools/document.md`; do not touch `.github/workflows/whisper-lib.yml`, which has no crate reference.
 - Scope: preserve behavior and current APIs, move fixtures and the existing engine rules with the crate, add no compatibility crate, and compile every current reverse consumer. This mechanical commit changes names only; Step 6 removes rules invalidated by the new boundary.

@@ -23,7 +23,7 @@ use tower::ServiceExt as _;
 pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) fn fixture_runtime(with_final: bool) -> (SttState, SttRuntime) {
-    let source = gateway_transcribe::fixtures::require_model();
+    let source = gateway_stt_engine::fixtures::require_model();
     fixture_runtime_with_models(&source, with_final.then_some(source.as_path()))
 }
 

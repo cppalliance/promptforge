@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use gateway_transcribe::{EngineConfig, SttEngine, fixtures};
+use gateway_stt_engine::{EngineConfig, SttEngine, fixtures};
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
 const UNPROMPTED_CLIP_TRANSCRIPT: &str = "country can do for you.";

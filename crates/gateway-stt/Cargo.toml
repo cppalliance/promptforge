@@ -16,7 +16,7 @@ hound.workspace = true
 gateway-config.workspace = true
 gateway-local.workspace = true
 shared-progress.workspace = true
-gateway-transcribe.workspace = true
+gateway-stt-engine.workspace = true
 workshop-server.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,7 +26,7 @@ tracing.workspace = true
 
 [features]
 default = []
-test-fixtures = ["gateway-transcribe/test-fixtures"]
+test-fixtures = ["gateway-stt-engine/test-fixtures"]
 
 [dev-dependencies]
 gateway-stt = { path = ".", features = ["test-fixtures"] }

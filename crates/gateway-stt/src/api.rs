@@ -4,7 +4,7 @@ use std::io::Cursor;
 
 use axum::extract::Multipart;
 use axum::response::{IntoResponse, Response};
-use gateway_transcribe::SAMPLE_RATE;
+use gateway_stt_engine::SAMPLE_RATE;
 use serde::Serialize;
 
 use crate::runtime::{LoadedModelRole, SttState};
@@ -326,7 +326,7 @@ pub enum TranscriptionError {
     /// Whisper rejected the audio.
     #[non_exhaustive]
     #[error("transcribe audio")]
-    Inference(#[source] gateway_transcribe::TranscribeError),
+    Inference(#[source] gateway_stt_engine::TranscribeError),
 }
 
 impl TranscriptionError {
@@ -564,7 +564,7 @@ mod tests {
     #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn verbose_round_trip_accepts_literal_timestamp_granularities_field() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let source = gateway_transcribe::fixtures::require_model()
+        let source = gateway_stt_engine::fixtures::require_model()
             .display()
             .to_string()
             .replace('\\', "/");
@@ -584,7 +584,7 @@ mod tests {
             .expect("profile selects");
         let state = SttState::default();
         let runtime = crate::SttRuntime::start(&config, state.clone(), None).expect("engine loads");
-        let samples = gateway_transcribe::fixtures::jfk_samples();
+        let samples = gateway_stt_engine::fixtures::jfk_samples();
         let (boundary, body) = multipart_body(
             &wav_f32(&samples),
             &[

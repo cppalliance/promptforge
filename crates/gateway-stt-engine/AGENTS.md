@@ -1,4 +1,4 @@
-# gateway-transcribe
+# gateway-stt-engine
 
 This crate owns the Whisper transcription engine and nothing else: model ownership, the interim and final-pass inference worker threads, energy-based segmentation, silence gating, and the runtime-loaded gateway-whisper-ffi integration.
 
