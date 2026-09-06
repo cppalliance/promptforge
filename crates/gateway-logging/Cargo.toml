@@ -1,0 +1,17 @@
+[package]
+name = "gateway-logging"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge gateway logging: a bounded priority queue, log rotation, and a worker-owned file sink behind tracing-subscriber's MakeWriter"
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

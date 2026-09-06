@@ -39,6 +39,9 @@ gateway-config-ui = { workspace = true, optional = true }
 # Optional: gateway-owned local inference (GGUF provisioning, managed
 # `llama-server` children, blob cache store). Headless builds disable it.
 gateway-local = { workspace = true, optional = true }
+# The bounded log pipeline: rotation, the priority queue, and the worker
+# thread behind the file layer's MakeWriter.
+gateway-logging.workspace = true
 # The first-run bearer key (src/boot.rs) comes from the OS-seeded CSPRNG.
 rand.workspace = true
 # The shared loopback wall for the admin config endpoints; always on,

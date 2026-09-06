@@ -11,10 +11,11 @@
 //! page (or prints its URL under `--print-url`) and exits.
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use gateway::{ProfileName, ServeOptions, run, run_printing_url, run_with_tray};
+use gateway_logging::{LogConfig, LogRuntime};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -95,7 +96,7 @@ fn main() -> ExitCode {
     // Logging starts only on the serving path: `--help`, `--version`, and
     // a second-instance handoff must not rotate the running gateway's log
     // out from under it.
-    init_logging();
+    let logging = init_logging();
 
     let result = if invocation.print_url {
         run_printing_url(&invocation.serve)
@@ -104,77 +105,85 @@ fn main() -> ExitCode {
     } else {
         run(&invocation.serve)
     };
-    match result {
+    let exit = match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            print_error_chain(&error);
+            // A fatal error is logged once with its complete source chain;
+            // raw stderr is only the fallback when the logger never
+            // started.
+            if logging.is_some() {
+                log_error_chain(&error);
+            } else {
+                print_error_chain(&error);
+            }
             ExitCode::FAILURE
         }
+    };
+    // The logger shuts down last, so the terminal outcome and every record
+    // behind it drain to the disk before the process exits.
+    if let Some(runtime) = logging
+        && let Err(error) = runtime.shutdown()
+    {
+        eprintln!("could not shut down the log worker: {error}");
     }
+    exit
 }
 
-/// Installs the global subscriber: the filtered stream on stdout, plus the
-/// same stream in `<state dir>/logs/gateway.log`, where the state dir is the
+/// Installs the global subscriber and starts the log pipeline: the filtered
+/// stream on stdout, plus the same stream through the bounded queue into
+/// `<state dir>/logs/gateway.log`, where the state dir is the
 /// `.promptforge` directory the run directory's resolver already knows
 /// (it holds `gateway.toml`, `run/`, and `models/`). A log file that cannot
-/// be opened warns on stdout and never stops the gateway.
-fn init_logging() {
+/// be opened warns on stdout and never stops the gateway. The returned
+/// runtime must be shut down last.
+fn init_logging() -> Option<LogRuntime> {
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
     };
     let stdout = tracing_subscriber::fmt::layer().with_filter(filter());
-    let log_file = shared_sidecar::default_run_dir()
-        .and_then(|run_dir| run_dir.parent().map(Path::to_path_buf))
-        .map(|state_dir| open_log_file(&state_dir));
-    match log_file {
-        Some(Ok((path, file))) => {
+    let runtime = shared_sidecar::default_run_dir()
+        .and_then(|run_dir| run_dir.parent().map(PathBuf::from))
+        .map(|state_dir| LogRuntime::start(LogConfig::new(state_dir)));
+    match runtime {
+        Some(Ok(runtime)) => {
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
-                .with_writer(std::sync::Mutex::new(file))
+                .with_writer(runtime.writer())
                 .with_filter(filter());
             tracing_subscriber::registry()
                 .with(stdout)
                 .with(file_layer)
                 .init();
-            tracing::info!("logging to {}", path.display());
+            tracing::info!("logging to {}", runtime.path().display());
+            Some(runtime)
         }
         Some(Err(error)) => {
             tracing_subscriber::registry().with(stdout).init();
-            tracing::warn!("could not open the log file: {error}; logging to stdout only");
+            tracing::warn!("could not start file logging: {error}; logging to stdout only");
+            None
         }
         None => {
             tracing_subscriber::registry().with(stdout).init();
             tracing::warn!("no user profile directory found; logging to stdout only");
+            None
         }
     }
 }
 
-/// Opens `<state_dir>/logs/gateway.log` fresh for this run, first rotating
-/// an existing log to `gateway.log.1` and overwriting any older rotation,
-/// so one previous run is kept and disk use stays bounded.
-///
-/// # Errors
-/// Returns the I/O failure from creating the directory, rotating the
-/// existing log, or opening the fresh one.
-fn open_log_file(state_dir: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
-    let logs = state_dir.join("logs");
-    std::fs::create_dir_all(&logs)?;
-    let current = logs.join("gateway.log");
-    let previous = logs.join("gateway.log.1");
-    if current.is_file() {
-        // A rename cannot overwrite an existing destination on Windows, so
-        // the older rotation is removed first.
-        if previous.is_file() {
-            std::fs::remove_file(&previous)?;
-        }
-        std::fs::rename(&current, &previous)?;
+/// Log the error and its full `source()` chain through the subscriber, so
+/// the fatal outcome lands in the drained queue.
+fn log_error_chain(error: &dyn std::error::Error) {
+    tracing::error!("error: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        tracing::error!("  caused by: {cause}");
+        source = cause.source();
     }
-    let file = std::fs::File::create(&current)?;
-    Ok((current, file))
 }
 
-/// Print the error and its full `source()` chain to stderr.
+/// Print the error and its full `source()` chain to stderr: the fallback
+/// when the logger itself never started.
 fn print_error_chain(error: &dyn std::error::Error) {
     eprintln!("error: {error}");
     let mut source = error.source();
@@ -327,36 +336,6 @@ mod tests {
         assert!(
             !DEFAULT_LOG_FILTER.contains("debug") && !DEFAULT_LOG_FILTER.contains("trace"),
             "the default never enables debug or trace: {DEFAULT_LOG_FILTER}"
-        );
-    }
-
-    #[test]
-    fn the_log_rotation_keeps_one_previous_run() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        std::fs::create_dir_all(temp.path().join("logs")).expect("logs dir");
-        std::fs::write(temp.path().join("logs/gateway.log"), "first run").expect("seed log");
-
-        let (path, file) = open_log_file(temp.path()).expect("first rotation opens");
-        drop(file);
-        assert_eq!(path, temp.path().join("logs/gateway.log"));
-        assert_eq!(
-            std::fs::read_to_string(temp.path().join("logs/gateway.log.1")).expect("rotated log"),
-            "first run",
-            "the previous run's log rotates to .1"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("fresh log"),
-            "",
-            "the new run starts on a fresh file"
-        );
-
-        std::fs::write(&path, "second run").expect("write second run");
-        let (_path, file) = open_log_file(temp.path()).expect("second rotation opens");
-        drop(file);
-        assert_eq!(
-            std::fs::read_to_string(temp.path().join("logs/gateway.log.1")).expect("rotated log"),
-            "second run",
-            "a second rotation overwrites the older .1"
         );
     }
 

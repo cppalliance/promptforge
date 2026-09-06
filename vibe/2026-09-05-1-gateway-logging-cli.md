@@ -7,7 +7,7 @@ todos:
     status: completed
   - id: logging-crate
     content: Extract gateway-logging with bounded prioritized worker and shutdown ownership
-    status: pending
+    status: completed
   - id: logging-diagnostics
     content: Add diagnostics, retention, fatal-chain capture, privacy, and pressure behavior
     status: pending

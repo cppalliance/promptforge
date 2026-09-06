@@ -1880,6 +1880,7 @@ dependencies = [
  "gateway-config",
  "gateway-config-ui",
  "gateway-local",
+ "gateway-logging",
  "gateway-routing",
  "gateway-stt",
  "gateway-web-search",
@@ -1970,6 +1971,14 @@ dependencies = [
  "tracing",
  "url",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "gateway-logging"
+version = "0.2.0"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
