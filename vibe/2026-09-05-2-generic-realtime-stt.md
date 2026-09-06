@@ -573,7 +573,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes bounded jobs, committed items, and complete snapshots; bounded drain gates destructive staging.
 
-### Step 21: Make profile replacement transactional
+### Step 21: Make profile replacement transactional [completed]
 
 - Artifacts: complete `gateway-stt/src/{replacement.rs,artifacts.rs}`; update STT-only integration in `gateway/src/{runner.rs,config_apply.rs,config_pending.rs,config_write.rs,shutdown.rs}` and `gateway/tests/it/profiles.rs`.
 - Scope: sync temporary persistence before replacement, stop old workers without detachment, stage under one deadline, publish after persistence, reconstruct on determinate failure, and invalidate tokens plus request controlled shutdown on fatal outcomes.

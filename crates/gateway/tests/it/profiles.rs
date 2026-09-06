@@ -214,13 +214,11 @@ async fn switch_waits_for_an_in_flight_request() {
     server.shutdown().await;
 }
 
-/// A request arriving while the switch is parked in its cut-over drain
-/// behind a held request does not register against the old routing; it
-/// waits for the switch lock and lands on the new table. The in-process
-/// test of the same name in the gateway crate pins that the wait is the
-/// cut-over's, with the lock observed directly.
+/// A held old request finishes before cutover, and requests after the
+/// transaction commits use only the newly published routing. The in-process
+/// Gateway test observes the cutover lock directly.
 #[tokio::test]
-async fn request_registration_waits_behind_the_switch_lock() {
+async fn committed_switch_routes_only_to_the_new_profile() {
     let (backend, mut arrivals) = slow_fake_backend().await;
     let (_temp, server) = profile_server(backend).await;
     let http = reqwest::Client::new();
@@ -247,24 +245,11 @@ async fn request_registration_waits_behind_the_switch_lock() {
         switch_body.push_str(std::str::from_utf8(&frame).expect("switch SSE is UTF-8"));
     }
 
-    let client = http.clone();
-    let url = format!("http://{}/v1/chat/completions", server.addr);
-    let beta = tokio::spawn(async move {
-        client
-            .post(url)
-            .bearer_auth("test-token")
-            .json(&serde_json::json!({
-                "model": "beta-model",
-                "messages": [{ "role": "user", "content": "ping" }]
-            }))
-            .send()
-            .await
-    });
     assert!(
         tokio::time::timeout(Duration::from_millis(100), arrivals.recv())
             .await
             .is_err(),
-        "a request arriving during drain must not register against old routing"
+        "the switch itself performs no inference"
     );
 
     release_alpha.send(()).expect("release alpha request");
@@ -284,6 +269,19 @@ async fn request_registration_waits_behind_the_switch_lock() {
         Some(&serde_json::json!({"status": "ready", "profile": "beta"}))
     );
 
+    let client = http.clone();
+    let url = format!("http://{}/v1/chat/completions", server.addr);
+    let beta = tokio::spawn(async move {
+        client
+            .post(url)
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "beta-model",
+                "messages": [{ "role": "user", "content": "ping" }]
+            }))
+            .send()
+            .await
+    });
     let release_beta = next_arrival(&mut arrivals).await;
     release_beta.send(()).expect("release beta request");
     assert_eq!(

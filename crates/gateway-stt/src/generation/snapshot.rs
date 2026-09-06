@@ -20,6 +20,82 @@ pub(super) enum Backend {
 }
 
 #[derive(Debug)]
+struct SharedFactory(Arc<dyn ModelFactory>);
+
+impl ModelFactory for SharedFactory {
+    fn create(
+        &self,
+        mode: DecodeMode,
+    ) -> Result<Option<Box<dyn gateway_stt_engine::Decoder>>, TranscribeError> {
+        self.0.create(mode)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct GenerationSpec {
+    backend: Backend,
+    factory: Arc<dyn ModelFactory>,
+    policy: EnginePolicy,
+    names: ModelNames,
+    guidance: Vec<String>,
+    infer_scripted_final: bool,
+}
+
+impl GenerationSpec {
+    pub(super) fn new(
+        backend: Backend,
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        names: ModelNames,
+        guidance: Vec<String>,
+    ) -> Self {
+        Self {
+            backend,
+            factory: Arc::new(factory),
+            policy,
+            names,
+            guidance,
+            infer_scripted_final: false,
+        }
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn scripted_inferred(factory: impl ModelFactory, policy: EnginePolicy) -> Self {
+        let mut spec = Self::new(
+            Backend::Scripted,
+            factory,
+            policy,
+            ModelNames::new("scripted-interim".to_owned(), None),
+            Vec::new(),
+        );
+        spec.infer_scripted_final = true;
+        spec
+    }
+
+    pub(super) fn build(&self, id: u64) -> Result<Generation, SpeechError> {
+        let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
+            .map_err(SpeechError::Engine)?;
+        let names = if self.infer_scripted_final {
+            ModelNames::new(
+                "scripted-interim".to_owned(),
+                engine.has_final_pass().then(|| "scripted-final".to_owned()),
+            )
+        } else {
+            self.names.clone()
+        };
+        Ok(Generation {
+            id,
+            backend: self.backend,
+            engine,
+            names,
+            guidance: self.guidance.clone().into(),
+            admission: Arc::new(AdmissionGate::default()),
+            restart: self.clone(),
+        })
+    }
+}
+
+#[derive(Debug)]
 pub(super) struct Generation {
     pub(super) id: u64,
     backend: Backend,
@@ -27,26 +103,10 @@ pub(super) struct Generation {
     names: ModelNames,
     pub(super) guidance: Arc<[String]>,
     pub(super) admission: Arc<AdmissionGate>,
+    restart: GenerationSpec,
 }
 
 impl Generation {
-    pub(super) fn from_engine(
-        id: u64,
-        backend: Backend,
-        engine: SttEngine,
-        names: ModelNames,
-        guidance: Vec<String>,
-    ) -> Self {
-        Self {
-            id,
-            backend,
-            engine,
-            names,
-            guidance: guidance.into(),
-            admission: Arc::new(AdmissionGate::default()),
-        }
-    }
-
     pub(super) fn from_factory(
         id: u64,
         backend: Backend,
@@ -55,8 +115,11 @@ impl Generation {
         names: ModelNames,
         guidance: Vec<String>,
     ) -> Result<Self, SpeechError> {
-        let engine = SttEngine::new(factory, policy).map_err(SpeechError::Engine)?;
-        Ok(Self::from_engine(id, backend, engine, names, guidance))
+        GenerationSpec::new(backend, factory, policy, names, guidance).build(id)
+    }
+
+    pub(super) fn restart_spec(&self) -> GenerationSpec {
+        self.restart.clone()
     }
 
     pub(super) fn shutdown(&self) -> Result<(), SpeechError> {

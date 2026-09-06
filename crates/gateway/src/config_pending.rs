@@ -32,6 +32,7 @@ pub(crate) async fn admin_config_pending(
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
+    let _publication = state.apply.lock().await;
     let config_path = crate::config_path(&state)?.to_path_buf();
     let running_profile = state.live.read().await.profile_name.clone();
     let reply = tokio::task::spawn_blocking(move || {
@@ -85,6 +86,7 @@ pub(crate) async fn admin_config_dirty(
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
+    let _publication = state.apply.lock().await;
     let config_path = crate::config_path(&state)?.to_path_buf();
     let reply = tokio::task::spawn_blocking(move || dirty_reply(&config_path))
         .await

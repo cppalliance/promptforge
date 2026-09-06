@@ -9,6 +9,10 @@
 //! shadow mechanics live in `gateway-config`; these handlers
 //! own auth, path resolution, and the JSON-to-TOML boundary.
 
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
@@ -17,6 +21,106 @@ use gateway_config::{ConfigErrorKind, save_config_shadow};
 use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
+
+static PERSISTENCE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// One fully written and synced temporary file awaiting atomic replacement.
+#[derive(Debug)]
+pub(crate) struct PreparedFile {
+    target: PathBuf,
+    temporary: PathBuf,
+    original: Option<Vec<u8>>,
+    contents: Vec<u8>,
+}
+
+impl PreparedFile {
+    pub(crate) fn prepare(target: PathBuf, contents: String) -> Result<Self, GatewayError> {
+        let temporary = persistence_temporary(&target);
+        let original = match std::fs::read(&target) {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(GatewayError::ConfigWriteIo(Box::new(error))),
+        };
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| GatewayError::ConfigWriteIo(Box::new(error)))?;
+        if let Err(error) = file
+            .write_all(contents.as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            drop(file);
+            let _ = std::fs::remove_file(&temporary);
+            return Err(GatewayError::ConfigWriteIo(Box::new(error)));
+        }
+        Ok(Self {
+            target,
+            temporary,
+            original,
+            contents: contents.into_bytes(),
+        })
+    }
+
+    pub(crate) fn commit(&mut self) -> Result<(), std::io::Error> {
+        std::fs::rename(&self.temporary, &self.target)
+    }
+
+    pub(crate) fn still_original(&self) -> bool {
+        match (&self.original, std::fs::read(&self.target)) {
+            (Some(original), Ok(current)) => &current == original,
+            (None, Err(error)) => error.kind() == std::io::ErrorKind::NotFound,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn has_committed_contents(&self) -> bool {
+        std::fs::read(&self.target).is_ok_and(|current| current == self.contents)
+    }
+
+    pub(crate) fn target(&self) -> &Path {
+        &self.target
+    }
+
+    #[cfg(test)]
+    pub(crate) fn discard_temporary(&self) {
+        std::fs::remove_file(&self.temporary).expect("prepared temporary exists");
+    }
+}
+
+impl Drop for PreparedFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.temporary);
+    }
+}
+
+fn persistence_temporary(target: &Path) -> PathBuf {
+    let mut name = target
+        .file_name()
+        .map_or_else(|| "profile".into(), std::ffi::OsStr::to_os_string);
+    name.push(format!(
+        ".prepared-{}-{}",
+        std::process::id(),
+        PERSISTENCE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    target.with_file_name(name)
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the cross-platform contract reports Unix directory sync failures; unsupported platforms are a no-op"
+)]
+pub(crate) fn sync_parent(path: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
 
 /// The `PUT /admin/config` route: bearer-authed, stages the global config
 /// and optional sibling profile state.

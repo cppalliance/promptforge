@@ -657,6 +657,42 @@ fn generation_quiescence_uses_explicit_ownership_without_item_transfer() {
 }
 
 #[test]
+fn profile_replacement_policy_requires_restartable_rollback_and_fatal_shutdown() {
+    let generation = read(&crate_root("gateway-stt").join("src/generation.rs"));
+    let gateway = read(&crate_root("gateway").join("src/lib.rs"));
+    let persistence = read(&crate_root("gateway").join("src/config_write.rs"));
+
+    for policy in [
+        "rollback: Option<GenerationSpec>",
+        "restore_generation",
+        "impl Drop for SpeechReplacement",
+    ] {
+        assert!(
+            generation.contains(policy),
+            "speech replacement must retain {policy}"
+        );
+    }
+    for policy in [
+        "PreparedPersistence::prepare",
+        "PersistenceCommitError::Determinate",
+        "PersistenceCommitError::Indeterminate",
+        "PROFILE_STAGE_TIMEOUT",
+        "state.shutdown.fire()",
+    ] {
+        assert!(
+            gateway.contains(policy),
+            "Gateway transaction policy must retain {policy}"
+        );
+    }
+    for policy in ["file.sync_all()", "std::fs::rename", "sync_parent"] {
+        assert!(
+            persistence.contains(policy),
+            "profile persistence must retain {policy}"
+        );
+    }
+}
+
+#[test]
 fn compiler_unsafe_lints_cover_the_stt_stack() {
     let workspace: toml::Value = toml::from_str(&read(&workspace_root().join("Cargo.toml")))
         .unwrap_or_else(|error| panic!("workspace Cargo.toml must parse: {error}"));

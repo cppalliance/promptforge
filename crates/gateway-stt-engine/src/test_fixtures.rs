@@ -35,6 +35,7 @@ enum ConstructionState {
 #[derive(Debug, Default)]
 struct DecoderState {
     outcomes: VecDeque<ScriptedOutcome>,
+    construction_errors: VecDeque<String>,
     requests: Vec<DecodeRequest>,
     creation_thread: Option<ThreadId>,
     decode_threads: Vec<ThreadId>,
@@ -85,6 +86,11 @@ impl ScriptedDecoder {
     /// Parks decoder construction until [`Self::release_construction`] runs.
     pub fn park_construction(&self) {
         self.state().construction = ConstructionState::Armed;
+    }
+
+    /// Makes the next construction attempt return the supplied failure.
+    pub fn fail_next_construction(&self, message: impl Into<String>) {
+        self.state().construction_errors.push_back(message.into());
     }
 
     /// Releases a decode parked by [`Self::park_next`].
@@ -150,6 +156,12 @@ impl ScriptedDecoder {
         self.state().worker_dropped
     }
 
+    /// Waits until engine cleanup drops the worker-owned decoder.
+    #[must_use]
+    pub fn wait_until_worker_dropped(&self, timeout: Duration) -> bool {
+        self.wait_for(timeout, |state| state.worker_dropped)
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, DecoderState> {
         self.shared.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -183,6 +195,10 @@ impl ScriptedDecoder {
             state.construction = ConstructionState::Ready;
         }
         state.creation_thread = Some(std::thread::current().id());
+    }
+
+    fn take_construction_error(&self) -> Option<String> {
+        self.state().construction_errors.pop_front()
     }
 }
 
@@ -324,6 +340,9 @@ impl ModelFactory for ScriptedModelFactory {
         let Some(decoder) = decoder else {
             return Ok(None);
         };
+        if let Some(message) = decoder.take_construction_error() {
+            return Err(TranscribeError::InvalidConfig(message));
+        }
         decoder.mark_created();
         Ok(Some(Box::new(WorkerDecoder(decoder.clone()))))
     }

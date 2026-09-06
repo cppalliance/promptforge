@@ -5,7 +5,7 @@ use std::sync::{Arc, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
-use gateway_stt_engine::{DecodeMode, EnginePolicy, ModelFactory, SttEngine};
+use gateway_stt_engine::{DecodeMode, EnginePolicy, ModelFactory};
 
 use crate::artifacts::{PreparedSpeech, SpeechError};
 use crate::model::{ModelNames, SpeechModelInfo};
@@ -18,7 +18,7 @@ mod snapshot;
 #[cfg(feature = "test-fixtures")]
 pub(crate) use lease::GenerationJob;
 pub(crate) use lease::GenerationLease;
-use snapshot::{Backend, Generation};
+use snapshot::{Backend, Generation, GenerationSpec};
 
 const GENERATION_QUIESCENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -27,6 +27,7 @@ const GENERATION_QUIESCENCE_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct SpeechReplacement {
     owner: Weak<Shared>,
     generation: Option<Generation>,
+    rollback: Option<GenerationSpec>,
     permit: ReplacementPermit,
 }
 
@@ -60,7 +61,18 @@ impl Default for GenerationState {
 
 impl GenerationState {
     pub(crate) fn stage(&self, prepared: PreparedSpeech) -> Result<SpeechReplacement, SpeechError> {
-        self.replace_with(GENERATION_QUIESCENCE_TIMEOUT, move |id| {
+        let deadline = Instant::now()
+            .checked_add(GENERATION_QUIESCENCE_TIMEOUT)
+            .ok_or(SpeechError::QuiescenceDeadline)?;
+        self.stage_until(prepared, deadline)
+    }
+
+    pub(crate) fn stage_until(
+        &self,
+        prepared: PreparedSpeech,
+        deadline: Instant,
+    ) -> Result<SpeechReplacement, SpeechError> {
+        self.replace_with_until(deadline, move |id, startup_timeout| {
             prepared
                 .generation
                 .map(|prepared| {
@@ -77,7 +89,8 @@ impl GenerationState {
                         prepared.interval_ms,
                         factory.gpu_available(),
                     )
-                    .map_err(SpeechError::Engine)?;
+                    .map_err(SpeechError::Engine)?
+                    .with_startup_timeout(startup_timeout);
                     Generation::from_factory(
                         id,
                         Backend::Whisper,
@@ -99,13 +112,16 @@ impl GenerationState {
         gpu_available: bool,
         timeout: Duration,
     ) -> Result<SpeechReplacement, SpeechError> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or(SpeechError::QuiescenceDeadline)?;
         let policy = EnginePolicy::new(15, 500, gpu_available).map_err(SpeechError::Engine)?;
-        self.replace_with(timeout, move |id| {
+        self.replace_with_until(deadline, move |id, startup_timeout| {
             Generation::from_factory(
                 id,
                 Backend::Scripted,
                 factory,
-                policy,
+                policy.with_startup_timeout(startup_timeout),
                 ModelNames::new("scripted-interim".to_owned(), final_model),
                 Vec::new(),
             )
@@ -114,22 +130,15 @@ impl GenerationState {
     }
 
     #[cfg(feature = "test-fixtures")]
-    pub(crate) fn stage_loaded_scripted(
+    pub(crate) fn stage_scripted_with_policy(
         &self,
-        engine: SttEngine,
-        interim: String,
-        final_model: Option<String>,
-        guidance: Vec<String>,
-        timeout: Duration,
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
     ) -> Result<SpeechReplacement, SpeechError> {
-        self.replace_with(timeout, move |id| {
-            Ok(Some(Generation::from_engine(
-                id,
-                Backend::Scripted,
-                engine,
-                ModelNames::new(interim, final_model),
-                guidance,
-            )))
+        self.replace_with(GENERATION_QUIESCENCE_TIMEOUT, move |id| {
+            GenerationSpec::scripted_inferred(factory, policy)
+                .build(id)
+                .map(Some)
         })
     }
 
@@ -161,11 +170,21 @@ impl GenerationState {
             true
         });
         match committed {
-            Some(true) => {}
+            Some(true) => replacement.rollback = None,
             Some(false) => return Err(SpeechError::GenerationActive),
             None => return Err(SpeechError::ReplacementInvalidated),
         }
         Ok(())
+    }
+
+    pub(crate) fn abort(&self, mut replacement: SpeechReplacement) -> Result<(), SpeechError> {
+        let Some(owner) = replacement.owner.upgrade() else {
+            return Err(SpeechError::ReplacementOwner);
+        };
+        if !Arc::ptr_eq(&owner, &self.shared) {
+            return Err(SpeechError::ReplacementOwner);
+        }
+        replacement.rollback()
     }
 
     pub(crate) fn shutdown(&self) {
@@ -257,23 +276,56 @@ impl GenerationState {
         timeout: Duration,
         build: impl FnOnce(u64) -> Result<Option<Generation>, SpeechError>,
     ) -> Result<SpeechReplacement, SpeechError> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or(SpeechError::QuiescenceDeadline)?;
+        self.replace_with_until(deadline, move |id, _startup_timeout| build(id))
+    }
+
+    fn replace_with_until(
+        &self,
+        deadline: Instant,
+        build: impl FnOnce(u64, Duration) -> Result<Option<Generation>, SpeechError>,
+    ) -> Result<SpeechReplacement, SpeechError> {
         let permit = self.shared.replacements.acquire();
-        self.quiesce(&permit, timeout)?;
+        let rollback = self.quiesce(&permit, deadline)?;
         if !permit.is_current() {
             return Err(SpeechError::ReplacementInvalidated);
         }
-        let generation = build(self.next_id())?;
+        let startup_timeout = deadline.saturating_duration_since(Instant::now());
+        let generation = match build(self.next_id(), startup_timeout) {
+            Ok(generation) => generation,
+            Err(failure) => {
+                if failure.is_non_preemptible_startup_timeout() {
+                    return Err(failure);
+                }
+                if let Some(rollback) = rollback
+                    && let Err(rollback) = restore_generation(&self.shared, &permit, &rollback)
+                {
+                    return Err(SpeechError::Rollback {
+                        failure: Box::new(failure),
+                        rollback: Box::new(rollback),
+                    });
+                }
+                return Err(failure);
+            }
+        };
         if !permit.is_current() {
             return Err(SpeechError::ReplacementInvalidated);
         }
         Ok(SpeechReplacement {
             owner: Arc::downgrade(&self.shared),
             generation,
+            rollback,
             permit,
         })
     }
 
-    fn quiesce(&self, permit: &ReplacementPermit, timeout: Duration) -> Result<(), SpeechError> {
+    fn quiesce(
+        &self,
+        permit: &ReplacementPermit,
+        deadline: Instant,
+    ) -> Result<Option<GenerationSpec>, SpeechError> {
         let generation = self
             .shared
             .active
@@ -282,11 +334,8 @@ impl GenerationState {
             .as_ref()
             .map(Arc::clone);
         let Some(generation) = generation else {
-            return Ok(());
+            return Ok(None);
         };
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .ok_or(SpeechError::QuiescenceDeadline)?;
         let close = permit
             .with_current(|| {
                 let close = generation.admission.close()?;
@@ -314,6 +363,7 @@ impl GenerationState {
             }
             DrainOutcome::Invalidated => Err(SpeechError::ReplacementInvalidated),
             DrainOutcome::Idle => {
+                let restart = generation.restart_spec();
                 let retired = permit
                     .with_current(|| {
                         self.shared
@@ -325,12 +375,76 @@ impl GenerationState {
                     .flatten()
                     .ok_or(SpeechError::ReplacementInvalidated)?;
                 drop(generation);
-                retired.shutdown()
+                retired.shutdown()?;
+                Ok(Some(restart))
             }
         }
     }
 
     fn next_id(&self) -> u64 {
         self.shared.next_generation.fetch_add(1, Ordering::Relaxed)
+    }
+}
+
+fn restore_generation(
+    shared: &Arc<Shared>,
+    permit: &ReplacementPermit,
+    rollback: &GenerationSpec,
+) -> Result<(), SpeechError> {
+    if !permit.is_current() {
+        return Err(SpeechError::ReplacementInvalidated);
+    }
+    let id = shared.next_generation.fetch_add(1, Ordering::Relaxed);
+    let generation = Arc::new(rollback.build(id)?);
+    let restored = permit
+        .with_current(|| {
+            let mut active = shared
+                .active
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            if active.is_some() {
+                return false;
+            }
+            *active = Some(generation);
+            true
+        })
+        .unwrap_or(false);
+    if !restored {
+        return Err(SpeechError::ReplacementInvalidated);
+    }
+    shared.changes.send_replace(id);
+    Ok(())
+}
+
+impl SpeechReplacement {
+    fn rollback(&mut self) -> Result<(), SpeechError> {
+        let Some(owner) = self.owner.upgrade() else {
+            return Err(SpeechError::ReplacementOwner);
+        };
+        let cleanup = self
+            .generation
+            .take()
+            .map_or(Ok(()), |generation| generation.shutdown());
+        let reconstruction = self.rollback.take().map_or(Ok(()), |rollback| {
+            restore_generation(&owner, &self.permit, &rollback)
+        });
+        match (cleanup, reconstruction) {
+            (Err(failure), Err(rollback)) => Err(SpeechError::Rollback {
+                failure: Box::new(failure),
+                rollback: Box::new(rollback),
+            }),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    }
+}
+
+impl Drop for SpeechReplacement {
+    fn drop(&mut self) {
+        if (self.generation.is_some() || self.rollback.is_some())
+            && let Err(error) = self.rollback()
+        {
+            tracing::error!(error = %error, "speech replacement rollback failed");
+        }
     }
 }

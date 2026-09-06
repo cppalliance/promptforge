@@ -44,6 +44,18 @@ impl SpeechService {
         self.state.stage(prepared)
     }
 
+    /// Serializes replacement and constrains drain plus worker startup to one deadline.
+    ///
+    /// # Errors
+    /// Returns a drain deadline, backend, policy, or worker startup error.
+    pub fn begin_replacement_before(
+        &self,
+        prepared: PreparedSpeech,
+        deadline: std::time::Instant,
+    ) -> Result<SpeechReplacement, SpeechError> {
+        self.state.stage_until(prepared, deadline)
+    }
+
     /// Publishes every fact in a staged generation through one transition.
     ///
     /// # Errors
@@ -52,9 +64,12 @@ impl SpeechService {
         self.state.commit(replacement)
     }
 
-    /// Drops a staged generation without publishing it.
-    pub fn abort_replacement(&self, replacement: SpeechReplacement) {
-        drop(replacement);
+    /// Stops a staged generation and reconstructs the old specification.
+    ///
+    /// # Errors
+    /// Returns an ownership, shutdown, or old-generation reconstruction error.
+    pub fn abort_replacement(&self, replacement: SpeechReplacement) -> Result<(), SpeechError> {
+        self.state.abort(replacement)
     }
 
     /// Stops admitting work and waits for the active generation to unload.
@@ -85,20 +100,5 @@ impl SpeechService {
     #[cfg(not(miri))]
     pub fn workshop_routes(&self, push: workshop_server::Push) -> axum::Router {
         crate::stt::workshop_router(self.state.clone(), push)
-    }
-
-    #[cfg(feature = "test-fixtures")]
-    pub(crate) fn scripted_replacement(
-        &self,
-        engine: gateway_stt_engine::SttEngine,
-        final_model: Option<String>,
-    ) -> Result<SpeechReplacement, SpeechError> {
-        self.state.stage_loaded_scripted(
-            engine,
-            "scripted-interim".to_owned(),
-            final_model,
-            Vec::new(),
-            std::time::Duration::from_secs(30),
-        )
     }
 }

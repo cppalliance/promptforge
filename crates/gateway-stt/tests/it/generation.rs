@@ -140,7 +140,9 @@ fn replacement_is_serial_and_publishes_one_complete_snapshot() {
     );
     assert!(second_interim.creation_thread().is_none());
 
-    service.abort_replacement(first);
+    service
+        .abort_replacement(first)
+        .expect("aborting the first replacement leaves no old generation");
     let second = finished_rx
         .recv_timeout(WAIT)
         .expect("second replacement resumes")
@@ -247,6 +249,118 @@ async fn active_replacement_drains_request_and_job_before_unload_and_publication
     service.shutdown();
     assert!(next_interim.worker_dropped());
     assert!(next_final.worker_dropped());
+}
+
+#[test]
+fn aborting_a_staged_replacement_reconstructs_the_old_generation() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let old_generation = service.status().generation();
+    let next = ScriptedDecoder::new();
+    let replacement = begin_scripted_replacement(&service, factory(&next), false, WAIT)
+        .expect("replacement stages");
+
+    assert!(!service.status().ready(), "staged state stays unpublished");
+    service
+        .abort_replacement(replacement)
+        .expect("determinate abort reconstructs the old specification");
+
+    let restored = service.status();
+    assert!(restored.ready());
+    assert_ne!(
+        restored.generation(),
+        old_generation,
+        "reconstruction publishes a fresh generation"
+    );
+    let request = generation_ownership(&service).expect("reconstructed generation admits");
+    assert!(
+        request.own_worker_job().is_some(),
+        "the reconstructed generation accepts worker ownership"
+    );
+    drop(request);
+    assert!(next.worker_dropped(), "the staged worker is joined");
+    service.shutdown();
+}
+
+#[test]
+fn determinate_start_failure_reconstructs_the_old_generation() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let failed = ScriptedDecoder::new();
+
+    let error = begin_scripted_replacement(
+        &service,
+        factory(&failed).with_interim_failure("determinate startup failure"),
+        false,
+        WAIT,
+    )
+    .expect_err("replacement construction fails");
+
+    assert!(
+        format!("{error:?}").contains("determinate startup failure"),
+        "the original determinate failure remains visible: {error:?}"
+    );
+    assert!(
+        service.status().ready(),
+        "a determinate staged failure reconstructs old speech"
+    );
+    assert!(
+        generation_ownership(&service)
+            .and_then(|request| request.own_worker_job())
+            .is_some(),
+        "the old specification starts an admitting worker before failure returns"
+    );
+    service.shutdown();
+}
+
+#[test]
+fn determinate_start_failure_reports_failed_old_generation_reconstruction() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    old.fail_next_construction("rollback reconstruction sentinel");
+    let failed = ScriptedDecoder::new();
+
+    let error = begin_scripted_replacement(
+        &service,
+        factory(&failed).with_interim_failure("determinate startup sentinel"),
+        false,
+        WAIT,
+    )
+    .expect_err("both replacement and reconstruction fail");
+    let debug = format!("{error:?}");
+
+    assert!(debug.contains("determinate startup sentinel"), "{debug}");
+    assert!(
+        debug.contains("rollback reconstruction sentinel"),
+        "{debug}"
+    );
+    assert!(
+        !service.status().ready(),
+        "failed reconstruction cannot claim speech remains available"
+    );
+}
+
+#[test]
+fn rollback_attempts_reconstruction_after_staged_worker_shutdown_fails() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let next = ScriptedDecoder::new();
+    let replacement = begin_scripted_replacement(&service, factory(&next), false, WAIT)
+        .expect("replacement stages");
+    next.panic_on_drop();
+    old.fail_next_construction("reconstruction after cleanup sentinel");
+
+    let error = service
+        .abort_replacement(replacement)
+        .expect_err("cleanup and reconstruction failures are aggregated");
+    let debug = format!("{error:?}");
+
+    assert!(debug.contains("ShutdownPanicked"), "{debug}");
+    assert!(
+        debug.contains("reconstruction after cleanup sentinel"),
+        "{debug}"
+    );
+    assert!(!service.status().ready());
 }
 
 #[tokio::test]

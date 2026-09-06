@@ -2,8 +2,6 @@
 
 use std::time::Duration;
 
-use gateway_stt_engine::{EnginePolicy, SttEngine};
-
 use crate::generation::{GenerationJob, GenerationLease};
 use crate::{SpeechError, SpeechService};
 
@@ -19,12 +17,10 @@ pub fn scripted_service(
     interval_ms: u64,
 ) -> Result<SpeechService, SpeechError> {
     let gpu_available = factory.gpu_available();
-    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)
-        .map_err(SpeechError::Engine)?;
-    let engine = SttEngine::new(factory, policy).map_err(SpeechError::Engine)?;
-    let final_name = engine.has_final_pass().then(|| "scripted-final".to_owned());
     let service = SpeechService::new();
-    let replacement = service.scripted_replacement(engine, final_name)?;
+    let policy = gateway_stt_engine::EnginePolicy::new(window_seconds, interval_ms, gpu_available)
+        .map_err(SpeechError::Engine)?;
+    let replacement = service.state.stage_scripted_with_policy(factory, policy)?;
     service.commit_replacement(replacement)?;
     Ok(service)
 }

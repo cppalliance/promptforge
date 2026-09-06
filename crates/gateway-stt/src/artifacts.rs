@@ -155,6 +155,15 @@ pub enum SpeechError {
     #[error("speech replacement was invalidated by shutdown")]
     ReplacementInvalidated,
 
+    /// Reconstructing the old generation failed after a determinate replacement failure.
+    #[error("speech replacement failed ({failure}); reconstruct old generation ({rollback})")]
+    Rollback {
+        /// The determinate failure that required reconstruction.
+        failure: Box<SpeechError>,
+        /// The failure returned while reconstructing the old specification.
+        rollback: Box<SpeechError>,
+    },
+
     /// Multipart framing could not be decoded.
     #[non_exhaustive]
     #[error("invalid multipart transcription request")]
@@ -211,6 +220,20 @@ pub enum SpeechError {
 }
 
 impl SpeechError {
+    /// Returns whether worker construction exceeded a deadline and left a
+    /// non-preemptible native call running.
+    #[must_use]
+    pub fn is_non_preemptible_startup_timeout(&self) -> bool {
+        match self {
+            Self::Engine(error) => error.is_non_preemptible_startup_timeout(),
+            Self::Rollback { failure, rollback } => {
+                failure.is_non_preemptible_startup_timeout()
+                    || rollback.is_non_preemptible_startup_timeout()
+            }
+            _ => false,
+        }
+    }
+
     /// Returns the unknown physical model name for a selection failure.
     #[must_use]
     pub fn model_not_found(&self) -> Option<&str> {

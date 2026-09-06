@@ -330,6 +330,11 @@ pub(crate) async fn apply_config(
         // whose reply promises the shadows are still staged.
         #[cfg(feature = "local")]
         Err(error @ GatewayError::PartialStart { .. }) => Err(error),
+        // Fatal replacement outcomes deliberately fire both cancellation
+        // and controlled shutdown after persistence became indeterminate or
+        // native staging outlived its deadline. Preserve that failure instead
+        // of promising the shadows are still staged.
+        Err(error) if state.shutdown.is_fired() => Err(error),
         // Any other failure under a fired token reports as the cancellation
         // it is, however deep in the switch the stop landed.
         Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(
