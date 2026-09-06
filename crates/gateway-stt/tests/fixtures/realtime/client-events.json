@@ -1,0 +1,37 @@
+{
+  "input_audio_buffer_append": {
+    "type": "input_audio_buffer.append",
+    "audio": "AAABAP//",
+    "event_id": "client_append_1"
+  },
+  "input_audio_buffer_clear": {
+    "type": "input_audio_buffer.clear"
+  },
+  "input_audio_buffer_commit": {
+    "type": "input_audio_buffer.commit"
+  },
+  "session_update": {
+    "type": "session.update",
+    "session": {
+      "type": "transcription",
+      "audio": {
+        "input": {
+          "format": {
+            "type": "audio/pcm",
+            "rate": 24000
+          },
+          "noise_reduction": null,
+          "transcription": {
+            "model": "realtime-transcribe",
+            "prompt": "meeting notes"
+          },
+          "turn_detection": null
+        }
+      },
+      "include": [
+        "item.input_audio_transcription.hypothesis"
+      ]
+    },
+    "event_id": "client_update_1"
+  }
+}

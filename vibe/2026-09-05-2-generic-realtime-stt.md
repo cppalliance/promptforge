@@ -346,7 +346,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `$fixture=(Resolve-Path 'local\stt-fixtures').Path; $env:PATH="$fixture;$env:PATH"; $env:PROMPTFORGE_WHISPER_LIBRARY=(Resolve-Path 'local\stt-fixtures\whisper.dll').Path; cargo test -p gateway-transcribe --test native_whisper -- --ignored`
 - Consumes and gates: consumes Step 1 and the named external fixtures; the same assets and expected transcript gate Steps 4 and 6.
 
-### Step 3: Freeze canonical Realtime fixtures
+### Step 3: Freeze canonical Realtime fixtures - d743690b
 
 - Artifacts: create `crates/gateway-stt/tests/fixtures/realtime/*.json`, `tests/it/realtime_fixtures.rs`, and `crates/workshop-server/ui/test/realtime-wire-fixtures.mjs`; register `realtime_fixtures` in `crates/gateway-stt/tests/it/main.rs`.
 - Scope: encode every event, effective session, error, usage, ID, hypothesis, and valid or invalid sequence from the Decision Record without mounting a route.

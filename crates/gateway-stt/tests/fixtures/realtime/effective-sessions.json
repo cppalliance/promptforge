@@ -1,0 +1,44 @@
+{
+  "default": {
+    "id": "sess_canonical",
+    "object": "realtime.transcription_session",
+    "type": "transcription",
+    "audio": {
+      "input": {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "noise_reduction": null,
+        "transcription": {
+          "model": "realtime-transcribe",
+          "prompt": ""
+        },
+        "turn_detection": null
+      }
+    },
+    "include": []
+  },
+  "updated": {
+    "id": "sess_canonical",
+    "object": "realtime.transcription_session",
+    "type": "transcription",
+    "audio": {
+      "input": {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "noise_reduction": null,
+        "transcription": {
+          "model": "realtime-transcribe",
+          "prompt": "meeting notes"
+        },
+        "turn_detection": null
+      }
+    },
+    "include": [
+      "item.input_audio_transcription.hypothesis"
+    ]
+  }
+}

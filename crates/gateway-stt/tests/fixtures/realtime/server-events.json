@@ -1,0 +1,153 @@
+{
+  "conversation_item_created": {
+    "event_id": "evt_item_created",
+    "type": "conversation.item.created",
+    "previous_item_id": null,
+    "item": {
+      "id": "item_alpha",
+      "type": "message",
+      "status": "completed",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_audio",
+          "transcript": null
+        }
+      ]
+    }
+  },
+  "error_correlated": {
+    "event_id": "evt_error_correlated",
+    "type": "error",
+    "error": {
+      "type": "invalid_request_error",
+      "code": "unsupported_model",
+      "message": "Only realtime-transcribe is supported",
+      "param": "session.audio.input.transcription.model",
+      "event_id": "client_bad_update"
+    }
+  },
+  "error_minimal": {
+    "event_id": "evt_error_minimal",
+    "type": "error",
+    "error": {
+      "type": "server_error",
+      "code": "internal_error",
+      "message": "Transcription failed"
+    }
+  },
+  "error_uncorrelated": {
+    "event_id": "evt_error_uncorrelated",
+    "type": "error",
+    "error": {
+      "type": "server_error",
+      "code": "engine_replaced",
+      "message": "The speech engine was replaced",
+      "param": null,
+      "event_id": null
+    }
+  },
+  "input_audio_buffer_cleared": {
+    "event_id": "evt_buffer_cleared",
+    "type": "input_audio_buffer.cleared"
+  },
+  "input_audio_buffer_committed": {
+    "event_id": "evt_buffer_committed",
+    "type": "input_audio_buffer.committed",
+    "item_id": "item_alpha",
+    "previous_item_id": null
+  },
+  "session_created": {
+    "event_id": "evt_session_created",
+    "type": "session.created",
+    "session": {
+      "id": "sess_canonical",
+      "object": "realtime.transcription_session",
+      "type": "transcription",
+      "audio": {
+        "input": {
+          "format": {
+            "type": "audio/pcm",
+            "rate": 24000
+          },
+          "noise_reduction": null,
+          "transcription": {
+            "model": "realtime-transcribe",
+            "prompt": ""
+          },
+          "turn_detection": null
+        }
+      },
+      "include": []
+    }
+  },
+  "session_updated": {
+    "event_id": "evt_session_updated",
+    "type": "session.updated",
+    "session": {
+      "id": "sess_canonical",
+      "object": "realtime.transcription_session",
+      "type": "transcription",
+      "audio": {
+        "input": {
+          "format": {
+            "type": "audio/pcm",
+            "rate": 24000
+          },
+          "noise_reduction": null,
+          "transcription": {
+            "model": "realtime-transcribe",
+            "prompt": "meeting notes"
+          },
+          "turn_detection": null
+        }
+      },
+      "include": [
+        "item.input_audio_transcription.hypothesis"
+      ]
+    }
+  },
+  "transcription_completed": {
+    "event_id": "evt_transcription_completed",
+    "type": "conversation.item.input_audio_transcription.completed",
+    "item_id": "item_alpha",
+    "content_index": 0,
+    "transcript": "Hello, world",
+    "usage": {
+      "type": "duration",
+      "seconds": 1.25
+    }
+  },
+  "transcription_delta": {
+    "event_id": "evt_transcription_delta",
+    "type": "conversation.item.input_audio_transcription.delta",
+    "item_id": "item_alpha",
+    "content_index": 0,
+    "delta": "Hello"
+  },
+  "transcription_failed": {
+    "event_id": "evt_transcription_failed",
+    "type": "conversation.item.input_audio_transcription.failed",
+    "item_id": "item_beta",
+    "content_index": 0,
+    "error": {
+      "type": "server_error",
+      "code": "transcription_failed",
+      "message": "Authoritative transcription failed",
+      "param": "audio"
+    }
+  },
+  "transcription_hypothesis": {
+    "event_id": "evt_transcription_hypothesis",
+    "type": "conversation.item.input_audio_transcription.hypothesis",
+    "item_id": "item_alpha",
+    "content_index": 0,
+    "revision": 3,
+    "transcript": "Hello, world",
+    "finalized": "Hello",
+    "agreed": ", wor",
+    "tentative": "ld",
+    "audio_start_ms": 0,
+    "audio_end_ms": 1250
+  }
+}

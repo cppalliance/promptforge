@@ -1,0 +1,224 @@
+{
+  "append_after_precommit_failure": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "AA==", "event_id": "client_append_after_failure" }, "setup": { "pending_precommit_failure": true } },
+    "expected_error": { "event_id": "evt_append_after_failure", "type": "error", "error": { "type": "invalid_request_error", "code": "precommit_transcription_failed", "message": "Further appends are rejected after accurate precommit failure", "param": "audio", "event_id": "client_append_after_failure" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "append_invalid_base64": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "***", "event_id": "client_invalid_base64" } },
+    "expected_error": { "event_id": "evt_invalid_base64", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_base64_audio", "message": "Audio must be valid Base64", "param": "audio", "event_id": "client_invalid_base64" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "append_limit_exceeded": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "AA==", "event_id": "client_append_limit" }, "materialize": { "decoded_audio_bytes": 15728641 } },
+    "expected_error": { "event_id": "evt_append_limit", "type": "error", "error": { "type": "invalid_request_error", "code": "audio_append_too_large", "message": "Decoded audio exceeds the 15 MiB append limit", "param": "audio", "event_id": "client_append_limit" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "append_unknown_field": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "AA==", "extra": true, "event_id": "client_append_unknown" } },
+    "expected_error": { "event_id": "evt_append_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field extra", "param": "extra", "event_id": "client_append_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "clear_unknown_field": {
+    "input": { "message": { "type": "input_audio_buffer.clear", "extra": true, "event_id": "client_clear_unknown" } },
+    "expected_error": { "event_id": "evt_clear_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field extra", "param": "extra", "event_id": "client_clear_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "commit_short_audio": {
+    "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_short_commit" }, "setup": { "buffered_audio_ms": 99 } },
+    "expected_error": { "event_id": "evt_short_commit", "type": "error", "error": { "type": "invalid_request_error", "code": "audio_too_short", "message": "A commit requires at least 100 ms of audio", "param": "audio", "event_id": "client_short_commit" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "commit_unknown_field": {
+    "input": { "message": { "type": "input_audio_buffer.commit", "extra": true, "event_id": "client_commit_unknown" } },
+    "expected_error": { "event_id": "evt_commit_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field extra", "param": "extra", "event_id": "client_commit_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "dangling_pcm_byte_on_commit": {
+    "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_odd_pcm" }, "setup": { "pending_pcm_bytes": [1] } },
+    "expected_error": { "event_id": "evt_odd_pcm", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_pcm_audio", "message": "PCM16 audio ends with an incomplete sample", "param": "audio", "event_id": "client_odd_pcm" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "excessive_queue_lag": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "AAA=", "event_id": "client_queue_lag" }, "setup": { "audio_lag_ms": 2001 } },
+    "expected_error": { "event_id": "evt_queue_lag", "type": "error", "error": { "type": "overload_error", "code": "audio_queue_lag", "message": "Audio queue lag exceeds two seconds", "param": "audio", "event_id": "client_queue_lag" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "invalid_client_event_id": {
+    "input": { "message": { "type": "input_audio_buffer.clear", "event_id": 7 } },
+    "expected_error": { "event_id": "evt_invalid_client_id", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_event_id", "message": "event_id must be a string", "param": "event_id", "event_id": null } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "invalid_include_type": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "include": "item.input_audio_transcription.hypothesis" }, "event_id": "client_include_type" } },
+    "expected_error": { "event_id": "evt_include_type", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_include", "message": "session.include must be an array", "param": "session.include", "event_id": "client_include_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "invalid_prompt_type": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "prompt": 7 } } } }, "event_id": "client_prompt_type" } },
+    "expected_error": { "event_id": "evt_prompt_type", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_prompt", "message": "Transcription prompt must be a string", "param": "session.audio.input.transcription.prompt", "event_id": "client_prompt_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "malformed_json": {
+    "input": { "wire_text": "{\"type\":\"input_audio_buffer.clear\"" },
+    "expected_error": { "event_id": "evt_malformed_json", "type": "error", "error": { "type": "invalid_request_error", "code": "invalid_json", "message": "The client event is not valid JSON" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "maximum_committed_items": {
+    "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_item_limit" }, "setup": { "committed_items_finalizing": 4, "buffered_audio_ms": 100 } },
+    "expected_error": { "event_id": "evt_item_limit", "type": "error", "error": { "type": "overload_error", "code": "too_many_committed_items", "message": "At most four committed items may finalize concurrently", "param": null, "event_id": "client_item_limit" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "maximum_unfinalized_audio": {
+    "input": { "message": { "type": "input_audio_buffer.append", "audio": "AAA=", "event_id": "client_audio_limit" }, "setup": { "unfinalized_audio_ms": 30000 } },
+    "expected_error": { "event_id": "evt_audio_limit", "type": "error", "error": { "type": "overload_error", "code": "too_much_unfinalized_audio", "message": "Unfinalized audio exceeds 30 seconds", "param": "audio", "event_id": "client_audio_limit" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "missing_append_audio": {
+    "input": { "message": { "type": "input_audio_buffer.append", "event_id": "client_missing_audio" } },
+    "expected_error": { "event_id": "evt_missing_audio", "type": "error", "error": { "type": "invalid_request_error", "code": "missing_required_field", "message": "Missing required field audio", "param": "audio", "event_id": "client_missing_audio" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "missing_client_event_type": {
+    "input": { "message": { "event_id": "client_missing_type" } },
+    "expected_error": { "event_id": "evt_missing_type", "type": "error", "error": { "type": "invalid_request_error", "code": "missing_required_field", "message": "Missing required field type", "param": "type", "event_id": "client_missing_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "missing_session": {
+    "input": { "message": { "type": "session.update", "event_id": "client_missing_session" } },
+    "expected_error": { "event_id": "evt_missing_session", "type": "error", "error": { "type": "invalid_request_error", "code": "missing_required_field", "message": "Missing required field session", "param": "session", "event_id": "client_missing_session" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "missing_session_type": {
+    "input": { "message": { "type": "session.update", "session": {}, "event_id": "client_missing_session_type" } },
+    "expected_error": { "event_id": "evt_missing_session_type", "type": "error", "error": { "type": "invalid_request_error", "code": "missing_required_field", "message": "Missing required field session.type", "param": "session.type", "event_id": "client_missing_session_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "non_null_noise_reduction": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "noise_reduction": { "type": "near_field" } } } }, "event_id": "client_noise_reduction" } },
+    "expected_error": { "event_id": "evt_noise_reduction", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_noise_reduction", "message": "Only null noise reduction is supported", "param": "session.audio.input.noise_reduction", "event_id": "client_noise_reduction" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "non_null_turn_detection": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "turn_detection": { "type": "server_vad" } } } }, "event_id": "client_turn_detection" } },
+    "expected_error": { "event_id": "evt_turn_detection", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_turn_detection", "message": "Only null turn detection is supported", "param": "session.audio.input.turn_detection", "event_id": "client_turn_detection" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "result_queue_overload": {
+    "input": { "message": { "type": "input_audio_buffer.commit", "event_id": "client_result_overload" }, "setup": { "buffered_audio_ms": 100, "result_queue_occupancy": 16 } },
+    "expected_error": { "event_id": "evt_result_overload", "type": "error", "error": { "type": "overload_error", "code": "result_queue_overload", "message": "The session result queue is full", "param": null, "event_id": "client_result_overload" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "session_audio_unknown_field": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": {}, "output": {} } }, "event_id": "client_audio_unknown" } },
+    "expected_error": { "event_id": "evt_audio_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field session.audio.output", "param": "session.audio.output", "event_id": "client_audio_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "session_input_unknown_field": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "extra": true } } }, "event_id": "client_input_unknown" } },
+    "expected_error": { "event_id": "evt_input_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field session.audio.input.extra", "param": "session.audio.input.extra", "event_id": "client_input_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "session_transcription_unknown_field": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "extra": true } } } }, "event_id": "client_transcription_unknown" } },
+    "expected_error": { "event_id": "evt_transcription_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field session.audio.input.transcription.extra", "param": "session.audio.input.transcription.extra", "event_id": "client_transcription_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "session_unknown_field": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "extra": true }, "event_id": "client_session_unknown" } },
+    "expected_error": { "event_id": "evt_session_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field session.extra", "param": "session.extra", "event_id": "client_session_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "session_update_unknown_field": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription" }, "extra": true, "event_id": "client_update_unknown" } },
+    "expected_error": { "event_id": "evt_update_unknown", "type": "error", "error": { "type": "invalid_request_error", "code": "unknown_field", "message": "Unknown field extra", "param": "extra", "event_id": "client_update_unknown" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unknown_event_type": {
+    "input": { "message": { "type": "response.create", "event_id": "client_unknown_type" } },
+    "expected_error": { "event_id": "evt_unknown_type", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_event_type", "message": "Unsupported client event type response.create", "param": "type", "event_id": "client_unknown_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unknown_include": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "include": ["item.input_audio_transcription.logprobs"] }, "event_id": "client_unknown_include" } },
+    "expected_error": { "event_id": "evt_unknown_include", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_include", "message": "Unsupported include value item.input_audio_transcription.logprobs", "param": "session.include", "event_id": "client_unknown_include" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_delay": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "delay_ms": 500 } } } }, "event_id": "client_delay" } },
+    "expected_error": { "event_id": "evt_delay", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_delay", "message": "Transcription delay is not supported", "param": "session.audio.input.transcription.delay_ms", "event_id": "client_delay" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_format_rate": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "format": { "type": "audio/pcm", "rate": 16000 } } } }, "event_id": "client_format_rate" } },
+    "expected_error": { "event_id": "evt_format_rate", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_audio_format", "message": "Only 24 kHz PCM audio is supported", "param": "session.audio.input.format.rate", "event_id": "client_format_rate" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_format_type": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "format": { "type": "audio/wav", "rate": 24000 } } } }, "event_id": "client_format_type" } },
+    "expected_error": { "event_id": "evt_format_type", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_audio_format", "message": "Only audio/pcm is supported", "param": "session.audio.input.format.type", "event_id": "client_format_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_keywords": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "keywords": ["PromptForge"] } } } }, "event_id": "client_keywords" } },
+    "expected_error": { "event_id": "evt_keywords", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_keywords", "message": "Transcription keywords are not supported", "param": "session.audio.input.transcription.keywords", "event_id": "client_keywords" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_language": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "language": "en" } } } }, "event_id": "client_language" } },
+    "expected_error": { "event_id": "evt_language", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_language", "message": "A transcription language is not supported", "param": "session.audio.input.transcription.language", "event_id": "client_language" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_logprobs": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "logprobs": true } } } }, "event_id": "client_logprobs" } },
+    "expected_error": { "event_id": "evt_logprobs", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_logprobs", "message": "Transcription logprobs are not supported", "param": "session.audio.input.transcription.logprobs", "event_id": "client_logprobs" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "unsupported_model": {
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "model": "whisper-1" } } } }, "event_id": "client_model" } },
+    "expected_error": { "event_id": "evt_model", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_model", "message": "Only realtime-transcribe is supported", "param": "session.audio.input.transcription.model", "event_id": "client_model" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  },
+  "wrong_session_type": {
+    "input": { "message": { "type": "session.update", "session": { "type": "realtime" }, "event_id": "client_session_type" } },
+    "expected_error": { "event_id": "evt_session_type", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_session_type", "message": "Only transcription sessions are supported", "param": "session.type", "event_id": "client_session_type" } },
+    "effective_session_after": "default",
+    "keeps_connection_usable": true
+  }
+}

@@ -5,3 +5,4 @@ mod common;
 
 mod batch;
 mod legacy_stream;
+mod realtime_fixtures;
