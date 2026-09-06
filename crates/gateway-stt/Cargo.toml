@@ -11,6 +11,7 @@ description = "PromptForge gateway-owned speech-to-text runtime and HTTP endpoin
 
 [dependencies]
 axum.workspace = true
+base64.workspace = true
 futures-util.workspace = true
 hound.workspace = true
 gateway-config.workspace = true

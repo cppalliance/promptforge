@@ -8,6 +8,8 @@
 //! and [`transcribe`] implements OpenAI-compatible multipart transcription.
 
 mod api;
+#[allow(dead_code)]
+mod audio;
 mod runtime;
 mod segment;
 mod stt;

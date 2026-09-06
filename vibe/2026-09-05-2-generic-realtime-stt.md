@@ -446,13 +446,13 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 6 backend configuration; canonical schema and generated documentation gate the facade.
 
-### Step 11: Add audio ingestion and shared PCM bytes
+### Step 11: Add audio ingestion and shared PCM bytes [completed]
 
 - Artifacts: add `base64 = "0.22"` to root `Cargo.toml` and `base64.workspace = true` to `crates/gateway-stt/Cargo.toml`; create `gateway-stt/src/audio.rs` and language-neutral `tests/fixtures/audio/pcm16le-24khz.json`; update ceilings.
 - Scope: review Base64 license, Rust 1.89 support, and transitive tree before acceptance; implement endian decoding, Base64 boundaries, odd-byte state, continuous 24 kHz to 16 kHz conversion, flush, reset, durations, and size bounds.
 - Focused test commands:
   - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install cargo-deny --locked`
-  - `C:\Users\Vinnie\cursor\promptforge`: `cargo tree -p gateway-stt -i base64`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo tree -p gateway-stt -i base64@0.22.1`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo deny check`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt audio`
   - `C:\Users\Vinnie\cursor\promptforge`: `node tools/check-stt-architecture.mjs`

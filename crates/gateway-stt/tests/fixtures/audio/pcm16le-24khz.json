@@ -1,0 +1,8 @@
+{
+  "encoding": "pcm_s16le",
+  "sample_rate_hz": 24000,
+  "channels": 1,
+  "samples": [-32768, -16384, -1, 0, 1, 16384, 32767],
+  "bytes": [0, 128, 0, 192, 255, 255, 0, 0, 1, 0, 0, 64, 255, 127],
+  "base64": "AIAAwP//AAABAABA/38="
+}

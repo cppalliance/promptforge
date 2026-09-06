@@ -22,7 +22,8 @@ destination = "independent committed-item finalization"
 
 [modules]
 "api.rs" = 625
-"lib.rs" = 23
+"audio.rs" = 380
+"lib.rs" = 25
 "runtime.rs" = 459
 "segment.rs" = 239
 "stt.rs" = 733
