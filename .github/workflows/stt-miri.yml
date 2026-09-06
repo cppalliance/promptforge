@@ -51,7 +51,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify preinstalled stable Rust
+        shell: powershell
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $rustup = Join-Path $cargoBin 'rustup.exe'
+          $cargo = Join-Path $cargoBin 'cargo.exe'
+          if (-not (Test-Path $rustup -PathType Leaf)) {
+            throw 'self-hosted runner Rust is not provisioned: missing rustup.exe'
+          }
+          if (-not (Test-Path $cargo -PathType Leaf)) {
+            throw 'self-hosted runner Rust is not provisioned: missing cargo.exe'
+          }
+          $env:RUSTUP_AUTO_INSTALL = '0'
+          $cargoBin | Add-Content $env:GITHUB_PATH
+          $toolchains = @(& $rustup toolchain list)
+          if ($LASTEXITCODE -ne 0) {
+            throw 'self-hosted runner Rust is not provisioned: rustup toolchain list failed'
+          }
+          $stableToolchain = $toolchains | Where-Object { $_ -match '^stable(?:-|\s|$)' } | Select-Object -First 1
+          if (-not $stableToolchain) {
+            throw 'self-hosted runner Rust is not provisioned: stable toolchain is missing'
+          }
+          & $cargo '+stable' '--version'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'self-hosted runner Rust is not provisioned: stable toolchain is unavailable'
+          }
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2

@@ -31,7 +31,7 @@ todos:
     status: completed
   - id: ci-native-rustup
     content: Use the self-hosted Windows runner's preinstalled Rust without reinstalling rustup
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -526,7 +526,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 15; complete item ownership gates facade replacement and generation quiescence.
 
-### Step 17: Use preinstalled Rust on the native runner
+### Step 17: Use preinstalled Rust on the native runner [completed]
 
 - Artifacts: update only the `native-whisper` job in `.github/workflows/stt-miri.yml` and add `tools/check-stt-native-workflow.test.mjs`.
 - Scope: remove `dtolnay/rust-toolchain@stable` from the self-hosted Windows job. Before Cargo caching or native tests, resolve the service account's existing `.cargo\bin`, require `rustup.exe` and `cargo.exe`, append that directory to `GITHUB_PATH`, and verify the preinstalled stable toolchain without installing rustup, creating proxy links, changing the default toolchain, or enabling self-update. Keep the hosted Linux Miri job and all native fixture or test commands unchanged.
