@@ -155,3 +155,7 @@ N26 | observation | constructor-injection @ crates/gateway-stt/src/runtime.rs::S
 N27 | observation | Violates A115 @ crates/gateway-stt/src/runtime.rs: control readiness during model startup is not determinable from diff | Harden STT workers and extend release gates; Migrate STT tuning to canonical configuration
 N28 | observation | Violates A116 @ crates/gateway/src/config_apply.rs::stt_pipeline_change_reloads_without_restart: publication consistency is not determinable from diff | Migrate STT tuning to canonical configuration
 N29 | observation | Violates A96 @ crates/gateway-config-ui/ui/src/services/config-store.ts::canonicalizeStt: bounded third-party model content is not determinable from diff | Migrate STT tuning to canonical configuration
+N30 | observation | Violates A2 @ crates/gateway-stt/src/realtime: not determinable from diff | Define the private Realtime wire
+N31 | observation | global-state @ crates/gateway-stt/src/realtime/wire/shared.rs::NEXT_GENERATOR: allocates ID generator namespaces from a process-wide atomic counter | Define the private Realtime wire
+N32 | observation | oversized-unit @ crates/gateway-stt/src/realtime/wire/server.rs::ServerEvent::validate: adds an 85-line server event validator | Define the private Realtime wire
+N33 | observation | flag-parameter @ crates/gateway-stt/src/realtime/wire/client.rs::parse_empty: selects commit or clear event construction through commit | Define the private Realtime wire

@@ -10,6 +10,8 @@
 mod api;
 #[allow(dead_code)]
 mod audio;
+#[allow(dead_code)]
+mod realtime;
 mod runtime;
 mod segment;
 mod stt;

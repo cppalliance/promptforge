@@ -75,7 +75,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
         ],
         temporary_edges: &[TemporaryEdge {
             dependency: "workshop-server",
-            removal_step: "Step 26",
+            removal_step: "Step 28",
         }],
     },
     DependencyPolicy {
@@ -124,22 +124,22 @@ const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
         targets: &[
             MigrationPolicyTarget {
                 module: "api.rs",
-                target_step: "Step 15",
+                target_step: "Step 17",
                 destination: "batch.rs",
             },
             MigrationPolicyTarget {
                 module: "runtime.rs",
-                target_step: "Step 15",
+                target_step: "Step 17",
                 destination: "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs",
             },
             MigrationPolicyTarget {
                 module: "stt.rs",
-                target_step: "Step 26",
+                target_step: "Step 28",
                 destination: "removal after the Realtime route and Workshop relay replace the legacy socket",
             },
             MigrationPolicyTarget {
                 module: "take.rs",
-                target_step: "Step 14",
+                target_step: "Step 16",
                 destination: "independent committed-item finalization",
             },
         ],
@@ -512,14 +512,14 @@ fn gateway_step_15_migrations_are_pinned_to_their_destinations() {
     assert_eq!(
         expected["api.rs"],
         MigrationTarget {
-            target_step: "Step 15".to_owned(),
+            target_step: "Step 17".to_owned(),
             destination: "batch.rs".to_owned(),
         }
     );
     assert_eq!(
         expected["runtime.rs"],
         MigrationTarget {
-            target_step: "Step 15".to_owned(),
+            target_step: "Step 17".to_owned(),
             destination: "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
                 .to_owned(),
         }

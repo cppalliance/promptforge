@@ -5,25 +5,32 @@
 public_root_budget = 9
 
 [migration_targets."api.rs"]
-target_step = "Step 15"
+target_step = "Step 17"
 destination = "batch.rs"
 
 [migration_targets."runtime.rs"]
-target_step = "Step 15"
+target_step = "Step 17"
 destination = "service.rs, artifacts.rs, generation.rs, status.rs, and model.rs"
 
 [migration_targets."stt.rs"]
-target_step = "Step 26"
+target_step = "Step 28"
 destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
 
 [migration_targets."take.rs"]
-target_step = "Step 14"
+target_step = "Step 16"
 destination = "independent committed-item finalization"
 
 [modules]
 "api.rs" = 625
 "audio.rs" = 380
-"lib.rs" = 25
+"lib.rs" = 28
+"realtime/mod.rs" = 2
+"realtime/query.rs" = 70
+"realtime/wire.rs" = 24
+"realtime/wire/client.rs" = 363
+"realtime/wire/server.rs" = 367
+"realtime/wire/shared.rs" = 212
+"realtime/wire/tests.rs" = 278
 "runtime.rs" = 459
 "segment.rs" = 239
 "stt.rs" = 733
