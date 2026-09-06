@@ -6,7 +6,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use gateway_config::{Config, SttRole};
 use gateway_local::artifacts::ArtifactStore;
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
-use gateway_stt_engine::SttEngine;
+use gateway_stt_engine::{EnginePolicy, SttEngine};
 use shared_progress::ProgressHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,8 +220,13 @@ impl SttRuntime {
             progress.map(|handle| handle.child("engine", 1.0)),
         );
         let factory = WhisperModelFactory::new(backend_config).map_err(SttRuntimeError::Engine)?;
-        let engine = SttEngine::new(factory, capture.window_seconds(), capture.interval_ms())
-            .map_err(SttRuntimeError::Engine)?;
+        let policy = EnginePolicy::new(
+            capture.window_seconds(),
+            capture.interval_ms(),
+            factory.gpu_available(),
+        )
+        .map_err(SttRuntimeError::Engine)?;
+        let engine = SttEngine::new(factory, policy).map_err(SttRuntimeError::Engine)?;
         let final_name = models.final_model.map(|(name, _)| name);
         state.activate(engine, interim_name, final_name, guidance);
         Ok(SttRuntime {

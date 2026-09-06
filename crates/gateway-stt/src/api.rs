@@ -4,7 +4,7 @@ use std::io::Cursor;
 
 use axum::extract::Multipart;
 use axum::response::{IntoResponse, Response};
-use gateway_stt_engine::SAMPLE_RATE;
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
 use serde::Serialize;
 
 use crate::runtime::{LoadedModelRole, SttState};
@@ -106,14 +106,14 @@ pub async fn transcribe(
         return Err(TranscriptionError::ModelNotFound(form.model));
     };
     let (samples, duration) = decode_wav(&form.file)?;
-    let text = match role {
-        LoadedModelRole::Interim => engine.transcribe(samples, guidance).await,
-        LoadedModelRole::Final => engine
-            .transcribe_final(samples, guidance, String::new())
-            .await
-            .ok_or_else(|| TranscriptionError::ModelNotFound(form.model.clone()))?,
-    }
-    .map_err(TranscriptionError::Inference)?;
+    let mode = match role {
+        LoadedModelRole::Interim => DecodeMode::Interim,
+        LoadedModelRole::Final => DecodeMode::Final,
+    };
+    let text = engine
+        .decode(DecodeRequest::new(mode, samples, guidance, String::new()))
+        .await
+        .map_err(TranscriptionError::Inference)?;
     Ok(axum::Json(response(form, text, duration)).into_response())
 }
 
@@ -240,7 +240,7 @@ fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, f64), TranscriptionError> {
                 .collect::<Result<Vec<_>, _>>()?
         }
     };
-    let duration = samples.len() as f64 / SAMPLE_RATE as f64;
+    let duration = samples.len() as f64 / EnginePolicy::SAMPLE_RATE as f64;
     Ok((samples, duration))
 }
 
@@ -357,7 +357,6 @@ impl TranscriptionError {
         matches!(self, Self::Inference(_))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,7 +365,10 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::routing::post;
     use tower::ServiceExt;
-
+    mod native_runtime {
+        #[rustfmt::skip]
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/common/native_runtime.rs"));
+    }
     fn wav(samples: &[i16]) -> Vec<u8> {
         let mut bytes = Cursor::new(Vec::new());
         {
@@ -387,7 +389,6 @@ mod tests {
         }
         bytes.into_inner()
     }
-
     fn wav_f32(samples: &[f32]) -> Vec<u8> {
         let mut bytes = Cursor::new(Vec::new());
         {
@@ -492,7 +493,6 @@ mod tests {
         body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
         (BOUNDARY.to_owned(), body)
     }
-
     async fn test_endpoint(State(state): State<SttState>, multipart: Multipart) -> Response {
         match transcribe(&state, multipart).await {
             Ok(response) => response.into_response(),
@@ -583,7 +583,7 @@ mod tests {
             .select_profile(&gateway_config::ProfileName::parse("work").expect("name"))
             .expect("profile selects");
         let state = SttState::default();
-        let runtime = crate::SttRuntime::start(&config, state.clone(), None).expect("engine loads");
+        let runtime = native_runtime::start(config, state.clone());
         let samples = crate::test_fixtures::jfk_samples();
         let (boundary, body) = multipart_body(
             &wav_f32(&samples),
@@ -620,6 +620,6 @@ mod tests {
                 .is_some_and(|text| text.to_lowercase().contains("country"))
         );
         assert_eq!(json["segments"][0]["start"], 0.0);
-        runtime.shutdown();
+        native_runtime::shutdown(runtime);
     }
 }

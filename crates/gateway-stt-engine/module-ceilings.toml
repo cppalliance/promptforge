@@ -7,10 +7,12 @@ public_root_budget = 7
 [migration_targets]
 
 [modules]
-"decoder.rs" = 42
-"engine.rs" = 403
-"error.rs" = 77
+"decoder.rs" = 87
+"engine.rs" = 251
+"error.rs" = 83
 "lib.rs" = 18
-"policy.rs" = 52
-"test_fixtures.rs" = 488
-"worker.rs" = 428
+"policy.rs" = 132
+"startup.rs" = 48
+"test_fixtures.rs" = 638
+"translation.rs" = 28
+"worker.rs" = 451

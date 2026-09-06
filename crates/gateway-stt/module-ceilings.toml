@@ -23,8 +23,8 @@ destination = "independent committed-item finalization"
 [modules]
 "api.rs" = 625
 "lib.rs" = 23
-"runtime.rs" = 454
-"segment.rs" = 233
-"stt.rs" = 712
-"take.rs" = 663
-"test_fixtures.rs" = 69
+"runtime.rs" = 459
+"segment.rs" = 239
+"stt.rs" = 733
+"take.rs" = 677
+"test_fixtures.rs" = 73

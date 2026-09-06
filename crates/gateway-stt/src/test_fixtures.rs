@@ -4,12 +4,14 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "test-fixtures")]
+pub use gateway_stt_engine::DecodeMode;
+#[cfg(feature = "test-fixtures")]
 pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
 
 #[cfg(feature = "test-fixtures")]
 use crate::SttRuntime;
 #[cfg(feature = "test-fixtures")]
-use gateway_stt_engine::{SttEngine, TranscribeError};
+use gateway_stt_engine::{EnginePolicy, SttEngine, TranscribeError};
 
 /// Builds a speech runtime around deterministic scripted workers.
 ///
@@ -21,7 +23,9 @@ pub fn scripted_runtime(
     window_seconds: u64,
     interval_ms: u64,
 ) -> Result<SttRuntime, TranscribeError> {
-    let engine = SttEngine::new(factory, window_seconds, interval_ms)?;
+    let gpu_available = factory.gpu_available();
+    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)?;
+    let engine = SttEngine::new(factory, policy)?;
     let final_name = engine.has_final_pass().then(|| "scripted-final".to_owned());
     Ok(SttRuntime::from_scripted_engine(
         engine,

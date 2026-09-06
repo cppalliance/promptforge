@@ -3,7 +3,9 @@
 use std::io::Read;
 use std::path::Path;
 
-use gateway_stt_engine::{Decoder, MIN_WINDOW_SAMPLES, ModelFactory, TranscribeError, is_silence};
+use gateway_stt_engine::{
+    DecodeMode, DecodeRequest, Decoder, EnginePolicy, ModelFactory, TranscribeError,
+};
 use gateway_whisper_ffi::{
     FullParams, SamplingStrategy, WhisperContext, WhisperLibrary, WhisperState,
 };
@@ -49,39 +51,32 @@ impl WhisperModelFactory {
             gpu_available,
         })
     }
+
+    /// Whether the loaded runtime reports hardware acceleration.
+    #[must_use]
+    pub fn gpu_available(&self) -> bool {
+        self.gpu_available
+    }
 }
 
 impl ModelFactory for WhisperModelFactory {
-    fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-        let progress = self
-            .config
-            .progress
-            .as_ref()
-            .map(|handle| handle.child("interim", 1.0));
-        WhisperDecoder::load(
-            &self.library,
-            &self.config.interim_model,
-            progress.as_ref(),
-            false,
-        )
-        .map(|decoder| Box::new(decoder) as Box<dyn Decoder>)
-    }
-
-    fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-        let Some(path) = &self.config.final_model else {
-            return Ok(None);
+    fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+        let (path, progress_name) = match mode {
+            DecodeMode::Interim => (&self.config.interim_model, "interim"),
+            DecodeMode::Final => {
+                let Some(path) = &self.config.final_model else {
+                    return Ok(None);
+                };
+                (path, "final")
+            }
         };
         let progress = self
             .config
             .progress
             .as_ref()
-            .map(|handle| handle.child("final", 1.0));
-        WhisperDecoder::load(&self.library, path, progress.as_ref(), true)
+            .map(|handle| handle.child(progress_name, 1.0));
+        WhisperDecoder::load(&self.library, path, progress.as_ref())
             .map(|decoder| Some(Box::new(decoder) as Box<dyn Decoder>))
-    }
-
-    fn gpu_available(&self) -> bool {
-        self.gpu_available
     }
 }
 
@@ -89,7 +84,6 @@ impl ModelFactory for WhisperModelFactory {
 struct WhisperDecoder {
     context: WhisperContext,
     state: WhisperState,
-    final_pass: bool,
 }
 
 impl WhisperDecoder {
@@ -97,7 +91,6 @@ impl WhisperDecoder {
         library: &WhisperLibrary,
         path: &Path,
         progress: Option<&ProgressHandle>,
-        final_pass: bool,
     ) -> Result<Self, TranscribeError> {
         let prewarm_leaf = progress.map(|handle| handle.child("prewarm", 1.0));
         prewarm(path, prewarm_leaf.as_ref())?;
@@ -110,40 +103,39 @@ impl WhisperDecoder {
         if let Some(leaf) = &init_leaf {
             leaf.complete();
         }
-        Ok(Self {
-            context,
-            state,
-            final_pass,
-        })
+        Ok(Self { context, state })
     }
 }
 
 impl Decoder for WhisperDecoder {
-    fn transcribe(
-        &mut self,
-        samples: &[f32],
-        guidance: &[String],
-        finalized: &str,
-    ) -> Result<String, TranscribeError> {
-        if self.final_pass && (samples.len() < MIN_WINDOW_SAMPLES || is_silence(samples)) {
+    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
+        let final_pass = request.mode() == DecodeMode::Final;
+        if final_pass
+            && (request.samples().len() < EnginePolicy::MIN_WINDOW_SAMPLES
+                || EnginePolicy::is_silence(request.samples()))
+        {
             return Ok(String::new());
         }
-        let glossary_budget = if self.final_pass {
+        let glossary_budget = if final_pass {
             GLOSSARY_TOKEN_BUDGET
         } else {
             MAX_PROMPT_TOKENS
         };
-        let glossary = fit_glossary(&self.context, guidance, glossary_budget);
-        let prompt = if self.final_pass {
-            Some(final_prompt(&self.context, glossary.as_deref(), finalized))
+        let glossary = fit_glossary(&self.context, request.guidance(), glossary_budget);
+        let prompt = if final_pass {
+            Some(final_prompt(
+                &self.context,
+                glossary.as_deref(),
+                request.finalized(),
+            ))
         } else {
             glossary
         };
         transcribe_blocking(
             &mut self.state,
-            samples,
+            request.samples(),
             prompt.as_deref(),
-            !self.final_pass,
+            !final_pass,
         )
     }
 }

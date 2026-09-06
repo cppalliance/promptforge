@@ -1,4 +1,5 @@
 //! Native characterization of the packaged Whisper backend contract.
+//! Miri excludes native model loading and decode; packaged-runtime CI owns them.
 
 #![expect(
     clippy::expect_used,
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
-use gateway_stt_engine::SttEngine;
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
 use shared_progress::{ProgressHandle, ProgressHub};
 
 const JFK_TRANSCRIPT: &str = "And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.";
@@ -60,7 +61,18 @@ fn engine_with_progress(
 ) -> SttEngine {
     let config = WhisperConfig::new(library, interim, final_model, progress);
     let factory = WhisperModelFactory::new(config).expect("packaged runtime loads");
-    SttEngine::new(factory, 12, 500).expect("backend models load")
+    let policy =
+        EnginePolicy::new(12, 500, factory.gpu_available()).expect("capture policy is valid");
+    SttEngine::new(factory, policy).expect("backend models load")
+}
+
+fn request(
+    mode: DecodeMode,
+    samples: Vec<f32>,
+    guidance: Vec<String>,
+    finalized: impl Into<String>,
+) -> DecodeRequest {
+    DecodeRequest::new(mode, samples, guidance, finalized.into())
 }
 
 #[tokio::test]
@@ -81,31 +93,44 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
 
     let unprompted = engine(library.clone(), model.clone(), Some(model.clone()));
     let interim = unprompted
-        .transcribe(samples.clone(), Vec::new())
+        .decode(request(
+            DecodeMode::Interim,
+            samples.clone(),
+            Vec::new(),
+            "",
+        ))
         .await
         .expect("interim decode succeeds");
     assert_eq!(interim, JFK_TRANSCRIPT, "interim decode policy stays fixed");
 
     let unprompted_clip = unprompted
-        .transcribe_final(prompt_sensitive_clip.clone(), Vec::new(), String::new())
+        .decode(request(
+            DecodeMode::Final,
+            prompt_sensitive_clip.clone(),
+            Vec::new(),
+            "",
+        ))
         .await
-        .expect("a final model is configured")
         .expect("unprompted final decode succeeds");
     assert_eq!(unprompted_clip, UNPROMPTED_CLIP_TRANSCRIPT);
 
     let conditioning_transcript = unprompted
-        .transcribe_final(conditioning_clip, Vec::new(), String::new())
+        .decode(request(
+            DecodeMode::Final,
+            conditioning_clip,
+            Vec::new(),
+            "",
+        ))
         .await
-        .expect("a final model is configured")
         .expect("conditioning decode succeeds");
     let conditioned_clip = unprompted
-        .transcribe_final(
+        .decode(request(
+            DecodeMode::Final,
             prompt_sensitive_clip.clone(),
             Vec::new(),
             conditioning_transcript.clone(),
-        )
+        ))
         .await
-        .expect("a final model is configured")
         .expect("transcript-conditioned final decode succeeds");
     assert_eq!(conditioning_transcript, CONDITIONING_TRANSCRIPT);
     assert_eq!(conditioned_clip, CONDITIONED_CLIP_TRANSCRIPT);
@@ -113,22 +138,22 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
 
     let glossary_prompted = engine(library, model.clone(), Some(model.clone()));
     let glossary_clip = glossary_prompted
-        .transcribe_final(
+        .decode(request(
+            DecodeMode::Final,
             prompt_sensitive_clip,
             vec!["one tree".to_string()],
-            String::new(),
-        )
+            "",
+        ))
         .await
-        .expect("a final model is configured")
         .expect("the glossary-conditioned segment decodes");
     let silent_tail = glossary_prompted
-        .transcribe_final(
+        .decode(request(
+            DecodeMode::Final,
             vec![0.0; 16_000],
             vec!["one tree".to_string()],
             glossary_clip.clone(),
-        )
+        ))
         .await
-        .expect("a final model is configured")
         .expect("the silent tail decodes");
     assert!(silent_tail.is_empty(), "silence remains gated");
     assert_eq!(glossary_clip, GLOSSARY_CLIP_TRANSCRIPT);
@@ -149,14 +174,12 @@ async fn independent_final_jobs_do_not_require_a_reset() {
     let samples = jfk_samples();
 
     let first = engine
-        .transcribe_final(samples.clone(), Vec::new(), String::new())
+        .decode(request(DecodeMode::Final, samples.clone(), Vec::new(), ""))
         .await
-        .expect("a final model is configured")
         .expect("first job succeeds");
     let second = engine
-        .transcribe_final(samples, Vec::new(), String::new())
+        .decode(request(DecodeMode::Final, samples, Vec::new(), ""))
         .await
-        .expect("a final model is configured")
         .expect("second job succeeds");
     assert_eq!(second, first, "equal stateless jobs remain independent");
 }
@@ -172,26 +195,37 @@ async fn one_final_job_cannot_change_another_jobs_history() {
     let prompt_sensitive = samples[6 * 16_000..8 * 16_000].to_vec();
 
     let control = engine
-        .transcribe_final(prompt_sensitive.clone(), Vec::new(), String::new())
+        .decode(request(
+            DecodeMode::Final,
+            prompt_sensitive.clone(),
+            Vec::new(),
+            "",
+        ))
         .await
-        .expect("a final model is configured")
         .expect("control job succeeds");
     let history = engine
-        .transcribe_final(samples[..4 * 16_000].to_vec(), Vec::new(), String::new())
+        .decode(request(
+            DecodeMode::Final,
+            samples[..4 * 16_000].to_vec(),
+            Vec::new(),
+            "",
+        ))
         .await
-        .expect("a final model is configured")
         .expect("history source succeeds");
     let conditioned = engine
-        .transcribe_final(prompt_sensitive.clone(), Vec::new(), history)
+        .decode(request(
+            DecodeMode::Final,
+            prompt_sensitive.clone(),
+            Vec::new(),
+            history,
+        ))
         .await
-        .expect("a final model is configured")
         .expect("conditioned job succeeds");
     assert_ne!(conditioned, control, "fixture detects conditioning");
 
     let standalone = engine
-        .transcribe_final(prompt_sensitive, Vec::new(), String::new())
+        .decode(request(DecodeMode::Final, prompt_sensitive, Vec::new(), ""))
         .await
-        .expect("a final model is configured")
         .expect("standalone job succeeds");
     assert_eq!(
         standalone, control,
@@ -206,12 +240,15 @@ async fn final_decode_is_absent_without_a_final_model() {
     let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
     let model = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
     let engine = engine(library, model, None);
+    let error = engine
+        .decode(request(DecodeMode::Final, jfk_samples(), Vec::new(), ""))
+        .await
+        .expect_err("an omitted final model leaves no final decoder");
     assert!(
-        engine
-            .transcribe_final(jfk_samples(), Vec::new(), String::new())
-            .await
-            .is_none(),
-        "an omitted final model leaves no final decoder"
+        error
+            .to_string()
+            .contains("final decoder is not configured"),
+        "the missing final worker is classified explicitly: {error}"
     );
 }
 

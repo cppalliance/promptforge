@@ -1,0 +1,109 @@
+name: STT Miri
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pure-worker-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-09-05
+          components: miri
+
+      - name: Cache Cargo and Miri
+        uses: Swatinem/rust-cache@v2
+
+      - name: Prepare Miri
+        run: cargo +nightly-2026-09-05 miri setup
+
+      # Miri runs only backend-neutral ownership and bounded queue tests.
+      # Socket I/O, dynamic FFI, native callbacks, and model loading stay in
+      # their native CI targets because the interpreter cannot execute them.
+      - name: Check pure STT worker ownership and queues
+        run: cargo +nightly-2026-09-05 miri test -p gateway-stt-engine --features test-fixtures miri_
+
+  native-whisper:
+    runs-on: [self-hosted, windows, cuda]
+    timeout-minutes: 90
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Workshop UI dependencies
+        working-directory: crates/workshop-server/ui
+        run: npm ci
+
+      - name: Provision pinned native fixtures
+        shell: powershell
+        run: |
+          $fixture = Join-Path $env:RUNNER_TEMP 'stt-native'
+          New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+          $archive = Join-Path $fixture 'whisper.zip'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip' `
+            -OutFile $archive
+          $runtimeHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($runtimeHash -ne 'F1BC54D7288E21EE826CCB5767249836B780FC316BEC4A0374873E73163DAE12') {
+            throw "unexpected Whisper runtime hash: $runtimeHash"
+          }
+          Expand-Archive -Path $archive -DestinationPath $fixture -Force
+          $model = Join-Path $fixture 'ggml-tiny.en.bin'
+          Invoke-WebRequest `
+            -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin' `
+            -OutFile $model
+          $modelHash = (Get-FileHash $model -Algorithm SHA256).Hash
+          if ($modelHash -ne '921E4CF8686FDD993DCD081A5DA5B6C365BFDE1162E72B08D75AC75289920B1F') {
+            throw "unexpected Whisper model hash: $modelHash"
+          }
+          $audio = Join-Path $fixture 'jfk.wav'
+          Invoke-WebRequest `
+            -Uri 'https://raw.githubusercontent.com/ggml-org/whisper.cpp/b4938/samples/jfk.wav' `
+            -OutFile $audio
+          $audioHash = (Get-FileHash $audio -Algorithm SHA256).Hash
+          if ($audioHash -ne '59DFB9A4ACB36FE2A2AFFC14BACBEE2920FF435CB13CC314A08C13F66BA7860E') {
+            throw "unexpected Whisper audio hash: $audioHash"
+          }
+          $fixture | Add-Content $env:GITHUB_PATH
+          "PROMPTFORGE_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
+          "PROMPTFORGE_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
+          "PROMPTFORGE_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
+
+      - name: Test safe Whisper backend integration
+        run: cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1
+
+      - name: Test native prompt budgets
+        run: 'cargo test --locked -p gateway-stt-backend-whisper --lib prompt::tests:: -- --ignored --test-threads=1'
+
+      - name: Test native Whisper FFI
+        run: cargo test --locked -p gateway-whisper-ffi --lib -- --ignored --test-threads=1
+
+      - name: Test native Gateway STT units
+        run: cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1
+
+      - name: Test native Gateway STT integration
+        run: cargo test --locked -p gateway-stt --test it -- --ignored --test-threads=1

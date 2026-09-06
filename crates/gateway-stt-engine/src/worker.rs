@@ -4,15 +4,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
-use crate::{Decoder, ModelFactory, TranscribeError};
+use crate::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
 
 pub(crate) const INTERIM_JOB_CAPACITY: usize = 8;
 pub(crate) const FINAL_JOB_CAPACITY: usize = 8;
 
 struct Job {
-    samples: Vec<f32>,
-    guidance: Vec<String>,
-    finalized: String,
+    request: DecodeRequest,
     reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
 }
 
@@ -22,6 +20,7 @@ pub(crate) struct Transcriber {
     job_tx: Option<mpsc::SyncSender<Job>>,
     stopping: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
+    join_panicked: bool,
 }
 
 impl Transcriber {
@@ -29,7 +28,7 @@ impl Transcriber {
     pub(super) fn spawn(
         name: &'static str,
         factory: Arc<dyn ModelFactory>,
-        final_model: bool,
+        mode: DecodeMode,
         capacity: usize,
     ) -> Result<(Self, mpsc::Receiver<Result<bool, TranscribeError>>), TranscribeError> {
         let (job_tx, job_rx) = mpsc::sync_channel::<Job>(capacity);
@@ -39,13 +38,7 @@ impl Transcriber {
         let worker = std::thread::Builder::new()
             .name(name.to_owned())
             .spawn(move || {
-                worker_loop(
-                    factory.as_ref(),
-                    final_model,
-                    &job_rx,
-                    &init_tx,
-                    &worker_stopping,
-                );
+                worker_loop(factory.as_ref(), mode, &job_rx, &init_tx, &worker_stopping);
             })
             .map_err(TranscribeError::SpawnWorker)?;
         Ok((
@@ -53,6 +46,7 @@ impl Transcriber {
                 job_tx: Some(job_tx),
                 stopping,
                 worker: Some(worker),
+                join_panicked: false,
             },
             init_rx,
         ))
@@ -60,9 +54,7 @@ impl Transcriber {
 
     fn submit(
         &self,
-        samples: Vec<f32>,
-        guidance: Vec<String>,
-        finalized: String,
+        request: DecodeRequest,
     ) -> Result<tokio::sync::oneshot::Receiver<Result<String, TranscribeError>>, TranscribeError>
     {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
@@ -70,12 +62,7 @@ impl Transcriber {
             return Err(TranscribeError::WorkerGone);
         };
         job_tx
-            .try_send(Job {
-                samples,
-                guidance,
-                finalized,
-                reply,
-            })
+            .try_send(Job { request, reply })
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => TranscribeError::Overloaded,
                 mpsc::TrySendError::Disconnected(_) => TranscribeError::WorkerGone,
@@ -85,43 +72,67 @@ impl Transcriber {
 
     pub(super) async fn transcribe(
         &self,
-        samples: Vec<f32>,
-        guidance: Vec<String>,
-        finalized: String,
+        request: DecodeRequest,
     ) -> Result<String, TranscribeError> {
-        let reply_rx = self.submit(samples, guidance, finalized)?;
+        let reply_rx = self.submit(request)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }
 
-    pub(super) fn shutdown(&mut self) {
+    pub(super) fn shutdown(&mut self) -> Result<(), TranscribeError> {
         self.stopping.store(true, Ordering::Release);
         drop(self.job_tx.take());
         if let Some(worker) = self.worker.take() {
-            let _ignored = worker.join();
+            self.join_panicked = worker.join().is_err();
+        }
+        if self.join_panicked {
+            Err(TranscribeError::ShutdownPanicked)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(super) fn abandon_startup(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        drop(self.job_tx.take());
+        // Construction is non-preemptible. Dropping this handle explicitly
+        // abandons only a timed-out startup worker so the host can classify
+        // the fatal outcome without claiming the thread was stopped.
+        drop(self.worker.take());
+    }
+
+    pub(super) fn startup_failure(
+        startup: TranscribeError,
+        cleanup: impl IntoIterator<Item = Result<(), TranscribeError>>,
+    ) -> TranscribeError {
+        let cleanup = cleanup
+            .into_iter()
+            .filter_map(Result::err)
+            .collect::<Vec<_>>();
+        if cleanup.is_empty() {
+            startup
+        } else {
+            TranscribeError::StartupCleanup {
+                startup: Box::new(startup),
+                cleanup,
+            }
         }
     }
 }
 
 impl Drop for Transcriber {
     fn drop(&mut self) {
-        self.shutdown();
+        drop(self.shutdown());
     }
 }
 
 fn worker_loop(
     factory: &dyn ModelFactory,
-    final_model: bool,
+    mode: DecodeMode,
     job_rx: &mpsc::Receiver<Job>,
     init_tx: &mpsc::SyncSender<Result<bool, TranscribeError>>,
     stopping: &AtomicBool,
 ) {
-    let decoder = catch_unwind(AssertUnwindSafe(|| {
-        if final_model {
-            factory.create_final()
-        } else {
-            factory.create_interim().map(Some)
-        }
-    }));
+    let decoder = catch_unwind(AssertUnwindSafe(|| factory.create(mode)));
     let decoder = match decoder {
         Ok(result) => result,
         Err(_) => Err(TranscribeError::WorkerPanicked),
@@ -151,9 +162,7 @@ fn worker_loop(
         if job.reply.is_closed() {
             continue;
         }
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            decoder.transcribe(&job.samples, &job.guidance, &job.finalized)
-        }));
+        let result = catch_unwind(AssertUnwindSafe(|| decoder.decode(job.request)));
         if let Ok(result) = result {
             if !stopping.load(Ordering::Acquire) {
                 // A disconnected caller no longer needs this stateless result.
@@ -229,28 +238,18 @@ mod tests {
     struct ParkFactory(ParkControl);
 
     impl ModelFactory for ParkFactory {
-        fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-            Ok(Box::new(ParkDecoder(self.0.clone())))
-        }
-
-        fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+        fn create(
+            &self,
+            _mode: DecodeMode,
+        ) -> Result<Option<Box<dyn crate::Decoder>>, TranscribeError> {
             Ok(Some(Box::new(ParkDecoder(self.0.clone()))))
-        }
-
-        fn gpu_available(&self) -> bool {
-            false
         }
     }
 
     struct ParkDecoder(ParkControl);
 
-    impl Decoder for ParkDecoder {
-        fn transcribe(
-            &mut self,
-            _samples: &[f32],
-            _guidance: &[String],
-            _finalized: &str,
-        ) -> Result<String, TranscribeError> {
+    impl crate::Decoder for ParkDecoder {
+        fn decode(&mut self, _request: DecodeRequest) -> Result<String, TranscribeError> {
             let (state, changed) = &*self.0.state;
             let mut state = state
                 .lock()
@@ -280,12 +279,15 @@ mod tests {
         }
     }
 
-    fn parked_worker(final_model: bool, capacity: usize) -> (Transcriber, ParkControl) {
+    fn request(mode: DecodeMode) -> DecodeRequest {
+        DecodeRequest::new(mode, Vec::new(), Vec::new(), String::new())
+    }
+
+    fn parked_worker(mode: DecodeMode, capacity: usize) -> (Transcriber, ParkControl) {
         let control = ParkControl::default();
         let factory: Arc<dyn ModelFactory> = Arc::new(ParkFactory(control.clone()));
-        let (worker, startup) =
-            Transcriber::spawn("bounded-worker-test", factory, final_model, capacity)
-                .expect("worker spawns");
+        let (worker, startup) = Transcriber::spawn("bounded-worker-test", factory, mode, capacity)
+            .expect("worker spawns");
         assert!(
             startup
                 .recv()
@@ -295,10 +297,10 @@ mod tests {
         (worker, control)
     }
 
-    fn assert_queue_boundary(final_model: bool, capacity: usize) {
-        let (mut worker, control) = parked_worker(final_model, capacity);
+    fn assert_queue_boundary(mode: DecodeMode, capacity: usize) {
+        let (mut worker, control) = parked_worker(mode, capacity);
         let running = worker
-            .submit(Vec::new(), Vec::new(), String::new())
+            .submit(request(mode))
             .expect("running job is admitted");
         control.wait_for(
             |state| state.phase == ParkPhase::Entered,
@@ -308,12 +310,12 @@ mod tests {
         let queued = (0..capacity)
             .map(|_| {
                 worker
-                    .submit(Vec::new(), Vec::new(), String::new())
+                    .submit(request(mode))
                     .expect("every queue slot is admitted")
             })
             .collect::<Vec<_>>();
         let error = worker
-            .submit(Vec::new(), Vec::new(), String::new())
+            .submit(request(mode))
             .expect_err("capacity plus one must fail without waiting");
         assert!(matches!(error, TranscribeError::Overloaded));
 
@@ -326,27 +328,52 @@ mod tests {
                 .expect("decode succeeds"),
             "scripted"
         );
-        worker.shutdown();
+        worker.shutdown().expect("worker joins");
         assert_eq!(control.calls(), 1, "cancelled queued jobs never decode");
     }
 
     #[test]
     fn interim_queue_accepts_exact_capacity_and_rejects_capacity_plus_one() {
         assert_eq!(INTERIM_JOB_CAPACITY, 8);
-        assert_queue_boundary(false, INTERIM_JOB_CAPACITY);
+        assert_queue_boundary(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
     }
 
     #[test]
     fn final_queue_accepts_exact_capacity_and_rejects_capacity_plus_one() {
         assert_eq!(FINAL_JOB_CAPACITY, 8);
-        assert_queue_boundary(true, FINAL_JOB_CAPACITY);
+        assert_queue_boundary(DecodeMode::Final, FINAL_JOB_CAPACITY);
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    #[test]
+    fn miri_worker_queues_own_exact_capacity_and_reject_the_next_job() {
+        assert_queue_boundary(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        assert_queue_boundary(DecodeMode::Final, FINAL_JOB_CAPACITY);
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    #[test]
+    fn miri_shutdown_releases_worker_ownership_once() {
+        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        worker.shutdown().expect("first shutdown joins");
+        worker.shutdown().expect("second shutdown is idempotent");
+
+        assert!(
+            control
+                .state
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .dropped,
+            "joined shutdown releases the worker-owned decoder"
+        );
     }
 
     #[test]
     fn cancellation_while_running_discards_only_that_reply() {
-        let (mut worker, control) = parked_worker(false, INTERIM_JOB_CAPACITY);
+        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
         let cancelled = worker
-            .submit(Vec::new(), Vec::new(), String::new())
+            .submit(request(DecodeMode::Interim))
             .expect("running job is admitted");
         control.wait_for(
             |state| state.phase == ParkPhase::Entered,
@@ -360,7 +387,7 @@ mod tests {
         );
 
         let next = worker
-            .submit(Vec::new(), Vec::new(), String::new())
+            .submit(request(DecodeMode::Interim))
             .expect("worker remains available");
         assert_eq!(
             next.blocking_recv()
@@ -368,31 +395,27 @@ mod tests {
                 .expect("decode succeeds"),
             "scripted"
         );
-        worker.shutdown();
+        worker.shutdown().expect("worker joins");
         assert_eq!(control.calls(), 2);
     }
 
     #[test]
     fn shutdown_joins_the_worker_and_is_idempotent() {
-        let (mut worker, control) = parked_worker(false, INTERIM_JOB_CAPACITY);
-        worker.shutdown();
-        worker.shutdown();
+        let (mut worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
+        worker.shutdown().expect("first shutdown joins");
+        worker.shutdown().expect("second shutdown is idempotent");
         control.wait_for(
             |state| state.dropped,
             "shutdown drops the decoder before returning",
         );
-        assert!(
-            worker
-                .submit(Vec::new(), Vec::new(), String::new())
-                .is_err()
-        );
+        assert!(worker.submit(request(DecodeMode::Interim)).is_err());
     }
 
     #[test]
     fn shutdown_waits_for_running_decode_instead_of_detaching() {
-        let (worker, control) = parked_worker(false, INTERIM_JOB_CAPACITY);
+        let (worker, control) = parked_worker(DecodeMode::Interim, INTERIM_JOB_CAPACITY);
         let reply = worker
-            .submit(Vec::new(), Vec::new(), String::new())
+            .submit(request(DecodeMode::Interim))
             .expect("running job is admitted");
         control.wait_for(
             |state| state.phase == ParkPhase::Entered,
@@ -402,7 +425,7 @@ mod tests {
         let (returned_tx, returned_rx) = mpsc::channel();
         let shutdown = std::thread::spawn(move || {
             let mut worker = worker;
-            worker.shutdown();
+            worker.shutdown().expect("worker joins");
             let _ignored = returned_tx.send(());
         });
 

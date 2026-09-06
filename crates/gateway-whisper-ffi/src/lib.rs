@@ -21,6 +21,7 @@ pub use error::WhisperError;
 pub use library::WhisperLibrary;
 pub use params::{FullParams, SamplingStrategy};
 
+// Miri excludes dynamic library loading and native log callback tests; native CI owns them.
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

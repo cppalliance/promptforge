@@ -368,7 +368,21 @@ fn spawn_final_pipeline(
         state,
         move |samples, guidance, finalized| {
             let engine = Arc::clone(&engine);
-            async move { engine.transcribe_final(samples, guidance, finalized).await }
+            async move {
+                if !engine.has_final_pass() {
+                    return None;
+                }
+                Some(
+                    engine
+                        .decode(gateway_stt_engine::DecodeRequest::new(
+                            gateway_stt_engine::DecodeMode::Final,
+                            samples,
+                            guidance,
+                            finalized,
+                        ))
+                        .await,
+                )
+            }
         },
     ));
     FinalPipeline { commands, task }

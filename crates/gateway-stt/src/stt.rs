@@ -10,7 +10,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE, SttEngine, is_silence};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 use workshop_server::{Activity, Push};
@@ -281,7 +281,9 @@ fn spawn_interim(
         loop {
             tokio::time::sleep(engine.interval()).await;
             let window = state.uncommitted_snapshot(engine.window_samples());
-            let tentative = if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
+            let tentative = if window.len() < EnginePolicy::MIN_WINDOW_SAMPLES
+                || EnginePolicy::is_silence(&window)
+            {
                 String::new()
             } else {
                 reporter.push_activity(
@@ -289,7 +291,15 @@ fn spawn_interim(
                     "an interim pass over the uncommitted audio",
                     Activity::General,
                 );
-                match engine.transcribe(window, state.guidance().to_vec()).await {
+                match engine
+                    .decode(DecodeRequest::new(
+                        DecodeMode::Interim,
+                        window,
+                        state.guidance().to_vec(),
+                        String::new(),
+                    ))
+                    .await
+                {
                     Ok(text) => text,
                     Err(error) => {
                         reporter.push_activity(
@@ -328,10 +338,18 @@ async fn final_transcript(
     reporter: &Reporter,
 ) -> String {
     let window = take.fallback_snapshot(engine.window_samples());
-    if window.len() < MIN_WINDOW_SAMPLES || is_silence(&window) {
+    if window.len() < EnginePolicy::MIN_WINDOW_SAMPLES || EnginePolicy::is_silence(&window) {
         return String::new();
     }
-    match engine.transcribe(window, take.guidance().to_vec()).await {
+    match engine
+        .decode(DecodeRequest::new(
+            DecodeMode::Interim,
+            window,
+            take.guidance().to_vec(),
+            String::new(),
+        ))
+        .await
+    {
         Ok(text) => text,
         Err(error) => {
             reporter.push_failure("Transcription failed", error.to_string(), Activity::General);
@@ -356,9 +374,9 @@ fn truncation_drop(uncommitted: usize, window_samples: usize) -> Option<usize> {
 fn truncation_message(window_samples: usize, dropped: usize) -> String {
     format!(
         "the take ran past the {} s interim window with no final transcription, so its first {}.{} s were dropped",
-        window_samples / SAMPLE_RATE,
-        dropped / SAMPLE_RATE,
-        dropped % SAMPLE_RATE * 10 / SAMPLE_RATE,
+        window_samples / EnginePolicy::SAMPLE_RATE,
+        dropped / EnginePolicy::SAMPLE_RATE,
+        dropped % EnginePolicy::SAMPLE_RATE * 10 / EnginePolicy::SAMPLE_RATE,
     )
 }
 
@@ -672,19 +690,22 @@ mod tests {
 
     #[test]
     fn truncation_starts_past_the_window() {
-        let window = 15 * SAMPLE_RATE;
+        let window = 15 * EnginePolicy::SAMPLE_RATE;
         assert_eq!(truncation_drop(0, window), None);
         assert_eq!(truncation_drop(window, window), None);
         assert_eq!(truncation_drop(window + 1, window), Some(1));
         assert_eq!(
-            truncation_drop(20 * SAMPLE_RATE, window),
-            Some(5 * SAMPLE_RATE)
+            truncation_drop(20 * EnginePolicy::SAMPLE_RATE, window),
+            Some(5 * EnginePolicy::SAMPLE_RATE)
         );
     }
 
     #[test]
     fn the_truncation_message_names_the_window_and_the_dropped_lead() {
-        let message = truncation_message(15 * SAMPLE_RATE, 5 * SAMPLE_RATE);
+        let message = truncation_message(
+            15 * EnginePolicy::SAMPLE_RATE,
+            5 * EnginePolicy::SAMPLE_RATE,
+        );
         assert!(message.contains("15 s"), "{message}");
         assert!(message.contains("5.0 s"), "{message}");
     }

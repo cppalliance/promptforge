@@ -199,9 +199,14 @@ mod tests {
         let response: serde_json::Value =
             serde_json::from_slice(&body).expect("response body is JSON");
         assert_eq!(response["text"], TRANSCRIPT);
+        let requests = decoder.requests();
+        assert_eq!(requests.len(), 1);
         assert_eq!(
-            decoder.requests(),
-            vec![(vec![0.25], Vec::new(), String::new())]
+            requests[0].mode(),
+            gateway_stt::test_fixtures::DecodeMode::Interim
         );
+        assert_eq!(requests[0].samples(), &[0.25]);
+        assert!(requests[0].guidance().is_empty());
+        assert!(requests[0].finalized().is_empty());
     }
 }

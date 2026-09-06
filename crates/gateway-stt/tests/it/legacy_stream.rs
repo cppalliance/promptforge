@@ -1,4 +1,5 @@
 //! Characterization tests for the mechanically moved `/stt` socket.
+//! Miri excludes these OS socket tests; native CI owns their coverage.
 
 #![expect(
     clippy::expect_used,
@@ -9,7 +10,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
 use gateway_stt::Segmenter;
-use gateway_stt_engine::{MIN_WINDOW_SAMPLES, SAMPLE_RATE};
+use gateway_stt_engine::EnginePolicy;
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -23,10 +24,14 @@ use crate::common::{
 #[test]
 fn legacy_stream_policy_constants_stay_pinned() {
     let capture = gateway_config::WorkshopSttConfig::default();
-    assert_eq!(SAMPLE_RATE, 16_000, "wire PCM stays at 16 kHz");
     assert_eq!(
-        MIN_WINDOW_SAMPLES,
-        SAMPLE_RATE / 2,
+        EnginePolicy::SAMPLE_RATE,
+        16_000,
+        "wire PCM stays at 16 kHz"
+    );
+    assert_eq!(
+        EnginePolicy::MIN_WINDOW_SAMPLES,
+        EnginePolicy::SAMPLE_RATE / 2,
         "interim decoding still requires half a second"
     );
     assert_eq!(
@@ -65,9 +70,9 @@ async fn closed_segments_are_reported_in_input_order() {
     let speech = jfk_samples();
     let third = speech.len() / 3;
     let mut samples = speech[..third].to_vec();
-    samples.extend(vec![0.0; 3 * SAMPLE_RATE]);
+    samples.extend(vec![0.0; 3 * EnginePolicy::SAMPLE_RATE]);
     samples.extend_from_slice(&speech[2 * third..]);
-    samples.extend(vec![0.0; 3 * SAMPLE_RATE]);
+    samples.extend(vec![0.0; 3 * EnginePolicy::SAMPLE_RATE]);
     let mut segmenter = Segmenter::new();
     let mut ranges = Vec::new();
     while let Some(range) = segmenter.poll(&samples) {
@@ -448,7 +453,7 @@ async fn a_disconnected_client_does_not_break_the_next_final_take() {
     abandoned.send_text("start").await;
     assert_eq!(abandoned.recv_json().await["type"], "stream");
     send_samples(&mut abandoned, &jfk_samples()).await;
-    send_pcm(&mut abandoned, 3 * SAMPLE_RATE).await;
+    send_pcm(&mut abandoned, 3 * EnginePolicy::SAMPLE_RATE).await;
     abandoned.close().await;
 
     let mut survivor = JsonSocket::connect(&server.ws_url("/stt")).await;

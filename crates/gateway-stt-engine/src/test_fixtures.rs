@@ -5,7 +5,7 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use crate::{Decoder, ModelFactory, TranscribeError};
+use crate::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
 
 #[derive(Debug)]
 enum ScriptedOutcome {
@@ -23,15 +23,26 @@ enum ParkState {
     Released,
 }
 
+#[derive(Debug, Default, Eq, PartialEq)]
+enum ConstructionState {
+    #[default]
+    Ready,
+    Armed,
+    Parked,
+    Released,
+}
+
 #[derive(Debug, Default)]
 struct DecoderState {
     outcomes: VecDeque<ScriptedOutcome>,
-    requests: Vec<(Vec<f32>, Vec<String>, String)>,
+    requests: Vec<DecodeRequest>,
     creation_thread: Option<ThreadId>,
     decode_threads: Vec<ThreadId>,
     waiters: usize,
     park: ParkState,
+    construction: ConstructionState,
     worker_dropped: bool,
+    panic_on_drop: bool,
 }
 
 /// A cloneable controller for one deterministic decoder.
@@ -71,11 +82,28 @@ impl ScriptedDecoder {
         self.state().park = ParkState::Armed;
     }
 
+    /// Parks decoder construction until [`Self::release_construction`] runs.
+    pub fn park_construction(&self) {
+        self.state().construction = ConstructionState::Armed;
+    }
+
     /// Releases a decode parked by [`Self::park_next`].
     pub fn release(&self) {
         let (_, changed) = &*self.shared;
         self.state().park = ParkState::Released;
         changed.notify_all();
+    }
+
+    /// Releases construction parked by [`Self::park_construction`].
+    pub fn release_construction(&self) {
+        let (_, changed) = &*self.shared;
+        self.state().construction = ConstructionState::Released;
+        changed.notify_all();
+    }
+
+    /// Makes dropping the worker-owned decoder panic.
+    pub fn panic_on_drop(&self) {
+        self.state().panic_on_drop = true;
     }
 
     /// Waits until at least `count` requests have entered the decoder.
@@ -90,9 +118,17 @@ impl ScriptedDecoder {
         self.wait_for(timeout, |state| state.park == ParkState::Parked)
     }
 
-    /// Returns all captured `(samples, guidance, finalized)` requests.
+    /// Waits until decoder construction has entered its rendezvous.
     #[must_use]
-    pub fn requests(&self) -> Vec<(Vec<f32>, Vec<String>, String)> {
+    pub fn wait_until_construction_parked(&self, timeout: Duration) -> bool {
+        self.wait_for(timeout, |state| {
+            state.construction == ConstructionState::Parked
+        })
+    }
+
+    /// Returns all captured stateless requests.
+    #[must_use]
+    pub fn requests(&self) -> Vec<DecodeRequest> {
         self.state().requests.clone()
     }
 
@@ -134,24 +170,29 @@ impl ScriptedDecoder {
     }
 
     fn mark_created(&self) {
-        self.state().creation_thread = Some(std::thread::current().id());
+        let (state, changed) = &*self.shared;
+        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.construction == ConstructionState::Armed {
+            state.construction = ConstructionState::Parked;
+            changed.notify_all();
+            state = changed
+                .wait_while(state, |state| {
+                    state.construction != ConstructionState::Released
+                })
+                .unwrap_or_else(PoisonError::into_inner);
+            state.construction = ConstructionState::Ready;
+        }
+        state.creation_thread = Some(std::thread::current().id());
     }
 }
 
 struct WorkerDecoder(ScriptedDecoder);
 
 impl Decoder for WorkerDecoder {
-    fn transcribe(
-        &mut self,
-        samples: &[f32],
-        guidance: &[String],
-        finalized: &str,
-    ) -> Result<String, TranscribeError> {
+    fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
         let (state, changed) = &*self.0.shared;
         let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
-        state
-            .requests
-            .push((samples.to_vec(), guidance.to_vec(), finalized.to_owned()));
+        state.requests.push(request);
         state.decode_threads.push(std::thread::current().id());
         changed.notify_all();
         if state.park == ParkState::Armed {
@@ -176,8 +217,13 @@ impl Decoder for WorkerDecoder {
 impl Drop for WorkerDecoder {
     fn drop(&mut self) {
         let (_, changed) = &*self.0.shared;
-        self.0.state().worker_dropped = true;
+        let panic_on_drop = {
+            let mut state = self.0.state();
+            state.worker_dropped = true;
+            state.panic_on_drop
+        };
         changed.notify_all();
+        assert!(!panic_on_drop, "scripted decoder drop panic");
     }
 }
 
@@ -249,39 +295,57 @@ impl ScriptedModelFactory {
         self.gpu_available = available;
         self
     }
+
+    /// Returns the fixture hardware-acceleration fact.
+    #[must_use]
+    pub fn gpu_available(&self) -> bool {
+        self.gpu_available
+    }
 }
 
 impl ModelFactory for ScriptedModelFactory {
-    fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-        assert!(!self.panic_interim, "scripted interim factory panic");
-        if let Some(message) = &self.interim_failure {
+    fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+        let (decoder, failure, panic) = match mode {
+            DecodeMode::Interim => (
+                Some(&self.interim),
+                &self.interim_failure,
+                self.panic_interim,
+            ),
+            DecodeMode::Final => (
+                self.final_decoder.as_ref(),
+                &self.final_failure,
+                self.panic_final,
+            ),
+        };
+        assert!(!panic, "scripted {mode:?} factory panic");
+        if let Some(message) = failure {
             return Err(TranscribeError::InvalidConfig(message.clone()));
         }
-        self.interim.mark_created();
-        Ok(Box::new(WorkerDecoder(self.interim.clone())))
-    }
-
-    fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-        assert!(!self.panic_final, "scripted final factory panic");
-        if let Some(message) = &self.final_failure {
-            return Err(TranscribeError::InvalidConfig(message.clone()));
-        }
-        let Some(decoder) = &self.final_decoder else {
+        let Some(decoder) = decoder else {
             return Ok(None);
         };
         decoder.mark_created();
         Ok(Some(Box::new(WorkerDecoder(decoder.clone()))))
-    }
-
-    fn gpu_available(&self) -> bool {
-        self.gpu_available
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SttEngine;
+    use crate::{EnginePolicy, SttEngine};
+
+    fn policy() -> EnginePolicy {
+        EnginePolicy::new(15, 500, false).expect("test policy is valid")
+    }
+
+    fn request(
+        mode: DecodeMode,
+        samples: Vec<f32>,
+        guidance: Vec<String>,
+        finalized: impl Into<String>,
+    ) -> DecodeRequest {
+        DecodeRequest::new(mode, samples, guidance, finalized.into())
+    }
 
     fn assert_invalid_config(error: TranscribeError, expected: &str) {
         let TranscribeError::InvalidConfig(message) = error else {
@@ -313,35 +377,47 @@ mod tests {
             ScriptedModelFactory::new(interim.clone())
                 .with_final(final_decoder.clone())
                 .with_gpu_available(true),
-            15,
-            500,
+            EnginePolicy::new(15, 500, true).expect("test policy is valid"),
         )
         .expect("scripted workers start");
 
         assert_eq!(
             engine
-                .transcribe(vec![0.25], vec!["term".to_owned()])
+                .decode(request(
+                    DecodeMode::Interim,
+                    vec![0.25],
+                    vec!["term".to_owned()],
+                    "",
+                ))
                 .await
                 .expect("interim succeeds"),
             "interim"
         );
         assert_eq!(
             engine
-                .transcribe_final(vec![0.5], vec!["name".to_owned()], "history".to_owned(),)
+                .decode(request(
+                    DecodeMode::Final,
+                    vec![0.5],
+                    vec!["name".to_owned()],
+                    "history",
+                ))
                 .await
-                .expect("final worker exists")
                 .expect("final succeeds"),
             "final"
         );
         assert!(engine.gpu_transcription_available());
-        assert_eq!(
-            interim.requests(),
-            vec![(vec![0.25], vec!["term".to_owned()], String::new())]
-        );
-        assert_eq!(
-            final_decoder.requests(),
-            vec![(vec![0.5], vec!["name".to_owned()], "history".to_owned())]
-        );
+        let interim_requests = interim.requests();
+        assert_eq!(interim_requests.len(), 1);
+        assert_eq!(interim_requests[0].mode(), DecodeMode::Interim);
+        assert_eq!(interim_requests[0].samples(), &[0.25]);
+        assert_eq!(interim_requests[0].guidance(), ["term"]);
+        assert_eq!(interim_requests[0].finalized(), "");
+        let final_requests = final_decoder.requests();
+        assert_eq!(final_requests.len(), 1);
+        assert_eq!(final_requests[0].mode(), DecodeMode::Final);
+        assert_eq!(final_requests[0].samples(), &[0.5]);
+        assert_eq!(final_requests[0].guidance(), ["name"]);
+        assert_eq!(final_requests[0].finalized(), "history");
         assert_ne!(interim.creation_thread(), Some(caller));
         assert_eq!(
             interim.decode_threads(),
@@ -355,7 +431,7 @@ mod tests {
                     .expect("final was constructed")
             ]
         );
-        engine.shutdown();
+        engine.shutdown().expect("workers join");
         assert!(interim.worker_dropped());
         assert!(final_decoder.worker_dropped());
     }
@@ -365,8 +441,7 @@ mod tests {
         let interim = ScriptedDecoder::new();
         let error = SttEngine::new(
             ScriptedModelFactory::new(interim.clone()).with_interim_panic(),
-            15,
-            500,
+            policy(),
         )
         .expect_err("startup panic fails construction");
         assert!(matches!(error, TranscribeError::WorkerPanicked));
@@ -379,8 +454,7 @@ mod tests {
         let interim = ScriptedDecoder::new();
         let error = SttEngine::new(
             ScriptedModelFactory::new(interim.clone()).with_final_panic(),
-            15,
-            500,
+            policy(),
         )
         .expect_err("startup panic fails construction");
         assert!(matches!(error, TranscribeError::WorkerPanicked));
@@ -391,15 +465,15 @@ mod tests {
     async fn scripted_decode_panic_is_explicit_and_closes_the_worker() {
         let interim = ScriptedDecoder::new();
         interim.panic_next();
-        let engine = SttEngine::new(ScriptedModelFactory::new(interim), 15, 500)
+        let engine = SttEngine::new(ScriptedModelFactory::new(interim), policy())
             .expect("scripted worker starts");
         let first = engine
-            .transcribe(Vec::new(), Vec::new())
+            .decode(request(DecodeMode::Interim, Vec::new(), Vec::new(), ""))
             .await
             .expect_err("panic is reported");
         assert!(matches!(first, TranscribeError::WorkerPanicked));
         let second = engine
-            .transcribe(Vec::new(), Vec::new())
+            .decode(request(DecodeMode::Interim, Vec::new(), Vec::new(), ""))
             .await
             .expect_err("panicked worker stays closed");
         assert!(matches!(second, TranscribeError::WorkerGone));
@@ -412,18 +486,23 @@ mod tests {
         let waiter =
             std::thread::spawn(move || waiter_decoder.wait_for_requests(1, Duration::from_secs(1)));
         wait_until_waiter_is_registered(&interim);
-        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), 15, 500)
+        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
             .expect("scripted worker starts");
 
         engine
-            .transcribe(vec![0.25], vec!["term".to_owned()])
+            .decode(request(
+                DecodeMode::Interim,
+                vec![0.25],
+                vec!["term".to_owned()],
+                "",
+            ))
             .await
             .expect("unparked decode succeeds");
         assert!(
             waiter.join().expect("request waiter does not panic"),
             "recording the request wakes the pre-existing waiter"
         );
-        engine.shutdown();
+        engine.shutdown().expect("worker joins");
         assert!(interim.worker_dropped());
     }
 
@@ -433,10 +512,10 @@ mod tests {
 
         let interim = ScriptedDecoder::new();
         interim.push_error(SENTINEL);
-        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), 15, 500)
+        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
             .expect("scripted worker starts");
         let error = engine
-            .transcribe(vec![0.25], Vec::new())
+            .decode(request(DecodeMode::Interim, vec![0.25], Vec::new(), ""))
             .await
             .expect_err("scripted decode fails");
         let TranscribeError::Inference(source) = error else {
@@ -445,7 +524,7 @@ mod tests {
         assert_eq!(source.to_string(), SENTINEL);
         assert!(source.source().is_none());
 
-        engine.shutdown();
+        engine.shutdown().expect("worker joins");
         assert!(interim.worker_dropped());
     }
 
@@ -456,8 +535,7 @@ mod tests {
         let interim = ScriptedDecoder::new();
         let error = SttEngine::new(
             ScriptedModelFactory::new(interim.clone()).with_interim_failure(SENTINEL),
-            15,
-            500,
+            policy(),
         )
         .expect_err("scripted interim construction fails");
         assert_invalid_config(error, SENTINEL);
@@ -475,8 +553,7 @@ mod tests {
             ScriptedModelFactory::new(interim.clone())
                 .with_final(final_decoder.clone())
                 .with_final_failure(SENTINEL),
-            15,
-            500,
+            policy(),
         )
         .expect_err("scripted final construction fails");
         assert_invalid_config(error, SENTINEL);
@@ -484,5 +561,78 @@ mod tests {
         assert!(interim.worker_dropped());
         assert_eq!(final_decoder.creation_thread(), None);
         assert!(!final_decoder.worker_dropped());
+    }
+
+    #[test]
+    fn parked_interim_construction_has_a_bounded_classified_outcome() {
+        let interim = ScriptedDecoder::new();
+        interim.park_construction();
+        let factory = ScriptedModelFactory::new(interim.clone());
+        let timeout = policy().with_startup_timeout(Duration::from_millis(20));
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let constructor = std::thread::spawn(move || {
+            let result = SttEngine::new(factory, timeout);
+            drop(result_tx.send(result));
+        });
+        assert!(interim.wait_until_construction_parked(Duration::from_secs(1)));
+        let error = result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup returns by its deadline")
+            .expect_err("parked interim construction times out");
+        assert!(matches!(error, TranscribeError::InterimStartupTimedOut));
+        constructor.join().expect("constructor does not panic");
+        interim.release_construction();
+        assert!(interim.wait_for(Duration::from_secs(1), |state| state.worker_dropped));
+    }
+
+    #[test]
+    fn parked_final_construction_cleans_up_the_initialized_interim_worker() {
+        let interim = ScriptedDecoder::new();
+        let final_decoder = ScriptedDecoder::new();
+        final_decoder.park_construction();
+        let factory = ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone());
+        let timeout = policy().with_startup_timeout(Duration::from_millis(20));
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let constructor = std::thread::spawn(move || {
+            let result = SttEngine::new(factory, timeout);
+            drop(result_tx.send(result));
+        });
+        assert!(
+            final_decoder.wait_until_construction_parked(Duration::from_secs(1)),
+            "final construction reaches its deterministic park"
+        );
+        let error = result_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("startup returns by its deadline")
+            .expect_err("parked final construction times out");
+        assert!(matches!(error, TranscribeError::FinalStartupTimedOut));
+        assert!(
+            interim.worker_dropped(),
+            "the worker initialized first is joined and cleaned up"
+        );
+        constructor.join().expect("constructor does not panic");
+        final_decoder.release_construction();
+        assert!(
+            final_decoder.wait_for(Duration::from_secs(1), |state| state.worker_dropped),
+            "the abandoned constructor releases its decoder after returning"
+        );
+    }
+
+    #[test]
+    fn shutdown_surfaces_join_panic_and_remains_idempotent() {
+        let interim = ScriptedDecoder::new();
+        interim.panic_on_drop();
+        let mut engine = SttEngine::new(ScriptedModelFactory::new(interim.clone()), policy())
+            .expect("scripted worker starts");
+
+        assert!(matches!(
+            engine.shutdown(),
+            Err(TranscribeError::ShutdownPanicked)
+        ));
+        assert!(matches!(
+            engine.shutdown(),
+            Err(TranscribeError::ShutdownPanicked)
+        ));
+        assert!(interim.worker_dropped());
     }
 }

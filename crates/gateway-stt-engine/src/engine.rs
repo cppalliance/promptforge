@@ -1,85 +1,115 @@
 //! Backend-neutral interim and final transcription workers.
 
 use std::sync::Arc;
-use std::time::Duration;
 
+use crate::startup;
 use crate::worker::{FINAL_JOB_CAPACITY, INTERIM_JOB_CAPACITY, Transcriber};
-use crate::{ModelFactory, SAMPLE_RATE, TranscribeError};
+use crate::{DecodeMode, DecodeRequest, EnginePolicy, ModelFactory, TranscribeError};
 
 /// The STT engine: one required interim worker and one optional final worker.
 #[derive(Debug)]
 pub struct SttEngine {
     transcriber: Transcriber,
     final_pass: Option<Transcriber>,
-    gpu_available: bool,
-    window_samples: usize,
-    interval: Duration,
+    policy: EnginePolicy,
 }
 
 impl SttEngine {
     /// Builds backend decoders on their owning worker threads.
     ///
-    /// `window_seconds` and `interval_ms` are backend-neutral capture policy.
-    ///
     /// # Errors
-    /// Returns [`TranscribeError::InvalidConfig`] for zero or overflowing
-    /// policy values, a backend-translated construction failure, or
-    /// [`TranscribeError::SpawnWorker`] when a worker cannot start.
-    pub fn new(
-        factory: impl ModelFactory,
-        window_seconds: u64,
-        interval_ms: u64,
-    ) -> Result<Self, TranscribeError> {
-        if window_seconds == 0 {
-            return Err(TranscribeError::InvalidConfig(
-                "stt.window_seconds must be at least 1".to_owned(),
-            ));
-        }
-        if interval_ms == 0 {
-            return Err(TranscribeError::InvalidConfig(
-                "stt.interval_ms must be at least 1".to_owned(),
-            ));
-        }
-        let seconds = usize::try_from(window_seconds).map_err(|_| {
-            TranscribeError::InvalidConfig("stt.window_seconds is too large".to_owned())
-        })?;
-        let window_samples = seconds.checked_mul(SAMPLE_RATE).ok_or_else(|| {
-            TranscribeError::InvalidConfig("stt.window_seconds is too large".to_owned())
-        })?;
+    /// Returns a backend-translated construction failure,
+    /// one or more role-specific startup failures, or
+    /// [`TranscribeError::SpawnWorker`]. If joining partially started workers
+    /// also fails, [`TranscribeError::StartupCleanup`] preserves both outcomes.
+    pub fn new(factory: impl ModelFactory, policy: EnginePolicy) -> Result<Self, TranscribeError> {
+        Self::new_with(factory, policy, Transcriber::spawn)
+    }
 
-        let gpu_available = factory.gpu_available();
+    fn new_with(
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        mut spawn: impl FnMut(
+            &'static str,
+            Arc<dyn ModelFactory>,
+            DecodeMode,
+            usize,
+        ) -> Result<
+            (
+                Transcriber,
+                std::sync::mpsc::Receiver<Result<bool, TranscribeError>>,
+            ),
+            TranscribeError,
+        >,
+    ) -> Result<Self, TranscribeError> {
         let factory: Arc<dyn ModelFactory> = Arc::new(factory);
-        let (transcriber, interim_init) = Transcriber::spawn(
+        let startup_deadline = std::time::Instant::now()
+            .checked_add(policy.startup_timeout())
+            .ok_or_else(|| {
+                TranscribeError::InvalidConfig("stt.startup_timeout is too large".to_owned())
+            })?;
+        let (mut transcriber, interim_init) = spawn(
             "stt-interim",
             Arc::clone(&factory),
-            false,
+            DecodeMode::Interim,
             INTERIM_JOB_CAPACITY,
         )?;
-        let interim_exists = interim_init
-            .recv()
-            .map_err(|_| TranscribeError::WorkerGone)??;
-        if !interim_exists {
-            return Err(TranscribeError::InvalidConfig(
-                "the interim decoder is required".to_owned(),
-            ));
-        }
-        let (final_worker, final_init) =
-            Transcriber::spawn("stt-final", Arc::clone(&factory), true, FINAL_JOB_CAPACITY)?;
-        let final_pass = if final_init
-            .recv()
-            .map_err(|_| TranscribeError::WorkerGone)??
-        {
+        let (mut final_worker, final_init) = match spawn(
+            "stt-final",
+            Arc::clone(&factory),
+            DecodeMode::Final,
+            FINAL_JOB_CAPACITY,
+        ) {
+            Ok(worker) => worker,
+            Err(final_spawn) => {
+                let interim =
+                    startup::outcome(&interim_init, DecodeMode::Interim, startup_deadline);
+                let interim_timed_out = startup::timed_out(&interim);
+                let Err(startup) = startup::pair(interim, Err(final_spawn)) else {
+                    unreachable!("the final spawn failure prevents construction");
+                };
+                let cleanup = if interim_timed_out {
+                    transcriber.abandon_startup();
+                    Vec::new()
+                } else {
+                    vec![transcriber.shutdown()]
+                };
+                return Err(Transcriber::startup_failure(startup, cleanup));
+            }
+        };
+        let interim = startup::outcome(&interim_init, DecodeMode::Interim, startup_deadline);
+        let final_result = startup::outcome(&final_init, DecodeMode::Final, startup_deadline);
+        let interim_timed_out = startup::timed_out(&interim);
+        let final_timed_out = startup::timed_out(&final_result);
+        let (interim_exists, final_exists) = match startup::pair(interim, final_result) {
+            Ok(pair) => pair,
+            Err(startup) => {
+                let mut cleanup = Vec::with_capacity(2);
+                if interim_timed_out {
+                    transcriber.abandon_startup();
+                } else {
+                    cleanup.push(transcriber.shutdown());
+                }
+                if final_timed_out {
+                    final_worker.abandon_startup();
+                } else {
+                    cleanup.push(final_worker.shutdown());
+                }
+                return Err(Transcriber::startup_failure(startup, cleanup));
+            }
+        };
+        debug_assert!(interim_exists);
+        let final_pass = if final_exists {
             Some(final_worker)
         } else {
+            final_worker.shutdown()?;
             None
         };
 
         Ok(Self {
             transcriber,
             final_pass,
-            gpu_available,
-            window_samples,
-            interval: Duration::from_millis(interval_ms),
+            policy,
         })
     }
 
@@ -92,48 +122,35 @@ impl SttEngine {
     /// Whether the backend reports hardware acceleration.
     #[must_use]
     pub fn gpu_transcription_available(&self) -> bool {
-        self.gpu_available
+        self.policy.gpu_available()
     }
 
     /// Samples in the sliding interim window.
     #[must_use]
     pub fn window_samples(&self) -> usize {
-        self.window_samples
+        self.policy.window_samples()
     }
 
     /// Cadence of the interim loop.
     #[must_use]
-    pub fn interval(&self) -> Duration {
-        self.interval
+    pub fn interval(&self) -> std::time::Duration {
+        self.policy.interval()
     }
 
-    /// Transcribes one interim audio buffer.
+    /// Decodes one explicit stateless request on its selected worker.
     ///
     /// # Errors
-    /// Returns a decoder failure or [`TranscribeError::WorkerGone`].
-    pub async fn transcribe(
-        &self,
-        samples: Vec<f32>,
-        guidance: Vec<String>,
-    ) -> Result<String, TranscribeError> {
-        self.transcriber
-            .transcribe(samples, guidance, String::new())
-            .await
-    }
-
-    /// Transcribes one independent buffer with the optional final decoder.
-    ///
-    /// # Errors
-    /// Returns a decoder failure or [`TranscribeError::WorkerGone`].
-    pub async fn transcribe_final(
-        &self,
-        samples: Vec<f32>,
-        guidance: Vec<String>,
-        finalized: String,
-    ) -> Option<Result<String, TranscribeError>> {
-        match &self.final_pass {
-            Some(final_pass) => Some(final_pass.transcribe(samples, guidance, finalized).await),
-            None => None,
+    /// Returns a decoder failure, [`TranscribeError::WorkerGone`], or an
+    /// invalid-configuration error when a final worker was not configured.
+    pub async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
+        match request.mode() {
+            DecodeMode::Interim => self.transcriber.transcribe(request).await,
+            DecodeMode::Final => match &self.final_pass {
+                Some(final_pass) => final_pass.transcribe(request).await,
+                None => Err(TranscribeError::InvalidConfig(
+                    "the final decoder is not configured".to_owned(),
+                )),
+            },
         }
     }
 
@@ -142,262 +159,93 @@ impl SttEngine {
     /// Calling this method more than once has no additional effect. Native
     /// decoding is non-preemptible, so shutdown waits for a running decode
     /// rather than detaching its worker.
-    pub fn shutdown(&mut self) {
-        self.transcriber.shutdown();
-        if let Some(final_pass) = &mut self.final_pass {
-            final_pass.shutdown();
+    /// # Errors
+    /// Returns [`TranscribeError::ShutdownPanicked`] for one panicked worker or
+    /// [`TranscribeError::ShutdownFailures`] for multiple panicked workers.
+    /// Both workers are still joined and every failure remains visible on
+    /// repeated calls.
+    pub fn shutdown(&mut self) -> Result<(), TranscribeError> {
+        let mut cleanup = Vec::with_capacity(2);
+        if let Err(error) = self.transcriber.shutdown() {
+            cleanup.push(error);
         }
-        self.final_pass = None;
+        if let Some(final_pass) = &mut self.final_pass
+            && let Err(error) = final_pass.shutdown()
+        {
+            cleanup.push(error);
+        }
+        if cleanup.len() > 1 {
+            return Err(TranscribeError::ShutdownFailures { cleanup });
+        }
+        match cleanup.pop() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 
 impl Drop for SttEngine {
     fn drop(&mut self) {
-        self.shutdown();
+        // Explicit shutdown surfaces join panics. Drop cannot return one.
+        drop(self.shutdown());
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::sync::mpsc;
-    use std::thread::ThreadId;
+    use std::sync::{Arc, Barrier};
 
-    use crate::{Decoder, ModelFactory};
+    use crate::Decoder;
 
     use super::*;
 
-    #[derive(Debug)]
-    struct NeverFactory;
-
-    impl ModelFactory for NeverFactory {
-        fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-            panic!("invalid policy must fail before backend construction");
-        }
-
-        fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-            panic!("invalid policy must fail before backend construction");
-        }
-
-        fn gpu_available(&self) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn zero_window_is_rejected_before_backend_construction() {
-        let error = SttEngine::new(NeverFactory, 0, 500).expect_err("zero window must fail");
-        assert!(matches!(error, TranscribeError::InvalidConfig(_)));
-    }
-
-    #[test]
-    fn zero_interval_is_rejected_before_backend_construction() {
-        let error = SttEngine::new(NeverFactory, 15, 0).expect_err("zero interval must fail");
-        assert!(matches!(error, TranscribeError::InvalidConfig(_)));
+    fn policy() -> EnginePolicy {
+        EnginePolicy::new(15, 500, false).expect("test policy is valid")
     }
 
     #[derive(Debug)]
-    struct FailingModelFactory {
-        created: mpsc::Sender<ThreadId>,
-    }
+    struct ConcurrentInterimFailure(Arc<Barrier>);
 
-    impl ModelFactory for FailingModelFactory {
-        fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-            assert!(
-                self.created.send(std::thread::current().id()).is_ok(),
-                "the test must receive the worker identity"
-            );
-            Err(TranscribeError::load_model(
-                PathBuf::from("failing-model.bin"),
-                std::io::Error::other("fake model construction failure"),
-            ))
-        }
-
-        fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-            Ok(None)
-        }
-
-        fn gpu_available(&self) -> bool {
-            false
-        }
-    }
-
-    #[test]
-    fn model_initialization_failure_reaches_the_constructor_from_the_worker() {
-        let caller = std::thread::current().id();
-        let (created_tx, created_rx) = mpsc::channel();
-        let error = SttEngine::new(
-            FailingModelFactory {
-                created: created_tx,
-            },
-            15,
-            500,
-        )
-        .expect_err("model construction must fail");
-        assert!(matches!(error, TranscribeError::LoadModel { .. }));
-        let created = created_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("the factory records its owning thread");
-        assert_ne!(
-            created, caller,
-            "model construction belongs on the dedicated worker"
-        );
-    }
-
-    const FINAL_INIT_SENTINEL: &str = "sentinel final initialization failure";
-
-    #[derive(Debug)]
-    struct FinalFailingModelFactory {
-        interim_dropped: mpsc::Sender<()>,
-    }
-
-    impl ModelFactory for FinalFailingModelFactory {
-        fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-            Ok(Box::new(InterimDropProbe {
-                dropped: self.interim_dropped.clone(),
-            }))
-        }
-
-        fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+    impl ModelFactory for ConcurrentInterimFailure {
+        fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
+            assert_eq!(mode, DecodeMode::Interim);
+            self.0.wait();
             Err(TranscribeError::InvalidConfig(
-                FINAL_INIT_SENTINEL.to_owned(),
+                "interim startup sentinel".to_owned(),
             ))
-        }
-
-        fn gpu_available(&self) -> bool {
-            false
-        }
-    }
-
-    struct InterimDropProbe {
-        dropped: mpsc::Sender<()>,
-    }
-
-    impl Decoder for InterimDropProbe {
-        fn transcribe(
-            &mut self,
-            _samples: &[f32],
-            _guidance: &[String],
-            _finalized: &str,
-        ) -> Result<String, TranscribeError> {
-            Ok(String::new())
-        }
-    }
-
-    impl Drop for InterimDropProbe {
-        fn drop(&mut self) {
-            let _ignored = self.dropped.send(());
         }
     }
 
     #[test]
-    fn final_initialization_failure_propagates_and_cleans_up_the_interim_worker() {
-        let (dropped_tx, dropped_rx) = mpsc::channel();
-        let error = SttEngine::new(
-            FinalFailingModelFactory {
-                interim_dropped: dropped_tx,
+    fn final_spawn_failure_preserves_concurrent_interim_startup_failure() {
+        let rendezvous = Arc::new(Barrier::new(2));
+        let spawn_rendezvous = Arc::clone(&rendezvous);
+        let error = SttEngine::new_with(
+            ConcurrentInterimFailure(rendezvous),
+            policy(),
+            move |name, factory, mode, capacity| {
+                if mode == DecodeMode::Final {
+                    spawn_rendezvous.wait();
+                    return Err(TranscribeError::SpawnWorker(std::io::Error::other(
+                        "final spawn sentinel",
+                    )));
+                }
+                Transcriber::spawn(name, factory, mode, capacity)
             },
-            15,
-            500,
         )
-        .expect_err("final model construction must fail");
-        let TranscribeError::InvalidConfig(message) = error else {
-            panic!("the final worker's exact failure must reach the constructor");
+        .expect_err("both concurrent startup failures prevent construction");
+        let TranscribeError::StartupFailures { failures, .. } = error else {
+            panic!("both observed role failures must be aggregated");
         };
-        assert_eq!(message, FINAL_INIT_SENTINEL);
-        dropped_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("constructor failure releases the initialized interim decoder");
-    }
-
-    #[derive(Debug)]
-    enum WorkerEvent {
-        Created(ThreadId),
-        Decoded { owner: ThreadId, current: ThreadId },
-    }
-
-    #[derive(Debug)]
-    struct FailingDecoderFactory {
-        events: mpsc::Sender<WorkerEvent>,
-    }
-
-    impl ModelFactory for FailingDecoderFactory {
-        fn create_interim(&self) -> Result<Box<dyn Decoder>, TranscribeError> {
-            let owner = std::thread::current().id();
-            assert!(
-                self.events.send(WorkerEvent::Created(owner)).is_ok(),
-                "the test must receive decoder creation"
-            );
-            Ok(Box::new(FailingDecoder {
-                owner,
-                events: self.events.clone(),
-            }))
-        }
-
-        fn create_final(&self) -> Result<Option<Box<dyn Decoder>>, TranscribeError> {
-            Ok(None)
-        }
-
-        fn gpu_available(&self) -> bool {
-            false
-        }
-    }
-
-    struct FailingDecoder {
-        owner: ThreadId,
-        events: mpsc::Sender<WorkerEvent>,
-    }
-
-    impl Decoder for FailingDecoder {
-        fn transcribe(
-            &mut self,
-            _samples: &[f32],
-            _guidance: &[String],
-            _finalized: &str,
-        ) -> Result<String, TranscribeError> {
-            assert!(
-                self.events
-                    .send(WorkerEvent::Decoded {
-                        owner: self.owner,
-                        current: std::thread::current().id(),
-                    })
-                    .is_ok(),
-                "the test must receive decoder execution"
-            );
-            Err(TranscribeError::inference(std::io::Error::other(
-                "fake decode failure",
-            )))
-        }
-    }
-
-    #[tokio::test]
-    async fn decode_failure_reaches_the_caller_on_the_decoder_owner_thread() {
-        let caller = std::thread::current().id();
-        let (event_tx, event_rx) = mpsc::channel();
-        let engine = SttEngine::new(FailingDecoderFactory { events: event_tx }, 15, 500)
-            .expect("fake decoder loads");
-        let WorkerEvent::Created(created) = event_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("the factory records decoder creation")
-        else {
-            panic!("decoder creation must be the first event");
-        };
-        let error = engine
-            .transcribe(vec![0.25; SAMPLE_RATE], Vec::new())
-            .await
-            .expect_err("fake decode must fail");
-        assert!(matches!(error, TranscribeError::Inference(_)));
-        let WorkerEvent::Decoded { owner, current } = event_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("the decoder records execution")
-        else {
-            panic!("decoder execution must follow creation");
-        };
-        assert_ne!(created, caller, "decoder creation uses a worker thread");
-        assert_eq!(owner, created, "the decoder retains its creating worker");
-        assert_eq!(
-            current, created,
-            "decode execution stays on the decoder's owning worker"
-        );
+        assert_eq!(failures.len(), 2);
+        assert!(matches!(
+            &failures[0],
+            TranscribeError::InvalidConfig(message) if message == "interim startup sentinel"
+        ));
+        assert!(matches!(
+            &failures[1],
+            TranscribeError::SpawnWorker(source)
+                if source.to_string() == "final spawn sentinel"
+        ));
     }
 }

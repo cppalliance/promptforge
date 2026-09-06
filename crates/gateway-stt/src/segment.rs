@@ -11,20 +11,20 @@
 
 use std::ops::Range;
 
-use gateway_stt_engine::{SAMPLE_RATE, is_silence};
+use gateway_stt_engine::EnginePolicy;
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
-const FRAME_SAMPLES: usize = SAMPLE_RATE * 30 / 1000;
+const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
 
 /// Silence must persist this long after speech to close a segment: 700 ms,
 /// long enough to survive sentence-internal pauses and natural breathing
 /// gaps (~2 s), short enough that the final pass starts well before the
 /// user stops talking.
-const MIN_SILENCE_SAMPLES: usize = SAMPLE_RATE * 2;
+const MIN_SILENCE_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 2;
 
 /// Speech shorter than 250 ms is discarded as a click or cough rather than
 /// transcribed, where whisper would hallucinate a word for it.
-const MIN_SPEECH_SAMPLES: usize = SAMPLE_RATE / 4;
+const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
 
 /// Incremental speech segmenter over one take's PCM buffer.
 ///
@@ -70,7 +70,7 @@ impl Segmenter {
     pub fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
         while self.cursor + FRAME_SAMPLES <= buffer.len() {
             let frame = &buffer[self.cursor..self.cursor + FRAME_SAMPLES];
-            let silent = is_silence(frame);
+            let silent = EnginePolicy::is_silence(frame);
             match (self.speech_start, silent) {
                 (Some(start), true) => {
                     let begin = self.silence_begin.get_or_insert(self.cursor);
@@ -107,12 +107,12 @@ mod tests {
 
     /// One second of loud synthetic speech (a constant 0.5 tone).
     fn speech(seconds: usize) -> Vec<f32> {
-        vec![0.5; seconds * SAMPLE_RATE]
+        vec![0.5; seconds * EnginePolicy::SAMPLE_RATE]
     }
 
     /// One second of digital silence.
     fn silence(seconds: usize) -> Vec<f32> {
-        vec![0.0; seconds * SAMPLE_RATE]
+        vec![0.0; seconds * EnginePolicy::SAMPLE_RATE]
     }
 
     /// Concatenates blocks of speech and silence into one buffer.
@@ -157,11 +157,11 @@ mod tests {
         let range = &ranges[0];
         assert_eq!(range.start, 0);
         assert!(
-            range.end <= 2 * SAMPLE_RATE + FRAME_SAMPLES,
+            range.end <= 2 * EnginePolicy::SAMPLE_RATE + FRAME_SAMPLES,
             "the segment ends where the silence began: {range:?}"
         );
         assert!(
-            range.end - range.start >= 2 * SAMPLE_RATE - FRAME_SAMPLES,
+            range.end - range.start >= 2 * EnginePolicy::SAMPLE_RATE - FRAME_SAMPLES,
             "the segment holds the whole speech run: {range:?}"
         );
         assert_eq!(segmenter.consumed(), range.end);
@@ -181,7 +181,13 @@ mod tests {
     #[test]
     fn clicks_shorter_than_min_speech_are_discarded() {
         // 100 ms of tone followed by a full closing silence.
-        let buffer = take(&[speech(1).split_at(SAMPLE_RATE / 10).0.to_vec(), silence(3)]);
+        let buffer = take(&[
+            speech(1)
+                .split_at(EnginePolicy::SAMPLE_RATE / 10)
+                .0
+                .to_vec(),
+            silence(3),
+        ]);
         let mut segmenter = Segmenter::new();
         assert!(
             close_all(&mut segmenter, &buffer).is_empty(),
