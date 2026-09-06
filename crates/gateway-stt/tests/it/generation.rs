@@ -161,7 +161,7 @@ fn replacement_is_serial_and_publishes_one_complete_snapshot() {
             .iter()
             .map(gateway_stt::SpeechModelInfo::name)
             .collect::<Vec<_>>(),
-        ["scripted-interim", "scripted-final"]
+        ["scripted-interim", "scripted-final", "realtime-transcribe"]
     );
     assert!(first_decoder.worker_dropped());
     service.shutdown();
@@ -208,7 +208,21 @@ async fn active_replacement_drains_request_and_job_before_unload_and_publication
         .await
         .expect("canceled old request returns")
         .expect("old request task joins");
-    assert!(!service.status().ready(), "closed admission is not ready");
+    let draining = service.status();
+    assert!(
+        draining.configured(),
+        "draining keeps the published configuration"
+    );
+    assert!(!draining.ready(), "closed admission is not ready");
+    assert_eq!(
+        draining.generation(),
+        None,
+        "draining never exposes a generation that refuses admission"
+    );
+    assert!(
+        service.models().is_empty(),
+        "draining publishes no discoverable speech model"
+    );
     assert!(
         next_interim.creation_thread().is_none() && next_final.creation_thread().is_none(),
         "replacement construction waits for every old worker job"
@@ -243,7 +257,7 @@ async fn active_replacement_drains_request_and_job_before_unload_and_publication
             .iter()
             .map(gateway_stt::SpeechModelInfo::name)
             .collect::<Vec<_>>(),
-        ["scripted-interim", "scripted-final"]
+        ["scripted-interim", "scripted-final", "realtime-transcribe"]
     );
 
     service.shutdown();

@@ -6,7 +6,7 @@ use gateway_config::{Config, SttRole};
 use gateway_local::artifacts::ArtifactStore;
 use shared_progress::ProgressHandle;
 
-use crate::model::ModelNames;
+use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 
 /// Verified artifacts and policy for a generation that has not started workers.
 #[derive(Debug)]
@@ -39,6 +39,15 @@ pub(crate) fn prepare(
     if config.stt_models().is_empty() {
         return Ok(PreparedSpeech { generation: None });
     }
+    if let Some(model) = config
+        .stt_models()
+        .iter()
+        .find(|model| model.name() == REALTIME_TRANSCRIBE_MODEL)
+    {
+        return Err(SpeechError::ReservedModelName {
+            model: model.name().to_owned(),
+        });
+    }
 
     let cache = gateway_local::resolve_cache_root(config.local().cache_dir())
         .map_err(SpeechError::Store)?;
@@ -61,7 +70,11 @@ pub(crate) fn prepare(
             library,
             interim_model,
             final_model,
-            names: ModelNames::new(interim_name, final_name),
+            names: ModelNames::new(interim_name, final_name).map_err(|error| {
+                SpeechError::ReservedModelName {
+                    model: error.into_name(),
+                }
+            })?,
             guidance: capture.vocabulary().to_vec(),
             window_seconds: capture.window_seconds(),
             interval_ms: capture.interval_ms(),
@@ -125,6 +138,14 @@ pub enum SpeechError {
     /// A final model was selected without its required interim partner.
     #[error("final STT model requires an interim model")]
     MissingInterim,
+
+    /// The logical Realtime identity was used by one physical worker.
+    #[non_exhaustive]
+    #[error("STT model name {model} is reserved for the logical Realtime model")]
+    ReservedModelName {
+        /// Physical catalog name that collided with the logical identity.
+        model: String,
+    },
 
     /// A future role reached a service that does not implement it.
     #[non_exhaustive]

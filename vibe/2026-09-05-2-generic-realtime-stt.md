@@ -592,7 +592,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p shared-loopback`
 - Consumes and gates: consumes no route state; pure predicate behavior gates Gateway sockets and later Workshop manifest adoption.
 
-### Step 23: Integrate generic speech facts
+### Step 23: Integrate generic speech facts [completed]
 
 - Artifacts: update `gateway/src/{model_info.rs,system.rs,lib.rs}`, `gateway/tests/it/surface.rs`, and gateway-stt status and model modules.
 - Scope: expose configured, ready, GPU, and generation status; advertise physical batch names and logical `realtime-transcribe` only when ready; omit speech without the feature.

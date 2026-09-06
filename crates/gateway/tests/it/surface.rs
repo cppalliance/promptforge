@@ -121,6 +121,95 @@ async fn a_keyless_loopback_client_reaches_the_inference_and_admin_surfaces() {
     server.shutdown().await;
 }
 
+#[cfg(feature = "stt")]
+#[tokio::test]
+async fn speech_status_is_generic_and_inactive_models_are_not_advertised() {
+    let server = gateway_for(fake_backend().await).await;
+    let client = reqwest::Client::new();
+
+    let status = send_within(
+        client
+            .get(format!("http://{}/admin/status", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await
+    .json::<serde_json::Value>()
+    .await
+    .expect("status is JSON");
+    assert_eq!(
+        status["speech"],
+        serde_json::json!({
+            "configured": false,
+            "ready": false,
+            "gpu": false,
+            "generation": null,
+        })
+    );
+
+    let catalog = send_within(
+        client
+            .get(format!("http://{}/v1/models", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await
+    .json::<serde_json::Value>()
+    .await
+    .expect("catalog is JSON");
+    assert_eq!(
+        catalog["data"]
+            .as_array()
+            .expect("catalog data")
+            .iter()
+            .map(|model| model["id"].as_str().expect("model id"))
+            .collect::<Vec<_>>(),
+        ["test-model"]
+    );
+
+    server.shutdown().await;
+}
+
+#[cfg(not(feature = "stt"))]
+#[tokio::test]
+async fn featureless_gateway_omits_speech_status_and_models() {
+    let server = gateway_for(fake_backend().await).await;
+    let client = reqwest::Client::new();
+
+    let status = send_within(
+        client
+            .get(format!("http://{}/admin/status", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await
+    .json::<serde_json::Value>()
+    .await
+    .expect("status is JSON");
+    assert!(
+        status.get("speech").is_none(),
+        "featureless status has no speech surface"
+    );
+
+    let catalog = send_within(
+        client
+            .get(format!("http://{}/v1/models", server.addr))
+            .bearer_auth("test-token"),
+    )
+    .await
+    .json::<serde_json::Value>()
+    .await
+    .expect("catalog is JSON");
+    assert_eq!(
+        catalog["data"]
+            .as_array()
+            .expect("catalog data")
+            .iter()
+            .map(|model| model["id"].as_str().expect("model id"))
+            .collect::<Vec<_>>(),
+        ["test-model"]
+    );
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn trust_loopback_false_refuses_the_keyless_loopback_client() {
     let server = strict_gateway_for(fake_backend().await).await;

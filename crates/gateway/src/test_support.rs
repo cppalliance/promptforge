@@ -253,4 +253,67 @@ mod tests {
             })
         );
     }
+
+    async fn get_json(state: AppState, uri: &'static str) -> serde_json::Value {
+        let response = build_router(state, None)
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body reads");
+        serde_json::from_slice(&body).expect("response body is JSON")
+    }
+
+    #[tokio::test]
+    async fn ready_scripted_pair_is_published_through_gateway_surfaces() {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n",
+        )
+        .expect("config parses");
+        let factory = ScriptedModelFactory::new(ScriptedDecoder::new())
+            .with_final(ScriptedDecoder::new())
+            .with_gpu_available(true);
+        let state = app_state_with_scripted_stt(config, factory).expect("scripted state builds");
+        let service = state.speech.clone();
+
+        let status = get_json(state.clone(), "/admin/status").await;
+        assert_eq!(
+            status["speech"],
+            serde_json::json!({
+                "configured": true,
+                "ready": true,
+                "gpu": true,
+                "generation": 1,
+            })
+        );
+        let speech_endpoint = status["endpoints"]
+            .as_array()
+            .expect("endpoints are an array")
+            .iter()
+            .find(|entry| entry["path"] == "/v1/audio/transcriptions")
+            .expect("speech endpoint is present");
+        assert_eq!(speech_endpoint["ready"], true);
+        assert_eq!(speech_endpoint["provisioning"], false);
+
+        let catalog = get_json(state, "/v1/models").await;
+        assert_eq!(
+            catalog["data"]
+                .as_array()
+                .expect("catalog data")
+                .iter()
+                .map(|model| model["id"].as_str().expect("model id"))
+                .collect::<Vec<_>>(),
+            ["scripted-interim", "scripted-final", "realtime-transcribe"]
+        );
+        service.shutdown();
+    }
 }

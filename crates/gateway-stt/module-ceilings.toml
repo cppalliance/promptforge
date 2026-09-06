@@ -9,16 +9,16 @@ target_step = "Step 30"
 destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
 
 [modules]
-"artifacts.rs" = 325
+"artifacts.rs" = 346
 "audio.rs" = 397
 "batch.rs" = 347
 "batch/native_tests.rs" = 113
 "batch/tests.rs" = 160
-"generation.rs" = 450
+"generation.rs" = 467
 "generation/lease.rs" = 126
-"generation/snapshot.rs" = 161
+"generation/snapshot.rs" = 158
 "lib.rs" = 41
-"model.rs" = 55
+"model.rs" = 105
 "realtime/mod.rs" = 16
 "realtime/input.rs" = 195
 "realtime/item.rs" = 157

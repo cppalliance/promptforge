@@ -23,6 +23,28 @@ use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
+/// Generic speech lifecycle facts included in Gateway operational status.
+#[cfg(feature = "stt")]
+#[derive(Debug, Clone, Copy, Serialize)]
+pub(crate) struct SpeechSnapshot {
+    configured: bool,
+    ready: bool,
+    gpu: bool,
+    generation: Option<u64>,
+}
+
+#[cfg(feature = "stt")]
+impl From<gateway_stt::SpeechStatus> for SpeechSnapshot {
+    fn from(status: gateway_stt::SpeechStatus) -> Self {
+        Self {
+            configured: status.configured(),
+            ready: status.ready(),
+            gpu: status.gpu(),
+            generation: status.generation(),
+        }
+    }
+}
+
 /// One `GET /admin/system` snapshot.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct SystemSnapshot {
@@ -286,6 +308,22 @@ mod tests {
     use gateway_config::Config;
 
     use crate::test_support::serve;
+
+    #[cfg(feature = "stt")]
+    #[test]
+    fn speech_snapshot_serializes_only_generic_facade_facts() {
+        let snapshot = super::SpeechSnapshot::from(gateway_stt::SpeechService::new().status());
+
+        assert_eq!(
+            serde_json::json!(snapshot),
+            serde_json::json!({
+                "configured": false,
+                "ready": false,
+                "gpu": false,
+                "generation": null,
+            })
+        );
+    }
 
     /// A minimal profile rooting the artifact cache at `cache_dir`.
     fn system_config(cache_dir: &std::path::Path) -> Config {

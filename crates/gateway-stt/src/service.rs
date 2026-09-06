@@ -83,7 +83,7 @@ impl SpeechService {
         self.state.status()
     }
 
-    /// Returns physical models from one point-in-time generation snapshot.
+    /// Returns physical batch models and any ready logical model from one snapshot.
     #[must_use]
     pub fn models(&self) -> Vec<SpeechModelInfo> {
         self.state.models()

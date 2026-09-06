@@ -89,7 +89,6 @@ mod env_file;
 mod error;
 mod handoff;
 mod hf;
-#[cfg(feature = "local")]
 mod model_info;
 #[cfg(feature = "local")]
 mod orphans;
@@ -149,8 +148,7 @@ use crate::error::GatewayError;
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::wire::{
-    ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse, RerankRequest,
-    RerankResponse,
+    ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, RerankRequest, RerankResponse,
 };
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
@@ -895,24 +893,39 @@ async fn rerank(
 async fn list_models(
     State(state): State<AppState>,
     caller: Caller,
-) -> Result<Json<ModelsResponse>, GatewayError> {
+) -> Result<Json<model_info::CatalogModelsResponse>, GatewayError> {
     check_auth(&state, &caller).await?;
+    let _publication = state.switch.lock().await;
     let live = state.live.read().await;
     let data = live
         .routing
         .models()
         .iter()
-        .map(|model| ModelInfo {
-            id: model.name.clone(),
-            object: "model",
-            kind: model.kind,
-            description: model.description.clone(),
-            context: model.context,
-            thinking: model.thinking,
-            capabilities: model.capabilities.clone(),
+        .map(|model| {
+            model_info::CatalogModelInfo::inference(ModelInfo {
+                id: model.name.clone(),
+                object: "model",
+                kind: model.kind,
+                description: model.description.clone(),
+                context: model.context,
+                thinking: model.thinking,
+                capabilities: model.capabilities.clone(),
+            })
         })
-        .collect();
-    Ok(Json(ModelsResponse {
+        .collect::<Vec<_>>();
+    drop(live);
+    #[cfg(feature = "stt")]
+    let data = {
+        let mut data = data;
+        let speech_models = state.speech.models();
+        data.extend(
+            speech_models
+                .iter()
+                .map(model_info::CatalogModelInfo::speech),
+        );
+        data
+    };
+    Ok(Json(model_info::CatalogModelsResponse {
         object: "list",
         data,
     }))
@@ -971,6 +984,22 @@ fn endpoint_status(
     }
 }
 
+#[cfg(feature = "stt")]
+fn with_speech_endpoint(
+    mut endpoints: Vec<EndpointStatus>,
+    speech: gateway_stt::SpeechStatus,
+    command_active: bool,
+) -> (Vec<EndpointStatus>, gateway_stt::SpeechStatus) {
+    endpoints.push(endpoint_status(
+        "/v1/audio/transcriptions",
+        "Audio transcriptions",
+        speech.configured(),
+        speech.ready(),
+        command_active,
+    ));
+    (endpoints, speech)
+}
+
 /// An `Instant` as Unix epoch seconds for the status wire shape. The
 /// conversion goes through the elapsed duration, so a clock that jumped
 /// backward clamps to now rather than underflowing.
@@ -993,6 +1022,7 @@ async fn admin_status(
     caller: Caller,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &caller).await?;
+    let _publication = state.switch.lock().await;
     let active = state.commands.active_command();
     let pending = state.commands.pending_commands();
     let live = state.live.read().await;
@@ -1046,18 +1076,9 @@ async fn admin_status(
         ),
     ];
     #[cfg(feature = "stt")]
-    let endpoints = {
-        let mut endpoints = endpoints;
-        endpoints.push(endpoint_status(
-            "/v1/audio/transcriptions",
-            "Audio transcriptions",
-            !live.config.stt_models().is_empty(),
-            state.speech.status().ready(),
-            command_active,
-        ));
-        endpoints
-    };
-    Ok(Json(serde_json::json!({
+    let (endpoints, speech) =
+        with_speech_endpoint(endpoints, state.speech.status(), command_active);
+    let response = serde_json::json!({
         "profile": live.profile_name,
         "models": models,
         "loading_models": live.loading.iter().collect::<Vec<_>>(),
@@ -1088,7 +1109,14 @@ async fn admin_status(
                 "provisioning": endpoint.provisioning,
             }))
             .collect::<Vec<_>>(),
-    })))
+    });
+    #[cfg(feature = "stt")]
+    let response = {
+        let mut response = response;
+        response["speech"] = serde_json::json!(system::SpeechSnapshot::from(speech));
+        response
+    };
+    Ok(Json(response))
 }
 
 /// The `POST /admin/queue/cancel` route: bearer-authed, fires the active
@@ -3505,7 +3533,11 @@ mod provisioning_tests {
         );
         let reader_state = state.clone();
         let dirty_state = state.clone();
+        let catalog_state = state.clone();
+        let status_state = state.clone();
         let dirty_caller = caller.clone();
+        let catalog_caller = caller.clone();
+        let status_caller = caller.clone();
         let mut reader = tokio::spawn(async move {
             crate::config_pending::admin_config_pending(axum::extract::State(reader_state), caller)
                 .await
@@ -3516,6 +3548,12 @@ mod provisioning_tests {
                 dirty_caller,
             )
             .await
+        });
+        let mut catalog_reader = tokio::spawn(async move {
+            crate::list_models(axum::extract::State(catalog_state), catalog_caller).await
+        });
+        let mut status_reader = tokio::spawn(async move {
+            crate::admin_status(axum::extract::State(status_state), status_caller).await
         });
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut reader)
@@ -3528,6 +3566,18 @@ mod provisioning_tests {
                 .await
                 .is_err(),
             "dirty readers wait while disk and live state differ"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut catalog_reader)
+                .await
+                .is_err(),
+            "model discovery waits while speech and profile publication differ"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut status_reader)
+                .await
+                .is_err(),
+            "operational status waits while speech and profile publication differ"
         );
 
         token.cancel();
@@ -3544,8 +3594,28 @@ mod provisioning_tests {
             .await
             .expect("dirty reader task joins")
             .expect("dirty read succeeds");
+        let axum::Json(catalog) = catalog_reader
+            .await
+            .expect("catalog reader task joins")
+            .expect("catalog read succeeds");
+        let axum::Json(status) = status_reader
+            .await
+            .expect("status reader task joins")
+            .expect("status read succeeds");
         assert_eq!(reply["profile"]["active_profile"], "beta");
         assert_eq!(dirty["dirty"], false);
+        let catalog = serde_json::to_value(catalog).expect("catalog serializes");
+        assert_eq!(catalog["data"][1]["id"], "scripted-interim");
+        assert_eq!(status["profile"], "beta");
+        assert_eq!(
+            status["speech"],
+            serde_json::json!({
+                "configured": true,
+                "ready": true,
+                "gpu": false,
+                "generation": 1,
+            })
+        );
         assert_eq!(
             state.live.read().await.profile_name.as_deref(),
             Some("beta")

@@ -33,10 +33,16 @@ pub struct SpeechReplacement {
 
 #[derive(Debug)]
 struct Shared {
-    active: RwLock<Option<Arc<Generation>>>,
+    publication: RwLock<Publication>,
     next_generation: AtomicU64,
     changes: tokio::sync::watch::Sender<u64>,
     replacements: Arc<ReplacementCoordinator>,
+}
+
+#[derive(Debug, Default)]
+struct Publication {
+    active: Option<Arc<Generation>>,
+    configured: bool,
 }
 
 /// Cloneable internal state used by service methods and private handlers.
@@ -50,7 +56,7 @@ impl Default for GenerationState {
         let (changes, _receiver) = tokio::sync::watch::channel(0);
         Self {
             shared: Arc::new(Shared {
-                active: RwLock::new(None),
+                publication: RwLock::new(Publication::default()),
                 next_generation: AtomicU64::new(1),
                 changes,
                 replacements: Arc::new(ReplacementCoordinator::default()),
@@ -122,7 +128,7 @@ impl GenerationState {
                 Backend::Scripted,
                 factory,
                 policy.with_startup_timeout(startup_timeout),
-                ModelNames::new("scripted-interim".to_owned(), final_model),
+                ModelNames::scripted(final_model.is_some()),
                 Vec::new(),
             )
             .map(Some)
@@ -152,20 +158,21 @@ impl GenerationState {
 
         let mut replacement = replacement;
         let published = replacement.generation.take().map(Arc::new);
+        let configured = published.is_some();
         let revision = published
             .as_ref()
             .map_or_else(|| self.next_id(), |generation| generation.id);
         let committed = replacement.permit.with_current(|| {
-            let mut active = self
+            let mut publication = self
                 .shared
-                .active
+                .publication
                 .write()
                 .unwrap_or_else(PoisonError::into_inner);
-            if active.is_some() {
+            if publication.active.is_some() {
                 return false;
             }
-            *active = published;
-            drop(active);
+            publication.active = published;
+            publication.configured = configured;
             self.shared.changes.send_replace(revision);
             true
         });
@@ -191,9 +198,10 @@ impl GenerationState {
         let _shutdown = self.shared.replacements.begin_shutdown();
         let generation = self
             .shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner)
+            .active
             .as_ref()
             .map(Arc::clone);
         let Some(generation) = generation else {
@@ -204,9 +212,10 @@ impl GenerationState {
         generation.admission.wait_until_idle();
         let retired = self
             .shared
-            .active
+            .publication
             .write()
             .unwrap_or_else(PoisonError::into_inner)
+            .active
             .take_if(|active| Arc::ptr_eq(active, &generation));
         drop(generation);
         if let Some(retired) = retired
@@ -217,12 +226,12 @@ impl GenerationState {
     }
 
     pub(crate) fn active(&self) -> Option<GenerationLease> {
-        let active = self
+        let publication = self
             .shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        let generation = active.as_ref()?;
+        let generation = publication.active.as_ref()?;
         let admission = generation.admission.admit()?;
         Some(GenerationLease::new(Arc::clone(generation), admission))
     }
@@ -238,24 +247,29 @@ impl GenerationState {
     }
 
     pub(crate) fn status(&self) -> SpeechStatus {
-        let active = self
+        let publication = self
             .shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        active
+        publication
+            .active
             .as_deref()
             .filter(|generation| generation.admission.is_open())
-            .map_or_else(SpeechStatus::inactive, Generation::status)
+            .map_or_else(
+                || SpeechStatus::unready(publication.configured),
+                Generation::status,
+            )
     }
 
     pub(crate) fn models(&self) -> Vec<SpeechModelInfo> {
-        let active = self
+        let publication = self
             .shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        active
+        publication
+            .active
             .as_deref()
             .filter(|generation| generation.admission.is_open())
             .map_or_else(Vec::new, Generation::models)
@@ -264,9 +278,10 @@ impl GenerationState {
     #[cfg(feature = "test-fixtures")]
     pub(crate) fn counts(&self) -> Option<(usize, usize)> {
         self.shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner)
+            .active
             .as_ref()
             .map(|generation| generation.admission.counts())
     }
@@ -328,9 +343,10 @@ impl GenerationState {
     ) -> Result<Option<GenerationSpec>, SpeechError> {
         let generation = self
             .shared
-            .active
+            .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner)
+            .active
             .as_ref()
             .map(Arc::clone);
         let Some(generation) = generation else {
@@ -367,9 +383,10 @@ impl GenerationState {
                 let retired = permit
                     .with_current(|| {
                         self.shared
-                            .active
+                            .publication
                             .write()
                             .unwrap_or_else(PoisonError::into_inner)
+                            .active
                             .take_if(|active| Arc::ptr_eq(active, &generation))
                     })
                     .flatten()
@@ -398,14 +415,14 @@ fn restore_generation(
     let generation = Arc::new(rollback.build(id)?);
     let restored = permit
         .with_current(|| {
-            let mut active = shared
-                .active
+            let mut publication = shared
+                .publication
                 .write()
                 .unwrap_or_else(PoisonError::into_inner);
-            if active.is_some() {
+            if publication.active.is_some() {
                 return false;
             }
-            *active = Some(generation);
+            publication.active = Some(generation);
             true
         })
         .unwrap_or(false);

@@ -65,7 +65,7 @@ impl GenerationSpec {
             Backend::Scripted,
             factory,
             policy,
-            ModelNames::new("scripted-interim".to_owned(), None),
+            ModelNames::scripted(false),
             Vec::new(),
         );
         spec.infer_scripted_final = true;
@@ -76,10 +76,7 @@ impl GenerationSpec {
         let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
             .map_err(SpeechError::Engine)?;
         let names = if self.infer_scripted_final {
-            ModelNames::new(
-                "scripted-interim".to_owned(),
-                engine.has_final_pass().then(|| "scripted-final".to_owned()),
-            )
+            ModelNames::scripted(engine.has_final_pass())
         } else {
             self.names.clone()
         };

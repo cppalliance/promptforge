@@ -693,6 +693,52 @@ fn profile_replacement_policy_requires_restartable_rollback_and_fatal_shutdown()
 }
 
 #[test]
+fn gateway_speech_discovery_uses_only_generic_facade_facts() {
+    let gateway_root = crate_root("gateway").join("src");
+    let gateway = read(&gateway_root.join("lib.rs"));
+    let section = |start, end| {
+        gateway
+            .split_once(start)
+            .and_then(|(_, rest)| rest.split_once(end))
+            .map_or_else(
+                || panic!("Gateway source must retain `{start}` before `{end}`"),
+                |(body, _)| body,
+            )
+    };
+    let model_info = read(&gateway_root.join("model_info.rs"));
+    let system = read(&gateway_root.join("system.rs"));
+    let discovery = [
+        section("async fn list_models(", "#[derive(Debug, Deserialize)]"),
+        section("async fn admin_status(", "async fn admin_queue_cancel("),
+        model_info.as_str(),
+        system.as_str(),
+    ]
+    .concat();
+    let compact = discovery
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+
+    for required in ["speech.status()", "speech.models()"] {
+        assert!(
+            compact.contains(required),
+            "Gateway speech discovery must use facade fact `{required}`"
+        );
+    }
+    for forbidden in [
+        "stt_models()",
+        "SttRole",
+        "WorkshopSttConfig",
+        "workshop_status",
+    ] {
+        assert!(
+            !compact.contains(forbidden),
+            "Gateway speech discovery must not depend on `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn compiler_unsafe_lints_cover_the_stt_stack() {
     let workspace: toml::Value = toml::from_str(&read(&workspace_root().join("Cargo.toml")))
         .unwrap_or_else(|error| panic!("workspace Cargo.toml must parse: {error}"));

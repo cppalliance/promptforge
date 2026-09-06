@@ -10,9 +10,9 @@ pub struct SpeechStatus {
 }
 
 impl SpeechStatus {
-    pub(crate) const fn inactive() -> Self {
+    pub(crate) const fn unready(configured: bool) -> Self {
         Self {
-            configured: false,
+            configured,
             ready: false,
             gpu: false,
             generation: None,
