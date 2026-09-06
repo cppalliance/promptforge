@@ -13,5 +13,8 @@ description = "Backend-neutral PromptForge speech decoding workers and audio pol
 thiserror.workspace = true
 tokio.workspace = true
 
+[features]
+test-fixtures = []
+
 [lints]
 workspace = true

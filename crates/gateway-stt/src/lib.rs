@@ -12,8 +12,10 @@ mod runtime;
 mod segment;
 mod stt;
 mod take;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "test-fixtures")))]
 mod test_fixtures;
+#[cfg(feature = "test-fixtures")]
+pub mod test_fixtures;
 
 pub use api::{MAX_AUDIO_BYTES, TranscriptionError, transcribe};
 pub use runtime::{SttRuntime, SttRuntimeError, SttState};

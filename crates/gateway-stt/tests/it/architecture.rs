@@ -146,18 +146,7 @@ const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
     },
     MigrationPolicy {
         crate_name: "gateway-stt-engine",
-        targets: &[
-            MigrationPolicyTarget {
-                module: "engine.rs",
-                target_step: "Step 8",
-                destination: "bounded worker dispatch",
-            },
-            MigrationPolicyTarget {
-                module: "worker.rs",
-                target_step: "Step 8",
-                destination: "bounded worker command queues",
-            },
-        ],
+        targets: &[],
     },
     MigrationPolicy {
         crate_name: "gateway-stt-backend-whisper",
@@ -494,13 +483,13 @@ fn module_ceilings_cover_sources_and_name_migration_targets() {
 }
 
 #[test]
-fn missing_migration_target_is_rejected() {
+fn completed_engine_migration_targets_are_removed() {
     let config = CeilingsFile {
-        public_root_budget: 0,
+        public_root_budget: 7,
         migration_targets: BTreeMap::new(),
-        modules: BTreeMap::from([("engine.rs".to_owned(), 1)]),
+        modules: BTreeMap::from([("engine.rs".to_owned(), 1), ("worker.rs".to_owned(), 1)]),
     };
-    assert!(validate_migration_targets("gateway-stt-engine", &config).is_err());
+    assert!(validate_migration_targets("gateway-stt-engine", &config).is_ok());
 }
 
 #[test]

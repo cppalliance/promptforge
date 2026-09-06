@@ -161,6 +161,21 @@ impl SttRuntime {
         }
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn from_scripted_engine(
+        engine: SttEngine,
+        interim: String,
+        final_model: Option<String>,
+        guidance: Vec<String>,
+    ) -> SttRuntime {
+        let state = SttState::default();
+        state.activate(engine, interim, final_model, guidance);
+        SttRuntime {
+            state,
+            active: true,
+        }
+    }
+
     /// Provisions the selected STT pair and loads its engine.
     ///
     /// A profile with no STT entries returns an inactive runtime. An

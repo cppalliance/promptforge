@@ -137,9 +137,18 @@ N8 | observation | oversized-unit @ crates/gateway-stt/tests/it/legacy_stream.rs
 N9 | observation | Violates A2 @ crates/gateway-stt/src/runtime.rs: not determinable from diff | Move take ownership into gateway STT; Separate Whisper from the STT engine
 N10 | observation | Violates A96 @ crates/gateway-stt/src/api.rs: not determinable from diff | Move take ownership into gateway STT
 N11 | observation | flag-parameter @ crates/gateway-stt-backend-whisper/src/model.rs::WhisperDecoder::load: selects interim or final decode policy through final_pass | Separate Whisper from the STT engine
-N12 | observation | flag-parameter @ crates/gateway-stt-engine/src/worker.rs::worker_loop: selects interim or final factory construction through final_model | Separate Whisper from the STT engine
+N12 | observation | flag-parameter @ crates/gateway-stt-engine/src/worker.rs::worker_loop: selects interim or final factory construction through final_model | Separate Whisper from the STT engine; Bound transcription workers and expose test fixtures
 N13 | observation | global-state @ crates/gateway-stt-backend-whisper/src/prompt.rs::NATIVE_TEST: serializes fixture-dependent prompt tests with a process-wide mutex | Separate Whisper from the STT engine
 N14 | observation | global-state @ crates/gateway-stt-backend-whisper/tests/native_whisper.rs::NATIVE_TEST: serializes native backend tests with a process-wide mutex | Separate Whisper from the STT engine
 N15 | observation | clone-block @ crates/gateway-stt/src/test_fixtures.rs: duplicates native fixture loading across unit and integration test support | Separate Whisper from the STT engine
 N16 | observation | clone-block @ crates/gateway-stt/tests/common/mod.rs: duplicates native fixture loading across integration and unit test support | Separate Whisper from the STT engine
 N17 | observation | Violates A2 @ crates/gateway-stt/tests/it/architecture.rs: not determinable from diff | Enforce exact STT architecture ratchets
+N18 | observation | feature-flag @ crates/gateway-stt-backend-whisper/Cargo.toml::test-fixtures: forwards scripted engine fixtures without an expiry | Bound transcription workers and expose test fixtures
+N19 | observation | feature-flag @ crates/gateway-stt-engine/Cargo.toml::test-fixtures: gates downstream scripted decoder fixtures without an expiry | Bound transcription workers and expose test fixtures
+N20 | observation | surface-growth @ crates/gateway-stt-engine/src/lib.rs::test_fixtures: exposes scripted decoder controls to downstream consumers | Bound transcription workers and expose test fixtures
+N21 | observation | shared-mutable-state @ crates/gateway-stt-engine/src/test_fixtures.rs::ScriptedDecoder: shares mutex-protected decoder controls across worker and test owners | Bound transcription workers and expose test fixtures
+N22 | observation | temporal-coupling @ crates/gateway-stt-engine/src/test_fixtures.rs::ScriptedDecoder: requires park, wait, and release calls in sequence | Bound transcription workers and expose test fixtures
+N23 | observation | feature-flag @ crates/gateway-stt/Cargo.toml::test-fixtures: gates the downstream speech test facade without an expiry | Bound transcription workers and expose test fixtures
+N24 | observation | surface-growth @ crates/gateway-stt/src/lib.rs::test_fixtures: exposes scripted speech runtime construction to downstream consumers | Bound transcription workers and expose test fixtures
+N25 | observation | facade @ crates/gateway-stt/src/lib.rs::test_fixtures: combines engine fixtures with speech runtime construction | Bound transcription workers and expose test fixtures
+N26 | observation | constructor-injection @ crates/gateway-stt/src/runtime.rs::SttRuntime::from_scripted_engine: receives the scripted engine and runtime settings as parameters | Bound transcription workers and expose test fixtures

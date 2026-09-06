@@ -37,6 +37,16 @@ pub enum TranscribeError {
     #[error("transcription worker exited")]
     WorkerGone,
 
+    /// The selected model worker has no free queue slot.
+    #[non_exhaustive]
+    #[error("transcription worker queue is full")]
+    Overloaded,
+
+    /// Model construction or decoding panicked on its worker thread.
+    #[non_exhaustive]
+    #[error("transcription worker panicked")]
+    WorkerPanicked,
+
     /// The STT engine configuration is invalid.
     #[non_exhaustive]
     #[error("invalid STT configuration: {0}")]

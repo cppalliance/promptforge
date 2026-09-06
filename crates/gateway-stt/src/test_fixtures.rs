@@ -1,11 +1,42 @@
 //! Native fixtures used only by this crate's unit tests.
 
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "test-fixtures")]
+pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+#[cfg(feature = "test-fixtures")]
+use crate::SttRuntime;
+#[cfg(feature = "test-fixtures")]
+use gateway_stt_engine::{SttEngine, TranscribeError};
+
+/// Builds a speech runtime around deterministic scripted workers.
+///
+/// # Errors
+/// Returns engine policy, startup, or worker construction failures.
+#[cfg(feature = "test-fixtures")]
+pub fn scripted_runtime(
+    factory: ScriptedModelFactory,
+    window_seconds: u64,
+    interval_ms: u64,
+) -> Result<SttRuntime, TranscribeError> {
+    let engine = SttEngine::new(factory, window_seconds, interval_ms)?;
+    let final_name = engine.has_final_pass().then(|| "scripted-final".to_owned());
+    Ok(SttRuntime::from_scripted_engine(
+        engine,
+        "scripted-interim".to_owned(),
+        final_name,
+        Vec::new(),
+    ))
+}
+
+#[cfg(test)]
 pub(crate) fn require_model() -> PathBuf {
     require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin")
 }
 
+#[cfg(test)]
 pub(crate) fn jfk_samples() -> Vec<f32> {
     let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
     let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
@@ -19,6 +50,7 @@ pub(crate) fn jfk_samples() -> Vec<f32> {
         .collect()
 }
 
+#[cfg(test)]
 fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
     let path = std::env::var_os(variable).map_or_else(
         || {

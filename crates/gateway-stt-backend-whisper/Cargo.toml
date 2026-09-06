@@ -20,5 +20,8 @@ hound.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 
+[features]
+test-fixtures = ["gateway-stt-engine/test-fixtures"]
+
 [lints]
 workspace = true

@@ -8,6 +8,8 @@ mod decoder;
 mod engine;
 mod error;
 mod policy;
+#[cfg(feature = "test-fixtures")]
+pub mod test_fixtures;
 mod worker;
 
 pub use decoder::{Decoder, ModelFactory};

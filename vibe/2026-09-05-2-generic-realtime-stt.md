@@ -402,7 +402,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes Step 6 final crate topology; the unfiltered command becomes mandatory after every later STT edit.
 
-### Step 8: Bound workers and expose scripted tests
+### Step 8: Bound workers and expose scripted tests - fb3a5be9
 
 - Artifacts: revise engine `worker.rs`, `engine.rs`, `error.rs`, and manifest; add `test-fixtures` scripted `ModelFactory` and `Decoder`; forward test features in backend and `gateway-stt` manifests; add Gateway development wiring and `crates/gateway/src/test_support.rs` injection without a new production facade type.
 - Scope: enforce `INTERIM_JOB_CAPACITY = 8` and `FINAL_JOB_CAPACITY = 8`, capacity and capacity-plus-one admission, cancellation, panic, factory failure, startup outcomes, cleanup, thread confinement, and non-detaching idempotent shutdown.

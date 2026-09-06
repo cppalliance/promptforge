@@ -32,5 +32,11 @@ tokio-tungstenite.workspace = true
 toml.workspace = true
 tower.workspace = true
 
+[features]
+test-fixtures = [
+    "gateway-stt-backend-whisper/test-fixtures",
+    "gateway-stt-engine/test-fixtures",
+]
+
 [lints]
 workspace = true

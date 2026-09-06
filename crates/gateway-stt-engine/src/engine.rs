@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::worker::Transcriber;
+use crate::worker::{FINAL_JOB_CAPACITY, INTERIM_JOB_CAPACITY, Transcriber};
 use crate::{ModelFactory, SAMPLE_RATE, TranscribeError};
 
 /// The STT engine: one required interim worker and one optional final worker.
@@ -49,11 +49,12 @@ impl SttEngine {
 
         let gpu_available = factory.gpu_available();
         let factory: Arc<dyn ModelFactory> = Arc::new(factory);
-        let (transcriber, interim_init) =
-            Transcriber::spawn("stt-interim", Arc::clone(&factory), false)?;
-        let (final_worker, final_init) =
-            Transcriber::spawn("stt-final", Arc::clone(&factory), true)?;
-
+        let (transcriber, interim_init) = Transcriber::spawn(
+            "stt-interim",
+            Arc::clone(&factory),
+            false,
+            INTERIM_JOB_CAPACITY,
+        )?;
         let interim_exists = interim_init
             .recv()
             .map_err(|_| TranscribeError::WorkerGone)??;
@@ -62,6 +63,8 @@ impl SttEngine {
                 "the interim decoder is required".to_owned(),
             ));
         }
+        let (final_worker, final_init) =
+            Transcriber::spawn("stt-final", Arc::clone(&factory), true, FINAL_JOB_CAPACITY)?;
         let final_pass = if final_init
             .recv()
             .map_err(|_| TranscribeError::WorkerGone)??
@@ -132,6 +135,25 @@ impl SttEngine {
             Some(final_pass) => Some(final_pass.transcribe(samples, guidance, finalized).await),
             None => None,
         }
+    }
+
+    /// Closes both worker queues and joins their threads.
+    ///
+    /// Calling this method more than once has no additional effect. Native
+    /// decoding is non-preemptible, so shutdown waits for a running decode
+    /// rather than detaching its worker.
+    pub fn shutdown(&mut self) {
+        self.transcriber.shutdown();
+        if let Some(final_pass) = &mut self.final_pass {
+            final_pass.shutdown();
+        }
+        self.final_pass = None;
+    }
+}
+
+impl Drop for SttEngine {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
