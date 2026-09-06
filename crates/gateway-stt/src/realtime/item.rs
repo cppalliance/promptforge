@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 use super::input::{InputSnapshot, SealedInput};
-use super::result_mailbox::ItemResult;
+use super::result_mailbox::{ItemFailure, ItemResult};
 use crate::take::Take;
 
 type FinalizationTask = JoinHandle<Result<String, String>>;
@@ -88,6 +88,12 @@ impl CommittedItem {
         self.finalization.is_some()
     }
 
+    pub(crate) fn finalization_finished(&self) -> bool {
+        self.finalization
+            .as_ref()
+            .is_some_and(tokio::task::JoinHandle::is_finished)
+    }
+
     pub(crate) const fn is_terminal(&self) -> bool {
         self.terminal
     }
@@ -105,7 +111,7 @@ impl CommittedItem {
                 .completed(transcript)
                 .ok_or_else(|| "the committed item already reached a terminal outcome".to_owned()),
             Err(message) => self
-                .failed(message)
+                .failed(ItemFailure::TranscriptionFailed(message))
                 .ok_or_else(|| "the committed item already reached a terminal outcome".to_owned()),
         }
     }
@@ -125,13 +131,13 @@ impl CommittedItem {
         })
     }
 
-    pub(crate) fn failed(&mut self, message: String) -> Option<ItemResult> {
+    pub(crate) fn failed(&mut self, failure: ItemFailure) -> Option<ItemResult> {
         if std::mem::replace(&mut self.terminal, true) {
             return None;
         }
         Some(ItemResult::Failed {
             item_id: self.id.clone(),
-            message,
+            failure,
         })
     }
 }

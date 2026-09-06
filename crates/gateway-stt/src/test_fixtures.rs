@@ -411,10 +411,10 @@ fn result_value(result: ItemResult) -> serde_json::Value {
             "transcript": transcript,
             "seconds": seconds,
         }),
-        ItemResult::Failed { item_id, message } => serde_json::json!({
+        ItemResult::Failed { item_id, failure } => serde_json::json!({
             "type": "failed",
             "item_id": item_id,
-            "message": message,
+            "message": failure.diagnostic(),
         }),
     }
 }

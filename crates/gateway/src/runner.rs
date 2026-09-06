@@ -369,6 +369,18 @@ impl Gateway {
         build_router(self.state.clone(), None)
     }
 
+    /// Replaces the speech facade used by routes and profile transitions.
+    ///
+    /// This composition seam lets embedders provide an already prepared
+    /// speech generation while preserving the Gateway's authentication,
+    /// host-authority, and route-layer policies.
+    #[cfg(feature = "stt")]
+    #[must_use]
+    pub fn with_speech_service(mut self, service: gateway_stt::SpeechService) -> Self {
+        self.state.speech = service;
+        self
+    }
+
     /// Bounded stdout/stderr tails captured from each running local
     /// `llama-server` child, keyed by configured model name.
     ///

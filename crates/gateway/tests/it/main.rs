@@ -34,6 +34,8 @@ mod local;
 mod profiles;
 mod progress;
 mod queue;
+#[cfg(feature = "stt")]
+mod realtime_stt;
 mod rerank;
 mod sidecar;
 mod surface;

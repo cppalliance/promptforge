@@ -7,6 +7,7 @@ use super::wire::{ClientError, EffectiveSession, IdGenerator, ServerEvent};
 use crate::generation::GenerationLease;
 
 mod items;
+mod route;
 mod state;
 
 #[cfg(test)]
@@ -65,6 +66,9 @@ impl Session {
             self.canceled_tasks.push(task);
         }
         self.input = None;
+        self.pending_interim.clear();
+        self.standard_interim_committed.clear();
+        self.hypothesis_revision = 0;
         Ok(())
     }
 

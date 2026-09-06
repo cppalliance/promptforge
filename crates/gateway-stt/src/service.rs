@@ -6,12 +6,17 @@ use shared_progress::ProgressHandle;
 use crate::artifacts::{self, PreparedSpeech, SpeechError};
 use crate::generation::{GenerationState, SpeechReplacement};
 use crate::model::SpeechModelInfo;
+#[cfg(feature = "test-fixtures")]
+use crate::realtime::ForcedPrecommitFailure;
+use crate::realtime::{RoutePolicy, SessionRegistry};
 use crate::status::SpeechStatus;
 
 /// Cloneable Gateway handle for all speech behavior.
 #[derive(Debug, Clone, Default)]
 pub struct SpeechService {
     pub(crate) state: GenerationState,
+    sessions: SessionRegistry,
+    realtime_policy: RoutePolicy,
 }
 
 impl SpeechService {
@@ -89,11 +94,36 @@ impl SpeechService {
         self.state.models()
     }
 
+    /// Blocks Realtime sends after `successful_sends` for deadline tests.
+    #[cfg(feature = "test-fixtures")]
+    pub fn block_realtime_send_after(&mut self, successful_sends: usize) {
+        self.realtime_policy = RoutePolicy::blocking_after(successful_sends);
+    }
+
+    /// Forces a typed precommit transcription failure for route tests.
+    #[cfg(feature = "test-fixtures")]
+    pub fn fail_realtime_precommit(&mut self) {
+        self.realtime_policy
+            .force_precommit_failure(ForcedPrecommitFailure::Transcription);
+    }
+
+    /// Forces a typed final-segment overload for route tests.
+    #[cfg(feature = "test-fixtures")]
+    pub fn overload_realtime_final_segment(&mut self) {
+        self.realtime_policy
+            .force_precommit_failure(ForcedPrecommitFailure::FinalSegmentOverload);
+    }
+
     /// Returns the batch and temporary legacy Gateway routes.
     #[cfg(not(miri))]
     pub fn routes(&self) -> axum::Router {
         crate::batch::routes(self.state.clone())
             .merge(crate::stt::gateway_router(self.state.clone()))
+            .merge(crate::realtime::routes(
+                self.state.clone(),
+                self.sessions.clone(),
+                self.realtime_policy.clone(),
+            ))
     }
 
     /// Returns the temporary Workshop-hosted legacy routes.

@@ -43,6 +43,7 @@ pub(super) enum Correlation {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ClientError {
+    kind: &'static str,
     code: &'static str,
     message: String,
     param: Option<String>,
@@ -57,6 +58,7 @@ impl ClientError {
         correlation: Correlation,
     ) -> Self {
         Self {
+            kind: "invalid_request_error",
             code,
             message: message.into(),
             param: param.map(str::to_owned),
@@ -66,7 +68,7 @@ impl ClientError {
 
     pub(in crate::realtime) fn into_server_event(self, event_id: &str) -> Value {
         let mut error = Map::new();
-        error.insert("type".to_owned(), Value::from("invalid_request_error"));
+        error.insert("type".to_owned(), Value::from(self.kind));
         error.insert("code".to_owned(), Value::from(self.code));
         error.insert("message".to_owned(), Value::from(self.message));
         if let Some(param) = self.param {
@@ -82,6 +84,42 @@ impl ClientError {
             }
         }
         serde_json::json!({"event_id": event_id, "type": "error", "error": error})
+    }
+
+    pub(in crate::realtime) fn request(
+        code: &'static str,
+        message: &'static str,
+        param: Option<&'static str>,
+        client_event_id: Option<String>,
+    ) -> Self {
+        Self::new(
+            code,
+            message,
+            param,
+            client_event_id.map_or(Correlation::Omitted, Correlation::Client),
+        )
+    }
+
+    pub(in crate::realtime) fn overload(
+        code: &'static str,
+        message: &'static str,
+        param: Option<&'static str>,
+        client_event_id: Option<String>,
+    ) -> Self {
+        let mut error = Self::request(code, message, param, client_event_id);
+        error.kind = "overload_error";
+        error
+    }
+
+    pub(in crate::realtime) fn server(
+        code: &'static str,
+        message: &'static str,
+        param: Option<&'static str>,
+        client_event_id: Option<String>,
+    ) -> Self {
+        let mut error = Self::request(code, message, param, client_event_id);
+        error.kind = "server_error";
+        error
     }
 }
 

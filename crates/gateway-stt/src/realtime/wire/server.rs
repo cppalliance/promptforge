@@ -7,6 +7,8 @@ use super::shared::{
     RequiredNullable, SESSION_OBJECT, SESSION_TYPE, deserialize_required_nullable,
 };
 
+mod events;
+
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EffectiveSession {

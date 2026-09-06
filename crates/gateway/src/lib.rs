@@ -58,6 +58,9 @@
 //! pending state, apply/revert, orphans, system, model-info, the HF
 //! proxy, reveal, shutdown) sits behind the shared loopback
 //! wall from `shared-loopback` in every build; with the
+//! default-on `stt` feature, `WS /v1/realtime?intent=transcription`
+//! serves Gateway-owned Realtime transcription beside the batch and
+//! temporary legacy speech routes; with the
 //! `config-ui` feature the embedded config SPA is served at `/config/`
 //! behind the same wall, and `GET /auth?key=` sets a session proof
 //! derived from the bearer key as an HttpOnly cookie and redirects to the
@@ -133,6 +136,8 @@ use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderValue;
+#[cfg(feature = "stt")]
+use axum::http::header::ORIGIN;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::Response;
 #[cfg(feature = "local")]
@@ -610,11 +615,31 @@ async fn authorize_stt_route(
     next: axum::middleware::Next,
 ) -> Result<Response, GatewayError> {
     check_auth(&state, &caller).await?;
+    if request.uri().path() == "/v1/realtime" && !gateway_realtime_origin_allowed(&request) {
+        return Ok(axum::http::StatusCode::FORBIDDEN.into_response());
+    }
     let in_flight = state.begin_inference().await;
     tokio::select! {
         response = next.run(request) => Ok(response),
         () = in_flight.cancelled() => Err(GatewayError::RequestCancelled),
     }
+}
+
+#[cfg(feature = "stt")]
+fn gateway_realtime_origin_allowed(request: &axum::extract::Request) -> bool {
+    let mut values = request.headers().get_all(ORIGIN).iter();
+    let first = values.next();
+    if values.next().is_some() {
+        return false;
+    }
+    let origin = match first {
+        None => None,
+        Some(value) => match value.to_str() {
+            Ok(value) => Some(value),
+            Err(_) => return false,
+        },
+    };
+    shared_loopback::gateway_loopback_origin_allowed(origin)
 }
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.

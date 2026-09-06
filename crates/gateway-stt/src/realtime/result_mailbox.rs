@@ -2,6 +2,31 @@ use std::collections::{HashMap, VecDeque};
 
 pub(crate) const SESSION_RESULT_CAPACITY: usize = 16;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ItemFailure {
+    FinalSegmentOverload(String),
+    PrecommitTranscriptionFailed(String),
+    TranscriptionFailed(String),
+}
+
+impl ItemFailure {
+    pub(crate) fn from_precommit(message: &str) -> Self {
+        if message == "final segment capacity is reached" {
+            Self::FinalSegmentOverload(message.to_owned())
+        } else {
+            Self::PrecommitTranscriptionFailed(message.to_owned())
+        }
+    }
+
+    pub(crate) fn diagnostic(&self) -> &str {
+        match self {
+            Self::FinalSegmentOverload(message)
+            | Self::PrecommitTranscriptionFailed(message)
+            | Self::TranscriptionFailed(message) => message,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ItemResult {
     Delta {
@@ -20,7 +45,7 @@ pub(crate) enum ItemResult {
     },
     Failed {
         item_id: String,
-        message: String,
+        failure: ItemFailure,
     },
 }
 

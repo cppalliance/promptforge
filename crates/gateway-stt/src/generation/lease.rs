@@ -69,6 +69,10 @@ impl GenerationLease {
         self.admission.epoch()
     }
 
+    pub(crate) async fn cancelled(&self) {
+        self.epoch().cancelled().await;
+    }
+
     pub(crate) fn own_job(&self) -> Option<GenerationJob> {
         let ownership = self.admission.own_job()?;
         Some(GenerationJob {

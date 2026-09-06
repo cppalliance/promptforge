@@ -2,7 +2,7 @@ use super::state::{
     MAX_COMMITTED_ITEMS_PER_SESSION, SESSION_CANCEL_JOIN_CAPACITY, Session, SessionError,
 };
 use crate::realtime::item::{CommitReceipt, CommittedItem};
-use crate::realtime::result_mailbox::{ItemResult, MailboxError};
+use crate::realtime::result_mailbox::{ItemFailure, ItemResult, MailboxError};
 
 impl Session {
     pub(crate) fn commit(&mut self) -> Result<CommitReceipt, SessionError> {
@@ -32,7 +32,7 @@ impl Session {
         let receipt = item.receipt();
         self.previous_item_id = Some(item_id.clone());
         if let Some(failure) = pending_failure
-            && let Some(terminal) = item.failed(failure)
+            && let Some(terminal) = item.failed(ItemFailure::from_precommit(&failure))
         {
             self.results.set_terminal(&item_id, terminal)?;
         }
@@ -104,7 +104,7 @@ impl Session {
             .get_mut(item_id)
             .ok_or(MailboxError::UnknownItem)?;
         let terminal = item
-            .failed(message)
+            .failed(ItemFailure::TranscriptionFailed(message))
             .ok_or(MailboxError::TerminalAlreadySet)?;
         self.results.set_terminal(item_id, terminal)?;
         Ok(())
