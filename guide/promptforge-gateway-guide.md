@@ -84,9 +84,15 @@ The gateway holds vendor credentials, so run it as a dedicated unprivileged user
 
 ## Watch the logs
 
+A serving gateway logs to `gateway.log` in the `logs` directory under the state directory (`~/.promptforge/logs` on a default install) and mirrors the same stream to stdout. Startup rotates the previous run's log aside - `gateway.log` becomes `gateway.log.1` - and keeps five previous runs, deleting the oldest. Every record crosses a redaction pass before it reaches disk: bearer tokens, authorization and cookie header values, and `api_key` assignments are masked. The log location is never configurable, so a config failure still has somewhere to report itself.
+
 Control log verbosity through the standard `RUST_LOG` environment filter. The speech library logs at warn level by default, so it stays quiet unless you ask for more.
 
-Startup failures appear on stderr with the full cause chain: one `error:` line followed by one `caused by:` line per cause. Once the gateway is serving, the log shows the bound address. If you configured port 0, the log reports the real bound port.
+Startup failures appear on stderr with the full cause chain: one `error:` line followed by one `caused by:` line per cause, and the same chain lands in the log file. Once the gateway is serving, the log shows the bound address. If you configured port 0, the log reports the real bound port.
+
+## Inspect a failed run
+
+When a gateway run fails before it can serve, `promptforge-gateway diagnostics` finds the evidence without any config knowledge. It prints a read-only JSON report: the state directory, the resolved config path and whether it exists, the current and retained log paths and which exist, the connection file, whether a gateway is running, and the version. It never serves, rotates a log, parses a config, or mutates the state directory, and it never prints secrets - no bearer key, environment value, config content, or log content. The generated config points at it in a comment.
 
 ## Stop the gateway
 
