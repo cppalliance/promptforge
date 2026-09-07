@@ -54,7 +54,7 @@ You can add a `vocabulary` list of domain terms to bias recognition:
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
 
-Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. The gateway saves only the canonical `[stt]` form.
+Version 2 accepts only the canonical `[stt]` section. Legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`, and the gateway saves only `[stt]`.
 
 First run provisions two recommended speech-to-text models: `whisper-base-en` for interim results and `whisper-small-en` for final results. They download from Hugging Face with pinned sha256 checksums and stated VRAM requirements of 1.0 GB and 2.0 GB. The generated configuration boots the gateway into a profile named `default` that activates both provisioned whisper models.
 

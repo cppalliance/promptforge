@@ -238,16 +238,19 @@ test("Workshop exposes canonical STT tuning without legacy model paths", async (
   );
 });
 
-test("a legacy Workshop STT payload is saved only as canonical STT", async () => {
+test("a canonical STT payload round-trips through the Workshop editor", async () => {
   const config = modelsFixture();
-  config.workshop = {
-    stt: { window_seconds: 8, interval_ms: 250, vocabulary: ["WG21"] },
-  };
+  config.stt = { window_seconds: 8, interval_ms: 250, vocabulary: ["WG21"] };
   const stub = fixtureStub({ config });
   const { dom, root } = await bootApp({ key: "k", stub });
 
   navigate(dom, "#/settings/workshop");
   await settle();
+  assert.equal(
+    root.querySelector(".field-row[data-key='window_seconds'] input").value,
+    "8",
+    "the editor reads the canonical top-level section",
+  );
   changeValue(dom, root.querySelector(".field-row[data-key='window_seconds'] input"), "9");
   await settle();
   root.querySelector(".card-save").click();

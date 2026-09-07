@@ -56,7 +56,7 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
-A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, and its `bind` and `open_browser` settings do nothing because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
+A `gateway.toml` carried over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 

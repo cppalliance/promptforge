@@ -335,7 +335,7 @@ isProject: false
 - Focused verification: from the repository root run `cargo test -p gateway-logging`, `cargo test -p gateway`, and `cargo test -p gateway-logging --release -- --ignored` for the existing latency budget.
 - Component boundary: ends Component 2; review cumulative Steps 4 through 8 against the Step 3 commit.
 
-### Step 9: Remove both legacy STT config shims
+### Step 9: Remove both legacy STT config shims [completed]
 
 - Component and piece: Component 3 of 8, version-2 configuration; delete both compatibility paths in one atomic behavior change.
 - Dependency: depends only on the regression foundation ending at Step 3 and is intentionally independent of logging; Rust and TypeScript must land together so no layer continues accepting `[workshop.stt]`.

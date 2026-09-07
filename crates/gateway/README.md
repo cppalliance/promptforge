@@ -125,7 +125,7 @@ A profile may select at most one interim and one final STT model. Interim withou
 sources, pins, and interim/final roles live in the global `[[stt_model]]`
 entries above; the active profile enables them by catalog name.
 
-Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. Defining both is an error, and config serialization writes only `[stt]`.
+Version 2 accepts only the canonical `[stt]` section. Legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`, and config serialization writes only `[stt]`.
 
 | Field | Default | Meaning |
 |---|---|---|

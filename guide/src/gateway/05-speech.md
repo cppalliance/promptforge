@@ -32,7 +32,7 @@ vocabulary = ["MCP", "GGUF", "Lua"]
 
 The `window_seconds` key sets the seconds of trailing audio transcribed per pass (default 15), and `interval_ms` sets the milliseconds between passes (default 500). Each must be at least 1; a zero value fails startup. The `vocabulary` lists domain terms that bias both transcription workers toward those terms. An empty list disables biasing. A vocabulary that exceeds the model's prompt budget is truncated, and a warning is logged.
 
-Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. Defining both is rejected, and saved configuration uses only `[stt]`.
+Version 2 accepts only the canonical `[stt]` section. Legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`, and saved configuration uses only `[stt]`.
 
 ## Batch transcription
 

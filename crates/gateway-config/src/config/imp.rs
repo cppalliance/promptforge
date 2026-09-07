@@ -226,7 +226,6 @@ impl Config {
     /// parsed TOML document.
     pub(crate) fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
         interpolate_value(&mut document)?;
-        migrate_legacy_stt(&mut document)?;
         let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
             path: None,
             source: Box::new(source),
@@ -236,33 +235,6 @@ impl Config {
         config.validate()?;
         Ok(config)
     }
-}
-
-fn migrate_legacy_stt(document: &mut toml::Value) -> Result<(), ConfigError> {
-    let Some(root) = document.as_table_mut() else {
-        return Ok(());
-    };
-    let legacy = root
-        .get_mut("workshop")
-        .and_then(toml::Value::as_table_mut)
-        .and_then(|workshop| workshop.remove("stt"));
-    let Some(legacy) = legacy else {
-        return Ok(());
-    };
-    if root.contains_key("stt") {
-        return Err(ConfigError::Validation(
-            "[stt] and [workshop.stt] cannot both be present".to_owned(),
-        ));
-    }
-    root.insert("stt".to_owned(), legacy);
-    if root
-        .get("workshop")
-        .and_then(toml::Value::as_table)
-        .is_some_and(toml::map::Map::is_empty)
-    {
-        root.remove("workshop");
-    }
-    Ok(())
 }
 
 pub(crate) fn reject_profiles_directory(path: &Path) -> Result<(), ConfigError> {

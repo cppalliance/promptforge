@@ -319,9 +319,6 @@ impl Config {
     }
 
     /// Returns canonical `[stt]` pipeline tuning, or `None` when absent.
-    ///
-    /// Legacy `[workshop.stt]` input is migrated to this accessor during
-    /// parsing and is never exposed through [`WorkshopConfig`].
     #[must_use]
     pub fn stt(&self) -> Option<&SttPipelineConfig> {
         self.stt.as_ref()

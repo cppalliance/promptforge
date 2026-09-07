@@ -26,7 +26,7 @@ When no `[tools.web_search]` section is configured, the route answers 404. The r
 
 ## The deprecated [workshop] section
 
-The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section. The section keeps parsing - an existing config must not fail - and the gateway logs a deprecation warning at startup because its `bind` and `open_browser` settings are inert. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
+The gateway never hosts the workshop: the desktop application embeds the workshop server itself, and the standalone `workshop-server` binary serves the UI for a browser. A boot config carried over from an older version may still declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning at startup. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 ## Manage the cache
 

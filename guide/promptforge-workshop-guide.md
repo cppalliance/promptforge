@@ -60,7 +60,7 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
-A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, and its `bind` and `open_browser` settings do nothing because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
+A `gateway.toml` carried over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
 Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 
@@ -524,7 +524,7 @@ You can add a `vocabulary` list of domain terms to bias recognition:
 vocabulary = ["MCP", "GGUF", "Lua"]
 ````
 
-Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. The gateway saves only the canonical `[stt]` form.
+Version 2 accepts only the canonical `[stt]` section. Legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`, and the gateway saves only `[stt]`.
 
 First run provisions two recommended speech-to-text models: `whisper-base-en` for interim results and `whisper-small-en` for final results. They download from Hugging Face with pinned sha256 checksums and stated VRAM requirements of 1.0 GB and 2.0 GB. The generated configuration boots the gateway into a profile named `default` that activates both provisioned whisper models.
 

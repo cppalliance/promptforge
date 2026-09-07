@@ -168,12 +168,12 @@ fn serialized_shape_uses_the_toml_key_names() {
 }
 
 #[test]
-fn legacy_stt_input_serializes_only_as_canonical_stt() {
+fn canonical_stt_input_round_trips_as_canonical_stt() {
     let config = Config::from_toml_str(
         "config-version = 2\n[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"k\"\n\
-         [workshop.stt]\nwindow_seconds = 8\n",
+         [stt]\nwindow_seconds = 8\n",
     )
-    .expect("legacy STT input parses");
+    .expect("canonical STT input parses");
     let json = config.to_json();
 
     assert_eq!(json["stt"]["window_seconds"], 8);

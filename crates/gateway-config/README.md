@@ -44,7 +44,7 @@ Use this canonical section order to minimize merge noise:
 11. `[[stt_model]]`
 12. `[[profile]]`
 
-Legacy `[workshop.stt]` input migrates to `[stt]` only when the canonical section is absent. Defining both is rejected, and every serialized configuration uses only `[stt]`.
+Version 2 accepts only the canonical top-level `[stt]` section. Legacy `[workshop.stt]` input, including documents that also define `[stt]`, is rejected as an unknown workshop field.
 
 `include`, a sibling `profiles/` directory, the top-level `models` allowlist, and `[workshop.voice]` are rejected. Hard-break diagnostics name the file, removed key, source line, and replacement layout.
 

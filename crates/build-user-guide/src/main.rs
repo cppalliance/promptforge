@@ -62,6 +62,7 @@ fn assemble(guide: &Path) -> Result<(), AssembleError> {
             intro.display()
         )));
     }
+    check_removed_workshop_stt_claims(&src)?;
 
     let mut parts: Vec<(&str, &str, Vec<Chapter>)> = Vec::new();
     for (set, part_title) in SETS {
@@ -78,6 +79,29 @@ fn assemble(guide: &Path) -> Result<(), AssembleError> {
     for (set, part_title, chapters) in &parts {
         let export = render_export(part_title, chapters, &src.join(set))?;
         write_file(&guide.join(format!("promptforge-{set}-guide.md")), &export)?;
+    }
+    Ok(())
+}
+
+/// Reject guide text that presents the removed legacy STT section as usable.
+fn check_removed_workshop_stt_claims(src: &Path) -> Result<(), AssembleError> {
+    for (set, _) in SETS {
+        let set_dir = src.join(set);
+        for chapter in read_chapters(&set_dir)? {
+            let path = set_dir.join(chapter.file_name);
+            let content = fs::read_to_string(&path)
+                .map_err(|e| AssembleError(format!("cannot read {}: {e}", path.display())))?;
+            for (index, line) in content.lines().enumerate() {
+                if line.contains("[workshop.stt]") && !line.to_ascii_lowercase().contains("reject")
+                {
+                    return Err(AssembleError(format!(
+                        "removed [workshop.stt] section is not described as rejected in {}:{}",
+                        path.display(),
+                        index + 1
+                    )));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -301,6 +325,23 @@ mod tests {
         let summary = "# Summary\n\n- [Gone](workshop/99-gone.md)\n";
         let error = check_links(summary, &src).expect_err("must fail");
         assert!(error.to_string().contains("workshop/99-gone.md"));
+    }
+
+    #[test]
+    fn assembly_rejects_legacy_workshop_stt_acceptance_claims() {
+        let dir = fake_guide();
+        let chapter = dir.path().join("src").join("gateway").join("01-start.md");
+        fs::write(
+            chapter,
+            "# Start\n\nLegacy `[workshop.stt]` input is accepted.\n",
+        )
+        .expect("stale chapter");
+        let error = assemble(dir.path()).expect_err("must reject stale claim");
+        assert!(
+            error
+                .to_string()
+                .contains("removed [workshop.stt] section is not described as rejected")
+        );
     }
 
     #[test]

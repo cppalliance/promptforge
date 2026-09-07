@@ -178,8 +178,8 @@ export class ConfigStore {
         this.api.getStatus(),
         this.loadChatTemplates(),
       ]);
-      this.running = canonicalizeStt(running);
-      this.pending = canonicalizeStt(pending);
+      this.running = running;
+      this.pending = pending;
       this.dirty = dirty;
       this.orphans = visibleOrphans(orphans);
       this.cache = cache;
@@ -201,7 +201,7 @@ export class ConfigStore {
       this.api.getConfigDirty(),
       this.loadChatTemplates(),
     ]);
-    this.pending = canonicalizeStt(pending);
+    this.pending = pending;
     this.dirty = dirty;
     this.chatTemplates = chatTemplates;
   }
@@ -221,7 +221,7 @@ export class ConfigStore {
   /** Re-reads the running view too (after apply/revert). */
   private async refreshAll(): Promise<void> {
     const [running, status] = await Promise.all([this.api.getConfig(), this.api.getStatus()]);
-    this.running = canonicalizeStt(running);
+    this.running = running;
     this.activeProfile = status.profile;
     this.runningModels = status.models;
     await Promise.all([this.refreshPending(), this.refreshArtifacts()]);
@@ -401,12 +401,10 @@ export class ConfigStore {
 
   /**
    * The full `PUT /admin/config` payload base. Untouched secrets remain
-   * `"***"` so the gateway can restore them before validation. A legacy
-   * `workshop.stt` value is moved to canonical top-level `stt` before any
-   * browser save.
+   * `"***"` so the gateway can restore them before validation.
    */
   buildConfigPayload(): EntryData {
-    return canonicalizeStt(structuredClone(this.pending));
+    return structuredClone(this.pending);
   }
 
   /** Stages the global config and optional active-profile shadow. */
@@ -807,22 +805,6 @@ function modelArray(kind: ModelSource): "model" | "local_model" | "stt_model" {
     return "model";
   }
   return kind === "local" ? "local_model" : "stt_model";
-}
-
-/** Moves legacy `workshop.stt` input into the canonical top-level section. */
-function canonicalizeStt(config: EntryData): EntryData {
-  const workshop = config["workshop"];
-  if (!isRecord(workshop) || !isRecord(workshop["stt"])) {
-    return config;
-  }
-  if (!isRecord(config["stt"])) {
-    config["stt"] = workshop["stt"];
-  }
-  delete workshop["stt"];
-  if (Object.keys(workshop).length === 0) {
-    delete config["workshop"];
-  }
-  return config;
 }
 
 /** Removes ArtifactStore marker files from a gateway response defensively. */

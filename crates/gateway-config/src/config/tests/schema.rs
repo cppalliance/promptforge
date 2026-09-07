@@ -75,18 +75,13 @@ fn canonical_example_uses_the_validated_section_layout() {
 }
 
 #[test]
-fn canonical_and_legacy_stt_sections_share_one_runtime_shape() {
-    let canonical = Config::from_toml_str(&format!(
+fn canonical_stt_section_parses_into_the_runtime_shape() {
+    let config = Config::from_toml_str(&format!(
         "{CATALOG}\n[stt]\nwindow_seconds = 8\ninterval_ms = 250\nvocabulary = [\"WG21\"]\n"
     ))
     .expect("canonical STT section parses");
-    let legacy = Config::from_toml_str(&format!(
-        "{CATALOG}\n[workshop.stt]\nwindow_seconds = 8\ninterval_ms = 250\nvocabulary = [\"WG21\"]\n"
-    ))
-    .expect("legacy STT section migrates");
 
-    assert_eq!(canonical.stt(), legacy.stt());
-    let stt = canonical.stt().expect("canonical STT settings are present");
+    let stt = config.stt().expect("canonical STT settings are present");
     assert_eq!(stt.window_seconds(), 8);
     assert_eq!(stt.interval_ms(), 250);
     assert_eq!(stt.vocabulary(), ["WG21"]);

@@ -197,6 +197,23 @@ fn parses_config_without_tools_section() {
 }
 
 #[test]
+fn rejects_legacy_stt_section() {
+    let toml = r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[workshop.stt]
+window_seconds = 8
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Parse { .. })
+    ));
+}
+
+#[test]
 fn rejects_canonical_and_legacy_stt_sections_together() {
     let toml = r#"
 config-version = 2
@@ -211,8 +228,8 @@ window_seconds = 8
 interval_ms = 250
 "#;
     assert!(matches!(
-        Config::from_toml_str(toml),
-        Err(error) if error.kind() == crate::ConfigErrorKind::Validation
+        Config::parse_toml(toml),
+        Err(ConfigError::Parse { .. })
     ));
 }
 
