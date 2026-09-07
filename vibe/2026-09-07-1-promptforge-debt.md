@@ -273,7 +273,7 @@ isProject: false
 - Exclusions: no production relay, session-agent, UI, Gateway binding, or sidecar behavior changes.
 - Focused verification: from the repository root run `cargo test -p workshop-server`.
 
-### Step 3: Enforce integration test file ceilings
+### Step 3: Enforce integration test file ceilings [completed]
 
 - Component and piece: Component 1 of 8, regression boundaries; add one repository gate for physical-line ceilings and exact test-count records for the three split suites.
 - Dependency: depends on Steps 1 and 2 because the selected decision is to split first, prove count preservation, and only then freeze the resulting concern boundaries.

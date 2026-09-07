@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "suites": {
+    "crates/gateway/tests/it/realtime_stt": {
+      "testTotal": 18,
+      "entry": {
+        "path": "crates/gateway/tests/it/realtime_stt.rs",
+        "ceiling": 659
+      },
+      "files": {
+        "authentication.rs": 89,
+        "canonical_sequence.rs": 102,
+        "lifecycle.rs": 227,
+        "overload.rs": 162,
+        "protocol.rs": 377,
+        "recovery.rs": 151
+      }
+    },
+    "crates/workshop-server/tests/it/chat_gate": {
+      "testTotal": 11,
+      "entry": {
+        "path": "crates/workshop-server/tests/it/chat_gate.rs",
+        "ceiling": 371
+      },
+      "files": {
+        "canonical_sequence.rs": 51,
+        "lifecycle.rs": 276,
+        "overload.rs": 46,
+        "protocol.rs": 54,
+        "recovery.rs": 301
+      }
+    },
+    "crates/workshop-server/tests/it/realtime_relay": {
+      "testTotal": 9,
+      "entry": {
+        "path": "crates/workshop-server/tests/it/realtime_relay.rs",
+        "ceiling": 371
+      },
+      "files": {
+        "authentication.rs": 115,
+        "canonical_sequence.rs": 49,
+        "lifecycle.rs": 27,
+        "overload.rs": 27,
+        "protocol.rs": 59,
+        "recovery.rs": 33
+      }
+    }
+  }
+}

@@ -43,6 +43,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Test integration test ceiling driver
+        run: node tools/check-integration-test-ceilings.test.mjs
+
+      - name: Check integration test ceilings
+        run: node tools/check-integration-test-ceilings.mjs
+
       - name: Install architecture tools
         run: |
           RUSTUP_TOOLCHAIN=1.89 cargo install cargo-modules --version 0.25.0 --locked
