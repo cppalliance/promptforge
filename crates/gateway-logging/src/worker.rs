@@ -272,23 +272,6 @@ fn write_durable_file(path: &Path, contents: &[u8], fault: &mut FaultInjector) -
     file.sync_all()
 }
 
-fn copy_durable_file(
-    source: &Path,
-    destination: &Path,
-    fault: &mut FaultInjector,
-) -> io::Result<()> {
-    fault.checkpoint("create staged copy")?;
-    let mut source = File::open(source)?;
-    let mut destination = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?;
-    fault.checkpoint("write staged copy")?;
-    io::copy(&mut source, &mut destination)?;
-    fault.checkpoint("sync staged copy")?;
-    destination.sync_all()
-}
-
 fn backup_file(source: &Path, backup: &Path, fault: &mut FaultInjector) -> io::Result<()> {
     fault.checkpoint("create rollback copy")?;
     if std::fs::hard_link(source, backup).is_ok() {
@@ -385,12 +368,20 @@ fn durable_replace(
     sync_parent(path, &mut FaultInjector::default())
 }
 
-fn rotation_prepared_path(current: &Path) -> PathBuf {
-    artifact_path(current, ".rotation-prepared")
-}
-
 fn rotation_committed_path(current: &Path) -> PathBuf {
     artifact_path(current, ".rotation-committed")
+}
+
+fn rotation_staged_path(current: &Path) -> PathBuf {
+    artifact_path(current, ".rotation-staged")
+}
+
+fn rotation_prepared_path(current: &Path, old_mask: u8) -> PathBuf {
+    artifact_path(current, &format!(".rotation-prepared-{old_mask:02x}"))
+}
+
+fn legacy_rotation_prepared_path(current: &Path) -> PathBuf {
+    artifact_path(current, ".rotation-prepared")
 }
 
 fn rotation_targets(current: &Path, retained: &[PathBuf]) -> Vec<PathBuf> {
@@ -412,7 +403,7 @@ fn rotation_old_mask(targets: &[PathBuf]) -> io::Result<u8> {
         })
 }
 
-fn read_rotation_mask(path: &Path) -> io::Result<u8> {
+fn read_legacy_rotation_mask(path: &Path) -> io::Result<u8> {
     let bytes = std::fs::read(path)?;
     if bytes.len() != 1 {
         return Err(io::Error::new(
@@ -423,20 +414,102 @@ fn read_rotation_mask(path: &Path) -> io::Result<u8> {
     Ok(bytes[0])
 }
 
-fn cleanup_rotation(current: &Path, retained: &[PathBuf]) -> io::Result<()> {
-    for target in rotation_targets(current, retained) {
-        remove_file_if_present(&artifact_path(&target, ".rotation-new"))?;
-        let backup = artifact_path(&target, ".rotation-old");
-        remove_file_if_present(&artifact_path(&backup, ".building"))?;
-        remove_file_if_present(&backup)?;
+fn find_rotation_prepared(current: &Path) -> io::Result<Option<(PathBuf, u8)>> {
+    for old_mask in 0..64 {
+        let path = rotation_prepared_path(current, old_mask);
+        if path.exists() {
+            return Ok(Some((path, old_mask)));
+        }
     }
-    remove_file_if_present(&rotation_committed_path(current))?;
-    remove_file_if_present(&rotation_prepared_path(current))?;
-    sync_parent(current, &mut FaultInjector::default())
+    let legacy = legacy_rotation_prepared_path(current);
+    if legacy.exists() {
+        return read_legacy_rotation_mask(&legacy).map(|old_mask| Some((legacy, old_mask)));
+    }
+    Ok(None)
 }
 
-fn rollback_rotation(current: &Path, retained: &[PathBuf], old_mask: u8) -> io::Result<()> {
+fn remove_rotation_file(
+    path: &Path,
+    operation: &'static str,
+    fault: &mut FaultInjector,
+) -> io::Result<()> {
+    if existing_file_len(path)?.is_some() {
+        fault.checkpoint(operation)?;
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn cleanup_rotation_with(
+    current: &Path,
+    retained: &[PathBuf],
+    fault: &mut FaultInjector,
+) -> io::Result<()> {
+    for target in rotation_targets(current, retained) {
+        remove_rotation_file(
+            &artifact_path(&target, ".rotation-new"),
+            "cleanup staged rotation file",
+            fault,
+        )?;
+        let backup = artifact_path(&target, ".rotation-old");
+        remove_rotation_file(
+            &artifact_path(&backup, ".building"),
+            "cleanup partial rollback file",
+            fault,
+        )?;
+        remove_rotation_file(&backup, "cleanup committed rollback file", fault)?;
+    }
+    remove_rotation_file(
+        &rotation_staged_path(current),
+        "cleanup staged rotation marker",
+        fault,
+    )?;
+    sync_parent(current, fault)?;
+    while let Some((prepared, _)) = find_rotation_prepared(current)? {
+        remove_rotation_file(&prepared, "cleanup prepared rotation marker", fault)?;
+    }
+    sync_parent(current, fault)?;
+    remove_rotation_file(
+        &rotation_committed_path(current),
+        "cleanup committed rotation marker",
+        fault,
+    )?;
+    sync_parent(current, fault)
+}
+
+fn cleanup_rotation(current: &Path, retained: &[PathBuf]) -> io::Result<()> {
+    cleanup_rotation_with(current, retained, &mut FaultInjector::default())
+}
+
+fn rotation_source_for<'a>(
+    current: &'a Path,
+    retained: &'a [PathBuf],
+    destination_index: usize,
+) -> &'a Path {
+    if destination_index == 0 {
+        current
+    } else {
+        &retained[destination_index - 1]
+    }
+}
+
+fn rollback_rotation(
+    current: &Path,
+    retained: &[PathBuf],
+    prepared: &Path,
+    old_mask: u8,
+) -> io::Result<()> {
     let targets = rotation_targets(current, retained);
+    if rotation_staged_path(current).exists() {
+        for (index, destination) in retained.iter().enumerate().rev() {
+            let source = rotation_source_for(current, retained, index);
+            let backup = artifact_path(source, ".rotation-old");
+            if old_mask & (1 << index) != 0 && !backup.exists() && destination.exists() {
+                std::fs::rename(destination, backup)?;
+            }
+        }
+        remove_file_if_present(current)?;
+    }
     for (index, target) in targets.iter().enumerate().rev() {
         let backup = artifact_path(target, ".rotation-old");
         remove_file_if_present(&artifact_path(&backup, ".building"))?;
@@ -451,89 +524,78 @@ fn rollback_rotation(current: &Path, retained: &[PathBuf], old_mask: u8) -> io::
         remove_file_if_present(&artifact_path(target, ".rotation-new"))?;
     }
     remove_file_if_present(&rotation_committed_path(current))?;
+    remove_file_if_present(&rotation_staged_path(current))?;
     sync_parent(current, &mut FaultInjector::default())?;
-    remove_file_if_present(&rotation_prepared_path(current))?;
+    remove_file_if_present(prepared)?;
     sync_parent(current, &mut FaultInjector::default())
 }
 
 fn recover_rotation(current: &Path, retained: &[PathBuf]) -> io::Result<()> {
-    let prepared = rotation_prepared_path(current);
-    if !prepared.exists() {
+    if rotation_committed_path(current).exists() {
         return cleanup_rotation(current, retained);
     }
-    if std::fs::read(rotation_committed_path(current)).is_ok_and(|bytes| bytes == b"committed") {
-        cleanup_rotation(current, retained)
-    } else {
-        match read_rotation_mask(&prepared) {
-            Ok(old_mask) => rollback_rotation(current, retained, old_mask),
-            Err(_error)
-                if rotation_targets(current, retained)
-                    .iter()
-                    .all(|target| !artifact_path(target, ".rotation-old").exists()) =>
-            {
-                cleanup_rotation(current, retained)
-            }
-            Err(error) => Err(error),
-        }
+    let Some((prepared, old_mask)) = find_rotation_prepared(current)? else {
+        return cleanup_rotation(current, retained);
+    };
+    if old_mask >= 64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid log rotation recovery mask",
+        ));
     }
+    rollback_rotation(current, retained, &prepared, old_mask)
 }
 
 fn rotate_files(
     current: &Path,
     retained: &[PathBuf],
     fault: &mut FaultInjector,
-    mode: ReplacementMode,
+    _mode: ReplacementMode,
 ) -> io::Result<()> {
     recover_rotation(current, retained)?;
     let targets = rotation_targets(current, retained);
     let old_mask = rotation_old_mask(&targets)?;
+    let prepared = rotation_prepared_path(current, old_mask);
     let result = (|| {
-        write_durable_file(&artifact_path(current, ".rotation-new"), b"", fault)?;
-        for (index, target) in retained.iter().enumerate() {
-            let source = if index == 0 {
-                current
-            } else {
-                &retained[index - 1]
-            };
-            if existing_file_len(source)?.is_some() {
-                copy_durable_file(source, &artifact_path(target, ".rotation-new"), fault)?;
-            }
-        }
-        write_durable_file(&rotation_prepared_path(current), &[old_mask], fault)?;
+        write_durable_file(&prepared, b"", fault)?;
         sync_parent(current, fault)?;
         for target in &targets {
             if existing_file_len(target)?.is_some() {
-                backup_file(target, &artifact_path(target, ".rotation-old"), fault)?;
+                fault.checkpoint("stage rotation source")?;
+                std::fs::rename(target, artifact_path(target, ".rotation-old"))?;
             }
         }
         sync_parent(current, fault)?;
-        for target in retained {
-            let staged = artifact_path(target, ".rotation-new");
-            install_file(
-                target,
-                staged.exists().then_some(staged.as_path()),
-                mode,
-                fault,
-            )?;
+        write_durable_file(&rotation_staged_path(current), b"", fault)?;
+        write_durable_file(&artifact_path(current, ".rotation-new"), b"", fault)?;
+        sync_parent(current, fault)?;
+        for (index, destination) in retained.iter().enumerate() {
+            let source = rotation_source_for(current, retained, index);
+            let staged = artifact_path(source, ".rotation-old");
+            if staged.exists() {
+                fault.checkpoint("install rotated segment")?;
+                std::fs::rename(staged, destination)?;
+            }
         }
         let staged_current = artifact_path(current, ".rotation-new");
-        install_file(current, Some(&staged_current), mode, fault)?;
+        fault.checkpoint("install fresh active segment")?;
+        std::fs::rename(staged_current, current)?;
         sync_parent(current, fault)?;
-        write_durable_file(&rotation_committed_path(current), b"committed", fault)?;
+        write_durable_file(&rotation_committed_path(current), b"", fault)?;
         sync_parent(current, fault)
     })();
     if let Err(error) = result {
         if fault.is_simulated_crash() {
             return Err(error);
         }
-        return match rollback_rotation(current, retained, old_mask) {
+        return match rollback_rotation(current, retained, &prepared, old_mask) {
             Ok(()) => Err(error),
             Err(rollback) => Err(io::Error::other(format!(
                 "{error}; rotation rollback failed: {rollback}"
             ))),
         };
     }
-    cleanup_rotation(current, retained)
+    cleanup_rotation_with(current, retained, fault)
 }
 
 fn prune_oldest_for(
@@ -1121,6 +1183,19 @@ mod tests {
             .sum()
     }
 
+    fn total_directory_file_bytes(directory: &Path) -> u64 {
+        std::fs::read_dir(directory)
+            .expect("read log directory")
+            .map(|entry| {
+                entry
+                    .expect("read log entry")
+                    .metadata()
+                    .expect("read log metadata")
+                    .len()
+            })
+            .sum()
+    }
+
     fn crashing_fault(fail_at: usize) -> FaultInjector {
         FaultInjector {
             fail_at: Some(fail_at),
@@ -1182,7 +1257,7 @@ mod tests {
 
     #[test]
     fn live_rotation_recovers_every_injected_filesystem_failure() {
-        let mut forced_replacement_gap = false;
+        let mut forced_staging_gap = false;
         let mut completed = false;
         for (failures, fail_at) in (1..=128).enumerate() {
             let temp = TempStateDir::new("rotation-crash");
@@ -1198,6 +1273,7 @@ mod tests {
                 .chain(retained.iter())
                 .map(|path| std::fs::read(path).expect("snapshot old chain"))
                 .collect();
+            let disk_budget = old.iter().map(Vec::len).sum::<usize>() as u64;
             let mut fault = crashing_fault(fail_at);
             let result = rotate_files(
                 &current,
@@ -1208,8 +1284,12 @@ mod tests {
             if result.is_ok() {
                 completed = true;
                 assert!(
-                    failures >= 30,
+                    failures >= 20,
                     "the loop injected every staged chain operation"
+                );
+                assert!(
+                    total_directory_file_bytes(&logs) <= disk_budget,
+                    "a completed rotation stays inside the original aggregate bytes"
                 );
                 assert_eq!(std::fs::read(&current).expect("new active"), b"");
                 for (index, path) in retained.iter().enumerate() {
@@ -1221,16 +1301,23 @@ mod tests {
                 }
                 break;
             }
-            let committed = std::fs::read(rotation_committed_path(&current))
-                .is_ok_and(|bytes| bytes == b"committed");
-            if fault.failed_operation == Some("install replacement")
+            assert!(
+                total_directory_file_bytes(&logs) <= disk_budget,
+                "transaction artifacts stay inside the aggregate budget at checkpoint {fail_at}"
+            );
+            let committed = rotation_committed_path(&current).exists();
+            if fault.failed_operation == Some("stage rotation source")
                 && rotation_targets(&current, &retained).iter().any(|target| {
                     !target.exists() && artifact_path(target, ".rotation-old").exists()
                 })
             {
-                forced_replacement_gap = true;
+                forced_staging_gap = true;
             }
             recover_rotation(&current, &retained).expect("restart recovers rotation");
+            assert!(
+                total_directory_file_bytes(&logs) <= disk_budget,
+                "recovery stays inside the same aggregate disk budget"
+            );
             if committed {
                 assert_eq!(std::fs::read(&current).expect("committed active"), b"");
                 for (index, path) in retained.iter().enumerate() {
@@ -1251,12 +1338,86 @@ mod tests {
             }
         }
         assert!(
-            forced_replacement_gap,
-            "fault injection reaches a Windows remove-then-rename gap"
+            forced_staging_gap,
+            "fault injection reaches an in-place staging boundary with the source preserved"
         );
         assert!(
             completed,
             "the fault loop reaches the first non-failing run"
+        );
+    }
+
+    #[test]
+    fn committed_sparse_rotation_survives_every_cleanup_crash_boundary() {
+        let mut completed = false;
+        for (failures, fail_at) in (1..=32).enumerate() {
+            let temp = TempStateDir::new("sparse-cleanup-crash");
+            let logs = temp.0.join("logs");
+            std::fs::create_dir_all(&logs).expect("create logs");
+            let config = LogConfig::new(&temp.0);
+            let current = config.log_path();
+            let retained = config.retained_log_paths();
+            std::fs::write(&current, "").expect("seed fresh active");
+            std::fs::write(&retained[0], "active\n").expect("seed shifted active");
+            std::fs::write(&retained[2], "old-2\n").expect("seed sparse shifted segment");
+            std::fs::write(&retained[4], "old-4\n").expect("seed sparse oldest destination");
+            std::fs::write(artifact_path(&retained[4], ".rotation-old"), "old-5\n")
+                .expect("seed pruned rollback segment");
+            std::fs::write(artifact_path(&current, ".rotation-new"), "")
+                .expect("seed stale empty stage");
+            let old_mask = 1 | (1 << 2) | (1 << 4) | (1 << 5);
+            std::fs::write(rotation_prepared_path(&current, old_mask), "")
+                .expect("seed prepared marker");
+            std::fs::write(rotation_staged_path(&current), "").expect("seed staged marker");
+            std::fs::write(rotation_committed_path(&current), "").expect("seed commit marker");
+            let disk_budget = total_directory_file_bytes(&logs);
+
+            let mut fault = crashing_fault(fail_at);
+            let result = cleanup_rotation_with(&current, &retained, &mut fault);
+            if result.is_ok() {
+                completed = true;
+                assert!(
+                    failures >= 5,
+                    "the loop injected every sparse cleanup operation"
+                );
+            } else {
+                assert!(
+                    fault.failed_operation.is_some(),
+                    "only an injected crash interrupts cleanup"
+                );
+                assert!(
+                    total_directory_file_bytes(&logs) <= disk_budget,
+                    "interrupted cleanup never duplicates segment bytes"
+                );
+                recover_rotation(&current, &retained).expect("restart completes committed cleanup");
+            }
+
+            assert_eq!(std::fs::read(&current).expect("active survives"), b"");
+            assert_eq!(
+                std::fs::read(&retained[0]).expect("newest survives"),
+                b"active\n"
+            );
+            assert!(!retained[1].exists(), "the sparse .2 remains absent");
+            assert_eq!(
+                std::fs::read(&retained[2]).expect("sparse .3 survives"),
+                b"old-2\n"
+            );
+            assert!(!retained[3].exists(), "the sparse .4 remains absent");
+            assert_eq!(
+                std::fs::read(&retained[4]).expect("sparse .5 survives"),
+                b"old-4\n"
+            );
+            assert!(
+                total_directory_file_bytes(&logs) < disk_budget,
+                "the committed oldest rollback segment is pruned after recovery"
+            );
+            if completed {
+                break;
+            }
+        }
+        assert!(
+            completed,
+            "the fault loop reaches the first non-failing sparse cleanup"
         );
     }
 

@@ -2,9 +2,9 @@
 //!
 //! [`LogRuntime`] owns one worker thread that drains a bounded priority
 //! queue into a rotated `gateway.log`; [`LogWriter`] adapts the queue to
-//! `tracing-subscriber`'s `MakeWriter` so the binary's fmt layer enqueues
-//! byte-bounded formatted events instead of blocking producer threads on
-//! disk.
+//! `tracing-subscriber`'s field formatter and `MakeWriter` so the binary's
+//! fmt layer redacts classified fields before formatting, then enqueues
+//! byte-bounded events instead of blocking producer threads on disk.
 //!
 //! The crate never installs the global subscriber, never reads the
 //! environment or the home directory, and never sees Gateway configuration:

@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use crate::config::LOG_LIMITS;
 
 const ADMISSION_CLOSED: u64 = 1 << 63;
-const ACTIVE_PRODUCERS: u64 = ADMISSION_CLOSED - 1;
+const ACTIVE_PRODUCER_ONE: u64 = 1 << 32;
+const ACTIVE_PRODUCERS: u64 = ((1 << 31) - 1) << 32;
+const UNDELIVERED_RECORDS: u64 = (1 << 32) - 1;
 
 /// Total records the queue holds before producers evict or block.
 pub(crate) const CAPACITY: usize = 8192;
@@ -104,7 +106,6 @@ pub(crate) struct LogQueue {
     admission_gate: AtomicU64,
     abandoned: AtomicBool,
     pending_rejections: AtomicU64,
-    outstanding_records: AtomicU64,
     outstanding_summaries: AtomicU64,
     unreported_pressure_records: AtomicU64,
     shutdown_abandoned_records: AtomicU64,
@@ -357,7 +358,6 @@ impl LogQueue {
             admission_gate: AtomicU64::new(0),
             abandoned: AtomicBool::new(false),
             pending_rejections: AtomicU64::new(0),
-            outstanding_records: AtomicU64::new(0),
             outstanding_summaries: AtomicU64::new(0),
             unreported_pressure_records: AtomicU64::new(0),
             shutdown_abandoned_records: AtomicU64::new(0),
@@ -385,12 +385,15 @@ impl LogQueue {
     fn begin_producer(&self) -> bool {
         let mut gate = self.admission_gate.load(Ordering::Acquire);
         loop {
-            if gate & ADMISSION_CLOSED != 0 || gate & ACTIVE_PRODUCERS == ACTIVE_PRODUCERS {
+            if gate & ADMISSION_CLOSED != 0
+                || gate & ACTIVE_PRODUCERS == ACTIVE_PRODUCERS
+                || gate & UNDELIVERED_RECORDS == UNDELIVERED_RECORDS
+            {
                 return false;
             }
             match self.admission_gate.compare_exchange_weak(
                 gate,
-                gate + 1,
+                gate + ACTIVE_PRODUCER_ONE + 1,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
@@ -400,9 +403,19 @@ impl LogQueue {
         }
     }
 
-    fn finish_producer(&self) {
-        let previous = self.admission_gate.fetch_sub(1, Ordering::AcqRel);
+    fn finish_admitted_producer(&self) {
+        let previous = self
+            .admission_gate
+            .fetch_sub(ACTIVE_PRODUCER_ONE, Ordering::AcqRel);
         debug_assert!(previous & ACTIVE_PRODUCERS > 0);
+    }
+
+    fn finish_rejected_producer(&self) {
+        let previous = self
+            .admission_gate
+            .fetch_sub(ACTIVE_PRODUCER_ONE + 1, Ordering::AcqRel);
+        debug_assert!(previous & ACTIVE_PRODUCERS > 0);
+        debug_assert!(previous & UNDELIVERED_RECORDS > 0);
     }
 
     fn close_admission(&self) {
@@ -411,7 +424,20 @@ impl LogQueue {
     }
 
     fn active_producers(&self) -> u64 {
-        self.admission_gate.load(Ordering::Acquire) & ACTIVE_PRODUCERS
+        (self.admission_gate.load(Ordering::Acquire) & ACTIVE_PRODUCERS) >> 32
+    }
+
+    fn outstanding_records(&self) -> u64 {
+        self.admission_gate.load(Ordering::Acquire) & UNDELIVERED_RECORDS
+    }
+
+    fn subtract_undelivered(&self, amount: u64) {
+        let _ = self
+            .admission_gate
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                let records = current & UNDELIVERED_RECORDS;
+                Some(current.saturating_sub(records.min(amount)))
+            });
     }
 
     fn saturating_sub(counter: &AtomicU64, amount: u64) {
@@ -473,7 +499,7 @@ impl LogQueue {
         self.begin_loss(state);
         state.loss.evicted[record.priority.lane()] =
             state.loss.evicted[record.priority.lane()].saturating_add(1);
-        Self::saturating_sub(&self.outstanding_records, 1);
+        self.subtract_undelivered(1);
         self.unreported_pressure_records
             .fetch_add(1, Ordering::AcqRel);
     }
@@ -510,6 +536,17 @@ impl LogQueue {
         status: FormatStatus,
         before_admission: impl FnOnce(),
     ) {
+        self.enqueue_around(priority, line, status, before_admission, || {});
+    }
+
+    fn enqueue_around(
+        &self,
+        priority: LogPriority,
+        line: Box<str>,
+        status: FormatStatus,
+        before_admission: impl FnOnce(),
+        after_admission: impl FnOnce(),
+    ) {
         if !self.begin_producer() {
             return;
         }
@@ -523,7 +560,7 @@ impl LogQueue {
             if !self.is_abandoned() {
                 self.record_rejection_without_lock();
             }
-            self.finish_producer();
+            self.finish_rejected_producer();
             self.work_available.notify_one();
             return;
         };
@@ -531,17 +568,19 @@ impl LogQueue {
         let mut close_accounted = false;
         loop {
             if state.closed {
-                if !close_accounted {
+                if close_accounted {
+                    self.finish_admitted_producer();
+                } else {
                     self.record_rejection(&mut state);
+                    self.finish_rejected_producer();
                 }
-                self.finish_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
             }
             if line_bytes > self.limits.max_bytes {
                 self.record_rejection(&mut state);
-                self.finish_producer();
+                self.finish_rejected_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
@@ -551,8 +590,8 @@ impl LogQueue {
                     self.record_truncation(&mut state);
                 }
                 state.admit(priority, line);
-                self.outstanding_records.fetch_add(1, Ordering::AcqRel);
-                self.finish_producer();
+                after_admission();
+                self.finish_admitted_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
@@ -564,7 +603,7 @@ impl LogQueue {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 self.record_rejection(&mut state);
-                self.finish_producer();
+                self.finish_rejected_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
@@ -579,7 +618,7 @@ impl LogQueue {
             close_accounted = state.closed;
             if timeout.timed_out() && !state.closed {
                 self.record_rejection(&mut state);
-                self.finish_producer();
+                self.finish_rejected_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
@@ -601,20 +640,20 @@ impl LogQueue {
             if !self.is_abandoned() {
                 self.record_rejection_without_lock();
             }
-            self.finish_producer();
+            self.finish_rejected_producer();
             self.work_available.notify_one();
             return;
         };
         self.merge_pending_rejections(&mut state);
         if state.closed {
             self.record_rejection(&mut state);
-            self.finish_producer();
+            self.finish_rejected_producer();
             drop(state);
             self.work_available.notify_one();
             return;
         }
         self.record_rejection(&mut state);
-        self.finish_producer();
+        self.finish_rejected_producer();
         drop(state);
         self.work_available.notify_one();
     }
@@ -753,10 +792,7 @@ impl LogQueue {
         state.in_flight_pressure_records = state
             .in_flight_pressure_records
             .saturating_sub(summary_affected);
-        Self::saturating_sub(
-            &self.outstanding_records,
-            u64::try_from(records).unwrap_or(u64::MAX),
-        );
+        self.subtract_undelivered(u64::try_from(records).unwrap_or(u64::MAX));
         if had_summary {
             Self::saturating_sub(&self.outstanding_summaries, 1);
         }
@@ -776,10 +812,7 @@ impl LogQueue {
         self.close_admission();
         self.abandoned.store(true, Ordering::Release);
         let loss = ShutdownLoss {
-            abandoned_records: self
-                .outstanding_records
-                .swap(0, Ordering::AcqRel)
-                .saturating_add(self.active_producers()),
+            abandoned_records: self.outstanding_records(),
             abandoned_summaries: self.outstanding_summaries.swap(0, Ordering::AcqRel),
             unreported_pressure_records: self.unreported_pressure_records.swap(0, Ordering::AcqRel),
         };
@@ -828,6 +861,7 @@ impl LogQueue {
         }
         state.closed = true;
         self.record_rejections(state, state.blocked_producers);
+        self.subtract_undelivered(state.blocked_producers);
     }
 }
 
@@ -1129,6 +1163,49 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(0, "admitted-first"), (1, "prepared-first")],
             "sequence is assigned atomically with successful admission"
+        );
+    }
+
+    #[test]
+    fn abandonment_counts_admission_boundary_record_exactly_once() {
+        let queue = Arc::new(LogQueue::new_for_test(8, 128));
+        let producer_queue = Arc::clone(&queue);
+        let (admitted_tx, admitted_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let producer = std::thread::spawn(move || {
+            producer_queue.enqueue_around(
+                LogPriority::Warn,
+                line("admitted-before-timeout"),
+                FormatStatus::Complete,
+                || {},
+                || {
+                    admitted_tx
+                        .send(())
+                        .expect("report the atomic admission boundary");
+                    release_rx.recv().expect("release the admitting producer");
+                },
+            );
+        });
+        admitted_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the producer pauses after admission");
+
+        let loss = queue.abandon();
+        assert_eq!(
+            loss,
+            ShutdownLoss {
+                abandoned_records: 1,
+                abandoned_summaries: 0,
+                unreported_pressure_records: 0,
+            },
+            "one admitting producer is one undelivered record, not an active-plus-admitted double count"
+        );
+        release_tx.send(()).expect("release the producer");
+        producer.join().expect("the producer joins");
+        assert_eq!(
+            queue.shutdown_loss_for_test(),
+            loss,
+            "the persisted shutdown accounting keeps the same exact snapshot"
         );
     }
 

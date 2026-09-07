@@ -324,7 +324,7 @@ isProject: false
 - Exclusions: no per-run discard, no prune-only active-file strategy, and no rename of diagnostic files.
 - Focused verification: from the repository root run `cargo test -p gateway-logging`.
 
-### Step 8: Redact structured logging fields
+### Step 8: Redact structured logging fields [completed]
 
 - Component and piece: Component 2 of 8, `gateway-logging`; classify and redact structured fields and secret types before formatting, with the bounded textual scanner retained as defense in depth.
 - Dependency: depends on Step 4 because pre-format output must honor the bounded writer and on Step 5 because rejected or truncated records share loss accounting; it follows Steps 6 and 7 to minimize conflicting edits.

@@ -1,14 +1,18 @@
 //! The `MakeWriter` adapter between the binary's fmt layer and the queue.
 
+use std::fmt;
 use std::io;
 use std::sync::Arc;
 
 use tracing::Metadata;
+use tracing::field::{Field, Visit};
+use tracing_subscriber::field::{RecordFields, VisitOutput};
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::fmt::format::{DefaultVisitor, FormatFields, Writer};
 
 use crate::config::LOG_LIMITS;
 use crate::queue::{FormatStatus, LogPriority, LogQueue};
-use crate::redact::redact_line_bounded;
+use crate::redact::{REDACTED, is_sensitive_field, redact_line_bounded};
 
 /// The suffix replacing omitted formatter bytes. It includes the record's
 /// terminal newline because truncation may discard the formatter's own.
@@ -19,7 +23,9 @@ const TRUNCATION_MARKER: &str = " [truncated]\n";
 ///
 /// Priority comes only from the event's tracing metadata; the formatted
 /// text passes through the privacy redaction before it can reach the
-/// queue. Obtained from
+/// queue. Use one clone as the file layer's field formatter so classified
+/// values are replaced without invoking their formatting implementation.
+/// Obtained from
 /// [`LogRuntime::writer`](crate::LogRuntime::writer).
 ///
 /// # Examples
@@ -27,7 +33,10 @@ const TRUNCATION_MARKER: &str = " [truncated]\n";
 /// # let dir = std::env::temp_dir().join(concat!("gateway-logging-doc-writer-", env!("CARGO_PKG_VERSION")));
 /// let runtime = gateway_logging::LogRuntime::start(gateway_logging::LogConfig::new(&dir))?;
 /// let writer = runtime.writer();
-/// let _clone = writer.clone();
+/// let _subscriber = tracing_subscriber::fmt()
+///     .fmt_fields(writer.clone())
+///     .with_writer(writer)
+///     .finish();
 /// runtime.shutdown()?;
 /// # std::fs::remove_dir_all(&dir).ok();
 /// # Ok::<(), gateway_logging::LogError>(())
@@ -55,6 +64,96 @@ impl<'a> MakeWriter<'a> for LogWriter {
             Arc::clone(&self.queue),
             LogPriority::from_level(*meta.level()),
         )
+    }
+}
+
+impl<'writer> FormatFields<'writer> for LogWriter {
+    fn format_fields<R>(&self, writer: Writer<'writer>, fields: R) -> fmt::Result
+    where
+        R: RecordFields,
+    {
+        let mut visitor = RedactingVisitor {
+            inner: DefaultVisitor::new(writer, true),
+        };
+        fields.record(&mut visitor);
+        visitor.inner.finish()
+    }
+}
+
+struct RedactingVisitor<'writer> {
+    inner: DefaultVisitor<'writer>,
+}
+
+impl RedactingVisitor<'_> {
+    fn redact(&mut self, field: &Field) -> bool {
+        if is_sensitive_field(field.name()) {
+            self.inner.record_str(field, REDACTED);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Visit for RedactingVisitor<'_> {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        if !self.redact(field) {
+            self.inner.record_f64(field, value);
+        }
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        if !self.redact(field) {
+            self.inner.record_i64(field, value);
+        }
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if !self.redact(field) {
+            self.inner.record_u64(field, value);
+        }
+    }
+
+    fn record_i128(&mut self, field: &Field, value: i128) {
+        if !self.redact(field) {
+            self.inner.record_i128(field, value);
+        }
+    }
+
+    fn record_u128(&mut self, field: &Field, value: u128) {
+        if !self.redact(field) {
+            self.inner.record_u128(field, value);
+        }
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        if !self.redact(field) {
+            self.inner.record_bool(field, value);
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if !self.redact(field) {
+            self.inner.record_str(field, value);
+        }
+    }
+
+    fn record_bytes(&mut self, field: &Field, value: &[u8]) {
+        if !self.redact(field) {
+            self.inner.record_bytes(field, value);
+        }
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        if !self.redact(field) {
+            self.inner.record_error(field, value);
+        }
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if !self.redact(field) {
+            self.inner.record_debug(field, value);
+        }
     }
 }
 
@@ -117,7 +216,7 @@ impl Drop for LogEventWriter {
         // well-shaped secrets are masked before they can reach the queue.
         let Some((line, truncated)) =
             redact_line_bounded(line, LOG_LIMITS.max_formatted_record_bytes)
-                .and_then(|redacted| redacted.finish(TRUNCATION_MARKER, self.truncated))
+                .finish(TRUNCATION_MARKER, self.truncated)
         else {
             self.queue.reject_formatted();
             return;
@@ -246,7 +345,21 @@ fn finish_formatter_text(buffer: &mut BoundedBytes, truncated: bool) -> Option<&
 mod tests {
     use super::*;
     use crate::config::LOG_LIMITS;
+    use std::fmt;
     use std::io::Write as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct ProtectedValue<'a> {
+        value: &'a str,
+        formatted: &'a AtomicBool,
+    }
+
+    impl fmt::Debug for ProtectedValue<'_> {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.formatted.store(true, Ordering::SeqCst);
+            formatter.write_str(self.value)
+        }
+    }
 
     #[test]
     fn an_oversized_event_never_allocates_or_enqueues_above_the_record_limit() {
@@ -286,10 +399,11 @@ mod tests {
 
     #[test]
     fn expanding_redaction_never_requests_an_allocation_above_the_record_limit() {
+        const UNIT: &str = "api_key=a prompt=b path=c payload=d ";
+
         let queue = Arc::new(LogQueue::new());
         let writer = LogWriter::new(Arc::clone(&queue));
-        let expansion_heavy =
-            "api_key=x ".repeat(LOG_LIMITS.max_formatted_record_bytes / "api_key=x ".len());
+        let expansion_heavy = UNIT.repeat(LOG_LIMITS.max_formatted_record_bytes / UNIT.len());
 
         let allocations = crate::allocation_tracking::AllocationTracker::start();
         {
@@ -312,10 +426,12 @@ mod tests {
             batch.records[0].line.ends_with(TRUNCATION_MARKER),
             "bounded expansion is explicitly marked"
         );
-        assert!(
-            !batch.records[0].line.contains("api_key=x"),
-            "retained assignments are redacted before enqueue"
-        );
+        for cleartext in ["api_key=a", "prompt=b", "path=c", "payload=d"] {
+            assert!(
+                !batch.records[0].line.contains(cleartext),
+                "retained assignments are redacted before enqueue"
+            );
+        }
     }
 
     #[test]
@@ -556,6 +672,168 @@ mod tests {
             batch.records[0].line.contains("[redacted]"),
             "the mask marks where the secret stood: {}",
             batch.records[0].line
+        );
+    }
+
+    #[test]
+    fn classified_fields_are_redacted_without_formatting_their_values() {
+        const SECRETS: [&str; 7] = [
+            "basic-secret",
+            "cookie-secret",
+            "url-secret",
+            "prompt-secret",
+            "path-secret",
+            "payload-secret",
+            "typed-secret",
+        ];
+
+        let queue = Arc::new(LogQueue::new());
+        let writer = LogWriter::new(Arc::clone(&queue));
+        let formatted = AtomicBool::new(false);
+        let protected = ProtectedValue {
+            value: SECRETS[6],
+            formatted: &formatted,
+        };
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .fmt_fields(writer.clone())
+            .with_writer(writer)
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(
+                authorization = "Basic basic-secret",
+                request_cookie = "session=cookie-secret",
+                upstream_url = "https://user:url-secret@example.test/v1",
+                system_prompt = "prompt-secret",
+                config_path = "C:\\private\\path-secret\\model.gguf",
+                request_payload = "{\"token\":\"payload-secret\"}",
+                secret = ?protected,
+                ordinary = 7_u64,
+                "classified field matrix"
+            );
+        });
+        queue.close();
+
+        let batch = queue.take_batch();
+        assert_eq!(batch.records.len(), 1);
+        let line = &batch.records[0].line;
+        for secret in SECRETS {
+            assert!(
+                !line.contains(secret),
+                "classified value reached the queue: {line}"
+            );
+        }
+        assert!(
+            !formatted.load(Ordering::SeqCst),
+            "a secret-typed debug value was formatted before redaction"
+        );
+        assert!(
+            line.contains("ordinary=7"),
+            "unclassified structured fields keep their formatting: {line}"
+        );
+        assert!(
+            line.contains("classified field matrix"),
+            "unstructured wording remains intact: {line}"
+        );
+    }
+
+    #[test]
+    fn composite_sensitive_aliases_never_invoke_adversarial_formatters() {
+        const SECRETS: [&str; 3] = [
+            "authorization-alias-secret",
+            "cookie-alias-secret",
+            "token-alias-secret",
+        ];
+        let formatted = std::array::from_fn::<_, 3, _>(|_| AtomicBool::new(false));
+        let authorization = ProtectedValue {
+            value: SECRETS[0],
+            formatted: &formatted[0],
+        };
+        let cookie = ProtectedValue {
+            value: SECRETS[1],
+            formatted: &formatted[1],
+        };
+        let token = ProtectedValue {
+            value: SECRETS[2],
+            formatted: &formatted[2],
+        };
+        let queue = Arc::new(LogQueue::new());
+        let writer = LogWriter::new(Arc::clone(&queue));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .fmt_fields(writer.clone())
+            .with_writer(writer)
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!(
+                authorization_header = ?authorization,
+                cookie_header = ?cookie,
+                token_value = ?token,
+                "composite alias matrix"
+            );
+        });
+        queue.close();
+
+        let batch = queue.take_batch();
+        assert_eq!(batch.records.len(), 1);
+        for (index, secret) in SECRETS.iter().enumerate() {
+            assert!(
+                !formatted[index].load(Ordering::SeqCst),
+                "the formatter for alias {index} was invoked"
+            );
+            assert!(
+                !batch.records[0].line.contains(secret),
+                "a composite alias reached the queue: {}",
+                batch.records[0].line
+            );
+        }
+    }
+
+    #[test]
+    fn unclassified_fields_keep_default_formatting_byte_for_byte() {
+        let default_queue = Arc::new(LogQueue::new());
+        let default_writer = LogWriter::new(Arc::clone(&default_queue));
+        let default_subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(default_writer)
+            .finish();
+        tracing::subscriber::with_default(default_subscriber, || {
+            tracing::info!(
+                target: "format-regression",
+                count = 7_u64,
+                label = "ordinary",
+                "unchanged wording"
+            );
+        });
+        default_queue.close();
+        let default_line = default_queue.take_batch().records.remove(0).line;
+
+        let redacting_queue = Arc::new(LogQueue::new());
+        let redacting_writer = LogWriter::new(Arc::clone(&redacting_queue));
+        let redacting_subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .fmt_fields(redacting_writer.clone())
+            .with_writer(redacting_writer)
+            .finish();
+        tracing::subscriber::with_default(redacting_subscriber, || {
+            tracing::info!(
+                target: "format-regression",
+                count = 7_u64,
+                label = "ordinary",
+                "unchanged wording"
+            );
+        });
+        redacting_queue.close();
+        let redacting_line = redacting_queue.take_batch().records.remove(0).line;
+
+        assert_eq!(
+            redacting_line, default_line,
+            "the redacting visitor delegates ordinary values to DefaultVisitor"
         );
     }
 }

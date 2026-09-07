@@ -171,9 +171,11 @@ fn init_logging() -> Option<LogRuntime> {
         .map(|state_dir| LogRuntime::start(LogConfig::new(state_dir)));
     match runtime {
         Some(Ok(runtime)) => {
+            let file_writer = runtime.writer();
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
-                .with_writer(runtime.writer())
+                .fmt_fields(file_writer.clone())
+                .with_writer(file_writer)
                 .with_filter(filter());
             tracing_subscriber::registry()
                 .with(stdout)

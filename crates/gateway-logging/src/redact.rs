@@ -2,18 +2,110 @@
 //!
 //! No log record may carry credentials, cookies, authorization headers,
 //! environment values, request bodies, audio, transcript text, prompts, or
-//! full local model paths. Most of that list is call-site discipline -
-//! the gateway never logs payloads - but the well-shaped secrets (bearer
-//! tokens, authorization and cookie header values, `api_key` assignments)
-//! can leak through an interpolated error or a debug-formatted structure,
-//! so the one chokepoint every record crosses masks them on the way in.
+//! full local model paths. Classified tracing fields are suppressed before
+//! their values are formatted. The bounded text pass remains at the queue
+//! chokepoint for authorization values, assignments, and dependency errors
+//! embedded in unstructured messages.
 //!
 //! The patterns are ASCII and matched case-insensitively where a header
 //! name is involved; redaction never reorders or truncates the rest of
 //! the line.
 
 /// The mask replacing a sensitive value.
-const REDACTED: &str = "[redacted]";
+pub(crate) const REDACTED: &str = "[redacted]";
+
+const SENSITIVE_FIELDS: &[&str] = &[
+    "access_token",
+    "api_key",
+    "audio",
+    "auth",
+    "authorization",
+    "base_url",
+    "body",
+    "config_path",
+    "cookie",
+    "cookies",
+    "credential",
+    "credentials",
+    "endpoint_url",
+    "file_path",
+    "headers",
+    "model_path",
+    "password",
+    "path",
+    "payload",
+    "prompt",
+    "prompts",
+    "proxy_authorization",
+    "refresh_token",
+    "request_body",
+    "request_url",
+    "response_body",
+    "response_url",
+    "secret",
+    "set_cookie",
+    "system_prompt",
+    "token",
+    "transcript",
+    "uri",
+    "url",
+    "user_prompt",
+];
+
+const SENSITIVE_ALIAS_SUFFIXES: &[&str] = &[
+    "data", "field", "header", "headers", "raw", "text", "value", "values",
+];
+
+/// Whether a tracing field is classified and must never format its value.
+pub(crate) fn is_sensitive_field(name: &str) -> bool {
+    let leaf = name
+        .rsplit(['.', ':'])
+        .next()
+        .unwrap_or(name)
+        .trim_start_matches("r#");
+    SENSITIVE_FIELDS.iter().any(|candidate| {
+        leaf.eq_ignore_ascii_case(candidate)
+            || leaf
+                .get(..leaf.len().saturating_sub(candidate.len()))
+                .is_some_and(|prefix| {
+                    leaf.get(prefix.len()..)
+                        .is_some_and(|suffix| suffix.eq_ignore_ascii_case(candidate))
+                        && prefix.ends_with(['_', '-'])
+                })
+            || sensitive_component_alias(leaf, candidate)
+    })
+}
+
+fn sensitive_component_alias(name: &str, component: &str) -> bool {
+    let mut from = 0;
+    while let Some(start) = find_ascii(name, component, from) {
+        let end = start + component.len();
+        let left_boundary = start == 0
+            || name
+                .as_bytes()
+                .get(start - 1)
+                .is_some_and(|byte| matches!(byte, b'_' | b'-'));
+        let right_boundary = end == name.len()
+            || name
+                .as_bytes()
+                .get(end)
+                .is_some_and(|byte| matches!(byte, b'_' | b'-'));
+        if left_boundary && right_boundary {
+            let suffix = name[end..].trim_start_matches(['_', '-']);
+            if !suffix.is_empty()
+                && suffix.split(['_', '-']).all(|part| {
+                    SENSITIVE_ALIAS_SUFFIXES
+                        .iter()
+                        .any(|suffix| part.eq_ignore_ascii_case(suffix))
+                })
+            {
+                return true;
+            }
+        }
+        from = end;
+    }
+    false
+}
 
 /// Fixed-capacity valid UTF-8 used while redaction may expand masks.
 #[derive(Debug)]
@@ -34,18 +126,8 @@ impl RedactedLine {
         }
     }
 
-    fn from_str(text: &str, capacity: usize) -> Self {
-        let mut bounded = Self::new(capacity);
-        bounded.push_str(text);
-        bounded
-    }
-
     fn capacity(&self) -> usize {
         self.storage.len()
-    }
-
-    fn as_str(&self) -> Result<&str, std::str::Utf8Error> {
-        std::str::from_utf8(&self.storage[..self.len])
     }
 
     fn push_str(&mut self, text: &str) {
@@ -96,13 +178,16 @@ impl RedactedLine {
 
 /// Masks the sensitive shapes `text` could carry without permitting any
 /// intermediate output buffer to exceed `capacity`.
-pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> Option<RedactedLine> {
-    let text = RedactedLine::from_str(text, capacity);
-    let text = redact_header_values(text, "authorization:")?;
-    let text = redact_header_values(text, "cookie:")?;
-    let text = redact_header_values(text, "set-cookie:")?;
-    let text = redact_bearer_tokens(text)?;
-    redact_api_key_assignments(text)
+pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> RedactedLine {
+    let mut out = RedactedLine::new(capacity);
+    let mut cursor = 0;
+    while let Some(span) = next_sensitive_span(text, cursor) {
+        out.push_str(&text[cursor..span.start]);
+        out.push_str(REDACTED);
+        cursor = span.end;
+    }
+    out.push_str(&text[cursor..]);
+    out
 }
 
 /// Masks the sensitive shapes `text` could carry and returns the result.
@@ -112,7 +197,7 @@ pub(crate) fn redact_line_bounded(text: &str, capacity: usize) -> Option<Redacte
 pub(crate) fn redact_line(text: &str) -> String {
     let capacity = text.len().saturating_mul(REDACTED.len());
     redact_line_bounded(text, capacity)
-        .and_then(|redacted| redacted.finish("", false))
+        .finish("", false)
         .filter(|(_, truncated)| !truncated)
         .map_or_else(String::new, |(text, _)| text.into())
 }
@@ -121,7 +206,7 @@ pub(crate) fn redact_line(text: &str) -> String {
 /// `from`, comparing ASCII case-insensitively. Byte offsets stay valid
 /// because only ASCII needles are ever searched.
 fn find_ascii(haystack: &str, needle: &str, from: usize) -> Option<usize> {
-    if from >= haystack.len() {
+    if from > haystack.len() || needle.len() > haystack.len().saturating_sub(from) {
         return None;
     }
     haystack.as_bytes()[from..]
@@ -130,131 +215,206 @@ fn find_ascii(haystack: &str, needle: &str, from: usize) -> Option<usize> {
         .map(|offset| from + offset)
 }
 
-/// Redacts everything after a header name up to the end of the line: an
-/// `Authorization:` or `Cookie:` value runs to the line's end in the
-/// one-line-per-event format the fmt layer produces.
-fn redact_header_values(input: RedactedLine, header: &str) -> Option<RedactedLine> {
-    if find_ascii(input.as_str().ok()?, header, 0).is_none() {
-        return Some(input);
-    }
-    let capacity = input.capacity();
-    let inherited_truncation = input.truncated;
-    let mut out = RedactedLine::new(capacity);
-    let mut rest = input.as_str().ok()?;
-    while let Some(start) = find_ascii(rest, header, 0) {
-        let mut value_start = start + header.len();
-        // The conventional space after the colon is kept with the name.
-        while rest.as_bytes().get(value_start) == Some(&b' ') {
-            value_start += 1;
-        }
-        let value_end = rest[value_start..]
-            .find('\n')
-            .map_or(rest.len(), |newline| value_start + newline);
-        out.push_str(&rest[..value_start]);
-        out.push_str(REDACTED);
-        rest = &rest[value_end..];
-    }
-    out.push_str(rest);
-    out.truncated |= inherited_truncation;
-    Some(out)
+#[derive(Debug, Clone, Copy)]
+struct SensitiveSpan {
+    start: usize,
+    end: usize,
 }
 
-/// Redacts the token after `Bearer `, the shape an authorization value
-/// takes when it appears without its header name (an interpolated error,
-/// a URL query). The token is the run of non-whitespace following the
-/// scheme.
-fn redact_bearer_tokens(input: RedactedLine) -> Option<RedactedLine> {
-    const SCHEME: &str = "bearer ";
-    if find_ascii(input.as_str().ok()?, SCHEME, 0).is_none() {
-        return Some(input);
-    }
-    let capacity = input.capacity();
-    let inherited_truncation = input.truncated;
-    let mut out = RedactedLine::new(capacity);
-    let mut rest = input.as_str().ok()?;
-    let mut from = 0;
-    while let Some(start) = find_ascii(rest, SCHEME, from) {
-        let token_start = start + SCHEME.len();
-        let token_end = rest[token_start..]
-            .find(char::is_whitespace)
-            .map_or(rest.len(), |space| token_start + space);
-        if token_end == token_start {
-            from = token_start;
-            continue;
+fn next_sensitive_span(text: &str, from: usize) -> Option<SensitiveSpan> {
+    let mut cursor = from;
+    while cursor < text.len() {
+        for header in ["authorization:", "cookie:", "set-cookie:"] {
+            if starts_ascii(text, header, cursor) {
+                let mut value_start = cursor + header.len();
+                while text
+                    .as_bytes()
+                    .get(value_start)
+                    .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+                {
+                    value_start += 1;
+                }
+                let value_end = text[value_start..]
+                    .find('\n')
+                    .map_or(text.len(), |newline| value_start + newline);
+                if value_end > value_start {
+                    return Some(SensitiveSpan {
+                        start: value_start,
+                        end: value_end,
+                    });
+                }
+            }
         }
-        out.push_str(&rest[..token_start]);
-        out.push_str(REDACTED);
-        rest = &rest[token_end..];
-        from = 0;
+        for scheme in ["bearer ", "basic "] {
+            if starts_ascii(text, scheme, cursor) {
+                let token_start = cursor + scheme.len();
+                let token_end = text[token_start..]
+                    .find(|character: char| {
+                        character.is_whitespace()
+                            || matches!(character, ',' | ';' | ')' | ']' | '}')
+                    })
+                    .map_or(text.len(), |end| token_start + end);
+                if token_end > token_start {
+                    return Some(SensitiveSpan {
+                        start: token_start,
+                        end: token_end,
+                    });
+                }
+            }
+        }
+        for field in SENSITIVE_FIELDS {
+            if starts_ascii(text, field, cursor)
+                && let Some(span) = assignment_span_at(text, field, cursor)
+            {
+                return Some(span);
+            }
+        }
+        if let Some(span) = url_span_at(text, cursor) {
+            return Some(span);
+        }
+        if let Some(span) = local_path_span_at(text, cursor) {
+            return Some(span);
+        }
+        cursor += text[cursor..].chars().next().map_or(1, char::len_utf8);
     }
-    out.push_str(rest);
-    out.truncated |= inherited_truncation;
-    Some(out)
+    None
 }
 
-/// Redacts the value of an `api_key` assignment in the shapes configs and
-/// JSON take: `api_key = "v"`, `api_key="v"`, `"api_key": "v"`, and bare
-/// `api_key = v`. The key name is kept so the log still says which field
-/// was masked.
-fn redact_api_key_assignments(input: RedactedLine) -> Option<RedactedLine> {
-    const KEY: &str = "api_key";
-    if find_ascii(input.as_str().ok()?, KEY, 0).is_none() {
-        return Some(input);
+fn starts_ascii(text: &str, needle: &str, at: usize) -> bool {
+    text.as_bytes()
+        .get(at..at.saturating_add(needle.len()))
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn assignment_span_at(text: &str, field: &str, start: usize) -> Option<SensitiveSpan> {
+    let after_key = start + field.len();
+    let bytes = text.as_bytes();
+    if start != 0 && bytes[start - 1].is_ascii_alphanumeric()
+        || bytes.get(after_key).is_some_and(u8::is_ascii_alphanumeric)
+    {
+        return None;
     }
-    let capacity = input.capacity();
-    let inherited_truncation = input.truncated;
-    let mut out = RedactedLine::new(capacity);
-    let mut rest = input.as_str().ok()?;
-    let mut from = 0;
-    while let Some(start) = find_ascii(rest, KEY, from) {
-        let after_key = start + KEY.len();
-        let bytes = rest.as_bytes();
-        let mut cursor = after_key;
-        // The JSON shape quotes the key: `"api_key": "v"`.
-        if cursor < bytes.len() && bytes[cursor] == b'"' {
-            cursor += 1;
-        }
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'\n'
-        {
-            cursor += 1;
-        }
-        // Only an assignment redacts: a bare mention of the field name is
-        // not a leak.
-        if cursor >= bytes.len() || (bytes[cursor] != b'=' && bytes[cursor] != b':') {
-            from = after_key;
-            continue;
-        }
+    let mut cursor = after_key;
+    if cursor < bytes.len() && bytes[cursor] == b'"' {
         cursor += 1;
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'\n'
-        {
-            cursor += 1;
-        }
-        let quoted = cursor < bytes.len() && bytes[cursor] == b'"';
-        if quoted {
-            cursor += 1;
-        }
-        let value_start = cursor;
-        let value_end = if quoted {
-            rest[value_start..]
-                .find('"')
-                .map_or(rest.len(), |quote| value_start + quote)
-        } else {
-            rest[value_start..]
-                .find(|c: char| c.is_whitespace() || c == ',')
-                .map_or(rest.len(), |end| value_start + end)
-        };
-        if value_end == value_start {
-            from = after_key;
-            continue;
-        }
-        out.push_str(&rest[..value_start]);
-        out.push_str(REDACTED);
-        rest = &rest[value_end..];
-        from = 0;
     }
-    out.push_str(rest);
-    out.truncated |= inherited_truncation;
-    Some(out)
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'\n' {
+        cursor += 1;
+    }
+    if cursor >= bytes.len() || (bytes[cursor] != b'=' && bytes[cursor] != b':') {
+        return None;
+    }
+    cursor += 1;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'\n' {
+        cursor += 1;
+    }
+    let quote = bytes
+        .get(cursor)
+        .copied()
+        .filter(|byte| matches!(byte, b'"' | b'\''));
+    if quote.is_some() {
+        cursor += 1;
+    }
+    let value_start = cursor;
+    let value_end = if let Some(quote) = quote {
+        quoted_value_end(text.as_bytes(), value_start, quote)
+    } else {
+        text[value_start..]
+            .find(|character: char| {
+                character.is_whitespace()
+                    || matches!(character, '"' | '\'' | ',' | '&' | ';' | ')' | ']' | '}')
+            })
+            .map_or(text.len(), |end| value_start + end)
+    };
+    (value_end > value_start).then_some(SensitiveSpan {
+        start: value_start,
+        end: value_end,
+    })
+}
+
+fn quoted_value_end(text: &[u8], start: usize, quote: u8) -> usize {
+    let mut escaped = false;
+    for (offset, byte) in text[start..].iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == quote {
+            return start + offset;
+        }
+    }
+    text.len()
+}
+
+fn url_span_at(text: &str, start: usize) -> Option<SensitiveSpan> {
+    let bytes = text.as_bytes();
+    if !bytes.get(start).is_some_and(u8::is_ascii_alphabetic) {
+        return None;
+    }
+    let mut marker = start + 1;
+    while bytes
+        .get(marker)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        marker += 1;
+    }
+    if bytes.get(marker..marker + 3) != Some(b"://") {
+        return None;
+    }
+    Some(SensitiveSpan {
+        start,
+        end: sensitive_token_end(text, marker + 3),
+    })
+}
+
+fn local_path_span_at(text: &str, start: usize) -> Option<SensitiveSpan> {
+    const MODEL_EXTENSIONS: &[&str] = &[
+        ".bin",
+        ".ggml",
+        ".gguf",
+        ".onnx",
+        ".pt",
+        ".pth",
+        ".safetensors",
+    ];
+    let bytes = text.as_bytes();
+    let boundary = start == 0
+        || bytes[start - 1].is_ascii_whitespace()
+        || matches!(
+            bytes[start - 1],
+            b'"' | b'\'' | b'(' | b'[' | b'{' | b'=' | b':'
+        );
+    let windows = start + 2 < bytes.len()
+        && bytes[start].is_ascii_alphabetic()
+        && bytes[start + 1] == b':'
+        && matches!(bytes[start + 2], b'/' | b'\\');
+    let unc = start + 1 < bytes.len()
+        && matches!(bytes[start], b'/' | b'\\')
+        && bytes[start + 1] == bytes[start];
+    let unix = bytes[start] == b'/'
+        && bytes.get(start + 1).is_some_and(|byte| {
+            !byte.is_ascii_whitespace() && !matches!(byte, b'/' | b')' | b']' | b'}')
+        });
+    if boundary && (windows || unc || unix) {
+        let end = sensitive_token_end(text, start + usize::from(windows) * 2);
+        if MODEL_EXTENSIONS.iter().any(|extension| {
+            let path = &text[start..end];
+            path.get(path.len().saturating_sub(extension.len())..)
+                .is_some_and(|suffix| suffix.eq_ignore_ascii_case(extension))
+        }) {
+            return Some(SensitiveSpan { start, end });
+        }
+    }
+    None
+}
+
+fn sensitive_token_end(text: &str, content_start: usize) -> usize {
+    text[content_start..]
+        .find(|character: char| {
+            character.is_whitespace()
+                || matches!(character, '"' | '\'' | ',' | ')' | ']' | '}' | '<' | '>')
+        })
+        .map_or(text.len(), |end| content_start + end)
 }
 
 #[cfg(test)]
@@ -335,13 +495,165 @@ mod tests {
     }
 
     #[test]
-    fn an_ordinary_line_passes_through_unchanged() {
-        let line = "loaded profile main with 2 models; bind 127.0.0.1:8081";
-        assert_eq!(
-            redact_line(line),
-            line,
-            "a line without a sensitive shape is byte-identical"
+    fn adversarial_unstructured_values_are_masked() {
+        for (line, secret) in [
+            (
+                "authorization: Basic YmFzaWMtdXNlcjpiYXNpYy1zZWNyZXQ=",
+                "YmFzaWMtdXNlcjpiYXNpYy1zZWNyZXQ=",
+            ),
+            (
+                "proxy rejected Basic YmFyZS11c2VyOmJhcmUtc2VjcmV0",
+                "YmFyZS11c2VyOmJhcmUtc2VjcmV0",
+            ),
+            (
+                "dependency rejected Bearer bearer-secret, retrying",
+                "bearer-secret",
+            ),
+            ("cookie=session=cookie-secret; theme=dark", "cookie-secret"),
+            ("set-cookie='set-cookie-secret'", "set-cookie-secret"),
+            ("url=https://user:url-secret@example.test/v1", "url-secret"),
+            (
+                "GET https://user:embedded-url-secret@example.test/v1",
+                "embedded-url-secret",
+            ),
+            ("prompt=\"first line\nprompt-secret\"", "prompt-secret"),
+            (
+                "prompt=\"escaped \\\" quote then escaped-prompt-secret\"",
+                "escaped-prompt-secret",
+            ),
+            (
+                "model_path=C:\\private\\path-secret\\model.gguf",
+                "path-secret",
+            ),
+            (
+                "payload={\"outer\":{\"token\":\"payload-secret\"}}",
+                "payload-secret",
+            ),
+            (
+                "outer error\ncaused by: request failed\ncaused by: api_key=nested-secret",
+                "nested-secret",
+            ),
+            (
+                "outer error\ncaused by: GET https://host/private-route?opaque-secret",
+                "opaque-secret",
+            ),
+            (
+                "outer error\ncaused by: model load failed at C:\\private\\model-secret.gguf",
+                "model-secret",
+            ),
+            (
+                "outer error\ncaused by: model load failed at /private/models/unix-secret.gguf",
+                "unix-secret",
+            ),
+        ] {
+            let redacted = redact_line(line);
+            assert!(
+                !redacted.contains(secret),
+                "protected text survives redaction: {redacted}"
+            );
+            assert!(
+                redacted.contains(REDACTED),
+                "the mask marks the removed value: {redacted}"
+            );
+        }
+    }
+
+    #[test]
+    fn structured_field_classification_uses_whole_components() {
+        for field in [
+            "authorization",
+            "authorization_header",
+            "cookie_header",
+            "gateway_api_key",
+            "request.headers",
+            "request_token_value",
+            "upstream-url",
+            "system_prompt",
+            "config_path",
+            "request_body",
+            "secret",
+        ] {
+            assert!(is_sensitive_field(field), "{field} must be classified");
+        }
+        for field in [
+            "message",
+            "profile",
+            "token_count",
+            "body_count",
+            "url_status",
+            "secretary",
+        ] {
+            assert!(
+                !is_sensitive_field(field),
+                "{field} is an ordinary diagnostic field"
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_patterns_cannot_leak_partial_secrets_at_any_capacity_boundary() {
+        const FIRST_SECRET: &str = "a";
+        const URL_SECRET: &str = "capacity-boundary-url-secret";
+        let line = "api_key=a then https://user:capacity-boundary-url-secret@example.test/private";
+
+        for capacity in (REDACTED.len() + 1)..line.len() {
+            let output = redact_line_bounded(line, capacity)
+                .finish("", false)
+                .expect("ASCII input remains valid");
+            assert!(
+                !output.0.contains("api_key=a"),
+                "the short first secret is masked at capacity {capacity}: {}",
+                output.0
+            );
+            for fragment_len in 4..=URL_SECRET.len() {
+                assert!(
+                    !output.0.contains(&URL_SECRET[..fragment_len]),
+                    "a URL secret prefix survived at capacity {capacity}: {}",
+                    output.0
+                );
+            }
+            assert_ne!(
+                output.0.as_ref(),
+                FIRST_SECRET,
+                "the first secret is never emitted by itself"
+            );
+        }
+    }
+
+    #[test]
+    fn unlabeled_urls_and_local_paths_are_replaced_whole_in_error_chains() {
+        let redacted = redact_line(
+            "dependency failed\ncaused by: https://host/private-route?opaque\ncaused by: C:\\private\\model.gguf\ncaused by: /opt/private/model.gguf",
         );
+        for protected in [
+            "https://host/private-route?opaque",
+            "C:\\private\\model.gguf",
+            "/opt/private/model.gguf",
+        ] {
+            assert!(
+                !redacted.contains(protected),
+                "an unlabeled URL or path survived: {redacted}"
+            );
+        }
+        assert_eq!(
+            redacted.matches(REDACTED).count(),
+            3,
+            "each complete protected location becomes one mask"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_line_passes_through_unchanged() {
+        for line in [
+            "loaded profile main with 2 models; bind 127.0.0.1:8081",
+            "logging to C:\\Users\\operator\\.promptforge\\logs\\gateway.log",
+        ] {
+            assert_eq!(
+                redact_line(line),
+                line,
+                "a line without a sensitive shape is byte-identical"
+            );
+        }
     }
 
     #[test]
