@@ -11,9 +11,8 @@
 // Dictation mounts on the same input: a push-to-talk mic beside the
 // send button drives stt.ts, which splices the transcript into the box
 // at the cursor. The mic stays visible and clickable whatever the state,
-// so a click while blocked names the blocker on the status bar (a probe
-// still in flight, a failed probe, no GPU, no provisioned speech models,
-// or no wait pinned) instead of the control silently disappearing. A take follows
+// so a click while blocked names the blocker on the status bar instead of
+// the control silently disappearing. A take follows
 // the wait it dictates into: when the pinned wait dies - spent by a send,
 // cancelled by the server, or reset by a new session - the live take is
 // discarded, because a take that cannot be sent is a trap.
@@ -27,14 +26,13 @@ import type {
   TranscriptItem,
 } from "../services/agent-session";
 import type { ModelService } from "../services/model-service";
+import { SpeechCaptureService } from "../services/speech-capture";
 import { AgentToolbar } from "./agent-toolbar";
 import { renderMarkdown } from "./markdown-render";
 import { PromptInput } from "./prompt-input";
 import { ToolCallCard } from "./tool-call-card";
 import {
   setupStt,
-  sttCapability,
-  type SttCapability,
   type SttHandle,
   type SttStatus,
 } from "./stt";
@@ -191,13 +189,12 @@ export class AgentSessionView extends Disposable {
   private readonly send: HTMLButtonElement;
   private readonly stt: SttHandle;
   private rendered: RenderedRow[] = [];
-  /** The capability probe's answer; undefined while it is in flight. */
-  private capability: SttCapability | null | undefined;
 
   constructor(
     private readonly service: AgentSessionService,
     status: SttStatus,
     modelService?: ModelService,
+    speechCapture?: SpeechCaptureService,
   ) {
     super();
     this.element = document.createElement("section");
@@ -258,39 +255,24 @@ export class AgentSessionView extends Disposable {
 
     // The dictation control over the mic and input. Registered before the
     // prompt input so disposal discards a live take while the editor
-    // still stands. The blocker names the first reason a take cannot
-    // start, capability before the wait. The probe resolves after mount;
-    // a click that beats it is refused, because a server with no engine
-    // still accepts /stt and answers an empty final, so an unchecked
-    // take would record for nothing.
+    // still stands. Production injects the composition root's capture
+    // service; isolated views own a fallback for tests and previews.
+    const capture = speechCapture ?? new SpeechCaptureService();
     this.stt = this._register(
       setupStt({ mic: this.mic, input: promptInput }, status, () => {
-        if (this.capability === undefined) {
-          return "Dictation is still checking what this server can do; try again in a moment.";
-        }
-        if (this.capability === null) {
-          return "Dictation is unavailable: the server's capability probe failed.";
-        }
-        if (!this.capability.gpu) {
-          return "Dictation needs a GPU this server doesn't have.";
-        }
-        if (!this.capability.engine) {
-          return "No speech models are provisioned in the active profile.";
-        }
         if (this.service.pendingInputToken === null) {
           return "The agent isn't asking for input; the mic opens when it does.";
         }
         return null;
-      }),
+      }, capture),
     );
+    if (speechCapture === undefined) {
+      this._register(capture);
+    }
     this.promptInput = this._register(promptInput);
 
     this.renderFeed();
     this.renderInputState();
-
-    void sttCapability().then((answer) => {
-      this.capability = answer;
-    });
   }
 
   /**

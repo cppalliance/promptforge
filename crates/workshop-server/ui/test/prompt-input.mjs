@@ -283,6 +283,7 @@ await assertNoLeaks(lifecycle, () => {
     const input = new PromptInput();
     input.setText("ab");
     check("setText loads plain text", input.getText() === "ab");
+    check("readRange preserves the text a take may need to restore", input.readRange(1, 3) === "ab");
     input.setSelection(2, 2);
     check(
       "setSelection places the cursor between the characters",

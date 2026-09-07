@@ -250,6 +250,11 @@ export class PromptInput extends Disposable implements SttInputTarget {
       .run();
   }
 
+  /** Reads plain text from one ProseMirror range for reversible dictation. */
+  readRange(from: number, to: number): string {
+    return this.editor.state.doc.textBetween(from, to, "\n", "\n");
+  }
+
   /**
    * The dictation take's lock: non-editable plus the recording ring on
    * the frame (stt.css's `.stt-input--recording`). Composes with the

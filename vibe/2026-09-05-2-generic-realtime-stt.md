@@ -662,7 +662,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
 - Consumes and gates: consumes Step 11 language-neutral bytes and Step 27 additive relay; byte parity gates browser migration.
 
-### Step 29: Migrate Workshop browser speech
+### Step 29: Migrate Workshop browser speech [completed]
 
 - Artifacts: create `workshop-server/ui/src/services/realtime-transcription.ts`; update `src/ui/stt.ts`, `src/ui/prompt-input.ts`, and `src/main.ts`; replace assertions in `test/agent-stt.mjs`, `agent-stt-boot.mjs`, and `stt-stream.mjs`; retain server legacy seams and `test/stt-capability.mjs`.
 - Scope: switch the browser to Realtime, hypothesis replacement, authoritative completion, local status, second take, clear, overlapping items, and recoverable errors while the server fallback remains removable only after physical acceptance.

@@ -1,13 +1,9 @@
 // Dictation on the agent session input (src/ui/agent-session-view.ts
 // mounting src/ui/stt.ts), driven through the real AgentSessionService
-// over a scripted wire, a scripted /stt socket, stubbed audio, and a
-// recording status sink in jsdom. Pins the composer behaviors the mic
-// carried before it moved here: the take is gated by the pinned wait and
-// by the capability probe (a blocked click names its reason and opens no
-// socket); the recording LED follows the recording; interims splice
-// committed+tentative at the cursor and the final replaces them in place;
-// the input is readOnly for the take's duration; a send discards the live
-// take; a dying wait discards it too. Run: node test/agent-stt.mjs
+// over a scripted wire, canonical Realtime events, production capture,
+// and a recording status sink in jsdom. It pins local gating and status,
+// replacement snapshots, authoritative completion, overlapping items,
+// clear, second take, recoverable failure, and disposal.
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -73,6 +69,7 @@ globalThis.navigator.mediaDevices = {
 };
 class FakeAudioContext {
   constructor() {
+    this.sampleRate = 24_000;
     this.destination = {};
     this.audioWorklet = { addModule: () => Promise.resolve() };
   }
@@ -82,10 +79,28 @@ class FakeAudioContext {
   close() {
     return Promise.resolve();
   }
+  resume() {
+    return Promise.resolve();
+  }
 }
+let nextFlushAudio = null;
 class FakeAudioWorkletNode {
   constructor() {
-    this.port = { onmessage: null };
+    this.port = {
+      onmessage: null,
+      postMessage: (message) => {
+        if (message?.type === "flush") {
+          const audio = nextFlushAudio;
+          nextFlushAudio = null;
+          queueMicrotask(() => {
+            if (audio !== null) {
+              this.port.onmessage?.({ data: audio });
+            }
+            this.port.onmessage?.({ data: { type: "flushed" } });
+          });
+        }
+      },
+    };
   }
   connect() {}
   disconnect() {}
@@ -97,6 +112,7 @@ globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 // A scripted /stt socket: opens asynchronously like a real one, records
 // what the client sends, and lets the test push server frames.
 const sockets = [];
+let nextItem = 0;
 class FakeWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -127,7 +143,7 @@ class FakeWebSocket {
     for (const entry of entries) entry.listener(event);
   }
   send(data) {
-    this.sent.push(data);
+    this.sent.push(JSON.parse(data));
   }
   close() {
     if (this.closed) return;
@@ -137,38 +153,52 @@ class FakeWebSocket {
   }
   // Test-side control, not part of the WebSocket surface.
   message(frame) {
+    if (frame.type === "interim" || frame.type === "final") {
+      if (!this.itemId) {
+        this.itemId = `item_${++nextItem}`;
+        this.dispatch("message", {
+          data: JSON.stringify({
+            type: "input_audio_buffer.committed",
+            event_id: `committed_${nextItem}`,
+            item_id: this.itemId,
+            previous_item_id: null,
+          }),
+        });
+      }
+      frame =
+        frame.type === "interim"
+          ? {
+              type: "conversation.item.input_audio_transcription.hypothesis",
+              event_id: `hypothesis_${nextItem}`,
+              item_id: this.itemId,
+              content_index: 0,
+              revision: 1,
+              transcript: [frame.committed, frame.tentative].filter(Boolean).join(
+                frame.committed && frame.tentative && !/\s$/.test(frame.committed) ? " " : "",
+              ),
+              finalized: frame.committed ?? "",
+              agreed: "",
+              tentative: frame.tentative ?? "",
+              audio_start_ms: 0,
+              audio_end_ms: 100,
+            }
+          : {
+              type: "conversation.item.input_audio_transcription.completed",
+              event_id: `completed_${nextItem}`,
+              item_id: this.itemId,
+              content_index: 0,
+              transcript: frame.text,
+              usage: { type: "duration", seconds: 0.1 },
+            };
+    }
     this.dispatch("message", { data: JSON.stringify(frame) });
+    if (frame.type === "conversation.item.input_audio_transcription.completed") {
+      this.itemId = null;
+    }
   }
 }
 window.WebSocket = FakeWebSocket;
 globalThis.WebSocket = FakeWebSocket;
-
-// The capability probe's scripted answer: a body to serve, null to fail
-// the fetch, or "pending" to hold the response until the test releases it
-// through `answerPendingProbe`. Each harness sets it before the view mounts.
-let capabilityAnswer = { gpu: true, engine: true };
-let answerPendingProbe = null;
-const probes = [];
-const capabilityResponse = (body) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-globalThis.fetch = (url) => {
-  probes.push(url);
-  if (url !== "/stt/capability") {
-    return Promise.reject(new Error(`unexpected fetch in the agent-stt test: ${url}`));
-  }
-  if (capabilityAnswer === null) {
-    return Promise.reject(new Error("connection refused"));
-  }
-  if (capabilityAnswer === "pending") {
-    return new Promise((resolve) => {
-      answerPendingProbe = (body) => resolve(capabilityResponse(body));
-    });
-  }
-  return Promise.resolve(capabilityResponse(capabilityAnswer));
-};
 
 const bundlePath = path.join(os.tmpdir(), "promptforge-agent-stt-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
@@ -183,8 +213,7 @@ function check(name, condition) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// startStt crosses several await points (getUserMedia, socket open,
-// worklet load) before sending "start"; poll until the take is live.
+// Capture crosses several await points before the take is live.
 async function waitFor(condition) {
   for (let attempt = 0; attempt < 50; attempt++) {
     if (condition()) return true;
@@ -229,13 +258,8 @@ function makeWire() {
   };
 }
 
-// Mounts a view over a fresh service with the probe answering
-// `capability`, waits for the probe to settle, and returns the handles.
-// `status` records what dictation paints: local messages and the recording
-// state.
-async function harness(capability = { gpu: true, engine: true }) {
-  capabilityAnswer = capability;
-  const probesBefore = probes.length;
+// Mounts a view over a fresh service and negotiated Realtime socket.
+async function harness() {
   const status = {
     local: [],
     recording: false,
@@ -250,9 +274,30 @@ async function harness(capability = { gpu: true, engine: true }) {
   const service = new AgentSessionService(wire);
   const view = new AgentSessionView(service, status);
   window.document.body.appendChild(view.element);
-  await waitFor(() => probes.length > probesBefore);
-  // The probe's then-callback lands a tick after the response resolves.
-  await sleep(10);
+  await waitFor(() =>
+    sockets.some(
+      (socket) =>
+        socket.url.endsWith("/v1/realtime") && socket.readyState === FakeWebSocket.OPEN,
+    ),
+  );
+  const realtime = sockets.filter((socket) => socket.url.endsWith("/v1/realtime")).at(-1);
+  realtime.message({
+    type: "session.created",
+    event_id: "created",
+    session: { id: "session", object: "realtime.transcription_session", type: "transcription", include: [], audio: { input: {} } },
+  });
+  await waitFor(() => realtime.sent.some((event) => event.type === "session.update"));
+  realtime.message({
+    type: "session.updated",
+    event_id: "updated",
+    session: {
+      id: "session",
+      object: "realtime.transcription_session",
+      type: "transcription",
+      include: ["item.input_audio_transcription.hypothesis"],
+      audio: { input: {} },
+    },
+  });
   const mic = view.element.querySelector(".agent-session__mic");
   // The ProseMirror prompt box: content and selection are driven through
   // the component (the DOM alone sets neither). The pending-wait gate
@@ -266,12 +311,9 @@ async function harness(capability = { gpu: true, engine: true }) {
   // Clicks the mic and waits for the take's /stt socket to open and
   // send "start"; null when no take began within the wait.
   async function startTake() {
-    const before = sockets.length;
     mic.click();
-    const started = await waitFor(
-      () => sockets.length > before && sockets.at(-1).sent.includes("start"),
-    );
-    return started ? sockets.at(-1) : null;
+    const started = await waitFor(() => status.recording);
+    return started ? realtime : null;
   }
   const dispose = () => {
     view.dispose();
@@ -320,7 +362,7 @@ await assertNoLeaks(lifecycle, async () => {
 
     wire.fire.inputCancelled("tok1");
     check("a cancelled wait dims the recording LED", !status.recording);
-    check("a cancelled wait closes the take's /stt socket", socket.closed);
+    check("a cancelled wait keeps the reusable Realtime socket open", !socket.closed);
     check(
       "a cancelled wait lifts the take lock and drops the interim",
       !recording() && input.getText() === "",
@@ -332,15 +374,15 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok2");
     const reopened = await startTake();
     check("a fresh wait lets the mic start a fresh take", reopened !== null);
-    reopened?.close();
-    check("a dropped /stt socket dims the recording LED", !status.recording);
+    wire.fire.inputCancelled("tok2");
+    check("clearing the second take dims the recording LED", !status.recording);
 
     // A new session resets the pin: the take dies with it.
     wire.fire.inputRequired("tok3");
     const third = await startTake();
     check("a take starts against the third wait", third !== null);
     wire.fire.session("s2");
-    check("a new session discards the live take", third?.closed === true && !status.recording && !recording());
+    check("a new session discards the live take", third?.closed === false && !status.recording && !recording());
 
     dispose();
     const before = sockets.length;
@@ -428,14 +470,14 @@ await assertNoLeaks(lifecycle, async () => {
     );
     socket.message({ type: "final", text: "Y" });
     check("the final replaces the interim in place", input.getText() === "aYb" && editable());
-    check("the final closes the take's socket", socket.closed);
+    check("the final keeps the reusable Realtime socket open", !socket.closed);
 
     input.setText("ab");
     input.setSelection(1, 3);
     socket = await startTake();
     socket?.message({ type: "interim", committed: "X", tentative: "" });
     check("a selection is replaced outright", input.getText() === "X");
-    socket?.close();
+    socket?.message({ type: "final", text: "X" });
 
     input.setText("start");
     socket = await startTake();
@@ -468,7 +510,11 @@ await assertNoLeaks(lifecycle, async () => {
     check("the interim still lands programmatically", input.getText() === "prefix world");
     // Stopping through the mic sends "stop" and waits for the final.
     mic.click();
-    check("a second mic click sends stop", socket.sent.includes("stop"));
+    await waitFor(() => socket.sent.some((event) => event.type === "input_audio_buffer.commit"));
+    check(
+      "a second mic click sends the canonical commit event",
+      socket.sent.some((event) => event.type === "input_audio_buffer.commit"),
+    );
     check("the take lock holds until the final arrives", !editable());
     socket.message({ type: "final", text: " world" });
     check("the final lifts the take lock", editable() && !recording());
@@ -491,7 +537,7 @@ await assertNoLeaks(lifecycle, async () => {
     mic.click();
     check("the stop dims the recording LED while the final is awaited", !status.recording && !editable());
     wire.fire.inputCancelled("tok1");
-    check("a wait dying in the stop window closes the awaited socket", socket.closed);
+    check("a wait dying in the stop window keeps the Realtime session reusable", !socket.closed);
     check(
       "a wait dying in the stop window lifts the take lock and drops the interim",
       !recording() && input.getText() === "",
@@ -505,8 +551,8 @@ await assertNoLeaks(lifecycle, async () => {
     mic.click();
     send.click();
     check(
-      "a send in the stop window carries the interim and closes the awaited socket",
-      isDeepStrictEqual(wire.responses, [["tok2", "sent as shown"]]) && socket?.closed === true,
+      "a send in the stop window carries the interim",
+      isDeepStrictEqual(wire.responses, [["tok2", "sent as shown"]]) && socket?.closed === false,
     );
     check(
       "a send in the stop window lifts the take lock and clears the box",
@@ -527,7 +573,36 @@ await assertNoLeaks(lifecycle, async () => {
     );
     check(
       "a socket dropping in the stop window says so on the status bar",
-      status.local.some((entry) => entry.label.includes("before the final transcript") && entry.severity === "error"),
+      status.local.some((entry) => entry.label.includes("temporarily unavailable") && entry.severity === "error"),
+    );
+    dispose();
+  }
+
+  // A stop keeps routing the worklet's carried block until flush completes.
+
+  {
+    const { wire, mic, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("flush ordering: the mic click did not open a Realtime socket");
+      dispose();
+      return;
+    }
+    nextFlushAudio = Uint8Array.from([1, 0, 2, 0]).buffer;
+    mic.click();
+    await waitFor(() =>
+      socket.sent.some((event) => event.type === "input_audio_buffer.commit"),
+    );
+    const speechEvents = socket.sent.filter((event) =>
+      event.type.startsWith("input_audio_buffer."),
+    );
+    check(
+      "stop sends the worklet's carried PCM block before commit",
+      speechEvents.length === 2 &&
+        speechEvents[0].type === "input_audio_buffer.append" &&
+        speechEvents[0].audio === "AQACAA==" &&
+        speechEvents[1].type === "input_audio_buffer.commit",
     );
     dispose();
   }
@@ -548,7 +623,7 @@ await assertNoLeaks(lifecycle, async () => {
     send.click();
     check("the send carries the interim the operator saw", isDeepStrictEqual(wire.responses, [["tok1", "hello"]]));
     check("the send dims the recording LED", !status.recording);
-    check("the send closes the take's /stt socket", socket.closed);
+    check("the send keeps the reusable Realtime socket open", !socket.closed);
     check(
       "the send lifts the take lock and clears the box",
       !recording() && input.getText() === "",
@@ -566,46 +641,268 @@ await assertNoLeaks(lifecycle, async () => {
     );
     check(
       "Enter during a take discards it and sends the interim",
-      isDeepStrictEqual(wire.responses[1], ["tok2", "via enter"]) && second?.closed === true && !status.recording,
+      isDeepStrictEqual(wire.responses[1], ["tok2", "via enter"]) && second?.closed === false && !status.recording,
     );
     dispose();
   }
 
-  // --- The capability probe gates the mic ------------------------------------
+  // A discarded commit keeps its FIFO place until its acknowledgment arrives.
 
-  for (const [capability, expected, name] of [
-    [{ gpu: false, engine: true }, "needs a GPU", "no GPU"],
-    [{ gpu: true, engine: false }, "No speech models", "no engine"],
-    [null, "capability probe failed", "a failed probe"],
-  ]) {
-    const { wire, status, startTake, dispose } = await harness(capability);
-    wire.fire.inputRequired("tok");
-    const socket = await startTake();
-    check(`${name} blocks the take with no /stt socket`, socket === null);
-    check(
-      `${name} names its reason on the status bar`,
-      status.local.length === 1 && status.local[0].label.includes(expected) && status.local[0].severity === "info",
-    );
-    dispose();
-  }
-
-  // A click that beats the probe is refused, not let through on the wait
-  // alone: a server with no engine still accepts /stt, so the gate must
-  // hold until the answer is known. Once it arrives, the same click starts a take.
   {
-    const { wire, status, startTake, dispose } = await harness("pending");
-    wire.fire.inputRequired("tok");
-    const early = await startTake();
-    check("a click while the probe is in flight opens no /stt socket", early === null);
-    check(
-      "a click while the probe is in flight says the check is still running",
-      status.local.length === 1 && status.local[0].label.includes("still checking") && status.local[0].severity === "info",
-    );
-    answerPendingProbe({ gpu: true, engine: true });
-    await sleep(10);
+    const { wire, mic, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok1");
     const socket = await startTake();
-    check("the gate lifts once the probe answers capable", socket !== null);
-    socket?.close();
+    if (socket === null) {
+      failures.push("commit tombstone: the first take did not start");
+      dispose();
+      return;
+    }
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
+    );
+    wire.fire.inputCancelled("tok1");
+
+    wire.fire.inputRequired("tok2");
+    await startTake();
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "late_discarded_commit",
+      item_id: "discarded_item",
+      previous_item_id: null,
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "late_discarded_hypothesis",
+      item_id: "discarded_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "WRONG TAKE",
+      finalized: "",
+      agreed: "",
+      tentative: "WRONG TAKE",
+      audio_start_ms: 0,
+      audio_end_ms: 100,
+    });
+    check(
+      "a discarded commit's late acknowledgment and hypothesis do not bind the new take",
+      input.getText() === "",
+    );
+
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "current_commit",
+      item_id: "current_item",
+      previous_item_id: "discarded_item",
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "current_hypothesis",
+      item_id: "current_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "right take",
+      finalized: "right",
+      agreed: "",
+      tentative: " take",
+      audio_start_ms: 100,
+      audio_end_ms: 200,
+    });
+    check(
+      "the acknowledgment after a tombstone binds the current take",
+      input.getText() === "right take",
+    );
+    dispose();
+  }
+
+  // --- Overlapping items finalize independently ------------------------------
+
+  {
+    const { wire, mic, input, editable, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok");
+    input.setText("base ");
+    const socket = await startTake();
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "overlap_commit_a",
+      item_id: "overlap_a",
+      previous_item_id: null,
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "overlap_hypothesis_a",
+      item_id: "overlap_a",
+      content_index: 0,
+      revision: 1,
+      transcript: "first",
+      finalized: "fir",
+      agreed: "s",
+      tentative: "t",
+      audio_start_ms: 0,
+      audio_end_ms: 100,
+    });
+
+    await startTake();
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "overlap_commit_b",
+      item_id: "overlap_b",
+      previous_item_id: "overlap_a",
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "overlap_hypothesis_b",
+      item_id: "overlap_b",
+      content_index: 0,
+      revision: 1,
+      transcript: " second",
+      finalized: " sec",
+      agreed: "on",
+      tentative: "d",
+      audio_start_ms: 100,
+      audio_end_ms: 200,
+    });
+    check(
+      "overlapping hypotheses occupy isolated replacement regions",
+      input.getText() === "base first second" && !editable(),
+    );
+
+    for (const [itemId, transcript] of [
+      ["overlap_b", " SECOND"],
+      ["overlap_a", "FIRST LONG"],
+    ]) {
+      socket.message({
+        type: "conversation.item.input_audio_transcription.completed",
+        event_id: `overlap_done_${itemId}`,
+        item_id: itemId,
+        content_index: 0,
+        transcript,
+        usage: { type: "duration", seconds: 0.1 },
+      });
+    }
+    check(
+      "reverse completion replaces each item with authoritative text",
+      input.getText() === "base FIRST LONG SECOND" && editable(),
+    );
+    dispose();
+  }
+
+  // A correlated rejection rolls back only the client event's take.
+
+  {
+    const { wire, mic, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("correlated error: the first take did not start");
+      dispose();
+      return;
+    }
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "older_commit",
+      item_id: "older_item",
+      previous_item_id: null,
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "older_hypothesis",
+      item_id: "older_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "older",
+      finalized: "old",
+      agreed: "",
+      tentative: "er",
+      audio_start_ms: 0,
+      audio_end_ms: 100,
+    });
+
+    await startTake();
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
+    );
+    const rejectedCommit = socket.sent
+      .filter((event) => event.type === "input_audio_buffer.commit")
+      .at(-1);
+    socket.message({
+      type: "error",
+      event_id: "rejected_commit",
+      error: {
+        type: "invalid_request_error",
+        code: "audio_too_short",
+        message: "SERVER WORDING MUST NOT LEAK",
+        param: "audio",
+        event_id: rejectedCommit.event_id,
+      },
+    });
+    check(
+      "a commit rejection rolls back its take but preserves an older finalization",
+      typeof rejectedCommit.event_id === "string" && input.getText() === "older",
+    );
+    socket.message({
+      type: "conversation.item.input_audio_transcription.completed",
+      event_id: "older_completed",
+      item_id: "older_item",
+      content_index: 0,
+      transcript: "OLDER FINAL",
+      usage: { type: "duration", seconds: 0.1 },
+    });
+    check(
+      "the preserved older item still accepts authoritative completion",
+      input.getText() === "OLDER FINAL",
+    );
+    dispose();
+  }
+
+  // --- Recoverable Realtime errors use local wording -------------------------
+
+  {
+    const { wire, status, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok");
+    const socket = await startTake();
+    socket?.message({ type: "interim", committed: "temporary", tentative: "" });
+    socket?.message({
+      type: "error",
+      event_id: "server_error",
+      error: {
+        type: "server_error",
+        code: "engine_replaced",
+        message: "SERVER WORDING MUST NOT LEAK",
+      },
+    });
+    check(
+      "a recoverable server error restores the pre-take text",
+      input.getText() === "",
+    );
+    check(
+      "a recoverable server error is worded locally",
+      status.local.at(-1).label.includes("temporarily unavailable") &&
+        !status.local.at(-1).label.includes("SERVER WORDING"),
+    );
     dispose();
   }
 });

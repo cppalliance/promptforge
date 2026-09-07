@@ -13,6 +13,7 @@
 import "./stt.css";
 
 import { DisposableStore, toDisposable, type IDisposable } from "../base/lifecycle";
+export { setupStt } from "./realtime-stt";
 
 /**
  * What dictation needs from its host input: a text target the take can
@@ -27,6 +28,8 @@ export interface SttInputTarget {
   getSelection(): { start: number; end: number };
   /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
   replaceRange(from: number, to: number, text: string): void;
+  /** Reads the plain text currently occupying [from, to]. */
+  readRange(from: number, to: number): string;
   /** Locks the input against typing while a take splices, or releases it. */
   setReadOnly(readOnly: boolean): void;
   /** Returns focus to the input; a landed final calls it. */
@@ -55,6 +58,7 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
       // behaves like typing to whatever listens on the input.
       input.dispatchEvent(new Event("input", { bubbles: true }));
     },
+    readRange: (from, to) => input.value.slice(from, to),
     setReadOnly: (readOnly) => {
       input.readOnly = readOnly;
       input.classList.toggle("stt-input--recording", readOnly);
@@ -145,7 +149,9 @@ interface StreamTracker {
   current: number | null;
 }
 
-export function setupStt(
+// Retained with the legacy capability seam until installed-package speech
+// acceptance permits Step 32 to delete the old browser protocol in one pass.
+function setupLegacyStt(
   elements: SttElements,
   statusBar: SttStatus,
   blocked: SttBlocker,

@@ -90,6 +90,21 @@ export async function bootWorkbench(name, run) {
       setTimeout(() => {
         this.readyState = FakeWebSocket.OPEN;
         this.onopen?.();
+        if (this.url.endsWith("/v1/realtime")) {
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: "session.created",
+              event_id: "boot_realtime_created",
+              session: {
+                id: "boot_realtime",
+                object: "realtime.transcription_session",
+                type: "transcription",
+                include: [],
+                audio: { input: {} },
+              },
+            }),
+          });
+        }
       }, 0);
     }
     addEventListener(type, listener) {
@@ -99,6 +114,24 @@ export async function bootWorkbench(name, run) {
     }
     send(data) {
       this.sent.push(data);
+      const event = typeof data === "string" ? JSON.parse(data) : null;
+      if (event?.type === "session.update") {
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: "session.updated",
+              event_id: "boot_realtime_updated",
+              session: {
+                id: "boot_realtime",
+                object: "realtime.transcription_session",
+                type: "transcription",
+                include: ["item.input_audio_transcription.hypothesis"],
+                audio: { input: {} },
+              },
+            }),
+          }),
+        );
+      }
     }
     close() {
       this.readyState = FakeWebSocket.CLOSED;
@@ -115,6 +148,7 @@ export async function bootWorkbench(name, run) {
   };
   class FakeAudioContext {
     constructor() {
+      this.sampleRate = 24_000;
       this.destination = {};
       this.audioWorklet = { addModule: () => Promise.resolve() };
     }
@@ -124,10 +158,20 @@ export async function bootWorkbench(name, run) {
     close() {
       return Promise.resolve();
     }
+    resume() {
+      return Promise.resolve();
+    }
   }
   class FakeAudioWorkletNode {
     constructor() {
-      this.port = { onmessage: null };
+      this.port = {
+        onmessage: null,
+        postMessage: (message) => {
+          if (message?.type === "flush") {
+            queueMicrotask(() => this.port.onmessage?.({ data: { type: "flushed" } }));
+          }
+        },
+      };
     }
     connect() {}
     disconnect() {}
@@ -254,7 +298,7 @@ export async function bootWorkbench(name, run) {
   // The agent panel's session socket, and the per-take /stt sockets the
   // mic opens.
   const agentsSocket = () => sockets.filter((socket) => socket.url.endsWith("/agents/ws")).at(-1);
-  const sttSockets = () => sockets.filter((socket) => socket.url.endsWith("/stt"));
+  const sttSockets = () => sockets.filter((socket) => socket.url.endsWith("/v1/realtime"));
 
   // The fake socket flips to OPEN on a 0ms timer, and the app can boot
   // during the bundle import's own microtask drain - before any macrotask

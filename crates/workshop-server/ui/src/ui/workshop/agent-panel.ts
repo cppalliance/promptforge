@@ -10,6 +10,7 @@ import { Disposable } from "../../base/lifecycle";
 import { AgentSessionService } from "../../services/agent-session";
 import { AgentSocket } from "../../services/agent-socket";
 import type { ModelService } from "../../services/model-service";
+import type { SpeechCaptureService } from "../../services/speech-capture";
 import { AgentSessionView } from "../agent-session-view";
 import type { SttStatus } from "../stt";
 
@@ -27,6 +28,7 @@ export class AgentPanel extends Disposable implements IContentRenderer {
   constructor(
     private readonly status: SttStatus = SILENT_STATUS,
     private readonly modelService?: ModelService,
+    private readonly speechCapture?: SpeechCaptureService,
   ) {
     super();
     this.element.className = "agent-panel";
@@ -35,7 +37,9 @@ export class AgentPanel extends Disposable implements IContentRenderer {
   init(): void {
     const socket = this._register(new AgentSocket());
     const service = this._register(new AgentSessionService(socket));
-    const view = this._register(new AgentSessionView(service, this.status, this.modelService));
+    const view = this._register(
+      new AgentSessionView(service, this.status, this.modelService, this.speechCapture),
+    );
     this.element.appendChild(view.element);
     this._register(
       service.onDidChangeAgents((agents) => {

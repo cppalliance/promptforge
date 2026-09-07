@@ -8,6 +8,7 @@ import type { CreateComponentOptions, IContentRenderer, ITabRenderer, TabPartIni
 
 import { Disposable } from "../../base/lifecycle";
 import type { ModelService } from "../../services/model-service";
+import type { SpeechCaptureService } from "../../services/speech-capture";
 import type { SttStatus } from "../stt";
 import { AgentPanel } from "./agent-panel";
 import { DropdownMenu } from "shared-ui/dropdown";
@@ -26,6 +27,7 @@ import type { ZoneName } from "./zones";
 export interface PanelServices {
   readonly statusBar: TreeStatusSink & SttStatus;
   readonly modelService: ModelService;
+  readonly speechCapture: SpeechCaptureService;
 }
 
 /** One panel kind's static registration. */
@@ -75,7 +77,7 @@ export const PANEL_TYPES = {
     title: "Agent Session",
     tabComponent: AGENT_TAB,
     factory: (services?: PanelServices): IContentRenderer =>
-      new AgentPanel(services?.statusBar, services?.modelService),
+      new AgentPanel(services?.statusBar, services?.modelService, services?.speechCapture),
   },
 } as const satisfies Record<string, PanelTypeEntry>;
 

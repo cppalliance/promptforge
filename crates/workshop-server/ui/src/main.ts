@@ -6,6 +6,7 @@ import { createToastStack } from "shared-ui/toast";
 
 import { DisposableStore, toDisposable } from "./base/lifecycle";
 import { ModelService } from "./services/model-service";
+import { SpeechCaptureService } from "./services/speech-capture";
 import { UpdateService } from "./services/update-service";
 import { WorkbenchService } from "./services/workbench-service";
 import { WorkshopSocket } from "./services/workshop-socket";
@@ -78,6 +79,7 @@ const modelService = disposables.add(
 // progress, chat gating - lives in the WorkbenchService, fed from the
 // same snapshots. The Model menu's Profiles section reads it below.
 const workbenchService = disposables.add(new WorkbenchService());
+const speechCapture = new SpeechCaptureService();
 
 disposables.add(workshopSocket.onStatus((frame) => statusBar.render(frame)));
 // A dropped socket means every in-flight status is stale; the bar returns
@@ -107,7 +109,8 @@ const dock = createDockview(dockEl, {
   // (add and remove folders) can announce their outcomes; the model
   // service rides along so the agent session's toolbar picker reads the
   // shared catalog and selection.
-  createComponent: (options) => createPanelComponent(options, { statusBar, modelService }),
+  createComponent: (options) =>
+    createPanelComponent(options, { statusBar, modelService, speechCapture }),
   createTabComponent: createPanelTabComponent,
   theme: themeDark,
   disableFloatingGroups: true,
@@ -116,6 +119,7 @@ const dock = createDockview(dockEl, {
   noPanelsOverlay: "emptyGroup",
 });
 disposables.add(dock);
+disposables.add(speechCapture);
 disposables.add(initZones(dock));
 
 // Restore the persisted layout; any failure falls back to the known-good

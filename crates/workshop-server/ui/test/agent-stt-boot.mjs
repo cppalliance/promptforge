@@ -1,7 +1,7 @@
 // Dictation on the booted workbench: the mic mounts on the agent session's
-// input, the capability probe reaches /stt/capability, a click with no
-// wait pinned names the blocker on the real status bar, a live take lights
-// the real recording LED, and a dropped /stt socket dims it. The
+// input, negotiates the Realtime hypothesis extension, names a missing
+// wait on the real status bar, lights the real recording LED for a live
+// take, and dims it when the Realtime socket drops. The
 // behaviors themselves are pinned by test/agent-stt.mjs against the
 // view; this proves the composition root wires the view to the bar.
 // Run: node test/agent-stt-boot.mjs (after `npm run build`).
@@ -21,19 +21,22 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   if (recEl.classList.contains("status-bar__led--recording")) {
     failures.push("the recording LED must start dark");
   }
-  // The probe resolves a tick after mount.
+  // Realtime negotiation resolves a tick after mount.
   await sleep(20);
 
-  // Clicks the mic and waits for a fresh /stt socket with a message
-  // listener; null when no take began.
+  // Clicks the mic and waits for the shared production capture service to
+  // report recording on the already-negotiated Realtime socket.
   async function startTake() {
-    const before = sttSockets().length;
     mic.click();
     const deadline = Date.now() + 2000;
     while (Date.now() < deadline) {
-      const opened = sttSockets();
-      if (opened.length > before && typeof opened.at(-1).onmessage === "function") {
-        return opened.at(-1);
+      const socket = sttSockets().at(-1);
+      if (
+        socket &&
+        typeof socket.onmessage === "function" &&
+        recEl.classList.contains("status-bar__led--recording")
+      ) {
+        return socket;
       }
       await sleep(10);
     }
@@ -53,16 +56,42 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   emitAgent({ type: "input_required", token: "tok1" });
   const sttSocket = await startTake();
   if (!sttSocket) {
-    failures.push("the mic click did not open a /stt socket once a wait was pinned");
+    failures.push("the mic click did not start capture once a wait was pinned");
     return;
   }
-  if (!sttSocket.sent.includes("start")) {
-    failures.push("the take did not send start on its /stt socket");
+  if (
+    !sttSocket.sent
+      .map((event) => JSON.parse(event))
+      .some((event) => event.type === "session.update")
+  ) {
+    failures.push("the Realtime socket did not negotiate the hypothesis extension");
   }
   if (!recEl.classList.contains("status-bar__led--recording")) {
     failures.push("starting dictation did not light the recording LED");
   }
-  sttSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "hello", tentative: "" }) });
+  sttSocket.onmessage({
+    data: JSON.stringify({
+      type: "input_audio_buffer.committed",
+      event_id: "boot_committed",
+      item_id: "boot_item",
+      previous_item_id: null,
+    }),
+  });
+  sttSocket.onmessage({
+    data: JSON.stringify({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "boot_hypothesis",
+      item_id: "boot_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "hello",
+      finalized: "hel",
+      agreed: "l",
+      tentative: "o",
+      audio_start_ms: 0,
+      audio_end_ms: 100,
+    }),
+  });
   if (input.textContent !== "hello" || input.getAttribute("contenteditable") !== "false") {
     failures.push(`the interim did not land in the read-only agent input (got "${input.textContent}")`);
   }
