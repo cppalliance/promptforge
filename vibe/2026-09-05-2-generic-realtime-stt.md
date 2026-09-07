@@ -778,7 +778,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo clippy -p gateway-stt -p gateway --all-targets --all-features -- -D warnings`
 - Consumes and gates: this repairs the post-Step 36 installed failure where a correct final hypothesis word vanished on Stop. Tests must combine an accepted hypothesis with stop-flush silence that closes 300 ms speech into a skipped sub-500 ms final segment, repeat for a sub-250 ms click-consumed region, prove divergent nonempty final text overrides provisional text, keep pure silence empty, and reject stale or beyond-commit hypothesis coverage.
 
-### Step 38: Pass installed Windows microphone acceptance
+### Step 38: Pass installed Windows microphone acceptance [completed]
 
 - Artifacts: stage `crates/workshop/binaries/promptforge-gateway-x86_64-pc-windows-msvc.exe`, build `target/release/bundle/nsis/*-setup.exe`, install `promptforge-workshop.exe` and its sibling `promptforge-gateway.exe`, and create `design/generic-realtime-stt-acceptance.md`.
 - Scope: follow `.github/workflows/release-workshop.yml` sidecar staging and Windows installer layout, but build a local unsigned NSIS package by passing `{"bundle":{"createUpdaterArtifacts":false}}` only through the Tauri command-line configuration override. Do not modify `tauri.conf.json`, release workflows, updater settings, or signing behavior. Install the resulting package, verify its sibling binaries and hashes, and record microphone revision, completion, second take, clear, cancellation, and recoverable permission or device failure with timestamps. State explicitly that signing was not tested.
