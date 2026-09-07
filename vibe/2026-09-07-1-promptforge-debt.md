@@ -263,7 +263,7 @@ isProject: false
 - Exclusions: no profile-switch, decoder, fixture-resolution, or production changes; unrelated defects are recorded separately.
 - Focused verification: from the repository root run `cargo test -p gateway`; compare the ratchet's recorded count with the passing discovered suite.
 
-### Step 2: Split Workshop relay integration coverage
+### Step 2: Split Workshop relay integration coverage [completed]
 
 - Component and piece: Component 1 of 8, regression boundaries; split Workshop `realtime_relay` and `chat_gate` coverage by authentication, protocol, lifecycle, recovery, overload, and canonical sequence while preserving every discovered test.
 - Dependency: depends on Step 1 only for one consistent count-preserving split convention; it must precede Workshop decoder, reducer, supervisor, and sidecar changes so moved assertions retain stable ownership.
