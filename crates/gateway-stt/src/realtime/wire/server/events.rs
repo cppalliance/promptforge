@@ -29,6 +29,7 @@ impl ServerEvent {
         item_id: String,
         revision: u64,
         snapshot: InterimSnapshot,
+        audio_start_ms: u64,
         audio_end_ms: u64,
     ) -> Self {
         let (transcript, finalized, agreed, tentative) = snapshot.into_parts();
@@ -41,7 +42,7 @@ impl ServerEvent {
             finalized,
             agreed,
             tentative,
-            audio_start_ms: 0,
+            audio_start_ms,
             audio_end_ms,
         }
     }

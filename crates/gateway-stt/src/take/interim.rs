@@ -1,6 +1,5 @@
 use super::agreement::{LocalAgreement, matching_token_prefix_end, token_spans};
 use super::text::append_transcript;
-use super::{Take, TakeState};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InterimSnapshot {
@@ -11,7 +10,7 @@ pub(crate) struct InterimSnapshot {
 }
 
 impl InterimSnapshot {
-    fn new(finalized: String, agreed: String, tentative: String) -> Self {
+    pub(super) fn new(finalized: String, agreed: String, tentative: String) -> Self {
         let transcript = format!("{finalized}{agreed}{tentative}");
         Self {
             transcript,
@@ -86,18 +85,6 @@ impl InterimState {
     }
 }
 
-impl Take {
-    pub(crate) fn next_interim(&self, hypothesis: &str) -> Option<(String, String)> {
-        self.next_interim_snapshot(hypothesis)
-            .map(InterimSnapshot::into_legacy_parts)
-    }
-
-    pub(crate) fn next_interim_snapshot(&self, hypothesis: &str) -> Option<InterimSnapshot> {
-        let finalized = self.finalized();
-        TakeState::lock(&self.state.interim).next(&finalized, hypothesis)
-    }
-}
-
 fn after_token_prefix(text: &str, tokens: usize) -> &str {
     if tokens == 0 {
         return text;
@@ -119,7 +106,7 @@ fn owned_piece(has_prefix: bool, piece: &str) -> String {
 mod tests {
     use gateway_stt_engine::TranscribeError;
 
-    use super::Take;
+    use crate::take::Take;
 
     #[test]
     fn snapshot_fields_own_disjoint_exact_text_after_divergent_finalization() {

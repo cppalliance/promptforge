@@ -30,6 +30,16 @@ impl TakeState {
         Self::lock(&self.finalized).text.clone()
     }
 
+    pub(super) fn finalized_snapshot(&self) -> (String, usize) {
+        self.finalized_snapshot_with(|| {})
+    }
+
+    fn finalized_snapshot_with(&self, synchronized: impl FnOnce()) -> (String, usize) {
+        let state = Self::lock(&self.finalized);
+        synchronized();
+        (state.text.clone(), state.samples)
+    }
+
     pub(super) fn record_finalized(
         &self,
         result: Result<String, TranscribeError>,
@@ -78,5 +88,42 @@ impl TakeState {
             Some(failure) => Err(failure),
             None => Ok(state.text.clone()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use gateway_stt_engine::TranscribeError;
+
+    use super::TakeState;
+
+    #[test]
+    fn finalized_snapshot_cannot_mix_text_and_sample_ownership() {
+        let state = Arc::new(TakeState::default());
+        state.record_finalized(Ok::<_, TranscribeError>("old".to_owned()), Some(100));
+        let writer_state = Arc::clone(&state);
+        let (start, started) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            start.send(()).expect("snapshot knows the writer is ready");
+            writer_state.record_finalized(Ok::<_, TranscribeError>("new".to_owned()), Some(200));
+        });
+
+        let snapshot = state.finalized_snapshot_with(|| {
+            started
+                .recv_timeout(Duration::from_secs(1))
+                .expect("writer reaches the synchronized snapshot boundary");
+            assert!(
+                state.finalized.try_lock().is_err(),
+                "the text and sample watermark share one held lock"
+            );
+        });
+        writer.join().expect("finalization writer joins");
+
+        assert_eq!(snapshot, ("old".to_owned(), 100));
+        assert_eq!(state.finalized_snapshot(), ("old new".to_owned(), 200));
     }
 }

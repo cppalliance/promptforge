@@ -135,6 +135,7 @@ stt = ["dep:gateway-stt"]
 
 [dev-dependencies]
 base64.workspace = true
+hound.workspace = true
 # Encodes the generated test image for the live CUDA projector proof.
 png.workspace = true
 # test-util pauses time so the progress heartbeat test runs instantly.

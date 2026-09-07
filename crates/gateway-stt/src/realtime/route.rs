@@ -144,6 +144,11 @@ async fn run_socket(
     }
     let mut completions = tokio::time::interval(Duration::from_millis(10));
     completions.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut interims = tokio::time::interval_at(
+        tokio::time::Instant::now() + generation.interval(),
+        generation.interval(),
+    );
+    interims.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             biased;
@@ -155,10 +160,37 @@ async fn run_socket(
                 return;
             }
             _ = completions.tick() => {
+                if let Err(error) = session.reap_canceled().await {
+                    let error = session_error(&error, None);
+                    if !send_client_error(&mut socket, &session, error, &policy).await {
+                        return;
+                    }
+                }
+                if session.interim_finished() {
+                    match session.finish_interim().await {
+                        Ok(Some(event)) => {
+                            if !send_event(&mut socket, &event, &policy).await {
+                                return;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            let error = session_error(&error, None);
+                            if !send_client_error(&mut socket, &session, error, &policy).await {
+                                return;
+                            }
+                        }
+                    }
+                }
                 let Ok(events) = session.finish_ready().await else {
                     return;
                 };
                 if !send_events(&mut socket, &events, &policy).await {
+                    return;
+                }
+            }
+            _ = interims.tick() => {
+                if session.schedule_interim().is_err() {
                     return;
                 }
             }
@@ -218,15 +250,14 @@ async fn handle_text(
             .update_text(text)
             .map(|()| vec![session.updated_event()]),
         ClientEvent::Append { audio, .. } => append_events(session, &audio, policy)
-            .await
             .map_err(|error| session_error(&error, client_event_id)),
         ClientEvent::Clear { .. } => session
             .clear()
             .map(|()| vec![session.cleared_event()])
             .map_err(|error| session_error(&error, client_event_id)),
-        ClientEvent::Commit { .. } => {
-            commit_events(session).map_err(|error| session_error(&error, client_event_id))
-        }
+        ClientEvent::Commit { .. } => commit_events(session)
+            .await
+            .map_err(|error| session_error(&error, client_event_id)),
     };
     match result {
         Ok(events) => send_events(socket, &events, policy).await,
@@ -234,7 +265,7 @@ async fn handle_text(
     }
 }
 
-async fn append_events(
+fn append_events(
     session: &mut Session,
     audio: &str,
     policy: &RoutePolicy,
@@ -244,16 +275,19 @@ async fn append_events(
     if let Some(failure) = policy.precommit_failure() {
         session.record_pending_failure(failure.to_owned())?;
     }
-    session
-        .decode_interim()
-        .await
-        .map(|event| event.into_iter().collect())
+    Ok(Vec::new())
 }
 
-fn commit_events(session: &mut Session) -> Result<Vec<ServerEvent>, SessionError> {
+async fn commit_events(session: &mut Session) -> Result<Vec<ServerEvent>, SessionError> {
+    let ready_interim = if session.interim_finished() {
+        session.finish_interim().await?
+    } else {
+        None
+    };
     let receipt = session.commit()?;
     let item_id = receipt.item_id().to_owned();
-    let mut events = Vec::from(session.committed_events(&receipt));
+    let mut events = ready_interim.into_iter().collect::<Vec<_>>();
+    events.extend(session.committed_events(&receipt));
     events.extend(session.take_pending_interim(&item_id));
     events.extend(session.drain_events());
     Ok(events)

@@ -12,10 +12,23 @@ use crate::realtime::wire::{EffectiveSession, IdGenerator};
 
 pub(super) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
 pub(super) const MAX_COMMITTED_ITEMS_PER_SESSION: usize = 4;
-pub(super) type InterimTask = JoinHandle<(InterimEpoch, String)>;
+pub(super) type InterimTask = JoinHandle<InterimTaskOutput>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InterimEpoch(pub(super) u64);
+
+#[derive(Debug)]
+pub(super) enum InterimTaskOutput {
+    Fixture(InterimEpoch, String),
+    Decode {
+        epoch: InterimEpoch,
+        item_id: String,
+        segment_start: usize,
+        audio_start: usize,
+        audio_end: usize,
+        transcript: Result<String, String>,
+    },
+}
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum SessionError {
@@ -55,6 +68,7 @@ pub(crate) struct Session {
     pub(super) current_epoch: Option<InterimEpoch>,
     pub(super) next_epoch: u64,
     pub(super) interim_task: Option<InterimTask>,
+    pub(super) last_interim_window: Option<(usize, usize, usize)>,
     pub(super) canceled_tasks: Vec<InterimTask>,
     pub(super) canceled_task_failed: bool,
     pub(super) committed: HashMap<String, CommittedItem>,
@@ -81,6 +95,7 @@ impl Session {
             current_epoch: None,
             next_epoch: 1,
             interim_task: None,
+            last_interim_window: None,
             canceled_tasks: Vec::with_capacity(SESSION_CANCEL_JOIN_CAPACITY),
             canceled_task_failed: false,
             committed: HashMap::with_capacity(MAX_COMMITTED_ITEMS_PER_SESSION),

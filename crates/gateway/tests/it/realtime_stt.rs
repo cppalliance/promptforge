@@ -1,6 +1,7 @@
 //! Mounted Realtime transcription route through the production Gateway wall.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -34,13 +35,22 @@ fn config(strict: bool) -> Config {
 }
 
 fn speech(interim: &ScriptedDecoder, final_decoder: Option<&ScriptedDecoder>) -> SpeechService {
+    speech_with_policy(interim, final_decoder, 15, 500)
+}
+
+fn speech_with_policy(
+    interim: &ScriptedDecoder,
+    final_decoder: Option<&ScriptedDecoder>,
+    window_seconds: u64,
+    interval_ms: u64,
+) -> SpeechService {
     let factory = final_decoder.map_or_else(
         || ScriptedModelFactory::new(interim.clone()),
         |final_decoder| {
             ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone())
         },
     );
-    scripted_service(factory, 15, 500).expect("scripted speech starts")
+    scripted_service(factory, window_seconds, interval_ms).expect("scripted speech starts")
 }
 
 async fn server(strict: bool, service: &SpeechService) -> TestServer {
@@ -126,7 +136,11 @@ async fn rejected_request(request: tokio_tungstenite::tungstenite::http::Request
 }
 
 async fn receive(socket: &mut Socket) -> serde_json::Value {
-    let message = tokio::time::timeout(PHASE_TIMEOUT, socket.next())
+    receive_within(socket, PHASE_TIMEOUT).await
+}
+
+async fn receive_within(socket: &mut Socket, timeout: Duration) -> serde_json::Value {
+    let message = tokio::time::timeout(timeout, socket.next())
         .await
         .expect("server frame arrives before deadline")
         .expect("server keeps the socket open")
@@ -158,8 +172,7 @@ async fn append_audio(socket: &mut Socket, audio: String) {
 }
 
 fn audio() -> String {
-    let bytes = vec![0_u8; 24_000 * 2 / 10];
-    base64::engine::general_purpose::STANDARD.encode(bytes)
+    audio_samples(&vec![8_192; 2_400])
 }
 
 fn audio_samples(samples: &[i16]) -> String {
@@ -170,10 +183,69 @@ fn audio_samples(samples: &[i16]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn closed_segment() -> String {
-    let mut samples = vec![16_384; 24_000];
-    samples.extend(vec![0; 72_000]);
-    audio_samples(&samples)
+fn native_fixture(variable: &str, name: &str) -> PathBuf {
+    std::env::var_os(variable).map_or_else(
+        || {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../local/stt-fixtures")
+                .join(name)
+        },
+        PathBuf::from,
+    )
+}
+
+fn native_jfk_24khz() -> Vec<i16> {
+    let path = native_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
+    let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
+    let spec = reader.spec();
+    assert_eq!(spec.sample_rate, 16_000);
+    assert_eq!(spec.channels, 1);
+    let source = reader
+        .samples::<i16>()
+        .map(|sample| sample.expect("JFK sample decodes"))
+        .collect::<Vec<_>>();
+    let mut resampled = Vec::with_capacity(source.len() * 3 / 2);
+    for pair in source.chunks(2) {
+        let first = pair[0];
+        let second = pair.get(1).copied().unwrap_or(first);
+        let midpoint = i16::try_from(i32::midpoint(i32::from(first), i32::from(second)))
+            .expect("the midpoint of two i16 samples remains i16");
+        resampled.extend([first, midpoint, second]);
+    }
+    resampled
+}
+
+fn native_speech_service() -> SpeechService {
+    let model = native_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let model = model.display().to_string().replace('\\', "/");
+    std::thread::spawn(move || {
+        let cache = tempfile::tempdir().expect("native test cache creates");
+        let cache = cache.path().display().to_string().replace('\\', "/");
+        let catalog = Config::from_toml_str(&format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [local]\ncache_dir = {cache:?}\n\
+             [stt]\nwindow_seconds = 4\ninterval_ms = 500\n\
+             [[stt_model]]\nname = \"speech\"\nrole = \"interim\"\nsource = {model:?}\nvram_gb = 1.0\n\
+             [[stt_model]]\nname = \"speech-final\"\nrole = \"final\"\nsource = {model:?}\nvram_gb = 1.0\n\
+             [[profile]]\nname = \"native\"\nmodels = [\"speech\", \"speech-final\"]\n"
+        ))
+        .expect("native fixture catalog parses");
+        let config = catalog
+            .select_profile(&gateway_config::ProfileName::parse("native").expect("profile name"))
+            .expect("native fixture profile selects");
+        let service = SpeechService::new();
+        let prepared = service.prepare(&config, None).expect("artifacts prepare");
+        let replacement = service
+            .begin_replacement(prepared)
+            .expect("native engine loads");
+        service
+            .commit_replacement(replacement)
+            .expect("native generation publishes");
+        service
+    })
+    .join()
+    .expect("native startup thread joins")
 }
 
 fn canonical_sequences() -> serde_json::Value {
@@ -259,6 +331,144 @@ async fn expect_error(
 }
 
 #[tokio::test]
+async fn interim_scheduler_enforces_cadence_minimum_silence_and_coalescing() {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("first window");
+    interim.push_text("newest window");
+    let service = speech_with_policy(&interim, Some(&ScriptedDecoder::new()), 15, 500);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+
+    for _ in 0..4 {
+        append_audio(&mut socket, audio()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        interim.requests().is_empty(),
+        "sub-500 ms audio never enters the decoder"
+    );
+
+    interim.park_next();
+    append_audio(&mut socket, audio()).await;
+    let parked = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("park observer joins"),
+        "the first eligible scheduled decode parks"
+    );
+    for _ in 0..5 {
+        append_audio(&mut socket, audio()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        interim.requests().len(),
+        1,
+        "only one interim decode may be in flight"
+    );
+
+    interim.release();
+    let coalesced = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || coalesced.wait_for_requests(2, PHASE_TIMEOUT))
+            .await
+            .expect("coalesced request observer joins"),
+        "the newest eligible snapshot runs after release"
+    );
+    assert_eq!(interim.requests()[1].samples().len(), 16_000);
+
+    interim.park_next();
+    for _ in 0..5 {
+        append_audio(&mut socket, audio()).await;
+    }
+    let canceled = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || canceled.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("cancellation park observer joins")
+    );
+    send(
+        &mut socket,
+        serde_json::json!({"type": "input_audio_buffer.clear"}),
+    )
+    .await;
+    expect_type(&mut socket, "input_audio_buffer.cleared").await;
+    interim.release();
+    let cleaned = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || cleaned.wait_for_completed(3, PHASE_TIMEOUT))
+            .await
+            .expect("canceled worker observer joins"),
+        "cleared scheduled work releases its underlying worker job"
+    );
+    for _ in 0..5 {
+        append_audio(&mut socket, audio_samples(&vec![0; 2_400])).await;
+    }
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        interim.requests().len(),
+        3,
+        "eligible silent windows are suppressed"
+    );
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn completion_cadence_reaps_more_than_eight_canceled_interims() {
+    let interim = ScriptedDecoder::new();
+    let service = speech_with_policy(&interim, Some(&ScriptedDecoder::new()), 15, 50);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+
+    for request_count in 1..=10 {
+        interim.park_next();
+        for _ in 0..5 {
+            append_audio(&mut socket, audio()).await;
+        }
+        let parked = interim.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || {
+                parked.wait_for_requests(request_count, PHASE_TIMEOUT)
+                    && parked.wait_until_parked(PHASE_TIMEOUT)
+            })
+            .await
+            .expect("park observer joins"),
+            "scheduled interim {request_count} reaches its worker"
+        );
+        send(
+            &mut socket,
+            serde_json::json!({"type": "input_audio_buffer.clear"}),
+        )
+        .await;
+        assert_eq!(
+            expect_type(&mut socket, "input_audio_buffer.cleared").await["type"],
+            "input_audio_buffer.cleared",
+            "completed canceled joins free bounded capacity before cycle {request_count}"
+        );
+        interim.release();
+        let completed = interim.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || {
+                completed.wait_for_completed(request_count, PHASE_TIMEOUT)
+            })
+            .await
+            .expect("completion observer joins"),
+            "underlying worker job {request_count} completes"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn canonical_fixture_drives_hypothesis_completion_and_clear() {
     let fixtures = canonical_sequences();
     let interim = ScriptedDecoder::new();
@@ -282,25 +492,27 @@ async fn canonical_fixture_drives_hypothesis_completion_and_clear() {
     .await;
     expect_type(&mut socket, "session.updated").await;
 
+    let mut hypotheses = Vec::new();
     for _ in 0..2 {
-        let mut append = canonical_client(
-            &fixtures,
-            "hypothesis_negotiation",
-            "input_audio_buffer.append",
+        for _ in 0..5 {
+            let mut append = canonical_client(
+                &fixtures,
+                "hypothesis_negotiation",
+                "input_audio_buffer.append",
+            );
+            append["audio"] = serde_json::json!(audio());
+            send(&mut socket, append).await;
+        }
+        hypotheses.push(
+            expect_type(
+                &mut socket,
+                "conversation.item.input_audio_transcription.hypothesis",
+            )
+            .await,
         );
-        append["audio"] = serde_json::json!(audio());
-        send(&mut socket, append).await;
     }
-    let first = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    let second = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
+    let first = &hypotheses[0];
+    let second = &hypotheses[1];
     assert_eq!(first["revision"], 1);
     assert_eq!(first["transcript"], "Hello");
     assert_eq!(second["revision"], 2);
@@ -361,105 +573,262 @@ async fn canonical_fixture_drives_hypothesis_completion_and_clear() {
 
 #[tokio::test]
 async fn producer_snapshots_partition_finalized_agreed_and_tentative_text() {
-    let fixtures = canonical_sequences();
     let interim = ScriptedDecoder::new();
     for transcript in [
-        "ask not your country",
-        "ask not your country",
-        "new tail first",
-        "new tail second",
+        "Why is it",
+        "Why is it",
+        "Why is this",
+        "is this working now",
     ] {
         interim.push_text(transcript);
     }
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_next();
-    final_decoder.push_text("ask not your kingdom");
-    final_decoder.push_text("second final");
-    let service = speech(&interim, Some(&final_decoder));
+    let service = speech_with_policy(&interim, Some(&final_decoder), 1, 500);
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
 
     expect_type(&mut socket, "session.created").await;
     send(
         &mut socket,
-        canonical_client(&fixtures, "producer_hypothesis_ownership", "session.update"),
+        serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "include": ["item.input_audio_transcription.hypothesis"]
+            }
+        }),
     )
     .await;
     expect_type(&mut socket, "session.updated").await;
 
-    append_audio(&mut socket, closed_segment()).await;
-    expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    append_audio(&mut socket, audio()).await;
-    expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-
-    assert!(final_decoder.wait_until_parked(PHASE_TIMEOUT));
-    interim.park_next();
-    final_decoder.release();
-    let completed_final = final_decoder.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || completed_final.wait_for_completed(1, PHASE_TIMEOUT))
-            .await
-            .expect("final completion observer joins")
-    );
-    final_decoder.park_next();
-    append_audio(&mut socket, closed_segment()).await;
-    let parked_interim = interim.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked_interim.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("interim park observer joins")
-    );
-    assert!(
-        final_decoder.wait_for_requests(2, PHASE_TIMEOUT),
-        "the first closed segment is finalized before snapshot assembly"
-    );
-    interim.release();
-
-    let third = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    append_audio(&mut socket, audio()).await;
-    let fourth = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-
-    for (actual, occurrence) in [(third, 0), (fourth, 1)] {
-        let expected = canonical_message(
-            &fixtures,
-            "producer_hypothesis_ownership",
-            "server",
-            "conversation.item.input_audio_transcription.hypothesis",
-            occurrence,
-        );
-        for field in [
-            "revision",
-            "transcript",
-            "finalized",
-            "agreed",
-            "tentative",
-            "audio_start_ms",
-            "audio_end_ms",
-        ] {
-            assert_eq!(actual[field], expected[field], "{field}: {actual}");
+    let mut hypotheses = Vec::new();
+    for _ in 0..4 {
+        for _ in 0..5 {
+            append_audio(&mut socket, audio()).await;
         }
+        hypotheses.push(
+            expect_type(
+                &mut socket,
+                "conversation.item.input_audio_transcription.hypothesis",
+            )
+            .await,
+        );
     }
 
-    final_decoder.release();
+    assert_eq!(hypotheses[0]["transcript"], "Why is it");
+    assert_eq!(hypotheses[1]["agreed"], "Why is it");
+    assert_eq!(
+        hypotheses[2]["transcript"], "Why is this",
+        "a whole-window revision retracts its former promoted suffix"
+    );
+    assert_eq!(hypotheses[2]["audio_start_ms"], 500);
+    assert_eq!(hypotheses[2]["audio_end_ms"], 1_500);
+    assert_eq!(
+        hypotheses[3]["transcript"], "Why is this working now",
+        "the sliding window retains only the prefix before explicit overlap"
+    );
+    assert_eq!(hypotheses[3]["audio_start_ms"], 1_000);
+    assert_eq!(hypotheses[3]["audio_end_ms"], 2_000);
+
     socket.close(None).await.expect("socket closes");
     drop(socket);
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn consumed_boundary_rebases_before_delayed_finalization_completes() {
+    let interim = ScriptedDecoder::new();
+    for transcript in ["first phrase", "second phrase", "second phrase now"] {
+        interim.push_text(transcript);
+    }
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text("revised first");
+    let service = speech_with_policy(&interim, Some(&final_decoder), 8, 500);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+    send(
+        &mut socket,
+        serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "include": ["item.input_audio_transcription.hypothesis"]
+            }
+        }),
+    )
+    .await;
+    expect_type(&mut socket, "session.updated").await;
+
+    for _ in 0..10 {
+        append_audio(&mut socket, audio()).await;
+    }
+    let first = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    assert_eq!(first["transcript"], "first phrase");
+
+    final_decoder.park_next();
+    append_audio(
+        &mut socket,
+        audio_samples(&[vec![0; 72_000], vec![8_192; 12_000]].concat()),
+    )
+    .await;
+    let parked = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("finalization park observer joins")
+    );
+    let pending = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    assert_eq!(pending["transcript"], "first phrase second phrase");
+    assert_eq!(pending["finalized"], "");
+
+    final_decoder.release();
+    let finalized = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || finalized.wait_for_completed(1, PHASE_TIMEOUT))
+            .await
+            .expect("finalization completion observer joins")
+    );
+    append_audio(&mut socket, audio()).await;
+    let revised = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    assert_eq!(revised["finalized"], "revised first");
+    assert_eq!(revised["transcript"], "revised first second phrase now");
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "requires packaged whisper.dll, ggml-tiny.en.bin, and jfk.wav fixtures"]
+async fn realtime_stt_native_incremental() {
+    for (variable, name) in [
+        ("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll"),
+        ("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin"),
+        ("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav"),
+    ] {
+        let path = native_fixture(variable, name);
+        assert!(
+            path.is_file(),
+            "native test fixture is missing: {}",
+            path.display()
+        );
+    }
+    let service = native_speech_service();
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+    send(
+        &mut socket,
+        serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "include": ["item.input_audio_transcription.hypothesis"]
+            }
+        }),
+    )
+    .await;
+    expect_type(&mut socket, "session.updated").await;
+
+    let samples = native_jfk_24khz();
+    let mut cursor = 0;
+    let mut spans = Vec::new();
+    for chunk_samples in [48_000, 24_000, 24_000, 24_000] {
+        let end = (cursor + chunk_samples).min(samples.len());
+        append_audio(&mut socket, audio_samples(&samples[cursor..end])).await;
+        cursor = end;
+        let event = tokio::time::timeout(Duration::from_secs(90), async {
+            loop {
+                let event = receive_within(&mut socket, Duration::from_secs(90)).await;
+                if event["type"] == "conversation.item.input_audio_transcription.hypothesis" {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("native hypothesis arrives before its decode deadline");
+        spans.push((
+            event["audio_start_ms"]
+                .as_u64()
+                .expect("native start offset is unsigned"),
+            event["audio_end_ms"]
+                .as_u64()
+                .expect("native end offset is unsigned"),
+            event["transcript"]
+                .as_str()
+                .expect("native transcript is text")
+                .to_owned(),
+        ));
+    }
+    assert_native_incremental_spans(&spans);
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+    tokio::task::spawn_blocking(move || service.shutdown())
+        .await
+        .expect("native shutdown thread joins");
+}
+
+fn assert_native_incremental_spans(spans: &[(u64, u64, String)]) {
+    assert!(
+        spans.windows(2).all(|pair| pair[0].1 < pair[1].1),
+        "incremental snapshots advance their accepted audio end"
+    );
+    assert_eq!(spans[0].0, 0);
+    let normalized = spans
+        .iter()
+        .map(|(_, _, transcript)| normalized_words(transcript))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        spans.iter().map(|span| span.0).collect::<Vec<_>>(),
+        [0, 0, 0, 1_000],
+        "three growing windows precede the first one-second slide"
+    );
+    assert!(
+        normalized[1].len() < normalized[2].len() && normalized[2].starts_with(&normalized[1]),
+        "the fixed-origin JFK hypothesis grows before sliding: {normalized:?}"
+    );
+    assert!(
+        spans.iter().skip(1).any(|(start, _, _)| *start > 0),
+        "the packaged native route eventually slides its window origin"
+    );
+    assert!(
+        normalized[3].starts_with(&normalized[2]),
+        "sliding snapshots retain prior speech exactly once: {normalized:?}"
+    );
+    assert_eq!(
+        normalized.last().expect("a final native snapshot exists"),
+        &["and", "so", "my", "fellow", "americans", "ask", "not"],
+        "the known JFK overlap is rebased without duplication"
+    );
+    assert!(
+        spans
+            .iter()
+            .all(|(_, _, transcript)| !transcript.is_empty()),
+        "every emitted native hypothesis carries replacement text"
+    );
+}
+
+fn normalized_words(transcript: &str) -> Vec<String> {
+    transcript
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 #[tokio::test]
@@ -618,24 +987,19 @@ async fn mounted_route_drives_scripted_wire_ownership_errors_and_privacy() {
         "errors never echo buffered audio"
     );
 
-    send(
-        &mut socket,
-        serde_json::json!({
-            "type": "input_audio_buffer.append",
-            "event_id": "append-one",
-            "audio": audio()
-        }),
-    )
-    .await;
-    send(
-        &mut socket,
-        serde_json::json!({
-            "type": "input_audio_buffer.append",
-            "event_id": "append-two",
-            "audio": audio()
-        }),
-    )
-    .await;
+    for pass in 1..=2 {
+        for _ in 0..5 {
+            append_audio(&mut socket, audio()).await;
+        }
+        let completed = interim.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || {
+                completed.wait_for_completed(pass, PHASE_TIMEOUT)
+            })
+            .await
+            .expect("interim completion observer joins")
+        );
+    }
     send(
         &mut socket,
         serde_json::json!({
@@ -857,24 +1221,18 @@ async fn mounted_session_errors_keep_canonical_codes_parameters_and_correlation(
     )
     .await;
 
-    send(
-        &mut socket,
-        serde_json::json!({
-            "type": "input_audio_buffer.append",
-            "event_id": "inference",
-            "audio": audio()
-        }),
-    )
-    .await;
-    expect_error(
-        &mut socket,
-        "server_error",
-        "internal_error",
-        "Transcription failed",
-        serde_json::Value::Null,
-        "inference",
-    )
-    .await;
+    for _ in 0..5 {
+        append_audio(&mut socket, audio()).await;
+    }
+    let inference = expect_type(&mut socket, "error").await;
+    assert_eq!(inference["error"]["type"], "server_error");
+    assert_eq!(inference["error"]["code"], "internal_error");
+    assert_eq!(inference["error"]["message"], "Transcription failed");
+    assert!(inference["error"]["param"].is_null());
+    assert!(
+        inference["error"]["event_id"].is_null(),
+        "scheduled inference failure is not attributed to one append"
+    );
 
     send(
         &mut socket,
@@ -927,15 +1285,18 @@ async fn standard_interims_emit_only_appendable_agreed_deltas() {
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
     expect_type(&mut socket, "session.created").await;
 
-    for _ in 0..3 {
-        send(
-            &mut socket,
-            serde_json::json!({
-                "type": "input_audio_buffer.append",
-                "audio": audio()
-            }),
-        )
-        .await;
+    for pass in 1..=3 {
+        for _ in 0..5 {
+            append_audio(&mut socket, audio()).await;
+        }
+        let completed = interim.clone();
+        assert!(
+            tokio::task::spawn_blocking(move || {
+                completed.wait_for_completed(pass, PHASE_TIMEOUT)
+            })
+            .await
+            .expect("interim completion observer joins")
+        );
     }
     send(
         &mut socket,

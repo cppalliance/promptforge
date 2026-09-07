@@ -26,6 +26,7 @@ impl Session {
             task.abort();
             self.canceled_tasks.push(task);
         }
+        self.last_interim_window = None;
         let Some(input) = self.input.take() else {
             return Err(SessionError::NoInput);
         };

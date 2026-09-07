@@ -1,9 +1,8 @@
-use std::time::Duration;
-
-use gateway_stt_engine::{DecodeMode, DecodeRequest};
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
 
 use super::{Session, SessionError};
 use crate::realtime::result_mailbox::{ItemResult, SESSION_RESULT_CAPACITY};
+use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::ServerEvent;
 
 impl Session {
@@ -34,36 +33,95 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) async fn decode_interim(&mut self) -> Result<Option<ServerEvent>, SessionError> {
-        let input = self.input.as_ref().ok_or(SessionError::NoInput)?;
-        let include_hypothesis = input.snapshot().include_hypothesis();
+    pub(crate) fn schedule_interim(&mut self) -> Result<(), SessionError> {
+        if self.interim_task.is_some() {
+            return Ok(());
+        }
+        let Some(input) = self.input.as_ref() else {
+            return Ok(());
+        };
         let engine = self
             .engine
             .as_ref()
             .ok_or(SessionError::GenerationUnavailable)?;
-        let transcript = engine
-            .decode(DecodeRequest::new(
-                DecodeMode::Interim,
-                input.take().uncommitted_snapshot(engine.window_samples()),
-                input.take().guidance().to_vec(),
-                input.take().finalized(),
-            ))
-            .await
-            .map_err(|_| SessionError::Inference)?;
+        let window = input.take().interim_window(engine.window_samples());
+        if window.samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES
+            || EnginePolicy::is_silence(&window.samples)
+        {
+            return Ok(());
+        }
+        let origin = (window.segment_start, window.start, window.end);
+        if self.last_interim_window == Some(origin) {
+            return Ok(());
+        }
+        let engine = engine.clone();
+        let item_id = input.item_id().to_owned();
+        let guidance = input.take().guidance().to_vec();
+        let finalized = input.take().finalized();
+        let epoch = self.begin_interim()?;
+        self.last_interim_window = Some(origin);
+        self.interim_task = Some(tokio::spawn(async move {
+            let transcript = engine
+                .decode(DecodeRequest::new(
+                    DecodeMode::Interim,
+                    window.samples,
+                    guidance,
+                    finalized,
+                ))
+                .await
+                .map_err(|error| error.to_string());
+            InterimTaskOutput::Decode {
+                epoch,
+                item_id,
+                segment_start: window.segment_start,
+                audio_start: window.start,
+                audio_end: window.end,
+                transcript,
+            }
+        }));
+        Ok(())
+    }
+
+    pub(super) fn accept_scheduled_interim(
+        &mut self,
+        output: InterimTaskOutput,
+    ) -> Result<Option<ServerEvent>, SessionError> {
+        let InterimTaskOutput::Decode {
+            epoch,
+            item_id,
+            segment_start,
+            audio_start,
+            audio_end,
+            transcript,
+        } = output
+        else {
+            unreachable!("fixture interims are accepted by the fixture path");
+        };
+        if self.current_epoch != Some(epoch) {
+            return Ok(None);
+        }
+        let input = self.input.as_ref().ok_or(SessionError::NoInput)?;
+        if input.item_id() != item_id {
+            return Ok(None);
+        }
+        let transcript = transcript.map_err(|_| SessionError::Inference)?;
         if transcript.is_empty() {
             return Ok(None);
         }
-        let update = input.take().next_interim_snapshot(&transcript);
+        let include_hypothesis = input.snapshot().include_hypothesis();
+        let update =
+            input
+                .take()
+                .next_window_snapshot(&transcript, segment_start, audio_start, audio_end);
         if !include_hypothesis {
             if let Some(snapshot) = update {
                 let committed = snapshot.committed();
-                let delta = committed
-                    .strip_prefix(&self.standard_interim_committed)
-                    .ok_or(SessionError::Inference)?;
-                if !delta.is_empty() {
-                    self.pending_interim.push(delta.to_owned());
+                if let Some(delta) = committed.strip_prefix(&self.standard_interim_committed) {
+                    if !delta.is_empty() {
+                        self.pending_interim.push(delta.to_owned());
+                    }
+                    committed.clone_into(&mut self.standard_interim_committed);
                 }
-                committed.clone_into(&mut self.standard_interim_committed);
             }
             return Ok(None);
         }
@@ -79,8 +137,8 @@ impl Session {
             input.item_id().to_owned(),
             self.hypothesis_revision,
             snapshot,
-            u64::try_from(Duration::from_secs_f64(input.buffered_duration_seconds()).as_millis())
-                .unwrap_or(u64::MAX),
+            sample_millis(audio_start),
+            sample_millis(audio_end),
         )))
     }
 
@@ -139,4 +197,9 @@ impl Session {
         }
         events
     }
+}
+
+fn sample_millis(samples: usize) -> u64 {
+    let millis = samples.saturating_mul(1_000) / EnginePolicy::SAMPLE_RATE;
+    u64::try_from(millis).unwrap_or(u64::MAX)
 }

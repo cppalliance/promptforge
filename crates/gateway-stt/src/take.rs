@@ -1,6 +1,7 @@
 //! Per-take speech state and finalization ownership.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 
 #[cfg(test)]
 use gateway_stt_engine::TranscribeError;
@@ -12,6 +13,7 @@ mod finalization;
 mod interim;
 mod state;
 mod text;
+mod window;
 
 #[cfg(test)]
 use agreement::LocalAgreement;
@@ -21,9 +23,18 @@ use finalization::{FinalPipeline, spawn_final_pipeline};
 pub(crate) use interim::InterimSnapshot;
 use state::TakeState;
 use text::append_transcript;
+use window::WholeWindowState;
 
 fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
+}
+
+#[derive(Debug)]
+pub(crate) struct InterimAudioWindow {
+    pub(crate) samples: Vec<f32>,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) segment_start: usize,
 }
 
 /// All mutable and immutable state belonging to one speech take.
@@ -31,6 +42,7 @@ fn tail(buffer: &[f32], window: usize) -> &[f32] {
 pub(crate) struct Take {
     guidance: Arc<[String]>,
     state: Arc<TakeState>,
+    whole_window: Mutex<WholeWindowState>,
     final_pipeline: Option<FinalPipeline>,
 }
 
@@ -44,6 +56,7 @@ impl Take {
         Self {
             guidance,
             state,
+            whole_window: Mutex::new(WholeWindowState::default()),
             final_pipeline,
         }
     }
@@ -78,6 +91,19 @@ impl Take {
         tail(uncommitted, window_samples).to_vec()
     }
 
+    pub(crate) fn interim_window(&self, window_samples: usize) -> InterimAudioWindow {
+        let segment_start = self.consumed();
+        let buffer = TakeState::lock(&self.state.buffer);
+        let end = buffer.len();
+        let start = segment_start.max(end.saturating_sub(window_samples));
+        InterimAudioWindow {
+            samples: buffer[start.min(end)..].to_vec(),
+            start,
+            end,
+            segment_start,
+        }
+    }
+
     pub(crate) fn fallback_snapshot(&self, window_samples: usize) -> Vec<f32> {
         let finalized = self.state.finalized_samples();
         let buffer = TakeState::lock(&self.state.buffer);
@@ -94,6 +120,33 @@ impl Take {
 
     pub(crate) fn finalized(&self) -> String {
         self.state.finalized()
+    }
+
+    pub(crate) fn next_interim(&self, hypothesis: &str) -> Option<(String, String)> {
+        self.next_interim_snapshot(hypothesis)
+            .map(InterimSnapshot::into_legacy_parts)
+    }
+
+    pub(crate) fn next_interim_snapshot(&self, hypothesis: &str) -> Option<InterimSnapshot> {
+        TakeState::lock(&self.state.interim).next(&self.finalized(), hypothesis)
+    }
+
+    pub(crate) fn next_window_snapshot(
+        &self,
+        hypothesis: &str,
+        segment_start: usize,
+        window_start: usize,
+        window_end: usize,
+    ) -> Option<InterimSnapshot> {
+        let (finalized, finalized_samples) = self.state.finalized_snapshot();
+        TakeState::lock(&self.whole_window).next(
+            &finalized,
+            finalized_samples,
+            segment_start,
+            window_start,
+            window_end,
+            hypothesis,
+        )
     }
 
     pub(crate) fn fallback_transcript(&self, tail: &str) -> String {

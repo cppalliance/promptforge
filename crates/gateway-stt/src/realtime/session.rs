@@ -10,6 +10,7 @@ mod items;
 mod route;
 mod state;
 
+use state::InterimTaskOutput;
 #[cfg(test)]
 use state::MAX_COMMITTED_ITEMS_PER_SESSION;
 use state::SESSION_CANCEL_JOIN_CAPACITY;
@@ -66,6 +67,7 @@ impl Session {
             self.canceled_tasks.push(task);
         }
         self.input = None;
+        self.last_interim_window = None;
         self.pending_interim.clear();
         self.standard_interim_committed.clear();
         self.hypothesis_revision = 0;
@@ -98,7 +100,9 @@ impl Session {
             self.canceled_tasks.push(previous);
         }
         let epoch = self.begin_interim()?;
-        self.interim_task = Some(tokio::spawn(async move { (epoch, task.await) }));
+        self.interim_task = Some(tokio::spawn(async move {
+            InterimTaskOutput::Fixture(epoch, task.await)
+        }));
         Ok(epoch)
     }
 
@@ -124,8 +128,18 @@ impl Session {
         };
         let result = task.await;
         self.interim_task = None;
-        let (epoch, transcript) = result.map_err(|_| SessionError::CanceledTaskFailed)?;
-        Ok(self.accept_interim(epoch, transcript))
+        match result.map_err(|_| SessionError::CanceledTaskFailed)? {
+            InterimTaskOutput::Fixture(epoch, transcript) => {
+                Ok(self.accept_interim(epoch, transcript))
+            }
+            output @ InterimTaskOutput::Decode { .. } => self.accept_scheduled_interim(output),
+        }
+    }
+
+    pub(crate) fn interim_finished(&self) -> bool {
+        self.interim_task
+            .as_ref()
+            .is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
     pub(crate) const fn canceled_join_count(&self) -> usize {
@@ -161,10 +175,37 @@ impl Session {
         while let Some(task) = self.canceled_tasks.first_mut() {
             let result = task.await;
             self.canceled_tasks.remove(0);
-            if result.is_err_and(|error| !error.is_cancelled()) {
-                self.canceled_task_failed = true;
-            }
+            self.record_canceled_result(result);
         }
+        self.take_canceled_failure()
+    }
+
+    pub(crate) async fn reap_canceled(&mut self) -> Result<(), SessionError> {
+        while self
+            .canceled_tasks
+            .first()
+            .is_some_and(tokio::task::JoinHandle::is_finished)
+        {
+            let Some(task) = self.canceled_tasks.first_mut() else {
+                break;
+            };
+            let result = task.await;
+            self.canceled_tasks.remove(0);
+            self.record_canceled_result(result);
+        }
+        self.take_canceled_failure()
+    }
+
+    fn record_canceled_result(
+        &mut self,
+        result: Result<InterimTaskOutput, tokio::task::JoinError>,
+    ) {
+        if result.is_err_and(|error| !error.is_cancelled()) {
+            self.canceled_task_failed = true;
+        }
+    }
+
+    fn take_canceled_failure(&mut self) -> Result<(), SessionError> {
         if self.canceled_task_failed {
             self.canceled_task_failed = false;
             Err(SessionError::CanceledTaskFailed)
