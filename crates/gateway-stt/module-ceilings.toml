@@ -3,6 +3,7 @@
 # the measured file size, so any size change updates this manifest explicitly.
 
 public_root_count = 6
+test_fixture_public_root_count = 7
 
 [modules]
 "artifacts.rs" = 346

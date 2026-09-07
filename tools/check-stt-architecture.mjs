@@ -14,6 +14,7 @@ const STT_CRATES = [
   "gateway-stt-backend-whisper",
   "gateway-whisper-ffi",
 ];
+const FIXTURE_STT_CRATES = new Set(["gateway-stt", "gateway-stt-engine"]);
 
 function fail(message) {
   throw new Error(message);
@@ -224,11 +225,54 @@ export function publicRootCount(source, crateName) {
   return Number(matches[0][1]);
 }
 
+export function testFixturePublicRootCount(source, crateName) {
+  const matches = [
+    ...source.matchAll(
+      /^\s*test_fixture_public_root_count\s*=\s*(\d+)\s*$/gm,
+    ),
+  ];
+  if (matches.length !== 1) {
+    fail(
+      `${crateName}/module-ceilings.toml must contain exactly one integer test_fixture_public_root_count`,
+    );
+  }
+  return Number(matches[0][1]);
+}
+
 export function requireExactPublicRootCount(crateName, actual, expected) {
   if (actual !== expected) {
     fail(
       `${crateName} exposes ${actual} effective root names, expected exactly ${expected}`,
     );
+  }
+}
+
+function canonicalPublicApi(output, crateName) {
+  const canonical = output.replaceAll("\r\n", "\n");
+  if (canonical.includes("\r") || !canonical.endsWith("\n")) {
+    fail(
+      `malformed cargo-public-api output for ${crateName}: expected LF-terminated lines`,
+    );
+  }
+  countEffectiveRootNames(canonical, crateName);
+  return canonical;
+}
+
+export function requireExactPublicApi(crateName, actual, expected) {
+  const actualCanonical = canonicalPublicApi(actual, crateName);
+  const expectedCanonical = canonicalPublicApi(expected, crateName);
+  if (actualCanonical !== expectedCanonical) {
+    fail(
+      `${crateName} feature-enabled public API differs from its exact snapshot`,
+    );
+  }
+}
+
+export function requireNoFixtureApi(crateName, output, expected) {
+  const canonical = canonicalPublicApi(output, crateName);
+  const expectedCanonical = canonicalPublicApi(expected, crateName);
+  if (canonical !== expectedCanonical) {
+    fail(`${crateName} default build exposes fixture API`);
   }
 }
 
@@ -282,9 +326,11 @@ export function runRustdocCargo(
 export function runPublicApi(
   root,
   crateName,
-  { spawn = spawnSync, env = process.env } = {},
+  { features = [], spawn = spawnSync, env = process.env } = {},
 ) {
   const manifestPath = join(root, "crates", crateName, "Cargo.toml");
+  const featureArgs =
+    features.length === 0 ? [] : ["--features", features.join(",")];
   return runRustdocCargo(
     root,
     [
@@ -293,6 +339,7 @@ export function runPublicApi(
       manifestPath,
       "--package",
       crateName,
+      ...featureArgs,
       "-sss",
       "--color",
       "never",
@@ -350,6 +397,50 @@ function main() {
     const expected = publicRootCount(readFileSync(ceilingPath, "utf8"), crateName);
     requireExactPublicRootCount(crateName, rootNames, expected);
     console.log(`${crateName}: acyclic, public roots ${rootNames}`);
+
+    if (FIXTURE_STT_CRATES.has(crateName)) {
+      const defaultSnapshotPath = join(
+        root,
+        "crates",
+        crateName,
+        "public-api-default.txt",
+      );
+      requireNoFixtureApi(
+        crateName.replaceAll("-", "_"),
+        publicApi,
+        readFileSync(defaultSnapshotPath, "utf8"),
+      );
+      const fixturePublicApi = runPublicApi(root, crateName, {
+        features: ["test-fixtures"],
+      });
+      const snapshotPath = join(
+        root,
+        "crates",
+        crateName,
+        "public-api-test-fixtures.txt",
+      );
+      requireExactPublicApi(
+        crateName.replaceAll("-", "_"),
+        fixturePublicApi,
+        readFileSync(snapshotPath, "utf8"),
+      );
+      const fixtureRootNames = countEffectiveRootNames(
+        fixturePublicApi,
+        crateName.replaceAll("-", "_"),
+      );
+      const expectedFixtureRoots = testFixturePublicRootCount(
+        readFileSync(ceilingPath, "utf8"),
+        crateName,
+      );
+      requireExactPublicRootCount(
+        `${crateName} test-fixtures`,
+        fixtureRootNames,
+        expectedFixtureRoots,
+      );
+      console.log(
+        `${crateName}: test-fixtures API exact, public roots ${fixtureRootNames}`,
+      );
+    }
   }
 }
 

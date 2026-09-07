@@ -20,6 +20,9 @@ const PUBLIC_ROOT_COUNTS: [(&str, usize); 4] = [
     ("gateway-whisper-ffi", 6),
 ];
 
+const TEST_FIXTURE_PUBLIC_ROOT_COUNTS: [(&str, usize); 2] =
+    [("gateway-stt", 7), ("gateway-stt-engine", 8)];
+
 const LEGACY_WORKSHOP_UI_SPEECH_SEAMS: [&str; 6] = [
     "setupLegacyStt",
     "sttCapability",
@@ -113,6 +116,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
 #[serde(deny_unknown_fields)]
 struct CeilingsFile {
     public_root_count: usize,
+    test_fixture_public_root_count: Option<usize>,
     modules: BTreeMap<String, usize>,
 }
 
@@ -487,6 +491,12 @@ fn expected_public_root_count(crate_name: &str) -> usize {
         .unwrap_or_else(|| panic!("public-root policy must cover {crate_name}"))
 }
 
+fn expected_test_fixture_public_root_count(crate_name: &str) -> Option<usize> {
+    TEST_FIXTURE_PUBLIC_ROOT_COUNTS
+        .iter()
+        .find_map(|(name, count)| (*name == crate_name).then_some(*count))
+}
+
 fn validate_module_ceiling(lines: usize, ceiling: usize) -> Result<(), String> {
     if lines != ceiling {
         return Err(format!(
@@ -510,6 +520,11 @@ fn final_module_ceilings_cover_every_source() {
             config.public_root_count,
             expected_public_root_count(crate_name),
             "{crate_name} public root count drifted from the exact final policy"
+        );
+        assert_eq!(
+            config.test_fixture_public_root_count,
+            expected_test_fixture_public_root_count(crate_name),
+            "{crate_name} test-fixtures public root count drifted from the exact final policy"
         );
         let measured = rust_sources(&src)
             .into_iter()

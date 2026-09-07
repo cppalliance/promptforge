@@ -7,8 +7,11 @@ import {
   countEffectiveRootNames,
   parseCargoModulesDot,
   publicRootCount,
+  requireExactPublicApi,
   requireCargoVersion,
   requireExactPublicRootCount,
+  requireNoFixtureApi,
+  testFixturePublicRootCount,
   requireToolVersion,
   runCargo,
   runPublicApi,
@@ -108,6 +111,114 @@ test("public root count is exact rather than a spare budget", () => {
   );
 });
 
+test("public API snapshots normalize CRLF and fail closed on drift", () => {
+  const snapshot = [
+    "pub mod demo",
+    "pub mod demo::test_fixtures",
+    "pub struct demo::test_fixtures::Fixture",
+    "",
+  ].join("\n");
+  assert.doesNotThrow(() => requireExactPublicApi("demo", snapshot, snapshot));
+  assert.doesNotThrow(() =>
+    requireExactPublicApi("demo", snapshot.replaceAll("\n", "\r\n"), snapshot),
+  );
+  assert.doesNotThrow(() =>
+    requireExactPublicApi("demo", snapshot, snapshot.replaceAll("\n", "\r\n")),
+  );
+  assert.throws(
+    () =>
+      requireExactPublicApi(
+        "demo",
+        snapshot.replace(
+          "\n",
+          "\npub fn demo::test_fixtures::added()\n",
+        ),
+        snapshot,
+      ),
+    /feature-enabled public API differs from its exact snapshot/,
+  );
+  assert.throws(
+    () =>
+      requireExactPublicApi(
+        "demo",
+        snapshot.replace(
+          "pub struct demo::test_fixtures::Fixture\n",
+          "",
+        ),
+        snapshot,
+      ),
+    /feature-enabled public API differs from its exact snapshot/,
+  );
+});
+
+test("public API snapshots reject empty and bare-CR tool output", () => {
+  const snapshot = "pub mod demo\npub struct demo::Public\n";
+  assert.throws(
+    () => requireExactPublicApi("demo", "", ""),
+    /malformed cargo-public-api output/,
+  );
+  assert.throws(
+    () => requireExactPublicApi("demo", snapshot, ""),
+    /malformed cargo-public-api output/,
+  );
+  assert.throws(
+    () =>
+      requireExactPublicApi(
+        "demo",
+        "pub mod demo\rpub struct demo::Public\r",
+        snapshot,
+      ),
+    /expected LF-terminated lines/,
+  );
+});
+
+test("default public API must match its exact non-fixture snapshot", () => {
+  const snapshot = [
+    "pub mod demo",
+    "pub struct demo::Public",
+    "impl demo::Public",
+    "",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    requireNoFixtureApi("demo", snapshot, snapshot),
+  );
+  assert.throws(
+    () =>
+      requireNoFixtureApi(
+        "demo",
+        snapshot.replace(
+          "impl demo::Public\n",
+          "impl demo::Public\npub fn demo::Public::block_realtime_send_after()\n",
+        ),
+        snapshot,
+      ),
+    /default build exposes fixture API/,
+  );
+  assert.throws(
+    () =>
+      requireNoFixtureApi(
+        "demo",
+        snapshot.replace("pub struct demo::Public\n", ""),
+        snapshot,
+      ),
+    /default build exposes fixture API/,
+  );
+});
+
+test("feature public root count is an exact module-ceiling record", () => {
+  assert.equal(
+    testFixturePublicRootCount(
+      "public_root_count = 6\ntest_fixture_public_root_count = 7\n",
+      "demo",
+    ),
+    7,
+  );
+  assert.throws(
+    () => testFixturePublicRootCount("public_root_count = 6\n", "demo"),
+    /exactly one integer test_fixture_public_root_count/,
+  );
+});
+
 test("tool version parser rejects an unpinned version", () => {
   assert.throws(
     () => requireToolVersion("cargo-modules", "cargo-modules 0.26.0\n", "0.25.0"),
@@ -183,6 +294,35 @@ test("public API command keeps exact package selection", () => {
     "never",
   ]);
   assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "nightly-2026-09-05");
+});
+
+test("feature public API command enables only test fixtures", () => {
+  let child;
+  runPublicApi("repo", "gateway-stt-engine", {
+    features: ["test-fixtures"],
+    spawn(command, args, options) {
+      child = { command, args, options };
+      return {
+        status: 0,
+        stdout: "pub mod gateway_stt_engine\n",
+        stderr: "",
+      };
+    },
+  });
+
+  assert.deepEqual(child.args, [
+    "+nightly-2026-09-05",
+    "public-api",
+    "--manifest-path",
+    join("repo", "crates", "gateway-stt-engine", "Cargo.toml"),
+    "--package",
+    "gateway-stt-engine",
+    "--features",
+    "test-fixtures",
+    "-sss",
+    "--color",
+    "never",
+  ]);
 });
 
 test("public API command fails closed when the pinned nightly is absent", () => {

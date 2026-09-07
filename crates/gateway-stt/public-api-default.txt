@@ -1,0 +1,63 @@
+pub mod gateway_stt
+#[non_exhaustive] pub enum gateway_stt::SpeechError
+#[non_exhaustive] pub gateway_stt::SpeechError::Artifact
+pub gateway_stt::SpeechError::Artifact::model: alloc::string::String
+pub gateway_stt::SpeechError::Artifact::source: gateway_local::error::LocalError
+#[non_exhaustive] pub gateway_stt::SpeechError::Engine(gateway_stt_engine::error::TranscribeError)
+pub gateway_stt::SpeechError::FileTooLarge
+pub gateway_stt::SpeechError::GenerationActive
+#[non_exhaustive] pub gateway_stt::SpeechError::Inference(gateway_stt_engine::error::TranscribeError)
+#[non_exhaustive] pub gateway_stt::SpeechError::InvalidAudio(hound::Error)
+#[non_exhaustive] pub gateway_stt::SpeechError::InvalidField
+pub gateway_stt::SpeechError::InvalidField::field: &'static str
+pub gateway_stt::SpeechError::InvalidField::value: alloc::string::String
+#[non_exhaustive] pub gateway_stt::SpeechError::MissingField(&'static str)
+pub gateway_stt::SpeechError::MissingInterim
+#[non_exhaustive] pub gateway_stt::SpeechError::ModelNotFound(alloc::string::String)
+#[non_exhaustive] pub gateway_stt::SpeechError::Multipart(axum::extract::multipart::MultipartError)
+pub gateway_stt::SpeechError::QuiescenceDeadline
+pub gateway_stt::SpeechError::ReplacementInvalidated
+pub gateway_stt::SpeechError::ReplacementOwner
+#[non_exhaustive] pub gateway_stt::SpeechError::ReservedModelName
+pub gateway_stt::SpeechError::ReservedModelName::model: alloc::string::String
+pub gateway_stt::SpeechError::Rollback
+pub gateway_stt::SpeechError::Rollback::failure: alloc::boxed::Box<gateway_stt::SpeechError>
+pub gateway_stt::SpeechError::Rollback::rollback: alloc::boxed::Box<gateway_stt::SpeechError>
+#[non_exhaustive] pub gateway_stt::SpeechError::Store(gateway_local::error::LocalError)
+#[non_exhaustive] pub gateway_stt::SpeechError::UnsupportedAudio
+pub gateway_stt::SpeechError::UnsupportedAudio::channels: u16
+pub gateway_stt::SpeechError::UnsupportedAudio::sample_rate: u32
+#[non_exhaustive] pub gateway_stt::SpeechError::UnsupportedResponseFormat(alloc::string::String)
+#[non_exhaustive] pub gateway_stt::SpeechError::UnsupportedRole
+pub gateway_stt::SpeechError::UnsupportedRole::model: alloc::string::String
+#[non_exhaustive] pub gateway_stt::SpeechError::WhisperLibrary(gateway_local::error::LocalError)
+impl gateway_stt::SpeechError
+pub fn gateway_stt::SpeechError::is_file_too_large(&self) -> bool
+pub fn gateway_stt::SpeechError::is_inference(&self) -> bool
+pub fn gateway_stt::SpeechError::is_non_preemptible_startup_timeout(&self) -> bool
+pub fn gateway_stt::SpeechError::model_not_found(&self) -> core::option::Option<&str>
+pub struct gateway_stt::PreparedSpeech
+pub struct gateway_stt::SpeechModelInfo
+impl gateway_stt::SpeechModelInfo
+pub fn gateway_stt::SpeechModelInfo::name(&self) -> &str
+pub struct gateway_stt::SpeechReplacement
+impl core::ops::drop::Drop for gateway_stt::SpeechReplacement
+pub fn gateway_stt::SpeechReplacement::drop(&mut self)
+pub struct gateway_stt::SpeechService
+impl gateway_stt::SpeechService
+pub fn gateway_stt::SpeechService::abort_replacement(&self, gateway_stt::SpeechReplacement) -> core::result::Result<(), gateway_stt::SpeechError>
+pub fn gateway_stt::SpeechService::begin_replacement(&self, gateway_stt::PreparedSpeech) -> core::result::Result<gateway_stt::SpeechReplacement, gateway_stt::SpeechError>
+pub fn gateway_stt::SpeechService::begin_replacement_before(&self, gateway_stt::PreparedSpeech, std::time::Instant) -> core::result::Result<gateway_stt::SpeechReplacement, gateway_stt::SpeechError>
+pub fn gateway_stt::SpeechService::commit_replacement(&self, gateway_stt::SpeechReplacement) -> core::result::Result<(), gateway_stt::SpeechError>
+pub fn gateway_stt::SpeechService::models(&self) -> alloc::vec::Vec<gateway_stt::SpeechModelInfo>
+pub fn gateway_stt::SpeechService::new() -> Self
+pub fn gateway_stt::SpeechService::prepare(&self, &gateway_config::config::Config, core::option::Option<&shared_progress::handle::ProgressHandle>) -> core::result::Result<gateway_stt::PreparedSpeech, gateway_stt::SpeechError>
+pub fn gateway_stt::SpeechService::routes(&self) -> axum::routing::Router
+pub fn gateway_stt::SpeechService::shutdown(&self)
+pub fn gateway_stt::SpeechService::status(&self) -> gateway_stt::SpeechStatus
+pub struct gateway_stt::SpeechStatus
+impl gateway_stt::SpeechStatus
+pub const fn gateway_stt::SpeechStatus::configured(self) -> bool
+pub const fn gateway_stt::SpeechStatus::generation(self) -> core::option::Option<u64>
+pub const fn gateway_stt::SpeechStatus::gpu(self) -> bool
+pub const fn gateway_stt::SpeechStatus::ready(self) -> bool

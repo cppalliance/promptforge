@@ -356,7 +356,7 @@ isProject: false
 - Exclusions: no fifth production STT crate, no installed speech behavior change, and no native fixture download redesign.
 - Focused verification: from the repository root run `cargo test -p gateway-stt -F test-fixtures`, `cargo test -p gateway-stt-backend-whisper -F test-fixtures`, and `cargo test -p gateway`.
 
-### Step 11: Ratchet feature-enabled fixture APIs
+### Step 11: Ratchet feature-enabled fixture APIs [completed]
 
 - Component and piece: Component 4 of 8, STT test infrastructure; measure and freeze the feature-enabled public surfaces before narrowing them.
 - Dependency: depends on Step 10 because snapshots must describe the centralized API, and it must precede Step 12 so narrowing has an explicit reviewed baseline.

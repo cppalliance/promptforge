@@ -1,0 +1,63 @@
+pub mod gateway_stt_engine
+pub enum gateway_stt_engine::DecodeMode
+pub gateway_stt_engine::DecodeMode::Final
+pub gateway_stt_engine::DecodeMode::Interim
+#[non_exhaustive] pub enum gateway_stt_engine::TranscribeError
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::FinalStartupTimedOut
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::Inference(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::InitializeBackend(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::InterimStartupTimedOut
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::InvalidConfig(alloc::string::String)
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::LoadModel
+pub gateway_stt_engine::TranscribeError::LoadModel::path: std::path::PathBuf
+pub gateway_stt_engine::TranscribeError::LoadModel::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::Overloaded
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::ShutdownFailures
+pub gateway_stt_engine::TranscribeError::ShutdownFailures::cleanup: alloc::vec::Vec<gateway_stt_engine::TranscribeError>
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::ShutdownPanicked
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::SpawnWorker(core::io::error::Error)
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::StartupCleanup
+pub gateway_stt_engine::TranscribeError::StartupCleanup::cleanup: alloc::vec::Vec<gateway_stt_engine::TranscribeError>
+pub gateway_stt_engine::TranscribeError::StartupCleanup::startup: alloc::boxed::Box<gateway_stt_engine::TranscribeError>
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::StartupFailures
+pub gateway_stt_engine::TranscribeError::StartupFailures::failures: alloc::vec::Vec<gateway_stt_engine::TranscribeError>
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::WorkerGone
+#[non_exhaustive] pub gateway_stt_engine::TranscribeError::WorkerPanicked
+impl gateway_stt_engine::TranscribeError
+pub fn gateway_stt_engine::TranscribeError::inference(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn gateway_stt_engine::TranscribeError::initialize_backend(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn gateway_stt_engine::TranscribeError::is_non_preemptible_startup_timeout(&self) -> bool
+pub fn gateway_stt_engine::TranscribeError::load_model(std::path::PathBuf, impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub struct gateway_stt_engine::DecodeRequest
+impl gateway_stt_engine::DecodeRequest
+pub fn gateway_stt_engine::DecodeRequest::finalized(&self) -> &str
+pub fn gateway_stt_engine::DecodeRequest::guidance(&self) -> &[alloc::string::String]
+pub fn gateway_stt_engine::DecodeRequest::mode(&self) -> gateway_stt_engine::DecodeMode
+pub fn gateway_stt_engine::DecodeRequest::new(gateway_stt_engine::DecodeMode, alloc::vec::Vec<f32>, alloc::vec::Vec<alloc::string::String>, alloc::string::String) -> Self
+pub fn gateway_stt_engine::DecodeRequest::samples(&self) -> &[f32]
+pub struct gateway_stt_engine::EnginePolicy
+impl gateway_stt_engine::EnginePolicy
+pub const gateway_stt_engine::EnginePolicy::MIN_WINDOW_SAMPLES: usize
+pub const gateway_stt_engine::EnginePolicy::SAMPLE_RATE: usize
+pub fn gateway_stt_engine::EnginePolicy::gpu_available(self) -> bool
+pub fn gateway_stt_engine::EnginePolicy::interval(self) -> core::time::Duration
+pub fn gateway_stt_engine::EnginePolicy::is_silence(&[f32]) -> bool
+pub fn gateway_stt_engine::EnginePolicy::new(u64, u64, bool) -> core::result::Result<Self, gateway_stt_engine::TranscribeError>
+pub fn gateway_stt_engine::EnginePolicy::startup_timeout(self) -> core::time::Duration
+pub fn gateway_stt_engine::EnginePolicy::window_samples(self) -> usize
+pub fn gateway_stt_engine::EnginePolicy::with_startup_timeout(self, core::time::Duration) -> Self
+pub struct gateway_stt_engine::SttEngine
+impl gateway_stt_engine::SttEngine
+pub async fn gateway_stt_engine::SttEngine::decode(&self, gateway_stt_engine::DecodeRequest) -> core::result::Result<alloc::string::String, gateway_stt_engine::TranscribeError>
+pub fn gateway_stt_engine::SttEngine::gpu_transcription_available(&self) -> bool
+pub fn gateway_stt_engine::SttEngine::has_final_pass(&self) -> bool
+pub fn gateway_stt_engine::SttEngine::interval(&self) -> core::time::Duration
+pub fn gateway_stt_engine::SttEngine::new(impl gateway_stt_engine::ModelFactory, gateway_stt_engine::EnginePolicy) -> core::result::Result<Self, gateway_stt_engine::TranscribeError>
+pub fn gateway_stt_engine::SttEngine::shutdown(&self) -> core::result::Result<(), gateway_stt_engine::TranscribeError>
+pub fn gateway_stt_engine::SttEngine::window_samples(&self) -> usize
+impl core::ops::drop::Drop for gateway_stt_engine::SttEngine
+pub fn gateway_stt_engine::SttEngine::drop(&mut self)
+pub trait gateway_stt_engine::Decoder
+pub fn gateway_stt_engine::Decoder::decode(&mut self, gateway_stt_engine::DecodeRequest) -> core::result::Result<alloc::string::String, gateway_stt_engine::TranscribeError>
+pub trait gateway_stt_engine::ModelFactory: core::fmt::Debug + core::marker::Send + core::marker::Sync + 'static
+pub fn gateway_stt_engine::ModelFactory::create(&self, gateway_stt_engine::DecodeMode) -> core::result::Result<core::option::Option<alloc::boxed::Box<dyn gateway_stt_engine::Decoder>>, gateway_stt_engine::TranscribeError>
