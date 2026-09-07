@@ -428,7 +428,7 @@ isProject: false
 - Focused verification: from the repository root run `cargo test -p gateway`, `cargo check -p gateway --no-default-features`, and `cargo clippy -p gateway --all-targets --all-features`.
 - Component boundary: ends Component 5; review cumulative Steps 15 through 17 against the Step 14 commit and update architecture records only for transaction facts now present.
 
-### Step 18: Decode Realtime events exhaustively
+### Step 18: Decode Realtime events exhaustively [completed]
 
 - Component and piece: Component 6 of 8, Workshop Realtime UI; introduce one pure exhaustive decoder used by production and canonical fixture mutation tests.
 - Dependency: depends on Step 2's stable Workshop integration boundaries and precedes reducer work because the reducer may accept only typed trusted events.

@@ -1,5 +1,6 @@
 import { Emitter, type Event as ServiceEvent } from "../base/event";
 import { Disposable } from "../base/lifecycle";
+import { decodeRealtimeEvent } from "./realtime-event-decoder";
 
 const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
 const RECONNECT_INITIAL_MS = 1000;
@@ -70,16 +71,6 @@ function socketUrl(): string {
   }
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   return `${scheme}://${location.host}/v1/realtime`;
-}
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function nonemptyString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function base64(buffer: ArrayBuffer): string {
@@ -237,114 +228,93 @@ export class RealtimeTranscriptionService extends Disposable {
       this.reportError("invalid_server_event", "session");
       return;
     }
-    const event = objectValue(parsed);
-    const type = nonemptyString(event?.type);
-    if (event === null || type === null) {
+    const event = decodeRealtimeEvent(parsed);
+    if (event === null) {
       this.reportError("invalid_server_event", "session");
       return;
     }
 
-    if (type === "session.created") {
-      this.send({
-        type: "session.update",
-        session: {
-          type: "transcription",
-          audio: {
-            input: {
-              format: { type: "audio/pcm", rate: 24_000 },
-              noise_reduction: null,
-              transcription: {
-                model: "realtime-transcribe",
-                prompt: this.options.prompt ?? "",
+    switch (event.type) {
+      case "session.created":
+        this.send({
+          type: "session.update",
+          session: {
+            type: "transcription",
+            audio: {
+              input: {
+                format: { type: "audio/pcm", rate: 24_000 },
+                noise_reduction: null,
+                transcription: {
+                  model: "realtime-transcribe",
+                  prompt: this.options.prompt ?? "",
+                },
+                turn_detection: null,
               },
-              turn_detection: null,
             },
+            include: [HYPOTHESIS_INCLUDE],
           },
-          include: [HYPOTHESIS_INCLUDE],
-        },
-        event_id: (this.options.eventId ?? defaultEventId)(),
-      });
-      return;
-    }
-    if (type === "session.updated") {
-      const session = objectValue(event.session);
-      const include = session?.include;
-      this.negotiatedHypotheses =
-        Array.isArray(include) &&
-        include.length === 1 &&
-        include[0] === HYPOTHESIS_INCLUDE;
-      this.reconnectDelayMs = RECONNECT_INITIAL_MS;
-      if (this.reconnectTimer !== null) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-      this.setState("ready");
-      return;
-    }
-    if (type === "input_audio_buffer.committed") {
-      const itemId = nonemptyString(event.item_id);
-      if (itemId !== null) {
-        this.committedEmitter.fire(itemId);
-      } else {
-        this.reportError("invalid_server_event", "session");
-      }
-      return;
-    }
-    if (type === "conversation.item.input_audio_transcription.hypothesis") {
-      const itemId = nonemptyString(event.item_id);
-      if (itemId !== null && typeof event.transcript === "string") {
-        this.snapshotEmitter.fire({ itemId, text: event.transcript });
-      } else {
-        this.reportError("invalid_server_event", "session");
-      }
-      return;
-    }
-    if (type === "conversation.item.input_audio_transcription.delta") {
-      if (this.negotiatedHypotheses) {
+          event_id: (this.options.eventId ?? defaultEventId)(),
+        });
+        return;
+      case "session.updated":
+        this.negotiatedHypotheses =
+          event.session.include.length === 1 &&
+          event.session.include[0] === HYPOTHESIS_INCLUDE;
+        this.reconnectDelayMs = RECONNECT_INITIAL_MS;
+        if (this.reconnectTimer !== null) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        this.setState("ready");
+        return;
+      case "input_audio_buffer.committed":
+        this.committedEmitter.fire(event.item_id);
+        return;
+      case "input_audio_buffer.cleared":
+      case "conversation.item.created":
+        return;
+      case "conversation.item.input_audio_transcription.hypothesis":
+        this.snapshotEmitter.fire({
+          itemId: event.item_id,
+          text: event.transcript,
+        });
+        return;
+      case "conversation.item.input_audio_transcription.delta": {
+        if (this.negotiatedHypotheses) {
+          return;
+        }
+        const text = (this.deltas.get(event.item_id) ?? "") + event.delta;
+        this.deltas.set(event.item_id, text);
+        this.snapshotEmitter.fire({ itemId: event.item_id, text });
         return;
       }
-      const itemId = nonemptyString(event.item_id);
-      if (itemId !== null && typeof event.delta === "string") {
-        const text = (this.deltas.get(itemId) ?? "") + event.delta;
-        this.deltas.set(itemId, text);
-        this.snapshotEmitter.fire({ itemId, text });
-      } else {
-        this.reportError("invalid_server_event", "session");
-      }
-      return;
-    }
-    if (type === "conversation.item.input_audio_transcription.completed") {
-      const itemId = nonemptyString(event.item_id);
-      if (itemId !== null && typeof event.transcript === "string") {
-        this.deltas.delete(itemId);
-        this.completedEmitter.fire({ itemId, transcript: event.transcript });
-      } else {
-        this.reportError("invalid_server_event", "session");
-      }
-      return;
-    }
-    if (type === "conversation.item.input_audio_transcription.failed") {
-      const itemId = nonemptyString(event.item_id);
-      const error = objectValue(event.error);
-      if (itemId !== null && error !== null) {
-        this.deltas.delete(itemId);
-        this.failedEmitter.fire({
-          itemId,
-          code: nonemptyString(error.code) ?? "transcription_failed",
+      case "conversation.item.input_audio_transcription.completed":
+        this.deltas.delete(event.item_id);
+        this.completedEmitter.fire({
+          itemId: event.item_id,
+          transcript: event.transcript,
         });
-      } else {
-        this.reportError("invalid_server_event", "session");
+        return;
+      case "conversation.item.input_audio_transcription.failed":
+        this.deltas.delete(event.item_id);
+        this.failedEmitter.fire({
+          itemId: event.item_id,
+          code: event.error.code,
+        });
+        return;
+      case "error": {
+        const eventId = event.error.event_id ?? null;
+        this.reportError(
+          event.error.code,
+          eventId === null ? "session" : "event",
+          eventId,
+        );
+        return;
       }
-      return;
-    }
-    if (type === "error") {
-      const error = objectValue(event.error);
-      const eventId = nonemptyString(error?.event_id);
-      this.reportError(
-        nonemptyString(error?.code) ?? "server_error",
-        eventId === null ? "session" : "event",
-        eventId,
-      );
+      default: {
+        const exhaustive: never = event;
+        return exhaustive;
+      }
     }
   }
 

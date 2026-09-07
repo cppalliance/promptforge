@@ -146,6 +146,187 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
+  const sockets = [];
+  const service = new RealtimeTranscriptionService({
+    eventId: () => "client_decoder_update",
+    socket: (url) => {
+      const socket = new ScriptedSocket(url);
+      sockets.push(socket);
+      return socket;
+    },
+  });
+  const committed = [];
+  const completions = [];
+  const errors = [];
+  service.onCommitted((value) => committed.push(value));
+  service.onCompleted((value) => completions.push(value));
+  service.onError((value) => errors.push(value));
+
+  sockets[0].open();
+  sockets[0].message(server.session_created);
+  sockets[0].message(server.session_updated);
+  sockets[0].message({
+    ...server.input_audio_buffer_committed,
+    unexpected: true,
+  });
+  sockets[0].message({
+    ...server.transcription_completed,
+    content_index: 1,
+  });
+  sockets[0].message({
+    event_id: "evt_future",
+    type: "response.created",
+  });
+
+  assert.deepEqual(committed, []);
+  assert.deepEqual(completions, []);
+  assert.deepEqual(
+    errors,
+    Array.from({ length: 3 }, () => ({
+      code: "invalid_server_event",
+      scope: "session",
+      eventId: null,
+      recoverable: true,
+    })),
+  );
+  service.dispose();
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sockets = [];
+    const service = new RealtimeTranscriptionService({
+      eventId: () => "client_fallback_update",
+      socket: (url) => {
+        const socket = new ScriptedSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const snapshots = [];
+    const completions = [];
+    const errors = [];
+    service.onSnapshot((value) => snapshots.push(value));
+    service.onCompleted((value) => completions.push(value));
+    service.onError((value) => errors.push(value));
+
+    const fallbackSessionUpdated = {
+      ...server.session_updated,
+      session: {
+        ...server.session_updated.session,
+        include: [],
+      },
+    };
+    sockets[0].open();
+    sockets[0].message(server.session_created);
+    sockets[0].message(fallbackSessionUpdated);
+    sockets[0].message({
+      ...server.transcription_delta,
+      event_id: "evt_stale_delta_1",
+      item_id: "item_shared",
+      delta: "stale",
+    });
+    sockets[0].message({
+      ...server.transcription_delta,
+      event_id: "evt_stale_delta_2",
+      item_id: "item_shared",
+      delta: " prefix",
+    });
+
+    sockets[0].close();
+    mock.timers.tick(1_000);
+    assert.equal(sockets.length, 2, "the fallback session reconnects deterministically");
+    sockets[1].open();
+    sockets[1].message(server.session_created);
+    sockets[1].message(fallbackSessionUpdated);
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_fresh_delta_1",
+      item_id: "item_shared",
+      delta: "fresh",
+    });
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_isolated_delta_1",
+      item_id: "item_isolated",
+      delta: "other",
+    });
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_fresh_delta_2",
+      item_id: "item_shared",
+      delta: " transcript",
+    });
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_isolated_delta_2",
+      item_id: "item_isolated",
+      delta: " item",
+    });
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_invalid_fallback_delta",
+      item_id: "item_invalid",
+      unexpected: true,
+    });
+    sockets[1].message({
+      ...server.transcription_completed,
+      event_id: "evt_fresh_completed",
+      item_id: "item_shared",
+      transcript: "fresh transcript",
+    });
+
+    sockets[1].message(server.session_updated);
+    sockets[1].message({
+      ...server.transcription_delta,
+      event_id: "evt_ignored_after_negotiation",
+      item_id: "item_isolated",
+      delta: " ignored",
+    });
+    sockets[1].message({
+      ...server.transcription_hypothesis,
+      event_id: "evt_later_hypothesis",
+      item_id: "item_isolated",
+      transcript: "hypothesis wins",
+      finalized: "",
+      agreed: "",
+      tentative: "hypothesis wins",
+    });
+    sockets[1].message({
+      ...server.transcription_completed,
+      event_id: "evt_isolated_completed",
+      item_id: "item_isolated",
+      transcript: "hypothesis wins",
+    });
+
+    assert.deepEqual(snapshots, [
+      { itemId: "item_shared", text: "stale" },
+      { itemId: "item_shared", text: "stale prefix" },
+      { itemId: "item_shared", text: "fresh" },
+      { itemId: "item_isolated", text: "other" },
+      { itemId: "item_shared", text: "fresh transcript" },
+      { itemId: "item_isolated", text: "other item" },
+      { itemId: "item_isolated", text: "hypothesis wins" },
+    ]);
+    assert.deepEqual(completions, [
+      { itemId: "item_shared", transcript: "fresh transcript" },
+      { itemId: "item_isolated", transcript: "hypothesis wins" },
+    ]);
+    assert.deepEqual(errors.at(-1), {
+      code: "invalid_server_event",
+      scope: "session",
+      eventId: null,
+      recoverable: true,
+    });
+
+    service.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   try {
     let attempts = 0;

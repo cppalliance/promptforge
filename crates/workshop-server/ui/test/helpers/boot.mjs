@@ -77,6 +77,20 @@ export async function bootWorkbench(name, run) {
   // `window.WebSocket`. Frames a test wants answered are pushed through
   // the socket's own onmessage by the ctx helpers below.
   const sockets = [];
+  const realtimeSession = (include, prompt = "") => ({
+    id: "boot_realtime",
+    object: "realtime.transcription_session",
+    type: "transcription",
+    audio: {
+      input: {
+        format: { type: "audio/pcm", rate: 24000 },
+        noise_reduction: null,
+        transcription: { model: "realtime-transcribe", prompt },
+        turn_detection: null,
+      },
+    },
+    include,
+  });
   class FakeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -95,13 +109,7 @@ export async function bootWorkbench(name, run) {
             data: JSON.stringify({
               type: "session.created",
               event_id: "boot_realtime_created",
-              session: {
-                id: "boot_realtime",
-                object: "realtime.transcription_session",
-                type: "transcription",
-                include: [],
-                audio: { input: {} },
-              },
+              session: realtimeSession([]),
             }),
           });
         }
@@ -121,13 +129,10 @@ export async function bootWorkbench(name, run) {
             data: JSON.stringify({
               type: "session.updated",
               event_id: "boot_realtime_updated",
-              session: {
-                id: "boot_realtime",
-                object: "realtime.transcription_session",
-                type: "transcription",
-                include: ["item.input_audio_transcription.hypothesis"],
-                audio: { input: {} },
-              },
+              session: realtimeSession(
+                ["item.input_audio_transcription.hypothesis"],
+                event.session.audio.input.transcription.prompt,
+              ),
             }),
           }),
         );

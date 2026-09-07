@@ -214,18 +214,18 @@ class FakeWebSocket {
       if (!this.itemId) {
         this.itemId = `item_${++nextItem}`;
       }
+      const finalized = frame.committed ?? "";
+      const tentative = `${finalized && frame.tentative && !/\s$/.test(finalized) ? " " : ""}${frame.tentative ?? ""}`;
       frame = {
         type: "conversation.item.input_audio_transcription.hypothesis",
         event_id: `hypothesis_${nextItem}`,
         item_id: this.itemId,
         content_index: 0,
         revision: 1,
-        transcript: [frame.committed, frame.tentative].filter(Boolean).join(
-          frame.committed && frame.tentative && !/\s$/.test(frame.committed) ? " " : "",
-        ),
-        finalized: frame.committed ?? "",
+        transcript: `${finalized}${tentative}`,
+        finalized,
         agreed: "",
-        tentative: frame.tentative ?? "",
+        tentative,
         audio_start_ms: 0,
         audio_end_ms: 100,
       };

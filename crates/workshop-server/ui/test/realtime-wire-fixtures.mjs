@@ -3,8 +3,21 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import * as esbuild from "esbuild";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
+const decoderBundle = await esbuild.build({
+  entryPoints: [path.join(testDir, "..", "src", "services", "realtime-event-decoder.ts")],
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  logLevel: "silent",
+});
+const { decodeRealtimeEvent } = await import(
+  `data:text/javascript;base64,${Buffer.from(decoderBundle.outputFiles[0].text).toString("base64")}`
+);
 const fixtureDir = path.join(
   testDir,
   "..",
@@ -123,6 +136,50 @@ function assertExactKeys(value, expected, context) {
 function assertNonemptyString(value, context) {
   assert.equal(typeof value, "string", `${context} is a string`);
   assert.notEqual(value.length, 0, `${context} is nonempty`);
+}
+
+function fieldPaths(value, prefix = []) {
+  if (typeof value !== "object" || value === null) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => fieldPaths(entry, [...prefix, index]));
+  }
+  return Object.entries(value).flatMap(([key, entry]) => [
+    [...prefix, key],
+    ...fieldPaths(entry, [...prefix, key]),
+  ]);
+}
+
+function objectPaths(value, prefix = []) {
+  if (typeof value !== "object" || value === null) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => objectPaths(entry, [...prefix, index]));
+  }
+  return [
+    prefix,
+    ...Object.entries(value).flatMap(([key, entry]) =>
+      objectPaths(entry, [...prefix, key]),
+    ),
+  ];
+}
+
+function parentAt(value, path) {
+  return path.slice(0, -1).reduce((parent, segment) => parent[segment], value);
+}
+
+function valueAt(value, path) {
+  return path.reduce((entry, segment) => entry[segment], value);
+}
+
+function pathName(path) {
+  return path.map(String).join(".");
+}
+
+function isOptionalErrorField(path) {
+  return (
+    path.length >= 2 &&
+    path.at(-2) === "error" &&
+    (path.at(-1) === "param" || path.at(-1) === "event_id")
+  );
 }
 
 function assertSession(session, context) {
@@ -337,6 +394,114 @@ test("canonical Realtime event fixtures match the Rust case list unchanged", asy
   assert.ok(hypothesis.audio_end_ms >= hypothesis.audio_start_ms);
 });
 
+test("the production decoder rejects every canonical field mutation", async () => {
+  const servers = await fixture("server-events.json");
+  for (const [name, event] of Object.entries(servers)) {
+    assert.deepEqual(decodeRealtimeEvent(event), event, `${name} decodes unchanged`);
+    for (const fieldPath of fieldPaths(event)) {
+      const mutated = structuredClone(event);
+      const original = valueAt(mutated, fieldPath);
+      parentAt(mutated, fieldPath)[fieldPath.at(-1)] =
+        typeof original === "number" ? Number.NaN : 7;
+      assert.equal(
+        decodeRealtimeEvent(mutated),
+        null,
+        `${name} rejects invalid ${pathName(fieldPath)}`,
+      );
+
+      if (!isOptionalErrorField(fieldPath)) {
+        const omitted = structuredClone(event);
+        delete parentAt(omitted, fieldPath)[fieldPath.at(-1)];
+        assert.equal(
+          decodeRealtimeEvent(omitted),
+          null,
+          `${name} rejects missing ${pathName(fieldPath)}`,
+        );
+      }
+    }
+    for (const objectPath of objectPaths(event)) {
+      const mutated = structuredClone(event);
+      valueAt(mutated, objectPath).unexpected = true;
+      assert.equal(
+        decodeRealtimeEvent(mutated),
+        null,
+        `${name} rejects unknown ${pathName(objectPath) || "event"} field`,
+      );
+    }
+  }
+
+  assert.equal(
+    decodeRealtimeEvent({ event_id: "evt_future", type: "response.created" }),
+    null,
+    "unsupported event types are rejected",
+  );
+
+  const semanticMutations = [
+    ["empty event ID", "session_created", ["event_id"], ""],
+    ["empty session ID", "session_created", ["session", "id"], ""],
+    ["unknown include", "session_updated", ["session", "include"], ["unsupported"]],
+    ["empty item ID", "input_audio_buffer_committed", ["item_id"], ""],
+    [
+      "empty nullable lineage ID",
+      "input_audio_buffer_committed",
+      ["previous_item_id"],
+      "",
+    ],
+    ["empty conversation item ID", "conversation_item_created", ["item", "id"], ""],
+    ["wrong content index", "transcription_completed", ["content_index"], 1],
+    ["negative revision", "transcription_hypothesis", ["revision"], -1],
+    ["fractional revision", "transcription_hypothesis", ["revision"], 1.5],
+    [
+      "unsafe revision",
+      "transcription_hypothesis",
+      ["revision"],
+      Number.MAX_SAFE_INTEGER + 1,
+    ],
+    [
+      "unequal transcript partition",
+      "transcription_hypothesis",
+      ["transcript"],
+      "different",
+    ],
+    [
+      "negative audio span",
+      "transcription_hypothesis",
+      ["audio_start_ms"],
+      -1,
+    ],
+    [
+      "reversed audio span",
+      "transcription_hypothesis",
+      ["audio_start_ms"],
+      1251,
+    ],
+    [
+      "negative completion usage",
+      "transcription_completed",
+      ["usage", "seconds"],
+      -0.01,
+    ],
+    [
+      "non-finite completion usage",
+      "transcription_completed",
+      ["usage", "seconds"],
+      Number.POSITIVE_INFINITY,
+    ],
+    [
+      "empty error correlation ID",
+      "error_correlated",
+      ["error", "event_id"],
+      "",
+    ],
+    ["empty nullable error param", "error_correlated", ["error", "param"], ""],
+  ];
+  for (const [context, caseName, fieldPath, replacement] of semanticMutations) {
+    const mutated = structuredClone(servers[caseName]);
+    parentAt(mutated, fieldPath)[fieldPath.at(-1)] = replacement;
+    assert.equal(decodeRealtimeEvent(mutated), null, `${context} is rejected`);
+  }
+});
+
 test("canonical Realtime sequences cover every frozen contract path", async () => {
   const valid = await fixture("valid-sequences.json");
   assert.deepEqual(sortedKeys(valid), validSequenceCases);
@@ -353,6 +518,11 @@ test("canonical Realtime sequences cover every frozen contract path", async () =
       }
       if (entry.direction === "server") {
         assertServerEventFields(entry.message, `${name} server event`);
+        assert.deepEqual(
+          decodeRealtimeEvent(entry.message),
+          entry.message,
+          `${name} server event decodes`,
+        );
       }
     }
     assertValidCommitAudio(name, sequence.events);
