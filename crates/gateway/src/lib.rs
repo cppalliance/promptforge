@@ -471,6 +471,7 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
         .route("/v1/embeddings", post(embeddings))
         .route("/v1/rerank", post(rerank))
         .route("/v1/audio/speech", post(audio_speech))
+        .route("/v1/audio/voices", get(audio_voices))
         .route("/v1/models", get(list_models))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
@@ -1059,6 +1060,38 @@ fn speech_mime(format: SpeechResponseFormat) -> HeaderValue {
         SpeechResponseFormat::Wav => "audio/wav",
         SpeechResponseFormat::Pcm => "audio/pcm",
     })
+}
+
+/// Bearer-authed union of the active profile's speech voices for host
+/// bind: every `kind = "speech"` model's configured `voices`, deduplicated
+/// and sorted, as id-first `{"id", "name"}` entries under
+/// `{"voices": [...]}`.
+///
+/// OpenAI has no voice-list route; the OpenAI-compatible ecosystem
+/// (Kokoro-FastAPI, vLLM-Omni, Fish Audio) converged on this one, and
+/// clients such as Open WebUI read the `id` key, so the entry shape is a
+/// compatibility surface pinned by the integration suite. `name` mirrors
+/// `id`: the catalog configures voices as bare strings with no separate
+/// display name.
+async fn audio_voices(
+    State(state): State<AppState>,
+    caller: Caller,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &caller).await?;
+    let _publication = state.switch.lock().await;
+    let live = state.live.read().await;
+    let voices = live
+        .routing
+        .models()
+        .iter()
+        .filter(|model| model.kind == ModelKind::Speech)
+        .flat_map(|model| model.capabilities.voices().iter())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|voice| serde_json::json!({ "id": voice, "name": voice }))
+        .collect::<Vec<_>>();
+    drop(live);
+    Ok(Json(serde_json::json!({ "voices": voices })))
 }
 
 /// Bearer-authed catalog of configured models for host bind.

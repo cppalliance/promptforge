@@ -195,4 +195,4 @@ N66 | observation | shared-parameter-cluster @ crates/gateway-logging/src/queue.
 N67 | observation | flag-parameter @ crates/gateway-logging/src/queue.rs::LogQueue::complete_batch: uses had_summary to select summary completion accounting | Bound logging stalls and shutdown
 N68 | observation | Violates A2 @ crates/gateway-logging/src/worker.rs: credential ownership in gateway logging is not determinable from diff | Rotate logs within fixed byte budgets
 N69 | observation | Violates A2 @ crates/gateway-local: not determinable from diff | Make launch_options fallible and refuse unknown kinds
-N70 | observation | surface-growth @ crates/gateway/src/error.rs::GatewayError::InvalidVoice: speech-only 400 variant carrying the requested voice and valid-voice list, added beyond the two named speech variants | Add POST /v1/audio/speech byte-passthrough route
+N70 | observation | surface-growth @ crates/gateway/src/error.rs::GatewayError::InvalidVoice: speech-only 400 variant carrying the requested voice and valid-voice list, added beyond the two named speech variants | Add POST /v1/audio/speech byte-passthrough route; Add GET /v1/audio/voices union route

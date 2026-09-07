@@ -821,6 +821,179 @@ async fn models_catalog_shows_the_speech_kind_and_voices() {
     gateway.shutdown().await;
 }
 
+/// Start a gateway whose catalog is the given `[[model]]` TOML fragments,
+/// all resolving to one fake backend. The voices route never calls an
+/// upstream; the backend exists only to satisfy config validation.
+async fn catalog_gateway(backend: SocketAddr, models: &str) -> TestServer {
+    let toml = format!(
+        r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+trust_loopback = false
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+{models}
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    TestServer::start(gateway).await
+}
+
+/// `GET /v1/audio/voices` with the test bearer, returning the raw body.
+async fn voices_body(gateway: &TestServer) -> (u16, String) {
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/audio/voices", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    let status = response.status().as_u16();
+    let body = bytes_within(response).await;
+    (
+        status,
+        String::from_utf8(body).expect("the voices body is UTF-8"),
+    )
+}
+
+/// `GET /v1/audio/voices` answers the union of the speech models' catalog
+/// voices as id-first `{"id", "name"}` entries under `{"voices": [...]}`.
+/// OpenAI has no voice-list route, but the OpenAI-compatible ecosystem
+/// converged on this shape and clients read the `id` key, so the entry
+/// shape is a compatibility surface pinned here on the raw body.
+#[tokio::test]
+async fn voices_route_returns_the_id_first_union_shape() {
+    let (backend, _recorder) = recording_speech_backend(Some("audio/mpeg")).await;
+    let gateway = catalog_gateway(
+        backend,
+        r#"
+[[model]]
+name = "tts-model"
+kind = "speech"
+description = "a speech model"
+context = 8192
+upstream = "backend-tts"
+endpoints = ["fake"]
+voices = ["alloy"]
+"#,
+    )
+    .await;
+
+    let (status, body) = voices_body(&gateway).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"voices":[{"id":"alloy","name":"alloy"}]}"#);
+    gateway.shutdown().await;
+}
+
+/// The union is deduplicated and sorted across every speech model in the
+/// active profile.
+#[tokio::test]
+async fn voices_route_deduplicates_and_sorts_across_speech_models() {
+    let (backend, _recorder) = recording_speech_backend(Some("audio/mpeg")).await;
+    let gateway = catalog_gateway(
+        backend,
+        r#"
+[[model]]
+name = "tts-one"
+kind = "speech"
+description = "a speech model"
+context = 8192
+upstream = "backend-tts"
+endpoints = ["fake"]
+voices = ["nova", "alloy"]
+
+[[model]]
+name = "tts-two"
+kind = "speech"
+description = "another speech model"
+context = 8192
+upstream = "backend-tts"
+endpoints = ["fake"]
+voices = ["shimmer", "nova"]
+"#,
+    )
+    .await;
+
+    let (status, body) = voices_body(&gateway).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        body,
+        r#"{"voices":[{"id":"alloy","name":"alloy"},{"id":"nova","name":"nova"},{"id":"shimmer","name":"shimmer"}]}"#
+    );
+    gateway.shutdown().await;
+}
+
+/// With no speech model in the active profile the union is empty.
+#[tokio::test]
+async fn voices_route_is_empty_without_speech_models() {
+    let (backend, _recorder) = recording_speech_backend(Some("audio/mpeg")).await;
+    let gateway = catalog_gateway(
+        backend,
+        r#"
+[[model]]
+name = "chat-model"
+description = "a chat model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#,
+    )
+    .await;
+
+    let (status, body) = voices_body(&gateway).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"voices":[]}"#);
+    gateway.shutdown().await;
+}
+
+/// Non-speech models contribute nothing to the union.
+#[tokio::test]
+async fn voices_route_ignores_non_speech_models() {
+    let (backend, _recorder) = recording_speech_backend(Some("audio/mpeg")).await;
+    let gateway = catalog_gateway(
+        backend,
+        r#"
+[[model]]
+name = "chat-model"
+description = "a chat model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[model]]
+name = "embed-model"
+kind = "embedding"
+description = "an embedding model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[model]]
+name = "tts-model"
+kind = "speech"
+description = "a speech model"
+context = 8192
+upstream = "backend-tts"
+endpoints = ["fake"]
+voices = ["nova"]
+"#,
+    )
+    .await;
+
+    let (status, body) = voices_body(&gateway).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"voices":[{"id":"nova","name":"nova"}]}"#);
+    gateway.shutdown().await;
+}
+
 /// An upstream 429 maps to the speech-only 429 envelope
 /// (`rate_limit_error` / `upstream_rate_limited`), so an OpenAI client sees
 /// a retryable rate-limit error rather than a server failure.
