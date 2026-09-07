@@ -193,3 +193,4 @@ N64 | observation | oversized-unit @ crates/gateway-logging/src/queue.rs::LogQue
 N65 | observation | oversized-unit @ crates/gateway-logging/src/runtime.rs::assert_stalled_shutdown: adds a 97-line deterministic stalled-shutdown test helper | Bound logging stalls and shutdown
 N66 | observation | shared-parameter-cluster @ crates/gateway-logging/src/queue.rs::LogQueue::new_for_test_with_wait: repeats max_records, max_bytes, and producer_wait across queue constructors | Bound logging stalls and shutdown
 N67 | observation | flag-parameter @ crates/gateway-logging/src/queue.rs::LogQueue::complete_batch: uses had_summary to select summary completion accounting | Bound logging stalls and shutdown
+N68 | observation | Violates A2 @ crates/gateway-logging/src/worker.rs: credential ownership in gateway logging is not determinable from diff | Rotate logs within fixed byte budgets

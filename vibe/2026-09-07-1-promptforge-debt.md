@@ -314,7 +314,7 @@ isProject: false
 - Exclusions: no emergency spool, no unbounded protected-record retention, no unrelated Gateway shutdown redesign, and no claim of lossless logging during a permanent stall.
 - Focused verification: from the repository root run `cargo test -p gateway-logging` and `cargo test -p gateway`.
 
-### Step 7: Rotate fixed-size log segments
+### Step 7: Rotate fixed-size log segments [completed]
 
 - Component and piece: Component 2 of 8, `gateway-logging`; replace run-count-only retention with fixed-size segments under one aggregate disk-byte budget.
 - Dependency: depends on Step 4 for segment and aggregate budgets and on Step 5 for bounded terminal records; it is independent of Step 6 behavior but follows it to avoid overlapping worker and runtime edits.

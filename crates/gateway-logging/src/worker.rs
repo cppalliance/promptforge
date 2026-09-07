@@ -1,51 +1,665 @@
-//! The worker thread, the file sink with its stderr fallback, and the log
-//! rotation performed before the fresh file opens.
+//! The worker thread, the segmented file sink with its stderr fallback,
+//! and startup plus size-triggered log rotation.
 
-use std::fs::File;
-use std::io::{self, BufWriter, Write as _};
+use std::fs::{File, OpenOptions};
+use std::io::{self, BufWriter, Read as _, Seek as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use crate::config::{LogConfig, RETAINED_RUNS};
+use crate::config::{LOG_LIMITS, LogConfig, SEGMENT_TRUNCATION_MARKER};
 use crate::queue::LogQueue;
 
-/// Opens `<state_dir>/logs/gateway.log` fresh for this run, first shifting
-/// the retained chain - `gateway.log.4` to `.5`, down to `gateway.log` to
-/// `.1` - and deleting the oldest rotation, so five previous runs are kept
-/// and disk use stays bounded.
+#[derive(Debug, Clone, Copy)]
+struct RotationLimits {
+    segment: u64,
+    aggregate: u64,
+    terminal_record: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReplacementMode {
+    Atomic,
+    RemoveThenRename,
+}
+
+impl ReplacementMode {
+    const fn production() -> Self {
+        if cfg!(windows) {
+            Self::RemoveThenRename
+        } else {
+            Self::Atomic
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct FaultInjector {
+    #[cfg(test)]
+    fail_at: Option<usize>,
+    #[cfg(test)]
+    calls: usize,
+    #[cfg(test)]
+    simulated_crash: bool,
+    #[cfg(test)]
+    failed_operation: Option<&'static str>,
+}
+
+impl FaultInjector {
+    #[cfg_attr(not(test), allow(clippy::unused_self, clippy::unnecessary_wraps))]
+    fn checkpoint(&mut self, operation: &'static str) -> io::Result<()> {
+        #[cfg(not(test))]
+        let _ = operation;
+        #[cfg(test)]
+        {
+            self.calls += 1;
+            if self.fail_at == Some(self.calls) {
+                self.fail_at = None;
+                self.failed_operation = Some(operation);
+                return Err(io::Error::other(format!(
+                    "injected filesystem failure at {operation}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    fn is_simulated_crash(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.simulated_crash && self.failed_operation.is_some()
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+}
+
+impl RotationLimits {
+    const fn production() -> Self {
+        Self {
+            segment: LOG_LIMITS.segment_bytes,
+            aggregate: LOG_LIMITS.aggregate_retained_bytes,
+            terminal_record: LOG_LIMITS.max_formatted_record_bytes as u64,
+        }
+    }
+
+    fn validate(self) -> io::Result<()> {
+        let reserved = self
+            .terminal_record
+            .checked_add(SEGMENT_TRUNCATION_MARKER.len() as u64)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "log limits overflow"))?;
+        if self.segment < reserved || self.aggregate < self.segment {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "log limits cannot reserve one marked terminal record",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Opens `<state_dir>/logs/gateway.log` fresh and returns the worker-owned
+/// segmented sink. Existing files are normalized before the current log is
+/// shifted to `.1`, so the first write of a restarted process begins inside
+/// the same segment and aggregate budgets used at runtime.
 ///
 /// # Errors
-/// Returns the I/O failure from creating the directory, rotating the
-/// existing log, or opening the fresh one.
-pub(crate) fn open_log_file(state_dir: &Path) -> io::Result<(PathBuf, File)> {
+/// Returns the I/O failure from creating the directory, normalizing or
+/// rotating retained logs, or opening the fresh active segment.
+pub(crate) fn open_log_file(state_dir: &Path) -> io::Result<(PathBuf, SegmentedFile)> {
+    open_log_file_with_limits(state_dir, RotationLimits::production())
+}
+
+fn open_log_file_with_limits(
+    state_dir: &Path,
+    limits: RotationLimits,
+) -> io::Result<(PathBuf, SegmentedFile)> {
+    limits.validate()?;
     let config = LogConfig::new(state_dir);
     let logs = state_dir.join("logs");
     std::fs::create_dir_all(&logs)?;
     let current = config.log_path();
     let retained = config.retained_log_paths();
-    if current.is_file() {
-        // A rename cannot overwrite an existing destination on Windows, so
-        // the oldest rotation is removed before the chain shifts.
-        let oldest = &retained[RETAINED_RUNS - 1];
-        if oldest.is_file() {
-            std::fs::remove_file(oldest)?;
+    recover_rotation(&current, &retained)?;
+
+    compact_oversized_segment(&current, limits.segment)?;
+    for path in &retained {
+        compact_oversized_segment(path, limits.segment)?;
+    }
+    let mut retained_bytes = retained.iter().try_fold(0u64, |total, path| {
+        Ok::<_, io::Error>(total.saturating_add(existing_file_len(path)?.unwrap_or(0)))
+    })?;
+    let current_bytes = existing_file_len(&current)?.unwrap_or(0);
+    prune_oldest_for(
+        &retained,
+        &mut retained_bytes,
+        current_bytes,
+        limits.aggregate,
+    )?;
+
+    if current_bytes != 0 {
+        rotate_files(
+            &current,
+            &retained,
+            &mut FaultInjector::default(),
+            ReplacementMode::production(),
+        )?;
+        retained_bytes = retained.iter().try_fold(0u64, |total, path| {
+            Ok::<_, io::Error>(total.saturating_add(existing_file_len(path)?.unwrap_or(0)))
+        })?;
+    } else {
+        File::create(&current)?.sync_all()?;
+    }
+    let file = OpenOptions::new().append(true).open(&current)?;
+    let sink = SegmentedFile {
+        current: current.clone(),
+        retained,
+        file: Some(BufWriter::new(file)),
+        current_bytes: 0,
+        retained_bytes,
+        limits,
+    };
+    Ok((current, sink))
+}
+
+fn existing_file_len(path: &Path) -> io::Result<Option<u64>> {
+    match path.metadata() {
+        Ok(metadata) if metadata.is_file() => Ok(Some(metadata.len())),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn compact_oversized_segment(path: &Path, segment_bytes: u64) -> io::Result<()> {
+    compact_oversized_segment_with(
+        path,
+        segment_bytes,
+        &mut FaultInjector::default(),
+        ReplacementMode::production(),
+    )
+}
+
+fn compact_oversized_segment_with(
+    path: &Path,
+    segment_bytes: u64,
+    fault: &mut FaultInjector,
+    replacement: ReplacementMode,
+) -> io::Result<()> {
+    recover_replacement(path)?;
+    let Some(file_bytes) = existing_file_len(path)? else {
+        return Ok(());
+    };
+    if file_bytes <= segment_bytes {
+        return Ok(());
+    }
+    let payload_bytes = segment_bytes
+        .checked_sub(SEGMENT_TRUNCATION_MARKER.len() as u64)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "segment marker exceeds budget")
+        })?;
+    let payload_len = usize::try_from(payload_bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "segment budget is too large"))?;
+    let mut file = File::open(path)?;
+    file.seek(io::SeekFrom::End(-i64::try_from(payload_bytes).map_err(
+        |_| io::Error::new(io::ErrorKind::InvalidInput, "segment budget is too large"),
+    )?))?;
+    let mut tail = vec![0; payload_len];
+    file.read_exact(&mut tail)?;
+    let tail = valid_utf8_tail(&tail);
+    let mut replacement_bytes = Vec::with_capacity(SEGMENT_TRUNCATION_MARKER.len() + tail.len());
+    replacement_bytes.extend_from_slice(SEGMENT_TRUNCATION_MARKER.as_bytes());
+    replacement_bytes.extend_from_slice(tail);
+    durable_replace(path, &replacement_bytes, fault, replacement)
+}
+
+fn valid_utf8_tail(mut bytes: &[u8]) -> &[u8] {
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(_) => return bytes,
+            Err(error) => match error.error_len() {
+                Some(invalid_bytes) => {
+                    bytes = &bytes[error.valid_up_to().saturating_add(invalid_bytes)..];
+                }
+                None => return &bytes[..error.valid_up_to()],
+            },
         }
-        for run in (1..RETAINED_RUNS).rev() {
-            if retained[run - 1].is_file() {
-                std::fs::rename(&retained[run - 1], &retained[run])?;
+    }
+}
+
+fn artifact_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map_or_else(|| "gateway.log".into(), std::ffi::OsStr::to_os_string);
+    name.push(suffix);
+    path.with_file_name(name)
+}
+
+fn remove_file_if_present(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "directory syncing is supported on Unix and intentionally a no-op elsewhere"
+)]
+fn sync_parent(path: &Path, fault: &mut FaultInjector) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        fault.checkpoint("sync parent directory")?;
+        File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, fault);
+        Ok(())
+    }
+}
+
+fn write_durable_file(path: &Path, contents: &[u8], fault: &mut FaultInjector) -> io::Result<()> {
+    fault.checkpoint("create staged file")?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    fault.checkpoint("write staged file")?;
+    file.write_all(contents)?;
+    fault.checkpoint("sync staged file")?;
+    file.sync_all()
+}
+
+fn copy_durable_file(
+    source: &Path,
+    destination: &Path,
+    fault: &mut FaultInjector,
+) -> io::Result<()> {
+    fault.checkpoint("create staged copy")?;
+    let mut source = File::open(source)?;
+    let mut destination = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    fault.checkpoint("write staged copy")?;
+    io::copy(&mut source, &mut destination)?;
+    fault.checkpoint("sync staged copy")?;
+    destination.sync_all()
+}
+
+fn backup_file(source: &Path, backup: &Path, fault: &mut FaultInjector) -> io::Result<()> {
+    fault.checkpoint("create rollback copy")?;
+    if std::fs::hard_link(source, backup).is_ok() {
+        return Ok(());
+    }
+    let building = artifact_path(backup, ".building");
+    remove_file_if_present(&building)?;
+    let mut source = File::open(source)?;
+    let mut staged_backup = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&building)?;
+    io::copy(&mut source, &mut staged_backup)?;
+    staged_backup.sync_all()?;
+    drop(staged_backup);
+    std::fs::rename(building, backup)
+}
+
+fn install_file(
+    target: &Path,
+    staged: Option<&Path>,
+    mode: ReplacementMode,
+    fault: &mut FaultInjector,
+) -> io::Result<()> {
+    let Some(staged) = staged else {
+        if existing_file_len(target)?.is_some() {
+            fault.checkpoint("remove rotation target")?;
+            std::fs::remove_file(target)?;
+        }
+        return Ok(());
+    };
+    if matches!(mode, ReplacementMode::RemoveThenRename) && existing_file_len(target)?.is_some() {
+        fault.checkpoint("remove replacement target")?;
+        std::fs::remove_file(target)?;
+    }
+    fault.checkpoint("install replacement")?;
+    std::fs::rename(staged, target)
+}
+
+fn recover_replacement(path: &Path) -> io::Result<()> {
+    let staged = artifact_path(path, ".compacting");
+    let backup = artifact_path(path, ".compact-backup");
+    remove_file_if_present(&artifact_path(&backup, ".building"))?;
+    if backup.exists() {
+        if path.exists() {
+            remove_file_if_present(&backup)?;
+        } else {
+            std::fs::rename(&backup, path)?;
+        }
+    }
+    remove_file_if_present(&staged)
+}
+
+fn rollback_replacement(path: &Path) -> io::Result<()> {
+    let staged = artifact_path(path, ".compacting");
+    let backup = artifact_path(path, ".compact-backup");
+    remove_file_if_present(&artifact_path(&backup, ".building"))?;
+    if backup.exists() {
+        remove_file_if_present(path)?;
+        std::fs::rename(&backup, path)?;
+    }
+    remove_file_if_present(&staged)?;
+    sync_parent(path, &mut FaultInjector::default())
+}
+
+fn durable_replace(
+    path: &Path,
+    contents: &[u8],
+    fault: &mut FaultInjector,
+    mode: ReplacementMode,
+) -> io::Result<()> {
+    recover_replacement(path)?;
+    let staged = artifact_path(path, ".compacting");
+    let backup = artifact_path(path, ".compact-backup");
+    let result = (|| {
+        write_durable_file(&staged, contents, fault)?;
+        backup_file(path, &backup, fault)?;
+        sync_parent(path, fault)?;
+        install_file(path, Some(&staged), mode, fault)?;
+        sync_parent(path, fault)
+    })();
+    if let Err(error) = result {
+        if fault.is_simulated_crash() {
+            return Err(error);
+        }
+        return match rollback_replacement(path) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(io::Error::other(format!(
+                "{error}; replacement rollback failed: {rollback}"
+            ))),
+        };
+    }
+    remove_file_if_present(&backup)?;
+    sync_parent(path, &mut FaultInjector::default())
+}
+
+fn rotation_prepared_path(current: &Path) -> PathBuf {
+    artifact_path(current, ".rotation-prepared")
+}
+
+fn rotation_committed_path(current: &Path) -> PathBuf {
+    artifact_path(current, ".rotation-committed")
+}
+
+fn rotation_targets(current: &Path, retained: &[PathBuf]) -> Vec<PathBuf> {
+    std::iter::once(current.to_path_buf())
+        .chain(retained.iter().cloned())
+        .collect()
+}
+
+fn rotation_old_mask(targets: &[PathBuf]) -> io::Result<u8> {
+    targets
+        .iter()
+        .enumerate()
+        .try_fold(0u8, |mask, (index, path)| {
+            Ok(if existing_file_len(path)?.is_some() {
+                mask | (1 << index)
+            } else {
+                mask
+            })
+        })
+}
+
+fn read_rotation_mask(path: &Path) -> io::Result<u8> {
+    let bytes = std::fs::read(path)?;
+    if bytes.len() != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid log rotation recovery marker",
+        ));
+    }
+    Ok(bytes[0])
+}
+
+fn cleanup_rotation(current: &Path, retained: &[PathBuf]) -> io::Result<()> {
+    for target in rotation_targets(current, retained) {
+        remove_file_if_present(&artifact_path(&target, ".rotation-new"))?;
+        let backup = artifact_path(&target, ".rotation-old");
+        remove_file_if_present(&artifact_path(&backup, ".building"))?;
+        remove_file_if_present(&backup)?;
+    }
+    remove_file_if_present(&rotation_committed_path(current))?;
+    remove_file_if_present(&rotation_prepared_path(current))?;
+    sync_parent(current, &mut FaultInjector::default())
+}
+
+fn rollback_rotation(current: &Path, retained: &[PathBuf], old_mask: u8) -> io::Result<()> {
+    let targets = rotation_targets(current, retained);
+    for (index, target) in targets.iter().enumerate().rev() {
+        let backup = artifact_path(target, ".rotation-old");
+        remove_file_if_present(&artifact_path(&backup, ".building"))?;
+        if backup.exists() {
+            remove_file_if_present(target)?;
+            std::fs::rename(&backup, target)?;
+        } else if old_mask & (1 << index) == 0 {
+            remove_file_if_present(target)?;
+        }
+    }
+    for target in &targets {
+        remove_file_if_present(&artifact_path(target, ".rotation-new"))?;
+    }
+    remove_file_if_present(&rotation_committed_path(current))?;
+    sync_parent(current, &mut FaultInjector::default())?;
+    remove_file_if_present(&rotation_prepared_path(current))?;
+    sync_parent(current, &mut FaultInjector::default())
+}
+
+fn recover_rotation(current: &Path, retained: &[PathBuf]) -> io::Result<()> {
+    let prepared = rotation_prepared_path(current);
+    if !prepared.exists() {
+        return cleanup_rotation(current, retained);
+    }
+    if std::fs::read(rotation_committed_path(current)).is_ok_and(|bytes| bytes == b"committed") {
+        cleanup_rotation(current, retained)
+    } else {
+        match read_rotation_mask(&prepared) {
+            Ok(old_mask) => rollback_rotation(current, retained, old_mask),
+            Err(_error)
+                if rotation_targets(current, retained)
+                    .iter()
+                    .all(|target| !artifact_path(target, ".rotation-old").exists()) =>
+            {
+                cleanup_rotation(current, retained)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn rotate_files(
+    current: &Path,
+    retained: &[PathBuf],
+    fault: &mut FaultInjector,
+    mode: ReplacementMode,
+) -> io::Result<()> {
+    recover_rotation(current, retained)?;
+    let targets = rotation_targets(current, retained);
+    let old_mask = rotation_old_mask(&targets)?;
+    let result = (|| {
+        write_durable_file(&artifact_path(current, ".rotation-new"), b"", fault)?;
+        for (index, target) in retained.iter().enumerate() {
+            let source = if index == 0 {
+                current
+            } else {
+                &retained[index - 1]
+            };
+            if existing_file_len(source)?.is_some() {
+                copy_durable_file(source, &artifact_path(target, ".rotation-new"), fault)?;
             }
         }
-        std::fs::rename(&current, &retained[0])?;
+        write_durable_file(&rotation_prepared_path(current), &[old_mask], fault)?;
+        sync_parent(current, fault)?;
+        for target in &targets {
+            if existing_file_len(target)?.is_some() {
+                backup_file(target, &artifact_path(target, ".rotation-old"), fault)?;
+            }
+        }
+        sync_parent(current, fault)?;
+        for target in retained {
+            let staged = artifact_path(target, ".rotation-new");
+            install_file(
+                target,
+                staged.exists().then_some(staged.as_path()),
+                mode,
+                fault,
+            )?;
+        }
+        let staged_current = artifact_path(current, ".rotation-new");
+        install_file(current, Some(&staged_current), mode, fault)?;
+        sync_parent(current, fault)?;
+        write_durable_file(&rotation_committed_path(current), b"committed", fault)?;
+        sync_parent(current, fault)
+    })();
+    if let Err(error) = result {
+        if fault.is_simulated_crash() {
+            return Err(error);
+        }
+        return match rollback_rotation(current, retained, old_mask) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(io::Error::other(format!(
+                "{error}; rotation rollback failed: {rollback}"
+            ))),
+        };
     }
-    let file = File::create(&current)?;
-    Ok((current, file))
+    cleanup_rotation(current, retained)
+}
+
+fn prune_oldest_for(
+    retained: &[PathBuf],
+    retained_bytes: &mut u64,
+    required_bytes: u64,
+    aggregate_bytes: u64,
+) -> io::Result<()> {
+    while retained_bytes.saturating_add(required_bytes) > aggregate_bytes {
+        let mut oldest = None;
+        for path in retained.iter().rev() {
+            if let Some(bytes) = existing_file_len(path)? {
+                oldest = Some((path, bytes));
+                break;
+            }
+        }
+        let Some((oldest, removed)) = oldest else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "active log cannot fit the aggregate budget",
+            ));
+        };
+        std::fs::remove_file(oldest)?;
+        *retained_bytes = retained_bytes.saturating_sub(removed);
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) struct SegmentedFile {
+    current: PathBuf,
+    retained: Vec<PathBuf>,
+    file: Option<BufWriter<File>>,
+    current_bytes: u64,
+    retained_bytes: u64,
+    limits: RotationLimits,
+}
+
+impl SegmentedFile {
+    fn write_line(&mut self, line: &str) -> io::Result<()> {
+        let line_bytes = line.len() as u64;
+        let marker_bytes = SEGMENT_TRUNCATION_MARKER.len() as u64;
+        if line_bytes.saturating_add(marker_bytes) > self.limits.segment {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "formatted record exceeds the segment terminal reserve",
+            ));
+        }
+        if self.current_bytes != 0
+            && self
+                .current_bytes
+                .saturating_add(line_bytes)
+                .saturating_add(marker_bytes)
+                > self.limits.segment
+        {
+            self.ensure_aggregate_room(marker_bytes)?;
+            self.write_bytes(SEGMENT_TRUNCATION_MARKER.as_bytes())?;
+            self.flush()?;
+            self.rotate()?;
+        }
+        self.ensure_aggregate_room(line_bytes)?;
+        self.write_bytes(line.as_bytes())
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("active log segment is closed"))?
+            .write_all(bytes)?;
+        self.current_bytes = self.current_bytes.saturating_add(bytes.len() as u64);
+        Ok(())
+    }
+
+    fn ensure_aggregate_room(&mut self, additional_bytes: u64) -> io::Result<()> {
+        let required_retained_room = self.current_bytes.saturating_add(additional_bytes);
+        prune_oldest_for(
+            &self.retained,
+            &mut self.retained_bytes,
+            required_retained_room,
+            self.limits.aggregate,
+        )
+    }
+
+    fn rotate(&mut self) -> io::Result<()> {
+        self.flush()?;
+        self.file
+            .as_ref()
+            .ok_or_else(|| io::Error::other("active log segment is closed"))?
+            .get_ref()
+            .sync_all()?;
+        drop(self.file.take());
+        let result = rotate_files(
+            &self.current,
+            &self.retained,
+            &mut FaultInjector::default(),
+            ReplacementMode::production(),
+        );
+        self.file = OpenOptions::new()
+            .append(true)
+            .open(&self.current)
+            .map(BufWriter::new)
+            .map(Some)?;
+        result?;
+        self.retained_bytes = self.retained.iter().try_fold(0u64, |total, path| {
+            Ok::<_, io::Error>(total.saturating_add(existing_file_len(path)?.unwrap_or(0)))
+        })?;
+        self.current_bytes = 0;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("active log segment is closed"))?
+            .flush()
+    }
 }
 
 /// The drain target: the rotated log file until a write fails, then
 /// synchronous stderr so records still land somewhere.
 #[derive(Debug)]
 enum Sink {
+    Segmented(SegmentedFile),
+    /// A plain file used only to isolate fallback and latency behavior from
+    /// rotation in focused tests.
+    #[cfg(test)]
     File(BufWriter<File>),
     Stderr,
     /// The latency test's baseline: every write accepted, nothing done.
@@ -70,6 +684,16 @@ pub(crate) enum StallPoint {
 impl Sink {
     fn write_line(&mut self, line: &str) {
         match self {
+            Self::Segmented(file) => {
+                if let Err(error) = file.write_line(line) {
+                    eprintln!(
+                        "the log file rejected a write ({error}); logging falls back to stderr"
+                    );
+                    *self = Self::Stderr;
+                    self.write_line(line);
+                }
+            }
+            #[cfg(test)]
             Self::File(file) => {
                 if let Err(error) = file.write_all(line.as_bytes()) {
                     eprintln!(
@@ -105,6 +729,15 @@ impl Sink {
 
     fn flush(&mut self) {
         match self {
+            Self::Segmented(file) => {
+                if let Err(error) = file.flush() {
+                    eprintln!(
+                        "the log file rejected a flush ({error}); logging falls back to stderr"
+                    );
+                    *self = Self::Stderr;
+                }
+            }
+            #[cfg(test)]
             Self::File(file) => {
                 if let Err(error) = file.flush() {
                     eprintln!(
@@ -160,8 +793,8 @@ impl LogWorker {
     ///
     /// # Errors
     /// Returns the I/O failure from spawning the thread.
-    pub(crate) fn spawn(queue: Arc<LogQueue>, file: File) -> io::Result<Self> {
-        Self::spawn_with_sink(queue, Sink::File(BufWriter::new(file)))
+    pub(crate) fn spawn(queue: Arc<LogQueue>, file: SegmentedFile) -> io::Result<Self> {
+        Self::spawn_with_sink(queue, Sink::Segmented(file))
     }
 
     fn spawn_with_sink(queue: Arc<LogQueue>, mut sink: Sink) -> io::Result<Self> {
@@ -373,9 +1006,8 @@ mod tests {
 
         let baseline = measure_p95_enqueue_to_write(Sink::Null, RECORDS);
         let temp = TempStateDir::new("latency");
-        std::fs::create_dir_all(temp.0.join("logs")).expect("logs dir");
-        let file = File::create(temp.0.join("logs/gateway.log")).expect("create the log");
-        let file_sink = measure_p95_enqueue_to_write(Sink::File(BufWriter::new(file)), RECORDS);
+        let (_path, file) = open_log_file(&temp.0).expect("open the production segmented sink");
+        let file_sink = measure_p95_enqueue_to_write(Sink::Segmented(file), RECORDS);
 
         // The budget: less than 2% over the null-sink baseline, or 1 ms,
         // whichever is larger.
@@ -478,6 +1110,349 @@ mod tests {
         assert!(
             !retained.iter().any(|contents| contents == "run 1"),
             "the sixth previous run is deleted, not retained"
+        );
+    }
+
+    fn total_log_bytes(state_dir: &Path) -> u64 {
+        let config = LogConfig::new(state_dir);
+        std::iter::once(config.log_path())
+            .chain(config.retained_log_paths())
+            .map(|path| path.metadata().map_or(0, |metadata| metadata.len()))
+            .sum()
+    }
+
+    fn crashing_fault(fail_at: usize) -> FaultInjector {
+        FaultInjector {
+            fail_at: Some(fail_at),
+            simulated_crash: true,
+            ..FaultInjector::default()
+        }
+    }
+
+    #[test]
+    fn restart_compaction_recovers_every_injected_filesystem_failure() {
+        let original = "old-prefix-".repeat(20) + "terminal diagnostic\n";
+        let mut forced_replacement_gap = false;
+        let mut completed = false;
+        for (failures, fail_at) in (1..=32).enumerate() {
+            let temp = TempStateDir::new("compaction-crash");
+            let path = temp.0.join("gateway.log");
+            std::fs::write(&path, &original).expect("seed oversized source");
+            let mut fault = crashing_fault(fail_at);
+            let result = compact_oversized_segment_with(
+                &path,
+                64,
+                &mut fault,
+                ReplacementMode::RemoveThenRename,
+            );
+            if result.is_ok() {
+                completed = true;
+                assert!(
+                    failures >= 6,
+                    "the loop injected every staged replacement operation"
+                );
+                break;
+            }
+            if fault.failed_operation == Some("install replacement") {
+                forced_replacement_gap = true;
+                assert!(
+                    !path.exists() && artifact_path(&path, ".compact-backup").exists(),
+                    "the forced Windows replacement gap retains the original rollback copy"
+                );
+            }
+            recover_replacement(&path).expect("restart recovers compaction");
+            let recovered = std::fs::read_to_string(&path).expect("one complete copy survives");
+            assert!(
+                recovered == original
+                    || (recovered.starts_with(SEGMENT_TRUNCATION_MARKER)
+                        && recovered.ends_with("terminal diagnostic\n")
+                        && recovered.len() <= 64),
+                "recovery keeps either the source or the complete durable replacement"
+            );
+        }
+        assert!(
+            forced_replacement_gap,
+            "fault injection reaches the destructive Windows rename boundary"
+        );
+        assert!(
+            completed,
+            "the fault loop reaches the first non-failing run"
+        );
+    }
+
+    #[test]
+    fn live_rotation_recovers_every_injected_filesystem_failure() {
+        let mut forced_replacement_gap = false;
+        let mut completed = false;
+        for (failures, fail_at) in (1..=128).enumerate() {
+            let temp = TempStateDir::new("rotation-crash");
+            let logs = temp.0.join("logs");
+            std::fs::create_dir_all(&logs).expect("create logs");
+            let current = logs.join("gateway.log");
+            let retained = LogConfig::new(&temp.0).retained_log_paths();
+            std::fs::write(&current, "active\n").expect("seed active");
+            for (index, path) in retained.iter().enumerate() {
+                std::fs::write(path, format!("old-{}\n", index + 1)).expect("seed retained");
+            }
+            let old: Vec<Vec<u8>> = std::iter::once(&current)
+                .chain(retained.iter())
+                .map(|path| std::fs::read(path).expect("snapshot old chain"))
+                .collect();
+            let mut fault = crashing_fault(fail_at);
+            let result = rotate_files(
+                &current,
+                &retained,
+                &mut fault,
+                ReplacementMode::RemoveThenRename,
+            );
+            if result.is_ok() {
+                completed = true;
+                assert!(
+                    failures >= 30,
+                    "the loop injected every staged chain operation"
+                );
+                assert_eq!(std::fs::read(&current).expect("new active"), b"");
+                for (index, path) in retained.iter().enumerate() {
+                    assert_eq!(
+                        std::fs::read(path).expect("new retained"),
+                        old[index],
+                        "the committed chain shifts each prior segment exactly once"
+                    );
+                }
+                break;
+            }
+            let committed = std::fs::read(rotation_committed_path(&current))
+                .is_ok_and(|bytes| bytes == b"committed");
+            if fault.failed_operation == Some("install replacement")
+                && rotation_targets(&current, &retained).iter().any(|target| {
+                    !target.exists() && artifact_path(target, ".rotation-old").exists()
+                })
+            {
+                forced_replacement_gap = true;
+            }
+            recover_rotation(&current, &retained).expect("restart recovers rotation");
+            if committed {
+                assert_eq!(std::fs::read(&current).expect("committed active"), b"");
+                for (index, path) in retained.iter().enumerate() {
+                    assert_eq!(
+                        std::fs::read(path).expect("committed retained"),
+                        old[index],
+                        "a durable commit marker keeps the complete new chain"
+                    );
+                }
+            } else {
+                for (index, path) in std::iter::once(&current).chain(retained.iter()).enumerate() {
+                    assert_eq!(
+                        std::fs::read(path).expect("rolled back chain"),
+                        old[index],
+                        "an uncommitted rotation restores every prior diagnostic name"
+                    );
+                }
+            }
+        }
+        assert!(
+            forced_replacement_gap,
+            "fault injection reaches a Windows remove-then-rename gap"
+        );
+        assert!(
+            completed,
+            "the fault loop reaches the first non-failing run"
+        );
+    }
+
+    #[test]
+    fn rotation_reserves_the_marker_and_preserves_the_terminal_record() {
+        let temp = TempStateDir::new("segment-terminal");
+        let limits = RotationLimits {
+            segment: 64,
+            aggregate: 128,
+            terminal_record: 24,
+        };
+        let (path, sink) = open_log_file_with_limits(&temp.0, limits).expect("open segmented log");
+        let queue = Arc::new(LogQueue::new());
+        let worker =
+            LogWorker::spawn(Arc::clone(&queue), sink).expect("spawn the production worker");
+        queue.enqueue(LogPriority::Info, Box::from("ordinary-record-000\n"));
+        queue.enqueue(LogPriority::Info, Box::from("ordinary-record-001\n"));
+        queue.enqueue(LogPriority::Info, Box::from("gateway exiting\n"));
+        queue.close();
+        worker.join().expect("worker drains segmented sink");
+
+        let retained =
+            std::fs::read_to_string(temp.0.join("logs/gateway.log.1")).expect("retained segment");
+        assert!(
+            retained.ends_with(SEGMENT_TRUNCATION_MARKER),
+            "the full segment ends with the reserved marker"
+        );
+        assert!(
+            retained.len() as u64 <= limits.segment,
+            "the retained segment obeys its fixed-size budget"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path).expect("active segment"),
+            "gateway exiting\n",
+            "the terminal record moves whole to the active segment"
+        );
+        assert!(
+            total_log_bytes(&temp.0) <= limits.aggregate,
+            "active and retained bytes stay inside one aggregate budget"
+        );
+    }
+
+    #[test]
+    fn byte_boundaries_rotate_a_full_numbered_chain_without_splitting_utf8() {
+        let temp = TempStateDir::new("segment-byte-boundaries");
+        let logs = temp.0.join("logs");
+        std::fs::create_dir_all(&logs).expect("create logs");
+        let config = LogConfig::new(&temp.0);
+        let current = config.log_path();
+        let retained = config.retained_log_paths();
+        File::create(&current).expect("create active");
+        for (index, path) in retained.iter().enumerate() {
+            std::fs::write(path, format!("old-{}\n", index + 1)).expect("seed full chain");
+        }
+        let retained_bytes = retained
+            .iter()
+            .map(|path| path.metadata().expect("retained metadata").len())
+            .sum();
+        let limits = RotationLimits {
+            segment: 48,
+            aggregate: 48 * 6,
+            terminal_record: 16,
+        };
+        let mut sink = SegmentedFile {
+            current: current.clone(),
+            retained: retained.clone(),
+            file: Some(BufWriter::new(
+                OpenOptions::new()
+                    .append(true)
+                    .open(&current)
+                    .expect("open active"),
+            )),
+            current_bytes: 0,
+            retained_bytes,
+            limits,
+        };
+        let multibyte = "😀aaaaaaaaaaaaaa\n";
+        let exact_boundary = "bbbbbbbbbbbbbbb\n";
+        let maximum_terminal = "ccccccccccccccc\n";
+        assert_eq!(multibyte.len(), 19);
+        assert_eq!(exact_boundary.len(), 16);
+        assert_eq!(
+            u64::try_from(maximum_terminal.len()).expect("record length fits u64"),
+            limits.terminal_record
+        );
+
+        sink.write_line(multibyte).expect("write multibyte record");
+        sink.write_line(exact_boundary)
+            .expect("exact byte boundary stays in the active segment");
+        sink.flush().expect("flush exact boundary");
+        assert_eq!(
+            std::fs::read_to_string(&current).expect("read exact active"),
+            format!("{multibyte}{exact_boundary}"),
+            "equality with the reserved marker does not rotate"
+        );
+
+        sink.write_line(maximum_terminal)
+            .expect("one byte over rotates before the maximum terminal record");
+        sink.flush().expect("flush terminal");
+        let newest =
+            std::fs::read_to_string(&retained[0]).expect("newest retained remains valid UTF-8");
+        assert_eq!(
+            newest,
+            format!("{multibyte}{exact_boundary}{SEGMENT_TRUNCATION_MARKER}")
+        );
+        assert_eq!(newest.len() as u64, limits.segment);
+        assert_eq!(
+            std::fs::read_to_string(&current).expect("active terminal"),
+            maximum_terminal
+        );
+        for (index, path) in retained.iter().enumerate().skip(1) {
+            assert_eq!(
+                std::fs::read_to_string(path).expect("shifted retained"),
+                format!("old-{index}\n"),
+                "the complete numbered chain shifts oldest-first"
+            );
+        }
+        assert!(
+            !std::fs::read_to_string(&retained[retained.len() - 1])
+                .expect("oldest retained")
+                .contains("old-5"),
+            "the prior oldest segment is pruned only after its replacement is durable"
+        );
+        assert!(
+            total_log_bytes(&temp.0) <= limits.aggregate,
+            "all named segments remain within the aggregate byte budget"
+        );
+    }
+
+    #[test]
+    fn restart_caps_legacy_segments_and_prunes_oldest_before_admission() {
+        let temp = TempStateDir::new("segment-restart");
+        let logs = temp.0.join("logs");
+        std::fs::create_dir_all(&logs).expect("logs dir");
+        let terminal = "gateway exiting after a fatal error\n";
+        std::fs::write(
+            logs.join("gateway.log"),
+            format!("{}{}", "😀".repeat(40), terminal),
+        )
+        .expect("seed oversized active log");
+        std::fs::write(logs.join("gateway.log.1"), "newer-retained".repeat(4))
+            .expect("seed newer retained log");
+        std::fs::write(logs.join("gateway.log.2"), "oldest-retained".repeat(4))
+            .expect("seed oldest retained log");
+        let limits = RotationLimits {
+            segment: 64,
+            aggregate: 80,
+            terminal_record: 40,
+        };
+
+        let (_path, mut first) =
+            open_log_file_with_limits(&temp.0, limits).expect("normalize first restart");
+        first
+            .write_line("first restart\n")
+            .expect("write after first restart");
+        first.flush().expect("flush first restart");
+        let normalized =
+            std::fs::read_to_string(logs.join("gateway.log.1")).expect("normalized legacy segment");
+        assert!(
+            normalized.starts_with(SEGMENT_TRUNCATION_MARKER),
+            "an oversized legacy segment records the omitted prefix"
+        );
+        assert!(
+            normalized.ends_with(terminal),
+            "tail compaction reserves enough room for the prior terminal record"
+        );
+        drop(first);
+        let (_path, mut second) =
+            open_log_file_with_limits(&temp.0, limits).expect("normalize second restart");
+        second
+            .write_line("second restart\n")
+            .expect("write after second restart");
+        second.flush().expect("flush second restart");
+
+        let config = LogConfig::new(&temp.0);
+        for path in std::iter::once(config.log_path()).chain(config.retained_log_paths()) {
+            let bytes = path.metadata().map_or(0, |metadata| metadata.len());
+            assert!(
+                bytes <= limits.segment,
+                "{} exceeded the segment budget with {bytes} bytes",
+                path.display()
+            );
+        }
+        assert!(
+            total_log_bytes(&temp.0) <= limits.aggregate,
+            "restart normalization and later writes preserve the aggregate budget"
+        );
+        assert!(
+            !logs.join("gateway.log.2").exists(),
+            "oldest segments are pruned before newer bytes are admitted"
+        );
+        let retained =
+            std::fs::read_to_string(logs.join("gateway.log.1")).expect("newest retained segment");
+        assert!(
+            retained.contains("first restart"),
+            "the current numbered diagnostic name retains the newest prior segment"
         );
     }
 }

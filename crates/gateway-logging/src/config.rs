@@ -3,10 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Previous runs retained beside the current log: `gateway.log.1` (the
-/// newest rotation) through `gateway.log.5` (the oldest). A sixth
-/// previous run is deleted by the rotation that would create it.
-pub(crate) const RETAINED_RUNS: usize = 5;
+/// Numbered segments retained beside `gateway.log`: `.1` is newest and
+/// `.5` is oldest. Admitting a sixth retained segment prunes `.5`.
+pub(crate) const RETAINED_SEGMENTS: usize = 5;
+
+/// Marks a segment boundary or a retained tail whose earlier bytes were
+/// discarded to restore the fixed-size invariant.
+pub(crate) const SEGMENT_TRUNCATION_MARKER: &str = " [truncated]\n";
 
 /// Every memory, latency, and disk budget for the logging pipeline.
 ///
@@ -40,7 +43,12 @@ const _: () = {
     assert!(LOG_LIMITS.producer_wait.as_millis() < LOG_LIMITS.shutdown_wait.as_millis());
     assert!(
         LOG_LIMITS.aggregate_retained_bytes
-            == LOG_LIMITS.segment_bytes * (RETAINED_RUNS as u64 + 1)
+            == LOG_LIMITS.segment_bytes * (RETAINED_SEGMENTS as u64 + 1)
+    );
+    assert!(
+        LOG_LIMITS.segment_bytes
+            >= LOG_LIMITS.max_formatted_record_bytes as u64
+                + SEGMENT_TRUNCATION_MARKER.len() as u64
     );
 };
 
@@ -97,10 +105,9 @@ impl LogConfig {
         self.state_dir.join("logs").join("gateway.log")
     }
 
-    /// The retained previous-run log paths, `gateway.log.1` (newest)
-    /// through `gateway.log.5` (oldest). Diagnostics enumerates these
-    /// without starting a runtime, so the log layout has exactly one
-    /// owner.
+    /// The retained log segment paths, `gateway.log.1` (newest) through
+    /// `gateway.log.5` (oldest). Diagnostics enumerates these without
+    /// starting a runtime, so the log layout has exactly one owner.
     ///
     /// # Examples
     /// ```
@@ -112,11 +119,11 @@ impl LogConfig {
     /// ```
     #[must_use]
     pub fn retained_log_paths(&self) -> Vec<PathBuf> {
-        (1..=RETAINED_RUNS)
-            .map(|run| {
+        (1..=RETAINED_SEGMENTS)
+            .map(|segment| {
                 self.state_dir
                     .join("logs")
-                    .join(format!("gateway.log.{run}"))
+                    .join(format!("gateway.log.{segment}"))
             })
             .collect()
     }
@@ -134,7 +141,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_log_layout_is_current_plus_five_retained_runs() {
+    fn the_log_layout_is_current_plus_five_numbered_segments() {
         let config = LogConfig::new("state");
         assert_eq!(
             config.log_path(),
