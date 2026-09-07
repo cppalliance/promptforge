@@ -9,6 +9,7 @@ use crate::generation::GenerationLease;
 
 mod agreement;
 mod finalization;
+mod interim;
 mod state;
 mod text;
 
@@ -17,6 +18,7 @@ use agreement::LocalAgreement;
 #[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, reserve_segment, run_final_pipeline};
 use finalization::{FinalPipeline, spawn_final_pipeline};
+pub(crate) use interim::InterimSnapshot;
 use state::TakeState;
 use text::append_transcript;
 
@@ -123,11 +125,6 @@ impl Take {
     #[cfg(test)]
     fn take_failure(&self) -> Option<String> {
         self.state.take_failure()
-    }
-
-    pub(crate) fn next_interim(&self, hypothesis: &str) -> Option<(String, String)> {
-        let finalized = self.finalized();
-        TakeState::lock(&self.state.interim).next(&finalized, hypothesis)
     }
 
     pub(crate) fn finalization(&self) -> Option<finalization::TakeFinalization> {

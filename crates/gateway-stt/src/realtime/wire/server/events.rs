@@ -3,6 +3,7 @@ use super::{
 };
 use crate::realtime::result_mailbox::{ItemFailure, ItemResult};
 use crate::realtime::wire::shared::{OptionalNullable, RequiredNullable};
+use crate::take::InterimSnapshot;
 
 impl ServerEvent {
     pub(in crate::realtime) fn session_created(
@@ -27,17 +28,16 @@ impl ServerEvent {
         event_id: String,
         item_id: String,
         revision: u64,
-        finalized: String,
-        agreed: String,
-        tentative: String,
+        snapshot: InterimSnapshot,
         audio_end_ms: u64,
     ) -> Self {
+        let (transcript, finalized, agreed, tentative) = snapshot.into_parts();
         Self::TranscriptionHypothesis {
             event_id,
             item_id,
             content_index: 0,
             revision,
-            transcript: format!("{finalized}{agreed}{tentative}"),
+            transcript,
             finalized,
             agreed,
             tentative,

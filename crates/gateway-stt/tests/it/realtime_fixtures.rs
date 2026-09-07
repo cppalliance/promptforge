@@ -51,6 +51,7 @@ const VALID_SEQUENCE_CASES: &[&str] = &[
     "overlapping_items_reverse_completion",
     "pending_precommit_failure_clear",
     "pending_precommit_failure_commit",
+    "producer_hypothesis_ownership",
     "saturated_commit_retry",
     "segment_admission_failure",
     "standard_delta_after_item_creation",

@@ -53,17 +53,17 @@ impl Session {
         if transcript.is_empty() {
             return Ok(None);
         }
-        let finalized = input.take().finalized();
-        let update = input.take().next_interim(&transcript);
+        let update = input.take().next_interim_snapshot(&transcript);
         if !include_hypothesis {
-            if let Some((committed, _)) = update {
+            if let Some(snapshot) = update {
+                let committed = snapshot.committed();
                 let delta = committed
                     .strip_prefix(&self.standard_interim_committed)
                     .ok_or(SessionError::Inference)?;
                 if !delta.is_empty() {
                     self.pending_interim.push(delta.to_owned());
                 }
-                self.standard_interim_committed = committed;
+                committed.clone_into(&mut self.standard_interim_committed);
             }
             return Ok(None);
         }
@@ -71,14 +71,14 @@ impl Session {
             .hypothesis_revision
             .checked_add(1)
             .ok_or(SessionError::EpochExhausted)?;
-        let (agreed, tentative) = update.unwrap_or_else(|| (String::new(), transcript));
+        let Some(snapshot) = update else {
+            return Ok(None);
+        };
         Ok(Some(ServerEvent::hypothesis(
             self.ids.event(),
             input.item_id().to_owned(),
             self.hypothesis_revision,
-            finalized,
-            agreed,
-            tentative,
+            snapshot,
             u64::try_from(Duration::from_secs_f64(input.buffered_duration_seconds()).as_millis())
                 .unwrap_or(u64::MAX),
         )))

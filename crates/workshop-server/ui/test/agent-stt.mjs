@@ -666,6 +666,41 @@ await assertNoLeaks(lifecycle, async () => {
     dispose();
   }
 
+  // Producer-generated ownership snapshots replay through replacement verbatim.
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("producer");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("producer replay: the mic click did not open a Realtime socket");
+      dispose();
+      return;
+    }
+    const first = canonicalMessage(
+      "producer_hypothesis_ownership",
+      "server",
+      "conversation.item.input_audio_transcription.hypothesis",
+    );
+    const second = canonicalMessage(
+      "producer_hypothesis_ownership",
+      "server",
+      "conversation.item.input_audio_transcription.hypothesis",
+      1,
+    );
+    socket.message(first);
+    check(
+      "producer ownership replay lands one exact transcript without a duplicated prefix",
+      input.getText() === "ask not your country new tail first",
+    );
+    socket.message(second);
+    check(
+      "producer ownership revision preserves exact spaces while replacing",
+      input.getText() === "ask not your country new tail second",
+    );
+    dispose();
+  }
+
   // --- Takes insert at the cursor -------------------------------------------
 
   {

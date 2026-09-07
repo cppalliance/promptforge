@@ -146,9 +146,34 @@ async fn send(socket: &mut Socket, value: serde_json::Value) {
         .expect("client event sends");
 }
 
+async fn append_audio(socket: &mut Socket, audio: String) {
+    send(
+        socket,
+        serde_json::json!({
+            "type": "input_audio_buffer.append",
+            "audio": audio
+        }),
+    )
+    .await;
+}
+
 fn audio() -> String {
     let bytes = vec![0_u8; 24_000 * 2 / 10];
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn audio_samples(samples: &[i16]) -> String {
+    let bytes = samples
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect::<Vec<_>>();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn closed_segment() -> String {
+    let mut samples = vec![16_384; 24_000];
+    samples.extend(vec![0; 72_000]);
+    audio_samples(&samples)
 }
 
 fn canonical_sequences() -> serde_json::Value {
@@ -329,6 +354,109 @@ async fn canonical_fixture_drives_hypothesis_completion_and_clear() {
     .await;
     expect_type(&mut socket, "input_audio_buffer.cleared").await;
 
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn producer_snapshots_partition_finalized_agreed_and_tentative_text() {
+    let fixtures = canonical_sequences();
+    let interim = ScriptedDecoder::new();
+    for transcript in [
+        "ask not your country",
+        "ask not your country",
+        "new tail first",
+        "new tail second",
+    ] {
+        interim.push_text(transcript);
+    }
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.park_next();
+    final_decoder.push_text("ask not your kingdom");
+    final_decoder.push_text("second final");
+    let service = speech(&interim, Some(&final_decoder));
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+
+    expect_type(&mut socket, "session.created").await;
+    send(
+        &mut socket,
+        canonical_client(&fixtures, "producer_hypothesis_ownership", "session.update"),
+    )
+    .await;
+    expect_type(&mut socket, "session.updated").await;
+
+    append_audio(&mut socket, closed_segment()).await;
+    expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    append_audio(&mut socket, audio()).await;
+    expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+
+    assert!(final_decoder.wait_until_parked(PHASE_TIMEOUT));
+    interim.park_next();
+    final_decoder.release();
+    let completed_final = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || completed_final.wait_for_completed(1, PHASE_TIMEOUT))
+            .await
+            .expect("final completion observer joins")
+    );
+    final_decoder.park_next();
+    append_audio(&mut socket, closed_segment()).await;
+    let parked_interim = interim.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked_interim.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("interim park observer joins")
+    );
+    assert!(
+        final_decoder.wait_for_requests(2, PHASE_TIMEOUT),
+        "the first closed segment is finalized before snapshot assembly"
+    );
+    interim.release();
+
+    let third = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    append_audio(&mut socket, audio()).await;
+    let fourth = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+
+    for (actual, occurrence) in [(third, 0), (fourth, 1)] {
+        let expected = canonical_message(
+            &fixtures,
+            "producer_hypothesis_ownership",
+            "server",
+            "conversation.item.input_audio_transcription.hypothesis",
+            occurrence,
+        );
+        for field in [
+            "revision",
+            "transcript",
+            "finalized",
+            "agreed",
+            "tentative",
+            "audio_start_ms",
+            "audio_end_ms",
+        ] {
+            assert_eq!(actual[field], expected[field], "{field}: {actual}");
+        }
+    }
+
+    final_decoder.release();
     socket.close(None).await.expect("socket closes");
     drop(socket);
     server.shutdown().await;

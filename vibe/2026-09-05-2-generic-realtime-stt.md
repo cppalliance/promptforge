@@ -741,7 +741,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo clippy -p workshop-server --all-targets --all-features -- -D warnings`
 - Consumes and gates: this repairs the installed race where chat auto-launched about one second before Gateway published `claude-opus-4-6`; the picker later converged but the running session retained an empty model catalog and failed locally before any Gateway request. Tests must launch chat against an empty catalog, publish and select a chat model later, prove one completion request, replace the catalog during a profile switch, and reject transcription-only readiness.
 
-### Step 35: Compose each live hypothesis from disjoint transcript ownership
+### Step 35: Compose each live hypothesis from disjoint transcript ownership [completed]
 
 - Artifacts: update `crates/gateway-stt/src/session.rs`, `crates/gateway-stt/src/realtime/server.rs`, the engine interim snapshot type and assembly only where ownership requires it, canonical wire fixtures, Gateway Realtime route tests, and the focused Workshop browser replay.
 - Scope: return one coherent interim snapshot whose finalized, agreed, and tentative fields are disjoint and own their exact boundary whitespace. Serialize visible `transcript` from that snapshot exactly once. Do not independently prepend `Take::finalized` to cumulative committed text, and do not read finalized state twice while assembling one event. Preserve provisional promotion, divergent final reconciliation, authoritative completion, fallback, and item ordering.

@@ -37,6 +37,7 @@ struct DecoderState {
     outcomes: VecDeque<ScriptedOutcome>,
     construction_errors: VecDeque<String>,
     requests: Vec<DecodeRequest>,
+    completed: usize,
     creation_thread: Option<ThreadId>,
     decode_threads: Vec<ThreadId>,
     waiters: usize,
@@ -116,6 +117,12 @@ impl ScriptedDecoder {
     #[must_use]
     pub fn wait_for_requests(&self, count: usize, timeout: Duration) -> bool {
         self.wait_for(timeout, |state| state.requests.len() >= count)
+    }
+
+    /// Waits until at least `count` scripted decodes have returned.
+    #[must_use]
+    pub fn wait_for_completed(&self, count: usize, timeout: Duration) -> bool {
+        self.wait_for(timeout, |state| state.completed >= count)
     }
 
     /// Waits until a parked decode has entered its rendezvous.
@@ -219,14 +226,17 @@ impl Decoder for WorkerDecoder {
                 .unwrap_or_else(PoisonError::into_inner);
             state.park = ParkState::Ready;
         }
-        match state.outcomes.pop_front() {
+        let outcome = match state.outcomes.pop_front() {
             Some(ScriptedOutcome::Text(text)) => Ok(text),
             Some(ScriptedOutcome::Error(message)) => {
                 Err(TranscribeError::inference(std::io::Error::other(message)))
             }
             Some(ScriptedOutcome::Panic) => panic!("scripted decoder panic"),
             None => Ok(String::new()),
-        }
+        };
+        state.completed += 1;
+        changed.notify_all();
+        outcome
     }
 }
 

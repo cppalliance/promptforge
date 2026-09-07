@@ -2,7 +2,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use gateway_stt_engine::TranscribeError;
 
-use super::agreement::InterimState;
+use super::interim::InterimState;
 use super::text::append_transcript;
 use crate::segment::Segmenter;
 
