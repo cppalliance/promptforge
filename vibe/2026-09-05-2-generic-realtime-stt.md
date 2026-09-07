@@ -644,7 +644,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
 - Consumes and gates: this repairs Linux warnings for unused `MANIFEST` and an unfulfilled `unsafe_code` expectation. Source checks must pin both declarations to Windows while existing Windows icon, manifest, and DPI tests remain green.
 
-### Step 27: Add the Workshop relay beside legacy
+### Step 27: Add the Workshop relay beside legacy [completed]
 
 - Artifacts: add `workshop-server/src/routes/realtime.rs`, a separate Realtime connector in `src/gateway.rs`, route composition in `src/routes.rs` and `src/app.rs`, `shared-loopback.workspace = true` in `workshop-server/Cargo.toml`, `tests/it/realtime_relay.rs`, and its registration in `tests/it/main.rs`.
 - Scope: retain `routes/stt.rs`, old connector, status parsing, old UI, and every old test; the new relay fixes the upstream target, attaches the bearer, stays payload-opaque, and preserves type, close, ping, pong, origin, and subprotocol semantics.

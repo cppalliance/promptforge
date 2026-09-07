@@ -20,7 +20,8 @@ const PUBLIC_ROOT_BUDGETS: [(&str, usize); 4] = [
     ("gateway-whisper-ffi", 6),
 ];
 
-const PHASE_A_CRATES: [&str; 7] = [
+const DEPENDENCY_PHASE: &str = "Phase B";
+const DEPENDENCY_POLICY_CRATES: [&str; 7] = [
     "gateway",
     "gateway-stt",
     "gateway-stt-engine",
@@ -118,6 +119,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "promptforge-model-client",
             "promptforge-store",
             "promptforge-tools",
+            "shared-loopback",
             "shared-progress",
             "shared-sidecar",
         ],
@@ -281,7 +283,9 @@ fn crate_workspace_edges(metadata: &CargoMetadata, crate_name: &str) -> BTreeSet
 }
 
 fn validate_dependency_policies(policies: &[DependencyPolicy]) -> Result<(), String> {
-    let expected = PHASE_A_CRATES.into_iter().collect::<BTreeSet<_>>();
+    let expected = DEPENDENCY_POLICY_CRATES
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let actual = policies
         .iter()
         .map(|policy| policy.crate_name)
@@ -291,7 +295,8 @@ fn validate_dependency_policies(policies: &[DependencyPolicy]) -> Result<(), Str
     }
     if actual != expected {
         return Err(format!(
-            "dependency policies must cover the exact Phase A crates: expected {expected:?}, got {actual:?}"
+            "dependency policies must cover the exact {DEPENDENCY_PHASE} crates: expected \
+             {expected:?}, got {actual:?}"
         ));
     }
     Ok(())
@@ -331,6 +336,19 @@ fn dependency_policy_omission_is_rejected() {
     assert!(
         validate_dependency_policies(&DEPENDENCY_POLICIES[..DEPENDENCY_POLICIES.len() - 1])
             .is_err()
+    );
+}
+
+#[test]
+fn dependency_policy_has_advanced_to_phase_b() {
+    assert_eq!(DEPENDENCY_PHASE, "Phase B");
+    let workshop = DEPENDENCY_POLICIES
+        .iter()
+        .find(|policy| policy.crate_name == "workshop-server")
+        .unwrap_or_else(|| panic!("Phase B contains the Workshop dependency policy"));
+    assert!(
+        workshop.final_edges.contains(&"shared-loopback"),
+        "Phase B adds only the Workshop dependency on shared-loopback"
     );
 }
 

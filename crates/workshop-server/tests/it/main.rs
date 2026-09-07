@@ -11,4 +11,5 @@ mod chat_gate;
 mod heartbeat;
 mod observer;
 mod ratchet;
+mod realtime_relay;
 mod session;

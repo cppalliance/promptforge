@@ -58,9 +58,12 @@
 # `ForwardedResponse`, and the `forward` relay the /gateway/api route
 # calls - one more request shape on the same gateway HTTP client. Shrank
 # in the chat-relay excision: the chat completion methods and `ChatStream`
-# left with their tests. Grew by the authenticated gateway WebSocket
-# connector used by the same-origin STT relay.
-"gateway.rs" = 1295
+# left with their tests. Shrank again when authenticated WebSocket
+# connection mechanics moved to their own responsibility module.
+"gateway.rs" = 1235
+# Split from gateway.rs: fixed-target authenticated WebSocket connections
+# for the legacy and Realtime relay paths.
+"gateway/socket.rs" = 94
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
 # RemoteOperation while the heartbeat reads the gateway as reachable.
@@ -144,6 +147,9 @@
 "routes/gateway_config.rs" = 190
 "routes/gateway_config/tests.rs" = 243
 "routes/health.rs" = 50
+# New module: the same-origin, payload-opaque Realtime transcription relay,
+# including bounded transport and hop-local control-frame ownership.
+"routes/realtime.rs" = 181
 # New module: the same-origin capability and WebSocket relay from the
 # Workshop listener to the gateway-owned STT routes.
 "routes/stt.rs" = 298

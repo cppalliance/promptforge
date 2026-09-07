@@ -172,3 +172,8 @@ N43 | observation | shared-parameter-cluster @ crates/gateway/src/lib.rs::commit
 N44 | observation | shared-parameter-cluster @ crates/gateway/src/lib.rs::restore_or_shutdown: repeats state, cancellation, and failure across rollback functions | Make profile replacement transactional
 N45 | observation | shared-parameter-cluster @ crates/gateway/src/lib.rs::request_fatal_shutdown: repeats state, cancellation, and failure across rollback functions | Make profile replacement transactional
 N46 | observation | shared-parameter-cluster @ crates/gateway/src/lib.rs::rollback_commit_failure: repeats state, cancellation, and failure across rollback functions | Make profile replacement transactional
+N47 | observation | flag-parameter @ crates/workshop-server/src/gateway/socket.rs::GatewayClient::connect_socket: selects the legacy status header through workshop_status | Add the Workshop Realtime relay
+N48 | observation | shared-mutable-state @ crates/workshop-server/tests/it/realtime_relay.rs::UpstreamProbe: shares mutex-protected request and frame observations across relay and test owners | Add the Workshop Realtime relay
+N49 | observation | oversized-unit @ crates/workshop-server/tests/it/realtime_relay.rs::upstream: adds a 79-line upstream probe handler | Add the Workshop Realtime relay
+N50 | observation | oversized-unit @ crates/workshop-server/tests/it/realtime_relay.rs::realtime_relay_is_authenticated_fixed_and_payload_opaque: adds an 83-line wire behavior test | Add the Workshop Realtime relay
+N51 | observation | shared-mutable-state @ crates/workshop-server/tests/it/realtime_relay.rs::StalledPeerProbe: shares frame delivery state between peer and test owners | Add the Workshop Realtime relay
