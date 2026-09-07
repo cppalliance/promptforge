@@ -34,7 +34,10 @@
 //! `GET /admin/chat-templates` family catalog and per-model effective
 //! resolution view (local builds), a bearer-authed
 //! `POST /v1/audio/transcriptions` OpenAI-compatible multipart STT endpoint
-//! (stt builds), a bearer-authed
+//! (stt builds), a bearer-authed `POST /v1/audio/speech` speech-synthesis
+//! passthrough for `kind = "speech"` models streaming the upstream's audio
+//! bytes unread, a bearer-authed `GET /v1/audio/voices` union catalog of
+//! the speech models' configured voices, a bearer-authed
 //! `GET /admin/system` snapshot of host CPU, RAM, cache-drive, and GPU
 //! metrics, a bearer-authed `GET /admin/hf/search` and
 //! `GET /admin/hf/model/{repo}` proxy onto the Hugging Face hub API
@@ -134,7 +137,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{FromRequest, Request, State};
 use axum::http::HeaderValue;
 #[cfg(feature = "stt")]
 use axum::http::header::ORIGIN;
@@ -154,6 +157,7 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, RerankRequest, RerankResponse,
+    SpeechRequest, SpeechResponseFormat, SpeechVoice,
 };
 use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
@@ -163,6 +167,7 @@ use gateway_stt::{SpeechReplacement, SpeechService};
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
+use shared_protocol::ProtocolError;
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -465,6 +470,7 @@ pub(crate) fn build_router(state: AppState, bound: Option<std::net::SocketAddr>)
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/embeddings", post(embeddings))
         .route("/v1/rerank", post(rerank))
+        .route("/v1/audio/speech", post(audio_speech))
         .route("/v1/models", get(list_models))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
@@ -914,6 +920,147 @@ async fn rerank(
     Ok(Json(response))
 }
 
+/// The speech route to a backend: the same auth, routing, kind guard, and
+/// dominion queue admission as chat, for `kind = "speech"` models.
+///
+/// Two deliberate departures from the other routes. First, auth runs before
+/// body extraction: the handler takes the ungated [`Caller`] parts
+/// extractor and a raw [`Request`], runs [`check_auth`], and only then
+/// extracts `Json<SpeechRequest>` by hand, so an unauthorized caller never
+/// makes the gateway parse a body. Second, the reply is a byte passthrough,
+/// not a typed relay: audio frames are opaque bytes the gateway cannot
+/// re-validate per chunk, so the upstream body is forwarded unread - the
+/// one departure from the gateway's typed-relay norm, the same trade
+/// [`relay_sse`] documents for its own design. Because the response is a
+/// long-lived byte stream, this route must never sit under a
+/// `CompressionLayer` or a whole-request `TimeoutLayer`: both buffer or
+/// kill long-lived streams.
+async fn audio_speech(
+    State(state): State<AppState>,
+    caller: Caller,
+    request: Request,
+) -> Result<Response, GatewayError> {
+    check_auth(&state, &caller).await?;
+    let Json(request) = Json::<SpeechRequest>::from_request(request, &state)
+        .await
+        .map_err(|rejection| GatewayError::MalformedRequest(rejection.body_text()))?;
+    request
+        .validate()
+        .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
+    let in_flight = state.begin_inference().await;
+    let model = resolve_routed_model(&state, &request.model).await?;
+    crate::routing::require_kind(&model, ModelKind::Speech)?;
+    // A voice the model does not offer is a client error, so it is judged
+    // before queue admission: a 400 never burns a queue slot.
+    let voices = model.capabilities.voices();
+    if !voices.is_empty() {
+        let requested = match &request.voice {
+            SpeechVoice::Name(name) => name.as_str(),
+            SpeechVoice::Id { id } => id.as_str(),
+        };
+        if !voices.iter().any(|voice| voice == requested) {
+            return Err(GatewayError::InvalidVoice {
+                voice: requested.to_owned(),
+                valid: voices.to_vec(),
+            });
+        }
+    }
+    let format = request.response_format;
+    let client_id = crate::queue::ClientId::from_header(
+        caller
+            .get(CLIENT_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
+    let permit = tokio::select! {
+        result = model.endpoint.queue.admit(client_id.as_str()) => result?,
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
+    // A failure here is before the response starts, so it is consumed as a
+    // normal JSON error, never a stream that dies mid-flight. The speech
+    // path maps upstream 429/503 to its own envelope codes; every other
+    // error keeps the shared protocol mapping.
+    let streamed = tokio::select! {
+        result = model.endpoint.upstream.send_speech(request, &model.upstream_name) => {
+            result.map_err(|error| match error {
+                ProtocolError::UpstreamStatus { status: 429, .. } => {
+                    GatewayError::UpstreamRateLimited
+                }
+                ProtocolError::UpstreamStatus { status: 503, .. } => {
+                    GatewayError::UpstreamUnavailable
+                }
+                other => GatewayError::Protocol(other),
+            })?
+        },
+        () = in_flight.cancelled() => return Err(GatewayError::RequestCancelled),
+    };
+    Ok(relay_audio(streamed, format, permit, in_flight))
+}
+
+/// Re-emit an upstream audio byte stream as the response body, holding the
+/// dominion queue permit for the stream's lifetime.
+///
+/// The relay is untyped on purpose: audio frames are opaque bytes, so the
+/// chunks pass through unread rather than being validated and re-serialized
+/// the way [`relay_sse`] re-emits chat chunks. The response forwards the
+/// upstream `Content-Type` when present and otherwise falls back to the
+/// requested format's MIME mapping; `Content-Length` is never set, so hyper
+/// emits `Transfer-Encoding: chunked`.
+///
+/// No error envelope can follow 200 plus audio bytes, so a mid-stream
+/// upstream failure is propagated as a body error (the client's read fails)
+/// and a profile-switch cancellation ends the stream early; both surface as
+/// a truncation, never a JSON tail. Client-disconnect cancellation is Drop
+/// all the way down, exactly as in [`relay_sse`]: when the client goes away
+/// the response body is dropped, which drops the byte stream, which drops
+/// the upstream response and aborts the upstream connection, releasing the
+/// permit in the same unwind. There is no explicit cancel path.
+fn relay_audio(
+    streamed: crate::upstream::StreamedAudio,
+    format: SpeechResponseFormat,
+    permit: crate::queue::Permit,
+    in_flight: drain::InFlightGuard,
+) -> Response {
+    use futures_util::StreamExt as _;
+
+    let relayed = futures_util::stream::unfold(
+        (streamed.body, false, permit, in_flight),
+        |(mut body, failed, permit, in_flight)| async move {
+            if failed {
+                return None;
+            }
+            let item = tokio::select! {
+                item = body.next() => item,
+                () = in_flight.cancelled() => None,
+            }?;
+            match item {
+                Ok(bytes) => Some((Ok(bytes), (body, false, permit, in_flight))),
+                Err(error) => Some((Err(error), (body, true, permit, in_flight))),
+            }
+        },
+    );
+    let mut response = Response::new(Body::from_stream(relayed));
+    let content_type = if streamed.content_type.is_empty() {
+        speech_mime(format)
+    } else {
+        HeaderValue::from_str(&streamed.content_type).unwrap_or_else(|_| speech_mime(format))
+    };
+    response.headers_mut().insert(CONTENT_TYPE, content_type);
+    response
+}
+
+/// The `Content-Type` a speech response falls back to when the upstream
+/// omits it: the requested format's MIME type (the OpenAI spellings).
+fn speech_mime(format: SpeechResponseFormat) -> HeaderValue {
+    HeaderValue::from_static(match format {
+        SpeechResponseFormat::Mp3 => "audio/mpeg",
+        SpeechResponseFormat::Opus => "audio/ogg",
+        SpeechResponseFormat::Aac => "audio/aac",
+        SpeechResponseFormat::Flac => "audio/flac",
+        SpeechResponseFormat::Wav => "audio/wav",
+        SpeechResponseFormat::Pcm => "audio/pcm",
+    })
+}
+
 /// Bearer-authed catalog of configured models for host bind.
 async fn list_models(
     State(state): State<AppState>,
@@ -1077,29 +1224,17 @@ async fn admin_status(
                 .any(|model| model.kind() == kind)
     };
     let routed = |kind: ModelKind| live.routing.models().iter().any(|model| model.kind == kind);
-    let endpoints = vec![
-        endpoint_status(
-            "/v1/chat/completions",
-            "Chat completions",
-            configured(ModelKind::Chat),
-            routed(ModelKind::Chat),
-            command_active,
-        ),
-        endpoint_status(
-            "/v1/embeddings",
-            "Embeddings",
-            configured(ModelKind::Embedding),
-            routed(ModelKind::Embedding),
-            command_active,
-        ),
-        endpoint_status(
-            "/v1/rerank",
-            "Rerank",
-            configured(ModelKind::Classifier),
-            routed(ModelKind::Classifier),
-            command_active,
-        ),
-    ];
+    let endpoints = [
+        ("/v1/chat/completions", "Chat completions", ModelKind::Chat),
+        ("/v1/embeddings", "Embeddings", ModelKind::Embedding),
+        ("/v1/rerank", "Rerank", ModelKind::Classifier),
+        ("/v1/audio/speech", "Speech synthesis", ModelKind::Speech),
+    ]
+    .into_iter()
+    .map(|(path, name, kind)| {
+        endpoint_status(path, name, configured(kind), routed(kind), command_active)
+    })
+    .collect::<Vec<_>>();
     #[cfg(feature = "stt")]
     let (endpoints, speech) =
         with_speech_endpoint(endpoints, state.speech.status(), command_active);
@@ -2919,6 +3054,74 @@ mod transcription_auth_tests {
             .expect("body reads");
         let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
         assert_eq!(json["error"]["code"], "model_not_found");
+    }
+}
+
+#[cfg(test)]
+mod speech_auth_tests {
+    //! The speech route's auth ordering through the real router. The route
+    //! is unconditional, so these tests sit beside, not inside, the
+    //! stt-gated `transcription_auth_tests` module.
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use gateway_config::Config;
+    use tower::ServiceExt;
+
+    use crate::build_router;
+    use crate::test_support::app_state;
+
+    fn state() -> crate::AppState {
+        let config = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [workshop]\n",
+        )
+        .expect("config parses");
+        app_state(config, None)
+    }
+
+    #[tokio::test]
+    async fn speech_checks_bearer_auth_before_json_extraction() {
+        let response = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/speech")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{not json"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "auth refuses the request before its malformed body is extracted"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticated_malformed_json_uses_the_openai_error_envelope() {
+        let response = build_router(state(), None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/audio/speech")
+                    .header("authorization", "Bearer test-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{not json"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("router answers");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("body is JSON");
+        assert_eq!(json["error"]["code"], "malformed_request");
+        assert_eq!(json["error"]["type"], "invalid_request_error");
     }
 }
 
@@ -5046,7 +5249,7 @@ mod status_surface_tests {
             chat["provisioning"], false,
             "no command is running, so nothing provisions"
         );
-        for path in ["/v1/embeddings", "/v1/rerank"] {
+        for path in ["/v1/embeddings", "/v1/rerank", "/v1/audio/speech"] {
             let entry = endpoints
                 .iter()
                 .find(|entry| entry["path"] == path)
