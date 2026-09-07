@@ -157,7 +157,6 @@ use crate::auth::Caller;
 use crate::error::GatewayError;
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
-use crate::profile_switch::{PersistenceCommitError, PreparedPersistence, SwitchTarget};
 use crate::routing::Routing;
 use crate::wire::{
     ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, RerankRequest, RerankResponse,
@@ -166,7 +165,7 @@ use gateway_config::ModelKind;
 #[cfg(feature = "web-search")]
 use gateway_config::WebSearchConfig;
 #[cfg(feature = "stt")]
-use gateway_stt::{SpeechReplacement, SpeechService};
+use gateway_stt::SpeechService;
 #[cfg(feature = "web-search")]
 use gateway_web_search::{WebSearchRequest, WebSearchResponse, WebSearchState};
 use shared_progress::{EventState, OperationId, ProgressEvent, ProgressHub, ProgressTree};
@@ -295,6 +294,10 @@ pub(crate) struct AppState {
     /// install one.
     #[cfg(test)]
     park: Option<Arc<switch_park::PhasePark>>,
+    /// Test-only transaction failure selected before the state is cloned into
+    /// a switch task.
+    #[cfg(test)]
+    switch_fault: Option<switch_park::SwitchFault>,
 }
 
 /// The test-only phase rendezvous for [`run_switch_with_config`].
@@ -315,6 +318,13 @@ pub(crate) mod switch_park {
         Commit,
         /// The persistence-to-live-publication boundary.
         Publish,
+    }
+
+    /// One transaction failure a test can inject through the production path.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum SwitchFault {
+        /// Runtime startup timed out after cutover and cannot be preempted.
+        StageIndeterminate,
     }
 
     /// Parks the switch at `phase` until the test releases it. Single use:
@@ -363,6 +373,11 @@ impl AppState {
         if let Some(park) = &self.park {
             park.park(phase).await;
         }
+    }
+
+    #[cfg(test)]
+    fn has_switch_fault(&self, fault: switch_park::SwitchFault) -> bool {
+        self.switch_fault == Some(fault)
     }
 
     /// Build full runtime state for `Gateway` and integration tests.
@@ -423,6 +438,8 @@ impl AppState {
             speech,
             #[cfg(test)]
             park: None,
+            #[cfg(test)]
+            switch_fault: None,
         }
     }
 
@@ -1375,36 +1392,6 @@ async fn admin_switch_profile(
     Ok(switch_sse_response(rx, enqueued.operation, switch))
 }
 
-#[derive(Debug)]
-enum CommitFailure {
-    Determinate(GatewayError),
-    Fatal(GatewayError),
-}
-
-#[derive(Debug)]
-#[cfg_attr(
-    not(any(feature = "local", feature = "stt")),
-    expect(
-        dead_code,
-        reason = "the featureless stage stub cannot produce either runtime failure classification"
-    )
-)]
-enum RuntimeStageFailure {
-    Determinate(GatewayError),
-    Fatal(GatewayError),
-}
-
-#[cfg(feature = "stt")]
-fn classify_speech_stage_failure(error: gateway_stt::SpeechError) -> RuntimeStageFailure {
-    let fatal = error.is_non_preemptible_startup_timeout();
-    let error = GatewayError::switch_failed("start-stt", error);
-    if fatal {
-        RuntimeStageFailure::Fatal(error)
-    } else {
-        RuntimeStageFailure::Determinate(error)
-    }
-}
-
 /// Executes a switch using an optional catalog parsed by Apply.
 ///
 /// The switch runs in five phases and holds the `switch` lock - the one
@@ -1464,461 +1451,7 @@ async fn run_switch_with_config(
     persistence: impl FnOnce() -> StatePersistence,
     token: &tokio_util::sync::CancellationToken,
 ) -> Result<String, GatewayError> {
-    // Every phase past the first may run after the interim state is
-    // published, so a failure anywhere in them clears `loading`; before the
-    // cut-over the set is still empty and the clear touches nothing.
-    let prepared =
-        profile_switch::prepare(&state, name.clone(), tree, candidate, persistence, token).await?;
-    let outcome = run_switch_phases(&state, &name, prepared).await;
-    let report = match outcome {
-        Ok(report) => report,
-        Err(error) => return Err(error),
-    };
-
-    #[cfg(feature = "local")]
-    if !report.failed.is_empty() {
-        return Err(GatewayError::PartialStart {
-            profile: name.to_string(),
-            loaded: report.loaded,
-            failed: report.failed,
-        });
-    }
-    #[cfg(not(feature = "local"))]
-    let StartReport {} = report;
-
-    tracing::info!(profile = %name, "switched profile");
-    Ok(name.to_string())
-}
-
-async fn run_switch_phases(
-    state: &AppState,
-    name: &ProfileName,
-    prepared: profile_switch::PreparedPhase,
-) -> Result<StartReport, GatewayError> {
-    let cutover = prepared.cut_over().await?;
-    #[cfg(feature = "stt")]
-    let mut cutover = cutover;
-    // Phase boundary: start no replacement children for a cancelled command.
-    if cutover.is_cancelled() {
-        let error = cutover.cancellation_error();
-        return Err(cutover.restore_or_shutdown(error).await);
-    }
-    #[cfg(test)]
-    {
-        state.park_at(switch_park::SwitchPhase::Spawn).await;
-    }
-    #[cfg(feature = "stt")]
-    let prepared_speech = match cutover.take_prepared_speech() {
-        Ok(speech) => speech,
-        Err(error) => return Err(cutover.restore_or_shutdown(error).await),
-    };
-    let deadline = std::time::Instant::now()
-        .checked_add(profile_switch::STAGE_TIMEOUT)
-        .ok_or_else(|| {
-            GatewayError::switch_failed(
-                "stage-profile-deadline",
-                std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "profile staging deadline could not be represented",
-                ),
-            )
-        })?;
-    let replacement = match spawn_runtimes(
-        cutover.config(),
-        #[cfg(feature = "stt")]
-        state.speech.clone(),
-        #[cfg(feature = "stt")]
-        prepared_speech,
-        cutover.tree(),
-        cutover.token(),
-        deadline,
-    )
-    .await
-    {
-        Ok(replacement) => replacement,
-        Err(RuntimeStageFailure::Determinate(error)) => {
-            return Err(cutover.restore_or_shutdown(error).await);
-        }
-        Err(RuntimeStageFailure::Fatal(error)) => {
-            return Err(request_fatal_shutdown(
-                state,
-                cutover.token(),
-                "stage-profile-timeout",
-                error,
-            ));
-        }
-    };
-    // Phase boundary: a token fired during the start stops before the
-    // persist and the swap; dropping the replacement tears down any
-    // children it started.
-    if cutover.is_cancelled() {
-        if let Err(rollback) = rollback_runtime(state, replacement) {
-            return Err(request_fatal_shutdown(
-                state,
-                cutover.token(),
-                "rollback-staged-profile",
-                rollback,
-            ));
-        }
-        let error = cutover.cancellation_error();
-        return Err(cutover.restore_or_shutdown(error).await);
-    }
-    let (target, prepared_persistence, old, token) = cutover.into_terminal_parts();
-    match commit_switch(
-        state,
-        name,
-        target,
-        replacement,
-        prepared_persistence,
-        &token,
-    )
-    .await
-    {
-        Ok(report) => Ok(report),
-        Err(CommitFailure::Determinate(error)) => {
-            Err(profile_switch::restore_or_shutdown(state, &token, old, error).await)
-        }
-        Err(CommitFailure::Fatal(error)) => Err(error),
-    }
-}
-
-#[cfg_attr(
-    not(feature = "stt"),
-    expect(
-        unused_variables,
-        reason = "featureless runtime replacement has no speech owner to restore"
-    )
-)]
-fn rollback_runtime(state: &AppState, replacement: RuntimeReplacement) -> Result<(), GatewayError> {
-    #[cfg(feature = "stt")]
-    state
-        .speech
-        .abort_replacement(replacement.speech)
-        .map_err(|error| GatewayError::switch_failed("rollback-stt", error))?;
-    #[cfg(not(feature = "stt"))]
-    let _replacement = replacement;
-    Ok(())
-}
-
-fn request_fatal_shutdown(
-    state: &AppState,
-    token: &tokio_util::sync::CancellationToken,
-    phase: &'static str,
-    error: GatewayError,
-) -> GatewayError {
-    token.cancel();
-    state.shutdown.fire();
-    #[cfg(feature = "stt")]
-    state.speech.shutdown();
-    GatewayError::switch_failed(phase, error)
-}
-
-fn rollback_commit_failure(
-    state: &AppState,
-    token: &tokio_util::sync::CancellationToken,
-    replacement: RuntimeReplacement,
-    failure: GatewayError,
-) -> CommitFailure {
-    match rollback_runtime(state, replacement) {
-        Ok(()) => CommitFailure::Determinate(failure),
-        Err(rollback) => CommitFailure::Fatal(request_fatal_shutdown(
-            state,
-            token,
-            "rollback-staged-profile",
-            GatewayError::switch_failed(
-                "determinate-profile-failure",
-                std::io::Error::other(format!(
-                    "{}; {}",
-                    config_write::error_chain(&failure),
-                    config_write::error_chain(&rollback)
-                )),
-            ),
-        )),
-    }
-}
-
-/// Phase 5: the commit, under the switch lock. Merges the started local
-/// models into the remote table, persists the profile selection, and swaps
-/// the whole new profile into the live state in one write, clearing
-/// `loading`. Persistence precedes the swap: once the state file commits
-/// the swap is infallible, so another switch can never overwrite pending
-/// state between activation and persistence.
-async fn commit_switch(
-    state: &AppState,
-    name: &ProfileName,
-    target: SwitchTarget,
-    replacement: RuntimeReplacement,
-    persistence: PreparedPersistence,
-    token: &tokio_util::sync::CancellationToken,
-) -> Result<StartReport, CommitFailure> {
-    let _switch = state.switch.lock().await;
-    #[cfg(test)]
-    {
-        state.park_at(switch_park::SwitchPhase::Commit).await;
-    }
-    #[cfg(feature = "local")]
-    let routing = match target
-        .remote_routing
-        .merge(replacement.local.models().iter().cloned())
-    {
-        Ok(routing) => routing,
-        Err(error) => {
-            let failure = GatewayError::switch_failed("merge-routing", error);
-            return Err(rollback_commit_failure(state, token, replacement, failure));
-        }
-    };
-    #[cfg(not(feature = "local"))]
-    let routing = target.remote_routing;
-    if token.is_cancelled() {
-        return Err(rollback_commit_failure(
-            state,
-            token,
-            replacement,
-            GatewayError::CommandCancelled("profile switch".to_owned()),
-        ));
-    }
-    let _publication = tokio::select! {
-        biased;
-        () = token.cancelled() => {
-            return Err(rollback_commit_failure(
-                state,
-                token,
-                replacement,
-                GatewayError::CommandCancelled("profile switch".to_owned()),
-            ));
-        }
-        guard = state.apply.lock() => guard,
-    };
-    if token.is_cancelled() {
-        return Err(rollback_commit_failure(
-            state,
-            token,
-            replacement,
-            GatewayError::CommandCancelled("profile switch".to_owned()),
-        ));
-    }
-    match persistence.commit().await {
-        Ok(()) => {}
-        Err(PersistenceCommitError::Determinate(error)) => {
-            return Err(rollback_commit_failure(state, token, replacement, error));
-        }
-        Err(PersistenceCommitError::Indeterminate(error)) => {
-            return Err(CommitFailure::Fatal(request_fatal_shutdown(
-                state,
-                token,
-                "persist-profile-indeterminate",
-                error,
-            )));
-        }
-    }
-    #[cfg(test)]
-    {
-        state.park_at(switch_park::SwitchPhase::Publish).await;
-    }
-    let report = start_report(&replacement);
-    #[cfg(feature = "stt")]
-    if let Err(error) = state.speech.commit_replacement(replacement.speech) {
-        return Err(CommitFailure::Fatal(request_fatal_shutdown(
-            state,
-            token,
-            "publish-stt",
-            GatewayError::switch_failed("publish-stt", error),
-        )));
-    }
-
-    // Atomic swap: commit the whole new profile at once.
-    let mut live = state.live.write().await;
-    live.routing = Arc::new(routing);
-    // The listener and bearer key are process-owned `[server]` state.
-    // Apply reports their edits as restart-required, so a profile reload
-    // must not change authentication before that restart.
-    live.config = Arc::new(target.config);
-    #[cfg(feature = "web-search")]
-    {
-        live.web_search = target.web_search;
-    }
-    #[cfg(feature = "local")]
-    {
-        live.local = replacement.local;
-    }
-    live.profile_name = Some(name.to_string());
-    live.model_allowlist = target.allowlist;
-    live.loading.clear();
-    Ok(report)
-}
-
-#[cfg(feature = "local")]
-fn start_report(replacement: &RuntimeReplacement) -> StartReport {
-    StartReport {
-        loaded: replacement
-            .local
-            .models()
-            .iter()
-            .map(|model| model.name.clone())
-            .collect(),
-        failed: replacement
-            .start_failures
-            .iter()
-            .map(|failure| format!("{}: {}", failure.model(), failure.error()))
-            .collect(),
-    }
-}
-
-#[cfg(not(feature = "local"))]
-fn start_report(_replacement: &RuntimeReplacement) -> StartReport {
-    StartReport {}
-}
-
-/// What the spawn reported once the commit landed: the local models that
-/// reached readiness and the ones that failed, rendered for
-/// [`GatewayError::PartialStart`].
-#[derive(Debug)]
-struct StartReport {
-    #[cfg(feature = "local")]
-    loaded: Vec<String>,
-    #[cfg(feature = "local")]
-    failed: Vec<String>,
-}
-
-/// The runtimes phase 4 started, swapped into the live state at commit.
-struct RuntimeReplacement {
-    #[cfg(feature = "local")]
-    local: LocalRuntime,
-    #[cfg(feature = "local")]
-    start_failures: Vec<local::LocalStartFailure>,
-    #[cfg(feature = "stt")]
-    speech: SpeechReplacement,
-}
-
-/// Phase 4 in a headless build: no local runtime or speech generation exists,
-/// and no `starting-models` leaf is registered.
-#[cfg(not(any(feature = "local", feature = "stt")))]
-async fn spawn_runtimes(
-    _config: &Config,
-    _tree: &ProgressTree,
-    _token: &tokio_util::sync::CancellationToken,
-    _deadline: std::time::Instant,
-) -> Result<RuntimeReplacement, RuntimeStageFailure> {
-    Ok(RuntimeReplacement {})
-}
-
-/// Phase 4: starts the target's local children and staged speech generation and waits
-/// for readiness under `starting-models`, unlocked. The artifacts were
-/// staged by phase 2, so the start's own ensure calls are cache hits and
-/// the phase is the spawn and the weight load.
-#[cfg(any(feature = "local", feature = "stt"))]
-async fn spawn_runtimes(
-    config: &Config,
-    #[cfg(feature = "stt")] speech: SpeechService,
-    #[cfg(feature = "stt")] prepared_speech: gateway_stt::PreparedSpeech,
-    tree: &ProgressTree,
-    token: &tokio_util::sync::CancellationToken,
-    deadline: std::time::Instant,
-) -> Result<RuntimeReplacement, RuntimeStageFailure> {
-    let starting = tree.register("starting-models", 5.0);
-    #[cfg(feature = "local")]
-    let start_config = config.clone();
-    #[cfg(feature = "local")]
-    let start_progress = starting.clone();
-    #[cfg(feature = "local")]
-    let outcome = {
-        // The child readiness poll predates the token and speaks
-        // `AtomicBool`; the bridge task folds the token into the flag so one
-        // cancellation source stops a child still loading weights.
-        let start_token = token.clone();
-        let interrupted = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let bridge = tokio::spawn({
-            let interrupted = Arc::clone(&interrupted);
-            let token = token.clone();
-            async move {
-                token.cancelled().await;
-                interrupted.store(true, std::sync::atomic::Ordering::Release);
-            }
-        });
-        let result = tokio::time::timeout(
-            deadline.saturating_duration_since(std::time::Instant::now()),
-            tokio::task::spawn_blocking(move || {
-                local::LocalRuntime::start_partial_with_cancellation(
-                    &start_config,
-                    Some(&start_progress),
-                    &start_token,
-                    &interrupted,
-                )
-            }),
-        )
-        .await;
-        bridge.abort();
-        match result {
-            Ok(Ok(Ok(outcome))) => outcome,
-            Ok(Ok(Err(error))) => {
-                starting.fail();
-                return Err(RuntimeStageFailure::Determinate(
-                    GatewayError::switch_failed("start-local", error),
-                ));
-            }
-            Ok(Err(error)) => {
-                starting.fail();
-                return Err(RuntimeStageFailure::Determinate(
-                    GatewayError::switch_failed("start-local-task", error),
-                ));
-            }
-            Err(_) => {
-                starting.fail();
-                return Err(RuntimeStageFailure::Fatal(GatewayError::switch_failed(
-                    "start-local-timeout",
-                    std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "local runtime startup exceeded the shared profile deadline",
-                    ),
-                )));
-            }
-        }
-    };
-    #[cfg(feature = "local")]
-    let (runtime, failures) = outcome.into_parts();
-    // Phase boundary: a cancelled command starts no speech generation behind the
-    // cancellation; the local runtime built above drops, killing its
-    // children.
-    #[cfg(feature = "stt")]
-    if token.is_cancelled() {
-        return Err(RuntimeStageFailure::Determinate(
-            GatewayError::CommandCancelled("profile switch".to_owned()),
-        ));
-    }
-    #[cfg(feature = "stt")]
-    let speech = match tokio::task::spawn_blocking(move || {
-        speech.begin_replacement_before(prepared_speech, deadline)
-    })
-    .await
-    {
-        Ok(Ok(runtime)) => runtime,
-        Ok(Err(error)) => {
-            starting.fail();
-            return Err(classify_speech_stage_failure(error));
-        }
-        Err(error) => {
-            starting.fail();
-            return Err(RuntimeStageFailure::Determinate(
-                GatewayError::switch_failed("start-stt-task", error),
-            ));
-        }
-    };
-    #[cfg(feature = "local")]
-    if failures.is_empty() {
-        starting.complete();
-    } else {
-        starting.fail();
-    }
-    #[cfg(not(feature = "local"))]
-    starting.complete();
-    Ok(RuntimeReplacement {
-        #[cfg(feature = "local")]
-        local: runtime,
-        #[cfg(feature = "local")]
-        start_failures: failures,
-        #[cfg(feature = "stt")]
-        speech,
-    })
+    profile_switch::run(&state, name, tree, candidate, persistence, token).await
 }
 
 /// Builds the switch-profile SSE response: the hub's event stream filtered
@@ -2458,51 +1991,42 @@ mod provisioning_tests {
         worker.await.expect("the worker exits on shutdown");
     }
 
-    /// A token fired after the spawn phase opens stops the switch before the
-    /// persist and the final routing-table swap. The canceller fires on the
-    /// `starting-models` phase opening; the start itself is a no-op (the
-    /// profile selects only a remote model), and the phase boundary after
-    /// the spawn keeps the cancelled switch from committing: the profile
-    /// is never recorded as active, and `loading` is left clear.
+    /// A featureless switch cancelled at the phase-independent spawn
+    /// rendezvous restores the prior routing and never publishes its target.
+    #[cfg(not(any(feature = "local", feature = "stt")))]
     #[tokio::test]
-    async fn a_token_fired_during_the_start_stops_the_persist_and_the_swap() {
-        let config = Config::from_toml_str(
-            "config-version = 2\n\
-             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
-             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
-             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
-             [[model]]\nname = \"remote-model\"\ndescription = \"d\"\n\
-             context = 8192\nupstream = \"u\"\nendpoints = [\"e\"]\n\
-             [[profile]]\nname = \"main\"\nmodels = [\"remote-model\"]\n",
-        )
-        .expect("config parses");
-        let state = app_state(config, None);
+    async fn featureless_cancellation_stops_persistence_and_publication() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Spawn,
+        ));
+        state.park = Some(Arc::clone(&park));
         let token = CancellationToken::new();
-        let mut rx = state.hub.subscribe();
-        let canceller = tokio::spawn({
-            let token = token.clone();
-            async move {
-                while let Ok(event) = rx.recv().await {
-                    if matches!(event.state, shared_progress::EventState::Begun { .. })
-                        && event.label == "starting-models"
-                    {
-                        token.cancel();
-                        return;
-                    }
-                }
-            }
+        let switch_state = state.clone();
+        let switch_token = token.clone();
+        let switch = tokio::spawn(async move {
+            let tree = switch_state.hub.operation();
+            crate::run_switch_with_config(
+                switch_state,
+                ProfileName::parse("beta").expect("profile name"),
+                tree,
+                None,
+                || crate::StatePersistence::Write,
+                &switch_token,
+            )
+            .await
         });
-        let tree = state.hub.operation();
-        let outcome = crate::run_switch_with_config(
-            state.clone(),
-            ProfileName::parse("main").expect("profile name"),
-            tree,
-            None,
-            || crate::StatePersistence::Write,
-            &token,
-        )
-        .await;
-        canceller.await.expect("the canceller ran");
+
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
+            .await
+            .expect("featureless switch reaches spawn");
+        token.cancel();
+        park.release();
+        let outcome = tokio::time::timeout(Duration::from_secs(10), switch)
+            .await
+            .expect("featureless cancellation settles")
+            .expect("switch task joins");
 
         assert!(
             matches!(
@@ -2512,9 +2036,12 @@ mod provisioning_tests {
             "the late cancellation stops the switch: {outcome:?}"
         );
         let live = state.live.read().await;
-        assert!(
-            live.profile_name.is_none(),
-            "the cancelled switch never committed the profile"
+        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
+        assert!(live.routing.model("alpha-model").is_ok());
+        assert!(live.routing.model("beta-model").is_err());
+        assert_eq!(
+            std::fs::read_to_string(state_path).expect("read profile state"),
+            "active_profile = \"alpha\"\n"
         );
         assert!(
             live.loading.is_empty(),
@@ -2544,6 +2071,62 @@ mod provisioning_tests {
             .select_profile(&ProfileName::parse("alpha").expect("profile name"))
             .expect("alpha profile selects");
         app_state(config, None)
+    }
+
+    fn persisted_two_remote_profiles(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
+        let config_path = temp.path().join("gateway.toml");
+        std::fs::write(&config_path, two_remote_catalog()).expect("write catalog");
+        let state_path = gateway_config::profile_state_path(&config_path);
+        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
+        let config = Config::load(
+            &config_path,
+            &gateway_config::ProfileSelection::new(Some("alpha"), None),
+        )
+        .expect("load alpha profile");
+        let state = app_state(
+            config,
+            Some(crate::test_support::AdminPaths {
+                fixture_dir: temp.path().to_path_buf(),
+                active: "alpha".to_owned(),
+                config_path,
+            }),
+        );
+        (state, state_path)
+    }
+
+    #[cfg(not(any(feature = "local", feature = "stt")))]
+    #[tokio::test]
+    async fn featureless_profile_switch_commits_the_complete_target() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (state, state_path) = persisted_two_remote_profiles(&temp);
+        let token = CancellationToken::new();
+        let tree = state.hub.operation();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::run_switch_with_config(
+                state.clone(),
+                ProfileName::parse("beta").expect("profile name"),
+                tree,
+                None,
+                || crate::StatePersistence::Write,
+                &token,
+            ),
+        )
+        .await
+        .expect("featureless switch settles")
+        .expect("featureless switch commits");
+
+        assert_eq!(outcome, "beta");
+        let live = state.live.read().await;
+        assert_eq!(live.profile_name.as_deref(), Some("beta"));
+        assert!(live.routing.model("alpha-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
+        assert_eq!(
+            std::fs::read_to_string(state_path).expect("read profile state"),
+            "active_profile = \"beta\"\n"
+        );
+        assert!(!token.is_cancelled());
+        assert!(!state.shutdown.is_fired());
     }
 
     /// Runs the switch to `profile` on its own task with no persistence.
@@ -2663,6 +2246,98 @@ mod provisioning_tests {
         }
     }
 
+    #[tokio::test]
+    async fn indeterminate_staging_timeout_requests_shutdown_without_persisting() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
+        state.switch_fault = Some(crate::switch_park::SwitchFault::StageIndeterminate);
+        let token = CancellationToken::new();
+        let tree = state.hub.operation();
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(10),
+            crate::run_switch_with_config(
+                state.clone(),
+                ProfileName::parse("beta").expect("profile name"),
+                tree,
+                None,
+                || crate::StatePersistence::Write,
+                &token,
+            ),
+        )
+        .await
+        .expect("injected staging timeout settles")
+        .expect_err("indeterminate staging fails");
+
+        let chain = crate::config_write::error_chain(&error);
+        assert!(chain.contains("stage-profile-timeout"));
+        assert!(chain.contains("injected non-preemptible runtime startup timeout"));
+        assert_eq!(
+            std::fs::read_to_string(state_path).expect("read profile state"),
+            "active_profile = \"alpha\"\n"
+        );
+        let live = state.live.read().await;
+        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
+        assert!(live.routing.model("alpha-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
+        assert!(token.is_cancelled());
+        assert!(state.shutdown.is_fired());
+        #[cfg(feature = "stt")]
+        assert!(!state.speech.status().ready());
+    }
+
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn failed_speech_publication_is_indeterminate_after_persistence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
+        let park = Arc::new(crate::switch_park::PhasePark::at(
+            crate::switch_park::SwitchPhase::Publish,
+        ));
+        state.park = Some(Arc::clone(&park));
+        let token = CancellationToken::new();
+        let switch_state = state.clone();
+        let switch_token = token.clone();
+        let switch = tokio::spawn(async move {
+            let tree = switch_state.hub.operation();
+            crate::run_switch_with_config(
+                switch_state,
+                ProfileName::parse("beta").expect("profile name"),
+                tree,
+                None,
+                || crate::StatePersistence::Write,
+                &switch_token,
+            )
+            .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(10), park.entered())
+            .await
+            .expect("switch reaches speech publication");
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("read profile state"),
+            "active_profile = \"beta\"\n"
+        );
+        state.speech.shutdown();
+        park.release();
+        let error = tokio::time::timeout(Duration::from_secs(10), switch)
+            .await
+            .expect("failed speech publication settles")
+            .expect("switch task joins")
+            .expect_err("invalidated speech publication is fatal");
+
+        let chain = crate::config_write::error_chain(&error);
+        assert!(chain.contains("publish-stt"));
+        assert!(chain.contains("invalidated"));
+        let live = state.live.read().await;
+        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
+        assert!(live.routing.model("alpha-model").is_err());
+        assert!(live.routing.model("beta-model").is_ok());
+        assert!(!state.speech.status().ready());
+        assert!(token.is_cancelled());
+        assert!(state.shutdown.is_fired());
+    }
+
     #[cfg(feature = "stt")]
     #[tokio::test]
     async fn determinate_commit_with_failed_speech_rollback_requests_shutdown() {
@@ -2695,7 +2370,7 @@ mod provisioning_tests {
         let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
             .await
             .expect("target prepares");
-        let replacement = crate::RuntimeReplacement {
+        let replacement = crate::profile_switch::RuntimeReplacement {
             #[cfg(feature = "local")]
             local: crate::local::LocalRuntime::empty(),
             #[cfg(feature = "local")]
@@ -2704,12 +2379,16 @@ mod provisioning_tests {
         };
         let token = CancellationToken::new();
 
-        let error = crate::commit_switch(&state, &name, target, replacement, persistence, &token)
-            .await
-            .expect_err("failed rollback makes a determinate persistence failure fatal");
-        let crate::CommitFailure::Fatal(error) = error else {
-            panic!("failed rollback must be fatal");
-        };
+        let error = crate::profile_switch::commit_for_test(
+            &state,
+            name,
+            target,
+            replacement,
+            persistence,
+            token.clone(),
+        )
+        .await
+        .expect_err("failed rollback makes a determinate persistence failure fatal");
 
         assert!(crate::config_write::error_chain(&error).contains("gateway rollback sentinel"));
         assert!(
@@ -2752,7 +2431,7 @@ mod provisioning_tests {
         let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
             .await
             .expect("target prepares");
-        let replacement = crate::RuntimeReplacement {
+        let replacement = crate::profile_switch::RuntimeReplacement {
             #[cfg(feature = "local")]
             local: crate::local::LocalRuntime::empty(),
             #[cfg(feature = "local")]
@@ -2761,10 +2440,16 @@ mod provisioning_tests {
         };
         let token = CancellationToken::new();
 
-        let error = crate::commit_switch(&state, &name, target, replacement, persistence, &token)
-            .await
-            .expect_err("indeterminate persistence is fatal");
-        assert!(matches!(error, crate::CommitFailure::Fatal(_)));
+        crate::profile_switch::commit_for_test(
+            &state,
+            name,
+            target,
+            replacement,
+            persistence,
+            token.clone(),
+        )
+        .await
+        .expect_err("indeterminate persistence is fatal");
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
         assert!(next.worker_dropped(), "invalidated staging is still joined");
@@ -2816,7 +2501,7 @@ mod provisioning_tests {
         let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
             .await
             .expect("target prepares");
-        let replacement = crate::RuntimeReplacement {
+        let replacement = crate::profile_switch::RuntimeReplacement {
             #[cfg(feature = "local")]
             local: crate::local::LocalRuntime::empty(),
             #[cfg(feature = "local")]
@@ -2831,13 +2516,13 @@ mod provisioning_tests {
         let commit_state = state.clone();
         let commit_token = token.clone();
         let commit = tokio::spawn(async move {
-            crate::commit_switch(
+            crate::profile_switch::commit_for_test(
                 &commit_state,
-                &name,
+                name,
                 target,
                 replacement,
                 persistence,
-                &commit_token,
+                commit_token,
             )
             .await
         });
@@ -2979,7 +2664,8 @@ mod provisioning_tests {
             )
             .expect("next construction reaches the blocked scenario");
         let error = result.expect_err("parked native-equivalent startup times out");
-        let crate::RuntimeStageFailure::Fatal(error) = crate::classify_speech_stage_failure(error)
+        let crate::profile_switch::RuntimeStageFailure::Indeterminate(error) =
+            crate::profile_switch::classify_speech_stage_failure(error)
         else {
             panic!("non-preemptible speech timeout must be fatal");
         };
@@ -2987,7 +2673,12 @@ mod provisioning_tests {
         state.speech = service;
         let token = CancellationToken::new();
 
-        let _error = crate::request_fatal_shutdown(&state, &token, "stage-profile-timeout", error);
+        let _error = crate::profile_switch::request_fatal_shutdown(
+            &state,
+            &token,
+            "stage-profile-timeout",
+            error,
+        );
 
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
@@ -3016,7 +2707,7 @@ mod provisioning_tests {
         .expect("speech stages");
         let token = CancellationToken::new();
 
-        let _error = crate::request_fatal_shutdown(
+        let _error = crate::profile_switch::request_fatal_shutdown(
             &state,
             &token,
             "fatal-test",
@@ -3888,7 +3579,7 @@ cache_dir = '{cache}'
     /// that happens past the wall, so any non-403 status proves
     /// admission.
     fn walled_requests() -> Vec<(Method, &'static str)> {
-        let mut requests = vec![
+        let requests = vec![
             (Method::GET, "/admin/config"),
             (Method::PUT, "/admin/config"),
             (Method::GET, "/admin/env"),
@@ -3903,11 +3594,15 @@ cache_dir = '{cache}'
             (Method::POST, "/admin/reveal"),
         ];
         #[cfg(feature = "local")]
-        requests.extend([
-            (Method::GET, "/admin/chat-templates"),
-            (Method::GET, "/admin/orphans"),
-            (Method::GET, "/admin/model-info"),
-        ]);
+        let requests = {
+            let mut requests = requests;
+            requests.extend([
+                (Method::GET, "/admin/chat-templates"),
+                (Method::GET, "/admin/orphans"),
+                (Method::GET, "/admin/model-info"),
+            ]);
+            requests
+        };
         requests
     }
 

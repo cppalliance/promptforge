@@ -39,4 +39,5 @@ mod realtime_stt;
 mod rerank;
 mod sidecar;
 mod surface;
+#[cfg(feature = "web-search")]
 mod web_search;

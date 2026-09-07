@@ -312,6 +312,7 @@ pub(crate) async fn gateway_for(backend: SocketAddr) -> TestServer {
 }
 
 /// A fake Brave Search backend returning five hits on two hosts.
+#[cfg(feature = "web-search")]
 pub(crate) async fn fake_brave() -> SocketAddr {
     async fn search() -> Json<Value> {
         Json(serde_json::json!({
@@ -330,6 +331,7 @@ pub(crate) async fn fake_brave() -> SocketAddr {
 }
 
 /// Start a gateway wired to a fake Brave backend for the web-search tool.
+#[cfg(feature = "web-search")]
 pub(crate) async fn gateway_with_web_search(brave: SocketAddr) -> TestServer {
     let toml = format!(
         r#"

@@ -417,7 +417,7 @@ isProject: false
 - Exclusions: no wire change, installed behavior change, new lock, terminal commit rewrite, or unrelated reduction of the root module.
 - Focused verification: from the repository root run `cargo test -p gateway`.
 
-### Step 17: Complete the profile-switch transaction
+### Step 17: Complete the profile-switch transaction [completed]
 
 - Component and piece: Component 5 of 8, Gateway profile switching; represent staged, committed, rolled-back, indeterminate, and terminal outcomes as values and delegate root orchestration to the transaction.
 - Dependency: depends on Step 16 because terminal transitions consume the prepared and cutover phase values and their owned rollback state.
