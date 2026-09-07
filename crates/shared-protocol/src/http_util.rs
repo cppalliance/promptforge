@@ -43,6 +43,30 @@ pub fn streaming_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+/// Per-read idle timeout for audio streams: a stalled upstream is detected
+/// within this window without capping the stream's total length.
+const AUDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// TCP keepalive interval for audio streams, so a silently dead peer or an
+/// idle middlebox drop surfaces instead of hanging the stream forever.
+const AUDIO_TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+
+/// Build a reqwest client for long-lived binary audio streams.
+///
+/// Like [`streaming_client`] there is no whole-request timeout, which would
+/// kill any stream that outlives it; unlike the SSE client, a per-read idle
+/// timeout bounds how long a stalled upstream may go silent, and TCP
+/// keepalive keeps middleboxes from dropping the connection between reads.
+#[must_use]
+pub fn audio_streaming_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(AUDIO_READ_TIMEOUT)
+        .tcp_keepalive(AUDIO_TCP_KEEPALIVE)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// Read at most `cap` bytes from `response`, stopping early once the cap is hit.
 ///
 /// The body is streamed chunk by chunk so an oversized or stalled response never

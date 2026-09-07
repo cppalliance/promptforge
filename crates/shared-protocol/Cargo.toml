@@ -15,6 +15,7 @@ documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 async-trait.workspace = true
+bytes.workspace = true
 futures-util.workspace = true
 gateway-config.workspace = true
 reqwest.workspace = true

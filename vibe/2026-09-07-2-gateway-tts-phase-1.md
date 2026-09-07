@@ -169,7 +169,7 @@ Components, in dependency order:
 - `crates/shared-protocol/src/wire.rs`: add `SpeechRequest` beside `EmbeddingRequest` with `validate() -> Result<(), &'static str>` mirroring `ChatRequest::validate`; `voice` is an untagged string-or-`{"id"}` enum; `response_format` is a closed enum with `#[serde(default)]` resolving an omitted field to `mp3`, so the pin is structural and no route can forget it; a flattened `rest` with `RESERVED` naming the seven known fields preserves verbatim passthrough.
 - Tests: the wire validation table (empty `model`, empty `input`, over-cap `input` past 4096 characters, out-of-range `speed`, unknown `response_format`), the serde-default `mp3` resolution, and verbatim passthrough of unnamed fields.
 
-### Step 4: Speech upstream and audio streaming client
+### Step 4: Speech upstream and audio streaming client [completed]
 
 - `crates/shared-protocol/src/upstream.rs`: add `StreamedAudio { content_type, body }` beside `StreamedChunks`; add `Upstream::send_speech` defaulting to `ProtocolError::ModelUnavailable`; implement `OpenAiUpstream::send_speech` over the raw `post` helper, substituting `upstream_model` and forwarding the body otherwise verbatim. `post` already returns `ProtocolError::UpstreamStatus` with a capped body (upstream.rs 218-228, `MAX_ERROR_BODY` at http_util.rs:12), so no error-path work exists here.
 - `crates/shared-protocol/src/http_util.rs`: add `audio_streaming_client()` beside `streaming_client()` (connect timeout 10 s, `read_timeout` 30 s per-read idle, `tcp_keepalive` 60 s); `OpenAiUpstream` gains a third client field and the chat SSE client is untouched.
