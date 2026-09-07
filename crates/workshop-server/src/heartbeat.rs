@@ -33,6 +33,7 @@ use std::time::Duration;
 use tokio::sync::{oneshot, watch};
 
 use crate::backoff::ReconnectBackoff;
+use crate::catalog::is_chat_capable;
 use crate::gateway::GatewayClient;
 use crate::protocol::{Activity, Severity, StatusBarUpdate};
 use crate::push::Push;
@@ -317,12 +318,7 @@ pub(crate) async fn refresh_catalog(client: &GatewayClient, push: &Push) -> bool
         tracing::warn!("catalog refresh carried no data array");
         return false;
     };
-    let selectable = models.iter().any(|model| {
-        model
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|id| !id.is_empty())
-    });
+    let selectable = models.iter().any(is_chat_capable);
     push.push_models_catalog(models.clone());
     selectable
 }
@@ -762,7 +758,7 @@ mod tests {
                 .as_array()
                 .expect("the fixture is an array")
                 .clone(),
-            "the push carries the gateway's data array verbatim"
+            "the push carries every chat-capable gateway model"
         );
         heartbeat.shutdown().await;
     }

@@ -97,10 +97,10 @@ impl Push {
     }
 
     /// Pushes one complete model catalog snapshot: a `{"type":"models",...}`
-    /// [`crate::protocol::CatalogFrame`] carrying the gateway's `data`
-    /// array verbatim. The single choke point for catalog publishes: the
-    /// menu revalidates its selection against the new catalog and
-    /// republishes the workbench snapshot when it changed.
+    /// [`crate::protocol::CatalogFrame`] carrying only chat-capable
+    /// entries. The single choke point for catalog publishes: the menu
+    /// revalidates its selection against the new catalog and republishes
+    /// the workbench snapshot when it changed.
     pub(crate) fn push_models_catalog(&self, models: Vec<serde_json::Value>) {
         self.catalog.publish(models);
         self.menu.reconcile_catalog();

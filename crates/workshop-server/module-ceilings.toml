@@ -38,7 +38,13 @@
 # re-record (the slack absorbed it), and the chat-relay excision's doc
 # edit here is net zero.
 "backoff.rs" = 235
-"catalog.rs" = 118
+"catalog.rs" = 97
+# New module: the chat-capable catalog subset, its shared predicate, and
+# generation changes consumed by agent-session supervisors.
+"catalog/chat.rs" = 83
+# New module: catalog retention and lag behavior tests moved intact when
+# chat-facing publication became its own responsibility.
+"catalog/tests.rs" = 38
 # Grew by a doc line recording the empty-`base_url` contract: no
 # default is filled, and an empty value is the not-explicit signal
 # endpoint resolution reads.
@@ -190,7 +196,12 @@
 # round (the push_failure that releases the status bar's sustained
 # Thinking LED, which only on_assistant_reply's idle otherwise clears)
 # and its pinning test.
-"session_agents.rs" = 1100
+"session_agents.rs" = 1028
+# New module: cancellation provenance and accepted-turn settlement.
+"session_agents/lifecycle.rs" = 102
+# New module: one agent session's run lifecycle across turn cancellation,
+# delayed catalog readiness, and usable chat-catalog replacement.
+"session_agents/supervisor.rs" = 170
 # New module: the /agents/ws socket - one select! loop owning the
 # socket, the launch/attach/input_response/cancel frame handling, the
 # cursor-driven durable event drain, and the reconnect replay-and-resend

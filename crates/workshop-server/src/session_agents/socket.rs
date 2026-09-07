@@ -37,7 +37,7 @@ use tokio::sync::broadcast;
 use crate::app::AppState;
 use crate::cross_site;
 use crate::error::AppError;
-use crate::input::{WaitError, deliver_input_response};
+use crate::input::WaitError;
 use crate::protocol::{
     Activity, AgentDeltaFrame, AgentEventFrame, AgentSessionFrame, AgentsFrame, ErrorFrame,
     InputFrame, InputResponse,
@@ -256,13 +256,7 @@ async fn handle_frame(
                 }
             };
             let session = &attached.session;
-            match deliver_input_response(
-                session.log.as_ref(),
-                &session.waits,
-                &session.id,
-                &session.agent,
-                response,
-            ) {
+            match session.accept_input(response, || {}) {
                 // The wait completed: the turn is dispatched.
                 Ok(()) => state.push().push_status_update(
                     "Running agent turn",

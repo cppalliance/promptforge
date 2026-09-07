@@ -3,7 +3,7 @@
 //! bus, and the per-profile model memory persisted in the state directory.
 //!
 //! The server owns all Model-menu state and the UI only renders it; in
-//! particular `chat_ready` is computed here - catalog non-empty, a model
+//! particular `chat_ready` is computed here - a chat-capable model
 //! selected, no switch in flight, gateway reachable - and never derived
 //! client-side. Like the catalog bus, the channel is a tokio broadcast:
 //! publishing never blocks, a publish with no sessions is a no-op, and a
@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use tokio::sync::broadcast;
 
-use crate::catalog::CatalogBus;
+use crate::catalog::{CatalogBus, is_chat_capable};
 use crate::protocol::WorkbenchSnapshot;
 
 /// Ring capacity of the menu bus. Pushes follow user interactions and
@@ -341,16 +341,16 @@ impl MenuBus {
     /// Builds the wire snapshot of `state`, computing `chat_ready` from
     /// its four conditions.
     fn snapshot(&self, state: &MenuState) -> WorkbenchSnapshot {
-        let catalog_nonempty = self
+        let catalog_has_chat = self
             .catalog
             .latest()
-            .is_some_and(|push| !push.models.is_empty());
+            .is_some_and(|push| push.models.iter().any(is_chat_capable));
         WorkbenchSnapshot {
             profiles: state.profiles.clone(),
             active: state.active.clone(),
             switching: state.switching.clone(),
             selected_model: state.selected_model.clone(),
-            chat_ready: catalog_nonempty
+            chat_ready: catalog_has_chat
                 && state.selected_model.is_some()
                 && state.switching.is_none()
                 && state.gateway_reachable,
@@ -391,19 +391,22 @@ impl MenuBus {
 
 /// Whether the catalog `models` array holds an entry whose `id` is `id`.
 fn models_contain(models: &[serde_json::Value], id: &str) -> bool {
-    models
-        .iter()
-        .any(|model| model.get("id").and_then(serde_json::Value::as_str) == Some(id))
+    models.iter().any(|model| {
+        is_chat_capable(model) && model.get("id").and_then(serde_json::Value::as_str) == Some(id)
+    })
 }
 
-/// The `id` of the first catalog entry carrying one, when any does.
+/// The `id` of the first chat-capable catalog entry, when any does.
 fn first_model_id(models: &[serde_json::Value]) -> Option<String> {
-    models.iter().find_map(|model| {
-        model
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-    })
+    models
+        .iter()
+        .filter(|model| is_chat_capable(model))
+        .find_map(|model| {
+            model
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
 }
 
 /// The persisted shape of [`WORKSHOP_STATE_FILE`]. Server state only:

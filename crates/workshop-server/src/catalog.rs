@@ -1,5 +1,5 @@
-//! The model catalog push channel: the gateway's catalog, rebroadcast to
-//! every connected `/ws` session as a `{"type":"models",...}` frame.
+//! The chat-capable model catalog push channel, rebroadcast to every
+//! connected `/ws` session as a `{"type":"models",...}` frame.
 //!
 //! The heartbeat republishes the catalog when the gateway comes back
 //! (unreachable to connected), so a UI that booted while the gateway was
@@ -13,9 +13,13 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::protocol::CatalogPush;
+
+mod chat;
+use chat::ChatCatalogBus;
+pub(crate) use chat::{ChatCatalog, is_chat_capable};
 
 /// Ring capacity of the catalog bus. Pushes are rare (one per gateway
 /// reconnect) and each is a full snapshot, so a handful of slots is
@@ -28,6 +32,7 @@ const CATALOG_CHANNEL_CAPACITY: usize = 4;
 pub struct CatalogBus {
     sender: broadcast::Sender<CatalogPush>,
     latest: Arc<Mutex<Option<CatalogPush>>>,
+    chat: ChatCatalogBus,
 }
 
 impl CatalogBus {
@@ -36,6 +41,7 @@ impl CatalogBus {
         Self {
             sender: broadcast::channel(CATALOG_CHANNEL_CAPACITY).0,
             latest: Arc::new(Mutex::new(None)),
+            chat: ChatCatalogBus::new(),
         }
     }
 
@@ -55,10 +61,22 @@ impl CatalogBus {
             .clone()
     }
 
+    /// The current non-empty chat-capable catalog generation.
+    pub(crate) fn latest_chat(&self) -> Option<ChatCatalog> {
+        self.chat.latest()
+    }
+
+    /// Subscribes to chat-capable catalog generation changes.
+    pub(crate) fn subscribe_chat_generation(&self) -> watch::Receiver<u64> {
+        self.chat.subscribe()
+    }
+
     /// Broadcasts one catalog. With no subscribers this is a no-op; a slow
     /// subscriber skips ahead rather than applying backpressure.
     pub fn publish(&self, models: Vec<serde_json::Value>) {
+        let models = models.into_iter().filter(is_chat_capable).collect();
         let push = CatalogPush { models };
+        self.chat.publish(&push.models);
         // The retained copy (a second owner, hence the clone) is written
         // before the send, so a session that subscribes after the send
         // still finds this push as its snapshot.
@@ -76,43 +94,4 @@ impl Default for CatalogBus {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn publishing_with_no_subscribers_is_a_no_op() {
-        let bus = CatalogBus::new();
-        bus.publish(vec![serde_json::json!({"id": "test-model"})]);
-    }
-
-    #[test]
-    fn the_newest_push_is_retained_for_the_connect_snapshot() {
-        let bus = CatalogBus::new();
-        assert!(bus.latest().is_none(), "an untouched bus has no snapshot");
-        bus.publish(vec![serde_json::json!({"id": "old"})]);
-        bus.publish(vec![serde_json::json!({"id": "new"})]);
-        let latest = bus.latest().expect("the bus retains the newest push");
-        assert_eq!(
-            latest.models[0]["id"], "new",
-            "a session connecting now snapshots the newest catalog"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_lagged_receiver_skips_ahead_instead_of_blocking() {
-        let bus = CatalogBus::new();
-        let mut receiver = bus.subscribe();
-        for index in 0..=CATALOG_CHANNEL_CAPACITY {
-            bus.publish(vec![serde_json::json!({"id": format!("model-{index}")})]);
-        }
-        match receiver.recv().await {
-            Err(broadcast::error::RecvError::Lagged(1)) => {}
-            other => panic!("expected a lag report of one, got {other:?}"),
-        }
-        let resumed = receiver.recv().await.expect("the ring still holds pushes");
-        assert_eq!(
-            resumed.models[0]["id"], "model-1",
-            "receiving resumes at the oldest retained push"
-        );
-    }
-}
+mod tests;

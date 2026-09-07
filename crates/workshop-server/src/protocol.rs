@@ -386,7 +386,7 @@ pub(crate) struct StatusFrame<'a> {
 /// One pushed model catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CatalogPush {
-    /// The gateway's `/v1/models` `data` array, verbatim.
+    /// The chat-capable subset of the gateway's model array.
     pub(crate) models: Vec<serde_json::Value>,
 }
 
@@ -414,7 +414,7 @@ pub(crate) struct CatalogFrame<'a> {
 
 /// One pushed workbench snapshot: the server-owned Model-menu state.
 ///
-/// The server computes `chat_ready` - catalog non-empty, a model
+/// The server computes `chat_ready` - a chat-capable model available, one
 /// selected, no switch in flight, gateway reachable - and the UI never
 /// derives it.
 #[derive(Debug, Clone, PartialEq)]

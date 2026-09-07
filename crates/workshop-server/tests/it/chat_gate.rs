@@ -22,7 +22,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use futures_util::StreamExt as _;
 use serde_json::json;
 use tokio::sync::broadcast;
@@ -116,6 +116,21 @@ fn gate_completions(captured: &CapturedRequests, body: &str) -> Response {
     ([(header::CONTENT_TYPE, "text/event-stream")], sse).into_response()
 }
 
+/// A successful profile switch whose refreshed catalog replaces the
+/// launch-time model with `model-b`.
+async fn switch_to_model_b() -> Response {
+    (
+        [(header::CONTENT_TYPE, "text/event-stream")],
+        concat!(
+            "data: {\"stage\":\"loading-profile\"}\n\n",
+            "data: {\"stage\":\"stopping-models\"}\n\n",
+            "data: {\"stage\":\"starting-models\"}\n\n",
+            "data: {\"status\":\"ready\",\"profile\":\"beta\"}\n\n",
+        ),
+    )
+        .into_response()
+}
+
 /// One workshop server over the gate mock. The agents directory is
 /// missing on purpose: every `chat` launch runs the embedded built-in.
 struct GateServer {
@@ -143,13 +158,34 @@ async fn spawn_chat_server(models: &[&str]) -> GateServer {
 async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str>) -> GateServer {
     let captured = CapturedRequests::default();
     let mock = Arc::clone(&captured);
-    let gateway_url = spawn_gateway(Router::new().route(
-        "/v1/chat/completions",
-        post(move |body: String| {
-            let captured = Arc::clone(&mock);
-            async move { gate_completions(&captured, &body) }
-        }),
-    ))
+    let gateway_url = spawn_gateway(
+        Router::new()
+            .route(
+                "/v1/chat/completions",
+                post(move |body: String| {
+                    let captured = Arc::clone(&mock);
+                    async move { gate_completions(&captured, &body) }
+                }),
+            )
+            .route("/admin/switch-profile", post(switch_to_model_b))
+            .route(
+                "/admin/profiles",
+                get(|| async { axum::Json(json!({"profiles": ["main", "beta"]})) }),
+            )
+            .route(
+                "/admin/status",
+                get(|| async { axum::Json(json!({"profile": "beta"})) }),
+            )
+            .route(
+                "/v1/models",
+                get(|| async {
+                    axum::Json(json!({
+                        "object": "list",
+                        "data": [{"id": "model-b", "object": "model"}],
+                    }))
+                }),
+            ),
+    )
     .await;
     let dir = tempfile::TempDir::new().expect("tempdir");
     let config = Config {
@@ -227,6 +263,15 @@ async fn launch_chat(socket: &mut JsonSocket) -> String {
         .as_str()
         .expect("the acknowledgment carries the session id")
         .to_owned()
+}
+
+/// Asserts that no input wait or error arrives during `duration`.
+async fn assert_chat_quiet(socket: &mut JsonSocket, duration: Duration) {
+    let frame = tokio::time::timeout(duration, socket.recv_json()).await;
+    assert!(
+        frame.is_err(),
+        "chat must stay dormant until a chat-capable catalog exists, got {frame:?}"
+    );
 }
 
 /// The `(role, content)` pairs of one captured request's message list.
@@ -747,5 +792,239 @@ async fn gate_binding_loss_surfaces_one_error_and_recovers_after_selection() {
         1,
         "only the recovered turn reaches the gateway"
     );
+    socket.close().await;
+}
+
+/// GATE 8 - delayed startup convergence. Launch acknowledgment may precede
+/// the Gateway catalog, but the run itself waits for a chat-capable model.
+/// Transcription-only publication neither readies nor starts chat.
+#[tokio::test]
+async fn gate_delayed_catalog_starts_chat_only_after_a_chat_model_arrives() {
+    let server = spawn_chat_server(&[]).await;
+    server.state.menu().set_gateway_reachable(true);
+    let mut socket = connect_chat(&server.ws_base).await;
+    let _session = launch_chat(&mut socket).await;
+    let mut workbench = JsonSocket::connect(&format!("{}/ws", server.ws_base)).await;
+    let initial = workbench
+        .recv_until(Duration::from_secs(10), |frame| frame["type"] == "models")
+        .await;
+    assert_eq!(initial["models"], json!([]));
+
+    assert_chat_quiet(&mut socket, Duration::from_millis(150)).await;
+    server.state.catalog().publish(vec![
+        json!({"id": "whisper-base-en", "kind": "transcription", "object": "model"}),
+        json!({"id": "whisper-small-en", "kind": "transcription", "object": "model"}),
+        json!({"id": "realtime-transcribe", "kind": "transcription", "object": "model"}),
+    ]);
+    server.state.menu().reconcile_catalog_for_test();
+    assert!(
+        server.state.menu().set_selected("whisper-base-en").is_err(),
+        "a transcription-only entry cannot become the selected chat binding"
+    );
+    let speech_only = workbench
+        .recv_until(Duration::from_secs(10), |frame| frame["type"] == "models")
+        .await;
+    assert_eq!(
+        speech_only["models"],
+        json!([]),
+        "the shared catalog feeding both model menus publishes no speech-only choices"
+    );
+    assert_chat_quiet(&mut socket, Duration::from_millis(150)).await;
+
+    server.state.catalog().publish(vec![
+        json!({"id": "whisper-base-en", "kind": "transcription", "object": "model"}),
+        json!({"id": "claude-opus-4-6", "kind": "chat", "object": "model"}),
+        json!({"id": "whisper-small-en", "kind": "transcription", "object": "model"}),
+        json!({"id": "realtime-transcribe", "kind": "transcription", "object": "model"}),
+    ]);
+    server.state.menu().reconcile_catalog_for_test();
+    server
+        .state
+        .menu()
+        .set_selected("claude-opus-4-6")
+        .expect("the chat model is selectable");
+    let chat_only = workbench
+        .recv_until(Duration::from_secs(10), |frame| frame["type"] == "models")
+        .await;
+    assert_eq!(
+        chat_only["models"],
+        json!([{"id": "claude-opus-4-6", "kind": "chat", "object": "model"}]),
+        "both chat-facing choosers receive only the chat-capable model"
+    );
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "after startup").await;
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&turn), "echo:after startup");
+    {
+        let requests = server.captured.lock().expect("the capture lock is healthy");
+        assert_eq!(requests.len(), 1, "exactly one completion was dispatched");
+        assert_eq!(requests[0]["model"], "claude-opus-4-6");
+    }
+    workbench.close().await;
+    socket.close().await;
+}
+
+/// GATE 9 - catalog replacement during a profile switch. The supervisor
+/// relaunches over retained history, while each individual run keeps its
+/// own immutable model bindings.
+#[tokio::test]
+async fn gate_profile_switch_relaunches_chat_with_history_and_the_new_catalog() {
+    let server = spawn_chat_server(&["model-a"]).await;
+    server.state.menu().set_gateway_reachable(true);
+    server.state.menu().set_profiles(
+        vec!["main".to_owned(), "beta".to_owned()],
+        Some("main".to_owned()),
+    );
+    let mut socket = connect_chat(&server.ws_base).await;
+    let _session = launch_chat(&mut socket).await;
+
+    let token = next_wait_token(&mut socket).await;
+    answer(&mut socket, &token, "before switch").await;
+    let first = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&first), "echo:before switch");
+    let _pending_wait = wait_after(&mut socket, &first).await;
+
+    let mut workbench = JsonSocket::connect(&format!("{}/ws", server.ws_base)).await;
+    workbench
+        .send_json(&json!({"type": "switch_profile", "name": "beta"}))
+        .await;
+    workbench
+        .recv_until(Duration::from_secs(10), |frame| {
+            frame["type"] == "workbench"
+                && frame["active"] == "beta"
+                && frame["selected"] == "model-b"
+                && frame["chat_ready"] == true
+        })
+        .await;
+
+    let fresh = next_wait_token(&mut socket).await;
+    answer(&mut socket, &fresh, "after switch").await;
+    let second = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&second), "echo:after switch");
+    {
+        let requests = server.captured.lock().expect("the capture lock is healthy");
+        assert_eq!(requests.len(), 2, "one completion runs on each catalog");
+        assert_eq!(requests[0]["model"], "model-a");
+        assert_eq!(requests[1]["model"], "model-b");
+        assert_eq!(
+            role_content_pairs(&requests[1]),
+            vec![
+                pair("user", "before switch"),
+                pair("assistant", "echo:before switch"),
+                pair("user", "after switch"),
+            ],
+            "the catalog relaunch preserves the settled event history"
+        );
+    }
+    workbench.close().await;
+    socket.close().await;
+}
+
+/// GATE 10 - accepted-input replacement race. Catalog retirement waits
+/// until the frozen run surfaces its lost binding, then relaunches on the
+/// new generation without replaying or dropping the accepted input.
+#[tokio::test]
+async fn gate_catalog_replacement_during_acceptance_settles_the_turn_exactly_once() {
+    let server = spawn_chat_server(&["model-a"]).await;
+    let mut socket = connect_chat(&server.ws_base).await;
+    let session = launch_chat(&mut socket).await;
+    let token = next_wait_token(&mut socket).await;
+
+    let state = server.state.clone();
+    server
+        .state
+        .agents()
+        .deliver_input_after_acceptance_for_test(
+            &session,
+            InputResponse {
+                token,
+                text: "accepted during replacement".to_owned(),
+            },
+            move || {
+                state
+                    .catalog()
+                    .publish(vec![json!({"id": "model-b", "object": "model"})]);
+                state.menu().reconcile_catalog_for_test();
+                state
+                    .menu()
+                    .set_selected("model-b")
+                    .expect("the replacement model becomes selected");
+            },
+        )
+        .expect("the launched session remains registered")
+        .expect("the accepted input resumes its original run");
+
+    let mut errors = Vec::new();
+    let mut accepted_events = 0;
+    let mut retired_wait = None;
+    let mut retired_wait_cancelled = false;
+    let fresh = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let frame = socket.recv_json().await;
+            match frame["type"].as_str() {
+                Some("error") => errors.push(frame),
+                Some("agent_event")
+                    if frame["event"]["content"] == "accepted during replacement" =>
+                {
+                    accepted_events += 1;
+                }
+                Some("input_required") if retired_wait_cancelled => {
+                    break frame["token"]
+                        .as_str()
+                        .expect("the replacement wait carries its token")
+                        .to_owned();
+                }
+                Some("input_required") => {
+                    retired_wait = frame["token"].as_str().map(str::to_owned);
+                }
+                Some("input_cancelled") => {
+                    assert_eq!(
+                        frame["token"].as_str(),
+                        retired_wait.as_deref(),
+                        "catalog retirement cancels only the old run's wait"
+                    );
+                    retired_wait_cancelled = true;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the replacement relaunch returns to input");
+    assert_eq!(errors.len(), 1, "the raced turn surfaces one failure");
+    assert!(
+        errors[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Model turn failed")),
+        "the failure names the model boundary: {}",
+        errors[0]
+    );
+    assert_eq!(accepted_events, 1, "accepted input is retained once");
+    assert_eq!(
+        server
+            .captured
+            .lock()
+            .expect("the capture lock is healthy")
+            .len(),
+        0,
+        "the retired binding cannot dispatch against either generation"
+    );
+
+    answer(&mut socket, &fresh, "after replacement").await;
+    let second = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&second), "echo:after replacement");
+    {
+        let requests = server.captured.lock().expect("the capture lock is healthy");
+        assert_eq!(requests.len(), 1, "the recovery dispatch runs exactly once");
+        assert_eq!(requests[0]["model"], "model-b");
+        assert_eq!(
+            role_content_pairs(&requests[0]),
+            vec![
+                pair("user", "accepted during replacement"),
+                pair("user", "after replacement"),
+            ],
+            "the replacement relaunch retains the failed input exactly once"
+        );
+    }
     socket.close().await;
 }

@@ -90,7 +90,7 @@ async fn the_initial_connect_pushes_the_catalog_and_readies_chat() {
             .as_array()
             .expect("the fixture is an array")
             .clone(),
-        "the push carries the gateway's data array verbatim"
+        "the push carries every chat-capable gateway model"
     );
     let ready = snapshot_where(&menu, |snapshot| snapshot.chat_ready).await;
     assert_eq!(
