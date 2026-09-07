@@ -80,6 +80,13 @@ pub(crate) struct Batch {
     pub(crate) done: bool,
 }
 
+/// Whether bounded formatting retained a whole record or a marked prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatStatus {
+    Complete,
+    Truncated,
+}
+
 /// The shared queue state producers and the single worker synchronize on.
 #[derive(Debug)]
 pub(crate) struct LogQueue {
@@ -94,7 +101,41 @@ struct State {
     lanes: [VecDeque<LogRecord>; 5],
     len: usize,
     closed: bool,
+    loss: LossCounts,
+}
+
+/// Counts every way record content is lost during one observable pressure
+/// episode.
+#[derive(Debug, Default)]
+struct LossCounts {
     evicted: [u64; 5],
+    truncated: u64,
+    rejected: u64,
+}
+
+impl LossCounts {
+    fn is_empty(&self) -> bool {
+        self.evicted.iter().all(|&count| count == 0) && self.truncated == 0 && self.rejected == 0
+    }
+
+    fn take_summary(&mut self) -> Option<Box<str>> {
+        if self.is_empty() {
+            return None;
+        }
+        let dropped: u64 = self.evicted.iter().sum::<u64>() + self.rejected;
+        let affected = dropped + self.truncated;
+        let summary = format!(
+            "log pressure affected {affected} record(s): dropped={dropped}, debug={}, trace={}, info={}, truncated={}, rejected={}\n",
+            self.evicted[LogPriority::Debug.lane()],
+            self.evicted[LogPriority::Trace.lane()],
+            self.evicted[LogPriority::Info.lane()],
+            self.truncated,
+            self.rejected,
+        )
+        .into_boxed_str();
+        *self = Self::default();
+        Some(summary)
+    }
 }
 
 impl State {
@@ -108,7 +149,7 @@ impl State {
     fn evict_for(&mut self, priority: LogPriority) -> Option<LogRecord> {
         for &lane_priority in priority.evictable() {
             if let Some(record) = self.lanes[lane_priority.lane()].pop_front() {
-                self.evicted[record.priority.lane()] += 1;
+                self.loss.evicted[record.priority.lane()] += 1;
                 self.len -= 1;
                 return Some(record);
             }
@@ -140,22 +181,10 @@ impl State {
     }
 
     /// Builds the one synthetic summary of a pressure episode and resets
-    /// the counters; `None` when nothing was evicted since the last
+    /// the counters; `None` when no content was lost since the last
     /// summary.
     fn take_summary(&mut self) -> Option<Box<str>> {
-        if self.evicted.iter().all(|&count| count == 0) {
-            return None;
-        }
-        let total: u64 = self.evicted.iter().sum();
-        let summary = format!(
-            "log pressure dropped {total} record(s): debug={}, trace={}, info={}\n",
-            self.evicted[LogPriority::Debug.lane()],
-            self.evicted[LogPriority::Trace.lane()],
-            self.evicted[LogPriority::Info.lane()],
-        )
-        .into_boxed_str();
-        self.evicted = [0; 5];
-        Some(summary)
+        self.loss.take_summary()
     }
 }
 
@@ -166,7 +195,7 @@ impl LogQueue {
                 lanes: std::array::from_fn(|_| VecDeque::new()),
                 len: 0,
                 closed: false,
-                evicted: [0; 5],
+                loss: LossCounts::default(),
             }),
             work_available: Condvar::new(),
             space_available: Condvar::new(),
@@ -180,7 +209,19 @@ impl LogQueue {
     /// with none eligible the producer blocks on the condition variable
     /// until the worker frees space. After [`close`](Self::close) new
     /// records are dropped.
+    #[cfg(test)]
     pub(crate) fn enqueue(&self, priority: LogPriority, line: Box<str>) {
+        self.enqueue_formatted(priority, line, FormatStatus::Complete);
+    }
+
+    /// Enqueues one bounded formatter result and accounts marked
+    /// truncation in the same pressure episode as queue eviction.
+    pub(crate) fn enqueue_formatted(
+        &self,
+        priority: LogPriority,
+        line: Box<str>,
+        status: FormatStatus,
+    ) {
         let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
@@ -188,6 +229,9 @@ impl LogQueue {
                 return;
             }
             if state.len < CAPACITY {
+                if status == FormatStatus::Truncated {
+                    state.loss.truncated += 1;
+                }
                 state.push(LogRecord {
                     sequence,
                     priority,
@@ -198,6 +242,9 @@ impl LogQueue {
                 return;
             }
             if state.evict_for(priority).is_some() {
+                if status == FormatStatus::Truncated {
+                    state.loss.truncated += 1;
+                }
                 state.push(LogRecord {
                     sequence,
                     priority,
@@ -214,6 +261,18 @@ impl LogQueue {
         }
     }
 
+    /// Rejects invalid formatter bytes and wakes the worker so the loss is
+    /// observable even when no queue record accompanies it.
+    pub(crate) fn reject_formatted(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.closed {
+            return;
+        }
+        state.loss.rejected += 1;
+        drop(state);
+        self.work_available.notify_one();
+    }
+
     /// Blocks until records are available (or the queue is closed and
     /// drained), moves up to [`BATCH`] of them out in global sequence
     /// order, and attaches the pressure summary when the queue empties
@@ -222,7 +281,7 @@ impl LogQueue {
     pub(crate) fn take_batch(&self) -> Batch {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
-            if state.len == 0 && !state.closed {
+            if state.len == 0 && state.loss.is_empty() && !state.closed {
                 state = self
                     .work_available
                     .wait(state)

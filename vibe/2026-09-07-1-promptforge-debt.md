@@ -284,7 +284,7 @@ isProject: false
 - Focused verification: from the repository root run `node tools/check-integration-test-ceilings.test.mjs`, `node tools/check-integration-test-ceilings.mjs`, `cargo test -p gateway`, and `cargo test -p workshop-server`.
 - Component boundary: ends Component 1; review cumulative Steps 1 through 3 against the pre-Step-1 base.
 
-### Step 4: Bound formatted logging records
+### Step 4: Bound formatted logging records [completed]
 
 - Component and piece: Component 2 of 8, `gateway-logging`; establish one immutable limits object and bounded record formatting with a valid-text truncation marker.
 - Dependency: depends on Step 3 only as the completed regression foundation; within logging it is first because queue, wait, shutdown, and segment budgets consume the same limits object.

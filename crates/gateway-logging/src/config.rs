@@ -1,11 +1,48 @@
 //! The configuration input for [`LogRuntime::start`](crate::LogRuntime::start).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Previous runs retained beside the current log: `gateway.log.1` (the
 /// newest rotation) through `gateway.log.5` (the oldest). A sixth
 /// previous run is deleted by the rotation that would create it.
 pub(crate) const RETAINED_RUNS: usize = 5;
+
+/// Every memory, latency, and disk budget for the logging pipeline.
+///
+/// Keeping these limits in one immutable value makes later queue, timeout,
+/// shutdown, and rotation work consume the same policy without adding
+/// configuration before logging is available.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LogLimits {
+    pub(crate) max_formatted_record_bytes: usize,
+    pub(crate) max_queued_bytes: usize,
+    pub(crate) producer_wait: Duration,
+    pub(crate) shutdown_wait: Duration,
+    pub(crate) segment_bytes: u64,
+    pub(crate) aggregate_retained_bytes: u64,
+}
+
+/// The process-wide logging policy. The queue, timeout, shutdown, and
+/// rotation paths consume their reserved fields as those bounds are
+/// enforced.
+pub(crate) const LOG_LIMITS: LogLimits = LogLimits {
+    max_formatted_record_bytes: 64 * 1024,
+    max_queued_bytes: 32 * 1024 * 1024,
+    producer_wait: Duration::from_millis(25),
+    shutdown_wait: Duration::from_secs(2),
+    segment_bytes: 16 * 1024 * 1024,
+    aggregate_retained_bytes: 96 * 1024 * 1024,
+};
+
+const _: () = {
+    assert!(LOG_LIMITS.max_formatted_record_bytes <= LOG_LIMITS.max_queued_bytes);
+    assert!(LOG_LIMITS.producer_wait.as_millis() < LOG_LIMITS.shutdown_wait.as_millis());
+    assert!(
+        LOG_LIMITS.aggregate_retained_bytes
+            == LOG_LIMITS.segment_bytes * (RETAINED_RUNS as u64 + 1)
+    );
+};
 
 /// The one input logging needs: the gateway state directory that holds
 /// `logs/`.
