@@ -6,7 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const CARGO_MODULES_VERSION = "0.25.0";
 const CARGO_PUBLIC_API_VERSION = "0.52.0";
 const CARGO_VERSION = "1.89.0";
-const RUSTUP_TOOLCHAIN = "1.89";
+const CARGO_TOOLCHAIN = "1.89.0";
+const RUSTDOC_TOOLCHAIN = "nightly-2026-09-05";
 const STT_CRATES = [
   "gateway-stt",
   "gateway-stt-engine",
@@ -239,7 +240,7 @@ export function runCargo(
   const result = spawn("cargo", args, {
     cwd: root,
     encoding: "utf8",
-    env: { ...env, RUSTUP_TOOLCHAIN },
+    env: { ...env, RUSTUP_TOOLCHAIN: CARGO_TOOLCHAIN },
     maxBuffer: 64 * 1024 * 1024,
     windowsHide: true,
   });
@@ -252,6 +253,52 @@ export function runCargo(
     );
   }
   return result.stdout;
+}
+
+export function runRustdocCargo(
+  root,
+  args,
+  { spawn = spawnSync, env = process.env } = {},
+) {
+  const commandArgs = [`+${RUSTDOC_TOOLCHAIN}`, ...args];
+  const result = spawn("cargo", commandArgs, {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...env, RUSTUP_TOOLCHAIN: RUSTDOC_TOOLCHAIN },
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.error !== undefined) {
+    fail(`cargo ${commandArgs.join(" ")} failed to start: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    fail(
+      `cargo ${commandArgs.join(" ")} failed with status ${result.status}\n${result.stderr}`,
+    );
+  }
+  return result.stdout;
+}
+
+export function runPublicApi(
+  root,
+  crateName,
+  { spawn = spawnSync, env = process.env } = {},
+) {
+  const manifestPath = join(root, "crates", crateName, "Cargo.toml");
+  return runRustdocCargo(
+    root,
+    [
+      "public-api",
+      "--manifest-path",
+      manifestPath,
+      "--package",
+      crateName,
+      "-sss",
+      "--color",
+      "never",
+    ],
+    { spawn, env },
+  );
 }
 
 function checkNodeVersion() {
@@ -272,7 +319,7 @@ function main() {
   );
   requireToolVersion(
     "cargo-public-api",
-    runCargo(root, ["public-api", "--version"]),
+    runRustdocCargo(root, ["public-api", "--version"]),
     CARGO_PUBLIC_API_VERSION,
   );
 
@@ -294,14 +341,7 @@ function main() {
     ]);
     assertAcyclic(parseCargoModulesDot(dot), crateName);
 
-    const publicApi = runCargo(root, [
-      "public-api",
-      "-p",
-      crateName,
-      "-sss",
-      "--color",
-      "never",
-    ]);
+    const publicApi = runPublicApi(root, crateName);
     const rootNames = countEffectiveRootNames(
       publicApi,
       crateName.replaceAll("-", "_"),

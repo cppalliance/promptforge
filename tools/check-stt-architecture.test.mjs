@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -10,6 +11,8 @@ import {
   requireExactPublicRootCount,
   requireToolVersion,
   runCargo,
+  runPublicApi,
+  runRustdocCargo,
 } from "./check-stt-architecture.mjs";
 
 test("DOT parser collapses item edges to their owning modules", () => {
@@ -133,12 +136,12 @@ test("cargo-modules child cannot inherit ambient Cargo 1.98", () => {
   assert.deepEqual(child.args, ["modules", "--version"]);
   assert.equal(child.options.env.AMBIENT_CARGO_VERSION, "1.98.0");
   assert.equal(child.options.env.PATH, "rustup");
-  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "1.89");
+  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "1.89.0");
 });
 
 test("cargo-public-api child cannot inherit ambient Cargo 1.98", () => {
   let child;
-  runCargo("repo", ["public-api", "--version"], {
+  runRustdocCargo("repo", ["public-api", "--version"], {
     env: { AMBIENT_CARGO_VERSION: "1.98.0", PATH: "rustup", RUSTUP_TOOLCHAIN: "stable" },
     spawn(command, args, options) {
       child = { command, args, options };
@@ -147,10 +150,85 @@ test("cargo-public-api child cannot inherit ambient Cargo 1.98", () => {
   });
 
   assert.equal(child.command, "cargo");
-  assert.deepEqual(child.args, ["public-api", "--version"]);
+  assert.deepEqual(child.args, [
+    "+nightly-2026-09-05",
+    "public-api",
+    "--version",
+  ]);
   assert.equal(child.options.env.AMBIENT_CARGO_VERSION, "1.98.0");
   assert.equal(child.options.env.PATH, "rustup");
-  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "1.89");
+  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "nightly-2026-09-05");
+});
+
+test("public API command keeps exact package selection", () => {
+  let child;
+  runPublicApi("repo", "gateway-stt", {
+    env: { RUSTUP_TOOLCHAIN: "stable" },
+    spawn(command, args, options) {
+      child = { command, args, options };
+      return { status: 0, stdout: "pub mod gateway_stt\n", stderr: "" };
+    },
+  });
+
+  assert.equal(child.command, "cargo");
+  assert.deepEqual(child.args, [
+    "+nightly-2026-09-05",
+    "public-api",
+    "--manifest-path",
+    join("repo", "crates", "gateway-stt", "Cargo.toml"),
+    "--package",
+    "gateway-stt",
+    "-sss",
+    "--color",
+    "never",
+  ]);
+  assert.equal(child.options.env.RUSTUP_TOOLCHAIN, "nightly-2026-09-05");
+});
+
+test("public API command fails closed when the pinned nightly is absent", () => {
+  assert.throws(
+    () =>
+      runPublicApi("repo", "gateway-stt", {
+        spawn(command, args) {
+          assert.equal(command, "cargo");
+          assert.equal(args[0], "+nightly-2026-09-05");
+          return {
+            status: 1,
+            stdout: "",
+            stderr:
+              "error: toolchain 'nightly-2026-09-05-x86_64-unknown-linux-gnu' is not installed",
+          };
+        },
+      }),
+    /cargo \+nightly-2026-09-05 public-api.*failed with status 1.*toolchain 'nightly-2026-09-05-x86_64-unknown-linux-gnu' is not installed/s,
+  );
+});
+
+test("public API failure never falls back to the virtual workspace manifest", () => {
+  const calls = [];
+  assert.throws(
+    () =>
+      runPublicApi("repo", "gateway-stt", {
+        spawn(command, args) {
+          calls.push({ command, args });
+          return {
+            status: 1,
+            stdout: "",
+            stderr:
+              "`Cargo.toml` is a virtual manifest; workspace API listing is unsupported",
+          };
+        },
+      }),
+    /failed with status 1.*virtual manifest/s,
+  );
+
+  assert.equal(calls.length, 1);
+  const manifestIndex = calls[0].args.indexOf("--manifest-path");
+  assert.equal(
+    calls[0].args[manifestIndex + 1],
+    join("repo", "crates", "gateway-stt", "Cargo.toml"),
+  );
+  assert.notEqual(calls[0].args[manifestIndex + 1], join("repo", "Cargo.toml"));
 });
 
 test("architecture cargo fails closed when Rust 1.89 is absent", () => {
@@ -161,11 +239,11 @@ test("architecture cargo fails closed when Rust 1.89 is absent", () => {
           return {
             status: 1,
             stdout: "",
-            stderr: "toolchain '1.89' is not installed",
+            stderr: "toolchain '1.89.0' is not installed",
           };
         },
       }),
-    /failed with status 1.*toolchain '1\.89' is not installed/s,
+    /failed with status 1.*toolchain '1\.89\.0' is not installed/s,
   );
 });
 
