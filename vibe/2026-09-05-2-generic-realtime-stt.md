@@ -40,7 +40,7 @@ todos:
     status: completed
   - id: ci-gateway-platform-warnings
     content: Restore warnings-denied Gateway builds on non-Windows hosts
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -634,7 +634,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: this repairs the Linux CI failure where correct retirement did not finish within 1,000 scheduler yields. Tests must prove the waiter starts before release, cleanup wakes it exactly once, admission stays occupied until wakeup, and omitted cleanup reaches the bounded timeout.
 
-### Step 26: Restore cross-platform Gateway warning cleanliness
+### Step 26: Restore cross-platform Gateway warning cleanliness [completed]
 
 - Artifacts: update only `gateway/build.rs`, `gateway/src/main.rs`, and focused source or compile tests when needed.
 - Scope: compile the Windows application manifest constant only on Windows and apply the one-call unsafe-code lint expectation only when the Windows DPI-awareness block exists. Preserve Windows resources, process startup, lint policy, and every non-Windows code path; do not suppress warnings globally.

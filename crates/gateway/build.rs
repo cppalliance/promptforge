@@ -26,6 +26,7 @@ const ICON: &str = "../workshop/icons/icon.ico";
 /// `muda`'s `common-controls-v6` feature requires. The resource script
 /// references it as `CREATEPROCESS_MANIFEST_RESOURCE_ID` (1) of type
 /// `RT_MANIFEST` (24).
+#[cfg(windows)]
 const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <dependency>
