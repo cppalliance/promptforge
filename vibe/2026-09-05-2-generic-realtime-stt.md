@@ -817,7 +817,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `mdbook build guide`
 - Consumes and gates: consumes Step 39 final topology; final verification starts only with zero temporary exceptions.
 
-### Step 41: Bookend Gateway serving logs
+### Step 41: Bookend Gateway serving logs [completed]
 
 - Artifacts: update only `crates/gateway/src/main.rs`, `crates/gateway/tests/it/boot.rs`, and this step's active-plan bookkeeping.
 - Scope: in `init_logging()`, immediately after installing the subscriber with the file layer, emit the first serving-run file record as `promptforge-gateway {version} starting` before the existing `logging to {path}` record. After the serving result determines success or failure and before `LogRuntime::shutdown`, emit `gateway exiting` on success or `gateway exiting after a fatal error` after `log_error_chain` on failure. Emit terminal records only when file logging initialized. Preserve no-subscriber behavior for help, version, diagnostics, second-instance handoff, and stdout-only fallback. Do not modify `gateway-logging`, CLI parsing, queues, sinks, retention, rotation, redaction, or subscriber ownership.

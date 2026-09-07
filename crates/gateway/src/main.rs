@@ -123,13 +123,19 @@ fn main() -> ExitCode {
         run(&invocation.serve)
     };
     let exit = match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            if logging.is_some() {
+                tracing::info!("gateway exiting");
+            }
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             // A fatal error is logged once with its complete source chain;
             // raw stderr is only the fallback when the logger never
             // started.
             if logging.is_some() {
                 log_error_chain(&error);
+                tracing::error!("gateway exiting after a fatal error");
             } else {
                 print_error_chain(&error);
             }
@@ -172,6 +178,7 @@ fn init_logging() -> Option<LogRuntime> {
                 .with(stdout)
                 .with(file_layer)
                 .init();
+            tracing::info!("promptforge-gateway {} starting", env!("CARGO_PKG_VERSION"));
             tracing::info!("logging to {}", runtime.path().display());
             Some(runtime)
         }

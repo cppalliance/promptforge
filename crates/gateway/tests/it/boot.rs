@@ -212,19 +212,21 @@ models = ["missing-model"]
     handle.shutdown().expect("graceful shutdown");
 }
 
-/// A headless invocation with `--config` writes its startup line to the
-/// log file under the state dir: the real binary is spawned with the
-/// profile directory redirected into a temp dir (via the home variables
-/// `home_dir` reads), so the run touches nothing outside it - not the
-/// connection file, not the already-running handoff, not the logs.
+/// A headless invocation with `--config` bookends its serving log: the
+/// versioned launch record is first, and route-driven shutdown leaves the
+/// clean terminal record last. The real binary is spawned with the profile
+/// directory redirected into a temp dir (via the home variables `home_dir`
+/// reads), so the run touches nothing outside it.
 #[test]
-fn headless_serve_writes_the_startup_line_to_the_log_file() {
+fn headless_serve_bookends_the_log_file() {
     let temp = tempfile::tempdir().unwrap();
     let path = write_config(
         &temp,
-        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n"
+        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
+    let run_dir = temp.path().join(".promptforge").join("run");
     let log = temp
         .path()
         .join(".promptforge")
@@ -233,6 +235,8 @@ fn headless_serve_writes_the_startup_line_to_the_log_file() {
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
         .arg("--config")
         .arg(&path)
+        .arg("--profile")
+        .arg("main")
         .arg("--no-tray")
         .env("USERPROFILE", temp.path())
         .env("HOME", temp.path())
@@ -242,25 +246,65 @@ fn headless_serve_writes_the_startup_line_to_the_log_file() {
         .spawn()
         .expect("the gateway binary spawns");
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    let contents = loop {
-        if log.is_file() {
-            let text = std::fs::read_to_string(&log).expect("read the log file");
-            if text.contains("logging to") {
-                break text;
-            }
+    let connection = loop {
+        if let Some(file) =
+            shared_sidecar::ConnectionFile::read(&run_dir).expect("read the connection file")
+        {
+            break file;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the startup line landed in {}",
-            log.display()
+            "the gateway bound and wrote {}",
+            run_dir.join("gateway.json").display()
         );
         std::thread::sleep(Duration::from_millis(50));
     };
-    let _ = child.kill();
-    let _ = child.wait();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let response = runtime
+        .block_on(async {
+            reqwest::Client::new()
+                .post(format!("http://127.0.0.1:{}/shutdown", connection.port))
+                .bearer_auth(&connection.api_key)
+                .send()
+                .await
+        })
+        .expect("the shutdown POST answers");
+    assert_eq!(response.status(), reqwest::StatusCode::ACCEPTED);
+    drop(runtime);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll the gateway process") {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("the route-driven shutdown did not stop the gateway");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success(), "the gateway exits cleanly: {status}");
+
+    let contents = std::fs::read_to_string(&log).expect("read the drained log file");
+    let lines = contents.lines().collect::<Vec<_>>();
     assert!(
         contents.contains("gateway.log"),
         "the startup line names the log path: {contents}"
+    );
+    assert!(
+        lines.first().is_some_and(|line| line.contains(&format!(
+            "promptforge-gateway {} starting",
+            env!("CARGO_PKG_VERSION")
+        ))),
+        "the versioned launch record is first: {contents}"
+    );
+    assert!(
+        lines
+            .last()
+            .is_some_and(|line| line.contains("gateway exiting")),
+        "the clean terminal record is last: {contents}"
     );
 }
 
@@ -634,6 +678,22 @@ fn a_fatal_boot_error_lands_in_the_log_with_its_chain() {
     assert!(
         log.contains("caused by:"),
         "the complete source chain is logged: {log}"
+    );
+    let fatal = log
+        .rfind("gateway exiting after a fatal error")
+        .expect("the fatal terminal record is logged");
+    let final_cause = log
+        .rfind("caused by:")
+        .expect("the complete source chain is logged");
+    assert!(
+        fatal > final_cause,
+        "the fatal terminal record follows the complete chain: {log}"
+    );
+    assert!(
+        log.lines()
+            .last()
+            .is_some_and(|line| line.contains("gateway exiting after a fatal error")),
+        "the fatal terminal record is last: {log}"
     );
 }
 
