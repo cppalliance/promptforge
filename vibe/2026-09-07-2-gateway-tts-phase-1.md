@@ -159,7 +159,7 @@ Components, in dependency order:
 - Tests: config parse/serialize round-trip of `kind = "speech"` with `voices`; each chat-only field rejected on a speech model; `voices` rejected on chat, embedding, and classifier models; empty voice entries and duplicates rejected at load; UI: update the dropdown-values pin to the four-kind list (`model-detail.test.mjs` ~78-82) and add a pick-speech/add-chip/save test asserting the PUT body (save-then-PUT pattern at `model-detail.test.mjs` ~409-436).
 - Verification adds the config-UI gates exactly as CI runs them (`npm ci`, then `npm run typecheck`, `npm run build`, `npm test` in `crates/gateway-config-ui/ui`; build first, the tests import built dist).
 
-### Step 2: launch_options goes fallible and refuses unknown kinds in gateway-local
+### Step 2: launch_options goes fallible and refuses unknown kinds in gateway-local [completed]
 
 - `crates/gateway-local/src/runtime.rs`: make `launch_options` (699-720) return `Result<LaunchOptions, LocalError>`; the already-fallible wrapper `launch_options_for` (722-731) propagates. The Chat/Embedding/Classifier arms stay; `ModelKind::Speech` errors "local speech models are not yet supported" through a new `LocalError` variant (beside `UnsupportedPlatform`, error.rs ~12-17); the wildcard becomes refuse-unknown (`_ => Err(...)`) instead of `_ => ServeMode::Chat` (714) — `ModelKind` is `#[non_exhaustive]`, so a wildcard must remain but it never maps to chat. Leave the `tool_dialect` wildcard (493-496); its chat-default is deliberate.
 - Tests: the speech arm errors rather than launching as chat.

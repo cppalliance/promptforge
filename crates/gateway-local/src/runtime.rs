@@ -696,8 +696,21 @@ fn resolve_admission(
     Ok(LocalAdmission { parallel, queue })
 }
 
-fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
-    LaunchOptions {
+fn launch_options(model: &LocalModelConfig, parallel: u32) -> Result<LaunchOptions, LocalError> {
+    let serve_mode = match model.kind() {
+        ModelKind::Chat => ServeMode::Chat,
+        ModelKind::Embedding => ServeMode::Embeddings,
+        ModelKind::Classifier => ServeMode::Reranking,
+        ModelKind::Speech => {
+            return Err(LocalError::UnsupportedKind {
+                kind: ModelKind::Speech,
+            });
+        }
+        // `ModelKind` is `#[non_exhaustive]`: a kind added after this mapping
+        // fails loudly instead of launching as a chat server.
+        kind => return Err(LocalError::UnsupportedKind { kind }),
+    };
+    Ok(LaunchOptions {
         ctx_size: model.context(),
         n_predict: model.n_predict(),
         parallel,
@@ -707,16 +720,11 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_v: model.cache_type_v().to_owned(),
         think: !matches!(model.thinking(), ThinkingMode::Never),
         chat_template_file: None,
-        serve_mode: match model.kind() {
-            ModelKind::Embedding => ServeMode::Embeddings,
-            ModelKind::Classifier => ServeMode::Reranking,
-            // Chat (and any kind added after this mapping) launches with no flag.
-            _ => ServeMode::Chat,
-        },
+        serve_mode,
         speculative: None,
         multimodal_projector: None,
         path_prefix: Vec::new(),
-    }
+    })
 }
 
 fn launch_options_for(
@@ -725,7 +733,7 @@ fn launch_options_for(
     model_path: &Path,
     admission: &LocalAdmission,
 ) -> Result<LaunchOptions, LocalError> {
-    let mut options = launch_options(model, admission.parallel);
+    let mut options = launch_options(model, admission.parallel)?;
     options.chat_template_file = resolve_chat_template_file(store, model, model_path)?;
     Ok(options)
 }
@@ -1401,7 +1409,12 @@ parallel = 3
         let admission = resolve_admission(&queues, model).expect("admission");
 
         assert_eq!(admission.parallel, 3);
-        assert_eq!(launch_options(model, admission.parallel).parallel, 3);
+        assert_eq!(
+            launch_options(model, admission.parallel)
+                .expect("launch options")
+                .parallel,
+            3
+        );
 
         let _first = admission.queue.admit("client").await.unwrap();
         let _second = admission.queue.admit("client").await.unwrap();
@@ -1503,8 +1516,14 @@ context = 4096
         .expect("config");
         let embed = &config.local_models()[0];
         let chat = &config.local_models()[1];
-        assert_eq!(launch_options(embed, 1).serve_mode, ServeMode::Embeddings);
-        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+        assert_eq!(
+            launch_options(embed, 1).expect("launch options").serve_mode,
+            ServeMode::Embeddings
+        );
+        assert_eq!(
+            launch_options(chat, 1).expect("launch options").serve_mode,
+            ServeMode::Chat
+        );
     }
 
     #[test]
@@ -1538,10 +1557,54 @@ context = 4096
         let classifier = &config.local_models()[0];
         let chat = &config.local_models()[1];
         assert_eq!(
-            launch_options(classifier, 1).serve_mode,
+            launch_options(classifier, 1)
+                .expect("launch options")
+                .serve_mode,
             ServeMode::Reranking
         );
-        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+        assert_eq!(
+            launch_options(chat, 1).expect("launch options").serve_mode,
+            ServeMode::Chat
+        );
+    }
+
+    #[test]
+    fn speech_kind_refuses_to_launch_as_chat() {
+        // A speech model has no `llama-server` serve mode: `launch_options`
+        // errors rather than falling through to the chat default, which is
+        // what the wildcard arm did before the mapping went fallible.
+        let config = Config::from_toml_str(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = "/models/tts.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let speech = &config.local_models()[0];
+        let error = launch_options(speech, 1).expect_err("a speech model must not launch as chat");
+        assert!(
+            matches!(
+                error,
+                LocalError::UnsupportedKind {
+                    kind: ModelKind::Speech
+                }
+            ),
+            "the refusal names the speech kind: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "local speech models are not yet supported"
+        );
     }
 
     fn companion_config(body: &str) -> Config {
@@ -1597,7 +1660,7 @@ sha256 = "{}"
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
 
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         provision_companions(&store, model, &mut options, None).expect("provision companions");
 
         let speculative = options.speculative.expect("speculative launch state");
@@ -1643,7 +1706,7 @@ draft_max = 2
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
         let model = &mismatching.local_models()[0];
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let error = provision_companions(&store, model, &mut options, None)
             .expect_err("pin mismatch must fail provisioning");
         assert!(matches!(error, LocalError::DigestMismatch { .. }));
@@ -1656,7 +1719,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
 "#,
         );
         let model = &missing.local_models()[0];
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let error = provision_companions(&store, model, &mut options, None)
             .expect_err("a missing local source must fail provisioning");
         assert!(matches!(error, LocalError::InvalidSource { .. }));
@@ -1672,7 +1735,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
         let model = &config.local_models()[0];
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let before = options.clone();
         provision_companions(&store, model, &mut options, None).expect("no companions");
         assert_eq!(options, before);
