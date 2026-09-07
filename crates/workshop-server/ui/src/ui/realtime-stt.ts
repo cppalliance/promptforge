@@ -154,7 +154,16 @@ export function setupStt(
       void releaseCapture();
       setRecording(false);
     }
-    const transcript = completion.transcript.trimEnd();
+    const current = input.readRange(take.from, take.from + take.length);
+    const insertionWhitespace = current.match(/^\s+/)?.[0] ?? "";
+    const authoritative = completion.transcript.trimEnd();
+    const transcript =
+      take.original === "" &&
+      authoritative !== "" &&
+      insertionWhitespace !== "" &&
+      !/^\s/.test(authoritative)
+        ? insertionWhitespace + authoritative
+        : authoritative;
     splice(take, transcript);
     removeTake(take);
     if (transcript === "") {

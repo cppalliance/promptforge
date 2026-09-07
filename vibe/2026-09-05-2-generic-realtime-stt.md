@@ -671,7 +671,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/agent-stt.mjs test/agent-stt-boot.mjs test/stt-stream.mjs test/realtime-wire-fixtures.mjs test/pcm-worklet.mjs`
 - Consumes and gates: consumes Steps 3, 27, and 28; browser acceptance gates independent full-path automation.
 
-### Step 30: Prove both fixture-driven halves
+### Step 30: Prove both fixture-driven halves [completed]
 
 - Artifacts: extend `gateway/tests/it/realtime_stt.rs`, `workshop-server/tests/it/realtime_relay.rs`, and Workshop UI sequence fixtures; add no dual-server Gateway test and no cross-product development dependency.
 - Scope: Gateway independently drives canonical sequences through scripted decoders; Workshop independently drives the same sequences through a fake upstream and fake media; only installed-package acceptance claims the real dual-server path.

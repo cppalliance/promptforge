@@ -4,7 +4,7 @@
 // and a recording status sink in jsdom. It pins local gating and status,
 // replacement snapshots, authoritative completion, overlapping items,
 // clear, second take, recoverable failure, and disposal.
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +14,27 @@ import { JSDOM } from "jsdom";
 import { assertNoLeaks } from "./helpers/leak-check.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
+const fixtureDir = path.join(
+  testDir,
+  "..",
+  "..",
+  "..",
+  "gateway-stt",
+  "tests",
+  "fixtures",
+  "realtime",
+);
+const canonicalSequences = JSON.parse(
+  await readFile(path.join(fixtureDir, "valid-sequences.json"), "utf8"),
+);
+
+function canonicalMessage(sequence, direction, type, occurrence = 0) {
+  return structuredClone(
+    canonicalSequences[sequence].events.filter(
+      (entry) => entry.direction === direction && entry.message.type === type,
+    )[occurrence].message,
+  );
+}
 
 const bundle = await esbuild.build({
   stdin: {
@@ -281,23 +302,13 @@ async function harness() {
     ),
   );
   const realtime = sockets.filter((socket) => socket.url.endsWith("/v1/realtime")).at(-1);
-  realtime.message({
-    type: "session.created",
-    event_id: "created",
-    session: { id: "session", object: "realtime.transcription_session", type: "transcription", include: [], audio: { input: {} } },
-  });
+  realtime.message(
+    canonicalMessage("first_event_readiness", "server", "session.created"),
+  );
   await waitFor(() => realtime.sent.some((event) => event.type === "session.update"));
-  realtime.message({
-    type: "session.updated",
-    event_id: "updated",
-    session: {
-      id: "session",
-      object: "realtime.transcription_session",
-      type: "transcription",
-      include: ["item.input_audio_transcription.hypothesis"],
-      audio: { input: {} },
-    },
-  });
+  realtime.message(
+    canonicalMessage("hypothesis_negotiation", "server", "session.updated"),
+  );
   const mic = view.element.querySelector(".agent-session__mic");
   // The ProseMirror prompt box: content and selection are driven through
   // the component (the DOM alone sets neither). The pending-wait gate
@@ -324,6 +335,96 @@ async function harness() {
 }
 
 await assertNoLeaks(lifecycle, async () => {
+  // The shared canonical sequence drives fake media through UI replacement,
+  // completion, second-take clear, local status, and capture cleanup.
+
+  {
+    const { wire, status, mic, input, editable, startTake, dispose } = await harness();
+    wire.fire.inputRequired("fixture");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("canonical fixture: the first take did not start");
+      dispose();
+      return;
+    }
+    const canonicalAppend = canonicalMessage(
+      "immediate_commit_and_provisional_promotion",
+      "client",
+      "input_audio_buffer.append",
+    );
+    nextFlushAudio = Uint8Array.from(
+      Buffer.from(canonicalAppend.audio, "base64"),
+    ).buffer;
+    mic.click();
+    await waitFor(() =>
+      socket.sent.some((event) => event.type === "input_audio_buffer.commit"),
+    );
+    const append = socket.sent.find(
+      (event) => event.type === "input_audio_buffer.append",
+    );
+    check(
+      "canonical fixture emits the shared valid-sized audio append",
+      append?.audio === canonicalAppend.audio,
+    );
+    const committed = canonicalMessage(
+      "immediate_commit_and_provisional_promotion",
+      "server",
+      "input_audio_buffer.committed",
+    );
+    committed.item_id = "item_hypothesis";
+    socket.message(committed);
+    socket.message(
+      canonicalMessage(
+        "hypothesis_negotiation",
+        "server",
+        "conversation.item.input_audio_transcription.hypothesis",
+      ),
+    );
+    check("the first canonical hypothesis replaces the take", input.getText() === "Hello");
+    socket.message(
+      canonicalMessage(
+        "hypothesis_negotiation",
+        "server",
+        "conversation.item.input_audio_transcription.hypothesis",
+        1,
+      ),
+    );
+    check("the revised canonical hypothesis replaces rather than appends", input.getText() === "Hello!");
+    socket.message(
+      canonicalMessage(
+        "hypothesis_negotiation",
+        "server",
+        "conversation.item.input_audio_transcription.completed",
+      ),
+    );
+    check(
+      "canonical completion is authoritative and restores ready UI state",
+      input.getText() === "Hello" &&
+        editable() &&
+        status.local.at(-1).label === "Dictation ready.",
+    );
+
+    const second = await startTake();
+    check("a second take starts on the reusable fixture socket", second === socket);
+    wire.fire.inputCancelled("fixture");
+    const clear = socket.sent
+      .filter((event) => event.type === "input_audio_buffer.clear")
+      .at(-1);
+    check(
+      "second-take cleanup sends the canonical clear event",
+      clear?.type ===
+        canonicalMessage(
+          "clear_retires_only_uncommitted_input",
+          "client",
+          "input_audio_buffer.clear",
+        ).type,
+    );
+    check("second-take cleanup stops recording", !status.recording);
+    check("second-take cleanup preserves completed text", input.getText() === "Hello");
+    check("second-take cleanup restores the no-wait disabled UI state", !editable());
+    dispose();
+  }
+
   // --- The pinned wait gates the mic; a dying wait discards the take -------
 
   {
@@ -733,16 +834,17 @@ await assertNoLeaks(lifecycle, async () => {
       () =>
         socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
     );
-    socket.message({
-      type: "input_audio_buffer.committed",
-      event_id: "overlap_commit_a",
-      item_id: "overlap_a",
-      previous_item_id: null,
-    });
+    socket.message(
+      canonicalMessage(
+        "overlapping_items_reverse_completion",
+        "server",
+        "input_audio_buffer.committed",
+      ),
+    );
     socket.message({
       type: "conversation.item.input_audio_transcription.hypothesis",
       event_id: "overlap_hypothesis_a",
-      item_id: "overlap_a",
+      item_id: "item_overlap_a",
       content_index: 0,
       revision: 1,
       transcript: "first",
@@ -759,16 +861,18 @@ await assertNoLeaks(lifecycle, async () => {
       () =>
         socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
     );
-    socket.message({
-      type: "input_audio_buffer.committed",
-      event_id: "overlap_commit_b",
-      item_id: "overlap_b",
-      previous_item_id: "overlap_a",
-    });
+    socket.message(
+      canonicalMessage(
+        "overlapping_items_reverse_completion",
+        "server",
+        "input_audio_buffer.committed",
+        1,
+      ),
+    );
     socket.message({
       type: "conversation.item.input_audio_transcription.hypothesis",
       event_id: "overlap_hypothesis_b",
-      item_id: "overlap_b",
+      item_id: "item_overlap_b",
       content_index: 0,
       revision: 1,
       transcript: " second",
@@ -783,22 +887,17 @@ await assertNoLeaks(lifecycle, async () => {
       input.getText() === "base first second" && !editable(),
     );
 
-    for (const [itemId, transcript] of [
-      ["overlap_b", " SECOND"],
-      ["overlap_a", "FIRST LONG"],
-    ]) {
-      socket.message({
-        type: "conversation.item.input_audio_transcription.completed",
-        event_id: `overlap_done_${itemId}`,
-        item_id: itemId,
-        content_index: 0,
-        transcript,
-        usage: { type: "duration", seconds: 0.1 },
-      });
+    for (const completion of [0, 1]) {
+      socket.message(canonicalMessage(
+        "overlapping_items_reverse_completion",
+        "server",
+        "conversation.item.input_audio_transcription.completed",
+        completion,
+      ));
     }
     check(
       "reverse completion replaces each item with authoritative text",
-      input.getText() === "base FIRST LONG SECOND" && editable(),
+      input.getText() === "base first second" && editable(),
     );
     dispose();
   }
