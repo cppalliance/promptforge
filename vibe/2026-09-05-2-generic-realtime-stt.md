@@ -653,7 +653,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server --test it stt`
 - Consumes and gates: consumes Step 22 Workshop predicate and Step 24 public fixtures, but adds no dependency on Gateway or gateway-stt.
 
-### Step 28: Prove the actual worklet bytes
+### Step 28: Prove the actual worklet bytes [completed]
 
 - Artifacts: revise `workshop-server/ui/pcm-worklet.js`, create `ui/src/services/speech-capture.ts`, create `ui/test/pcm-worklet.mjs`, and consume `gateway-stt/tests/fixtures/audio/pcm16le-24khz.json`.
 - Scope: make the dedicated JavaScript harness load the real worklet in a processor shim and assert little-endian bytes, clipping, transferred `ArrayBuffer` type, partial-buffer carry, and 24 kHz output; `stt-stream.mjs` is not evidence for worklet encoding.
