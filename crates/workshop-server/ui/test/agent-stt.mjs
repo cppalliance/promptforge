@@ -174,43 +174,45 @@ class FakeWebSocket {
   }
   // Test-side control, not part of the WebSocket surface.
   message(frame) {
-    if (frame.type === "interim" || frame.type === "final") {
+    if (frame.type === "interim") {
       if (!this.itemId) {
         this.itemId = `item_${++nextItem}`;
-        this.dispatch("message", {
-          data: JSON.stringify({
-            type: "input_audio_buffer.committed",
-            event_id: `committed_${nextItem}`,
-            item_id: this.itemId,
-            previous_item_id: null,
-          }),
-        });
       }
-      frame =
-        frame.type === "interim"
-          ? {
-              type: "conversation.item.input_audio_transcription.hypothesis",
-              event_id: `hypothesis_${nextItem}`,
-              item_id: this.itemId,
-              content_index: 0,
-              revision: 1,
-              transcript: [frame.committed, frame.tentative].filter(Boolean).join(
-                frame.committed && frame.tentative && !/\s$/.test(frame.committed) ? " " : "",
-              ),
-              finalized: frame.committed ?? "",
-              agreed: "",
-              tentative: frame.tentative ?? "",
-              audio_start_ms: 0,
-              audio_end_ms: 100,
-            }
-          : {
-              type: "conversation.item.input_audio_transcription.completed",
-              event_id: `completed_${nextItem}`,
-              item_id: this.itemId,
-              content_index: 0,
-              transcript: frame.text,
-              usage: { type: "duration", seconds: 0.1 },
-            };
+      frame = {
+        type: "conversation.item.input_audio_transcription.hypothesis",
+        event_id: `hypothesis_${nextItem}`,
+        item_id: this.itemId,
+        content_index: 0,
+        revision: 1,
+        transcript: [frame.committed, frame.tentative].filter(Boolean).join(
+          frame.committed && frame.tentative && !/\s$/.test(frame.committed) ? " " : "",
+        ),
+        finalized: frame.committed ?? "",
+        agreed: "",
+        tentative: frame.tentative ?? "",
+        audio_start_ms: 0,
+        audio_end_ms: 100,
+      };
+    } else if (frame.type === "final") {
+      if (!this.itemId) {
+        this.itemId = `item_${++nextItem}`;
+      }
+      this.dispatch("message", {
+        data: JSON.stringify({
+          type: "input_audio_buffer.committed",
+          event_id: `committed_${nextItem}`,
+          item_id: this.itemId,
+          previous_item_id: null,
+        }),
+      });
+      frame = {
+        type: "conversation.item.input_audio_transcription.completed",
+        event_id: `completed_${nextItem}`,
+        item_id: this.itemId,
+        content_index: 0,
+        transcript: frame.text,
+        usage: { type: "duration", seconds: 0.1 },
+      };
     }
     this.dispatch("message", { data: JSON.stringify(frame) });
     if (frame.type === "conversation.item.input_audio_transcription.completed") {
@@ -366,21 +368,16 @@ await assertNoLeaks(lifecycle, async () => {
       "canonical fixture emits the shared valid-sized audio append",
       append?.audio === canonicalAppend.audio,
     );
-    const committed = canonicalMessage(
-      "immediate_commit_and_provisional_promotion",
+    const firstHypothesis = canonicalMessage(
+      "hypothesis_negotiation",
       "server",
-      "input_audio_buffer.committed",
+      "conversation.item.input_audio_transcription.hypothesis",
     );
-    committed.item_id = "item_hypothesis";
-    socket.message(committed);
-    socket.message(
-      canonicalMessage(
-        "hypothesis_negotiation",
-        "server",
-        "conversation.item.input_audio_transcription.hypothesis",
-      ),
+    socket.message(firstHypothesis);
+    check(
+      "the first precommit hypothesis binds and replaces the active take",
+      input.getText() === "Hello",
     );
-    check("the first canonical hypothesis replaces the take", input.getText() === "Hello");
     socket.message(
       canonicalMessage(
         "hypothesis_negotiation",
@@ -389,7 +386,34 @@ await assertNoLeaks(lifecycle, async () => {
         1,
       ),
     );
-    check("the revised canonical hypothesis replaces rather than appends", input.getText() === "Hello!");
+    check(
+      "every precommit revision replaces rather than appends",
+      input.getText() === "Hello!",
+    );
+    const committed = canonicalMessage(
+      "immediate_commit_and_provisional_promotion",
+      "server",
+      "input_audio_buffer.committed",
+    );
+    committed.item_id = firstHypothesis.item_id;
+    socket.message(committed);
+    const beforeUnknown = input.getText();
+    check(
+      "the matching acknowledgment confirms without changing provisional text",
+      input.getText() === "Hello!",
+    );
+    socket.message(
+      {
+        ...firstHypothesis,
+        event_id: "unknown_hypothesis_after_binding",
+        item_id: "unknown_item",
+        transcript: "MUST NOT LAND",
+      },
+    );
+    check(
+      "an unknown hypothesis cannot replace a bound take",
+      input.getText() === beforeUnknown,
+    );
     socket.message(
       canonicalMessage(
         "hypothesis_negotiation",
@@ -402,6 +426,16 @@ await assertNoLeaks(lifecycle, async () => {
       input.getText() === "Hello" &&
         editable() &&
         status.local.at(-1).label === "Dictation ready.",
+    );
+    socket.message({
+      ...firstHypothesis,
+      event_id: "unknown_hypothesis_without_active_take",
+      item_id: "orphan_item",
+      transcript: "ORPHAN",
+    });
+    check(
+      "an unknown hypothesis with no active take changes no text",
+      input.getText() === "Hello",
     );
 
     const second = await startTake();
@@ -422,6 +456,89 @@ await assertNoLeaks(lifecycle, async () => {
     check("second-take cleanup stops recording", !status.recording);
     check("second-take cleanup preserves completed text", input.getText() === "Hello");
     check("second-take cleanup restores the no-wait disabled UI state", !editable());
+    dispose();
+  }
+
+  // A mismatched acknowledgment retires its provisional take and unblocks FIFO.
+
+  {
+    const { wire, status, mic, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("tok");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("mismatch recovery: the first take did not start");
+      dispose();
+      return;
+    }
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "mismatch_hypothesis",
+      item_id: "provisional_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "must roll back",
+      finalized: "",
+      agreed: "",
+      tentative: "must roll back",
+      audio_start_ms: 0,
+      audio_end_ms: 100,
+    });
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "mismatched_commit",
+      item_id: "wrong_item",
+      previous_item_id: null,
+    });
+    check(
+      "a mismatched acknowledgment rolls back its provisional take",
+      input.getText() === "" &&
+        status.local.at(-1).severity === "error" &&
+        status.local.at(-1).label.includes("temporarily unavailable"),
+    );
+
+    await startTake();
+    socket.message({
+      type: "conversation.item.input_audio_transcription.hypothesis",
+      event_id: "fresh_hypothesis",
+      item_id: "fresh_item",
+      content_index: 0,
+      revision: 1,
+      transcript: "fresh take",
+      finalized: "fresh",
+      agreed: "",
+      tentative: " take",
+      audio_start_ms: 100,
+      audio_end_ms: 200,
+    });
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
+    );
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "fresh_commit",
+      item_id: "fresh_item",
+      previous_item_id: "wrong_item",
+    });
+    socket.message({
+      type: "conversation.item.input_audio_transcription.completed",
+      event_id: "fresh_completed",
+      item_id: "fresh_item",
+      content_index: 0,
+      transcript: "fresh final",
+      usage: { type: "duration", seconds: 0.1 },
+    });
+    check(
+      "one mismatch cannot block the next take's matching acknowledgment",
+      input.getText() === "fresh final" &&
+        status.local.at(-1).label === "Dictation ready.",
+    );
     dispose();
   }
 
@@ -797,12 +914,6 @@ await assertNoLeaks(lifecycle, async () => {
         socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
     );
     socket.message({
-      type: "input_audio_buffer.committed",
-      event_id: "current_commit",
-      item_id: "current_item",
-      previous_item_id: "discarded_item",
-    });
-    socket.message({
       type: "conversation.item.input_audio_transcription.hypothesis",
       event_id: "current_hypothesis",
       item_id: "current_item",
@@ -815,8 +926,14 @@ await assertNoLeaks(lifecycle, async () => {
       audio_start_ms: 100,
       audio_end_ms: 200,
     });
+    socket.message({
+      type: "input_audio_buffer.committed",
+      event_id: "current_commit",
+      item_id: "current_item",
+      previous_item_id: "discarded_item",
+    });
     check(
-      "the acknowledgment after a tombstone binds the current take",
+      "a precommit hypothesis after a tombstone binds the current take",
       input.getText() === "right take",
     );
     dispose();
@@ -834,13 +951,6 @@ await assertNoLeaks(lifecycle, async () => {
       () =>
         socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
     );
-    socket.message(
-      canonicalMessage(
-        "overlapping_items_reverse_completion",
-        "server",
-        "input_audio_buffer.committed",
-      ),
-    );
     socket.message({
       type: "conversation.item.input_audio_transcription.hypothesis",
       event_id: "overlap_hypothesis_a",
@@ -854,20 +964,19 @@ await assertNoLeaks(lifecycle, async () => {
       audio_start_ms: 0,
       audio_end_ms: 100,
     });
+    socket.message(
+      canonicalMessage(
+        "overlapping_items_reverse_completion",
+        "server",
+        "input_audio_buffer.committed",
+      ),
+    );
 
     await startTake();
     mic.click();
     await waitFor(
       () =>
         socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
-    );
-    socket.message(
-      canonicalMessage(
-        "overlapping_items_reverse_completion",
-        "server",
-        "input_audio_buffer.committed",
-        1,
-      ),
     );
     socket.message({
       type: "conversation.item.input_audio_transcription.hypothesis",
@@ -882,6 +991,14 @@ await assertNoLeaks(lifecycle, async () => {
       audio_start_ms: 100,
       audio_end_ms: 200,
     });
+    socket.message(
+      canonicalMessage(
+        "overlapping_items_reverse_completion",
+        "server",
+        "input_audio_buffer.committed",
+        1,
+      ),
+    );
     check(
       "overlapping hypotheses occupy isolated replacement regions",
       input.getText() === "base first second" && !editable(),

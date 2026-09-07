@@ -54,6 +54,7 @@ export function setupStt(
   const awaitingCommit: Array<Take | null> = [];
   const byItem = new Map<string, Take>();
   const byClientEvent = new Map<string, Take>();
+  const retiredItems = new Set<string>();
   let active: Take | null = null;
   let stopping = false;
   let pendingCaptureStop: Promise<SpeechCaptureOutcome> | null = null;
@@ -110,6 +111,7 @@ export function setupStt(
     }
     if (take.itemId !== null) {
       byItem.delete(take.itemId);
+      retiredItems.add(take.itemId);
     }
     if (active === take) {
       active = null;
@@ -138,10 +140,20 @@ export function setupStt(
   }
 
   function applySnapshot(snapshot: RealtimeTranscriptSnapshot): void {
-    const take = takeFor(snapshot.itemId);
-    if (take !== null) {
-      splice(take, snapshot.text);
+    let take = takeFor(snapshot.itemId);
+    if (take === null) {
+      if (retiredItems.has(snapshot.itemId) || awaitingCommit.includes(null)) {
+        return;
+      }
+      const unbound = takes.filter((candidate) => candidate.itemId === null);
+      if (unbound.length !== 1) {
+        return;
+      }
+      take = unbound[0];
+      take.itemId = snapshot.itemId;
+      byItem.set(snapshot.itemId, take);
     }
+    splice(take, snapshot.text);
   }
 
   function applyCompletion(completion: RealtimeTranscriptCompletion): void {
@@ -176,20 +188,39 @@ export function setupStt(
 
   store.add(
     realtime.onCommitted((itemId) => {
-      const known = byItem.get(itemId);
-      if (known !== undefined) {
-        const index = awaitingCommit.indexOf(known);
-        if (index >= 0) {
-          awaitingCommit.splice(index, 1);
+      if (awaitingCommit.length === 0) {
+        if (byItem.has(itemId)) {
+          return;
         }
+        if (active !== null && active.itemId === null) {
+          active.itemId = itemId;
+          byItem.set(itemId, active);
+          return;
+        }
+        retiredItems.add(itemId);
+        status.showLocal("Dictation is temporarily unavailable. Try again.", "error");
         return;
       }
-      const take = awaitingCommit.length > 0 ? awaitingCommit.shift() : active;
-      if (take === undefined || take === null) {
+      const take = awaitingCommit[0];
+      if (take === null) {
+        awaitingCommit.shift();
+        retiredItems.add(itemId);
         return;
       }
-      take.itemId = itemId;
-      byItem.set(itemId, take);
+      if (take.itemId === null) {
+        awaitingCommit.shift();
+        take.itemId = itemId;
+        byItem.set(itemId, take);
+        return;
+      }
+      if (take.itemId === itemId) {
+        awaitingCommit.shift();
+        return;
+      }
+      awaitingCommit.shift();
+      retiredItems.add(itemId);
+      rollback(take);
+      status.showLocal("Dictation is temporarily unavailable. Try again.", "error");
     }),
   );
   store.add(realtime.onSnapshot(applySnapshot));

@@ -720,7 +720,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
 - Consumes and gates: this repairs the installed observation where Gateway became ready in under two seconds but Workshop retained an empty model picker, Realtime remained connecting for 20 to 30 seconds, and a completed profile operation left the progress bar visible instead of restoring LEDs. Tests must keep health continuously true while catalog readiness changes, keep the progress SSE open after root completion, and force Realtime reconnect cancellation.
 
-### Step 33: Bind live hypotheses before commit acknowledgment
+### Step 33: Bind live hypotheses before commit acknowledgment [completed]
 
 - Artifacts: update `workshop-server/ui/src/ui/realtime-stt.ts`, its service only if typed provisional-item state is needed, and focused browser speech tests.
 - Scope: when a valid hypothesis arrives for an unknown item while exactly one active uncommitted take exists, bind that provisional item ID to the take before applying the snapshot. Require the later `input_audio_buffer.committed` acknowledgment to name the same item, preserve FIFO tombstones and overlapping committed items, and ignore unknown hypotheses when no active take exists. Render every revision as replacement text while recording continues, then preserve authoritative completion behavior.
