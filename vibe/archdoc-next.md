@@ -142,7 +142,7 @@ N13 | observation | global-state @ crates/gateway-stt-backend-whisper/src/prompt
 N14 | observation | global-state @ crates/gateway-stt-backend-whisper/tests/native_whisper.rs::NATIVE_TEST: serializes native backend tests with a process-wide mutex | Separate Whisper from the STT engine
 N15 | observation | clone-block @ crates/gateway-stt/src/test_fixtures.rs: duplicates native fixture loading across unit and integration test support | Separate Whisper from the STT engine; Quiesce speech generations before replacement
 N16 | observation | clone-block @ crates/gateway-stt/tests/common/mod.rs: duplicates native fixture loading across integration and unit test support | Separate Whisper from the STT engine
-N17 | observation | Violates A2 @ crates/gateway-stt/tests/it/architecture.rs: not determinable from diff | Enforce exact STT architecture ratchets
+N17 | observation | Violates A2 @ crates/gateway-stt/tests/it/architecture.rs: not determinable from diff | Enforce exact STT architecture ratchets; Finalize generic Realtime STT architecture
 N18 | observation | feature-flag @ crates/gateway-stt-backend-whisper/Cargo.toml::test-fixtures: forwards scripted engine fixtures without an expiry | Bound transcription workers and expose test fixtures
 N19 | observation | feature-flag @ crates/gateway-stt-engine/Cargo.toml::test-fixtures: gates downstream scripted decoder fixtures without an expiry | Bound transcription workers and expose test fixtures
 N20 | observation | surface-growth @ crates/gateway-stt-engine/src/lib.rs::test_fixtures: exposes scripted decoder controls to downstream consumers | Bound transcription workers and expose test fixtures; Partition live hypotheses into disjoint fields

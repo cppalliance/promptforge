@@ -48,13 +48,12 @@ jobs:
           RUSTUP_TOOLCHAIN=1.89 cargo install cargo-modules --version 0.25.0 --locked
           RUSTUP_TOOLCHAIN=1.89 cargo install cargo-public-api --version 0.52.0 --locked
 
-      - name: Install UI dependencies
-        working-directory: crates/workshop-server/ui
-        run: npm ci
-
       - name: Install config UI dependencies
         working-directory: crates/gateway-config-ui/ui
         run: npm ci
+
+      - name: Build Gateway without Workshop UI tooling
+        run: cargo build --locked -p gateway
 
       - name: Test STT architecture driver
         run: node --test tools/check-stt-architecture.test.mjs

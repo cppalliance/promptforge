@@ -5,7 +5,9 @@ import {
   assertAcyclic,
   countEffectiveRootNames,
   parseCargoModulesDot,
+  publicRootCount,
   requireCargoVersion,
+  requireExactPublicRootCount,
   requireToolVersion,
   runCargo,
 } from "./check-stt-architecture.mjs";
@@ -87,6 +89,19 @@ test("public API parser rejects malformed output", () => {
   assert.throws(
     () => countEffectiveRootNames("pub mod demo\nnot public API output\n", "demo"),
     /malformed cargo-public-api output/,
+  );
+});
+
+test("public root count is exact rather than a spare budget", () => {
+  assert.equal(publicRootCount("public_root_count = 6\n", "demo"), 6);
+  assert.doesNotThrow(() => requireExactPublicRootCount("demo", 6, 6));
+  assert.throws(
+    () => requireExactPublicRootCount("demo", 5, 6),
+    /expected exactly 6/,
+  );
+  assert.throws(
+    () => requireExactPublicRootCount("demo", 7, 6),
+    /expected exactly 6/,
   );
 });
 

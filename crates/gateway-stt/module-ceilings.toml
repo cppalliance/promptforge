@@ -1,10 +1,8 @@
-# Exact source and public-root ratchets for the gateway STT facade.
+# Exact source and public-root counts for the gateway STT facade.
 # Physical lines include comments and blanks. Every recorded ceiling equals
 # the measured file size, so any size change updates this manifest explicitly.
 
-public_root_budget = 6
-
-[migration_targets]
+public_root_count = 6
 
 [modules]
 "artifacts.rs" = 346

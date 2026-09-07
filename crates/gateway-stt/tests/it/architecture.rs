@@ -13,7 +13,7 @@ const STT_CRATES: [&str; 4] = [
     "gateway-whisper-ffi",
 ];
 
-const PUBLIC_ROOT_BUDGETS: [(&str, usize); 4] = [
+const PUBLIC_ROOT_COUNTS: [(&str, usize); 4] = [
     ("gateway-stt", 6),
     ("gateway-stt-engine", 7),
     ("gateway-stt-backend-whisper", 2),
@@ -29,7 +29,6 @@ const LEGACY_WORKSHOP_UI_SPEECH_SEAMS: [&str; 6] = [
     "pcm-capture",
 ];
 
-const DEPENDENCY_PHASE: &str = "Phase C";
 const DEPENDENCY_POLICY_CRATES: [&str; 7] = [
     "gateway",
     "gateway-stt",
@@ -43,23 +42,6 @@ const DEPENDENCY_POLICY_CRATES: [&str; 7] = [
 struct DependencyPolicy {
     crate_name: &'static str,
     final_edges: &'static [&'static str],
-    temporary_edges: &'static [TemporaryEdge],
-}
-
-struct TemporaryEdge {
-    dependency: &'static str,
-    removal_step: &'static str,
-}
-
-struct MigrationPolicy {
-    crate_name: &'static str,
-    targets: &'static [MigrationPolicyTarget],
-}
-
-struct MigrationPolicyTarget {
-    module: &'static str,
-    target_step: &'static str,
-    destination: &'static str,
 }
 
 const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
@@ -79,7 +61,6 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "shared-protocol",
             "shared-sidecar",
         ],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "gateway-stt",
@@ -90,12 +71,10 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "gateway-stt-engine",
             "shared-progress",
         ],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "gateway-stt-engine",
         final_edges: &[],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "gateway-stt-backend-whisper",
@@ -104,17 +83,14 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "gateway-whisper-ffi",
             "shared-progress",
         ],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "gateway-whisper-ffi",
         final_edges: &[],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "shared-loopback",
         final_edges: &[],
-        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "workshop-server",
@@ -129,42 +105,14 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "shared-progress",
             "shared-sidecar",
         ],
-        temporary_edges: &[],
-    },
-];
-
-const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
-    MigrationPolicy {
-        crate_name: "gateway-stt",
-        targets: &[],
-    },
-    MigrationPolicy {
-        crate_name: "gateway-stt-engine",
-        targets: &[],
-    },
-    MigrationPolicy {
-        crate_name: "gateway-stt-backend-whisper",
-        targets: &[],
-    },
-    MigrationPolicy {
-        crate_name: "gateway-whisper-ffi",
-        targets: &[],
     },
 ];
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CeilingsFile {
-    public_root_budget: usize,
-    migration_targets: BTreeMap<String, MigrationTarget>,
+    public_root_count: usize,
     modules: BTreeMap<String, usize>,
-}
-
-#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MigrationTarget {
-    target_step: String,
-    destination: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -305,40 +253,43 @@ fn validate_dependency_policies(policies: &[DependencyPolicy]) -> Result<(), Str
     }
     if actual != expected {
         return Err(format!(
-            "dependency policies must cover the exact {DEPENDENCY_PHASE} crates: expected \
-             {expected:?}, got {actual:?}"
+            "dependency policies must cover the exact final crates: expected {expected:?}, got \
+             {actual:?}"
         ));
     }
     Ok(())
 }
 
+fn dependency_drift_message(crate_name: &str) -> String {
+    format!("{crate_name} workspace edges drifted from the exact final allowlist")
+}
+
 #[test]
-fn workspace_dependencies_match_phase_specific_allowlists() {
+fn workspace_dependencies_match_exact_final_allowlists() {
     let metadata = workspace_metadata();
     validate_dependency_policies(&DEPENDENCY_POLICIES).unwrap_or_else(|error| panic!("{error}"));
     for policy in &DEPENDENCY_POLICIES {
-        let mut allowed = policy
+        let allowed = policy
             .final_edges
             .iter()
             .copied()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
-        for edge in policy.temporary_edges {
-            assert!(
-                edge.removal_step.starts_with("Step "),
-                "{} -> {} must name its removal step",
-                policy.crate_name,
-                edge.dependency
-            );
-            allowed.insert(edge.dependency.to_owned());
-        }
         assert_eq!(
             crate_workspace_edges(metadata, policy.crate_name),
             allowed,
-            "{} workspace edges drifted from the current phase allowlist",
-            policy.crate_name
+            "{}",
+            dependency_drift_message(policy.crate_name)
         );
     }
+}
+
+#[test]
+fn dependency_drift_diagnostic_names_the_final_invariant() {
+    assert_eq!(
+        dependency_drift_message("gateway-stt"),
+        "gateway-stt workspace edges drifted from the exact final allowlist"
+    );
 }
 
 #[test]
@@ -350,21 +301,23 @@ fn dependency_policy_omission_is_rejected() {
 }
 
 #[test]
-fn dependency_policy_has_advanced_to_phase_c() {
-    assert_eq!(DEPENDENCY_PHASE, "Phase C");
+fn dependency_policy_is_final_without_workshop_back_edges() {
     let workshop = DEPENDENCY_POLICIES
         .iter()
         .find(|policy| policy.crate_name == "workshop-server")
-        .unwrap_or_else(|| panic!("Phase C contains the Workshop dependency policy"));
+        .unwrap_or_else(|| panic!("final policy contains the Workshop dependency policy"));
     assert!(
         workshop.final_edges.contains(&"shared-loopback"),
-        "Phase C retains the Workshop dependency on shared-loopback"
+        "final policy retains the Workshop dependency on shared-loopback"
     );
     assert!(
-        DEPENDENCY_POLICIES
+        !DEPENDENCY_POLICIES
             .iter()
-            .all(|policy| policy.temporary_edges.is_empty()),
-        "Phase C has no temporary dependency exceptions"
+            .find(|policy| policy.crate_name == "gateway-stt")
+            .unwrap_or_else(|| panic!("final policy contains gateway-stt"))
+            .final_edges
+            .contains(&"workshop-server"),
+        "final policy forbids the Gateway STT to Workshop dependency"
     );
 }
 
@@ -526,79 +479,36 @@ fn relative_source_path(src: &Path, source: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn expected_migration_targets(crate_name: &str) -> BTreeMap<String, MigrationTarget> {
-    MIGRATION_POLICIES
+fn expected_public_root_count(crate_name: &str) -> usize {
+    PUBLIC_ROOT_COUNTS
         .iter()
-        .find(|policy| policy.crate_name == crate_name)
-        .unwrap_or_else(|| panic!("migration policy must cover {crate_name}"))
-        .targets
-        .iter()
-        .map(|target| {
-            (
-                target.module.to_owned(),
-                MigrationTarget {
-                    target_step: target.target_step.to_owned(),
-                    destination: target.destination.to_owned(),
-                },
-            )
-        })
-        .collect()
-}
-
-fn expected_public_root_budget(crate_name: &str) -> usize {
-    PUBLIC_ROOT_BUDGETS
-        .iter()
-        .find_map(|(name, budget)| (*name == crate_name).then_some(*budget))
+        .find_map(|(name, count)| (*name == crate_name).then_some(*count))
         .unwrap_or_else(|| panic!("public-root policy must cover {crate_name}"))
 }
 
-fn validate_migration_targets(crate_name: &str, config: &CeilingsFile) -> Result<(), String> {
-    let expected = expected_migration_targets(crate_name);
-    if config.migration_targets != expected {
-        return Err(format!(
-            "{crate_name} migration targets must match the exact phase policy: expected {expected:?}, got {:?}",
-            config.migration_targets
-        ));
-    }
-    for module in config.migration_targets.keys() {
-        if !config.modules.contains_key(module) {
-            return Err(format!(
-                "{crate_name} migration target names unknown module {module}"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_module_ceiling(
-    lines: usize,
-    ceiling: usize,
-    settled_limit: Option<usize>,
-) -> Result<(), String> {
+fn validate_module_ceiling(lines: usize, ceiling: usize) -> Result<(), String> {
     if lines != ceiling {
         return Err(format!(
             "measured {lines} physical lines but the exact ceiling is {ceiling}"
         ));
     }
-    if let Some(limit) = settled_limit
-        && lines > limit
-    {
+    if lines > 500 {
         return Err(format!(
-            "settled module has {lines} physical lines above the {limit}-line limit"
+            "final module has {lines} physical lines above the 500-line limit"
         ));
     }
     Ok(())
 }
 
 #[test]
-fn module_ceilings_cover_sources_and_name_migration_targets() {
+fn final_module_ceilings_cover_every_source() {
     for crate_name in STT_CRATES {
         let src = crate_root(crate_name).join("src");
         let config = ceilings(crate_name);
         assert_eq!(
-            config.public_root_budget,
-            expected_public_root_budget(crate_name),
-            "{crate_name} public root budget drifted from the exact phase policy"
+            config.public_root_count,
+            expected_public_root_count(crate_name),
+            "{crate_name} public root count drifted from the exact final policy"
         );
         let measured = rust_sources(&src)
             .into_iter()
@@ -616,58 +526,32 @@ fn module_ceilings_cover_sources_and_name_migration_targets() {
         );
         for (module, lines) in measured {
             let ceiling = config.modules[&module];
-            let settled_limit = (crate_name == "gateway-stt"
-                && !config.migration_targets.contains_key(&module))
-            .then_some(500);
-            validate_module_ceiling(lines, ceiling, settled_limit).unwrap_or_else(|error| {
+            validate_module_ceiling(lines, ceiling).unwrap_or_else(|error| {
                 panic!("{crate_name}/{module} violates its source policy: {error}")
             });
         }
-        validate_migration_targets(crate_name, &config).unwrap_or_else(|error| panic!("{error}"));
     }
 }
 
 #[test]
-fn exact_module_ceiling_policy_rejects_spare_growth_and_settled_oversize() {
-    assert!(validate_module_ceiling(499, 500, Some(500)).is_err());
-    assert!(validate_module_ceiling(501, 501, Some(500)).is_err());
-    assert!(validate_module_ceiling(500, 500, Some(500)).is_ok());
-    assert!(
-        validate_module_ceiling(501, 501, None).is_ok(),
-        "a named migration may retain an exact temporary oversize"
-    );
+fn exact_module_ceiling_policy_rejects_spare_growth_and_every_oversize() {
+    assert!(validate_module_ceiling(499, 500).is_err());
+    assert!(validate_module_ceiling(501, 501).is_err());
+    assert!(validate_module_ceiling(500, 500).is_ok());
 }
 
 #[test]
-fn completed_engine_migration_targets_are_removed() {
-    let config = CeilingsFile {
-        public_root_budget: 7,
-        migration_targets: BTreeMap::new(),
-        modules: BTreeMap::from([("engine.rs".to_owned(), 1), ("worker.rs".to_owned(), 1)]),
-    };
-    assert!(validate_migration_targets("gateway-stt-engine", &config).is_ok());
-}
-
-#[test]
-fn misspelled_migration_section_is_rejected() {
+fn stale_migration_section_is_rejected() {
     let malformed = r#"
-        public_root_budget = 2
+        public_root_count = 2
 
-        [migration_targtes]
+        [migration_targets]
 
         [modules]
         "lib.rs" = 1
     "#;
 
     assert!(parse_ceilings(malformed).is_err());
-}
-
-#[test]
-fn completed_step_39_migrations_are_removed() {
-    let expected = expected_migration_targets("gateway-stt");
-    assert!(!expected.contains_key("api.rs"));
-    assert!(!expected.contains_key("runtime.rs"));
-    assert!(expected.is_empty());
 }
 
 const REFCOUNT_INTROSPECTION_OWNERS: [&str; 3] = ["Arc", "Rc", "Weak"];

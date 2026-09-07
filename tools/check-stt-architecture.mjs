@@ -211,16 +211,24 @@ export function countEffectiveRootNames(output, crateName) {
   return names.size;
 }
 
-function publicRootBudget(source, crateName) {
+export function publicRootCount(source, crateName) {
   const matches = [
-    ...source.matchAll(/^\s*public_root_budget\s*=\s*(\d+)\s*$/gm),
+    ...source.matchAll(/^\s*public_root_count\s*=\s*(\d+)\s*$/gm),
   ];
   if (matches.length !== 1) {
     fail(
-      `${crateName}/module-ceilings.toml must contain exactly one integer public_root_budget`,
+      `${crateName}/module-ceilings.toml must contain exactly one integer public_root_count`,
     );
   }
   return Number(matches[0][1]);
+}
+
+export function requireExactPublicRootCount(crateName, actual, expected) {
+  if (actual !== expected) {
+    fail(
+      `${crateName} exposes ${actual} effective root names, expected exactly ${expected}`,
+    );
+  }
 }
 
 export function runCargo(
@@ -299,13 +307,9 @@ function main() {
       crateName.replaceAll("-", "_"),
     );
     const ceilingPath = join(root, "crates", crateName, "module-ceilings.toml");
-    const budget = publicRootBudget(readFileSync(ceilingPath, "utf8"), crateName);
-    if (rootNames > budget) {
-      fail(
-        `${crateName} exposes ${rootNames} effective root names past its budget ${budget}`,
-      );
-    }
-    console.log(`${crateName}: acyclic, public roots ${rootNames}/${budget}`);
+    const expected = publicRootCount(readFileSync(ceilingPath, "utf8"), crateName);
+    requireExactPublicRootCount(crateName, rootNames, expected);
+    console.log(`${crateName}: acyclic, public roots ${rootNames}`);
   }
 }
 

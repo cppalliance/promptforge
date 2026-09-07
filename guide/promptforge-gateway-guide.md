@@ -388,7 +388,7 @@ Local chat completions accept deterministic sampling parameters such as `tempera
 
 # Speech-to-Text
 
-This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and what the transcription endpoint serves. Speech builds on local models, because speech models are provisioned and cached the same way.
+This chapter teaches you the gateway's transcription surface: how to declare speech models, how the interim and final roles work together, and how to use batch and Realtime transcription. Speech builds on local models, because speech models are provisioned and cached the same way.
 
 ## Declare speech models
 
@@ -422,7 +422,7 @@ The `window_seconds` key sets the seconds of trailing audio transcribed per pass
 
 Legacy `[workshop.stt]` input is accepted only when `[stt]` is absent. Defining both is rejected, and saved configuration uses only `[stt]`.
 
-## The transcription endpoint
+## Batch transcription
 
 With the default-on `stt` feature the gateway serves OpenAI-compatible audio transcription at POST /v1/audio/transcriptions. The multipart form accepts `file`, `model`, `language`, `prompt`, `temperature`, `response_format`, and the repeated field `timestamp_granularities[]`.
 
@@ -442,15 +442,17 @@ A recorded take is split into speech segments at silence boundaries. A segment c
 
 With a final model configured, completed speech segments are re-transcribed in the background while the take still records, and each segment's text is reported as it finishes. Without a final model, the stop falls back to the interim model. Silent or very short fragments are skipped so the model does not invent text for them. Transcription is pinned to English, and translation is disabled.
 
-## The streaming socket
+## Realtime transcription
 
-The gateway serves the authenticated streaming speech-to-text WebSocket at `/stt` and its `GET /stt/capability` probe. The desktop application's Workshop listener relays those routes under the same paths, so the webview remains same-origin and never receives the gateway credential.
+The gateway serves authenticated Realtime transcription at `WS /v1/realtime?intent=transcription`. The query is exact: missing, duplicate, malformed, unsupported, or additional parameters are rejected before upgrade. Native clients may omit Origin; browser clients must send an HTTP loopback Origin.
 
-The client drives the socket with the bare text messages `start` and `stop` and binary little-endian f32 PCM audio frames. The wire contract has a `stream` frame announcing each take, `interim` frames carrying committed and tentative transcripts, and a `final` frame with the transcript and frame count. Frames carry a per-connection generation counter, and committed text is append-only across interim frames.
+The server creates a transcription session for the logical model `realtime-transcribe`. Clients may send `session.update`, `input_audio_buffer.append`, `input_audio_buffer.clear`, and `input_audio_buffer.commit`. Audio appends are canonical Base64 containing signed little-endian mono PCM16 at 24 kHz. The gateway preserves an odd trailing byte across appends, continuously resamples to 16 kHz, flushes the resampler on commit, and resets the whole input on clear.
 
-The /stt socket refuses cross-site browser connections: the upgrade performs an Origin allowlist check and answers 403.
+Only null noise reduction and turn detection are accepted. Session updates may change the transcription prompt and negotiate the PromptForge extension `item.input_audio_transcription.hypothesis`. Standard clients receive OpenAI-shaped session, item, transcription delta, completed, failed, and error events. Extension clients also receive revisioned replacement snapshots with the complete transcript and its finalized, agreed, and tentative regions; completion remains authoritative.
 
-During a take the status bar shows "Listening...", then "Transcribing...", then "Finalizing transcript...", and failures appear as notices. A take that overruns the interim window without a final model is truncated; the warning names the window length and the dropped lead in seconds.
+One connection may have four committed items finalizing concurrently, and the service admits at most eight Realtime sessions. One append decodes to at most 15 MiB, one uncommitted input holds at most 30 seconds of audio, and committed audio must be at least 100 ms. Queue and capacity overloads return explicit errors instead of waiting without limit.
+
+The desktop Workshop exposes the same `/v1/realtime` path on its own origin. Its server authenticates the fixed upstream target and relays payloads without parsing them, so the webview never receives the gateway credential.
 
 Switching the active profile provisions and loads the selected speech models. Switching away unloads the engine and releases the model memory.
 
@@ -772,7 +774,7 @@ The gateway restricts the cache root to your own account at startup and refuses 
 
 ## Status, progress, and metrics
 
-GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. GET /admin/profiles lists the profiles in the loaded catalog.
+GET /admin/status reports the active profile, the models it exposes, and a config generation that changes when the gateway restarts. With the STT feature it also includes generic `speech` facts: whether speech is configured, whether a complete generation is ready, whether its backend reports GPU acceleration, and the active generation number. A featureless build omits the speech object. GET /admin/profiles lists the profiles in the loaded catalog.
 
 GET /admin/progress streams every long-running operation in the process as one server-sent event stream. A fresh subscriber first receives live operations replayed, then every event. Heartbeat comment lines arrive every 15 seconds while idle.
 

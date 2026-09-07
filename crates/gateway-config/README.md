@@ -82,6 +82,8 @@ Loading validates every profile, not only the active one:
 
 The built-in `RECOMMENDED_STT_MODELS` pair is `base.en` for interim and `small.en` for final. Both use canonical whisper.cpp URLs and SHA-256 pins from Hugging Face LFS metadata. The ignored live test downloads both artifacts to detect URL or digest drift.
 
+`realtime-transcribe` is reserved for the Gateway's logical Realtime model and cannot be used as a physical `[[stt_model]]` name. The Gateway advertises that logical name only while an interim and final pair is active; physical names remain the batch transcription selectors.
+
 ## Pending edits
 
 `save_config_shadow` accepts the pending admin document. It writes global config to `gateway.toml.next` and writes the matching `active_profile` key to `gateway.state.toml.next`. `load_pending_config` reads those shadows with the same selection precedence. No save touches a real file until `promote_shadow` renames the shadow into place, or a caller holding the intended contents commits them with `write_atomic`, the replace-through-rename primitive both shadows and `persist_profile_state` build on.

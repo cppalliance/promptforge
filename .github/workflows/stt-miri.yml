@@ -81,14 +81,6 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install Workshop UI dependencies
-        working-directory: crates/workshop-server/ui
-        run: npm ci
-
       - name: Provision pinned native fixtures
         shell: powershell
         run: |

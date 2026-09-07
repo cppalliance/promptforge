@@ -53,7 +53,7 @@ The Workshop also keeps working when parts of its environment fail. The interfac
 
 ## The gateway configuration
 
-The gateway owns its own boot config, `gateway.toml`, and the Workshop never reads it. On the gateway's first run - when no config exists anywhere it searches - the gateway writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and prints a message telling you where it wrote the file. It also creates `profiles\default.toml` beside it, and it never overwrites an existing `profiles\default.toml`. The generated config boots the gateway into the `default` profile.
+The gateway owns its own boot config, `gateway.toml`, and the Workshop never reads it. On the gateway's first run - when no config exists anywhere it searches - the gateway writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and a sibling `gateway.state.toml` selecting the generated `default` profile. The generated catalog, profiles, and global settings all live in that one editable config file.
 
 The generated config is a single editable TOML file with a header that invites edits. Two properties of the generated file are worth knowing:
 
@@ -61,6 +61,8 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
 A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, and its `bind` and `open_browser` settings do nothing because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
+
+Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 
 At run time the gateway also downloads the pinned voice runtime matched to your machine (CUDA on Windows, Metal on Apple Silicon, CPU on the other supported targets), plus the managed `llama-server`. You make no build-time choices for this.
 
@@ -470,7 +472,7 @@ You can now hold a full conversation, steer it, and recover from anything that i
 
 You can type prompts into the chat surface. This chapter teaches you to speak them instead. Dictation uses a push-to-talk microphone button beside the send button, and the transcript lands in the prompt exactly as if you had typed it. If voice is not available on your machine, this chapter also teaches you how to tell and why.
 
-The desktop application keeps the microphone connection same-origin: its Workshop server relays `/stt` and `/stt/capability` to the gateway, which owns the speech models and transcription engine. The gateway credential stays in the server process and is never exposed to the webview.
+The desktop application keeps the microphone connection same-origin: its Workshop server relays `/v1/realtime` to the gateway's fixed `/v1/realtime?intent=transcription` target. The relay authenticates upstream but never parses speech payloads or owns speech state. The gateway credential stays in the server process and is never exposed to the webview.
 
 ## Dictating a prompt
 
@@ -480,7 +482,7 @@ To dictate into the chat input:
 2. Speak your message.
 3. Click the microphone button again to stop. The tooltip now reads "Stop recording".
 
-While you speak, you see live transcription as a growing committed prefix plus a tentative tail. When you stop, the assembled final transcript replaces the interim text and focus returns to the input. After you stop, the input stays locked until the final transcript arrives; a slow transcription is allowed up to two minutes.
+While you speak, you see one evolving transcript. Each revision replaces the previous hypothesis in the same editor range, so revised phrases do not accumulate. When you stop, the authoritative completion replaces the hypothesis and focus returns to the input. After you stop, the input stays locked until the final transcript arrives; other committed takes may finish independently.
 
 Dictation splices the transcript into the current selection, behaving like typing at the cursor. Newlines in the transcript become line breaks. Dictating over a selection replaces the selection outright. Consecutive takes compose, because each take captures the cursor position fresh at record start. You never see stale transcription text from a previous take: takes are numbered per connection, and frames from a superseded take are discarded.
 
@@ -490,16 +492,11 @@ The status bar shows a red recording LED while the microphone is capturing, and 
 
 ## When the mic does nothing
 
-The mic stays visible and clickable in every state. Dictation is gated on a capability check and on a pending input wait: the application asks the server what dictation can do here and treats any failure of that check as blocked. Clicking the mic while dictation cannot start names the blocker on the status bar instead of silently doing nothing:
-
-- "Dictation is still checking what this server can do; try again in a moment."
-- "Dictation needs a GPU this server doesn't have."
-- "No speech models are provisioned in the active profile."
-- "The agent isn't asking for input; the mic opens when it does."
+The mic stays visible and clickable in every state. Dictation is gated by the agent's pending input wait. Clicking it at another time names the blocker on the status bar: "The agent isn't asking for input; the mic opens when it does." The first eligible click may connect the Realtime session and ask you to try again in a moment; the session then reconnects with bounded backoff after a dropped connection.
 
 Failures during dictation are named too. Microphone permission denial or capture failure is named on the status bar. A dropped dictation connection is reported on the status bar, including drops before the final transcript lands. A server error message during a take is shown verbatim on the status bar and ends the take. A browser without microphone, audio, or WebSocket support is told "Dictation is not available in this browser."
 
-Under the hood, the Workshop serves a speech-to-text socket endpoint at `/stt`. Dictation streams your speech to it continuously as mono audio blocks while you talk. Microphone capture applies echo cancellation and noise suppression, and the audio is resampled to 16 kHz before it is sent for transcription.
+Under the hood, the Workshop serves a payload-opaque Realtime socket at `/v1/realtime`. Browser capture applies echo cancellation and noise suppression, resamples to 24 kHz, converts samples to signed little-endian PCM16, and sends canonical Base64 audio appends. Stop flushes the capture worklet before committing the input buffer, so the final short block is included.
 
 ## Microphone permission on each platform
 

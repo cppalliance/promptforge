@@ -1,10 +1,8 @@
-# Exact source and public-root ratchets for the backend-neutral STT engine.
+# Exact source and public-root counts for the backend-neutral STT engine.
 # Physical lines include comments and blanks. Every recorded ceiling equals
 # the measured file size, so any size change updates this manifest explicitly.
 
-public_root_budget = 7
-
-[migration_targets]
+public_root_count = 7
 
 [modules]
 "decoder.rs" = 87
@@ -13,6 +11,7 @@ public_root_budget = 7
 "lib.rs" = 18
 "policy.rs" = 132
 "startup.rs" = 48
-"test_fixtures.rs" = 667
+"test_fixtures.rs" = 362
+"test_fixtures/tests.rs" = 304
 "translation.rs" = 50
 "worker.rs" = 460

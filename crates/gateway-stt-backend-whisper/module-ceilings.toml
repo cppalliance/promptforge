@@ -1,10 +1,8 @@
-# Exact source and public-root ratchets for the safe Whisper backend.
+# Exact source and public-root counts for the safe Whisper backend.
 # Physical lines include comments and blanks. Every recorded ceiling equals
 # the measured file size, so any size change updates this manifest explicitly.
 
-public_root_budget = 2
-
-[migration_targets]
+public_root_count = 2
 
 [modules]
 "config.rs" = 32

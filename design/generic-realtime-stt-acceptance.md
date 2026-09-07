@@ -13,6 +13,42 @@ Accepted by the operator for the installed unsigned package built from current H
 - Signing: not tested
 - Commit created: no
 
+## Final topology and documentation evidence
+
+This section records the Step 40 architecture result. It does not replace or extend the installed-microphone verdict above.
+
+### Debt before and after
+
+- Temporary workspace dependency exceptions: 1 before, 0 after
+- Migration-target exceptions: 6 before, 0 after
+- Forbidden `gateway-stt -> workshop-server` edges: 1 before, 0 after
+- STT source modules above 500 physical lines: 3 before, 0 after
+- Largest STT source module: 712 lines before, 481 after
+- Effective public-root policy: allowances `9, 7, 2, 6` before; exact counts `6, 7, 2, 6` after
+- STT production-library module cycles: 0 after
+- Legacy `/stt`, `/stt/capability`, Workshop status/header, and Workshop STT dependency exceptions: 0 after
+
+The engine's 667-line scripted fixture was split into a 362-line fixture and a 304-line test module without changing its 22 unit, 6 contract, 8 startup-cleanup, or documentation test results.
+
+### Final gates
+
+- `node --test tools/check-stt-architecture.test.mjs`: passed, 13 tests
+- `node tools/check-stt-architecture.mjs`: passed; all four STT crates acyclic with exact public roots `6, 7, 2, 6`
+- `cargo test -p gateway-stt --test it architecture`: passed, 15 tests
+- `cargo fmt --all --check`: passed
+- `cargo run -p build-user-guide`: passed; all nine generated artifacts had identical SHA-256 values on the clean second run
+- `$env:RUSTUP_TOOLCHAIN='stable'; cargo install mdbook --version 0.4.44 --locked`: passed
+- `mdbook build guide`: passed
+
+### Final documentation and rules audit
+
+- Added the final architecture design covering ownership, exact dependencies, public counts, Realtime wire policy, bounds, profile replacement, Workshop relay behavior, CI gates, and debt results.
+- Updated Gateway, config, Workshop server, and source-guide documentation to remove the retired custom routes and describe `/v1/realtime`.
+- Regenerated every guide index and all four single-file exports through `build-user-guide`.
+- Corrected the root build prerequisite because a Gateway-only build no longer includes Workshop UI tooling.
+- Corrected Workshop's error rule because Workshop no longer provisions STT.
+- Audited `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway`, and `shared-loopback` rules; their final constraints remain concrete and correct, so they were unchanged.
+
 ## Latest installed preparation from HEAD 2d1ecca8
 
 ### Source and prior process boundary

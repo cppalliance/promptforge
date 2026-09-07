@@ -49,7 +49,7 @@ The Workshop also keeps working when parts of its environment fail. The interfac
 
 ## The gateway configuration
 
-The gateway owns its own boot config, `gateway.toml`, and the Workshop never reads it. On the gateway's first run - when no config exists anywhere it searches - the gateway writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and prints a message telling you where it wrote the file. It also creates `profiles\default.toml` beside it, and it never overwrites an existing `profiles\default.toml`. The generated config boots the gateway into the `default` profile.
+The gateway owns its own boot config, `gateway.toml`, and the Workshop never reads it. On the gateway's first run - when no config exists anywhere it searches - the gateway writes a default `gateway.toml` into `%USERPROFILE%\.promptforge\` and a sibling `gateway.state.toml` selecting the generated `default` profile. The generated catalog, profiles, and global settings all live in that one editable config file.
 
 The generated config is a single editable TOML file with a header that invites edits. Two properties of the generated file are worth knowing:
 
@@ -57,6 +57,8 @@ The generated config is a single editable TOML file with a header that invites e
 - The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
 
 A `gateway.toml` carried over from an older version may declare a `[workshop]` section. It still parses: the gateway logs a deprecation warning, and its `bind` and `open_browser` settings do nothing because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input migrates only when `[stt]` is absent.
+
+Voice uses the same separation. The gateway owns speech models, worker lifecycle, batch transcription, and the generic Realtime endpoint. The Workshop server contributes only an authenticated same-origin relay, while the browser UI owns microphone capture and transcript presentation.
 
 At run time the gateway also downloads the pinned voice runtime matched to your machine (CUDA on Windows, Metal on Apple Silicon, CPU on the other supported targets), plus the managed `llama-server`. You make no build-time choices for this.
 
