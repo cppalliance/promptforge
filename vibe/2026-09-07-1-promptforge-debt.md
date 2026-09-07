@@ -407,7 +407,7 @@ isProject: false
 - Exclusions: no broad temporary-file cleanup, rollback redesign, config format change, or deletion of unproven residue.
 - Focused verification: from the repository root run `cargo test -p gateway`.
 
-### Step 16: Extract profile preparation phases
+### Step 16: Extract profile preparation phases [completed]
 
 - Component and piece: Component 5 of 8, Gateway profile switching; create a private transaction module for target, cancellation, prepared persistence, prior runtime snapshot, and prepared and cutover phase values.
 - Dependency: depends on Step 15 because moved preparation must use the final collision and ownership contract; it precedes terminal phases so tests can pin preparation and cutover independently.
