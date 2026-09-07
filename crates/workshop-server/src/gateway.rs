@@ -16,7 +16,7 @@ use futures_util::stream::{self, Stream, StreamExt};
 use serde::Deserialize;
 
 mod socket;
-pub(crate) use socket::{GatewayRealtimeSocket, GatewaySttSocket};
+pub(crate) use socket::GatewayRealtimeSocket;
 
 /// Default bound on a single `GET /health` probe: a gateway that accepts
 /// the connection but never answers must still read as unreachable, and two

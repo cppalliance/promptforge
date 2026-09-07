@@ -46,7 +46,7 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   // No wait pinned: the click is refused and the bar says why.
   const gated = await startTake();
   if (gated) {
-    failures.push("a mic click with no wait pinned opened a /stt socket");
+    failures.push("a mic click with no wait pinned opened a Realtime socket");
   }
   if (!statusText.textContent.includes("isn't asking for input")) {
     failures.push(`a gated click named no blocker on the status bar (got "${statusText.textContent}")`);
@@ -99,10 +99,10 @@ await bootWorkbench("dictation is wired into the booted agent session", async (c
   // The scripted socket never fires onclose on its own; a drop dims the LED.
   sttSocket.onclose?.();
   if (recEl.classList.contains("status-bar__led--recording")) {
-    failures.push("a dropped /stt socket did not dim the recording LED");
+    failures.push("a dropped Realtime socket did not dim the recording LED");
   }
   if (input.getAttribute("contenteditable") !== "true") {
-    failures.push("a dropped /stt socket did not lift the input's read-only lock");
+    failures.push("a dropped Realtime socket did not lift the input's read-only lock");
   }
 
   // Closing the Agent tab from its tab chip disposes the panel, the view,

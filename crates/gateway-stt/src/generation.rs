@@ -35,7 +35,6 @@ pub struct SpeechReplacement {
 struct Shared {
     publication: RwLock<Publication>,
     next_generation: AtomicU64,
-    changes: tokio::sync::watch::Sender<u64>,
     replacements: Arc<ReplacementCoordinator>,
 }
 
@@ -53,12 +52,10 @@ pub(crate) struct GenerationState {
 
 impl Default for GenerationState {
     fn default() -> Self {
-        let (changes, _receiver) = tokio::sync::watch::channel(0);
         Self {
             shared: Arc::new(Shared {
                 publication: RwLock::new(Publication::default()),
                 next_generation: AtomicU64::new(1),
-                changes,
                 replacements: Arc::new(ReplacementCoordinator::default()),
             }),
         }
@@ -159,9 +156,6 @@ impl GenerationState {
         let mut replacement = replacement;
         let published = replacement.generation.take().map(Arc::new);
         let configured = published.is_some();
-        let revision = published
-            .as_ref()
-            .map_or_else(|| self.next_id(), |generation| generation.id);
         let committed = replacement.permit.with_current(|| {
             let mut publication = self
                 .shared
@@ -173,7 +167,6 @@ impl GenerationState {
             }
             publication.active = published;
             publication.configured = configured;
-            self.shared.changes.send_replace(revision);
             true
         });
         match committed {
@@ -208,7 +201,6 @@ impl GenerationState {
             return;
         };
         generation.admission.shutdown();
-        self.shared.changes.send_replace(self.next_id());
         generation.admission.wait_until_idle();
         let retired = self
             .shared
@@ -240,10 +232,6 @@ impl GenerationState {
         let generation = self.active()?;
         let mode = generation.select(name)?;
         Some((generation, mode))
-    }
-
-    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
-        self.shared.changes.subscribe()
     }
 
     pub(crate) fn status(&self) -> SpeechStatus {
@@ -355,7 +343,6 @@ impl GenerationState {
         let close = permit
             .with_current(|| {
                 let close = generation.admission.close()?;
-                self.shared.changes.send_replace(self.next_id());
                 Some(close)
             })
             .flatten()
@@ -363,13 +350,7 @@ impl GenerationState {
         match generation.admission.wait_for_idle(&close, deadline) {
             DrainOutcome::TimedOut => {
                 let reopened = permit
-                    .with_current(|| {
-                        let reopened = generation.admission.reopen(&close);
-                        if reopened {
-                            self.shared.changes.send_replace(self.next_id());
-                        }
-                        reopened
-                    })
+                    .with_current(|| generation.admission.reopen(&close))
                     .unwrap_or(false);
                 if reopened {
                     Err(SpeechError::QuiescenceDeadline)
@@ -429,7 +410,6 @@ fn restore_generation(
     if !restored {
         return Err(SpeechError::ReplacementInvalidated);
     }
-    shared.changes.send_replace(id);
     Ok(())
 }
 

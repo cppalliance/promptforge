@@ -218,7 +218,6 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::chat::routes(state.clone()))
         .merge(crate::session_agents::socket::routes(state.clone()))
         .merge(routes::realtime::routes(state.clone()))
-        .merge(routes::stt::routes(state.clone()))
         .merge(routes::gateway_config::routes(state))
         .merge(with_deadline(
             routes::workspace::routes(workspace),
@@ -232,8 +231,7 @@ pub fn router(state: AppState) -> Router {
         // The outermost layer on the server's own routes: every response
         // carries the CSP, error envelopes included, so the shell's
         // External-origin webview runs under the policy no matter which
-        // route answered. Routes a host merges through `spawn_with_routes`
-        // are composed after this layer and sit outside it.
+        // route answered.
         .layer(axum::middleware::from_fn(crate::csp::header))
 }
 

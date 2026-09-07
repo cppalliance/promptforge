@@ -114,21 +114,13 @@ impl SpeechService {
             .force_precommit_failure(ForcedPrecommitFailure::FinalSegmentOverload);
     }
 
-    /// Returns the batch and temporary legacy Gateway routes.
+    /// Returns the batch and Realtime Gateway routes.
     #[cfg(not(miri))]
     pub fn routes(&self) -> axum::Router {
-        crate::batch::routes(self.state.clone())
-            .merge(crate::stt::gateway_router(self.state.clone()))
-            .merge(crate::realtime::routes(
-                self.state.clone(),
-                self.sessions.clone(),
-                self.realtime_policy.clone(),
-            ))
-    }
-
-    /// Returns the temporary Workshop-hosted legacy routes.
-    #[cfg(not(miri))]
-    pub fn workshop_routes(&self, push: workshop_server::Push) -> axum::Router {
-        crate::stt::workshop_router(self.state.clone(), push)
+        crate::batch::routes(self.state.clone()).merge(crate::realtime::routes(
+            self.state.clone(),
+            self.sessions.clone(),
+            self.realtime_policy.clone(),
+        ))
     }
 }

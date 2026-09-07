@@ -318,6 +318,25 @@ async fn canonical_sequences_cross_the_fake_upstream_unchanged_without_browser_b
 }
 
 #[tokio::test]
+async fn workshop_exposes_only_the_realtime_speech_route() {
+    let (gateway, _probe) = spawn_probe().await;
+    let server = TestServer::spawn(&gateway);
+    let client = reqwest::Client::new();
+    for path in ["/stt", "/stt/capability"] {
+        let response = client
+            .get(server.http_url(path))
+            .send()
+            .await
+            .expect("the Workshop route answers");
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "GET {path} is retired"
+        );
+    }
+}
+
+#[tokio::test]
 async fn realtime_relay_is_authenticated_fixed_and_payload_opaque() {
     let (gateway, probe) = spawn_probe().await;
     let server = TestServer::spawn(&gateway);

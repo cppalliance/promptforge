@@ -59,8 +59,8 @@
 //! proxy, reveal, shutdown) sits behind the shared loopback
 //! wall from `shared-loopback` in every build; with the
 //! default-on `stt` feature, `WS /v1/realtime?intent=transcription`
-//! serves Gateway-owned Realtime transcription beside the batch and
-//! temporary legacy speech routes; with the
+//! serves Gateway-owned Realtime transcription beside the batch route;
+//! with the
 //! `config-ui` feature the embedded config SPA is served at `/config/`
 //! behind the same wall, and `GET /auth?key=` sets a session proof
 //! derived from the bearer key as an HttpOnly cookie and redirects to the
@@ -2880,37 +2880,6 @@ mod transcription_auth_tests {
                 }
             })
         );
-    }
-
-    #[tokio::test]
-    async fn stt_capability_is_mounted_behind_bearer_auth() {
-        let unauthorized = build_router(state(), None)
-            .oneshot(
-                Request::builder()
-                    .uri("/stt/capability")
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("router answers");
-        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-
-        let authorized = build_router(state(), None)
-            .oneshot(
-                Request::builder()
-                    .uri("/stt/capability")
-                    .header("host", "gateway.lan:8080")
-                    .header("authorization", "Bearer test-token")
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("router answers");
-        assert_eq!(authorized.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(authorized.into_body(), usize::MAX)
-            .await
-            .expect("body reads");
-        assert_eq!(&body[..], br#"{"gpu":false,"engine":false}"#);
     }
 
     #[tokio::test]

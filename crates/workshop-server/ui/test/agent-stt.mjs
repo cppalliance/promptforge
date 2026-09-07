@@ -130,7 +130,7 @@ window.AudioContext = FakeAudioContext;
 globalThis.AudioContext = FakeAudioContext;
 globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
-// A scripted /stt socket: opens asynchronously like a real one, records
+// A scripted Realtime socket: opens asynchronously like a real one, records
 // what the client sends, and lets the test push server frames.
 const sockets = [];
 let nextItem = 0;
@@ -321,7 +321,7 @@ async function harness() {
   const editable = () => editorEl.getAttribute("contenteditable") === "true";
   const recording = () => input.element.classList.contains("stt-input--recording");
   const send = view.element.querySelector(".agent-session__send");
-  // Clicks the mic and waits for the take's /stt socket to open and
+  // Clicks the mic and waits for the take's Realtime socket to open and
   // send "start"; null when no take began within the wait.
   async function startTake() {
     mic.click();
@@ -555,7 +555,7 @@ await assertNoLeaks(lifecycle, async () => {
         mic.querySelector("svg") !== null,
     );
     const gated = await startTake();
-    check("a mic click with no wait pinned opens no /stt socket", gated === null);
+    check("a mic click with no wait pinned opens no Realtime socket", gated === null);
     check(
       "a gated click names the missing wait on the status bar",
       status.local.length === 1 &&
@@ -566,7 +566,7 @@ await assertNoLeaks(lifecycle, async () => {
 
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
-    check("the mic click opens a /stt socket once a wait is pinned", socket !== null);
+    check("the mic click opens a Realtime socket once a wait is pinned", socket !== null);
     if (socket === null) {
       dispose();
       return;
@@ -616,7 +616,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("wait swap: the mic click did not open a /stt socket");
+      failures.push("wait swap: the mic click did not open a Realtime socket");
       dispose();
       return;
     }
@@ -641,7 +641,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("interim splice: the mic click did not open a /stt socket");
+      failures.push("interim splice: the mic click did not open a Realtime socket");
       dispose();
       return;
     }
@@ -711,7 +711,7 @@ await assertNoLeaks(lifecycle, async () => {
     input.setSelection(2, 2);
     let socket = await startTake();
     if (socket === null) {
-      failures.push("cursor insert: the mic click did not open a /stt socket");
+      failures.push("cursor insert: the mic click did not open a Realtime socket");
       dispose();
       return;
     }
@@ -753,7 +753,7 @@ await assertNoLeaks(lifecycle, async () => {
     input.setText("prefix");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("readonly take: the mic click did not open a /stt socket");
+      failures.push("readonly take: the mic click did not open a Realtime socket");
       dispose();
       return;
     }
@@ -782,7 +782,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok1");
     let socket = await startTake();
     if (socket === null) {
-      failures.push("stop window: the mic click did not open a /stt socket");
+      failures.push("stop window: the mic click did not open a Realtime socket");
       dispose();
       return;
     }
@@ -867,7 +867,7 @@ await assertNoLeaks(lifecycle, async () => {
     wire.fire.inputRequired("tok1");
     const socket = await startTake();
     if (socket === null) {
-      failures.push("discard on send: the mic click did not open a /stt socket");
+      failures.push("discard on send: the mic click did not open a Realtime socket");
       dispose();
       return;
     }

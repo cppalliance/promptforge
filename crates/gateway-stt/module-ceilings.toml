@@ -4,9 +4,7 @@
 
 public_root_budget = 6
 
-[migration_targets."stt.rs"]
-target_step = "Step 35"
-destination = "removal after the Realtime route and Workshop relay replace the legacy socket"
+[migration_targets]
 
 [modules]
 "artifacts.rs" = 346
@@ -14,10 +12,10 @@ destination = "removal after the Realtime route and Workshop relay replace the l
 "batch.rs" = 347
 "batch/native_tests.rs" = 113
 "batch/tests.rs" = 160
-"generation.rs" = 467
+"generation.rs" = 447
 "generation/lease.rs" = 130
 "generation/snapshot.rs" = 158
-"lib.rs" = 41
+"lib.rs" = 39
 "model.rs" = 105
 "realtime/mod.rs" = 16
 "realtime/input.rs" = 195
@@ -38,15 +36,14 @@ destination = "removal after the Realtime route and Workshop relay replace the l
 "realtime/wire/tests.rs" = 278
 "replacement.rs" = 473
 "segment.rs" = 253
-"service.rs" = 134
+"service.rs" = 126
 "status.rs" = 54
-"stt.rs" = 725
-"take.rs" = 470
-"take/agreement.rs" = 62
+"take.rs" = 272
+"take/agreement.rs" = 30
 "take/final_outcome.rs" = 98
 "take/finalization.rs" = 379
-"take/interim.rs" = 132
-"take/state.rs" = 163
+"take/interim.rs" = 27
+"take/state.rs" = 157
 "take/text.rs" = 9
 "take/window.rs" = 250
 "test_fixtures.rs" = 444

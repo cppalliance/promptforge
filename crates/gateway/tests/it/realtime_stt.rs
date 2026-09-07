@@ -993,8 +993,33 @@ fn normalized_words(transcript: &str) -> Vec<String> {
         .collect()
 }
 
+async fn assert_final_speech_route_surface(http: &reqwest::Client, address: SocketAddr) {
+    let batch = send_within(
+        http.post(format!("http://{address}/v1/audio/transcriptions"))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_ne!(
+        batch.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "POST /v1/audio/transcriptions remains mounted"
+    );
+    for path in ["/stt", "/stt/capability"] {
+        let response = send_within(
+            http.get(format!("http://{address}{path}"))
+                .bearer_auth("test-token"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "GET {path} is retired"
+        );
+    }
+}
+
 #[tokio::test]
-async fn gateway_auth_origin_query_and_legacy_surfaces_precede_upgrade() {
+async fn gateway_auth_origin_query_and_final_speech_surfaces_precede_upgrade() {
     let service = speech(&ScriptedDecoder::new(), Some(&ScriptedDecoder::new()));
     let strict = server(true, &service).await;
 
@@ -1072,25 +1097,7 @@ async fn gateway_auth_origin_query_and_legacy_surfaces_precede_upgrade() {
     cookie_socket.close(None).await.expect("socket closes");
     drop(cookie_socket);
 
-    for (method, path) in [
-        ("POST", "/v1/audio/transcriptions"),
-        ("GET", "/stt"),
-        ("GET", "/stt/capability"),
-    ] {
-        let response = send_within(
-            http.request(
-                reqwest::Method::from_bytes(method.as_bytes()).expect("method is valid"),
-                format!("http://{}{path}", strict.addr),
-            )
-            .bearer_auth("test-token"),
-        )
-        .await;
-        assert_ne!(
-            response.status(),
-            reqwest::StatusCode::NOT_FOUND,
-            "{method} {path} remains mounted"
-        );
-    }
+    assert_final_speech_route_surface(&http, strict.addr).await;
     strict.shutdown().await;
 
     let trusted = server(false, &service).await;

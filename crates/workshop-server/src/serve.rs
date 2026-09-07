@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::app::{AppState, StateError, router, state_with_gateway};
+use crate::app::{StateError, router, state_with_gateway};
 use crate::config::Config;
 use crate::gateway_progress;
 use crate::heartbeat;
@@ -33,8 +33,6 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// would otherwise hold the runtime's drop - and with it the host's join -
 /// open indefinitely.
 const RUNTIME_TEARDOWN: Duration = Duration::from_secs(1);
-
-type RouteFactory = Box<dyn FnOnce(&AppState) -> axum::Router + Send>;
 
 /// How a [`ServerHandle::shutdown`] ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,35 +146,13 @@ pub enum SpawnError {
 /// or the shared state cannot be built, and [`SpawnError::Io`] if the
 /// bind fails or the server thread cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {
-    spawn_inner(
-        config,
-        None,
-        SHUTDOWN_GRACE,
-        Box::new(|_| axum::Router::new()),
-    )
+    spawn_inner(config, None, SHUTDOWN_GRACE)
 }
 
-/// Spawns the workshop server against an already-resolved gateway
-/// endpoint, with extra routes merged into its loopback listener.
-///
-/// `gateway` skips connection-file discovery: a host attaching routes
-/// holds its own endpoint, and discovery must never condemn that file
-/// or attach the workshop to a foreign gateway. `routes` runs after
-/// shared state construction on the server thread. It receives the state
-/// so an owning gateway subsystem can attach to the Workshop status bus
-/// without moving that subsystem into this crate. Product hosts currently
-/// need no extra routes; integration fixtures use the seam to exercise
-/// externally-owned route groups.
-///
-/// # Errors
-/// Returns [`SpawnError::State`] if shared state cannot be built, or
-/// [`SpawnError::Io`] if the listener or server thread cannot start.
-pub fn spawn_with_routes(
-    config: Config,
-    gateway: ResolvedGateway,
-    routes: impl FnOnce(&AppState) -> axum::Router + Send + 'static,
-) -> Result<ServerHandle, SpawnError> {
-    spawn_inner(config, Some(gateway), SHUTDOWN_GRACE, Box::new(routes))
+#[cfg(feature = "test-fixtures")]
+pub(crate) fn spawn_resolved(config: Config) -> Result<ServerHandle, SpawnError> {
+    let gateway = ResolvedGateway::from_config(&config.gateway);
+    spawn_inner(config, Some(gateway), SHUTDOWN_GRACE)
 }
 
 /// [`spawn`] with the shutdown grace window injectable, so tests prove the
@@ -185,19 +161,13 @@ pub fn spawn_with_routes(
 #[cfg(test)]
 fn spawn_with_grace(config: Config, grace: Duration) -> Result<ServerHandle, SpawnError> {
     let gateway = ResolvedGateway::from_config(&config.gateway);
-    spawn_inner(
-        config,
-        Some(gateway),
-        grace,
-        Box::new(|_| axum::Router::new()),
-    )
+    spawn_inner(config, Some(gateway), grace)
 }
 
 fn spawn_inner(
     config: Config,
     gateway: Option<ResolvedGateway>,
     grace: Duration,
-    routes: RouteFactory,
 ) -> Result<ServerHandle, SpawnError> {
     // Discovery runs before the server thread starts: a resolution
     // failure is the plain no-gateway error, never a bind-then-fail.
@@ -210,17 +180,7 @@ fn spawn_inner(
     let (stopped_tx, stopped_rx) = mpsc::channel();
     let thread = std::thread::Builder::new()
         .name("workshop-server".to_string())
-        .spawn(move || {
-            serve_thread(
-                config,
-                gateway,
-                routes,
-                ready_tx,
-                shutdown_rx,
-                &stopped_tx,
-                grace,
-            )
-        })?;
+        .spawn(move || serve_thread(config, gateway, ready_tx, shutdown_rx, &stopped_tx, grace))?;
     match ready_rx.recv() {
         Ok(Ok(url)) => Ok(ServerHandle {
             url,
@@ -251,7 +211,6 @@ fn spawn_inner(
 fn serve_thread(
     config: Config,
     gateway: ResolvedGateway,
-    routes: RouteFactory,
     ready: mpsc::Sender<Result<String, SpawnError>>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
     stopped: &mpsc::Sender<Termination>,
@@ -277,7 +236,7 @@ fn serve_thread(
                 return (Termination::Graceful, Ok(()));
             }
         };
-        let app = router(state.clone()).merge(routes(&state));
+        let app = router(state.clone());
         let listener = match reuse_bind(&config.server.bind) {
             Ok(listener) => listener,
             Err(error) => {

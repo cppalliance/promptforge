@@ -17,13 +17,10 @@ mod text;
 mod window;
 
 #[cfg(test)]
-use agreement::LocalAgreement;
-#[cfg(test)]
 use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, reserve_segment, run_final_pipeline};
 use finalization::{FinalPipeline, spawn_final_pipeline};
 pub(crate) use interim::InterimSnapshot;
 use state::TakeState;
-use text::append_transcript;
 use window::WholeWindowState;
 
 fn tail(buffer: &[f32], window: usize) -> &[f32] {
@@ -105,31 +102,8 @@ impl Take {
         }
     }
 
-    pub(crate) fn fallback_snapshot(&self, window_samples: usize) -> Vec<f32> {
-        let finalized = self.state.finalized_samples();
-        let buffer = TakeState::lock(&self.state.buffer);
-        let pending = &buffer[finalized.min(buffer.len())..];
-        tail(pending, window_samples).to_vec()
-    }
-
-    pub(crate) fn fallback_len(&self) -> usize {
-        let finalized = self.state.finalized_samples();
-        TakeState::lock(&self.state.buffer)
-            .len()
-            .saturating_sub(finalized)
-    }
-
     pub(crate) fn finalized(&self) -> String {
         self.state.finalized()
-    }
-
-    pub(crate) fn next_interim(&self, hypothesis: &str) -> Option<(String, String)> {
-        self.next_interim_snapshot(hypothesis)
-            .map(InterimSnapshot::into_legacy_parts)
-    }
-
-    pub(crate) fn next_interim_snapshot(&self, hypothesis: &str) -> Option<InterimSnapshot> {
-        TakeState::lock(&self.state.interim).next(&self.finalized(), hypothesis)
     }
 
     pub(crate) fn next_window_snapshot(
@@ -148,12 +122,6 @@ impl Take {
             window_end,
             hypothesis,
         )
-    }
-
-    pub(crate) fn fallback_transcript(&self, tail: &str) -> String {
-        let mut transcript = self.finalized();
-        append_transcript(&mut transcript, tail);
-        transcript
     }
 
     #[cfg(test)]
@@ -191,10 +159,6 @@ impl Take {
         let accepted = TakeState::lock(&self.whole_window).accepted_hypotheses(committed_samples);
         Some(pipeline.finalization(tail, consumed, committed_samples, accepted))
     }
-
-    pub(crate) async fn complete(&self) -> Option<Result<String, String>> {
-        Some(self.finalization()?.await)
-    }
 }
 
 #[cfg(test)]
@@ -205,7 +169,7 @@ mod tests {
 
     use tokio::sync::{mpsc, oneshot};
 
-    use super::{FinalCommand, LocalAgreement, Take, reserve_segment, run_final_pipeline};
+    use super::{FinalCommand, Take, reserve_segment, run_final_pipeline};
 
     #[test]
     fn miri_final_segment_reservation_is_exact() {
@@ -226,66 +190,6 @@ mod tests {
         assert_eq!(super::tail(&buffer, 4), &[6.0, 7.0, 8.0, 9.0]);
         assert_eq!(super::tail(&buffer, 100), &buffer);
         assert_eq!(super::tail(&[], 4), &[] as &[f32]);
-    }
-
-    #[test]
-    fn local_agreement_requires_two_hypotheses_and_preserves_whitespace() {
-        let mut agreement = LocalAgreement::default();
-        let first = agreement.observe("ask not what");
-        assert_eq!(first.agreed, "");
-        assert_eq!(first.tentative, "ask not what");
-
-        let second = agreement.observe("ask not who");
-        assert_eq!(second.agreed, "ask not");
-        assert_eq!(second.tentative, " who");
-        assert_eq!(
-            format!("{}{}", second.agreed, second.tentative),
-            "ask not who"
-        );
-    }
-
-    #[test]
-    fn production_interims_promote_locally_agreed_words() {
-        let take = Take::without_final(Vec::new());
-        assert_eq!(
-            take.next_interim("ask not what"),
-            Some((String::new(), "ask not what".to_owned()))
-        );
-        assert_eq!(
-            take.next_interim("ask not who"),
-            Some(("ask not".to_owned(), "who".to_owned()))
-        );
-        assert_eq!(
-            take.next_interim("ask not who"),
-            Some(("ask not who".to_owned(), String::new()))
-        );
-        assert_eq!(
-            take.next_interim("ask not when"),
-            Some(("ask not who".to_owned(), "when".to_owned()))
-        );
-    }
-
-    #[test]
-    fn finalization_preserves_a_divergent_promoted_prefix() {
-        let take = Take::without_final(Vec::new());
-        assert_eq!(
-            take.next_interim("ask not your country"),
-            Some((String::new(), "ask not your country".to_owned()))
-        );
-        let promoted = take
-            .next_interim("ask not your country")
-            .expect("the repeated hypothesis promotes its words")
-            .0;
-        assert_eq!(promoted, "ask not your country");
-
-        take.record_finalized(Ok("ask not your kingdom".to_owned()));
-        let committed = take
-            .next_interim("new tail")
-            .expect("speech after finalization emits another interim")
-            .0;
-
-        assert_eq!(committed, promoted);
-        assert!(committed.starts_with("ask not your country"));
     }
 
     #[test]
@@ -317,108 +221,6 @@ mod tests {
         take.record_failure("second");
         let failure = take.take_failure().expect("the take owns its failure");
         assert_eq!(failure, "first");
-    }
-
-    #[test]
-    fn tail_failure_fallback_preserves_successful_closed_segments() {
-        let take = Take::without_final(Vec::new());
-        take.record_finalized(Ok("successful segment".to_owned()));
-        take.record_failure("tail failed");
-
-        assert_eq!(take.state.completion(&[], 0), Err("tail failed".to_owned()));
-        assert_eq!(
-            take.fallback_transcript("fallback tail"),
-            "successful segment fallback tail"
-        );
-    }
-
-    #[tokio::test]
-    async fn failed_segment_audio_remains_in_the_fallback_window() {
-        let take = Take::without_final(Vec::new());
-        let successful = vec![1.0; 8_000];
-        let failed = vec![2.0; 8_000];
-        let skipped = vec![3.0; 8_000];
-        let tail = vec![4.0; 8_000];
-        take.append(
-            &[
-                successful.clone(),
-                failed.clone(),
-                skipped.clone(),
-                tail.clone(),
-            ]
-            .concat(),
-        );
-
-        let (commands, receiver) = mpsc::channel(super::FINAL_SEGMENT_CAPACITY);
-        let calls = Arc::new(AtomicUsize::new(0));
-        let decode_calls = Arc::clone(&calls);
-        let task = tokio::spawn(run_final_pipeline(
-            receiver,
-            Arc::from([]),
-            Arc::clone(&take.state),
-            Arc::new(AtomicUsize::new(3)),
-            move |_, _, _| {
-                let call = decode_calls.fetch_add(1, Ordering::SeqCst);
-                async move {
-                    Some(match call {
-                        0 => Ok("successful".to_owned()),
-                        1 => return None,
-                        _ => panic!("decoding must stop after the first failure"),
-                    })
-                }
-            },
-        ));
-        commands
-            .send(FinalCommand::Segment {
-                samples: successful,
-                range: 0..8_000,
-                leading_silence: None,
-            })
-            .await
-            .expect("the successful segment queues");
-        commands
-            .send(FinalCommand::Segment {
-                samples: failed.clone(),
-                range: 8_000..16_000,
-                leading_silence: None,
-            })
-            .await
-            .expect("the failed segment queues");
-        commands
-            .send(FinalCommand::Segment {
-                samples: skipped.clone(),
-                range: 16_000..24_000,
-                leading_silence: None,
-            })
-            .await
-            .expect("the skipped segment queues");
-        let (reply, completion) = oneshot::channel();
-        commands
-            .send(FinalCommand::Complete {
-                tail: tail.clone(),
-                start: 24_000,
-                committed_samples: 32_000,
-                accepted: Vec::new(),
-                reply,
-            })
-            .await
-            .expect("completion queues");
-
-        assert!(
-            completion
-                .await
-                .expect("the completion pipeline replies")
-                .is_err()
-        );
-        tokio::time::timeout(Duration::from_secs(1), task)
-            .await
-            .expect("the completed pipeline terminates before the deadline")
-            .expect("the completed pipeline task succeeds");
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(
-            take.fallback_snapshot(usize::MAX),
-            [failed, skipped, tail].concat()
-        );
     }
 
     #[tokio::test]

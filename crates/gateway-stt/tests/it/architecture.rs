@@ -20,7 +20,16 @@ const PUBLIC_ROOT_BUDGETS: [(&str, usize); 4] = [
     ("gateway-whisper-ffi", 6),
 ];
 
-const DEPENDENCY_PHASE: &str = "Phase B";
+const LEGACY_WORKSHOP_UI_SPEECH_SEAMS: [&str; 6] = [
+    "setupLegacyStt",
+    "sttCapability",
+    "interface StreamFrame",
+    "interface InterimFrame",
+    "interface FinalFrame",
+    "pcm-capture",
+];
+
+const DEPENDENCY_PHASE: &str = "Phase C";
 const DEPENDENCY_POLICY_CRATES: [&str; 7] = [
     "gateway",
     "gateway-stt",
@@ -81,10 +90,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "gateway-stt-engine",
             "shared-progress",
         ],
-        temporary_edges: &[TemporaryEdge {
-            dependency: "workshop-server",
-            removal_step: "Step 35",
-        }],
+        temporary_edges: &[],
     },
     DependencyPolicy {
         crate_name: "gateway-stt-engine",
@@ -130,11 +136,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
 const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
     MigrationPolicy {
         crate_name: "gateway-stt",
-        targets: &[MigrationPolicyTarget {
-            module: "stt.rs",
-            target_step: "Step 35",
-            destination: "removal after the Realtime route and Workshop relay replace the legacy socket",
-        }],
+        targets: &[],
     },
     MigrationPolicy {
         crate_name: "gateway-stt-engine",
@@ -222,6 +224,14 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
     collect(root, &mut sources);
     sources.sort();
     sources
+}
+
+fn forbidden_legacy_speech_seams<'a>(source: &str, forbidden: &'a [&'a str]) -> Vec<&'a str> {
+    forbidden
+        .iter()
+        .copied()
+        .filter(|symbol| source.contains(symbol))
+        .collect()
 }
 
 fn workspace_metadata() -> &'static CargoMetadata {
@@ -340,15 +350,112 @@ fn dependency_policy_omission_is_rejected() {
 }
 
 #[test]
-fn dependency_policy_has_advanced_to_phase_b() {
-    assert_eq!(DEPENDENCY_PHASE, "Phase B");
+fn dependency_policy_has_advanced_to_phase_c() {
+    assert_eq!(DEPENDENCY_PHASE, "Phase C");
     let workshop = DEPENDENCY_POLICIES
         .iter()
         .find(|policy| policy.crate_name == "workshop-server")
-        .unwrap_or_else(|| panic!("Phase B contains the Workshop dependency policy"));
+        .unwrap_or_else(|| panic!("Phase C contains the Workshop dependency policy"));
     assert!(
         workshop.final_edges.contains(&"shared-loopback"),
-        "Phase B adds only the Workshop dependency on shared-loopback"
+        "Phase C retains the Workshop dependency on shared-loopback"
+    );
+    assert!(
+        DEPENDENCY_POLICIES
+            .iter()
+            .all(|policy| policy.temporary_edges.is_empty()),
+        "Phase C has no temporary dependency exceptions"
+    );
+}
+
+#[test]
+fn legacy_speech_seams_are_absent_from_production_sources() {
+    let gateway_stt = rust_sources(&crate_root("gateway-stt").join("src"))
+        .into_iter()
+        .map(|path| read(&path))
+        .collect::<String>();
+    for forbidden in [
+        "mod stt;",
+        "crate::stt::",
+        "workshop_server",
+        "workshop_status",
+        "x-promptforge-workshop-status",
+        "workshop_routes",
+    ] {
+        assert!(
+            !gateway_stt.contains(forbidden),
+            "gateway-stt production sources must not contain legacy seam `{forbidden}`"
+        );
+    }
+
+    let workshop = rust_sources(&crate_root("workshop-server").join("src"))
+        .into_iter()
+        .map(|path| read(&path))
+        .collect::<String>();
+    for forbidden in [
+        "pub(crate) mod stt;",
+        "routes::stt",
+        "GatewaySttSocket",
+        "connect_stt",
+        "workshop_status",
+        "x-promptforge-workshop-status",
+        "spawn_with_routes",
+    ] {
+        assert!(
+            !workshop.contains(forbidden),
+            "Workshop production sources must not contain legacy seam `{forbidden}`"
+        );
+    }
+
+    let workshop_ui = [
+        read(&crate_root("workshop-server").join("ui/src/ui/stt.ts")),
+        read(&crate_root("workshop-server").join("ui/src/services/protocol.ts")),
+        read(&crate_root("workshop-server").join("ui/pcm-worklet.js")),
+    ]
+    .concat();
+    let forbidden = forbidden_legacy_speech_seams(&workshop_ui, &LEGACY_WORKSHOP_UI_SPEECH_SEAMS);
+    assert!(
+        forbidden.is_empty(),
+        "Workshop UI production sources must not contain legacy seams: {forbidden:?}"
+    );
+}
+
+#[test]
+fn legacy_workshop_ui_gate_rejects_all_legacy_forms_without_current_capture_false_positives() {
+    for forbidden in LEGACY_WORKSHOP_UI_SPEECH_SEAMS {
+        assert_eq!(
+            forbidden_legacy_speech_seams(forbidden, &LEGACY_WORKSHOP_UI_SPEECH_SEAMS),
+            [forbidden],
+            "the zero-symbol gate must reject legacy production symbol `{forbidden}`"
+        );
+    }
+
+    let adversarial_pcm_forms = [
+        r#"registerProcessor("pcm-capture", Processor);"#,
+        r#"new AudioWorkletNode(context, "pcm-capture");"#,
+        "`pcm-capture requires a 24 kHz AudioContext`",
+    ];
+    for source in adversarial_pcm_forms {
+        assert_eq!(
+            forbidden_legacy_speech_seams(source, &LEGACY_WORKSHOP_UI_SPEECH_SEAMS),
+            ["pcm-capture"],
+            "the zero-symbol gate must reject the processor ID in every production context"
+        );
+    }
+
+    let retained_capture = [
+        "pcm16-capture",
+        "Pcm16CaptureProcessor",
+        "RealtimeTranscriptionService",
+        "SpeechCaptureService",
+        "AudioWorkletNode",
+        "getUserMedia",
+    ]
+    .join("\n");
+    assert!(
+        forbidden_legacy_speech_seams(&retained_capture, &LEGACY_WORKSHOP_UI_SPEECH_SEAMS)
+            .is_empty(),
+        "the zero-symbol gate must retain current Realtime and browser capture behavior"
     );
 }
 
@@ -556,11 +663,11 @@ fn misspelled_migration_section_is_rejected() {
 }
 
 #[test]
-fn completed_step_18_migrations_are_removed() {
+fn completed_step_39_migrations_are_removed() {
     let expected = expected_migration_targets("gateway-stt");
     assert!(!expected.contains_key("api.rs"));
     assert!(!expected.contains_key("runtime.rs"));
-    assert_eq!(expected.keys().collect::<Vec<_>>(), ["stt.rs"]);
+    assert!(expected.is_empty());
 }
 
 const REFCOUNT_INTROSPECTION_OWNERS: [&str; 3] = ["Arc", "Rc", "Weak"];

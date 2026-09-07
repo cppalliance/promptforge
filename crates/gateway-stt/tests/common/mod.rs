@@ -6,19 +6,11 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use futures_util::{SinkExt, StreamExt};
 use gateway_stt::SpeechService;
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt as _;
-
-pub(crate) const RECV_TIMEOUT: Duration = Duration::from_secs(10);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn require_model() -> PathBuf {
     require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin")
@@ -146,100 +138,6 @@ pub(crate) fn copy_model_replacing_token(
     destination
 }
 
-pub(crate) fn fixture_server(with_final: bool) -> TestServer {
-    TestServer::spawn_with(fixture_service(with_final))
-}
-
-pub(crate) struct TestServer {
-    url: String,
-    task: tokio::task::JoinHandle<()>,
-    service: SpeechService,
-}
-
-impl TestServer {
-    pub(crate) fn spawn() -> Self {
-        Self::spawn_with(SpeechService::new())
-    }
-
-    pub(crate) fn spawn_with(service: SpeechService) -> Self {
-        let std_listener =
-            std::net::TcpListener::bind("127.0.0.1:0").expect("gateway listener binds");
-        std_listener
-            .set_nonblocking(true)
-            .expect("gateway listener becomes nonblocking");
-        let address = std_listener
-            .local_addr()
-            .expect("gateway listener has an address");
-        let listener =
-            tokio::net::TcpListener::from_std(std_listener).expect("tokio adopts the listener");
-        let app = service.routes();
-        let task = tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("gateway STT fixture serves");
-        });
-        Self {
-            url: format!("http://{address}"),
-            task,
-            service,
-        }
-    }
-
-    pub(crate) fn ws_url(&self, path: &str) -> String {
-        format!(
-            "ws{}{}",
-            self.url.strip_prefix("http").expect("server URL is http"),
-            path
-        )
-    }
-
-    pub(crate) async fn shutdown(mut self) {
-        self.task.abort();
-        let _ = tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut self.task)
-            .await
-            .expect("gateway STT fixture server stops before the cleanup deadline");
-        let service = self.service.clone();
-        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            service.shutdown();
-            let _ = finished_tx.send(());
-        });
-        tokio::time::timeout(SHUTDOWN_TIMEOUT, finished_rx)
-            .await
-            .expect("fixture service stops before the cleanup deadline")
-            .expect("fixture service cleanup thread reports completion");
-    }
-}
-
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-pub(crate) async fn send_pcm(socket: &mut JsonSocket, frames: usize) {
-    socket.send_binary(vec![0u8; frames * 4]).await;
-}
-
-pub(crate) async fn send_samples(socket: &mut JsonSocket, samples: &[f32]) {
-    const BLOCK: usize = 4096;
-    for chunk in samples.chunks(BLOCK) {
-        let mut bytes = Vec::with_capacity(chunk.len() * 4);
-        for sample in chunk {
-            bytes.extend_from_slice(&sample.to_le_bytes());
-        }
-        socket.send_binary(bytes).await;
-    }
-}
-
-pub(crate) async fn send_samples_once(socket: &mut JsonSocket, samples: &[f32]) {
-    let mut bytes = Vec::with_capacity(samples.len() * 4);
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
-    }
-    socket.send_binary(bytes).await;
-}
-
 fn wav_f32(samples: &[f32]) -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
     {
@@ -307,62 +205,4 @@ pub(crate) async fn transcribe_batch(
         .expect("batch response body reads");
     let json = serde_json::from_slice(&body).expect("batch response is JSON");
     (status, json)
-}
-
-pub(crate) struct JsonSocket {
-    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
-}
-
-impl JsonSocket {
-    pub(crate) async fn connect(url: &str) -> Self {
-        let (socket, _) = tokio_tungstenite::connect_async(url)
-            .await
-            .expect("WebSocket connects");
-        Self { socket }
-    }
-
-    pub(crate) async fn send_text(&mut self, text: &str) {
-        self.socket
-            .send(Message::Text(text.to_owned().into()))
-            .await
-            .expect("text frame sends");
-    }
-
-    pub(crate) async fn send_binary(&mut self, bytes: Vec<u8>) {
-        self.socket
-            .send(Message::Binary(bytes.into()))
-            .await
-            .expect("binary frame sends");
-    }
-
-    pub(crate) async fn recv_json(&mut self) -> serde_json::Value {
-        let message = tokio::time::timeout(RECV_TIMEOUT, self.socket.next())
-            .await
-            .expect("frame arrives before timeout")
-            .expect("socket open")
-            .expect("frame has no socket error");
-        let text = message.into_text().expect("frame is text");
-        serde_json::from_str(&text).expect("frame is JSON")
-    }
-
-    pub(crate) async fn recv_until(
-        &mut self,
-        deadline: Duration,
-        keep: impl Fn(&serde_json::Value) -> bool,
-    ) -> serde_json::Value {
-        tokio::time::timeout(deadline, async {
-            loop {
-                let frame = self.recv_json().await;
-                if keep(&frame) {
-                    break frame;
-                }
-            }
-        })
-        .await
-        .expect("matching frame arrives before deadline")
-    }
-
-    pub(crate) async fn close(mut self) {
-        self.socket.close(None).await.expect("socket closes");
-    }
 }

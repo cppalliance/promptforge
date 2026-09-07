@@ -3,18 +3,6 @@
 const OUTPUT_SAMPLE_RATE = 24_000;
 const DEFAULT_CHUNK_SAMPLES = OUTPUT_SAMPLE_RATE / 10;
 
-// Legacy /stt capture remains 16 kHz mono f32 until its consumer migrates.
-class PcmCaptureProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const channel = inputs[0] && inputs[0][0];
-    if (channel && channel.length > 0) {
-      const copy = new Float32Array(channel);
-      this.port.postMessage(copy.buffer, [copy.buffer]);
-    }
-    return true;
-  }
-}
-
 // Converts the first input channel into exact little-endian mono PCM16.
 // Full 100 ms chunks cross to the page immediately. A final partial chunk
 // stays owned here until the page requests a flush before stopping.
@@ -22,7 +10,7 @@ class Pcm16CaptureProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     if (sampleRate !== OUTPUT_SAMPLE_RATE) {
-      throw new Error(`pcm-capture requires a 24 kHz AudioContext, received ${sampleRate} Hz`);
+      throw new Error(`pcm16-capture requires a 24 kHz AudioContext, received ${sampleRate} Hz`);
     }
     const requested = options && options.processorOptions && options.processorOptions.chunkSamples;
     this.chunkSamples =
@@ -74,5 +62,4 @@ class Pcm16CaptureProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("pcm-capture", PcmCaptureProcessor);
 registerProcessor("pcm16-capture", Pcm16CaptureProcessor);

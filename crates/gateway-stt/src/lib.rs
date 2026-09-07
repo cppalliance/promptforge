@@ -1,7 +1,7 @@
 //! Gateway-owned speech facade and HTTP endpoints.
 //!
 //! [`SpeechService`] owns artifact preparation, complete generation
-//! publication, batch transcription, and the temporary legacy socket.
+//! publication, batch transcription, and Realtime transcription.
 
 mod artifacts;
 #[allow(dead_code)]
@@ -15,8 +15,6 @@ mod replacement;
 mod segment;
 mod service;
 mod status;
-#[cfg(not(miri))]
-mod stt;
 mod take;
 #[cfg(all(test, not(feature = "test-fixtures")))]
 mod test_fixtures;

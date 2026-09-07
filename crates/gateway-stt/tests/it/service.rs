@@ -1,11 +1,8 @@
 //! Public speech-facade integration tests.
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
 use gateway_config::{Config, ProfileName};
 use gateway_stt::SpeechService;
 use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
-use tower::ServiceExt as _;
 
 use crate::common::fixture_service;
 
@@ -95,26 +92,6 @@ fn physical_final_in_a_pair_cannot_claim_the_logical_realtime_identity() {
         .prepare(&config, None)
         .expect_err("the logical name is reserved before artifact access");
     assert!(error.to_string().contains("reserved"), "{error}");
-}
-
-#[tokio::test]
-async fn facade_routes_keep_the_temporary_legacy_capability() {
-    let response = SpeechService::new()
-        .routes()
-        .oneshot(
-            Request::builder()
-                .uri("/stt/capability")
-                .body(Body::empty())
-                .expect("request builds"),
-        )
-        .await
-        .expect("route answers");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body reads");
-    assert_eq!(&body[..], br#"{"gpu":false,"engine":false}"#);
 }
 
 #[test]

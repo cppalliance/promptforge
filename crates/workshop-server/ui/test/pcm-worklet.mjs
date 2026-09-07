@@ -45,7 +45,7 @@ async function loadProcessor(
     },
   });
   new vm.Script(source, { filename: "pcm-worklet.js" }).runInContext(context);
-  assert.deepEqual([...processors.keys()], ["pcm-capture", "pcm16-capture"]);
+  assert.deepEqual([...processors.keys()], ["pcm16-capture"]);
   const Processor = processors.get(name);
   assert.ok(Processor, `the real worklet registers ${name}`);
   return { processor: new Processor(options), messages, port };
@@ -82,19 +82,6 @@ test("the real worklet emits the shared fixture as exact little-endian PCM16", a
   assert.equal(messages[0].transfer.length, 1);
   assert.equal(messages[0].transfer[0], messages[0].value);
   assert.deepEqual(bytesOf(messages[0].value), fixture.bytes);
-});
-
-test("the legacy processor keeps sending copied 16 kHz float blocks", async () => {
-  const { processor, messages } = await loadProcessor("pcm-capture", {}, 16_000);
-  const input = Float32Array.from([-0.5, 0, 0.75]);
-
-  processor.process([[input]]);
-  input.fill(1);
-
-  assert.equal(messages.length, 1);
-  assert.equal(Object.prototype.toString.call(messages[0].value), "[object ArrayBuffer]");
-  assert.equal(messages[0].transfer[0], messages[0].value);
-  assert.deepEqual([...new Float32Array(messages[0].value)], [-0.5, 0, 0.75]);
 });
 
 test("the real worklet clips samples and flushes only the carried partial block", async () => {

@@ -68,7 +68,7 @@
 # connection mechanics moved to their own responsibility module.
 "gateway.rs" = 1235
 # Split from gateway.rs: fixed-target authenticated WebSocket connections
-# for the legacy and Realtime relay paths.
+# for the Realtime relay path.
 "gateway/socket.rs" = 94
 # New module: the gateway progress subscriber, importing the gateway's
 # /admin/progress event stream into the workshop ProgressHub as a
@@ -161,18 +161,10 @@
 # New module: the same-origin, payload-opaque Realtime transcription relay,
 # including bounded transport and hop-local control-frame ownership.
 "routes/realtime.rs" = 181
-# New module: the same-origin capability and WebSocket relay from the
-# Workshop listener to the gateway-owned STT routes.
-"routes/stt.rs" = 298
 "routes/workspace.rs" = 20
-# Grew by the gateway-endpoint wiring: `spawn` resolves the endpoint
-# (connection file first, explicit config second) before the server
-# thread starts, and `spawn_with_routes` takes the host's already-resolved
-# endpoint - the same spawn-surface responsibility, one parameter and its
-# documentation more. The resolution logic itself lives in resolve.rs.
-# Grew again by three lines as the remaining shutdown and bind tests
-# moved onto the discovery-bypassing `spawn_with_grace` - a test never
-# consults the real run directory.
+# `spawn` resolves the endpoint before the server thread starts.
+# Tests use the discovery-bypassing fixture so they never consult the real
+# run directory.
 "serve.rs" = 606
 # Shrank in the chat-relay excision: the socket keeps the menu events,
 # boot snapshots, and bus forwarding; the chat multiplexing left whole.

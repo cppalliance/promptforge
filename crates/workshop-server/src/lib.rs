@@ -57,6 +57,12 @@ pub mod fixtures {
 
     #[cfg(feature = "test-fixtures")]
     pub use crate::app::fixtures::spawn_gateway;
+
+    /// Spawns a Workshop test server against the explicit configured Gateway.
+    #[cfg(feature = "test-fixtures")]
+    pub fn spawn(config: crate::Config) -> Result<crate::ServerHandle, crate::SpawnError> {
+        crate::serve::spawn_resolved(config)
+    }
 }
 
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
@@ -73,5 +79,5 @@ pub use observer::WorkshopObserver;
 pub use protocol::{Activity, InputFrame, InputResponse};
 pub use push::Push;
 pub use resolve::{GatewaySource, ResolveError, ResolvedGateway};
-pub use serve::{ServerHandle, SpawnError, Termination, spawn, spawn_with_routes};
+pub use serve::{ServerHandle, SpawnError, Termination, spawn};
 pub use session_agents::AgentSessions;

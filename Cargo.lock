@@ -2018,7 +2018,6 @@ dependencies = [
  "toml 0.8.2",
  "tower",
  "tracing",
- "workshop-server",
 ]
 
 [[package]]

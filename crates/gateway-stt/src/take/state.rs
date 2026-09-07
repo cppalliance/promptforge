@@ -4,7 +4,6 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use gateway_stt_engine::TranscribeError;
 
 use super::final_outcome::{FinalRangeOutcome, FinalRangeResult, assemble_completion};
-use super::interim::InterimState;
 use super::text::append_transcript;
 use super::window::AcceptedHypothesis;
 use crate::segment::Segmenter;
@@ -23,7 +22,6 @@ pub(super) struct TakeState {
     pub(super) buffer: Mutex<Vec<f32>>,
     pub(super) segmenter: Mutex<Segmenter>,
     finalized: Mutex<FinalizedState>,
-    pub(super) interim: Mutex<InterimState>,
 }
 
 impl TakeState {
@@ -92,10 +90,6 @@ impl TakeState {
 
     pub(super) fn has_failure(&self) -> bool {
         Self::lock(&self.finalized).failure.is_some()
-    }
-
-    pub(super) fn finalized_samples(&self) -> usize {
-        Self::lock(&self.finalized).samples
     }
 
     pub(super) fn pending_failure(&self) -> Option<String> {

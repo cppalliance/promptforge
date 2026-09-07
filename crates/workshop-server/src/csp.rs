@@ -1,6 +1,4 @@
-//! The Content-Security-Policy stamped on every response from the
-//! server's own routes (routes a host merges through `spawn_with_routes`
-//! are composed after this layer and carry their own layers).
+//! The Content-Security-Policy stamped on every server response.
 //!
 //! The desktop shell loads the UI as an External-origin Tauri webview, so
 //! the page's policy is the server's to set: there is no `tauri.conf.json`

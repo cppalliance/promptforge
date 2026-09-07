@@ -182,22 +182,13 @@ export async function bootWorkbench(name, run) {
 
   // The workbench state (models, profiles, selection) arrives only over
   // the socket, so a booted workbench fetches nothing but the Workshop
-  // tree's roots listing (answered empty: no grants yet) and the agent
-  // session's STT capability probe (answered fully capable, so a test
-  // can start a take). Any other fetch - including the retired /v1/models
-  // and /profiles boot fetches - rejects the test.
+  // tree's roots listing (answered empty: no grants yet). Any other fetch,
+  // including the retired /v1/models and /profiles boot fetches, rejects
+  // the test.
   globalThis.fetch = (url) => {
     if (url === "/workspace/tree") {
       return Promise.resolve(
         new Response(JSON.stringify({ path: null, entries: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
-    }
-    if (url === "/stt/capability") {
-      return Promise.resolve(
-        new Response(JSON.stringify({ gpu: true, engine: true }), {
           status: 200,
           headers: { "content-type": "application/json" },
         }),
@@ -295,8 +286,8 @@ export async function bootWorkbench(name, run) {
   // agent panel's /agents/ws connection.
   const wsSocket = () =>
     sockets.filter((socket) => socket.url.endsWith("/ws") && !socket.url.endsWith("/agents/ws")).at(-1);
-  // The agent panel's session socket, and the per-take /stt sockets the
-  // mic opens.
+  // The agent panel's session socket, and the per-take Realtime sockets
+  // the mic opens.
   const agentsSocket = () => sockets.filter((socket) => socket.url.endsWith("/agents/ws")).at(-1);
   const sttSockets = () => sockets.filter((socket) => socket.url.endsWith("/v1/realtime"));
 
