@@ -26,6 +26,7 @@ use tokio::sync::oneshot;
 use promptforge_model_client::model::subscribe_progress;
 use shared_progress::{EventState, OperationId, ProgressHub, RemoteOperation};
 
+use crate::gateway_binding::GatewayBinding;
 use crate::heartbeat::GatewayHealth;
 
 /// How long a resubscribe waits when the stream ended while the gateway
@@ -62,33 +63,23 @@ impl Subscriber {
 /// reachable.
 #[must_use]
 pub(crate) fn spawn(
-    base_url: String,
-    api_key: String,
+    gateway: GatewayBinding,
     hub: Arc<ProgressHub>,
     health: GatewayHealth,
 ) -> Subscriber {
-    spawn_with_delay(base_url, api_key, hub, health, RESUBSCRIBE_DELAY)
+    spawn_with_delay(gateway, hub, health, RESUBSCRIBE_DELAY)
 }
 
 /// [`spawn`] with the resubscribe delay injected, so tests can shorten it.
 fn spawn_with_delay(
-    base_url: String,
-    api_key: String,
+    gateway: GatewayBinding,
     hub: Arc<ProgressHub>,
     health: GatewayHealth,
     resubscribe_delay: Duration,
 ) -> Subscriber {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(
-            &base_url,
-            &api_key,
-            &hub,
-            &health,
-            resubscribe_delay,
-            &mut stopped,
-        )
-        .await;
+        run(&gateway, &hub, &health, resubscribe_delay, &mut stopped).await;
     });
     Subscriber {
         stop: Some(stop),
@@ -103,18 +94,23 @@ fn spawn_with_delay(
 /// signal wins every select, so shutdown never waits out a stream read, a
 /// connect, or a resubscribe delay.
 async fn run(
-    base_url: &str,
-    api_key: &str,
+    gateway: &GatewayBinding,
     hub: &Arc<ProgressHub>,
     health: &GatewayHealth,
     resubscribe_delay: Duration,
     stop: &mut oneshot::Receiver<()>,
 ) {
     let mut reachable = health.subscribe();
-    loop {
+    let mut gateway_changed = gateway.subscribe();
+    'reconnect: loop {
         while !*reachable.borrow_and_update() {
             tokio::select! {
                 _ = &mut *stop => return,
+                changed = gateway_changed.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
                 changed = reachable.changed() => {
                     // The sender lives in AppState for the process
                     // lifetime, so a closed watch means shutdown.
@@ -124,16 +120,28 @@ async fn run(
                 }
             }
         }
+        let snapshot = gateway.snapshot();
         let stream = tokio::select! {
             _ = &mut *stop => return,
             _ = reachable.changed() => continue,
-            result = subscribe_progress(base_url, api_key) => match result {
+            changed = gateway_changed.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                continue;
+            }
+            result = subscribe_progress(snapshot.base_url(), snapshot.api_key()) => match result {
                 Ok(stream) => stream,
                 Err(error) => {
                     tracing::warn!(%error, "gateway progress subscription failed");
                     tokio::select! {
                         _ = &mut *stop => return,
                         _ = reachable.changed() => {}
+                        changed = gateway_changed.changed() => {
+                            if changed.is_err() {
+                                return;
+                            }
+                        }
                         () = tokio::time::sleep(resubscribe_delay) => {}
                     }
                     continue;
@@ -146,6 +154,12 @@ async fn run(
             tokio::select! {
                 _ = &mut *stop => return,
                 _ = reachable.changed() => break,
+                changed = gateway_changed.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    continue 'reconnect;
+                }
                 item = stream.next() => match item {
                     Some(Ok(event)) => {
                         let operation = event.operation;
@@ -172,6 +186,11 @@ async fn run(
             tokio::select! {
                 _ = &mut *stop => return,
                 _ = reachable.changed() => {}
+                changed = gateway_changed.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
                 () = tokio::time::sleep(resubscribe_delay) => {}
             }
         }
@@ -195,6 +214,11 @@ mod tests {
     use shared_progress::OperationSnapshot;
 
     use crate::app::fixtures::spawn_gateway;
+
+    /// A replaceable binding for one mock Gateway.
+    fn binding(base_url: &str) -> GatewayBinding {
+        GatewayBinding::new(base_url, "").expect("the test binding builds")
+    }
 
     /// A mock `GET /admin/progress`: every payload published to the feed
     /// streams to every connected subscriber as an SSE `data:` frame, and
@@ -314,12 +338,7 @@ mod tests {
         let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
         let hub = Arc::new(ProgressHub::new());
         // The flag starts optimistic, so the subscriber connects at once.
-        let subscriber = spawn(
-            base_url,
-            String::new(),
-            Arc::clone(&hub),
-            GatewayHealth::new(),
-        );
+        let subscriber = spawn(binding(&base_url), Arc::clone(&hub), GatewayHealth::new());
 
         wait_for_connections(&mock, 1).await;
         mock.send(event_json(
@@ -345,12 +364,7 @@ mod tests {
         let mock = Arc::new(MockProgress::new());
         let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
         let hub = Arc::new(ProgressHub::new());
-        let subscriber = spawn(
-            base_url,
-            String::new(),
-            Arc::clone(&hub),
-            GatewayHealth::new(),
-        );
+        let subscriber = spawn(binding(&base_url), Arc::clone(&hub), GatewayHealth::new());
 
         wait_for_connections(&mock, 1).await;
         mock.send(event_json(
@@ -383,8 +397,7 @@ mod tests {
         let hub = Arc::new(ProgressHub::new());
         let delay = Duration::from_millis(50);
         let subscriber = spawn_with_delay(
-            base_url,
-            String::new(),
+            binding(&base_url),
             Arc::clone(&hub),
             GatewayHealth::new(),
             delay,
@@ -417,7 +430,7 @@ mod tests {
         let hub = Arc::new(ProgressHub::new());
         let health = GatewayHealth::new();
         health.publish(false);
-        let subscriber = spawn(base_url, String::new(), Arc::clone(&hub), health.clone());
+        let subscriber = spawn(binding(&base_url), Arc::clone(&hub), health.clone());
 
         let quiet = tokio::time::timeout(Duration::from_millis(200), async {
             wait_for_connections(&mock, 1).await;
@@ -440,7 +453,7 @@ mod tests {
         let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
         let hub = Arc::new(ProgressHub::new());
         let health = GatewayHealth::new();
-        let subscriber = spawn(base_url, String::new(), Arc::clone(&hub), health.clone());
+        let subscriber = spawn(binding(&base_url), Arc::clone(&hub), health.clone());
 
         wait_for_connections(&mock, 1).await;
         mock.send(event_json(
@@ -479,4 +492,5 @@ mod tests {
     }
 
     mod lifecycle;
+    mod recovery;
 }

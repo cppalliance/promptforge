@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::app::{StateError, router, state_with_gateway};
 use crate::config::Config;
+use crate::gateway_binding::GatewayUpdater;
 use crate::gateway_progress;
 use crate::heartbeat;
 use crate::progress;
@@ -52,6 +53,7 @@ pub enum Termination {
 #[derive(Debug)]
 pub struct ServerHandle {
     url: String,
+    gateway: GatewayUpdater,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     stopped: mpsc::Receiver<Termination>,
     thread: Option<JoinHandle<std::io::Result<()>>>,
@@ -63,6 +65,13 @@ impl ServerHandle {
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Returns the restricted publisher used by an embedding desktop host
+    /// to atomically replace a relaunched local sidecar's port and bearer.
+    #[must_use]
+    pub fn gateway_updater(&self) -> GatewayUpdater {
+        self.gateway.clone()
     }
 
     /// Signals shutdown and waits for the server thread to finish,
@@ -182,8 +191,9 @@ fn spawn_inner(
         .name("workshop-server".to_string())
         .spawn(move || serve_thread(config, gateway, ready_tx, shutdown_rx, &stopped_tx, grace))?;
     match ready_rx.recv() {
-        Ok(Ok(url)) => Ok(ServerHandle {
+        Ok(Ok((url, gateway))) => Ok(ServerHandle {
             url,
+            gateway,
             shutdown: Some(shutdown_tx),
             stopped: stopped_rx,
             thread: Some(thread),
@@ -211,7 +221,7 @@ fn spawn_inner(
 fn serve_thread(
     config: Config,
     gateway: ResolvedGateway,
-    ready: mpsc::Sender<Result<String, SpawnError>>,
+    ready: mpsc::Sender<Result<(String, GatewayUpdater), SpawnError>>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
     stopped: &mpsc::Sender<Termination>,
     grace: Duration,
@@ -227,8 +237,6 @@ fn serve_thread(
         }
     };
     let (outcome, result) = runtime.block_on(async move {
-        let gateway_base_url = gateway.base_url().to_string();
-        let gateway_api_key = gateway.api_key().to_string();
         let state = match state_with_gateway(&config, &gateway) {
             Ok(state) => state,
             Err(error) => {
@@ -248,12 +256,12 @@ fn serve_thread(
             Ok(address) => address,
             Err(error) => return (Termination::Graceful, Err(error)),
         };
-        let _ = ready.send(Ok(format!("http://{address}")));
+        let _ = ready.send(Ok((format!("http://{address}"), state.gateway_updater())));
         // The heartbeat, gateway progress subscriber, and progress renderer
         // start with serving and stop inside the same graceful-shutdown
         // signal, so they never outlive the server.
         let heartbeat = heartbeat::spawn(
-            state.gateway_client().clone(),
+            state.gateway_binding().clone(),
             state.push(),
             state.health().clone(),
             heartbeat::HEARTBEAT_INTERVAL,
@@ -261,8 +269,7 @@ fn serve_thread(
         );
         let renderer = progress::spawn(std::sync::Arc::clone(state.progress()), state.push());
         let subscriber = gateway_progress::spawn(
-            gateway_base_url,
-            gateway_api_key,
+            state.gateway_binding().clone(),
             std::sync::Arc::clone(state.progress()),
             state.health().clone(),
         );

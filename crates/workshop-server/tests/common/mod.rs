@@ -81,6 +81,29 @@ impl TestServer {
                 .url()
         )
     }
+
+    /// Atomically replaces the local sidecar endpoint and bearer used by
+    /// every gateway-dependent Workshop path.
+    pub(crate) fn replace_gateway(&self, gateway_base_url: &str, api_key: &str) {
+        let port = url::Url::parse(gateway_base_url)
+            .expect("the replacement gateway URL parses")
+            .port()
+            .expect("the replacement gateway URL carries a port");
+        let file = shared_sidecar::ConnectionFile {
+            port,
+            api_key: api_key.to_owned(),
+            pid: std::process::id(),
+            epoch: 1_757_000_000,
+            version: "test".to_owned(),
+            started_at: "2026-09-07T14:14:31Z".to_owned(),
+        };
+        self.handle
+            .as_ref()
+            .expect("the handle is held until drop")
+            .gateway_updater()
+            .replace_sidecar(&file)
+            .expect("the replacement endpoint publishes");
+    }
 }
 
 impl Drop for TestServer {

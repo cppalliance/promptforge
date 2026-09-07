@@ -37,7 +37,8 @@ async fn upgrade(
     if ws.requested_protocols().next().is_some() {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    match state.gateway_client().connect_realtime().await {
+    let gateway = state.gateway_snapshot();
+    match gateway.client().connect_realtime().await {
         Ok(gateway) => ws.on_upgrade(move |browser| relay(browser, gateway)),
         Err(error) => {
             tracing::warn!(%error, "could not connect the Workshop Realtime relay to the gateway");

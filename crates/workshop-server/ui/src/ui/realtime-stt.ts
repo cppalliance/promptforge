@@ -20,6 +20,7 @@ interface Take {
   from: number;
   length: number;
   readonly original: string;
+  readonly compositionPrefix: "" | " ";
   itemId: string | null;
 }
 
@@ -83,6 +84,14 @@ export function setupStt(
 
   function syncInputLock(): void {
     input.setReadOnly(takes.length > 0);
+  }
+
+  function composeTranscript(take: Take, transcript: string): string {
+    return take.compositionPrefix !== "" &&
+      transcript !== "" &&
+      !/^\s/.test(transcript)
+      ? take.compositionPrefix + transcript
+      : transcript;
   }
 
   function splice(take: Take, text: string): void {
@@ -153,7 +162,7 @@ export function setupStt(
       take.itemId = snapshot.itemId;
       byItem.set(snapshot.itemId, take);
     }
-    splice(take, snapshot.text);
+    splice(take, composeTranscript(take, snapshot.text));
   }
 
   function applyCompletion(completion: RealtimeTranscriptCompletion): void {
@@ -166,16 +175,8 @@ export function setupStt(
       void releaseCapture();
       setRecording(false);
     }
-    const current = input.readRange(take.from, take.from + take.length);
-    const insertionWhitespace = current.match(/^\s+/)?.[0] ?? "";
     const authoritative = completion.transcript.trimEnd();
-    const transcript =
-      take.original === "" &&
-      authoritative !== "" &&
-      insertionWhitespace !== "" &&
-      !/^\s/.test(authoritative)
-        ? insertionWhitespace + authoritative
-        : authoritative;
+    const transcript = composeTranscript(take, authoritative);
     splice(take, transcript);
     removeTake(take);
     if (transcript === "") {
@@ -312,6 +313,12 @@ export function setupStt(
       from: selection.start,
       length: selection.end - selection.start,
       original: input.readRange(selection.start, selection.end),
+      compositionPrefix:
+        selection.start === selection.end &&
+        selection.end === input.getDocumentEnd() &&
+        /\S$/.test(input.readRange(0, selection.start))
+          ? " "
+          : "",
       itemId: null,
     };
     takes.push(take);

@@ -5,11 +5,10 @@ use std::sync::atomic::Ordering;
 
 use promptforge_agent::{AgentConfig, AgentError, AgentLimits, run_agent_with_client};
 use promptforge_core_support::observe::Observer;
-use promptforge_model_client::client::GatewayClient as ModelClient;
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
 
-use crate::catalog::{CatalogBus, ChatCatalog};
+use crate::gateway_binding::GatewayBinding;
 use crate::input::UserInputTool;
 use crate::protocol::Activity;
 
@@ -18,6 +17,9 @@ use super::{
     delta_stamp, ui_provider,
 };
 
+mod catalog;
+use catalog::{wait_for_chat_catalog, wait_for_replacement_catalog};
+
 /// Spawns one session supervisor. Each run freezes one usable chat
 /// catalog; cancellation or a genuinely new usable generation relaunches
 /// over the retained event log.
@@ -25,7 +27,7 @@ pub(super) fn spawn(
     session: Arc<AgentSession>,
     registry: AgentSessions,
     host: SessionHost,
-    client: ModelClient,
+    gateway: GatewayBinding,
 ) {
     tokio::spawn(async move {
         let tool: Arc<dyn Tool> = Arc::new(UserInputTool::new(
@@ -45,6 +47,7 @@ pub(super) fn spawn(
         let on_delta = delta_stamp(&session, &host.push);
         let ui = ui_provider(&host.menu, &host.workspace);
         let mut catalog_generation = host.catalog.subscribe_chat_generation();
+        let mut gateway_generation = gateway.subscribe();
         loop {
             let Some(chat_catalog) =
                 wait_for_chat_catalog(&session, &host.catalog, &mut catalog_generation).await
@@ -54,6 +57,15 @@ pub(super) fn spawn(
             let active_generation = chat_catalog.generation;
             let active_models = chat_catalog.models;
             let models = build_model_catalog(Some(active_models.clone()));
+            let gateway_snapshot = gateway.snapshot();
+            let active_gateway_generation = gateway_snapshot.generation();
+            let Some(client) = gateway_snapshot.model_client() else {
+                let message = "the replacement Gateway credentials cannot make a model client";
+                let _ = session.errors.send(message.to_owned());
+                host.push
+                    .push_failure("Agent failed", message, Activity::General);
+                break;
+            };
             let run_cancel = session.arm_cancel();
             let config = AgentConfig {
                 name: session.agent.clone(),
@@ -96,31 +108,49 @@ pub(super) fn spawn(
                         }
                     }
                 }
-            };
-            match (result, session.cancel_origin()) {
-                (Err(AgentError::Interrupted), _) => {
-                    if session.closing.load(Ordering::SeqCst) {
-                        break;
+                replaced = wait_for_gateway_replacement(
+                    &mut gateway_generation,
+                    active_gateway_generation,
+                ) => {
+                    if replaced {
+                        session.cancel_for_gateway();
                     }
-                    report_cancel_origin(&session);
+                    run.await
                 }
-                (Ok(()), _) => break,
-                (Err(error), _) => {
-                    tracing::warn!(
-                        %error,
-                        session = %session.id,
-                        agent = %session.agent,
-                        "agent run failed"
-                    );
-                    let _ = session.errors.send(error.to_string());
-                    host.push
-                        .push_failure("Agent failed", error.to_string(), Activity::General);
-                    break;
-                }
+            };
+            if run_finished(result, &session, &host) {
+                break;
             }
         }
         registry.forget(&session.id);
     });
+}
+
+/// Reports one run ending and answers whether the supervisor is finished.
+fn run_finished(
+    result: Result<(), AgentError>,
+    session: &AgentSession,
+    host: &SessionHost,
+) -> bool {
+    match (result, session.cancel_origin()) {
+        (Err(AgentError::Interrupted), _) if !session.closing.load(Ordering::SeqCst) => {
+            report_cancel_origin(session);
+            false
+        }
+        (Err(AgentError::Interrupted) | Ok(()), _) => true,
+        (Err(error), _) => {
+            tracing::warn!(
+                %error,
+                session = %session.id,
+                agent = %session.agent,
+                "agent run failed"
+            );
+            let _ = session.errors.send(error.to_string());
+            host.push
+                .push_failure("Agent failed", error.to_string(), Activity::General);
+            true
+        }
+    }
 }
 
 /// Builds the observer shared by every generation of one session.
@@ -143,6 +173,10 @@ fn report_cancel_origin(session: &AgentSession) {
             session = %session.id,
             "agent run retired for a new catalog generation"
         ),
+        Some(CancelOrigin::Gateway) => tracing::debug!(
+            session = %session.id,
+            "agent run retired for a new gateway generation"
+        ),
         None => tracing::debug!(
             session = %session.id,
             "agent run interrupted without a supervisor cancellation origin"
@@ -150,50 +184,17 @@ fn report_cancel_origin(session: &AgentSession) {
     }
 }
 
-/// Waits for the first non-empty chat catalog or session close.
-async fn wait_for_chat_catalog(
-    session: &AgentSession,
-    catalog: &CatalogBus,
+/// Waits until the host publishes a different Gateway generation.
+async fn wait_for_gateway_replacement(
     generation: &mut tokio::sync::watch::Receiver<u64>,
-) -> Option<ChatCatalog> {
+    active: u64,
+) -> bool {
     loop {
-        let closed = session.closed.notified();
-        tokio::pin!(closed);
-        if session.closing.load(Ordering::SeqCst) {
-            return None;
+        if *generation.borrow_and_update() != active {
+            return true;
         }
-        if let Some(chat) = catalog.latest_chat() {
-            return Some(chat);
-        }
-        tokio::select! {
-            () = &mut closed => {}
-            changed = generation.changed() => {
-                if changed.is_err() {
-                    return None;
-                }
-            }
-        }
-    }
-}
-
-/// Waits for a usable generation with bindings different from this run.
-/// Empty snapshots let an accepted dispatch report binding loss, while
-/// restoring identical bindings needs no relaunch.
-async fn wait_for_replacement_catalog(
-    catalog: &CatalogBus,
-    generation: &mut tokio::sync::watch::Receiver<u64>,
-    active_generation: u64,
-    active_models: &[serde_json::Value],
-) -> Option<ChatCatalog> {
-    loop {
         if generation.changed().await.is_err() {
-            return None;
-        }
-        if let Some(chat) = catalog.latest_chat()
-            && chat.generation != active_generation
-            && chat.models != active_models
-        {
-            return Some(chat);
+            return false;
         }
     }
 }

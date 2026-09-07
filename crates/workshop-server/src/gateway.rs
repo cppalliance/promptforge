@@ -247,6 +247,14 @@ pub fn switch_events(payloads: SsePayloadStream) -> SwitchEventStream {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GatewayError {
+    /// A local-sidecar connection file failed its structural validation.
+    #[non_exhaustive]
+    #[error("invalid local gateway connection: {reason}")]
+    InvalidSidecar {
+        /// The rejected structural property.
+        reason: &'static str,
+    },
+
     /// The HTTP client could not be built.
     #[non_exhaustive]
     #[error("build gateway http client")]
@@ -270,8 +278,8 @@ pub enum GatewayError {
 #[derive(Clone)]
 pub struct GatewayClient {
     http: reqwest::Client,
-    base_url: String,
-    api_key: String,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
     /// Whole-request bound for buffered calls; header-phase bound for
     /// streaming calls.
     request_timeout: Duration,

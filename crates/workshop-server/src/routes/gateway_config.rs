@@ -92,7 +92,8 @@ fn forward_allowed(method: &Method, path: &str) -> bool {
 /// Answers the gateway's base URL, so the workshop UI can point the
 /// config panel's iframe at `<origin>/config/?mode=panel`.
 async fn gateway_origin(State(state): State<AppState>) -> Response {
-    let body = serde_json::json!({ "origin": state.gateway_client().base_url() });
+    let gateway = state.gateway_snapshot();
+    let body = serde_json::json!({ "origin": gateway.base_url() });
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
@@ -124,8 +125,9 @@ async fn gateway_config_assets(
 
 /// The shared proxy core: GET the gateway's config asset and relay it.
 async fn proxy_config_asset(state: &AppState, path: &str) -> Result<Response, AppError> {
-    let forwarded = state
-        .gateway_client()
+    let gateway = state.gateway_snapshot();
+    let forwarded = gateway
+        .client()
         .forward(reqwest::Method::GET, path, None)
         .await
         .map_err(AppError::Gateway)?;
@@ -164,8 +166,9 @@ async fn gateway_forward(
     // name reqwest cannot represent is refused rather than forwarded.
     let method = reqwest::Method::from_bytes(method.as_str().as_bytes())
         .map_err(|_| AppError::ForwardDenied)?;
-    let forwarded = state
-        .gateway_client()
+    let gateway = state.gateway_snapshot();
+    let forwarded = gateway
+        .client()
         .forward(
             method,
             &path_and_query,

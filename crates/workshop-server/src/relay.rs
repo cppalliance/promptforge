@@ -25,7 +25,8 @@ pub(crate) async fn models(State(state): State<AppState>) -> Response {
         "fetching the gateway model catalog",
         Activity::General,
     );
-    let result = state.gateway.list_models().await;
+    let gateway = state.gateway_snapshot();
+    let result = gateway.client().list_models().await;
     report_gateway_outcome(&push, &result, "GET /v1/models");
     relay(result)
 }

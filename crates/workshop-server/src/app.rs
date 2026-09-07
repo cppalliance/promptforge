@@ -11,7 +11,8 @@ use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;
 use crate::config::Config;
 use crate::deadline::{DEFAULT_DEADLINE, with_deadline};
-use crate::gateway::{GatewayClient, GatewayError};
+use crate::gateway::GatewayError;
+use crate::gateway_binding::{GatewayBinding, GatewaySnapshot, GatewayUpdater};
 use crate::heartbeat::GatewayHealth;
 use crate::menu::MenuBus;
 use crate::push::Push;
@@ -29,7 +30,7 @@ pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 /// workspace state, and the agent-session registry.
 #[derive(Debug, Clone)]
 pub struct AppState {
-    pub(crate) gateway: GatewayClient,
+    pub(crate) gateway: GatewayBinding,
     pub(crate) status: StatusBus,
     pub(crate) progress: Arc<ProgressHub>,
     pub(crate) health: GatewayHealth,
@@ -76,10 +77,25 @@ impl AppState {
         Push::new(self.status.clone(), self.catalog.clone(), self.menu.clone())
     }
 
-    /// The gateway client, shared with the heartbeat and the relay routes.
+    /// One atomic Gateway endpoint and credential generation.
+    pub(crate) fn gateway_snapshot(&self) -> Arc<GatewaySnapshot> {
+        self.gateway.snapshot()
+    }
+
+    /// A clone of the currently published Gateway HTTP client.
     #[must_use]
-    pub fn gateway_client(&self) -> &GatewayClient {
+    pub fn gateway_client(&self) -> crate::GatewayClient {
+        self.gateway_snapshot().client().clone()
+    }
+
+    /// The replaceable Gateway binding shared with long-lived tasks.
+    pub(crate) fn gateway_binding(&self) -> &GatewayBinding {
         &self.gateway
+    }
+
+    /// The restricted local-sidecar replacement handle for an embedding host.
+    pub(crate) fn gateway_updater(&self) -> GatewayUpdater {
+        self.gateway.updater()
     }
 
     /// Shared gateway reachability, published by the heartbeat; the
@@ -154,15 +170,15 @@ pub fn state_with_gateway(
     // Startup phases are reported as they run; with no client connected
     // yet these land on an empty bus, ready for the first session.
     crate::resolve::report(gateway, &push);
-    let client =
-        GatewayClient::new(gateway.base_url(), gateway.api_key()).map_err(StateError::Gateway)?;
+    let gateway_binding =
+        GatewayBinding::new(gateway.base_url(), gateway.api_key()).map_err(StateError::Gateway)?;
     let progress = Arc::new(ProgressHub::new());
     let backoff = ReconnectBackoff::new();
     let workspace = Workspace::new();
     let agents = AgentSessions::new(
         config.agents.path.clone(),
         config.server.state_dir.join("sessions"),
-        crate::session_agents::model_client(gateway.base_url(), gateway.api_key()),
+        gateway_binding.clone(),
         SessionHost {
             push: push.clone(),
             backoff: backoff.clone(),
@@ -173,7 +189,7 @@ pub fn state_with_gateway(
     );
     push.push_idle();
     Ok(AppState {
-        gateway: client,
+        gateway: gateway_binding,
         status,
         progress,
         health: GatewayHealth::new(),
@@ -331,6 +347,7 @@ mod tests {
     use axum::routing::get;
 
     use super::fixtures::{config_for, spawn_gateway};
+    use crate::gateway::GatewayClient;
 
     /// Reports whether the request carried an `Authorization` header, so
     /// the client tests can observe what was sent.

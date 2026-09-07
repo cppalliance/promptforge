@@ -217,6 +217,11 @@ export class PromptInput extends Disposable implements SttInputTarget {
     return { start: from, end: to };
   }
 
+  /** The logical document end in ProseMirror's position space. */
+  getDocumentEnd(): number {
+    return this.editor.state.doc.content.size - 1;
+  }
+
   /** Places the cursor or selection at ProseMirror positions. */
   setSelection(from: number, to: number): void {
     this.editor.commands.setTextSelection({ from, to });

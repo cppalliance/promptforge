@@ -35,7 +35,7 @@ mod navigation;
 
 use std::ffi::OsStr;
 use std::process::ExitCode;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -57,7 +57,10 @@ type ServerSlot = Mutex<Option<ServerHandle>>;
 /// connection file, for the quit-everything menu item's `/shutdown` post.
 /// `None` when the gateway came from explicit config (a LAN gateway the
 /// shell never stops).
-type GatewaySlot = Mutex<Option<shared_sidecar::ConnectionFile>>;
+type GatewaySlot = Arc<Mutex<Option<shared_sidecar::ConnectionFile>>>;
+
+/// The managed local-sidecar supervisor, absent for an explicit LAN Gateway.
+type GatewaySupervisorSlot = Mutex<Option<gateway::GatewaySupervisor>>;
 
 /// The permission set the workshop page holds. The grant itself is built
 /// in setup with the exact bound port: the OS assigns the port at boot, so
@@ -155,6 +158,14 @@ fn run() -> anyhow::Result<()> {
         .context("build the desktop application")?;
     app.run(|handle, event| {
         if let tauri::RunEvent::Exit = event {
+            let supervisor = handle.try_state::<GatewaySupervisorSlot>().and_then(|slot| {
+                slot.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take()
+            });
+            if let Some(supervisor) = supervisor {
+                supervisor.shutdown();
+            }
             let server = handle
                 .try_state::<ServerSlot>()
                 .map(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
@@ -182,11 +193,12 @@ fn run() -> anyhow::Result<()> {
 /// and the failure exit code.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     match boot() {
-        Ok((server, url, attachment)) => {
+        Ok((server, url, attachment, gateway_slot, supervisor)) => {
             // The capability must exist before the window does: the
             // authority resolves a window's grants at creation.
             app.add_capability(window_capability(&url))?;
-            app.manage(GatewaySlot::new(attachment.sidecar_file().cloned()));
+            app.manage(gateway_slot);
+            app.manage(GatewaySupervisorSlot::new(supervisor));
             app.manage(ServerSlot::new(Some(server)));
             menu::install(app, attachment.sidecar_file())?;
             open_window(app, &url)
@@ -204,7 +216,13 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
 /// file first, explicit `workshop.toml` config second - and waits out its
 /// health probe. A failure after the spawn shuts the server down before
 /// propagating.
-fn boot() -> anyhow::Result<(ServerHandle, url::Url, gateway::GatewayAttachment)> {
+fn boot() -> anyhow::Result<(
+    ServerHandle,
+    url::Url,
+    gateway::GatewayAttachment,
+    GatewaySlot,
+    Option<gateway::GatewaySupervisor>,
+)> {
     let config = config::load().context("load the workshop configuration")?;
     let attachment = gateway::ensure_gateway(&config).context("connect to the gateway")?;
     let server = workshop_server::spawn(config).context("start the in-process workshop server")?;
@@ -213,7 +231,21 @@ fn boot() -> anyhow::Result<(ServerHandle, url::Url, gateway::GatewayAttachment)
     {
         Ok(()) => {
             let url = url::Url::parse(server.url()).context("parse the workshop URL")?;
-            Ok((server, url, attachment))
+            let gateway_slot = Arc::new(Mutex::new(attachment.sidecar_file().cloned()));
+            let supervisor = match gateway::supervise(
+                &attachment,
+                server.gateway_updater(),
+                Arc::clone(&gateway_slot),
+            ) {
+                Ok(supervisor) => supervisor,
+                Err(error) => {
+                    if let Err(shutdown_error) = server.shutdown() {
+                        eprintln!("{shutdown_error:?}");
+                    }
+                    return Err(error.context("supervise the local gateway"));
+                }
+            };
+            Ok((server, url, attachment, gateway_slot, supervisor))
         }
         Err(error) => {
             if let Err(shutdown_error) = server.shutdown() {

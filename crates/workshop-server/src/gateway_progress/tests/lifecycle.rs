@@ -15,12 +15,7 @@ async fn a_multi_stage_operation_detaches_only_when_the_operation_finishes() {
     let mock = Arc::new(MockProgress::new());
     let base_url = spawn_gateway(Arc::clone(&mock).router()).await;
     let hub = Arc::new(ProgressHub::new());
-    let subscriber = spawn(
-        base_url,
-        String::new(),
-        Arc::clone(&hub),
-        GatewayHealth::new(),
-    );
+    let subscriber = spawn(binding(&base_url), Arc::clone(&hub), GatewayHealth::new());
 
     wait_for_connections(&mock, 1).await;
     mock.send(event_json(

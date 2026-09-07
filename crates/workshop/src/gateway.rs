@@ -18,6 +18,7 @@
 //! (`crate::menu`) is the only path that stops the gateway.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
@@ -38,6 +39,43 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Delay between polls for the launched gateway's connection file.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+/// Healthy-sidecar supervision cadence.
+const SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
+
+/// First delay after a failed re-resolution or relaunch.
+const SUPERVISION_BASE_DELAY: Duration = Duration::from_millis(250);
+
+/// Ceiling on repeated sidecar recovery attempts.
+const SUPERVISION_MAX_DELAY: Duration = Duration::from_secs(30);
+
+/// One sidecar liveness observation.
+enum SupervisionProbe {
+    /// Another process already published a live replacement.
+    Replacement(ConnectionFile),
+    /// No live local Gateway is currently discoverable.
+    Missing,
+}
+
+/// The running local-sidecar supervisor.
+#[derive(Debug)]
+pub(crate) struct GatewaySupervisor {
+    stop: Option<mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl GatewaySupervisor {
+    /// Stops supervision without waiting for a probe or backoff interval.
+    pub(crate) fn shutdown(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        // A synchronous liveness probe or launch race cannot be interrupted.
+        // Detaching here keeps application shutdown bounded; process exit
+        // tears down any in-flight supervisor work moments later.
+        drop(self.thread.take());
+    }
+}
 
 /// How boot connected the gateway: the fact the quit-everything menu
 /// item labels and behaves from.
@@ -180,26 +218,40 @@ fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<ConnectionFil
     }
 }
 
-/// Waits for the launched gateway's connection file to appear, then for
-/// its health endpoint to answer. The launch-lock holder cleaned any
-/// stale file before electing a launcher, so the file that appears is
-/// the new gateway's.
+/// Waits for the launched gateway's connection file to appear, become ready,
+/// and pass the shared process-image, health, and bearer validation.
 fn wait_for_launched_file(run_dir: &Path, timeout: Duration) -> anyhow::Result<ConnectionFile> {
+    wait_for_launched_file_with(run_dir, timeout, shared_sidecar::resolve)
+}
+
+/// Waits for readiness, then accepts only a connection file that passes the
+/// shared process-image, health, and bearer validation.
+fn wait_for_launched_file_with<Resolve>(
+    run_dir: &Path,
+    timeout: Duration,
+    mut resolve: Resolve,
+) -> anyhow::Result<ConnectionFile>
+where
+    Resolve: FnMut(&Path) -> Result<Resolution, SidecarError>,
+{
     let deadline = Instant::now() + timeout;
-    let file = loop {
+    loop {
         if let Ok(Some(file)) = ConnectionFile::read(run_dir) {
-            break file;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let url = format!("http://127.0.0.1:{}", file.port);
+            shared_sidecar::wait_for_health(&url, remaining)
+                .context("the launched gateway did not answer its health probe")?;
+            if let Ok(Resolution::Attach(validated)) = resolve(run_dir) {
+                return Ok(validated);
+            }
         }
         if Instant::now() >= deadline {
-            anyhow::bail!("the launched gateway wrote no connection file within {timeout:?}");
+            anyhow::bail!(
+                "the launched gateway wrote no validated connection file within {timeout:?}"
+            );
         }
         std::thread::sleep(POLL_INTERVAL);
-    };
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let url = format!("http://127.0.0.1:{}", file.port);
-    shared_sidecar::wait_for_health(&url, remaining)
-        .context("the launched gateway did not answer its health probe")?;
-    Ok(file)
+    }
 }
 
 /// Spawns the gateway detached from the shell's lifetime: the bare
@@ -245,6 +297,130 @@ fn spawn_detached(exe: &Path) -> std::io::Result<()> {
         eprintln!("could not spawn the gateway reaper thread; the child goes unreaped: {error}");
     }
     Ok(())
+}
+
+/// Starts runtime supervision only for a connection-file sidecar.
+///
+/// Explicitly configured LAN endpoints return `None`: their address is fixed,
+/// and this process neither probes them for replacement nor launches anything.
+pub(crate) fn supervise(
+    attachment: &GatewayAttachment,
+    updater: workshop_server::GatewayUpdater,
+    slot: crate::GatewaySlot,
+) -> anyhow::Result<Option<GatewaySupervisor>> {
+    let Some(initial) = attachment.sidecar_file().cloned() else {
+        return Ok(None);
+    };
+    let run_dir = shared_sidecar::default_run_dir().context("locate the sidecar run directory")?;
+    let exe_dir = std::env::current_exe()
+        .context("locate the executable")?
+        .parent()
+        .map(Path::to_path_buf)
+        .context("the executable has no parent directory")?;
+    let sibling = sibling_gateway(&exe_dir);
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let thread = std::thread::Builder::new()
+        .name("gateway-supervisor".to_owned())
+        .spawn(move || {
+            run_supervision(
+                initial,
+                |_| match shared_sidecar::resolve(&run_dir) {
+                    Ok(Resolution::Attach(file)) => SupervisionProbe::Replacement(file),
+                    Ok(_) => SupervisionProbe::Missing,
+                    Err(error) => {
+                        eprintln!("could not re-resolve the local gateway: {error}");
+                        SupervisionProbe::Missing
+                    }
+                },
+                || {
+                    let exe = sibling.as_deref().context(
+                        "the local gateway disappeared and no sibling gateway executable is installed",
+                    )?;
+                    launch_and_attach(&run_dir, exe)
+                },
+                |file| {
+                    updater
+                        .replace_sidecar(file)
+                        .context("publish the replacement gateway endpoint")?;
+                    *slot
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(file.clone());
+                    Ok(())
+                },
+                |delay| match stop_rx.recv_timeout(delay) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => true,
+                    Err(mpsc::RecvTimeoutError::Timeout) => false,
+                },
+            );
+        })
+        .context("spawn the gateway supervisor")?;
+    Ok(Some(GatewaySupervisor {
+        stop: Some(stop_tx),
+        thread: Some(thread),
+    }))
+}
+
+/// Runs the supervision state machine with I/O injected for deterministic
+/// liveness and recovery tests.
+fn run_supervision<Probe, Recover, Publish, Wait, Error>(
+    mut current: ConnectionFile,
+    mut probe: Probe,
+    mut recover: Recover,
+    mut publish: Publish,
+    mut wait: Wait,
+) where
+    Probe: FnMut(&ConnectionFile) -> SupervisionProbe,
+    Recover: FnMut() -> Result<ConnectionFile, Error>,
+    Publish: FnMut(&ConnectionFile) -> Result<(), Error>,
+    Wait: FnMut(Duration) -> bool,
+    Error: std::fmt::Display,
+{
+    let mut retry_delay = SUPERVISION_BASE_DELAY;
+    loop {
+        match probe(&current) {
+            SupervisionProbe::Replacement(file) if same_gateway_identity(&file, &current) => {
+                retry_delay = SUPERVISION_BASE_DELAY;
+                if wait(SUPERVISION_INTERVAL) {
+                    return;
+                }
+                continue;
+            }
+            SupervisionProbe::Replacement(file) => match publish(&file) {
+                Ok(()) => {
+                    current = file;
+                    retry_delay = SUPERVISION_BASE_DELAY;
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!("could not publish a replacement local gateway: {error}");
+                }
+            },
+            SupervisionProbe::Missing => match recover() {
+                Ok(file) => match publish(&file) {
+                    Ok(()) => {
+                        current = file;
+                        retry_delay = SUPERVISION_BASE_DELAY;
+                        continue;
+                    }
+                    Err(error) => {
+                        eprintln!("could not publish a replacement local gateway: {error}");
+                    }
+                },
+                Err(error) => {
+                    eprintln!("could not recover the local gateway: {error}");
+                }
+            },
+        }
+        if wait(retry_delay) {
+            return;
+        }
+        retry_delay = retry_delay.saturating_mul(2).min(SUPERVISION_MAX_DELAY);
+    }
+}
+
+/// Whether two validated connection files describe the same Gateway boot.
+fn same_gateway_identity(left: &ConnectionFile, right: &ConnectionFile) -> bool {
+    left.pid == right.pid && left.epoch == right.epoch && left.started_at == right.started_at
 }
 
 #[cfg(test)]
@@ -479,8 +655,9 @@ mod tests {
                 .expect("the launched gateway writes");
         });
 
-        let waited = wait_for_launched_file(run.path(), Duration::from_secs(5))
-            .expect("the file lands and answers");
+        let waited =
+            wait_for_launched_file_with(run.path(), Duration::from_secs(5), probe_own_image)
+                .expect("the validated file lands and answers");
         assert_eq!(waited, file);
         writer.join().expect("the writer thread ran");
     }
@@ -488,11 +665,28 @@ mod tests {
     #[test]
     fn the_launch_wait_times_out_when_no_file_appears() {
         let run = tempfile::TempDir::new().expect("tempdir");
-        let error = wait_for_launched_file(run.path(), Duration::from_millis(150))
-            .expect_err("a gateway that never writes must not hang boot");
+        let error =
+            wait_for_launched_file_with(run.path(), Duration::from_millis(150), probe_own_image)
+                .expect_err("a gateway that never writes must not hang boot");
         assert!(
-            error.to_string().contains("no connection file"),
+            error.to_string().contains("no validated connection file"),
             "the error names the missing file: {error}"
+        );
+    }
+
+    #[test]
+    fn the_launch_wait_rejects_a_key_the_live_process_does_not_accept() {
+        let run = tempfile::TempDir::new().expect("tempdir");
+        let file = live_file(fixture_gateway("accepted-key"), "rejected-key");
+        file.write_to(run.path()).expect("write");
+
+        let error =
+            wait_for_launched_file_with(run.path(), Duration::from_millis(150), probe_own_image)
+                .expect_err("an unaccepted connection-file key must not publish");
+
+        assert!(
+            error.to_string().contains("no validated connection file"),
+            "the error names the validation failure without exposing the key: {error}"
         );
     }
 
@@ -524,5 +718,137 @@ mod tests {
             message.contains("workshop.toml"),
             "the error names the explicit-config remedy: {message}"
         );
+    }
+
+    #[test]
+    fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_atomically() {
+        use std::cell::{Cell, RefCell};
+
+        let original = live_file(54_375, "old-key");
+        let replacement = ConnectionFile {
+            api_key: "new-key".to_owned(),
+            pid: original.pid + 1,
+            epoch: original.epoch + 1,
+            started_at: "2026-09-03T12:00:01Z".to_owned(),
+            ..original.clone()
+        };
+        let elapsed = Cell::new(Duration::ZERO);
+        let recoveries = Cell::new(0_u8);
+        let published = RefCell::new(Vec::new());
+
+        run_supervision(
+            original.clone(),
+            |current| {
+                if !published.borrow().is_empty() || elapsed.get() <= Duration::from_secs(65) {
+                    SupervisionProbe::Replacement(current.clone())
+                } else {
+                    SupervisionProbe::Missing
+                }
+            },
+            || {
+                recoveries.set(recoveries.get() + 1);
+                if recoveries.get() < 3 {
+                    anyhow::bail!("injected launch failure");
+                }
+                Ok(replacement.clone())
+            },
+            |file| {
+                published.borrow_mut().push(file.clone());
+                Ok(())
+            },
+            |delay| {
+                assert!(
+                    delay <= SUPERVISION_MAX_DELAY,
+                    "every supervision wait is capped: {delay:?}"
+                );
+                elapsed.set(elapsed.get() + delay);
+                !published.borrow().is_empty()
+            },
+        );
+
+        assert!(
+            elapsed.get() > Duration::from_secs(60),
+            "the supervisor remains live beyond one minute"
+        );
+        assert_eq!(recoveries.get(), 3, "failed launches retry under backoff");
+        assert_eq!(
+            published.borrow().as_slice(),
+            [replacement],
+            "one successful relaunch publishes its exact connection-file pair"
+        );
+        assert_eq!(
+            published.borrow()[0].port,
+            original.port,
+            "an OS-assigned port may be reused"
+        );
+        assert_ne!(
+            published.borrow()[0].api_key,
+            original.api_key,
+            "a configured key edit propagates with the replacement identity"
+        );
+    }
+
+    #[test]
+    fn a_new_pid_replacement_publishes_even_when_port_and_key_are_unchanged() {
+        use std::cell::RefCell;
+
+        let original = live_file(54_375, "stable-key");
+        let replacement = ConnectionFile {
+            pid: original.pid + 1,
+            epoch: original.epoch + 1,
+            started_at: "2026-09-03T12:00:01Z".to_owned(),
+            ..original.clone()
+        };
+        let published = RefCell::new(Vec::new());
+
+        run_supervision(
+            original.clone(),
+            |current| {
+                if published.borrow().is_empty() {
+                    SupervisionProbe::Replacement(replacement.clone())
+                } else {
+                    SupervisionProbe::Replacement(current.clone())
+                }
+            },
+            || -> anyhow::Result<ConnectionFile> {
+                panic!("a validated replacement does not need a relaunch")
+            },
+            |file| {
+                published.borrow_mut().push(file.clone());
+                Ok(())
+            },
+            |_| !published.borrow().is_empty(),
+        );
+
+        assert_eq!(
+            published.borrow().as_slice(),
+            [replacement],
+            "new process identity publishes the exact stable endpoint and credential pair"
+        );
+        assert_eq!(published.borrow()[0].port, original.port);
+        assert_eq!(published.borrow()[0].api_key, original.api_key);
+    }
+
+    #[test]
+    fn pid_or_boot_identity_distinguishes_replacement_from_endpoint_changes() {
+        let original = live_file(54_375, "stable-key");
+        let new_pid = ConnectionFile {
+            pid: original.pid + 1,
+            ..original.clone()
+        };
+        let new_boot = ConnectionFile {
+            epoch: original.epoch + 1,
+            started_at: "2026-09-03T12:00:01Z".to_owned(),
+            ..original.clone()
+        };
+        let endpoint_only = ConnectionFile {
+            port: 54_379,
+            api_key: "edited-without-restart".to_owned(),
+            ..original.clone()
+        };
+
+        assert!(!same_gateway_identity(&original, &new_pid));
+        assert!(!same_gateway_identity(&original, &new_boot));
+        assert!(same_gateway_identity(&original, &endpoint_only));
     }
 }

@@ -67,6 +67,9 @@
 # left with their tests. Shrank again when authenticated WebSocket
 # connection mechanics moved to their own responsibility module.
 "gateway.rs" = 1235
+# New module: one atomically replaceable Gateway URL and bearer generation
+# shared by HTTP, Realtime, progress, heartbeat, and agent model clients.
+"gateway_binding.rs" = 267
 # Split from gateway.rs: fixed-target authenticated WebSocket connections
 # for the Realtime relay path.
 "gateway/socket.rs" = 94
@@ -80,12 +83,18 @@
 # Operation-lifecycle coverage split from the subscriber module so its
 # operation-id, SSE-lifetime, and interleaving fixture stays isolated.
 "gateway_progress/tests/lifecycle.rs" = 77
+# Replacement-generation coverage split from the subscriber module.
+"gateway_progress/tests/recovery.rs" = 38
 # Grew by the join-time status recompute: the transition-label constants and
 # the join_status helper (a late-joining session's line comes from the
 # current probe, not a stale retained announcement) plus their tests.
 "heartbeat.rs" = 969
+# Gateway catalog and profile refresh is independent of probe scheduling.
+"heartbeat/refresh.rs" = 117
 # Simultaneous-startup convergence fixtures split from the heartbeat loop.
 "heartbeat/tests/startup_convergence.rs" = 214
+# Endpoint-generation wake and credential replacement coverage.
+"heartbeat/tests/recovery.rs" = 59
 # New module: the user-input wait machinery - the WaitRegistry of
 # single-use cryptographic wait tokens, the Workshop's user_input Tool
 # (trusted structured output; a drop guard turns every dying wait into a
@@ -157,6 +166,8 @@
 # Its route/forwarding implementation is now separate from route tests.
 "routes/gateway_config.rs" = 190
 "routes/gateway_config/tests.rs" = 243
+# Replacement snapshot coverage split from the proxy's baseline tests.
+"routes/gateway_config/tests/recovery.rs" = 55
 "routes/health.rs" = 50
 # New module: the same-origin, payload-opaque Realtime transcription relay,
 # including bounded transport and hop-local control-frame ownership.
@@ -194,6 +205,8 @@
 # New module: one agent session's run lifecycle across turn cancellation,
 # delayed catalog readiness, and usable chat-catalog replacement.
 "session_agents/supervisor.rs" = 170
+# Catalog-generation waits split from agent run orchestration.
+"session_agents/supervisor/catalog.rs" = 53
 # New module: the /agents/ws socket - one select! loop owning the
 # socket, the launch/attach/input_response/cancel frame handling, the
 # cursor-driven durable event drain, and the reconnect replay-and-resend

@@ -16,6 +16,8 @@ export { setupStt } from "./realtime-stt";
 export interface SttInputTarget {
   /** The current selection: the take's insertion anchor. */
   getSelection(): { start: number; end: number };
+  /** The logical document-end position in the target's coordinate space. */
+  getDocumentEnd(): number;
   /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
   replaceRange(from: number, to: number, text: string): void;
   /** Reads the plain text currently occupying [from, to]. */
@@ -41,6 +43,7 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
       start: input.selectionStart ?? input.value.length,
       end: input.selectionEnd ?? input.value.length,
     }),
+    getDocumentEnd: () => input.value.length,
     replaceRange: (from, to, text) => {
       input.setRangeText(text, from, to, "end");
       // Programmatic value sets don't fire the textarea's "input" event,

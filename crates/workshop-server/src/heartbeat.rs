@@ -33,10 +33,14 @@ use std::time::Duration;
 use tokio::sync::{oneshot, watch};
 
 use crate::backoff::ReconnectBackoff;
-use crate::catalog::is_chat_capable;
+#[cfg(test)]
 use crate::gateway::GatewayClient;
+use crate::gateway_binding::{GatewayBinding, GatewaySnapshot};
 use crate::protocol::{Activity, Severity, StatusBarUpdate};
 use crate::push::Push;
+
+mod refresh;
+pub(crate) use refresh::{refresh_catalog, refresh_profiles};
 
 /// The status line announcing that the gateway answers its health probe.
 pub(crate) const CONNECTED_LABEL: &str = "Connected to gateway";
@@ -163,8 +167,8 @@ impl Heartbeat {
 /// gateway answers and draw from `backoff` while it does not, ending the
 /// loop when the backoff's budget exhausts.
 #[must_use]
-pub fn spawn(
-    client: GatewayClient,
+pub(crate) fn spawn(
+    gateway: GatewayBinding,
     push: Push,
     health: GatewayHealth,
     interval: Duration,
@@ -172,7 +176,7 @@ pub fn spawn(
 ) -> Heartbeat {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&client, &push, &health, interval, &backoff, &mut stopped).await;
+        run(&gateway, &push, &health, interval, &backoff, &mut stopped).await;
     });
     Heartbeat {
         stop: Some(stop),
@@ -189,8 +193,15 @@ pub fn spawn(
 /// successful probe deliberately never resets the backoff - only useful
 /// work does, elsewhere - and an exhausted budget ends the loop with a
 /// give-up report.
+#[derive(Default)]
+struct RefreshState {
+    profiles_ready: bool,
+    catalog_ready: bool,
+    selection_restored: bool,
+}
+
 async fn run(
-    client: &GatewayClient,
+    gateway: &GatewayBinding,
     push: &Push,
     health: &GatewayHealth,
     interval: Duration,
@@ -198,9 +209,8 @@ async fn run(
     stop: &mut oneshot::Receiver<()>,
 ) {
     let mut last: Option<bool> = None;
-    let mut profiles_ready = false;
-    let mut catalog_ready = false;
-    let mut selection_restored = false;
+    let mut refresh = RefreshState::default();
+    let mut gateway_changed = gateway.subscribe();
     loop {
         // The first probe runs immediately; every later one waits here.
         if let Some(reachable) = last {
@@ -218,13 +228,36 @@ async fn run(
             };
             tokio::select! {
                 _ = &mut *stop => break,
+                changed = gateway_changed.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    last = None;
+                    refresh = RefreshState::default();
+                    continue;
+                }
                 () = tokio::time::sleep(wait) => {}
             }
         }
+        let snapshot = gateway.snapshot();
+        let generation = snapshot.generation();
         let reachable = tokio::select! {
             _ = &mut *stop => break,
-            reachable = client.health() => reachable,
+            changed = gateway_changed.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                last = None;
+                refresh = RefreshState::default();
+                continue;
+            }
+            reachable = snapshot.client().health() => reachable,
         };
+        if gateway.generation() != generation {
+            last = None;
+            refresh = RefreshState::default();
+            continue;
+        }
         health.publish(reachable);
         let transitioned = last != Some(reachable);
         last = Some(reachable);
@@ -247,12 +280,10 @@ async fn run(
             }
         }
         if !reachable {
-            profiles_ready = false;
-            catalog_ready = false;
-            selection_restored = false;
+            refresh = RefreshState::default();
             continue;
         }
-        if !profiles_ready || !catalog_ready {
+        if !refresh.profiles_ready || !refresh.catalog_ready {
             // All menu state is server-owned and reaches the UI via
             // socket pushes - the UI fetches nothing on boot - so every
             // transition into reachable, boot's first probe included,
@@ -263,148 +294,49 @@ async fn run(
             // retries and keeps this from becoming a busy loop.
             tokio::select! {
                 _ = &mut *stop => break,
-                () = async {
-                    match (profiles_ready, catalog_ready) {
-                        (false, false) => {
-                            (profiles_ready, catalog_ready) =
-                                tokio::join!(refresh_profiles(client, push), refresh_catalog(client, push));
-                        }
-                        (false, true) => profiles_ready = refresh_profiles(client, push).await,
-                        (true, false) => catalog_ready = refresh_catalog(client, push).await,
-                        (true, true) => {}
+                changed = gateway_changed.changed() => {
+                    if changed.is_err() {
+                        break;
                     }
-                } => {}
+                    last = None;
+                    refresh = RefreshState::default();
+                    continue;
+                }
+                () = refresh_incomplete_sources(
+                    &snapshot,
+                    push,
+                    &mut refresh,
+                ) => {}
             }
         }
-        if profiles_ready && catalog_ready && !selection_restored {
+        if refresh.profiles_ready && refresh.catalog_ready && !refresh.selection_restored {
             // A fresh boot has no selection, so restore the remembered
             // model for the now-known active profile (else the first
             // catalog model); a reconnect whose selection survived the
             // outage is a no-op. This branch runs exactly once per reachable
             // convergence because both readiness facts remain true.
             push.menu().restore_selection();
-            selection_restored = true;
+            refresh.selection_restored = true;
         }
     }
 }
 
-/// Re-fetches the gateway's model catalog and pushes it to every session.
-///
-/// A failed, declined, or malformed catalog is logged and skipped rather
-/// than pushed: pushing a bad snapshot would clear pickers that still hold
-/// a usable list. Runs on every transition into reachable (boot and
-/// reconnect) and is shared with the profile-switch task in
-/// [`crate::session::menu`], which refetches after a switch settles.
-pub(crate) async fn refresh_catalog(client: &GatewayClient, push: &Push) -> bool {
-    let response = match client.list_models().await {
-        Ok(response) => response,
-        Err(error) => {
-            tracing::warn!(%error, "catalog refresh failed");
-            return false;
+/// Refreshes only the Gateway-owned menu sources that have not converged.
+async fn refresh_incomplete_sources(
+    snapshot: &GatewaySnapshot,
+    push: &Push,
+    refresh: &mut RefreshState,
+) {
+    match (refresh.profiles_ready, refresh.catalog_ready) {
+        (false, false) => {
+            (refresh.profiles_ready, refresh.catalog_ready) = tokio::join!(
+                refresh_profiles(snapshot.client(), push),
+                refresh_catalog(snapshot.client(), push)
+            );
         }
-    };
-    if !response.status.is_success() {
-        tracing::warn!(status = %response.status, "catalog refresh was declined");
-        return false;
-    }
-    let body: serde_json::Value = match serde_json::from_slice(&response.body) {
-        Ok(body) => body,
-        Err(error) => {
-            tracing::warn!(%error, "catalog refresh was not JSON");
-            return false;
-        }
-    };
-    let Some(models) = body.get("data").and_then(serde_json::Value::as_array) else {
-        tracing::warn!("catalog refresh carried no data array");
-        return false;
-    };
-    let selectable = models.iter().any(is_chat_capable);
-    push.push_models_catalog(models.clone());
-    selectable
-}
-
-/// The decoded body of `GET /admin/profiles`.
-#[derive(serde::Deserialize)]
-struct ProfileList {
-    /// Every profile name the gateway can serve, in gateway order.
-    profiles: Vec<String>,
-}
-
-/// The decoded body of `GET /admin/status`, reduced to the one field the
-/// menu needs.
-#[derive(serde::Deserialize)]
-struct ProfileStatus {
-    /// The profile the gateway is serving.
-    #[serde(default)]
-    profile: Option<String>,
-}
-
-/// Fetches the gateway's profile list and active profile and publishes
-/// them into the workbench snapshot.
-///
-/// A gateway without profile support is a state, not an error: a failed,
-/// declined, or malformed answer degrades that half to empty (logged by
-/// its fetcher), so the menu shows no profiles rather than stale names.
-/// Shared with the profile-switch task in [`crate::session::menu`], which
-/// refetches after a switch settles.
-pub(crate) async fn refresh_profiles(client: &GatewayClient, push: &Push) -> bool {
-    let (profiles, active) = tokio::join!(fetch_profile_list(client), fetch_active_profile(client));
-    let ready = profiles.as_ref().is_some_and(|profiles| {
-        !profiles.is_empty()
-            && active
-                .as_ref()
-                .is_some_and(|active| profiles.contains(active))
-    });
-    push.menu()
-        .set_profiles(profiles.unwrap_or_default(), active);
-    ready
-}
-
-/// The gateway's profile names from `GET /admin/profiles`, or `None`
-/// when the request fails, is declined, or answers malformed JSON - each
-/// logged and tolerated.
-async fn fetch_profile_list(client: &GatewayClient) -> Option<Vec<String>> {
-    let response = match client.list_profiles().await {
-        Ok(response) => response,
-        Err(error) => {
-            tracing::warn!(%error, "profile list fetch failed");
-            return None;
-        }
-    };
-    if !response.status.is_success() {
-        tracing::warn!(status = %response.status, "profile list was declined");
-        return None;
-    }
-    match serde_json::from_slice::<ProfileList>(&response.body) {
-        Ok(list) => Some(list.profiles),
-        Err(error) => {
-            tracing::warn!(%error, "profile list was not the expected JSON");
-            None
-        }
-    }
-}
-
-/// The active profile name from `GET /admin/status`, or `None` when the
-/// request fails, is declined, or answers malformed JSON - each logged
-/// and tolerated.
-async fn fetch_active_profile(client: &GatewayClient) -> Option<String> {
-    let response = match client.profile_status().await {
-        Ok(response) => response,
-        Err(error) => {
-            tracing::warn!(%error, "profile status fetch failed");
-            return None;
-        }
-    };
-    if !response.status.is_success() {
-        tracing::warn!(status = %response.status, "profile status was declined");
-        return None;
-    }
-    match serde_json::from_slice::<ProfileStatus>(&response.body) {
-        Ok(status) => status.profile,
-        Err(error) => {
-            tracing::warn!(%error, "profile status was not the expected JSON");
-            None
-        }
+        (false, true) => refresh.profiles_ready = refresh_profiles(snapshot.client(), push).await,
+        (true, false) => refresh.catalog_ready = refresh_catalog(snapshot.client(), push).await,
+        (true, true) => {}
     }
 }
 
@@ -577,12 +509,12 @@ mod tests {
         status: &StatusBus,
         catalog: &CatalogBus,
     ) -> (Heartbeat, GatewayHealth, MenuBus, ReconnectBackoff) {
-        let client = GatewayClient::new(base_url, "").expect("client builds in tests");
+        let gateway = GatewayBinding::new(base_url, "").expect("binding builds in tests");
         let health = GatewayHealth::new();
         let menu = MenuBus::new(catalog.clone(), None);
         let backoff = test_backoff();
         let heartbeat = spawn(
-            client,
+            gateway,
             Push::new(status.clone(), catalog.clone(), menu.clone()),
             health.clone(),
             TEST_INTERVAL,
@@ -662,7 +594,7 @@ mod tests {
         let menu = MenuBus::new(catalog.clone(), None);
         let mut rx = status.subscribe();
         let heartbeat = spawn(
-            client,
+            GatewayBinding::from_client(client),
             Push::new(status.clone(), catalog, menu),
             GatewayHealth::new(),
             TEST_INTERVAL,
@@ -907,7 +839,7 @@ mod tests {
         let status = StatusBus::new();
         let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
+        let gateway = GatewayBinding::new(&base_url, "").expect("binding builds in tests");
         let health = GatewayHealth::new();
         let menu = MenuBus::new(catalog.clone(), None);
         // A budget of a few schedule steps: exhausted within a handful of
@@ -918,7 +850,7 @@ mod tests {
             Duration::from_millis(50),
         );
         let heartbeat = spawn(
-            client,
+            gateway,
             Push::new(status.clone(), catalog, menu),
             health.clone(),
             TEST_INTERVAL,
@@ -945,11 +877,12 @@ mod tests {
         // A long interval: if the stop signal did not win the select, the
         // shutdown would block for the whole minute.
         let status = StatusBus::new();
-        let client = GatewayClient::new("http://127.0.0.1:1", "").expect("client builds in tests");
+        let gateway =
+            GatewayBinding::new("http://127.0.0.1:1", "").expect("binding builds in tests");
         let catalog = CatalogBus::new();
         let menu = crate::menu::MenuBus::new(catalog.clone(), None);
         let heartbeat = spawn(
-            client,
+            gateway,
             Push::new(status, catalog, menu),
             GatewayHealth::new(),
             Duration::from_secs(60),
@@ -960,5 +893,6 @@ mod tests {
             .expect("shutdown does not wait out the interval");
     }
 
+    mod recovery;
     mod startup_convergence;
 }

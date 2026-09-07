@@ -40,14 +40,15 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use promptforge_core_support::cancel::CancelHandle;
 use promptforge_core_support::events::{CallMetrics, RuntimeEventKind, ToolCallEvent};
 use promptforge_core_support::observe::{Observation, Observer};
-use promptforge_model_client::client::{
-    GatewayClient as ModelClient, GatewayEndpoint, SecretString, StreamDelta,
-};
+#[cfg(test)]
+use promptforge_model_client::client::GatewayClient as ModelClient;
+use promptforge_model_client::client::StreamDelta;
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use tokio::sync::{Notify, broadcast};
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::{CatalogBus, is_chat_capable};
+use crate::gateway_binding::GatewayBinding;
 use crate::input::{WaitError, WaitRegistry, deliver_input_response_before_completion};
 use crate::menu::MenuBus;
 use crate::observer::WorkshopObserver;
@@ -139,11 +140,8 @@ struct Inner {
     agents_dir: PathBuf,
     /// Where session event JSONLs persist (`state_dir/sessions`).
     sessions_dir: PathBuf,
-    /// The model client agents complete through, built from the workshop
-    /// gateway settings; `None` when those settings cannot make a client
-    /// (an empty API key), which refuses launches rather than failing at
-    /// startup - the rest of the workshop still serves.
-    client: Option<ModelClient>,
+    /// The atomically replaceable Gateway clients every run snapshots.
+    gateway: GatewayBinding,
     /// The shared bus handles session lifecycles report through.
     host: SessionHost,
     /// The running sessions by id.
@@ -169,14 +167,14 @@ impl AgentSessions {
     pub(crate) fn new(
         agents_dir: PathBuf,
         sessions_dir: PathBuf,
-        client: Option<ModelClient>,
+        gateway: GatewayBinding,
         host: SessionHost,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 agents_dir,
                 sessions_dir,
-                client,
+                gateway,
                 host,
                 sessions: Mutex::new(HashMap::new()),
             }),
@@ -220,9 +218,9 @@ impl AgentSessions {
         // chat, but an agent run would fail its first model round - or
         // silently resolve a different gateway from the environment - so
         // the launch refuses instead.
-        let Some(client) = self.inner.client.clone() else {
+        if self.inner.gateway.snapshot().model_client().is_none() {
             return Err(LaunchRefusal::GatewayUnusable);
-        };
+        }
         let source = agent_source(&self.inner.agents_dir, name)
             .map_err(|source| LaunchRefusal::SessionState { source })?;
         std::fs::create_dir_all(&self.inner.sessions_dir)
@@ -257,7 +255,7 @@ impl AgentSessions {
             Arc::clone(&session),
             self.clone(),
             self.inner.host.clone(),
-            client,
+            self.inner.gateway.clone(),
         );
         Ok(session)
     }
@@ -453,6 +451,11 @@ impl AgentSession {
     /// Requests catalog retirement, deferring while accepted input is active.
     fn cancel_for_catalog(&self) -> bool {
         self.lifecycle.cancel_for_catalog()
+    }
+
+    /// Retires the current run immediately after a Gateway replacement.
+    fn cancel_for_gateway(&self) {
+        self.lifecycle.cancel(CancelOrigin::Gateway);
     }
 
     /// Waits until the accepted turn reaches a terminal event.
@@ -721,23 +724,9 @@ fn fresh_session_id() -> String {
 /// `None` - logged here, and refused per launch as
 /// [`LaunchRefusal::GatewayUnusable`] - when the key is empty (the model
 /// client refuses blank credentials) or the URL does not parse.
-pub(crate) fn model_client(base_url: &str, api_key: &str) -> Option<ModelClient> {
-    let key = match SecretString::new(api_key) {
-        Ok(key) => key,
-        Err(error) => {
-            tracing::warn!(%error, "agent sessions disabled: gateway API key unusable");
-            return None;
-        }
-    };
-    let root = format!("{}/v1", base_url.trim_end_matches('/'));
-    let endpoint = match GatewayEndpoint::new(&root) {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            tracing::warn!(%error, "agent sessions disabled: gateway URL unusable");
-            return None;
-        }
-    };
-    Some(ModelClient::new(endpoint, key))
+#[cfg(test)]
+fn model_client(base_url: &str, api_key: &str) -> Option<ModelClient> {
+    crate::gateway_binding::model_client(base_url, api_key)
 }
 
 /// Builds the session's model catalog from the retained gateway catalog:
@@ -981,7 +970,8 @@ mod tests {
         let sessions = AgentSessions::new(
             dir.path().to_path_buf(),
             dir.path().join("sessions"),
-            None,
+            GatewayBinding::new("http://127.0.0.1:1", "")
+                .expect("the unusable model binding still builds its HTTP client"),
             SessionHost {
                 push: Push::new(
                     crate::status::StatusBus::new(),

@@ -36,6 +36,42 @@ function canonicalMessage(sequence, direction, type, occurrence = 0) {
   );
 }
 
+function producerHypothesis(itemId, transcript, revision = 1) {
+  return {
+    type: "conversation.item.input_audio_transcription.hypothesis",
+    event_id: `${itemId}_hypothesis_${revision}`,
+    item_id: itemId,
+    content_index: 0,
+    revision,
+    transcript,
+    finalized: transcript,
+    agreed: "",
+    tentative: "",
+    audio_start_ms: 0,
+    audio_end_ms: 100,
+  };
+}
+
+function producerCommitted(itemId) {
+  return {
+    type: "input_audio_buffer.committed",
+    event_id: `${itemId}_committed`,
+    item_id: itemId,
+    previous_item_id: null,
+  };
+}
+
+function producerCompletion(itemId, transcript) {
+  return {
+    type: "conversation.item.input_audio_transcription.completed",
+    event_id: `${itemId}_completed`,
+    item_id: itemId,
+    content_index: 0,
+    transcript,
+    usage: { type: "duration", seconds: 0.1 },
+  };
+}
+
 const bundle = await esbuild.build({
   stdin: {
     contents: `
@@ -697,6 +733,137 @@ await assertNoLeaks(lifecycle, async () => {
     check(
       "producer ownership revision preserves exact spaces while replacing",
       input.getText() === "ask not your country new tail second",
+    );
+    dispose();
+  }
+
+  // Standalone producer transcripts compose only at the logical document end.
+
+  {
+    const { wire, mic, input, editable, startTake, dispose } = await harness();
+    wire.fire.inputRequired("sequential");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("sequential composition: the first take did not start");
+      dispose();
+      return;
+    }
+    socket.message(producerHypothesis("composition_first", "First test alpha"));
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 1,
+    );
+    socket.message(producerCommitted("composition_first"));
+    socket.message(producerCompletion("composition_first", "First test alpha"));
+
+    await startTake();
+    socket.message(producerHypothesis("composition_second", "Second test beta"));
+    check(
+      "a second standalone producer hypothesis composes after the first take",
+      input.getText() === "First test alpha Second test beta",
+    );
+    mic.click();
+    await waitFor(
+      () =>
+        socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 2,
+    );
+    socket.message(producerCommitted("composition_second"));
+    socket.message(producerCompletion("composition_second", "Second test beta"));
+    check(
+      "the standalone completion replaces its hypothesis without losing composition spacing",
+      input.getText() === "First test alpha Second test beta" && editable(),
+    );
+    dispose();
+  }
+
+  {
+    const { wire, mic, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("completion-only");
+    input.setText("First test alpha");
+    const socket = await startTake();
+    if (socket === null) {
+      failures.push("completion-only composition: the take did not start");
+      dispose();
+      return;
+    }
+    mic.click();
+    await waitFor(() =>
+      socket.sent.some((event) => event.type === "input_audio_buffer.commit"),
+    );
+    socket.message(producerCommitted("completion_only_second"));
+    socket.message(producerCompletion("completion_only_second", "Second test beta"));
+    check(
+      "a completion with no hypothesis composes at the logical document end",
+      input.getText() === "First test alpha Second test beta",
+    );
+    dispose();
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("existing-space");
+    input.setText("First test alpha ");
+    const socket = await startTake();
+    socket?.message(producerHypothesis("existing_space", "Second test beta"));
+    check(
+      "existing trailing space prevents an added composition separator",
+      input.getText() === "First test alpha Second test beta",
+    );
+    dispose();
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("producer-space");
+    input.setText("First test alpha");
+    const socket = await startTake();
+    socket?.message(producerHypothesis("producer_space", " Second test beta"));
+    check(
+      "producer-leading space prevents a duplicate composition separator",
+      input.getText() === "First test alpha Second test beta",
+    );
+    dispose();
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("selection");
+    input.setText("First test alpha");
+    input.setSelection(7, 11);
+    const socket = await startTake();
+    socket?.message(producerHypothesis("selection", "Second"));
+    check(
+      "a selected replacement receives no composition separator",
+      input.getText() === "First Second alpha",
+    );
+    dispose();
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("mid-word");
+    input.setText("alphaBeta");
+    input.setSelection(6, 6);
+    const socket = await startTake();
+    socket?.message(producerHypothesis("mid_word", "Second"));
+    check(
+      "a mid-word insertion receives no composition separator",
+      input.getText() === "alphaSecondBeta",
+    );
+    dispose();
+  }
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("rollback-spacing");
+    input.setText("First test alpha");
+    const socket = await startTake();
+    socket?.message(producerHypothesis("rollback_spacing", "Second test beta"));
+    wire.fire.inputCancelled("rollback-spacing");
+    check(
+      "rolling back a composed hypothesis removes its owned separator",
+      input.getText() === "First test alpha",
     );
     dispose();
   }

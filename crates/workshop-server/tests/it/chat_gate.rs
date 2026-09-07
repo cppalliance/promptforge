@@ -37,7 +37,7 @@ use promptforge_model_client::client::{
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
-use workshop_server::fixtures::state_with_gateway;
+use workshop_server::fixtures::{gateway_updater, state_with_gateway};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
     ServerConfig, UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,
@@ -403,6 +403,74 @@ async fn gate_streaming_delivers_text_and_reasoning_deltas_then_the_reply() {
             .iter()
             .all(|delta| delta["reply"] == reply["reply"]),
         "deltas and the completed reply share the superseding id"
+    );
+    socket.close().await;
+}
+
+#[tokio::test]
+async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
+    let server = spawn_chat_server(&["test-model"]).await;
+    let mut socket = connect_chat(&server.ws_base).await;
+    let _session = launch_chat(&mut socket).await;
+    let original_wait = next_wait_token(&mut socket).await;
+
+    let replacement_captured = CapturedRequests::default();
+    let captured = Arc::clone(&replacement_captured);
+    let replacement = spawn_gateway(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: axum::http::HeaderMap, body: String| {
+            let captured = Arc::clone(&captured);
+            async move {
+                if headers
+                    .get(header::AUTHORIZATION)
+                    .and_then(|value| value.to_str().ok())
+                    != Some("Bearer replacement-key")
+                {
+                    return StatusCode::UNAUTHORIZED.into_response();
+                }
+                gate_completions(&captured, &body)
+            }
+        }),
+    ))
+    .await;
+    let port = url::Url::parse(&replacement)
+        .expect("the replacement URL parses")
+        .port()
+        .expect("the replacement URL carries a port");
+    gateway_updater(&server.state)
+        .replace_sidecar(&shared_sidecar::ConnectionFile {
+            port,
+            api_key: "replacement-key".to_owned(),
+            pid: std::process::id(),
+            epoch: 1_757_000_000,
+            version: "test".to_owned(),
+            started_at: "2026-09-07T14:14:31Z".to_owned(),
+        })
+        .expect("the replacement publishes");
+
+    let replacement_wait = next_wait_token(&mut socket).await;
+    assert_ne!(
+        replacement_wait, original_wait,
+        "the endpoint generation retires and relaunches the waiting agent"
+    );
+    answer(&mut socket, &replacement_wait, "after gateway recovery").await;
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(delta_text(&turn), "echo:after gateway recovery");
+    assert!(
+        server
+            .captured
+            .lock()
+            .expect("the original capture lock is healthy")
+            .is_empty(),
+        "the old endpoint receives no post-publication completion"
+    );
+    assert_eq!(
+        replacement_captured
+            .lock()
+            .expect("the replacement capture lock is healthy")
+            .len(),
+        1,
+        "the replacement endpoint and bearer complete the next turn"
     );
     socket.close().await;
 }

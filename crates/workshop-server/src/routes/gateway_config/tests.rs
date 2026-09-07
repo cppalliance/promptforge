@@ -9,6 +9,8 @@ use tower::ServiceExt;
 use crate::app::fixtures::{body_bytes, spawn_gateway, state_for};
 use crate::app::router;
 
+mod recovery;
+
 #[test]
 fn the_allowlist_admits_the_config_surface_and_refuses_the_rest() {
     for (method, path) in [

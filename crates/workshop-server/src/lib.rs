@@ -19,6 +19,7 @@ mod csp;
 mod deadline;
 mod error;
 mod gateway;
+mod gateway_binding;
 mod gateway_progress;
 mod heartbeat;
 mod input;
@@ -49,7 +50,7 @@ pub mod fixtures {
     pub use crate::app::state_with_gateway;
     pub use crate::backoff::ReconnectBackoff;
     pub use crate::catalog::CatalogBus;
-    pub use crate::heartbeat::{GatewayHealth, Heartbeat, spawn as spawn_heartbeat};
+    pub use crate::heartbeat::{GatewayHealth, Heartbeat};
     pub use crate::menu::{MenuBus, MenuRefusal};
     pub use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
     pub use crate::push::Push;
@@ -57,6 +58,31 @@ pub mod fixtures {
 
     #[cfg(feature = "test-fixtures")]
     pub use crate::app::fixtures::spawn_gateway;
+
+    /// Returns the host-only Gateway publisher from fixture state.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn gateway_updater(state: &crate::AppState) -> crate::GatewayUpdater {
+        state.gateway_updater()
+    }
+
+    /// Starts a heartbeat around a fixture Gateway client.
+    #[must_use]
+    pub fn spawn_heartbeat(
+        client: crate::GatewayClient,
+        push: crate::Push,
+        health: GatewayHealth,
+        interval: std::time::Duration,
+        backoff: ReconnectBackoff,
+    ) -> Heartbeat {
+        crate::heartbeat::spawn(
+            crate::gateway_binding::GatewayBinding::from_client(client),
+            push,
+            health,
+            interval,
+            backoff,
+        )
+    }
 
     /// Spawns a Workshop test server against the explicit configured Gateway.
     #[cfg(feature = "test-fixtures")]
@@ -74,6 +100,7 @@ pub use gateway::{
     CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
     SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
+pub use gateway_binding::GatewayUpdater;
 pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
 pub use observer::WorkshopObserver;
 pub use protocol::{Activity, InputFrame, InputResponse};

@@ -12,6 +12,8 @@ pub(super) enum CancelOrigin {
     Operator,
     /// The supervisor retired an idle run for a new catalog generation.
     Catalog,
+    /// The desktop host published a relaunched local Gateway generation.
+    Gateway,
 }
 
 /// State shared by input acceptance, the supervisor, and terminal events.

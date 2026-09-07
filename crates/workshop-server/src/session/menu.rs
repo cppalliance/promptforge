@@ -63,7 +63,7 @@ pub(super) async fn start_switch(
     // state, not work held on behalf of one client, so it runs to
     // completion (and settles the menu) even if the clicking client
     // disconnects mid-switch.
-    let client = state.gateway_client().clone();
+    let client = state.gateway_snapshot().client().clone();
     let push = state.push();
     let name = name.to_string();
     tokio::spawn(async move {
