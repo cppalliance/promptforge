@@ -465,13 +465,11 @@ mod tests {
     use promptforge_core_support::observe::Observation;
     use promptforge_tools::OutputTrust;
 
-    /// Hostile operator text - CRLF, quotes, JSON braces, a backslash,
-    /// and a multi-byte scalar - so byte-exactness is proven on the bytes
-    /// most likely to be mangled by an envelope or a codec.
+    /// Hostile operator text covering the bytes most likely to be mangled
+    /// by an envelope or codec.
     const GNARLY: &str = "line1\r\nline2 \"quoted\" {\"text\":\"decoy\"} \\slash \u{1F980}";
 
-    /// A tool over a fresh registry and channel; the channel's initial
-    /// receiver is dropped, so tests start with zero subscribers.
+    /// A fresh tool, registry, and channel with no subscribers.
     fn tool_fixture() -> (
         UserInputTool,
         Arc<WaitRegistry>,
@@ -483,7 +481,6 @@ mod tests {
         (tool, registry, frames)
     }
 
-    /// Waits for a spawned call to register its wait, without a socket.
     async fn registered_token(registry: &WaitRegistry) -> String {
         for _ in 0..1024 {
             if let Some(token) = registry.unresolved().first().cloned() {
@@ -494,7 +491,6 @@ mod tests {
         panic!("the tool call never registered its wait");
     }
 
-    /// Receives the next frame and unwraps the `input_required` token.
     async fn required_token(socket: &mut broadcast::Receiver<InputFrame>) -> String {
         let frame = socket.recv().await.expect("a frame arrives");
         let InputFrame::Required { token } = frame else {
@@ -754,19 +750,22 @@ mod tests {
         );
     }
 
-    /// Records every `on_user_input` report for the producer tests.
     #[derive(Default)]
     struct RecordingObserver {
         inputs: Mutex<Vec<(String, String, String)>>,
+    }
+
+    impl RecordingObserver {
+        fn inputs(&self) -> MutexGuard<'_, Vec<(String, String, String)>> {
+            self.inputs.lock().expect("the recorder mutex stays usable")
+        }
     }
 
     impl Observer for RecordingObserver {
         fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
 
         fn on_user_input(&self, execution: &str, section: &str, text: &str) {
-            self.inputs
-                .lock()
-                .expect("the recorder mutex stays usable")
+            self.inputs()
                 .push((execution.to_owned(), section.to_owned(), text.to_owned()));
         }
     }
@@ -793,11 +792,7 @@ mod tests {
             "the completed value is the response text byte-exact"
         );
         assert_eq!(
-            observer
-                .inputs
-                .lock()
-                .expect("the recorder mutex stays usable")
-                .as_slice(),
+            observer.inputs().as_slice(),
             &[("run-1".to_owned(), "chat".to_owned(), GNARLY.to_owned())],
             "exactly one byte-exact event per response"
         );
@@ -817,11 +812,7 @@ mod tests {
             Err(WaitError::UnknownToken)
         );
         assert_eq!(
-            observer
-                .inputs
-                .lock()
-                .expect("the recorder mutex stays usable")
-                .len(),
+            observer.inputs().len(),
             2,
             "the event fires exactly once per response, even a stale one"
         );
