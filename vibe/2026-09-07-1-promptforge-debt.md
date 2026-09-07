@@ -438,7 +438,7 @@ isProject: false
 - Exclusions: no speech protocol change, relay change, reconnect policy change, or dictation ownership refactor.
 - Focused verification: from `crates/workshop-server/ui` run `npm run typecheck`, `npm run build`, and `npm test`.
 
-### Step 19: Move insertion policy into input targets
+### Step 19: Move insertion policy into input targets [completed]
 
 - Component and piece: Component 6 of 8, Workshop Realtime UI; give each `SttInputTarget` one insertion-context operation.
 - Dependency: depends on Step 18 only for settled typed service inputs and precedes the registry because composition policy must leave lifecycle state before reducer extraction.

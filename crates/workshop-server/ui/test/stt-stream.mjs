@@ -6,6 +6,7 @@ import { mock } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { JSDOM } from "jsdom";
 import { assertNoLeaks } from "./helpers/leak-check.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,8 @@ const bundle = await esbuild.build({
     contents: `
       export * as lifecycle from "./src/base/lifecycle.ts";
       export { RealtimeTranscriptionService } from "./src/services/realtime-transcription.ts";
+      export { SpeechCaptureService } from "./src/services/speech-capture.ts";
+      export { setupStt, textareaSttTarget } from "./src/ui/stt.ts";
     `,
     resolveDir: path.join(uiDir, ".."),
     loader: "ts",
@@ -28,12 +31,70 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const { lifecycle, RealtimeTranscriptionService } = await import(
+const {
+  lifecycle,
+  RealtimeTranscriptionService,
+  SpeechCaptureService,
+  setupStt,
+  textareaSttTarget,
+} = await import(
   `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`
 );
 const client = JSON.parse(await readFile(path.join(fixtures, "client-events.json"), "utf8"));
 const server = JSON.parse(await readFile(path.join(fixtures, "server-events.json"), "utf8"));
 globalThis.location = new URL("http://127.0.0.1:7910/");
+
+{
+  const dom = new JSDOM("<!doctype html><textarea></textarea>");
+  const textarea = dom.window.document.querySelector("textarea");
+  const target = textareaSttTarget(textarea);
+
+  textarea.value = "First test alpha";
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  const append = target.insertionContext();
+  assert.deepEqual(append, {
+    range: { start: 16, end: 16 },
+    original: "",
+    compositionPrefix: " ",
+  });
+
+  textarea.value += " ";
+  assert.equal(
+    append.compositionPrefix,
+    " ",
+    "a captured textarea composition prefix is immutable",
+  );
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  assert.equal(
+    target.insertionContext().compositionPrefix,
+    "",
+    "existing textarea whitespace prevents a composition separator",
+  );
+
+  textarea.value = "First test alpha";
+  textarea.setSelectionRange(6, 10);
+  assert.deepEqual(
+    target.insertionContext(),
+    {
+      range: { start: 6, end: 10 },
+      original: "test",
+      compositionPrefix: "",
+    },
+    "a textarea selection is captured without a composition separator",
+  );
+
+  textarea.value = "alphaBeta";
+  textarea.setSelectionRange(5, 5);
+  assert.deepEqual(
+    target.insertionContext(),
+    {
+      range: { start: 5, end: 5 },
+      original: "",
+      compositionPrefix: "",
+    },
+    "a mid-word textarea insertion receives no composition separator",
+  );
+}
 
 class ScriptedSocket {
   static CONNECTING = 0;
@@ -74,6 +135,89 @@ class ScriptedSocket {
     this.dispatch("message", { data: JSON.stringify(frame) });
   }
 }
+
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({ socket: () => socket });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+
+    let finishCaptureStart = null;
+    const capture = new SpeechCaptureService({
+      open: () =>
+        new Promise((resolve) => {
+          finishCaptureStart = () =>
+            resolve({
+              clear() {},
+              async stop() {},
+              dispose() {},
+            });
+        }),
+    });
+    const status = {
+      recording: false,
+      showLocal() {},
+      setRecording(recording) {
+        this.recording = recording;
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    textarea.value = "old target keep";
+    textarea.setSelectionRange(4, 10);
+    textarea.focus();
+    mic.click();
+    assert.equal(typeof finishCaptureStart, "function");
+    assert.equal(textarea.readOnly, false, "the textarea remains editable during startup");
+
+    textarea.value = "edited live tail";
+    textarea.setSelectionRange(7, 11);
+    finishCaptureStart();
+    for (let turn = 0; turn < 4 && !status.recording; turn++) {
+      await Promise.resolve();
+    }
+    assert.equal(textarea.readOnly, true, "successful startup locks the current textarea context");
+
+    socket.message({
+      ...server.transcription_hypothesis,
+      event_id: "evt_delayed_textarea_hypothesis",
+      item_id: "item_delayed_textarea",
+      transcript: "spoken",
+      finalized: "",
+      agreed: "",
+      tentative: "spoken",
+    });
+    assert.equal(textarea.value, "edited spoken tail");
+    stt.discardIfRecording();
+    assert.equal(
+      textarea.value,
+      "edited live tail",
+      "textarea rollback restores the selection captured after delayed startup",
+    );
+    assert.equal(textarea.selectionStart, 11);
+    assert.equal(dom.window.document.activeElement, textarea);
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
 
 await assertNoLeaks(lifecycle, async () => {
   const sockets = [];

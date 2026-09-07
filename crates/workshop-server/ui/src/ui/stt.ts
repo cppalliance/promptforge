@@ -5,6 +5,19 @@ import "./stt.css";
 import type { IDisposable } from "../base/lifecycle";
 export { setupStt } from "./realtime-stt";
 
+/** One immutable snapshot of the target-owned transcript insertion policy. */
+export interface SttInsertionContext {
+  /** The selected range in the target's coordinate space. */
+  readonly range: {
+    readonly start: number;
+    readonly end: number;
+  };
+  /** The selected text a cancelled or failed take restores. */
+  readonly original: string;
+  /** The separator owned by this take, if appending requires one. */
+  readonly compositionPrefix: "" | " ";
+}
+
 /**
  * What dictation needs from its host input: a text target the take can
  * splice the transcript into. Offsets are the target's own text
@@ -14,14 +27,10 @@ export { setupStt } from "./realtime-stt";
  * both spaces.
  */
 export interface SttInputTarget {
-  /** The current selection: the take's insertion anchor. */
-  getSelection(): { start: number; end: number };
-  /** The logical document-end position in the target's coordinate space. */
-  getDocumentEnd(): number;
+  /** Captures the selected range, rollback text, and target-owned insertion policy. */
+  insertionContext(): SttInsertionContext;
   /** Replaces [from, to] with text, leaving the cursor after the inserted text. */
   replaceRange(from: number, to: number, text: string): void;
-  /** Reads the plain text currently occupying [from, to]. */
-  readRange(from: number, to: number): string;
   /** Locks the input against typing while a take splices, or releases it. */
   setReadOnly(readOnly: boolean): void;
   /** Returns focus to the input; a landed final calls it. */
@@ -39,11 +48,18 @@ export interface SttElements {
  */
 export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
   return {
-    getSelection: () => ({
-      start: input.selectionStart ?? input.value.length,
-      end: input.selectionEnd ?? input.value.length,
-    }),
-    getDocumentEnd: () => input.value.length,
+    insertionContext: () => {
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      return {
+        range: { start, end },
+        original: input.value.slice(start, end),
+        compositionPrefix:
+          start === end && end === input.value.length && /\S$/.test(input.value.slice(0, start))
+            ? " "
+            : "",
+      };
+    },
     replaceRange: (from, to, text) => {
       input.setRangeText(text, from, to, "end");
       // Programmatic value sets don't fire the textarea's "input" event,
@@ -51,7 +67,6 @@ export function textareaSttTarget(input: HTMLTextAreaElement): SttInputTarget {
       // behaves like typing to whatever listens on the input.
       input.dispatchEvent(new Event("input", { bubbles: true }));
     },
-    readRange: (from, to) => input.value.slice(from, to),
     setReadOnly: (readOnly) => {
       input.readOnly = readOnly;
       input.classList.toggle("stt-input--recording", readOnly);

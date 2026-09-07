@@ -283,17 +283,21 @@ await assertNoLeaks(lifecycle, () => {
     const input = new PromptInput();
     input.setText("ab");
     check("setText loads plain text", input.getText() === "ab");
-    check("readRange preserves the text a take may need to restore", input.readRange(1, 3) === "ab");
     input.setSelection(2, 2);
+    const middle = input.insertionContext();
     check(
-      "setSelection places the cursor between the characters",
-      input.getSelection().start === 2 && input.getSelection().end === 2,
+      "insertionContext captures a mid-word cursor with no composition prefix",
+      middle.range.start === 2 &&
+        middle.range.end === 2 &&
+        middle.original === "" &&
+        middle.compositionPrefix === "",
     );
     input.replaceRange(2, 2, "X");
     check("replaceRange splices at the cursor", input.getText() === "aXb");
+    const afterInsert = input.insertionContext().range;
     check(
       "replaceRange leaves the cursor after the inserted text",
-      input.getSelection().start === 3 && input.getSelection().end === 3,
+      afterInsert.start === 3 && afterInsert.end === 3,
     );
     input.replaceRange(1, 4, "");
     check("replaceRange with empty text deletes the range", input.getText() === "");
@@ -302,6 +306,40 @@ await assertNoLeaks(lifecycle, () => {
       "setText writes one paragraph per newline",
       input.getText() === "line one\nline two" &&
         editorElement(input).querySelectorAll("p").length === 2,
+    );
+    input.dispose();
+  }
+
+  {
+    const input = new PromptInput();
+    input.setText("First test alpha");
+    const append = input.insertionContext();
+    check(
+      "insertionContext captures a ProseMirror append separator",
+      append.range.start === append.range.end &&
+        append.range.end === 17 &&
+        append.original === "" &&
+        append.compositionPrefix === " ",
+    );
+    input.replaceRange(append.range.start, append.range.end, " ");
+    check(
+      "a captured ProseMirror composition prefix is immutable",
+      append.compositionPrefix === " ",
+    );
+    input.setText("First test alpha ");
+    check(
+      "insertionContext preserves existing ProseMirror trailing whitespace",
+      input.insertionContext().compositionPrefix === "",
+    );
+    input.setText("First test alpha");
+    input.setSelection(7, 11);
+    const replacement = input.insertionContext();
+    check(
+      "insertionContext captures selected ProseMirror text without a separator",
+      replacement.range.start === 7 &&
+        replacement.range.end === 11 &&
+        replacement.original === "test" &&
+        replacement.compositionPrefix === "",
     );
     input.dispose();
   }
@@ -326,9 +364,10 @@ await assertNoLeaks(lifecycle, () => {
     );
     // The take's splice math (TakeState.length in stt.ts) holds only while
     // every inserted character, newline included, occupies one position.
+    const afterNewline = input.insertionContext().range;
     check(
       "a spliced newline occupies one position, keeping the take's length arithmetic",
-      input.getSelection().start === 5 && input.getSelection().end === 5,
+      afterNewline.start === 5 && afterNewline.end === 5,
     );
     input.replaceRange(2, 5, "");
     check(

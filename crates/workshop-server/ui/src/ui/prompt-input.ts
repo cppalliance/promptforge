@@ -13,7 +13,7 @@ import { Editor, type JSONContent } from "@tiptap/core";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Disposable, toDisposable } from "../base/lifecycle";
-import type { SttInputTarget } from "./stt";
+import type { SttInputTarget, SttInsertionContext } from "./stt";
 import { MentionChip, MentionSuggestionPluginKey } from "./workshop/mention-chip";
 
 // The fallbacks mirror the token defaults in shared-ui/tokens.css; they
@@ -68,7 +68,7 @@ export interface PromptInputOptions {
  * editor, which empties and unwires the ProseMirror DOM.
  *
  * Implements {@link SttInputTarget}: dictation splices the transcript in
- * through getSelection/replaceRange and holds the box with setReadOnly.
+ * through insertionContext/replaceRange and holds the box with setReadOnly.
  * The target's offsets are ProseMirror positions.
  */
 export class PromptInput extends Disposable implements SttInputTarget {
@@ -211,15 +211,20 @@ export class PromptInput extends Disposable implements SttInputTarget {
     this.editor.commands.setTextSelection(this.editor.state.doc.content.size - 1);
   }
 
-  /** The selection as ProseMirror positions - the SttInputTarget coordinate space. */
-  getSelection(): { start: number; end: number } {
+  /** Captures the ProseMirror selection and its target-owned insertion policy. */
+  insertionContext(): SttInsertionContext {
     const { from, to } = this.editor.state.selection;
-    return { start: from, end: to };
-  }
-
-  /** The logical document end in ProseMirror's position space. */
-  getDocumentEnd(): number {
-    return this.editor.state.doc.content.size - 1;
+    const document = this.editor.state.doc;
+    return {
+      range: { start: from, end: to },
+      original: document.textBetween(from, to, "\n", "\n"),
+      compositionPrefix:
+        from === to &&
+        to === document.content.size - 1 &&
+        /\S$/.test(document.textBetween(0, from, "\n", "\n"))
+          ? " "
+          : "",
+    };
   }
 
   /** Places the cursor or selection at ProseMirror positions. */
@@ -253,11 +258,6 @@ export class PromptInput extends Disposable implements SttInputTarget {
       .insertContentAt({ from, to }, content)
       .setTextSelection(from + text.length)
       .run();
-  }
-
-  /** Reads plain text from one ProseMirror range for reversible dictation. */
-  readRange(from: number, to: number): string {
-    return this.editor.state.doc.textBetween(from, to, "\n", "\n");
   }
 
   /**

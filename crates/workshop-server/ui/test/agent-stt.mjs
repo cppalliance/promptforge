@@ -121,9 +121,39 @@ window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
 // Audio stubs: jsdom has no audio stack, so the getUserMedia/AudioContext
 // path is scripted to succeed.
 const fakeAudioStream = { getTracks: () => [{ stop() {} }] };
+let delayedMediaStart = null;
 globalThis.navigator.mediaDevices = {
-  getUserMedia: () => Promise.resolve(fakeAudioStream),
+  getUserMedia: () => {
+    if (delayedMediaStart === null) {
+      return Promise.resolve(fakeAudioStream);
+    }
+    delayedMediaStart.markRequested();
+    return delayedMediaStart.stream;
+  },
 };
+function delayNextMediaStart() {
+  let resolveStream;
+  let markRequested;
+  const requested = new Promise((resolve) => {
+    markRequested = resolve;
+  });
+  const stream = new Promise((resolve) => {
+    resolveStream = resolve;
+  });
+  const delayed = {
+    markRequested,
+    requested,
+    stream,
+    release() {
+      if (delayedMediaStart === delayed) {
+        delayedMediaStart = null;
+      }
+      resolveStream(fakeAudioStream);
+    },
+  };
+  delayedMediaStart = delayed;
+  return delayed;
+}
 class FakeAudioContext {
   constructor() {
     this.sampleRate = 24_000;
@@ -868,6 +898,37 @@ await assertNoLeaks(lifecycle, async () => {
     dispose();
   }
 
+  // A take owns the selection present when delayed capture becomes usable.
+
+  {
+    const { wire, status, mic, input, editable, recording, dispose } = await harness();
+    wire.fire.inputRequired("delayed-start");
+    input.setText("old target keep");
+    input.setSelection(5, 11);
+    const delayed = delayNextMediaStart();
+    mic.click();
+    await delayed.requested;
+    check("the prompt remains editable during microphone startup", editable() && !recording());
+
+    input.setText("edited live tail");
+    input.setSelection(8, 12);
+    delayed.release();
+    const started = await waitFor(() => status.recording);
+    const socket = sockets.filter((candidate) => candidate.url.endsWith("/v1/realtime")).at(-1);
+    check("delayed microphone startup completes", started);
+    socket.message(producerHypothesis("delayed_prompt", "spoken"));
+    check(
+      "a delayed take inserts at the selection current when startup succeeds",
+      input.getText() === "edited spoken tail",
+    );
+    wire.fire.inputCancelled("delayed-start");
+    check(
+      "delayed prompt rollback preserves edits made during startup",
+      input.getText() === "edited live tail" && !recording(),
+    );
+    dispose();
+  }
+
   // --- Takes insert at the cursor -------------------------------------------
 
   {
@@ -884,9 +945,10 @@ await assertNoLeaks(lifecycle, async () => {
     }
     socket.message({ type: "interim", committed: "X", tentative: "" });
     check("an interim inserts at the cursor", input.getText() === "aXb");
+    const afterInterim = input.insertionContext().range;
     check(
       "the cursor sits after the inserted interim",
-      input.getSelection().start === 3 && input.getSelection().end === 3,
+      afterInterim.start === 3 && afterInterim.end === 3,
     );
     socket.message({ type: "final", text: "Y" });
     check("the final replaces the interim in place", input.getText() === "aYb" && editable());

@@ -299,7 +299,6 @@ export function setupStt(
       status.showLocal("Dictation is connecting. Try again in a moment.", "info");
       return;
     }
-    const selection = input.getSelection();
     const outcome = await capture.start();
     if (!outcome.ok) {
       status.showLocal(captureFailureLabel(outcome), "error");
@@ -309,16 +308,12 @@ export function setupStt(
       void releaseCapture();
       return;
     }
+    const insertion = input.insertionContext();
     const take: Take = {
-      from: selection.start,
-      length: selection.end - selection.start,
-      original: input.readRange(selection.start, selection.end),
-      compositionPrefix:
-        selection.start === selection.end &&
-        selection.end === input.getDocumentEnd() &&
-        /\S$/.test(input.readRange(0, selection.start))
-          ? " "
-          : "",
+      from: insertion.range.start,
+      length: insertion.range.end - insertion.range.start,
+      original: insertion.original,
+      compositionPrefix: insertion.compositionPrefix,
       itemId: null,
     };
     takes.push(take);
