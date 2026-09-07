@@ -386,7 +386,7 @@ isProject: false
 - Exclusions: no module-wide allowance, speculative use site, or unrelated warning cleanup.
 - Focused verification: from the repository root run `cargo test -p gateway-stt`, `cargo test -p gateway-stt -F test-fixtures`, `cargo clippy -p gateway-stt --all-targets --all-features -- -D warnings`, and `cargo check -p gateway --no-default-features`.
 
-### Step 14: Pin the native STT runner contract
+### Step 14: Pin the native STT runner contract [completed]
 
 - Component and piece: Component 4 of 8, STT test infrastructure; enforce one exact Rust toolchain and versioned self-hosted runner layout before cache or native work.
 - Dependency: depends on Step 10 for the final native fixture contract and follows Steps 11 through 13 so the workflow validates the settled test surface.

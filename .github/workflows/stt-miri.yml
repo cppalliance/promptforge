@@ -47,7 +47,7 @@ jobs:
     runs-on: [self-hosted, windows, cuda]
     timeout-minutes: 90
     env:
-      RUSTUP_TOOLCHAIN: 1.89.0
+      RUSTUP_TOOLCHAIN: 1.89
       RUSTUP_AUTO_INSTALL: "0"
     steps:
       - uses: actions/checkout@v4
@@ -121,10 +121,44 @@ jobs:
             Write-Host "Using $Name $actualVersion from $ToolPath"
           }
 
+          function Test-RustupProxy {
+            param(
+              [Parameter(Mandatory = $true)][string] $ToolPath
+            )
+
+            $proxyVersionLines = @(& $ToolPath "+$env:RUSTUP_TOOLCHAIN" '--version' 2>&1)
+            $proxyExitCode = $LASTEXITCODE
+            if ($proxyExitCode -ne 0) {
+              return $false
+            }
+            $proxyVersionText = ($proxyVersionLines | Out-String).Trim()
+            return [regex]::IsMatch(
+              $proxyVersionText,
+              "^cargo\s+$([regex]::Escape($requiredVersion))(?:\s|$)"
+            )
+          }
+
           $cargo = Resolve-RustTool -Name 'cargo' -Bin $contractBin
           $rustc = Resolve-RustTool -Name 'rustc' -Bin $contractBin
           Assert-RustToolVersion -Name 'cargo' -ToolPath $cargo
           Assert-RustToolVersion -Name 'rustc' -ToolPath $rustc
+
+          $cargoIsRustupProxy = Test-RustupProxy -ToolPath $cargo
+          if ($cargoIsRustupProxy) {
+            $cargoHash = (Get-FileHash $cargo -Algorithm SHA256).Hash
+            $rustcHash = (Get-FileHash $rustc -Algorithm SHA256).Hash
+            if ($cargoHash -ne $rustcHash) {
+              throw "self-hosted runner Rust $requiredVersion mixes a rustup cargo proxy with a direct rustc.exe; provision both tools from one direct or rustup-managed toolchain"
+            }
+            $rustup = Resolve-RustTool -Name 'rustup' -Bin $contractBin
+            $rustupHash = (Get-FileHash $rustup -Algorithm SHA256).Hash
+            if ($cargoHash -ne $rustupHash) {
+              throw "self-hosted runner Rust $requiredVersion rustup.exe does not match the selected cargo.exe and rustc.exe proxies"
+            }
+            Write-Host "Using rustup proxies from $rustup"
+          } else {
+            Write-Host 'Using direct Rust tools'
+          }
 
           if (-not [string]::IsNullOrWhiteSpace($contractBin)) {
             $contractBin | Add-Content -Path $env:GITHUB_PATH
