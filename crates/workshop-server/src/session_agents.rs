@@ -50,8 +50,12 @@ use tokio::sync::broadcast;
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::CatalogBus;
 use crate::input::{UserInputTool, WaitRegistry};
+#[cfg(feature = "test-fixtures")]
+use crate::input::{WaitError, deliver_input_response_before_completion};
 use crate::menu::MenuBus;
 use crate::observer::WorkshopObserver;
+#[cfg(feature = "test-fixtures")]
+use crate::protocol::InputResponse;
 use crate::protocol::{Activity, AgentDeltaKind, InputFrame};
 use crate::push::Push;
 use crate::workspace::Workspace;
@@ -283,6 +287,26 @@ impl AgentSessions {
     #[must_use]
     pub fn unresolved_waits(&self, id: &str) -> Option<Vec<String>> {
         Some(self.get(id)?.waits.unresolved())
+    }
+
+    /// Delivers a fixture response after running `after_acceptance`
+    /// between its durable observation and the waiting tool's resumption.
+    #[cfg(feature = "test-fixtures")]
+    pub fn deliver_input_after_acceptance_for_test(
+        &self,
+        id: &str,
+        response: InputResponse,
+        after_acceptance: impl FnOnce(),
+    ) -> Option<Result<(), WaitError>> {
+        let session = self.get(id)?;
+        Some(deliver_input_response_before_completion(
+            session.log.as_ref(),
+            &session.waits,
+            &session.id,
+            &session.agent,
+            response,
+            after_acceptance,
+        ))
     }
 
     /// The session map guard; a lock poisoned by a panicking peer

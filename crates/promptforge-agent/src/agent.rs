@@ -627,30 +627,39 @@ async fn dispatch_infer(
 /// never on `finish_reason`. The model client fails the batch when
 /// `length` or `content_filter` truncates a tool-call round, and that
 /// failure rides back as this call's answer.
+/// A binding that is absent when dispatch begins reports a failed turn
+/// before its call-site error resumes into Lua, so a surrounding `pcall`
+/// cannot hide the operator-visible boundary failure.
 async fn dispatch_chat(
     run: &AgentRun<'_>,
     messages: &serde_json::Value,
     model: Option<String>,
     tools: &[String],
 ) -> Result<ChatResult, AgentError> {
+    let missing_binding = |message: String| {
+        run.observer
+            .observe(run.execution, run.name, detail::MODEL_TURN_FAILED);
+        AgentError::Program {
+            message,
+            source: None,
+        }
+    };
     let binding = match model {
         Some(name) => ModelView::binding(&run.model_view, &name)
             .map_err(|error| AgentError::Program {
                 message: error.to_string(),
                 source: Some(Box::new(error)),
             })?
-            .ok_or_else(|| AgentError::Program {
-                message: format!("model {name:?} is not in this agent's catalog"),
-                source: None,
+            .ok_or_else(|| {
+                missing_binding(format!("model {name:?} is not in this agent's catalog"))
             })?,
         None => {
             resolve_model_binding(&run.model_view, &run.vm.model_runtime)?.ok_or_else(|| {
-                AgentError::Program {
-                    message: "no model is selected: pass opts.model or call models.use(...) \
-                              before models.chat"
+                missing_binding(
+                    "no model is selected: pass opts.model or call models.use(...) \
+                     before models.chat"
                         .to_owned(),
-                    source: None,
-                }
+                )
             })?
         }
     };

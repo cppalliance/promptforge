@@ -1,4 +1,4 @@
-//! THE PARITY GATE: six in-process tests over the SSE mock gateway, each
+//! THE PARITY GATE: seven in-process tests over the SSE mock gateway, each
 //! pinned to a behavior the built-in `chat` agent must keep. The agent
 //! replaced the direct-to-gateway chat relay; these tests hold the parity
 //! the relay established.
@@ -134,6 +134,13 @@ struct GateServer {
 /// Spawns the gate server with `models` in the retained catalog and the
 /// first of them selected in the menu.
 async fn spawn_chat_server(models: &[&str]) -> GateServer {
+    spawn_chat_server_with_selection(models, models.first().copied()).await
+}
+
+/// Spawns the gate server with an explicit menu selection. `None` keeps
+/// the catalog available to the launched agent while its live `ui()`
+/// snapshot has no selected binding.
+async fn spawn_chat_server_with_selection(models: &[&str], selected: Option<&str>) -> GateServer {
     let captured = CapturedRequests::default();
     let mock = Arc::clone(&captured);
     let gateway_url = spawn_gateway(Router::new().route(
@@ -167,10 +174,12 @@ async fn spawn_chat_server(models: &[&str]) -> GateServer {
             .map(|id| json!({ "id": id, "object": "model" }))
             .collect(),
     );
-    state
-        .menu()
-        .set_selected(models[0])
-        .expect("the first model is in the retained catalog");
+    if let Some(selected) = selected {
+        state
+            .menu()
+            .set_selected(selected)
+            .expect("the selected model is in the retained catalog");
+    }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind the gate test server");
@@ -640,5 +649,103 @@ async fn gate_model_failure_surfaces_an_error_and_the_next_input_works() {
     );
     let reply = turn.events.last().expect("the recovery turn completes");
     assert_eq!(reply["event"]["content"], "echo:recovered");
+    socket.close().await;
+}
+
+/// GATE 7 - selection-loss recovery. A selection can vanish after the
+/// browser accepted an input but before the built-in reads its fresh
+/// `ui()` snapshot. The missing binding is a failed model turn, not a
+/// silent pcall: one error reaches the socket, no request reaches the
+/// gateway, and the loop accepts a recovery input.
+#[tokio::test]
+async fn gate_binding_loss_surfaces_one_error_and_recovers_after_selection() {
+    let server = spawn_chat_server(&["test-model"]).await;
+    let mut socket = connect_chat(&server.ws_base).await;
+    let session = launch_chat(&mut socket).await;
+
+    let token = next_wait_token(&mut socket).await;
+    let state = server.state.clone();
+    server
+        .state
+        .agents()
+        .deliver_input_after_acceptance_for_test(
+            &session,
+            InputResponse {
+                token,
+                text: "accepted before loss".to_owned(),
+            },
+            move || {
+                state.catalog().publish(Vec::new());
+                state.menu().reconcile_catalog_for_test();
+            },
+        )
+        .expect("the launched session remains registered")
+        .expect("the submitted input completes its live wait");
+
+    let mut errors = Vec::new();
+    let fresh = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let frame = socket.recv_json().await;
+            match frame["type"].as_str() {
+                Some("error") => errors.push(frame),
+                Some("input_required") => {
+                    break frame["token"]
+                        .as_str()
+                        .expect("the recovery wait carries its token")
+                        .to_owned();
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the failed turn returns to input");
+    assert_eq!(
+        errors.len(),
+        1,
+        "the failed turn produces one visible error"
+    );
+    assert!(
+        errors[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Model turn failed")),
+        "the visible error names the failed model boundary: {}",
+        errors[0]
+    );
+    assert_eq!(
+        server
+            .captured
+            .lock()
+            .expect("the capture lock is healthy")
+            .len(),
+        0,
+        "a missing binding never reaches the gateway"
+    );
+
+    server
+        .state
+        .catalog()
+        .publish(vec![json!({ "id": "test-model", "object": "model" })]);
+    server
+        .state
+        .menu()
+        .set_selected("test-model")
+        .expect("the retained model can be selected for recovery");
+    answer(&mut socket, &fresh, "recovered after selection").await;
+    let turn = collect_turn(&mut socket).await;
+    assert_eq!(
+        delta_text(&turn),
+        "echo:recovered after selection",
+        "the next input completes after selection becomes valid"
+    );
+    assert_eq!(
+        server
+            .captured
+            .lock()
+            .expect("the capture lock is healthy")
+            .len(),
+        1,
+        "only the recovered turn reaches the gateway"
+    );
     socket.close().await;
 }

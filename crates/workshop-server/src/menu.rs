@@ -325,6 +325,13 @@ impl MenuBus {
         }
     }
 
+    /// Revalidates the selection after an integration fixture publishes
+    /// directly to the catalog bus.
+    #[cfg(feature = "test-fixtures")]
+    pub fn reconcile_catalog_for_test(&self) {
+        self.reconcile_catalog();
+    }
+
     /// The state guard, recovering a lock poisoned by a panicking peer
     /// rather than wedging the process (the crate's zone-two policy).
     fn lock_state(&self) -> MutexGuard<'_, MenuState> {

@@ -264,7 +264,28 @@ pub fn deliver_input_response(
     section: &str,
     response: InputResponse,
 ) -> Result<(), WaitError> {
+    deliver_input_response_before_completion(
+        observer,
+        registry,
+        execution,
+        section,
+        response,
+        || {},
+    )
+}
+
+/// Delivers one response with a synchronous seam after the durable input
+/// observation and before the suspended tool call resumes.
+pub(crate) fn deliver_input_response_before_completion(
+    observer: &dyn Observer,
+    registry: &WaitRegistry,
+    execution: &str,
+    section: &str,
+    response: InputResponse,
+    before_completion: impl FnOnce(),
+) -> Result<(), WaitError> {
     observer.on_user_input(execution, section, &response.text);
+    before_completion();
     registry.complete(&response.token, response.text)
 }
 

@@ -83,7 +83,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
         ],
         temporary_edges: &[TemporaryEdge {
             dependency: "workshop-server",
-            removal_step: "Step 32",
+            removal_step: "Step 33",
         }],
     },
     DependencyPolicy {
@@ -132,7 +132,7 @@ const MIGRATION_POLICIES: [MigrationPolicy; 4] = [
         crate_name: "gateway-stt",
         targets: &[MigrationPolicyTarget {
             module: "stt.rs",
-            target_step: "Step 32",
+            target_step: "Step 33",
             destination: "removal after the Realtime route and Workshop relay replace the legacy socket",
         }],
     },

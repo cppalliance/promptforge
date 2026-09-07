@@ -386,6 +386,76 @@ await assertNoLeaks(lifecycle, () => {
     dispose();
   }
 
+  // --- A model selection gates every submission path ------------------------
+
+  {
+    const status = {
+      local: [],
+      showLocal(label, severity) {
+        this.local.push({ label, severity });
+      },
+      setRecording() {},
+    };
+    const modelService = new ModelService(() => true);
+    const wire = makeWire();
+    const service = new AgentSessionService(wire);
+    const view = new AgentSessionView(service, status, modelService);
+    window.document.body.appendChild(view.element);
+    const input = view.promptInput;
+    const editorEl = view.element.querySelector(".prompt-input__editor");
+    const send = view.element.querySelector(".agent-session__send");
+    wire.fire.inputRequired("model-gated");
+    input.setText("keep this draft");
+    check(
+      "the send control exposes the absent-selection gate",
+      send.getAttribute("aria-disabled") === "true",
+    );
+
+    send.click();
+    check(
+      "click submission without a model is rejected and keeps the draft",
+      wire.responses.length === 0 && input.getText() === "keep this draft",
+    );
+    check(
+      "click submission without a model shows the exact local selection status",
+      isDeepStrictEqual(status.local.at(-1), {
+        label: "Select a model before sending.",
+        severity: "info",
+      }),
+    );
+
+    editorEl.dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    check(
+      "keyboard submission without a model is rejected and keeps the draft",
+      wire.responses.length === 0 && input.getText() === "keep this draft",
+    );
+    check(
+      "keyboard submission without a model shows the exact local selection status",
+      status.local.length === 2 &&
+        status.local[1]?.label === "Select a model before sending." &&
+        status.local[1]?.severity === "info",
+    );
+
+    modelService.applySelected("alpha");
+    check(
+      "selection arrival immediately lifts the send control gate",
+      send.getAttribute("aria-disabled") === "false",
+    );
+    send.click();
+    check(
+      "a later model selection makes the pending draft immediately submittable",
+      isDeepStrictEqual(wire.responses, [["model-gated", "keep this draft"]]) &&
+        input.getText() === "",
+    );
+
+    view.dispose();
+    service.dispose();
+    modelService.dispose();
+    view.element.remove();
+  }
+
   // --- The placeholder matches Cursor's agent input ---------------------------
 
   {

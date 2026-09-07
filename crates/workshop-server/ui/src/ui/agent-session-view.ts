@@ -173,9 +173,10 @@ function renderItem(item: TranscriptItem, resultIds: ReadonlySet<string>): Paint
  * input bar. The toolbar (mode chip, model picker, context ring) mounts
  * only when the composition root threads a ModelService through; a view
  * built without one mounts none. The input enables only while a wait is
- * pinned; submitting answers the wait through the service and clears
- * the box on a successful send. The status sink receives dictation's
- * local messages and recording LED state.
+ * pinned; a configured model service gates submission until its current
+ * selection is non-empty. Submitting answers the wait through the service
+ * and clears the box on a successful send. The status sink receives
+ * dictation's local messages, selection blockers, and recording LED state.
  */
 export class AgentSessionView extends Disposable {
   readonly element: HTMLElement;
@@ -192,8 +193,8 @@ export class AgentSessionView extends Disposable {
 
   constructor(
     private readonly service: AgentSessionService,
-    status: SttStatus,
-    modelService?: ModelService,
+    private readonly status: SttStatus,
+    private readonly modelService?: ModelService,
     speechCapture?: SpeechCaptureService,
   ) {
     super();
@@ -252,6 +253,9 @@ export class AgentSessionView extends Disposable {
         this.renderInputState();
       }),
     );
+    if (this.modelService !== undefined) {
+      this._register(this.modelService.onDidChangeCurrent(() => this.renderInputState()));
+    }
 
     // The dictation control over the mic and input. Registered before the
     // prompt input so disposal discards a live take while the editor
@@ -316,6 +320,10 @@ export class AgentSessionView extends Disposable {
     const pinned = this.service.pendingInputToken !== null;
     this.promptInput.setEditable(pinned);
     this.send.disabled = !pinned;
+    this.send.setAttribute(
+      "aria-disabled",
+      String(pinned && this.modelService !== undefined && this.modelService.current === ""),
+    );
   }
 
   /**
@@ -329,6 +337,10 @@ export class AgentSessionView extends Disposable {
   private submit(): void {
     const text = this.promptInput.getText();
     if (text === "" || this.service.pendingInputToken === null) {
+      return;
+    }
+    if (this.modelService !== undefined && this.modelService.current === "") {
+      this.status.showLocal("Select a model before sending.", "info");
       return;
     }
     // Read before discarding: the discard restores the box to its

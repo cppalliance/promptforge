@@ -452,13 +452,19 @@ struct RecordedReply {
 /// can assert each fires exactly once with its model attribution.
 #[derive(Default)]
 struct ContentRecorder {
+    observations: Mutex<Vec<Observation>>,
     replies: Mutex<Vec<RecordedReply>>,
     batches: Mutex<Vec<(String, Vec<ToolCallEvent>)>>,
     thinking: Mutex<Vec<(String, String)>>,
 }
 
 impl Observer for ContentRecorder {
-    fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
+    fn observe(&self, _execution: &str, _section: &str, event: Observation) {
+        self.observations
+            .lock()
+            .expect("the observation log must not be poisoned")
+            .push(event);
+    }
 
     fn on_assistant_reply(
         &self,
@@ -781,6 +787,57 @@ store.write('err.txt', err)
         "a selection-free chat without opts.model names the fix"
     );
     assert_eq!(run.gateway.call_count(), 1);
+}
+
+#[tokio::test]
+async fn a_missing_chat_binding_reports_one_failed_turn_before_lua_pcall_resumes() {
+    let recorder = Arc::new(ContentRecorder::default());
+    let mut config = config_with(Arc::clone(&recorder) as Arc<dyn Observer>);
+    config.ui = Some(Arc::new(
+        || json!({ "selected_model": serde_json::Value::Null }),
+    ));
+    let run = run_over_fixture(
+        r#"
+local ok, err = pcall(function()
+    return models.chat(
+        { { role = "user", content = "not sent" } },
+        { model = ui().selected_model }
+    )
+end)
+store.write('ok.txt', tostring(ok))
+store.write('err.txt', err)
+"#,
+        vec![text_body("fixture-model", "never fetched", "stop")],
+        no_tools(),
+        config,
+    )
+    .await;
+    run.result
+        .as_ref()
+        .expect("the program catches the missing binding");
+    assert_eq!(run.read("ok.txt"), "false");
+    assert!(
+        run.read("err.txt").contains("no model is selected"),
+        "the call-site error tells the program why no request ran: {}",
+        run.read("err.txt")
+    );
+    assert_eq!(
+        run.gateway.call_count(),
+        0,
+        "a missing binding fails before any live model request"
+    );
+    let observations = recorder
+        .observations
+        .lock()
+        .expect("the observation log is intact");
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|event| matches!(event, Observation::ModelTurnFailed))
+            .count(),
+        1,
+        "the failed boundary is observed exactly once before pcall recovers"
+    );
 }
 
 #[tokio::test]
