@@ -2,6 +2,7 @@
 // fixtures shared with the Rust implementation. Run: node test/stt-stream.mjs
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { mock } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -142,4 +143,80 @@ await assertNoLeaks(lifecycle, async () => {
 
   service.dispose();
   assert.equal(sockets[0].readyState, ScriptedSocket.CLOSED);
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let attempts = 0;
+    const service = new RealtimeTranscriptionService({
+      socket: () => {
+        attempts += 1;
+        throw new Error("gateway is still starting");
+      },
+    });
+
+    assert.equal(service.state, "unavailable");
+    assert.equal(attempts, 1);
+    const schedule = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000];
+    for (const [index, delay] of schedule.entries()) {
+      mock.timers.tick(delay - 1);
+      assert.equal(
+        attempts,
+        index + 1,
+        `retry ${index + 1} does not run before its ${delay} ms delay`,
+      );
+      mock.timers.tick(1);
+      assert.equal(
+        attempts,
+        index + 2,
+        `retry ${index + 1} runs at its ${delay} ms delay`,
+      );
+    }
+
+    service.dispose();
+    mock.timers.tick(30_000);
+    assert.equal(attempts, 8, "disposal cancels the pending capped retry");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sockets = [];
+    let attempts = 0;
+    const service = new RealtimeTranscriptionService({
+      socket: (url) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("gateway is still starting");
+        }
+        const socket = new ScriptedSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    mock.timers.tick(1000);
+    assert.equal(attempts, 2, "an initial failure reconnects without another mic click");
+    sockets[0].open();
+    sockets[0].message(server.session_created);
+    sockets[0].message(server.session_updated);
+    assert.equal(service.state, "ready");
+
+    sockets[0].close();
+    mock.timers.tick(999);
+    assert.equal(attempts, 2, "readiness resets the reconnect delay to one second");
+    mock.timers.tick(1);
+    assert.equal(attempts, 3, "an established connection reconnects on the reset delay");
+    const racing = sockets[1];
+    service.dispose();
+    racing.dispatch("close", {});
+    mock.timers.tick(30_000);
+    assert.equal(attempts, 3, "disposal cancels a reconnect even as its socket is created");
+  } finally {
+    mock.timers.reset();
+  }
 });

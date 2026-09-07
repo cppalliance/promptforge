@@ -44,22 +44,23 @@ impl fmt::Display for OperationId {
     }
 }
 
-/// One progress observation emitted by a leaf of an operation tree.
+/// One progress or lifecycle observation emitted by an operation tree.
 ///
 /// Intermediate (`Updated`) events are lossy: handles coalesce them and slow
 /// receivers drop them. Terminal (`Finished`) events are never coalesced, and
-/// consumers detect completion only from `Finished`, never from a fraction
-/// reaching 1.0.
+/// consumers detect leaf completion only from `Finished`, never from a
+/// fraction reaching 1.0. `OperationFinished` marks tree detachment after its
+/// final leaf event.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct ProgressEvent {
-    /// The operation tree the leaf belongs to.
+    /// The operation tree the observation belongs to.
     pub operation: OperationId,
-    /// Hierarchical leaf id within the operation, for example
-    /// `local-models/ggml-large-v3/download`.
+    /// Hierarchical leaf id within the operation, or empty for the
+    /// operation-level terminal event.
     pub path: String,
-    /// Human-readable leaf label.
+    /// Human-readable leaf label, or empty for the operation-level event.
     pub label: String,
     /// What the leaf reports.
     pub state: EventState,
@@ -80,6 +81,18 @@ impl ProgressEvent {
             path: path.into(),
             label: label.into(),
             state,
+        }
+    }
+
+    /// Creates the terminal lifecycle event emitted when an operation tree
+    /// detaches from its source hub.
+    #[must_use]
+    pub(crate) fn operation_finished(operation: OperationId) -> Self {
+        Self {
+            operation,
+            path: String::new(),
+            label: String::new(),
+            state: EventState::OperationFinished,
         }
     }
 }
@@ -107,6 +120,10 @@ pub enum EventState {
         /// Whether the leaf's work succeeded.
         ok: bool,
     },
+    /// The complete operation tree detached from its source hub. This
+    /// lifecycle event follows every leaf event and lets remote importers
+    /// release operation ownership without closing a process-lifetime stream.
+    OperationFinished,
 }
 
 #[cfg(test)]
@@ -131,6 +148,7 @@ mod serde_tests {
             EventState::Begun { weight: 2.5 },
             EventState::Updated { fraction: 0.25 },
             EventState::Finished { ok: false },
+            EventState::OperationFinished,
         ] {
             let event = ProgressEvent::new(OperationId::next(), "op/leaf", "leaf", state);
             let json = serde_json::to_string(&event).expect("the event serializes");

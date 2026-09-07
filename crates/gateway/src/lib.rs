@@ -1208,7 +1208,8 @@ const PROGRESS_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(1
 /// as synthetic `Begun`/`Updated` events, plus a `Finished` for each leaf
 /// that already reached its terminal state, so it can render current state
 /// without waiting for the next event, and then every broadcast
-/// [`ProgressEvent`], with heartbeat comment lines every
+/// [`ProgressEvent`], including one operation-level terminal event when a
+/// tree detaches, with heartbeat comment lines every
 /// [`PROGRESS_HEARTBEAT`] while the hub is idle. Intermediate events are
 /// lossy - a lagging subscriber drops them - and terminal events are never
 /// coalesced at the source. Client disconnect is Drop all the way down, as
@@ -4261,6 +4262,28 @@ mod progress_tests {
     }
 
     #[tokio::test]
+    async fn a_subscriber_sees_when_the_complete_operation_detaches() {
+        let hub = Arc::new(ProgressHub::new());
+        let response = progress_sse_response(&hub, ShutdownSignal::default());
+        let mut frames = response.into_body().into_data_stream();
+        let tree = hub.operation();
+        let operation = tree.operation();
+        let leaf = tree.register("loading-profile", 1.0);
+        leaf.complete();
+        drop(tree);
+
+        let events = read_until(&mut frames, |event| {
+            matches!(event.state, EventState::OperationFinished)
+        })
+        .await;
+        assert_eq!(
+            events.last().map(|event| event.operation),
+            Some(operation),
+            "the terminal lifecycle event names the detached operation"
+        );
+    }
+
+    #[tokio::test]
     async fn a_lagged_subscriber_drops_the_overflow_and_carries_on() {
         let hub = Arc::new(ProgressHub::new());
         let response = progress_sse_response(&hub, ShutdownSignal::default());
@@ -4308,20 +4331,24 @@ mod progress_tests {
         }
     }
 
-    #[tokio::test]
-    async fn the_stream_goes_quiet_when_the_tree_drops() {
+    #[tokio::test(start_paused = true)]
+    async fn a_tree_drop_reports_completion_then_the_stream_goes_quiet() {
         let hub = Arc::new(ProgressHub::new());
         let response = progress_sse_response(&hub, ShutdownSignal::default());
         let mut frames = response.into_body().into_data_stream();
 
         let tree = hub.operation();
+        let operation = tree.operation();
         let _leaf = tree.register("download", 1.0);
         let events = read_events(&mut frames, 1).await;
         assert!(matches!(events[0].state, EventState::Begun { .. }));
 
         drop(tree);
+        let events = read_events(&mut frames, 1).await;
+        assert_eq!(events[0].operation, operation);
+        assert!(matches!(events[0].state, EventState::OperationFinished));
         // The first heartbeat is 15 s out, so nothing may arrive inside this
-        // window: a detached tree emits no events and an idle hub is silent.
+        // window after completion: an idle hub is otherwise silent.
         assert!(
             tokio::time::timeout(Duration::from_millis(300), frames.next())
                 .await

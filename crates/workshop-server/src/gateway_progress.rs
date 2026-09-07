@@ -9,12 +9,14 @@
 //! graceful-shutdown signal, and driven by the shared [`GatewayHealth`]
 //! verdict rather than by probes of its own. It subscribes while the
 //! gateway reads reachable and idles while it does not; a reconnect
-//! resubscribes, and each subscription attaches a fresh import, so a
-//! gateway that flaps never stacks duplicate remote state on the hub.
+//! resubscribes, and each subscription tracks one import per upstream
+//! operation id, so interleaved work stays separate and a finished operation
+//! detaches without closing the long-lived event stream.
 //! When the subscription drops - a lost connection or an unreachable
 //! verdict - the import detaches with it, because progress from a gateway
 //! the workshop can no longer hear is stale, not informative.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +24,7 @@ use futures_util::StreamExt;
 use tokio::sync::oneshot;
 
 use promptforge_model_client::model::subscribe_progress;
-use shared_progress::{ProgressHub, RemoteOperation};
+use shared_progress::{EventState, OperationId, ProgressHub, RemoteOperation};
 
 use crate::heartbeat::GatewayHealth;
 
@@ -95,9 +97,11 @@ fn spawn_with_delay(
 }
 
 /// The subscription loop: idle while the gateway is unreachable, and while
-/// reachable hold one subscription whose events drive one
-/// [`RemoteOperation`]. The stop signal wins every select, so shutdown
-/// never waits out a stream read, a connect, or a resubscribe delay.
+/// reachable hold one subscription whose events drive operation-id-keyed
+/// [`RemoteOperation`] imports. An operation-level terminal event
+/// detaches that import while the subscription remains open. The stop
+/// signal wins every select, so shutdown never waits out a stream read, a
+/// connect, or a resubscribe delay.
 async fn run(
     base_url: &str,
     api_key: &str,
@@ -136,14 +140,24 @@ async fn run(
                 }
             },
         };
-        let remote = RemoteOperation::attach(hub);
+        let mut remotes: HashMap<OperationId, RemoteOperation> = HashMap::new();
         tokio::pin!(stream);
         loop {
             tokio::select! {
                 _ = &mut *stop => return,
                 _ = reachable.changed() => break,
                 item = stream.next() => match item {
-                    Some(Ok(event)) => remote.apply(&event),
+                    Some(Ok(event)) => {
+                        let operation = event.operation;
+                        if matches!(event.state, EventState::OperationFinished) {
+                            remotes.remove(&operation);
+                            continue;
+                        }
+                        remotes
+                            .entry(operation)
+                            .or_insert_with(|| RemoteOperation::attach(hub))
+                            .apply(&event);
+                    }
                     // One malformed event or a terminal read failure; the
                     // stream itself decides which by continuing or ending.
                     Some(Err(error)) => {
@@ -153,7 +167,7 @@ async fn run(
                 }
             }
         }
-        drop(remote);
+        drop(remotes);
         if *reachable.borrow_and_update() {
             tokio::select! {
                 _ = &mut *stop => return,
@@ -463,4 +477,6 @@ mod tests {
         );
         subscriber.shutdown().await;
     }
+
+    mod lifecycle;
 }

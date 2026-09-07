@@ -2,6 +2,8 @@ import { Emitter, type Event as ServiceEvent } from "../base/event";
 import { Disposable } from "../base/lifecycle";
 
 const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
+const RECONNECT_INITIAL_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
 
 /** Readiness of the browser's Realtime transcription connection. */
 export type RealtimeTranscriptionState = "connecting" | "ready" | "unavailable";
@@ -108,6 +110,8 @@ export class RealtimeTranscriptionService extends Disposable {
   private disposed = false;
   private negotiatedHypotheses = false;
   private currentState: RealtimeTranscriptionState = "connecting";
+  private reconnectDelayMs = RECONNECT_INITIAL_MS;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Fires when connection readiness changes. */
   readonly onState: ServiceEvent<RealtimeTranscriptionState> = this.stateEmitter.event;
@@ -145,6 +149,7 @@ export class RealtimeTranscriptionService extends Disposable {
     } catch {
       this.setState("unavailable");
       this.reportError("connection_failed");
+      this.scheduleReconnect();
       return;
     }
     this.socket = socket;
@@ -155,7 +160,12 @@ export class RealtimeTranscriptionService extends Disposable {
     };
     const onError = (): void => {
       if (this.socket === socket) {
+        this.socket = null;
+        this.resetConnectionState();
+        this.setState("unavailable");
         this.reportError("connection_failed");
+        socket.close();
+        this.scheduleReconnect();
       }
     };
     const onClose = (): void => {
@@ -163,11 +173,11 @@ export class RealtimeTranscriptionService extends Disposable {
         return;
       }
       this.socket = null;
-      this.negotiatedHypotheses = false;
-      this.deltas.clear();
+      this.resetConnectionState();
       if (!this.disposed) {
         this.setState("unavailable");
         this.reportError("connection_closed");
+        this.scheduleReconnect();
       }
     };
     if (socket.addEventListener !== undefined) {
@@ -204,6 +214,10 @@ export class RealtimeTranscriptionService extends Disposable {
       return;
     }
     this.disposed = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const socket = this.socket;
     this.socket = null;
     socket?.close();
@@ -259,6 +273,11 @@ export class RealtimeTranscriptionService extends Disposable {
         Array.isArray(include) &&
         include.length === 1 &&
         include[0] === HYPOTHESIS_INCLUDE;
+      this.reconnectDelayMs = RECONNECT_INITIAL_MS;
+      if (this.reconnectTimer !== null) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
       this.setState("ready");
       return;
     }
@@ -355,6 +374,23 @@ export class RealtimeTranscriptionService extends Disposable {
     }
     this.currentState = state;
     this.stateEmitter.fire(state);
+  }
+
+  private resetConnectionState(): void {
+    this.negotiatedHypotheses = false;
+    this.deltas.clear();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.socket !== null || this.reconnectTimer !== null) {
+      return;
+    }
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(delay * 2, RECONNECT_MAX_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   private reportError(

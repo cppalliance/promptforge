@@ -44,6 +44,12 @@ todos:
   - id: chat-model-selection
     content: Prevent silent built-in chat turns when no model is selected
     status: completed
+  - id: workshop-startup-convergence
+    content: Converge model catalog, Realtime readiness, and progress state after simultaneous startup
+    status: completed
+  - id: realtime-live-hypotheses
+    content: Bind precommit hypothesis item IDs to the active browser take
+    status: pending
 isProject: false
 ---
 
@@ -68,7 +74,7 @@ isProject: false
   - Dynamic backend plugins before a second backend exists.
   - AlignAtt, attention-specific APIs, native streaming encoders, speculative decoding, batching, denoising, generic VAD tuning, or a new WER framework.
   - A fifth STT crate or STT wire types in `shared-protocol`.
-  - Gateway CLI behavior, diagnostics, logging queues, sink lifecycle, log rotation, or the already-owned Workshop baseline-ratchet repair. The two serving-run bookend records in Step 35 are the sole logging exception.
+  - Gateway CLI behavior, diagnostics, logging queues, sink lifecycle, log rotation, or the already-owned Workshop baseline-ratchet repair. The two serving-run bookend records in Step 37 are the sole logging exception.
   - Browser-direct OpenAI authentication or WebRTC. Workshop remains the browser authentication proxy.
 - Success criteria:
   - The forbidden `gateway-stt -> workshop-server` dependency falls from one to zero and no Gateway STT crate contains Workshop-specific status or guard symbols.
@@ -251,6 +257,8 @@ isProject: false
   - Gateway host-specific declarations and lint expectations exist only on the platforms that use them. Non-Windows builds must not compile the Windows manifest constant or carry an unfulfilled unsafe-code expectation.
   - Installed-package STT acceptance uses a local unsigned NSIS build with updater artifacts disabled only through the Tauri command-line configuration override. Functional acceptance does not require distribution signing. Repository release configuration and release CI signing remain unchanged, and the acceptance record must state that signing was not tested.
   - Agent input cannot enter the built-in chat while no model is selected. The UI keeps text editable, blocks submission, and names the required model selection; if selection becomes invalid after submission, `models.chat` emits the existing model-turn failure observation before Lua `pcall` returns to the next input. A local model-binding error must never appear as a silent tool result with no Gateway request.
+  - Workshop startup must converge after it launches beside a still-loading Gateway. While Gateway remains reachable, an empty model catalog or absent selection triggers bounded refresh retries; a failed initial Realtime socket reconnects under bounded backoff; completed imported Gateway progress detaches by upstream operation even though the SSE stream remains open. Every retry and imported operation is canceled on shutdown.
+  - A precommit hypothesis carries the provisional item ID that commit later promotes unchanged. The browser binds the first valid hypothesis for the active uncommitted take to that ID immediately, renders subsequent snapshots live, and requires the commit acknowledgment to confirm the same ID. Unknown hypotheses with no active take never mutate text.
 - Rejected alternatives:
   - Keeping Workshop status frames, headers, guards, or types in Gateway because it preserves the forbidden product dependency.
   - Exposing the Gateway key to the webview because it expands browser credential exposure.
@@ -363,7 +371,7 @@ isProject: false
 
 Use Windows PowerShell 5.1. Every command below has an explicit working directory and runs separately, so no shell state or success chaining is assumed. Before Step 1, run `npm ci` separately in `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui` and `C:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui`. Before native tests, extract `https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip` to `C:\Users\Vinnie\cursor\promptforge\local\stt-fixtures\`; place `ggml-tiny.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin` and `jfk.wav` from `https://github.com/ggerganov/whisper.cpp/raw/master/samples/jfk.wav` in the current engine fixture directory; and let each native command set `$env:PATH` and `$env:PROMPTFORGE_WHISPER_LIBRARY` itself. Begin from a clean worktree and green baseline. Each step is one commit; formatting, warnings-denied linting for touched packages, and its listed commands must pass before the next step. When architecture changes invalidate an `AGENTS.md` rule, delete that text in the same commit and add only a minimal replacement when the new boundary would otherwise be unenforced. Do not restate root rules or this design plan in nested rule files.
 
-The architecture harness enforces exact workspace-package edges across normal, development, and build dependencies, ignoring self-dependencies. Phase A, Steps 7 through 24: `gateway -> {gateway-config,gateway-config-ui,gateway-local,gateway-logging,gateway-routing,gateway-stt,gateway-web-search,promptforge-core,shared-loopback,shared-progress,shared-protocol,shared-sidecar}`; `gateway-stt -> {gateway-config,gateway-local,gateway-stt-backend-whisper,gateway-stt-engine,shared-progress,workshop-server}`; `gateway-stt-engine -> {}`; `gateway-stt-backend-whisper -> {gateway-stt-engine,gateway-whisper-ffi,shared-progress}`; `gateway-whisper-ffi -> {}`; `shared-loopback -> {}`; `workshop-server -> {build-ui,promptforge-agent,promptforge-core-support,promptforge-model-client,promptforge-store,promptforge-tools,shared-progress,shared-sidecar}`. Phase B, Steps 27 through 32, adds only `workshop-server -> shared-loopback`. Final Phase C, Step 33 onward, is Phase B with only `gateway-stt -> workshop-server` removed. No normal or development edge from `gateway` to `workshop-server`, and no new such edge from `gateway-stt`, may be added; the current `gateway-stt -> workshop-server` edge is solely a temporary removal target. Beginning with Step 7, every later step touching an STT source file, manifest, crate-root export, or ceiling runs `node tools/check-stt-architecture.mjs` followed by the unfiltered Rust architecture test.
+The architecture harness enforces exact workspace-package edges across normal, development, and build dependencies, ignoring self-dependencies. Phase A, Steps 7 through 24: `gateway -> {gateway-config,gateway-config-ui,gateway-local,gateway-logging,gateway-routing,gateway-stt,gateway-web-search,promptforge-core,shared-loopback,shared-progress,shared-protocol,shared-sidecar}`; `gateway-stt -> {gateway-config,gateway-local,gateway-stt-backend-whisper,gateway-stt-engine,shared-progress,workshop-server}`; `gateway-stt-engine -> {}`; `gateway-stt-backend-whisper -> {gateway-stt-engine,gateway-whisper-ffi,shared-progress}`; `gateway-whisper-ffi -> {}`; `shared-loopback -> {}`; `workshop-server -> {build-ui,promptforge-agent,promptforge-core-support,promptforge-model-client,promptforge-store,promptforge-tools,shared-progress,shared-sidecar}`. Phase B, Steps 27 through 34, adds only `workshop-server -> shared-loopback`. Final Phase C, Step 35 onward, is Phase B with only `gateway-stt -> workshop-server` removed. No normal or development edge from `gateway` to `workshop-server`, and no new such edge from `gateway-stt`, may be added; the current `gateway-stt -> workshop-server` edge is solely a temporary removal target. Beginning with Step 7, every later step touching an STT source file, manifest, crate-root export, or ceiling runs `node tools/check-stt-architecture.mjs` followed by the unfiltered Rust architecture test.
 
 ### Step 1: Characterize current speech behavior [completed]
 
@@ -699,7 +707,31 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
 - Consumes and gates: this repairs the installed-package observation where the model picker still showed `Select model`, the session persisted a user-input tool result with no assistant event, Gateway received no model request, and Lua returned silently to input. Tests must cover click and keyboard submission, selection arrival, selection loss after submission, one visible error, retained text, and a successful next turn.
 
-### Step 32: Pass installed Windows microphone acceptance
+### Step 32: Converge Workshop state after simultaneous startup [completed]
+
+- Artifacts: update `workshop-server/src/heartbeat.rs`, `workshop-server/src/gateway_progress.rs`, shared progress import support only if needed, `workshop-server/ui/src/services/realtime-transcription.ts`, and focused Rust and UI lifecycle tests.
+- Scope: when Gateway health stays reachable but its first profile or model refresh was empty, retry catalog and profile refresh under the existing bounded heartbeat cadence until a selectable model is retained, then restore selection exactly once. Reconnect a failed initial Realtime socket under bounded cancel-safe backoff without requiring repeated microphone clicks. Track imported Gateway progress by upstream operation ID and detach an operation when its root finishes while keeping the never-ending SSE subscription alive, so the status renderer clears progress and restores LEDs. Cancel refresh, reconnect, and progress ownership on shutdown or disposal.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server heartbeat`
+  - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p workshop-server gateway_progress`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/speech-capture.mjs test/agent-stt-boot.mjs`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
+- Consumes and gates: this repairs the installed observation where Gateway became ready in under two seconds but Workshop retained an empty model picker, Realtime remained connecting for 20 to 30 seconds, and a completed profile operation left the progress bar visible instead of restoring LEDs. Tests must keep health continuously true while catalog readiness changes, keep the progress SSE open after root completion, and force Realtime reconnect cancellation.
+
+### Step 33: Bind live hypotheses before commit acknowledgment
+
+- Artifacts: update `workshop-server/ui/src/ui/realtime-stt.ts`, its service only if typed provisional-item state is needed, and focused browser speech tests.
+- Scope: when a valid hypothesis arrives for an unknown item while exactly one active uncommitted take exists, bind that provisional item ID to the take before applying the snapshot. Require the later `input_audio_buffer.committed` acknowledgment to name the same item, preserve FIFO tombstones and overlapping committed items, and ignore unknown hypotheses when no active take exists. Render every revision as replacement text while recording continues, then preserve authoritative completion behavior.
+- Focused test commands:
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `node --test test/agent-stt.mjs test/stt-stream.mjs`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run typecheck`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm run build`
+  - `C:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui`: `npm test`
+- Consumes and gates: this repairs the installed observation where correct final text appeared only after stop because every precommit hypothesis was ignored until commit assigned the take's item ID. Tests must force multiple revisions before acknowledgment, mismatched acknowledgment, no-active-take input, overlap, clear, cancellation, and final replacement.
+
+### Step 34: Pass installed Windows microphone acceptance
 
 - Artifacts: stage `crates/workshop/binaries/promptforge-gateway-x86_64-pc-windows-msvc.exe`, build `target/release/bundle/nsis/*-setup.exe`, install `promptforge-workshop.exe` and its sibling `promptforge-gateway.exe`, and create `design/generic-realtime-stt-acceptance.md`.
 - Scope: follow `.github/workflows/release-workshop.yml` sidecar staging and Windows installer layout, but build a local unsigned NSIS package by passing `{"bundle":{"createUpdaterArtifacts":false}}` only through the Tauri command-line configuration override. Do not modify `tauri.conf.json`, release workflows, updater settings, or signing behavior. Install the resulting package, verify its sibling binaries and hashes, and record microphone revision, completion, second take, clear, cancellation, and recoverable permission or device failure with timestamps. State explicitly that signing was not tested.
@@ -710,9 +742,9 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'`
   - `C:\Users\Vinnie\cursor\promptforge`: `$setup=Get-ChildItem -Recurse 'target\release\bundle\nsis' -Filter '*-setup.exe' | Select-Object -First 1; if (-not $setup) { throw 'no NSIS installer' }; Start-Process $setup.FullName -ArgumentList '/S' -Wait`
   - `C:\Users\Vinnie\cursor\promptforge`: `$workshop=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-workshop.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; $gateway=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-gateway.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; if (-not $workshop -or -not $gateway) { throw 'installed Workshop or Gateway missing' }; Start-Process $workshop.FullName`
-- Consumes and gates: consumes Steps 30 and 31; the operator must exercise the installed application and record passing evidence, which alone gates legacy removal.
+- Consumes and gates: consumes Steps 30 through 33; the operator must exercise the installed application and record passing evidence, which alone gates legacy removal.
 
-### Step 33: Remove legacy seams and tests
+### Step 35: Remove legacy seams and tests
 
 - Artifacts: remove gateway-stt legacy route/status code from `src/stt.rs` after moving retained `Take` behavior, remove old exports and Gateway mounts, remove Workshop `routes/stt.rs`, old connector/status parsing and capability proxy, update route composition, remove `workshop-server` from `gateway-stt/Cargo.toml`, update `Cargo.lock`, update `crates/gateway/AGENTS.md` and `crates/workshop-server/AGENTS.md`, and retire `tests/it/legacy_stream.rs`, old `tests/it/stt.rs` registrations, and UI `test/stt-capability.mjs`.
 - Scope: map every retired legacy assertion to Steps 3, 24, 27, 29, and 30 replacement evidence in the commit rationale; deletion is justified only because those fixtures preserve the behavior, and the final allowlist, zero legacy symbols, and only batch plus Realtime routes are enforced. Delete Gateway's temporary `gateway-stt -> workshop-server` exception and Workshop's `spawn_with_routes`, Gateway-owned socket attachment, status-bus, and Whisper-job language. Add only one Workshop-local rule if needed: its Realtime relay authenticates upstream, validates browser origin, and never parses speech payloads or owns speech state.
@@ -726,7 +758,7 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway-stt --test it architecture`
 - Consumes and gates: consumes the passing installed-package record; failed replacement coverage blocks deletion.
 
-### Step 34: Finalize architecture and documentation
+### Step 36: Finalize architecture and documentation
 
 - Artifacts: finalize the architecture harness and all four ceilings; audit root `AGENTS.md` plus the targeted `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway`, `shared-loopback`, and `workshop-server` rule files for stale pre-migration text; update `.github/workflows/ci.yml`, `.github/workflows/stt-miri.yml`, `crates/gateway/README.md`, `crates/gateway-config/README.md`, `crates/workshop-server/README.md`, source guides `guide/src/gateway/05-speech.md`, `guide/src/gateway/10-serving-and-observing.md`, `guide/src/workshop/01-application.md`, and `guide/src/workshop/07-voice.md`; generated `guide/src/SUMMARY.md`, `guide/src/gateway/index.md`, `guide/src/workshop/index.md`, `guide/src/language/index.md`, `guide/src/agent/index.md`, `guide/promptforge-gateway-guide.md`, `guide/promptforge-workshop-guide.md`, `guide/promptforge-language-guide.md`, and `guide/promptforge-agent-guide.md`; `design/generic-realtime-stt.md`; and `design/generic-realtime-stt-acceptance.md`.
 - Scope: remove temporary allowlist edges, enforce exact final dependencies, cycles, public counts, every 500-line ceiling, Gateway-only build isolation, normal-CI scripted coverage, and before or after debt counts. The rules audit deletes obsolete or duplicated lines first and edits only files with a concrete contradiction. Keep root `AGENTS.md`, `gateway-whisper-ffi/AGENTS.md`, `gateway-config/AGENTS.md`, and `workshop-server/ui/AGENTS.md` unchanged unless the final implementation proves one of their current constraints false.
@@ -736,9 +768,9 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo run -p build-user-guide`
   - `C:\Users\Vinnie\cursor\promptforge`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo install mdbook --version 0.4.44 --locked`
   - `C:\Users\Vinnie\cursor\promptforge`: `mdbook build guide`
-- Consumes and gates: consumes Step 33 final topology; final verification starts only with zero temporary exceptions.
+- Consumes and gates: consumes Step 35 final topology; final verification starts only with zero temporary exceptions.
 
-### Step 35: Bookend Gateway serving logs
+### Step 37: Bookend Gateway serving logs
 
 - Artifacts: update only `crates/gateway/src/main.rs`, `crates/gateway/tests/it/boot.rs`, and this step's active-plan bookkeeping.
 - Scope: in `init_logging()`, immediately after installing the subscriber with the file layer, emit the first serving-run file record as `promptforge-gateway {version} starting` before the existing `logging to {path}` record. After the serving result determines success or failure and before `LogRuntime::shutdown`, emit `gateway exiting` on success or `gateway exiting after a fatal error` after `log_error_chain` on failure. Emit terminal records only when file logging initialized. Preserve no-subscriber behavior for help, version, diagnostics, second-instance handoff, and stdout-only fallback. Do not modify `gateway-logging`, CLI parsing, queues, sinks, retention, rotation, redaction, or subscriber ownership.
@@ -746,9 +778,9 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo fmt --all --check`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo clippy -p gateway --all-targets --all-features -- -D warnings`
   - `C:\Users\Vinnie\cursor\promptforge`: `cargo test -p gateway`
-- Consumes and gates: this operator-requested observability correction is independent of STT and follows Step 34 only to preserve a single ordered run. Extend the existing child-process log tests so a serving log's first line contains the versioned launch record, normal route shutdown leaves the clean terminal record last, and fatal-chain logging places the fatal terminal record after the complete chain. Existing no-log and no-rotation tests must remain unchanged and green. Step 36's full release verification must pass after this change.
+- Consumes and gates: this operator-requested observability correction is independent of STT and follows Step 36 only to preserve a single ordered run. Extend the existing child-process log tests so a serving log's first line contains the versioned launch record, normal route shutdown leaves the clean terminal record last, and fatal-chain logging places the fatal terminal record after the complete chain. Existing no-log and no-rotation tests must remain unchanged and green. Step 38's full release verification must pass after this change.
 
-### Step 36: Run every release gate and repeat acceptance
+### Step 38: Run every release gate and repeat acceptance
 
 - Artifacts: append command results, hashes, ratchet counts, native equivalence, generated-doc cleanliness, and repeated installed-microphone evidence to `design/generic-realtime-stt-acceptance.md`; change no implementation.
 - Scope: run every exit criterion independently under PowerShell 5.1 and stop on any failure.
@@ -782,6 +814,6 @@ The architecture harness enforces exact workspace-package edges across normal, d
   - `C:\Users\Vinnie\cursor\promptforge\crates\workshop`: `$env:RUSTUP_TOOLCHAIN='stable'; cargo tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'`
   - `C:\Users\Vinnie\cursor\promptforge`: `$setup=Get-ChildItem -Recurse 'target\release\bundle\nsis' -Filter '*-setup.exe' | Select-Object -First 1; if (-not $setup) { throw 'no NSIS installer' }; Start-Process $setup.FullName -ArgumentList '/S' -Wait`
   - `C:\Users\Vinnie\cursor\promptforge`: `$workshop=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-workshop.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; $gateway=@($env:LOCALAPPDATA,$env:ProgramFiles,${env:ProgramFiles(x86)}) | ForEach-Object { Get-ChildItem $_ -Recurse -Filter 'promptforge-gateway.exe' -ErrorAction SilentlyContinue } | Select-Object -First 1; if (-not $workshop -or -not $gateway) { throw 'installed Workshop or Gateway missing' }; Start-Process $workshop.FullName`
-- Consumes and gates: consumes Step 35, then repeats the Step 32 installed-package microphone scenarios. Completion requires every command, ratchet, generated-doc check, and physical scenario to pass with no open finding.
+- Consumes and gates: consumes Step 37, then repeats the Step 34 installed-package microphone scenarios. Completion requires every command, ratchet, generated-doc check, and physical scenario to pass with no open finding.
 
-Stop and revise after repeated same-signature failures, an upstream wire incompatibility, an unacceptable dependency license, Rust 1.89 incompatibility, unsafe or transitive expansion, or evidence that two generations cannot satisfy memory constraints. Do not modify Gateway CLI, diagnostics, logging queues, sinks, rotation, logging lifecycle beyond Step 35's exact two records, or completed Workshop baseline-ratchet work. VAD tuning, alignment, decode-quality changes, native streaming, batching, denoising, a new WER harness, dynamic plugins, a fifth STT crate, shared STT wire types, browser credentials, WebRTC, and automatic turn detection remain outside this plan.
+Stop and revise after repeated same-signature failures, an upstream wire incompatibility, an unacceptable dependency license, Rust 1.89 incompatibility, unsafe or transitive expansion, or evidence that two generations cannot satisfy memory constraints. Do not modify Gateway CLI, diagnostics, logging queues, sinks, rotation, logging lifecycle beyond Step 37's exact two records, or completed Workshop baseline-ratchet work. VAD tuning, alignment, decode-quality changes, native streaming, batching, denoising, a new WER harness, dynamic plugins, a fifth STT crate, shared STT wire types, browser credentials, WebRTC, and automatic turn detection remain outside this plan.

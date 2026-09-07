@@ -143,6 +143,11 @@ mod tests {
         let leaf = tree.register("leaf", 1.0);
         assert!(rx.try_recv().is_ok(), "register emits Begun");
         drop(tree);
+        let terminal = rx.try_recv().expect("tree drop emits operation completion");
+        assert!(matches!(
+            terminal.state,
+            crate::event::EventState::OperationFinished
+        ));
         leaf.set_fraction(1.0);
         assert!(
             rx.try_recv().is_err(),

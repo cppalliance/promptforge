@@ -126,6 +126,18 @@ impl TreeState {
         self.live.store(false, Ordering::Relaxed);
     }
 
+    /// Emits the operation-level terminal signal before the tree detaches.
+    pub(crate) fn finish_operation(&self) {
+        if !self.live.load(Ordering::Relaxed) {
+            return;
+        }
+        let event = ProgressEvent::operation_finished(self.operation);
+        tracing::trace!(operation = %self.operation, "progress operation finished");
+        // An absent or lagging receiver is not an error. This terminal event
+        // is never coalesced at the source, like a leaf's Finished event.
+        let _ = self.events.send(event);
+    }
+
     fn emit(&self, node: &Node, state: EventState) {
         if !self.live.load(Ordering::Relaxed) {
             return;
@@ -448,6 +460,7 @@ impl ProgressTree {
 
 impl Drop for ProgressTree {
     fn drop(&mut self) {
+        self.state.finish_operation();
         self.state.retire();
         self.hub.detach(self.state.operation());
     }

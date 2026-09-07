@@ -84,6 +84,9 @@ impl RemoteOperation {
     /// assert_eq!(hub.snapshot()[0].nodes[0].fraction, 1.0);
     /// ```
     pub fn apply(&self, event: &ProgressEvent) {
+        if matches!(event.state, EventState::OperationFinished) {
+            return;
+        }
         let (slot, node) = self.state.ensure_remote(&event.path, &event.label);
         match event.state {
             EventState::Begun { weight } => {
@@ -101,12 +104,14 @@ impl RemoteOperation {
             EventState::Finished { ok } => {
                 self.state.finish(&node, ok);
             }
+            EventState::OperationFinished => unreachable!("handled before creating a leaf"),
         }
     }
 }
 
 impl Drop for RemoteOperation {
     fn drop(&mut self) {
+        self.state.finish_operation();
         self.state.retire();
         self.hub.detach(self.state.operation());
     }

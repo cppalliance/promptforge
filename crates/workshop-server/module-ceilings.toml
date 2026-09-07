@@ -71,10 +71,15 @@
 # malformed-event skip and stream-end resubscribe tests) - the recorded
 # ceiling had also been set four lines under the module's measured size.
 "gateway_progress.rs" = 466
+# Operation-lifecycle coverage split from the subscriber module so its
+# operation-id, SSE-lifetime, and interleaving fixture stays isolated.
+"gateway_progress/tests/lifecycle.rs" = 77
 # Grew by the join-time status recompute: the transition-label constants and
 # the join_status helper (a late-joining session's line comes from the
 # current probe, not a stale retained announcement) plus their tests.
 "heartbeat.rs" = 969
+# Simultaneous-startup convergence fixtures split from the heartbeat loop.
+"heartbeat/tests/startup_convergence.rs" = 214
 # New module: the user-input wait machinery - the WaitRegistry of
 # single-use cryptographic wait tokens, the Workshop's user_input Tool
 # (trusted structured output; a drop guard turns every dying wait into a
