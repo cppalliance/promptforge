@@ -22,9 +22,9 @@ export interface SttInsertionContext {
  * What dictation needs from its host input: a text target the take can
  * splice the transcript into. Offsets are the target's own text
  * coordinates - a textarea's string offsets, the prompt editor's
- * ProseMirror positions. A take only ever combines a captured `start`
- * with the length of the text it last inserted there, which is valid in
- * both spaces.
+ * ProseMirror positions. A take preserves both captured endpoints for
+ * its first splice, then combines `start` with the length of the text it
+ * inserted there, which is valid in both spaces.
  */
 export interface SttInputTarget {
   /** Captures the selected range, rollback text, and target-owned insertion policy. */

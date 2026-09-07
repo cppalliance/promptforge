@@ -448,7 +448,7 @@ isProject: false
 - Exclusions: no editor replacement, document-wide read in the registry, transcript reducer, or visual behavior change.
 - Focused verification: from `crates/workshop-server/ui` run `npm run typecheck`, `npm run build`, and `npm test`.
 
-### Step 20: Build the pure TakeRegistry reducer
+### Step 20: Build the pure TakeRegistry reducer [completed]
 
 - Component and piece: Component 6 of 8, Workshop Realtime UI; extract pure take state and transitions before production wiring.
 - Dependency: depends on Step 18 for typed events and Step 19 for target-owned insertion context, which together define all reducer inputs.
