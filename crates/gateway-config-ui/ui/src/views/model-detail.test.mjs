@@ -77,8 +77,8 @@ test("the local detail pane renders the registry sections with the model's value
   const kindSelect = root.querySelector(".field-row[data-key='kind'] .select");
   assert.deepEqual(
     dropdownValues(root, "kind"),
-    ["chat", "embedding", "classifier"],
-    "the header kind dropdown offers the three model kinds",
+    ["chat", "embedding", "classifier", "speech"],
+    "the header kind dropdown offers the four model kinds",
   );
   assert.equal(kindSelect.value, "chat");
 
@@ -440,6 +440,41 @@ test("Save PUTs the edited payload with untouched secrets redacted, then the pen
     /Apply \(1\)/,
     "the tab bar's Apply count follows the dirty report",
   );
+});
+
+test("picking the speech kind reveals the voices chips and Save PUTs them", async () => {
+  const stub = fixtureStub();
+  const { dom, root } = await bootApp({ key: "k", stub });
+  navigate(dom, "#/remote/gpt-remote");
+  await settle();
+
+  assert.equal(
+    root.querySelector(".field-row[data-key='voices']"),
+    null,
+    "a chat model hides the voices field",
+  );
+
+  dropdownValues(root, "kind");
+  root.querySelector(".field-row[data-key='kind'] [data-value='speech']").click();
+  await settle();
+
+  const voicesRow = root.querySelector(".field-row[data-key='voices']");
+  assert.ok(voicesRow, "the speech kind reveals the voices field");
+  const chips = voicesRow.querySelector(".chip-input input");
+  chips.value = "nova";
+  chips.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter" }));
+  await settle();
+
+  root.querySelector(".detail-save").click();
+  await settle();
+
+  const put = stub.calls.find(
+    (call) => call.url.endsWith("/admin/config") && call.init.method === "PUT",
+  );
+  assert.ok(put, "Save PUTs /admin/config");
+  const model = JSON.parse(put.init.body).model.find((entry) => entry.name === "gpt-remote");
+  assert.equal(model.kind, "speech", "the picked kind carries into the payload");
+  assert.deepEqual(model.voices, ["nova"], "the added chip carries into the payload");
 });
 
 test("deleting a model confirms, PUTs the config without it, and returns to the list", async () => {

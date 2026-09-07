@@ -1925,6 +1925,45 @@ impl Capabilities {
     pub fn adaptive_thinking(&self) -> bool {
         self.adaptive_thinking
     }
+
+    /// Returns the voices the model offers for speech synthesis (empty when
+    /// the model exposes no fixed voice list).
+    ///
+    /// # Examples
+    /// ```
+    /// # use gateway_config::Config;
+    /// # let toml = r#"
+    /// # config-version = 2
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # kind = "speech"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # voices = ["alloy", "nova"]
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(
+    ///     config.models()[0].capabilities().voices(),
+    ///     ["alloy", "nova"]
+    /// );
+    /// # Ok::<(), gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn voices(&self) -> &[String] {
+        &self.voices
+    }
 }
 impl ToolsConfig {
     /// Returns the web-search tool configuration, or `None` when no

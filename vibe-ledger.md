@@ -1,0 +1,8 @@
+# Vibe ledger
+
+## 2026-09-07-2-gateway-tts-phase-1
+
+- Run seeded 2026-09-07 on branch `add-tts-phase-1` (`f8e07fb6`). Plan: `vibe/2026-09-07-2-gateway-tts-phase-1.md` (source: Cursor plan `gateway_tts_phase_1_6ba42590`).
+- Decision (run-level): verify cadence. The plan's execution rules say every step ends with the full gate suite green; the vibe-coder cycle verifies on every third step, at component ends, after fix rounds, and on the final step. Reconciled: every step gets a Verify dispatch running the build plus that step's focused tests; the full CI-exact gate suite runs at the cadence points (steps 2, 3, 4, 6, 7, 8, 9, and after any fix round that changed the commit). Falsifier: a step lands red that its focused run could not catch, which indicts the cadence rather than the step.
+- Decision (run-level): `vibe/ACTIVE` named `2026-09-07-1-promptforge-debt` from an earlier run that left no `[WIP]` commit; replaced with this plan's name per plan-seed. Falsifier: the debt plan shows live run state; none found (tree clean, HEAD `f8e07fb6`).
+- Step 1 (Speech model kind and voices capability): `cargo build` + `cargo test -p gateway-config` green at `9d8d2ca3` (log `/tmp/verify-9d8d2ca3.log`); config-UI npm gates (typecheck, build, 129 tests) green at code time. Review: 1 Minor (the `ModelKind` doc comment omitted Speech), fixed and closed. Decision (made alone): ratified the coding agent's deviation of landing the serialize.rs pins with the implementation rather than in the red run, because they are compile-coupled to the new variant. Falsifier: a pin that can fail red independently, which a compile-coupled literal cannot.

@@ -160,6 +160,15 @@ function capabilities(): SettingDef[] {
       default: false,
       visibleWhen: (ctx) => ctx.value("thinking") !== "never" && ctx.value("thinking") != null,
     },
+    {
+      key: "voices",
+      label: "Voices",
+      help: "The voices the model offers for speech synthesis.",
+      section: "capabilities",
+      type: "chips",
+      default: [],
+      visibleWhen: (ctx) => ctx.value("kind") === "speech",
+    },
   ];
 }
 
