@@ -47,35 +47,87 @@ jobs:
     runs-on: [self-hosted, windows, cuda]
     timeout-minutes: 90
     env:
-      RUSTUP_TOOLCHAIN: stable
+      RUSTUP_TOOLCHAIN: 1.89.0
+      RUSTUP_AUTO_INSTALL: "0"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify preinstalled stable Rust
+      - name: Verify preinstalled MSRV Rust
         shell: powershell
         run: |
-          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
-          $rustup = Join-Path $cargoBin 'rustup.exe'
-          $cargo = Join-Path $cargoBin 'cargo.exe'
-          if (-not (Test-Path $rustup -PathType Leaf)) {
-            throw 'self-hosted runner Rust is not provisioned: missing rustup.exe'
+          $ErrorActionPreference = 'Stop'
+          $requiredVersion = '1.89.0'
+          $contractName = 'PROMPTFORGE_RUST_1_89_0_BIN'
+          $contractBin = [Environment]::GetEnvironmentVariable($contractName)
+
+          if (-not [string]::IsNullOrWhiteSpace($contractBin)) {
+            $contractBin = $contractBin.Trim()
+            if (-not [IO.Path]::IsPathRooted($contractBin)) {
+              throw "self-hosted runner Rust $requiredVersion contract $contractName must be an absolute directory: '$contractBin'"
+            }
+            if (-not (Test-Path $contractBin -PathType Container)) {
+              throw "self-hosted runner Rust $requiredVersion contract $contractName directory does not exist: '$contractBin'"
+            }
+            $contractBin = (Resolve-Path $contractBin).Path
           }
-          if (-not (Test-Path $cargo -PathType Leaf)) {
-            throw 'self-hosted runner Rust is not provisioned: missing cargo.exe'
+
+          function Resolve-RustTool {
+            param(
+              [Parameter(Mandatory = $true)][string] $Name,
+              [string] $Bin
+            )
+
+            if (-not [string]::IsNullOrWhiteSpace($Bin)) {
+              $candidate = Join-Path $Bin "$Name.exe"
+              if (-not (Test-Path $candidate -PathType Leaf)) {
+                throw "self-hosted runner Rust $requiredVersion contract $contractName is missing $Name.exe at '$candidate'"
+              }
+              return (Resolve-Path $candidate).Path
+            }
+
+            $command = Get-Command "$Name.exe" -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (-not $command) {
+              throw "self-hosted runner Rust $requiredVersion is not provisioned: $Name.exe was not found on PATH; install it outside CI or set $contractName to its versioned bin directory"
+            }
+            return $command.Source
           }
-          $env:RUSTUP_AUTO_INSTALL = '0'
-          $cargoBin | Add-Content $env:GITHUB_PATH
-          $toolchains = @(& $rustup toolchain list)
-          if ($LASTEXITCODE -ne 0) {
-            throw 'self-hosted runner Rust is not provisioned: rustup toolchain list failed'
+
+          function Assert-RustToolVersion {
+            param(
+              [Parameter(Mandatory = $true)][string] $Name,
+              [Parameter(Mandatory = $true)][string] $ToolPath
+            )
+
+            $versionLines = @(& $ToolPath '--version' 2>&1)
+            $exitCode = $LASTEXITCODE
+            $versionText = ($versionLines | Out-String).Trim()
+            if ($exitCode -ne 0) {
+              throw "self-hosted runner $Name.exe failed at '$ToolPath' with exit code ${exitCode}; provision Rust $requiredVersion outside CI and expose it through PATH or $contractName. Output: $versionText"
+            }
+
+            $versionMatch = [regex]::Match(
+              $versionText,
+              "^$([regex]::Escape($Name))\s+(\d+\.\d+\.\d+)(?:\s|$)"
+            )
+            if (-not $versionMatch.Success) {
+              throw "self-hosted runner $Name.exe returned an unrecognized version at '$ToolPath'; required repository MSRV is exactly $requiredVersion. Output: $versionText"
+            }
+            $actualVersion = $versionMatch.Groups[1].Value
+            if ($actualVersion -ne $requiredVersion) {
+              throw "self-hosted runner $Name.exe has Rust toolchain version $actualVersion at '$ToolPath'; required repository MSRV is exactly $requiredVersion. Reprovision it outside CI or point $contractName at the correct versioned bin directory"
+            }
+
+            Write-Host "Using $Name $actualVersion from $ToolPath"
           }
-          $stableToolchain = $toolchains | Where-Object { $_ -match '^stable(?:-|\s|$)' } | Select-Object -First 1
-          if (-not $stableToolchain) {
-            throw 'self-hosted runner Rust is not provisioned: stable toolchain is missing'
-          }
-          & $cargo '+stable' '--version'
-          if ($LASTEXITCODE -ne 0) {
-            throw 'self-hosted runner Rust is not provisioned: stable toolchain is unavailable'
+
+          $cargo = Resolve-RustTool -Name 'cargo' -Bin $contractBin
+          $rustc = Resolve-RustTool -Name 'rustc' -Bin $contractBin
+          Assert-RustToolVersion -Name 'cargo' -ToolPath $cargo
+          Assert-RustToolVersion -Name 'rustc' -ToolPath $rustc
+
+          if (-not [string]::IsNullOrWhiteSpace($contractBin)) {
+            $contractBin | Add-Content -Path $env:GITHUB_PATH
           }
 
       - name: Cache Cargo
