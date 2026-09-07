@@ -164,7 +164,7 @@ Components, in dependency order:
 - `crates/gateway-local/src/runtime.rs`: make `launch_options` (699-720) return `Result<LaunchOptions, LocalError>`; the already-fallible wrapper `launch_options_for` (722-731) propagates. The Chat/Embedding/Classifier arms stay; `ModelKind::Speech` errors "local speech models are not yet supported" through a new `LocalError` variant (beside `UnsupportedPlatform`, error.rs ~12-17); the wildcard becomes refuse-unknown (`_ => Err(...)`) instead of `_ => ServeMode::Chat` (714) — `ModelKind` is `#[non_exhaustive]`, so a wildcard must remain but it never maps to chat. Leave the `tool_dialect` wildcard (493-496); its chat-default is deliberate.
 - Tests: the speech arm errors rather than launching as chat.
 
-### Step 3: SpeechRequest wire type
+### Step 3: SpeechRequest wire type [completed]
 
 - `crates/shared-protocol/src/wire.rs`: add `SpeechRequest` beside `EmbeddingRequest` with `validate() -> Result<(), &'static str>` mirroring `ChatRequest::validate`; `voice` is an untagged string-or-`{"id"}` enum; `response_format` is a closed enum with `#[serde(default)]` resolving an omitted field to `mp3`, so the pin is structural and no route can forget it; a flattened `rest` with `RESERVED` naming the seven known fields preserves verbatim passthrough.
 - Tests: the wire validation table (empty `model`, empty `input`, over-cap `input` past 4096 characters, out-of-range `speed`, unknown `response_format`), the serde-default `mp3` resolution, and verbatim passthrough of unnamed fields.
