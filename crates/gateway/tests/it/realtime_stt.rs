@@ -711,6 +711,168 @@ async fn consumed_boundary_rebases_before_delayed_finalization_completes() {
     server.shutdown().await;
 }
 
+async fn assert_stop_reconciles_skipped_range(short_input_samples: usize) {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("last word");
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text("corrected first");
+    final_decoder.park_next();
+    let service = speech_with_policy(&interim, Some(&final_decoder), 15, 50);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+    send(
+        &mut socket,
+        serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "include": ["item.input_audio_transcription.hypothesis"]
+            }
+        }),
+    )
+    .await;
+    expect_type(&mut socket, "session.updated").await;
+
+    let before_stop = [
+        vec![8_192; 24_000],
+        vec![0; 72_000],
+        vec![8_192; short_input_samples],
+    ]
+    .concat();
+    append_audio(&mut socket, audio_samples(&before_stop)).await;
+    let hypothesis = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    assert!(
+        hypothesis["transcript"]
+            .as_str()
+            .is_some_and(|text| text.ends_with("last word"))
+    );
+    let parked = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("finalization park observer joins"),
+        "the accepted hypothesis is captured while earlier final work is parked"
+    );
+
+    append_audio(&mut socket, audio_samples(&vec![0; 72_000])).await;
+    send(
+        &mut socket,
+        serde_json::json!({"type": "input_audio_buffer.commit"}),
+    )
+    .await;
+    expect_type(&mut socket, "input_audio_buffer.committed").await;
+    expect_type(&mut socket, "conversation.item.created").await;
+    final_decoder.release();
+    let completed = loop {
+        let event = receive(&mut socket).await;
+        if event["type"] == "conversation.item.input_audio_transcription.completed" {
+            break event;
+        }
+    };
+
+    assert_eq!(
+        completed["transcript"],
+        "corrected first last word",
+        "accepted={hypothesis}, final_lengths={:?}",
+        final_decoder
+            .requests()
+            .iter()
+            .map(|request| request.samples().len())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        final_decoder.requests().len(),
+        1,
+        "the 300 ms final range and stop-time silence are explicit skips"
+    );
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn stop_reconciles_an_accepted_word_from_a_skipped_short_final_range() {
+    assert_stop_reconciles_skipped_range(7_200).await;
+}
+
+#[tokio::test]
+async fn stop_reconciles_an_accepted_word_from_a_click_consumed_range() {
+    assert_stop_reconciles_skipped_range(2_400).await;
+}
+
+async fn assert_same_range_final_authority(final_text: &str, expected: &str) {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("provisional words");
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text(final_text);
+    final_decoder.park_next();
+    let service = speech_with_policy(&interim, Some(&final_decoder), 15, 50);
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+    send(
+        &mut socket,
+        serde_json::json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "include": ["item.input_audio_transcription.hypothesis"]
+            }
+        }),
+    )
+    .await;
+    expect_type(&mut socket, "session.updated").await;
+
+    append_audio(&mut socket, audio_samples(&vec![8_192; 12_000])).await;
+    let hypothesis = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.hypothesis",
+    )
+    .await;
+    assert_eq!(hypothesis["transcript"], "provisional words");
+    send(
+        &mut socket,
+        serde_json::json!({"type": "input_audio_buffer.commit"}),
+    )
+    .await;
+    expect_type(&mut socket, "input_audio_buffer.committed").await;
+    expect_type(&mut socket, "conversation.item.created").await;
+    let parked = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
+            .await
+            .expect("finalization park observer joins"),
+        "the exact accepted range reaches authoritative final decoding"
+    );
+    final_decoder.release();
+    let completed = expect_type(
+        &mut socket,
+        "conversation.item.input_audio_transcription.completed",
+    )
+    .await;
+    assert_eq!(completed["transcript"], expected);
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn same_range_divergent_final_text_overrides_the_accepted_hypothesis() {
+    assert_same_range_final_authority("authoritative words", "authoritative words").await;
+}
+
+#[tokio::test]
+async fn same_range_decoded_empty_remains_authoritative() {
+    assert_same_range_final_authority("", "").await;
+}
+
 #[tokio::test]
 #[ignore = "requires packaged whisper.dll, ggml-tiny.en.bin, and jfk.wav fixtures"]
 async fn realtime_stt_native_incremental() {
@@ -1069,14 +1231,16 @@ async fn admission_is_bounded_and_replacement_closes_with_1012() {
     for mut socket in sockets.drain(1..) {
         socket.close(None).await.expect("socket closes");
     }
-    send(
-        &mut sockets[0],
-        serde_json::json!({
-            "type": "input_audio_buffer.append",
-            "audio": audio()
-        }),
-    )
-    .await;
+    for _ in 0..5 {
+        send(
+            &mut sockets[0],
+            serde_json::json!({
+                "type": "input_audio_buffer.append",
+                "audio": audio()
+            }),
+        )
+        .await;
+    }
     send(
         &mut sockets[0],
         serde_json::json!({"type": "input_audio_buffer.commit"}),
@@ -1407,7 +1571,9 @@ async fn commit_existing_item(
     append: &serde_json::Value,
     previous: Option<&String>,
 ) -> String {
-    send(socket, append.clone()).await;
+    for _ in 0..5 {
+        send(socket, append.clone()).await;
+    }
     send(
         socket,
         serde_json::json!({"type": "input_audio_buffer.commit"}),
@@ -1509,11 +1675,12 @@ async fn expect_retried_item(
 #[tokio::test]
 async fn saturated_commit_preserves_the_canonical_input_for_retry() {
     let fixtures = canonical_sequences();
-    let append = canonical_client(
+    let mut append = canonical_client(
         &fixtures,
         "saturated_commit_retry",
         "input_audio_buffer.append",
     );
+    append["audio"] = serde_json::json!(audio());
     let commit = canonical_message(
         &fixtures,
         "saturated_commit_retry",
@@ -1563,7 +1730,9 @@ async fn saturated_commit_preserves_the_canonical_input_for_retry() {
         "the serial final worker is parked while four items own finalization"
     );
 
-    send(&mut socket, append.clone()).await;
+    for _ in 0..5 {
+        send(&mut socket, append.clone()).await;
+    }
     send(&mut socket, commit).await;
     let saturated = expect_type(&mut socket, "error").await;
     let requests_at_saturation = final_decoder.requests().len();

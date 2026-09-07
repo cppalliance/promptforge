@@ -1,9 +1,12 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+#[cfg(test)]
 use gateway_stt_engine::TranscribeError;
 
+use super::final_outcome::{FinalRangeOutcome, FinalRangeResult, assemble_completion};
 use super::interim::InterimState;
 use super::text::append_transcript;
+use super::window::AcceptedHypothesis;
 use crate::segment::Segmenter;
 
 #[derive(Debug, Default)]
@@ -11,6 +14,8 @@ struct FinalizedState {
     text: String,
     failure: Option<String>,
     samples: usize,
+    outcomes: Vec<FinalRangeOutcome>,
+    has_skipped_coverage: bool,
 }
 
 #[derive(Debug, Default)]
@@ -40,6 +45,7 @@ impl TakeState {
         (state.text.clone(), state.samples)
     }
 
+    #[cfg(test)]
     pub(super) fn record_finalized(
         &self,
         result: Result<String, TranscribeError>,
@@ -56,6 +62,25 @@ impl TakeState {
             Err(error) if state.failure.is_none() => state.failure = Some(error.to_string()),
             Ok(_) | Err(_) => {}
         }
+    }
+
+    pub(super) fn record_final_outcome(&self, outcome: FinalRangeOutcome) {
+        let mut state = Self::lock(&self.finalized);
+        if state.failure.is_some() {
+            return;
+        }
+        match &outcome.result {
+            FinalRangeResult::Decoded(text) => {
+                if !state.has_skipped_coverage {
+                    append_transcript(&mut state.text, text);
+                    state.samples = outcome.range.end;
+                }
+            }
+            FinalRangeResult::Skipped(_) => {
+                state.has_skipped_coverage = true;
+            }
+        }
+        state.outcomes.push(outcome);
     }
 
     pub(super) fn record_failure(&self, failure: String) {
@@ -82,11 +107,20 @@ impl TakeState {
         Self::lock(&self.finalized).failure.take()
     }
 
-    pub(super) fn completion(&self) -> Result<String, String> {
+    pub(super) fn completion(
+        &self,
+        accepted: &[AcceptedHypothesis],
+        committed_samples: usize,
+    ) -> Result<String, String> {
         let mut state = Self::lock(&self.finalized);
         match state.failure.take() {
             Some(failure) => Err(failure),
-            None => Ok(state.text.clone()),
+            None if state.outcomes.is_empty() => Ok(state.text.clone()),
+            None => {
+                let transcript = assemble_completion(&state.outcomes, accepted, committed_samples);
+                state.samples = committed_samples;
+                Ok(transcript)
+            }
         }
     }
 }

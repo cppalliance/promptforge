@@ -9,7 +9,9 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt as _, StreamExt as _};
-use gateway_stt::test_fixtures::segment_ranges;
+use gateway_stt::test_fixtures::{
+    ScriptedDecoder, ScriptedModelFactory, scripted_service, segment_ranges,
+};
 use gateway_stt_engine::EnginePolicy;
 use serde_json::json;
 use tokio_tungstenite::tungstenite;
@@ -44,6 +46,57 @@ fn legacy_stream_policy_constants_stay_pinned() {
         500,
         "the default interim cadence stays 500 ms"
     );
+}
+
+#[tokio::test]
+async fn skipped_then_decoded_then_failed_falls_back_once_in_audio_order() {
+    let interim = ScriptedDecoder::new();
+    interim.push_text("fallback whole take");
+    let final_decoder = ScriptedDecoder::new();
+    final_decoder.push_text("later accurate segment");
+    final_decoder.push_error("following segment failed");
+    let service = scripted_service(
+        ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone()),
+        15,
+        500,
+    )
+    .expect("scripted speech starts");
+    let server = TestServer::spawn_with(service);
+    let mut socket = JsonSocket::connect(&server.ws_url("/stt")).await;
+    socket.send_text("start").await;
+    assert_eq!(socket.recv_json().await["type"], "stream");
+
+    let silence = vec![0.0; EnginePolicy::SAMPLE_RATE * 3];
+    let samples = [
+        vec![0.5; EnginePolicy::SAMPLE_RATE / 10],
+        silence.clone(),
+        vec![0.5; EnginePolicy::SAMPLE_RATE],
+        silence.clone(),
+        vec![0.5; EnginePolicy::SAMPLE_RATE],
+        silence,
+    ]
+    .concat();
+    send_samples_once(&mut socket, &samples).await;
+    let completed = final_decoder.clone();
+    assert!(
+        tokio::task::spawn_blocking(move || {
+            completed.wait_for_completed(2, Duration::from_secs(2))
+        })
+        .await
+        .expect("completion observer joins"),
+        "the later success and following failure complete in order: {:?}",
+        final_decoder.requests()
+    );
+
+    socket.send_text("stop").await;
+    let reply = socket
+        .recv_until(Duration::from_secs(1), |frame| frame["type"] == "final")
+        .await;
+    assert_eq!(reply["text"], "fallback whole take");
+    assert_eq!(interim.requests().len(), 1);
+
+    socket.close().await;
+    server.shutdown().await;
 }
 
 fn transcript_words(text: &str) -> Vec<String> {

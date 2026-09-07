@@ -509,6 +509,16 @@ fn append_committable(session: &mut RealtimeSessionFixture) -> String {
         .to_owned()
 }
 
+#[allow(
+    clippy::expect_used,
+    reason = "the helper establishes valid decodable fixture audio"
+)]
+fn append_decodable(session: &mut RealtimeSessionFixture) {
+    session
+        .append_base64(&encoded(&vec![512; 12_000]))
+        .expect("decodable input appends");
+}
+
 #[test]
 fn commit_promotes_the_provisional_id_and_preserves_durable_lineage() {
     let mut session = session();
@@ -576,7 +586,7 @@ async fn four_items_finalize_in_reverse_order_without_crossing_ownership() {
         session
             .update_text(&update(&format!("prompt-{index}"), true))
             .expect("item prompt updates");
-        append_committable(&mut session);
+        append_decodable(&mut session);
         ids.push(session.commit().expect("item commits").item_id().to_owned());
     }
     assert_eq!(
@@ -637,7 +647,7 @@ async fn canceling_item_finish_keeps_finalization_owned_for_retry() {
             ScriptedModelFactory::new(interim).with_final(final_decoder.clone()),
         )
         .expect("scripted session starts");
-    append_committable(&mut session);
+    append_decodable(&mut session);
     let item = session.commit().expect("item commits");
     let item_id = item.item_id().to_owned();
 

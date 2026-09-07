@@ -5,8 +5,10 @@
 pub fn segment_ranges(samples: &[f32]) -> Vec<std::ops::Range<usize>> {
     let mut segmenter = crate::segment::Segmenter::new();
     let mut ranges = Vec::new();
-    while let Some(range) = segmenter.poll(samples) {
-        ranges.push(range);
+    while let Some(outcome) = segmenter.poll(samples) {
+        if let crate::segment::SegmentOutcome::Decode(range) = outcome {
+            ranges.push(range);
+        }
     }
     ranges
 }

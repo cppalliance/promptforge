@@ -9,6 +9,7 @@ use gateway_stt_engine::TranscribeError;
 use crate::generation::GenerationLease;
 
 mod agreement;
+mod final_outcome;
 mod finalization;
 mod interim;
 mod state;
@@ -184,8 +185,11 @@ impl Take {
         let pipeline = self.final_pipeline.as_ref()?;
         let consumed = self.consumed();
         let buffer = TakeState::lock(&self.state.buffer);
+        let committed_samples = buffer.len();
         let tail = buffer[consumed.min(buffer.len())..].to_vec();
-        Some(pipeline.finalization(tail))
+        drop(buffer);
+        let accepted = TakeState::lock(&self.whole_window).accepted_hypotheses(committed_samples);
+        Some(pipeline.finalization(tail, consumed, committed_samples, accepted))
     }
 
     pub(crate) async fn complete(&self) -> Option<Result<String, String>> {
@@ -321,33 +325,20 @@ mod tests {
         take.record_finalized(Ok("successful segment".to_owned()));
         take.record_failure("tail failed");
 
-        assert_eq!(take.state.completion(), Err("tail failed".to_owned()));
+        assert_eq!(take.state.completion(&[], 0), Err("tail failed".to_owned()));
         assert_eq!(
             take.fallback_transcript("fallback tail"),
             "successful segment fallback tail"
         );
     }
 
-    #[test]
-    fn closed_segment_failure_does_not_duplicate_a_successful_tail_in_fallback() {
-        let take = Take::without_final(Vec::new());
-        take.record_failure("closed segment failed");
-        take.record_finalized(Ok("successful tail".to_owned()));
-
-        assert_eq!(
-            take.state.completion(),
-            Err("closed segment failed".to_owned())
-        );
-        assert_eq!(take.fallback_transcript("fallback tail"), "fallback tail");
-    }
-
     #[tokio::test]
     async fn failed_segment_audio_remains_in_the_fallback_window() {
         let take = Take::without_final(Vec::new());
-        let successful = vec![1.0; 4];
-        let failed = vec![2.0; 3];
-        let skipped = vec![3.0; 2];
-        let tail = vec![4.0];
+        let successful = vec![1.0; 8_000];
+        let failed = vec![2.0; 8_000];
+        let skipped = vec![3.0; 8_000];
+        let tail = vec![4.0; 8_000];
         take.append(
             &[
                 successful.clone(),
@@ -380,21 +371,24 @@ mod tests {
         commands
             .send(FinalCommand::Segment {
                 samples: successful,
-                end: 4,
+                range: 0..8_000,
+                leading_silence: None,
             })
             .await
             .expect("the successful segment queues");
         commands
             .send(FinalCommand::Segment {
                 samples: failed.clone(),
-                end: 7,
+                range: 8_000..16_000,
+                leading_silence: None,
             })
             .await
             .expect("the failed segment queues");
         commands
             .send(FinalCommand::Segment {
                 samples: skipped.clone(),
-                end: 9,
+                range: 16_000..24_000,
+                leading_silence: None,
             })
             .await
             .expect("the skipped segment queues");
@@ -402,6 +396,9 @@ mod tests {
         commands
             .send(FinalCommand::Complete {
                 tail: tail.clone(),
+                start: 24_000,
+                committed_samples: 32_000,
+                accepted: Vec::new(),
                 reply,
             })
             .await
@@ -449,6 +446,9 @@ mod tests {
         commands
             .send(FinalCommand::Complete {
                 tail: Vec::new(),
+                start: 0,
+                committed_samples: 0,
+                accepted: Vec::new(),
                 reply,
             })
             .await

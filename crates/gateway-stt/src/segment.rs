@@ -13,6 +13,12 @@ use std::ops::Range;
 
 use gateway_stt_engine::EnginePolicy;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum SegmentOutcome {
+    Decode(Range<usize>),
+    Skipped(Range<usize>),
+}
+
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
 const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
 
@@ -67,7 +73,7 @@ impl Segmenter {
     /// Scans newly arrived frames and returns the range of the next
     /// completed speech segment, if one closed. Call in a loop: a large
     /// arrival can complete more than one segment.
-    pub(crate) fn poll(&mut self, buffer: &[f32]) -> Option<Range<usize>> {
+    pub(crate) fn poll(&mut self, buffer: &[f32]) -> Option<SegmentOutcome> {
         while self.cursor + FRAME_SAMPLES <= buffer.len() {
             let frame = &buffer[self.cursor..self.cursor + FRAME_SAMPLES];
             let silent = EnginePolicy::is_silence(frame);
@@ -81,10 +87,9 @@ impl Segmenter {
                         self.cursor += FRAME_SAMPLES;
                         self.consumed = end;
                         if end - start >= MIN_SPEECH_SAMPLES {
-                            return Some(start..end);
+                            return Some(SegmentOutcome::Decode(start..end));
                         }
-                        // A click: consumed past it, nothing to transcribe.
-                        continue;
+                        return Some(SegmentOutcome::Skipped(start..end));
                     }
                 }
                 (None, false) => {
@@ -123,8 +128,10 @@ mod tests {
     /// Drains every segment the segmenter can close over `buffer`.
     fn close_all(segmenter: &mut Segmenter, buffer: &[f32]) -> Vec<Range<usize>> {
         let mut ranges = Vec::new();
-        while let Some(range) = segmenter.poll(buffer) {
-            ranges.push(range);
+        while let Some(outcome) = segmenter.poll(buffer) {
+            if let SegmentOutcome::Decode(range) = outcome {
+                ranges.push(range);
+            }
         }
         ranges
     }
@@ -189,9 +196,13 @@ mod tests {
             silence(3),
         ]);
         let mut segmenter = Segmenter::new();
-        assert!(
-            close_all(&mut segmenter, &buffer).is_empty(),
-            "a 100 ms blip is a click, not a segment"
+        let outcome = segmenter
+            .poll(&buffer)
+            .expect("the discarded click is an explicit outcome");
+        assert_eq!(
+            outcome,
+            SegmentOutcome::Skipped(0..EnginePolicy::SAMPLE_RATE * 3 / 25),
+            "the frame-aligned click coverage is retained for reconciliation"
         );
         assert!(
             segmenter.consumed() > 0,
@@ -218,7 +229,10 @@ mod tests {
         let mut segmenter = Segmenter::new();
         assert!(segmenter.poll(&buffer).is_none());
         buffer.extend_from_slice(&silence(3));
-        let first = segmenter.poll(&buffer).expect("the segment closes");
+        let SegmentOutcome::Decode(first) = segmenter.poll(&buffer).expect("the segment closes")
+        else {
+            panic!("ordinary speech is decoded");
+        };
         assert_eq!(first.start, 0);
         // Polling again without new audio returns nothing.
         assert!(segmenter.poll(&buffer).is_none());

@@ -1,11 +1,33 @@
+use std::ops::Range;
+
 use super::agreement::{matching_token_prefix_end, token_spans};
 use super::interim::InterimSnapshot;
 use super::text::append_transcript;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AcceptedHypothesis {
+    range: Range<usize>,
+    text: String,
+}
+
+impl AcceptedHypothesis {
+    pub(super) fn new(range: Range<usize>, text: String) -> Self {
+        Self { range, text }
+    }
+
+    pub(super) fn range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+
+    pub(super) fn text(&self) -> &str {
+        &self.text
+    }
+}
+
 #[derive(Debug)]
 struct PendingRegion {
     end: usize,
-    text: String,
+    accepted: AcceptedHypothesis,
 }
 
 #[derive(Debug, Default)]
@@ -13,6 +35,7 @@ pub(super) struct WholeWindowState {
     segment_start: usize,
     window_start: Option<usize>,
     active: String,
+    active_end: usize,
     pending: Vec<PendingRegion>,
     last: Option<InterimSnapshot>,
 }
@@ -24,7 +47,7 @@ impl WholeWindowState {
         finalized_samples: usize,
         segment_start: usize,
         window_start: usize,
-        _window_end: usize,
+        window_end: usize,
         hypothesis: &str,
     ) -> Option<InterimSnapshot> {
         self.pending.retain(|region| region.end > finalized_samples);
@@ -32,7 +55,10 @@ impl WholeWindowState {
             if !self.active.is_empty() {
                 self.pending.push(PendingRegion {
                     end: segment_start,
-                    text: std::mem::take(&mut self.active),
+                    accepted: AcceptedHypothesis::new(
+                        self.segment_start..self.active_end,
+                        std::mem::take(&mut self.active),
+                    ),
                 });
             }
             self.window_start = None;
@@ -51,11 +77,12 @@ impl WholeWindowState {
             matching_token_prefix_end(&self.active, &replacement)
         };
         self.active = replacement;
+        self.active_end = window_end;
         self.window_start = Some(window_start);
 
         let mut agreed = String::new();
         for region in &self.pending {
-            append_transcript(&mut agreed, &region.text);
+            append_transcript(&mut agreed, region.accepted.text());
         }
         append_transcript(&mut agreed, self.active[..agreed_end].trim());
         let agreed = owned_piece(!finalized.is_empty(), &agreed);
@@ -69,6 +96,22 @@ impl WholeWindowState {
         }
         self.last = Some(snapshot.clone());
         Some(snapshot)
+    }
+
+    pub(super) fn accepted_hypotheses(&self, committed_samples: usize) -> Vec<AcceptedHypothesis> {
+        let mut accepted = self
+            .pending
+            .iter()
+            .map(|region| region.accepted.clone())
+            .filter(|hypothesis| hypothesis.range.end <= committed_samples)
+            .collect::<Vec<_>>();
+        if !self.active.is_empty() && self.active_end <= committed_samples {
+            accepted.push(AcceptedHypothesis::new(
+                self.segment_start..self.active_end,
+                self.active.clone(),
+            ));
+        }
+        accepted
     }
 }
 
@@ -187,5 +230,21 @@ mod tests {
             snapshot.into_parts().0,
             "And so my fellow Americans ask not"
         );
+    }
+
+    #[test]
+    fn accepted_hypothesis_retains_exact_committed_audio_coverage() {
+        let mut state = WholeWindowState::default();
+        state.next("", 0, 32_000, 32_000, 40_000, "old");
+        state.next("", 0, 32_000, 32_000, 44_800, "last word");
+
+        assert!(
+            state.accepted_hypotheses(40_000).is_empty(),
+            "a snapshot extending beyond committed audio is not reusable"
+        );
+        let accepted = state.accepted_hypotheses(44_800);
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].range(), 32_000..44_800);
+        assert_eq!(accepted[0].text(), "last word");
     }
 }
