@@ -142,8 +142,9 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     };
-    // The logger shuts down last, so the terminal outcome and every record
-    // behind it drain to the disk before the process exits.
+    // The logger shuts down last, so a healthy sink drains the terminal
+    // outcome and every admitted record before exit. A stalled sink gets
+    // bounded loss accounting and cannot hold process exit forever.
     if let Some(runtime) = logging
         && let Err(error) = runtime.shutdown()
     {

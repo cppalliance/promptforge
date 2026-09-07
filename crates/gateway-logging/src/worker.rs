@@ -51,6 +51,20 @@ enum Sink {
     /// The latency test's baseline: every write accepted, nothing done.
     #[cfg(test)]
     Null,
+    /// A controllable permanently stalled operation for shutdown tests.
+    #[cfg(test)]
+    Stalled {
+        point: StallPoint,
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: Option<std::sync::mpsc::Receiver<()>>,
+    },
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum StallPoint {
+    Write,
+    Flush,
 }
 
 impl Sink {
@@ -70,6 +84,22 @@ impl Sink {
             }
             #[cfg(test)]
             Self::Null => {}
+            #[cfg(test)]
+            Self::Stalled {
+                point: StallPoint::Write,
+                entered,
+                release,
+            } => {
+                if let Some(release) = release.take() {
+                    let _ = entered.send(());
+                    let _ = release.recv();
+                }
+            }
+            #[cfg(test)]
+            Self::Stalled {
+                point: StallPoint::Flush,
+                ..
+            } => {}
         }
     }
 
@@ -88,6 +118,22 @@ impl Sink {
             }
             #[cfg(test)]
             Self::Null => {}
+            #[cfg(test)]
+            Self::Stalled {
+                point: StallPoint::Flush,
+                entered,
+                release,
+            } => {
+                if let Some(release) = release.take() {
+                    let _ = entered.send(());
+                    let _ = release.recv();
+                }
+            }
+            #[cfg(test)]
+            Self::Stalled {
+                point: StallPoint::Write,
+                ..
+            } => {}
         }
     }
 
@@ -100,9 +146,12 @@ impl Sink {
 }
 
 /// The worker owner: spawned by
-/// [`LogRuntime::start`](crate::LogRuntime::start), joined by
-/// [`LogRuntime::shutdown`](crate::LogRuntime::shutdown).
-pub(crate) struct LogWorker;
+/// [`LogRuntime::start`](crate::LogRuntime::start), then joined after a
+/// healthy drain or detached after the shutdown budget expires.
+#[derive(Debug)]
+pub(crate) struct LogWorker {
+    handle: JoinHandle<()>,
+}
 
 impl LogWorker {
     /// Spawns the single worker thread. It blocks on the queue, swaps up to
@@ -111,25 +160,96 @@ impl LogWorker {
     ///
     /// # Errors
     /// Returns the I/O failure from spawning the thread.
-    pub(crate) fn spawn(queue: Arc<LogQueue>, file: File) -> io::Result<JoinHandle<()>> {
-        std::thread::Builder::new()
+    pub(crate) fn spawn(queue: Arc<LogQueue>, file: File) -> io::Result<Self> {
+        Self::spawn_with_sink(queue, Sink::File(BufWriter::new(file)))
+    }
+
+    fn spawn_with_sink(queue: Arc<LogQueue>, mut sink: Sink) -> io::Result<Self> {
+        let handle = std::thread::Builder::new()
             .name("gateway-logging".to_string())
             .spawn(move || {
-                let mut sink = Sink::File(BufWriter::new(file));
                 loop {
                     let batch = queue.take_batch();
+                    let records = batch.records.len();
+                    let had_summary = batch.summary.is_some();
                     for record in &batch.records {
+                        if queue.is_abandoned() {
+                            return;
+                        }
                         sink.write_line(&record.line);
                     }
                     if let Some(summary) = &batch.summary {
+                        if queue.is_abandoned() {
+                            return;
+                        }
                         sink.write_line(summary);
                     }
+                    if queue.is_abandoned() {
+                        return;
+                    }
                     sink.flush();
+                    if queue.is_abandoned() {
+                        return;
+                    }
+                    queue.complete_batch(records, had_summary, batch.summary_affected);
                     if batch.done {
                         break;
                     }
                 }
-            })
+            })?;
+        Ok(Self { handle })
+    }
+
+    pub(crate) fn is_finished(&self) -> bool {
+        self.handle.is_finished()
+    }
+
+    pub(crate) fn join(self) -> std::thread::Result<()> {
+        self.handle.join()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spawn_stalled(
+        queue: Arc<LogQueue>,
+        point: StallPoint,
+    ) -> io::Result<(Self, StalledSinkControl)> {
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let worker = Self::spawn_with_sink(
+            queue,
+            Sink::Stalled {
+                point,
+                entered: entered_tx,
+                release: Some(release_rx),
+            },
+        )?;
+        Ok((
+            worker,
+            StalledSinkControl {
+                entered: entered_rx,
+                release: release_tx,
+            },
+        ))
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct StalledSinkControl {
+    entered: std::sync::mpsc::Receiver<()>,
+    release: std::sync::mpsc::SyncSender<()>,
+}
+
+#[cfg(test)]
+impl StalledSinkControl {
+    pub(crate) fn wait_until_stalled(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<(), std::sync::mpsc::RecvTimeoutError> {
+        self.entered.recv_timeout(timeout)
+    }
+
+    pub(crate) fn release(self) {
+        let _ = self.release.send(());
     }
 }
 

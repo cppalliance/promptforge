@@ -304,7 +304,7 @@ isProject: false
 - Exclusions: no indefinite retention guarantee, sink implementation change, segment rotation, or redaction work.
 - Focused verification: from the repository root run `cargo test -p gateway-logging`.
 
-### Step 6: Bound logging stalls and shutdown
+### Step 6: Bound logging stalls and shutdown [completed]
 
 - Component and piece: Component 2 of 8, `gateway-logging`; apply the selected bounded-loss policy to protected producers, sink stalls, and runtime shutdown.
 - Dependency: depends on Step 5 because finite waits must terminate in the queue's explicit loss-accounting path and preserve successful-admission order.

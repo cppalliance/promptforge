@@ -2,9 +2,14 @@
 //! total capacity, and eviction rules that protect Warn and Error records.
 
 use std::collections::VecDeque;
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError, TryLockError};
+use std::time::{Duration, Instant};
 
 use crate::config::LOG_LIMITS;
+
+const ADMISSION_CLOSED: u64 = 1 << 63;
+const ACTIVE_PRODUCERS: u64 = ADMISSION_CLOSED - 1;
 
 /// Total records the queue holds before producers evict or block.
 pub(crate) const CAPACITY: usize = 8192;
@@ -78,6 +83,7 @@ pub(crate) struct LogRecord {
 pub(crate) struct Batch {
     pub(crate) records: Vec<LogRecord>,
     pub(crate) summary: Option<Box<str>>,
+    pub(crate) summary_affected: u64,
     pub(crate) done: bool,
 }
 
@@ -95,6 +101,15 @@ pub(crate) struct LogQueue {
     work_available: Condvar,
     space_available: Condvar,
     limits: QueueLimits,
+    admission_gate: AtomicU64,
+    abandoned: AtomicBool,
+    pending_rejections: AtomicU64,
+    outstanding_records: AtomicU64,
+    outstanding_summaries: AtomicU64,
+    unreported_pressure_records: AtomicU64,
+    shutdown_abandoned_records: AtomicU64,
+    shutdown_abandoned_summaries: AtomicU64,
+    shutdown_unreported_pressure_records: AtomicU64,
 }
 
 /// Admission limits and their shared low-water definition. Pressure has
@@ -103,6 +118,7 @@ pub(crate) struct LogQueue {
 struct QueueLimits {
     max_records: usize,
     max_bytes: usize,
+    producer_wait: Duration,
 }
 
 impl QueueLimits {
@@ -120,8 +136,23 @@ struct State {
     closed: bool,
     loss: LossCounts,
     pending_summaries: VecDeque<PendingSummary>,
+    pending_pressure_records: u64,
+    in_flight_records: usize,
+    in_flight_summaries: usize,
+    in_flight_pressure_records: u64,
+    blocked_producers: u64,
     #[cfg(test)]
     peak_queued_bytes: usize,
+}
+
+/// Records and already-built summaries that could not be delivered before
+/// the shutdown budget expired. The counters live in queue state from
+/// construction, so recording a timeout never needs to allocate.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShutdownLoss {
+    pub(crate) abandoned_records: u64,
+    pub(crate) abandoned_summaries: u64,
+    pub(crate) unreported_pressure_records: u64,
 }
 
 /// A closed pressure episode sequenced immediately after every record that
@@ -130,6 +161,7 @@ struct State {
 struct PendingSummary {
     after_sequence: u64,
     text: Box<str>,
+    affected: u64,
 }
 
 /// Counts every way record content is lost during one observable pressure
@@ -146,12 +178,24 @@ impl LossCounts {
         self.evicted.iter().all(|&count| count == 0) && self.truncated == 0 && self.rejected == 0
     }
 
-    fn take_summary(&mut self) -> Option<Box<str>> {
+    fn evicted(&self) -> u64 {
+        self.evicted
+            .iter()
+            .fold(0u64, |total, count| total.saturating_add(*count))
+    }
+
+    fn affected(&self) -> u64 {
+        self.evicted()
+            .saturating_add(self.truncated)
+            .saturating_add(self.rejected)
+    }
+
+    fn take_summary(&mut self) -> Option<(Box<str>, u64)> {
         if self.is_empty() {
             return None;
         }
-        let dropped: u64 = self.evicted.iter().sum::<u64>() + self.rejected;
-        let affected = dropped + self.truncated;
+        let dropped = self.evicted().saturating_add(self.rejected);
+        let affected = self.affected();
         let summary = format!(
             "log pressure affected {affected} record(s): dropped={dropped}, debug={}, trace={}, info={}, truncated={}, rejected={}\n",
             self.evicted[LogPriority::Debug.lane()],
@@ -162,7 +206,7 @@ impl LossCounts {
         )
         .into_boxed_str();
         *self = Self::default();
-        Some(summary)
+        Some((summary, affected))
     }
 }
 
@@ -172,10 +216,7 @@ impl State {
             && line_bytes <= limits.max_bytes.saturating_sub(self.queued_bytes)
     }
 
-    fn admit(&mut self, priority: LogPriority, line: Box<str>, status: FormatStatus) {
-        if status == FormatStatus::Truncated {
-            self.loss.truncated += 1;
-        }
+    fn admit(&mut self, priority: LogPriority, line: Box<str>) {
         let line_bytes = line.len();
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.wrapping_add(1);
@@ -193,11 +234,10 @@ impl State {
     }
 
     /// Evicts the oldest record the incoming priority is allowed to
-    /// displace, counting the eviction by the evicted record's level.
+    /// displace.
     fn evict_for(&mut self, priority: LogPriority) -> Option<LogRecord> {
         for &lane_priority in priority.evictable() {
             if let Some(record) = self.lanes[lane_priority.lane()].pop_front() {
-                self.loss.evicted[record.priority.lane()] += 1;
                 self.len -= 1;
                 self.queued_bytes -= record.line.len();
                 return Some(record);
@@ -243,12 +283,14 @@ impl State {
     }
 
     fn close_loss_episode(&mut self) {
-        let Some(text) = self.loss.take_summary() else {
+        let Some((text, affected)) = self.loss.take_summary() else {
             return;
         };
+        self.pending_pressure_records = self.pending_pressure_records.saturating_add(affected);
         self.pending_summaries.push_back(PendingSummary {
             after_sequence: self.next_sequence,
             text,
+            affected,
         });
     }
 
@@ -258,7 +300,7 @@ impl State {
             .map(|summary| summary.after_sequence)
     }
 
-    fn take_ready_summary(&mut self) -> Option<Box<str>> {
+    fn take_ready_summary(&mut self) -> Option<PendingSummary> {
         let fence = self.pending_summary_fence()?;
         if self
             .oldest_sequence()
@@ -266,18 +308,24 @@ impl State {
         {
             return None;
         }
-        self.pending_summaries
-            .pop_front()
-            .map(|summary| summary.text)
+        let summary = self.pending_summaries.pop_front()?;
+        self.pending_pressure_records = self
+            .pending_pressure_records
+            .saturating_sub(summary.affected);
+        Some(summary)
     }
 }
 
 impl LogQueue {
     pub(crate) fn new() -> Self {
-        Self::with_limits(CAPACITY, LOG_LIMITS.max_queued_bytes)
+        Self::with_limits(
+            CAPACITY,
+            LOG_LIMITS.max_queued_bytes,
+            LOG_LIMITS.producer_wait,
+        )
     }
 
-    fn with_limits(max_records: usize, max_bytes: usize) -> Self {
+    fn with_limits(max_records: usize, max_bytes: usize, producer_wait: Duration) -> Self {
         assert!(max_records > 0, "a queue needs record capacity");
         assert!(max_bytes > 0, "a queue needs byte capacity");
         Self {
@@ -291,6 +339,11 @@ impl LogQueue {
                 pending_summaries: VecDeque::with_capacity(
                     max_records.div_ceil(BATCH).saturating_add(1),
                 ),
+                pending_pressure_records: 0,
+                in_flight_records: 0,
+                in_flight_summaries: 0,
+                in_flight_pressure_records: 0,
+                blocked_producers: 0,
                 #[cfg(test)]
                 peak_queued_bytes: 0,
             }),
@@ -299,8 +352,130 @@ impl LogQueue {
             limits: QueueLimits {
                 max_records,
                 max_bytes,
+                producer_wait,
             },
+            admission_gate: AtomicU64::new(0),
+            abandoned: AtomicBool::new(false),
+            pending_rejections: AtomicU64::new(0),
+            outstanding_records: AtomicU64::new(0),
+            outstanding_summaries: AtomicU64::new(0),
+            unreported_pressure_records: AtomicU64::new(0),
+            shutdown_abandoned_records: AtomicU64::new(0),
+            shutdown_abandoned_summaries: AtomicU64::new(0),
+            shutdown_unreported_pressure_records: AtomicU64::new(0),
         }
+    }
+
+    fn lock_until(&self, deadline: Instant) -> Option<MutexGuard<'_, State>> {
+        loop {
+            match self.state.try_lock() {
+                Ok(state) => return Some(state),
+                Err(TryLockError::Poisoned(error)) => return Some(error.into_inner()),
+                Err(TryLockError::WouldBlock) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return None;
+                    }
+                    std::thread::yield_now();
+                }
+            }
+        }
+    }
+
+    fn begin_producer(&self) -> bool {
+        let mut gate = self.admission_gate.load(Ordering::Acquire);
+        loop {
+            if gate & ADMISSION_CLOSED != 0 || gate & ACTIVE_PRODUCERS == ACTIVE_PRODUCERS {
+                return false;
+            }
+            match self.admission_gate.compare_exchange_weak(
+                gate,
+                gate + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(current) => gate = current,
+            }
+        }
+    }
+
+    fn finish_producer(&self) {
+        let previous = self.admission_gate.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous & ACTIVE_PRODUCERS > 0);
+    }
+
+    fn close_admission(&self) {
+        self.admission_gate
+            .fetch_or(ADMISSION_CLOSED, Ordering::AcqRel);
+    }
+
+    fn active_producers(&self) -> u64 {
+        self.admission_gate.load(Ordering::Acquire) & ACTIVE_PRODUCERS
+    }
+
+    fn saturating_sub(counter: &AtomicU64, amount: u64) {
+        let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            Some(current.saturating_sub(amount))
+        });
+    }
+
+    fn begin_loss(&self, state: &State) {
+        if state.loss.is_empty() {
+            self.outstanding_summaries.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn record_rejection(&self, state: &mut State) {
+        self.begin_loss(state);
+        state.loss.rejected = state.loss.rejected.saturating_add(1);
+        self.unreported_pressure_records
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn record_rejections(&self, state: &mut State, count: u64) {
+        if count == 0 {
+            return;
+        }
+        self.begin_loss(state);
+        state.loss.rejected = state.loss.rejected.saturating_add(count);
+        self.unreported_pressure_records
+            .fetch_add(count, Ordering::AcqRel);
+    }
+
+    fn record_rejection_without_lock(&self) {
+        if self.pending_rejections.fetch_add(1, Ordering::AcqRel) == 0 {
+            self.outstanding_summaries.fetch_add(1, Ordering::AcqRel);
+        }
+        self.unreported_pressure_records
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn merge_pending_rejections(&self, state: &mut State) {
+        let pending = self.pending_rejections.swap(0, Ordering::AcqRel);
+        if pending == 0 {
+            return;
+        }
+        if !state.loss.is_empty() {
+            Self::saturating_sub(&self.outstanding_summaries, 1);
+        }
+        state.loss.rejected = state.loss.rejected.saturating_add(pending);
+    }
+
+    fn record_truncation(&self, state: &mut State) {
+        self.begin_loss(state);
+        state.loss.truncated = state.loss.truncated.saturating_add(1);
+        self.unreported_pressure_records
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn record_eviction(&self, state: &mut State, record: &LogRecord) {
+        self.begin_loss(state);
+        state.loss.evicted[record.priority.lane()] =
+            state.loss.evicted[record.priority.lane()].saturating_add(1);
+        Self::saturating_sub(&self.outstanding_records, 1);
+        self.unreported_pressure_records
+            .fetch_add(1, Ordering::AcqRel);
     }
 
     /// Enqueues `line`, assigning its global sequence atomically with
@@ -308,8 +483,8 @@ impl LogQueue {
     /// the mutex. When either record or byte capacity is exhausted, the
     /// oldest eligible lower-priority records are evicted until the line
     /// fits; with none eligible the producer blocks on the condition
-    /// variable until the worker frees space. After [`close`](Self::close)
-    /// new records are dropped.
+    /// variable until the worker frees space. After admission closes, new
+    /// records are dropped.
     #[cfg(test)]
     pub(crate) fn enqueue(&self, priority: LogPriority, line: Box<str>) {
         self.enqueue_formatted(priority, line, FormatStatus::Complete);
@@ -335,43 +510,111 @@ impl LogQueue {
         status: FormatStatus,
         before_admission: impl FnOnce(),
     ) {
+        if !self.begin_producer() {
+            return;
+        }
+        let started = Instant::now();
+        let deadline = started
+            .checked_add(self.limits.producer_wait)
+            .unwrap_or(started);
         let line_bytes = line.len();
         before_admission();
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(mut state) = self.lock_until(deadline) else {
+            if !self.is_abandoned() {
+                self.record_rejection_without_lock();
+            }
+            self.finish_producer();
+            self.work_available.notify_one();
+            return;
+        };
+        self.merge_pending_rejections(&mut state);
+        let mut close_accounted = false;
         loop {
             if state.closed {
+                if !close_accounted {
+                    self.record_rejection(&mut state);
+                }
+                self.finish_producer();
+                drop(state);
+                self.work_available.notify_one();
                 return;
             }
             if line_bytes > self.limits.max_bytes {
-                state.loss.rejected += 1;
+                self.record_rejection(&mut state);
+                self.finish_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
             }
             if state.can_admit(self.limits, line_bytes) {
-                state.admit(priority, line, status);
+                if status == FormatStatus::Truncated {
+                    self.record_truncation(&mut state);
+                }
+                state.admit(priority, line);
+                self.outstanding_records.fetch_add(1, Ordering::AcqRel);
+                self.finish_producer();
                 drop(state);
                 self.work_available.notify_one();
                 return;
             }
-            if state.evict_for(priority).is_some() {
+            if let Some(evicted) = state.evict_for(priority) {
+                self.record_eviction(&mut state, &evicted);
                 continue;
             }
-            state = self
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                self.record_rejection(&mut state);
+                self.finish_producer();
+                drop(state);
+                self.work_available.notify_one();
+                return;
+            }
+            state.blocked_producers = state.blocked_producers.saturating_add(1);
+            let (next, timeout) = self
                 .space_available
-                .wait(state)
+                .wait_timeout(state, remaining)
                 .unwrap_or_else(PoisonError::into_inner);
+            state = next;
+            state.blocked_producers = state.blocked_producers.saturating_sub(1);
+            close_accounted = state.closed;
+            if timeout.timed_out() && !state.closed {
+                self.record_rejection(&mut state);
+                self.finish_producer();
+                drop(state);
+                self.work_available.notify_one();
+                return;
+            }
         }
     }
 
     /// Rejects invalid formatter bytes and wakes the worker so the loss is
     /// observable even when no queue record accompanies it.
     pub(crate) fn reject_formatted(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.closed {
+        if !self.begin_producer() {
             return;
         }
-        state.loss.rejected += 1;
+        let started = Instant::now();
+        let deadline = started
+            .checked_add(self.limits.producer_wait)
+            .unwrap_or(started);
+        let Some(mut state) = self.lock_until(deadline) else {
+            if !self.is_abandoned() {
+                self.record_rejection_without_lock();
+            }
+            self.finish_producer();
+            self.work_available.notify_one();
+            return;
+        };
+        self.merge_pending_rejections(&mut state);
+        if state.closed {
+            self.record_rejection(&mut state);
+            self.finish_producer();
+            drop(state);
+            self.work_available.notify_one();
+            return;
+        }
+        self.record_rejection(&mut state);
+        self.finish_producer();
         drop(state);
         self.work_available.notify_one();
     }
@@ -384,10 +627,19 @@ impl LogQueue {
     pub(crate) fn take_batch(&self) -> Batch {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         loop {
+            self.merge_pending_rejections(&mut state);
+            if self.is_abandoned() {
+                return Batch {
+                    records: Vec::new(),
+                    summary: None,
+                    summary_affected: 0,
+                    done: true,
+                };
+            }
             if state.len == 0
                 && state.loss.is_empty()
                 && state.pending_summaries.is_empty()
-                && !state.closed
+                && (!state.closed || self.active_producers() > 0)
             {
                 state = self
                     .work_available
@@ -413,16 +665,25 @@ impl LogQueue {
             if self.limits.is_at_low_water(state.len, state.queued_bytes) {
                 state.close_loss_episode();
             }
-            let summary = state.take_ready_summary();
+            let ready_summary = state.take_ready_summary();
+            let summary_affected = ready_summary.as_ref().map_or(0, |summary| summary.affected);
+            let summary = ready_summary.map(|summary| summary.text);
+            state.in_flight_records += records.len();
+            state.in_flight_summaries += usize::from(summary.is_some());
+            state.in_flight_pressure_records = state
+                .in_flight_pressure_records
+                .saturating_add(summary_affected);
             let done = state.closed
                 && state.len == 0
                 && state.loss.is_empty()
-                && state.pending_summaries.is_empty();
+                && state.pending_summaries.is_empty()
+                && self.active_producers() == 0;
             drop(state);
             self.space_available.notify_all();
             return Batch {
                 records,
                 summary,
+                summary_affected,
                 done,
             };
         }
@@ -440,8 +701,28 @@ impl LogQueue {
     }
 
     #[cfg(test)]
-    fn new_for_test(max_records: usize, max_bytes: usize) -> Self {
-        Self::with_limits(max_records, max_bytes)
+    pub(crate) fn new_for_test(max_records: usize, max_bytes: usize) -> Self {
+        Self::with_limits(max_records, max_bytes, LOG_LIMITS.producer_wait)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test_with_wait(
+        max_records: usize,
+        max_bytes: usize,
+        producer_wait: Duration,
+    ) -> Self {
+        Self::with_limits(max_records, max_bytes, producer_wait)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_lock_for_test(
+        &self,
+        entered: &std::sync::mpsc::SyncSender<()>,
+        release: &std::sync::mpsc::Receiver<()>,
+    ) {
+        let _state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        entered.send(()).expect("report held queue mutex");
+        release.recv().expect("release queue mutex");
     }
 
     #[cfg(test)]
@@ -450,15 +731,103 @@ impl LogQueue {
         (state.len, state.queued_bytes, state.peak_queued_bytes)
     }
 
+    #[cfg(test)]
+    pub(crate) fn shutdown_loss_for_test(&self) -> ShutdownLoss {
+        ShutdownLoss {
+            abandoned_records: self.shutdown_abandoned_records.load(Ordering::Acquire),
+            abandoned_summaries: self.shutdown_abandoned_summaries.load(Ordering::Acquire),
+            unreported_pressure_records: self
+                .shutdown_unreported_pressure_records
+                .load(Ordering::Acquire),
+        }
+    }
+
+    /// Marks one flushed batch as delivered. Records remain in flight until
+    /// flush returns because buffered writes alone are not final delivery.
+    pub(crate) fn complete_batch(&self, records: usize, had_summary: bool, summary_affected: u64) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.in_flight_records = state.in_flight_records.saturating_sub(records);
+        state.in_flight_summaries = state
+            .in_flight_summaries
+            .saturating_sub(usize::from(had_summary));
+        state.in_flight_pressure_records = state
+            .in_flight_pressure_records
+            .saturating_sub(summary_affected);
+        Self::saturating_sub(
+            &self.outstanding_records,
+            u64::try_from(records).unwrap_or(u64::MAX),
+        );
+        if had_summary {
+            Self::saturating_sub(&self.outstanding_summaries, 1);
+        }
+        Self::saturating_sub(&self.unreported_pressure_records, summary_affected);
+    }
+
+    /// Whether shutdown has abandoned delivery after its finite wait.
+    pub(crate) fn is_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::Acquire)
+    }
+
+    /// Accounts everything not known to have reached the sink and prevents a
+    /// later queue batch from beginning. The bounded queue storage stays with
+    /// the detached worker rather than making timeout cleanup part of the
+    /// caller's latency.
+    pub(crate) fn abandon(&self) -> ShutdownLoss {
+        self.close_admission();
+        self.abandoned.store(true, Ordering::Release);
+        let loss = ShutdownLoss {
+            abandoned_records: self
+                .outstanding_records
+                .swap(0, Ordering::AcqRel)
+                .saturating_add(self.active_producers()),
+            abandoned_summaries: self.outstanding_summaries.swap(0, Ordering::AcqRel),
+            unreported_pressure_records: self.unreported_pressure_records.swap(0, Ordering::AcqRel),
+        };
+        self.shutdown_abandoned_records
+            .fetch_add(loss.abandoned_records, Ordering::AcqRel);
+        self.shutdown_abandoned_summaries
+            .fetch_add(loss.abandoned_summaries, Ordering::AcqRel);
+        self.shutdown_unreported_pressure_records
+            .fetch_add(loss.unreported_pressure_records, Ordering::AcqRel);
+        self.space_available.notify_all();
+        self.work_available.notify_all();
+        loss
+    }
+
     /// Closes admission and wakes every waiter: producers drop new
     /// records, blocked producers return, and the worker exits once the
     /// queue drains.
+    #[cfg(test)]
     pub(crate) fn close(&self) {
+        self.close_admission();
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.closed = true;
+        self.close_locked(&mut state);
         drop(state);
         self.work_available.notify_all();
         self.space_available.notify_all();
+    }
+
+    /// Closes admission within an existing shutdown budget. Failure means
+    /// the mutex owner consumed that budget and the caller must abandon.
+    pub(crate) fn close_until(&self, deadline: Instant) -> bool {
+        self.close_admission();
+        let Some(mut state) = self.lock_until(deadline) else {
+            return false;
+        };
+        self.close_locked(&mut state);
+        drop(state);
+        self.work_available.notify_all();
+        self.space_available.notify_all();
+        true
+    }
+
+    fn close_locked(&self, state: &mut State) {
+        self.merge_pending_rejections(state);
+        if state.closed {
+            return;
+        }
+        state.closed = true;
+        self.record_rejections(state, state.blocked_producers);
     }
 }
 
@@ -558,7 +927,11 @@ mod tests {
 
     #[test]
     fn a_producer_with_no_eligible_record_blocks_until_space_opens() {
-        let queue = Arc::new(LogQueue::new());
+        let queue = Arc::new(LogQueue::new_for_test_with_wait(
+            CAPACITY,
+            LOG_LIMITS.max_queued_bytes,
+            Duration::from_secs(1),
+        ));
         for index in 0..CAPACITY {
             queue.enqueue(LogPriority::Warn, line(&format!("warn-{index}")));
         }
@@ -597,6 +970,88 @@ mod tests {
                 .count(),
             CAPACITY - BATCH,
             "no Warn record was evicted to make room"
+        );
+    }
+
+    #[test]
+    fn a_protected_producer_times_out_into_preallocated_loss_accounting() {
+        let wait = Duration::from_millis(30);
+        let queue = LogQueue::new_for_test_with_wait(2, 32, wait);
+        queue.enqueue(LogPriority::Warn, line("warn-one"));
+        queue.enqueue(LogPriority::Error, line("error-two"));
+
+        let started = std::time::Instant::now();
+        queue.enqueue(LogPriority::Error, line("error-timeout"));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= wait,
+            "the protected producer waits for its configured budget: {elapsed:?}"
+        );
+        assert!(
+            elapsed < wait + Duration::from_millis(75),
+            "the protected producer stays near its configured upper bound: {elapsed:?}"
+        );
+
+        queue.close();
+        let batch = queue.take_batch();
+        assert_eq!(
+            batch
+                .records
+                .iter()
+                .map(|record| record.line.as_ref())
+                .collect::<Vec<_>>(),
+            ["warn-one", "error-two"],
+            "the timed-out record was never admitted"
+        );
+        assert_eq!(
+            batch.summary.as_deref(),
+            Some(
+                "log pressure affected 1 record(s): dropped=1, debug=0, trace=0, info=0, truncated=0, rejected=1\n"
+            ),
+            "timeout loss uses the existing pressure summary storage"
+        );
+    }
+
+    #[test]
+    fn producer_deadline_includes_waiting_to_acquire_the_mutex() {
+        let wait = Duration::from_millis(40);
+        let queue = Arc::new(LogQueue::new_for_test_with_wait(2, 32, wait));
+        queue.enqueue(LogPriority::Warn, line("warn-one"));
+        queue.enqueue(LogPriority::Error, line("error-two"));
+
+        let lock_queue = Arc::clone(&queue);
+        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::channel();
+        let lock_holder = std::thread::spawn(move || {
+            lock_queue.hold_lock_for_test(&locked_tx, &release_rx);
+        });
+        locked_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the queue mutex is held");
+
+        let producer_queue = Arc::clone(&queue);
+        let (done_tx, done_rx) = mpsc::sync_channel(0);
+        let producer = std::thread::spawn(move || {
+            producer_queue.enqueue(LogPriority::Error, line("mutex-timeout"));
+            done_tx.send(()).expect("report bounded producer");
+        });
+        let bounded = done_rx.recv_timeout(wait + Duration::from_millis(75));
+        release_tx.send(()).expect("release queue mutex");
+        lock_holder.join().expect("the lock holder joins");
+        producer.join().expect("the producer joins");
+        assert!(
+            bounded.is_ok(),
+            "mutex acquisition is part of the producer's {wait:?} budget"
+        );
+
+        queue.close();
+        let batch = queue.take_batch();
+        assert_eq!(
+            batch.summary.as_deref(),
+            Some(
+                "log pressure affected 1 record(s): dropped=1, debug=0, trace=0, info=0, truncated=0, rejected=1\n"
+            ),
+            "a mutex-budget loss remains explicitly observable"
         );
     }
 
@@ -786,8 +1241,12 @@ mod tests {
     }
 
     #[test]
-    fn byte_blocked_producers_wake_after_drain_and_close() {
-        let queue = Arc::new(LogQueue::new_for_test(4, 4));
+    fn a_byte_blocked_producer_wakes_after_drain() {
+        let queue = Arc::new(LogQueue::new_for_test_with_wait(
+            4,
+            4,
+            Duration::from_secs(1),
+        ));
         queue.enqueue(LogPriority::Warn, line("wwww"));
 
         let drain_queue = Arc::clone(&queue);
@@ -836,7 +1295,15 @@ mod tests {
         drain_waiter.join().expect("the drain waiter joins");
         let admitted = queue.take_batch();
         assert_eq!(admitted.records[0].line.as_ref(), "d");
+    }
 
+    #[test]
+    fn close_preaccounts_a_byte_blocked_protected_record() {
+        let queue = Arc::new(LogQueue::new_for_test_with_wait(
+            4,
+            4,
+            Duration::from_secs(1),
+        ));
         queue.enqueue(LogPriority::Warn, line("wwww"));
         let close_queue = Arc::clone(&queue);
         let (close_prepared_tx, close_prepared_rx) = mpsc::channel();
@@ -844,7 +1311,7 @@ mod tests {
         let (close_done_tx, close_done_rx) = mpsc::channel();
         let close_waiter = std::thread::spawn(move || {
             close_queue.enqueue_after(
-                LogPriority::Debug,
+                LogPriority::Error,
                 line("z"),
                 FormatStatus::Complete,
                 || {
@@ -874,15 +1341,24 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("close wakes the byte-blocked producer");
         close_waiter.join().expect("the close waiter joins");
-        let remaining = drain_all(&queue);
+        let remaining = queue.take_batch();
         assert_eq!(
             remaining
+                .records
                 .iter()
                 .map(|record| record.line.as_ref())
                 .collect::<Vec<_>>(),
             ["wwww"],
             "close wakes the producer without admitting its record"
         );
+        assert_eq!(
+            remaining.summary.as_deref(),
+            Some(
+                "log pressure affected 1 record(s): dropped=1, debug=0, trace=0, info=0, truncated=0, rejected=1\n"
+            ),
+            "close pre-accounts the protected record before waking its producer"
+        );
+        assert!(remaining.done);
     }
 
     #[test]
@@ -946,7 +1422,11 @@ mod tests {
     fn saturation_under_load_never_evicts_or_duplicates_warn_or_error() {
         const PRODUCERS: u64 = 4;
         const PER_PRODUCER: u64 = 10000;
-        let queue = Arc::new(LogQueue::new());
+        let queue = Arc::new(LogQueue::new_for_test_with_wait(
+            CAPACITY,
+            LOG_LIMITS.max_queued_bytes,
+            Duration::from_secs(1),
+        ));
         let (drained_tx, drained_rx) = mpsc::channel();
         let worker_queue = Arc::clone(&queue);
         let worker = std::thread::spawn(move || {
