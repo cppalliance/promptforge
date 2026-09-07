@@ -397,7 +397,7 @@ isProject: false
 - Focused verification: from the repository root run `node tools/check-stt-native-workflow.test.mjs`, `cargo test -p gateway-stt`, and `cargo test -p gateway-stt-backend-whisper`.
 - Component boundary: ends Component 4; review cumulative Steps 10 through 14 against the Step 9 commit.
 
-### Step 15: Make preparation names collision-resistant
+### Step 15: Make preparation names collision-resistant [completed]
 
 - Component and piece: Component 5 of 8, Gateway profile switching; harden prepared persistence names before moving transaction ownership.
 - Dependency: depends on Step 1's split Gateway coverage and is the first profile-switch piece because the transaction must inherit settled temporary-file ownership semantics.

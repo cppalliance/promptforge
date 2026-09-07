@@ -12,39 +12,85 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, OnceLock};
 
 use axum::Json;
 use axum::extract::State;
 use axum::extract::rejection::JsonRejection;
 use gateway_config::{ConfigErrorKind, save_config_shadow};
+use rand::Rng as _;
 
 use crate::auth::Caller;
 use crate::error::GatewayError;
 use crate::{AppState, check_auth};
 
-static PERSISTENCE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const PREPARED_CREATE_ATTEMPTS: u64 = 16;
+static PERSISTENCE_NAMES: LazyLock<ProcessPreparationNames<fn() -> u128>> =
+    LazyLock::new(|| ProcessPreparationNames::new(std::process::id(), random_persistence_nonce));
+
+struct ProcessPreparationNames<N> {
+    pid: u32,
+    nonce: OnceLock<u128>,
+    sequence: AtomicU64,
+    random_nonce: N,
+}
+
+impl<N: Fn() -> u128> ProcessPreparationNames<N> {
+    fn new(pid: u32, random_nonce: N) -> Self {
+        Self {
+            pid,
+            nonce: OnceLock::new(),
+            sequence: AtomicU64::new(0),
+            random_nonce,
+        }
+    }
+
+    fn nonce(&self) -> u128 {
+        *self.nonce.get_or_init(|| (self.random_nonce)())
+    }
+
+    fn next_sequence(&self) -> u64 {
+        self.sequence.fetch_add(1, Ordering::Relaxed)
+    }
+}
 
 /// One fully written and synced temporary file awaiting atomic replacement.
 #[derive(Debug)]
 pub(crate) struct PreparedFile {
     target: PathBuf,
-    temporary: PathBuf,
+    temporary: Option<PathBuf>,
     original: Option<Vec<u8>>,
     contents: Vec<u8>,
 }
 
 impl PreparedFile {
     pub(crate) fn prepare(target: PathBuf, contents: String) -> Result<Self, GatewayError> {
-        let temporary = persistence_temporary(&target);
+        Self::prepare_with_name_source(target, contents, &PERSISTENCE_NAMES)
+    }
+
+    fn prepare_with_name_source<N: Fn() -> u128>(
+        target: PathBuf,
+        contents: String,
+        names: &ProcessPreparationNames<N>,
+    ) -> Result<Self, GatewayError> {
+        Self::prepare_with_names(target, contents, names.pid, names.nonce(), || {
+            names.next_sequence()
+        })
+    }
+
+    fn prepare_with_names(
+        target: PathBuf,
+        contents: String,
+        pid: u32,
+        nonce: u128,
+        mut next_sequence: impl FnMut() -> u64,
+    ) -> Result<Self, GatewayError> {
         let original = match std::fs::read(&target) {
             Ok(contents) => Some(contents),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(GatewayError::ConfigWriteIo(Box::new(error))),
         };
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
+        let (mut file, temporary) = create_prepared(&target, pid, nonce, &mut next_sequence)
             .map_err(|error| GatewayError::ConfigWriteIo(Box::new(error)))?;
         if let Err(error) = file
             .write_all(contents.as_bytes())
@@ -56,14 +102,22 @@ impl PreparedFile {
         }
         Ok(Self {
             target,
-            temporary,
+            temporary: Some(temporary),
             original,
             contents: contents.into_bytes(),
         })
     }
 
     pub(crate) fn commit(&mut self) -> Result<(), std::io::Error> {
-        std::fs::rename(&self.temporary, &self.target)
+        let temporary = self.temporary.as_ref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "prepared persistence was already committed",
+            )
+        })?;
+        std::fs::rename(temporary, &self.target)?;
+        self.temporary = None;
+        Ok(())
     }
 
     pub(crate) fn still_original(&self) -> bool {
@@ -84,25 +138,94 @@ impl PreparedFile {
 
     #[cfg(test)]
     pub(crate) fn discard_temporary(&self) {
-        std::fs::remove_file(&self.temporary).expect("prepared temporary exists");
+        let temporary = self
+            .temporary
+            .as_ref()
+            .expect("uncommitted preparation owns a temporary");
+        std::fs::remove_file(temporary).expect("prepared temporary exists");
     }
 }
 
 impl Drop for PreparedFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.temporary);
+        if let Some(temporary) = &self.temporary {
+            let _ = std::fs::remove_file(temporary);
+        }
     }
 }
 
-fn persistence_temporary(target: &Path) -> PathBuf {
+fn random_persistence_nonce() -> u128 {
+    rand::rng().random()
+}
+
+#[derive(Debug)]
+struct PreparedCreateExhausted {
+    target: PathBuf,
+    attempts: u64,
+    last_candidate: PathBuf,
+    source: std::io::Error,
+}
+
+impl std::fmt::Display for PreparedCreateExhausted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "failed to prepare {} after {} create_new attempts; last candidate {}",
+            self.target.display(),
+            self.attempts,
+            self.last_candidate.display()
+        )
+    }
+}
+
+impl std::error::Error for PreparedCreateExhausted {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+fn create_prepared(
+    target: &Path,
+    pid: u32,
+    nonce: u128,
+    next_sequence: &mut impl FnMut() -> u64,
+) -> Result<(std::fs::File, PathBuf), std::io::Error> {
+    let mut last_collision = None;
+    for _ in 0..PREPARED_CREATE_ATTEMPTS {
+        let temporary = persistence_temporary(target, pid, nonce, next_sequence());
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((file, temporary)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_collision = Some((temporary, error));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let Some((last_candidate, source)) = last_collision else {
+        return Err(std::io::Error::other(
+            "prepared persistence retry budget must be nonzero",
+        ));
+    };
+    Err(std::io::Error::new(
+        source.kind(),
+        PreparedCreateExhausted {
+            target: target.to_path_buf(),
+            attempts: PREPARED_CREATE_ATTEMPTS,
+            last_candidate,
+            source,
+        },
+    ))
+}
+
+fn persistence_temporary(target: &Path, pid: u32, nonce: u128, sequence: u64) -> PathBuf {
     let mut name = target
         .file_name()
         .map_or_else(|| "profile".into(), std::ffi::OsStr::to_os_string);
-    name.push(format!(
-        ".prepared-{}-{}",
-        std::process::id(),
-        PERSISTENCE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
+    name.push(format!(".prepared-{pid}-{nonce:032x}-{sequence}"));
     target.with_file_name(name)
 }
 
@@ -295,6 +418,224 @@ models = ["beta-model"]
             config_path,
         };
         (temp, config, paths)
+    }
+
+    #[test]
+    fn prepared_file_retries_deterministic_collisions_without_claiming_residue() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("gateway.state.toml");
+        std::fs::write(&target, "old").expect("write target");
+        let pid = 41;
+        let nonce = 0x1234;
+        let collision = super::persistence_temporary(&target, pid, nonce, 7);
+        let owned = super::persistence_temporary(&target, pid, nonce, 8);
+        std::fs::write(&collision, "crash residue").expect("write collision");
+        let mut sequences = [7, 8].into_iter();
+
+        let prepared =
+            super::PreparedFile::prepare_with_names(target, "new".to_owned(), pid, nonce, || {
+                sequences.next().expect("bounded sequence")
+            })
+            .expect("collision retries");
+
+        assert_eq!(
+            std::fs::read_to_string(&collision).expect("read residue"),
+            "crash residue"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&owned).expect("read preparation"),
+            "new"
+        );
+        drop(prepared);
+        assert!(collision.exists(), "unowned residue remains");
+        assert!(!owned.exists(), "owned preparation is cleaned");
+    }
+
+    #[test]
+    fn process_name_source_is_stable_full_width_and_unique_across_pid_reuse() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("gateway.state.toml");
+        let pid = 73;
+        let first_nonce = 0x0123_4567_89ab_cdef_fedc_ba98_7654_3210;
+        let second_nonce = 0xfedc_ba98_7654_3210_0123_4567_89ab_cdef;
+        let first_nonce_calls = std::cell::Cell::new(0);
+        let first_source = super::ProcessPreparationNames::new(pid, || {
+            first_nonce_calls.set(first_nonce_calls.get() + 1);
+            first_nonce
+        });
+        let second_source = super::ProcessPreparationNames::new(pid, || second_nonce);
+
+        let first = super::PreparedFile::prepare_with_name_source(
+            target.clone(),
+            "first preparation".to_owned(),
+            &first_source,
+        )
+        .expect("first process prepares");
+        let next = super::PreparedFile::prepare_with_name_source(
+            target.clone(),
+            "next preparation".to_owned(),
+            &first_source,
+        )
+        .expect("same process prepares again");
+        let reused = super::PreparedFile::prepare_with_name_source(
+            target,
+            "reused PID preparation".to_owned(),
+            &second_source,
+        )
+        .expect("reused PID prepares");
+
+        assert_eq!(first_nonce_calls.get(), 1, "one nonce per process source");
+        assert_eq!(
+            first
+                .temporary
+                .as_deref()
+                .and_then(std::path::Path::file_name),
+            Some(std::ffi::OsStr::new(
+                "gateway.state.toml.prepared-73-0123456789abcdeffedcba9876543210-0"
+            ))
+        );
+        assert_eq!(
+            next.temporary
+                .as_deref()
+                .and_then(std::path::Path::file_name),
+            Some(std::ffi::OsStr::new(
+                "gateway.state.toml.prepared-73-0123456789abcdeffedcba9876543210-1"
+            ))
+        );
+        assert_eq!(
+            reused
+                .temporary
+                .as_deref()
+                .and_then(std::path::Path::file_name),
+            Some(std::ffi::OsStr::new(
+                "gateway.state.toml.prepared-73-fedcba98765432100123456789abcdef-0"
+            ))
+        );
+    }
+
+    #[test]
+    fn process_nonce_separates_pid_reuse_from_crash_residue() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("gateway.state.toml");
+        let pid = 73;
+        let crashed = super::persistence_temporary(&target, pid, 0xaaaa, 0);
+        let current = super::persistence_temporary(&target, pid, 0xbbbb, 0);
+        std::fs::write(&crashed, "prior process").expect("write crash residue");
+
+        let prepared = super::PreparedFile::prepare_with_names(
+            target,
+            "current process".to_owned(),
+            pid,
+            0xbbbb,
+            || 0,
+        )
+        .expect("reused PID prepares");
+
+        assert_eq!(
+            std::fs::read_to_string(&crashed).expect("read crash residue"),
+            "prior process"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&current).expect("read current preparation"),
+            "current process"
+        );
+        drop(prepared);
+        assert!(crashed.exists(), "prior process residue remains");
+    }
+
+    #[test]
+    fn prepared_file_bounds_collision_retries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("gateway.state.toml");
+        let pid = 97;
+        let nonce = 0xcafe;
+        for sequence in 0..super::PREPARED_CREATE_ATTEMPTS {
+            std::fs::write(
+                super::persistence_temporary(&target, pid, nonce, sequence),
+                format!("residue {sequence}"),
+            )
+            .expect("write residue");
+        }
+        let mut sequence = 0_u64;
+
+        let error = super::PreparedFile::prepare_with_names(
+            target.clone(),
+            "new".to_owned(),
+            pid,
+            nonce,
+            || {
+                let current = sequence;
+                sequence += 1;
+                current
+            },
+        )
+        .expect_err("retry budget exhausts");
+
+        let super::GatewayError::ConfigWriteIo(error) = error else {
+            panic!("collision exhaustion returns an I/O error");
+        };
+        let error = error.downcast_ref::<std::io::Error>().expect("I/O source");
+        let last_candidate =
+            super::persistence_temporary(&target, pid, nonce, super::PREPARED_CREATE_ATTEMPTS - 1);
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "failed to prepare {} after {} create_new attempts; last candidate {}",
+                target.display(),
+                super::PREPARED_CREATE_ATTEMPTS,
+                last_candidate.display()
+            )
+        );
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        let context = error
+            .get_ref()
+            .and_then(|source| source.downcast_ref::<super::PreparedCreateExhausted>())
+            .expect("collision exhaustion context");
+        assert_eq!(context.attempts, super::PREPARED_CREATE_ATTEMPTS);
+        assert_eq!(context.last_candidate, last_candidate);
+        let collision = std::error::Error::source(error)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("final collision source");
+        assert_eq!(collision.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(sequence, super::PREPARED_CREATE_ATTEMPTS);
+        for residue in 0..super::PREPARED_CREATE_ATTEMPTS {
+            assert_eq!(
+                std::fs::read_to_string(
+                    super::persistence_temporary(&target, pid, nonce, residue,)
+                )
+                .expect("read residue"),
+                format!("residue {residue}")
+            );
+        }
+    }
+
+    #[test]
+    fn successful_commit_releases_temporary_path_ownership() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let target = temp.path().join("gateway.state.toml");
+        std::fs::write(&target, "old").expect("write target");
+        let temporary = super::persistence_temporary(&target, 101, 0xfeed, 3);
+        let mut prepared = super::PreparedFile::prepare_with_names(
+            target.clone(),
+            "new".to_owned(),
+            101,
+            0xfeed,
+            || 3,
+        )
+        .expect("prepare");
+
+        prepared.commit().expect("commit");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read target"),
+            "new"
+        );
+        assert!(!temporary.exists(), "rename consumes preparation");
+        std::fs::write(&temporary, "later owner").expect("replace temporary path");
+        drop(prepared);
+        assert_eq!(
+            std::fs::read_to_string(&temporary).expect("read later owner"),
+            "later owner"
+        );
     }
 
     #[tokio::test]
