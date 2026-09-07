@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   assertAcyclic,
+  broadDeadCodeAllowances,
   countEffectiveRootNames,
   parseCargoModulesDot,
   publicRootCount,
+  readRustSources,
   requireExactPublicApi,
   requireCargoVersion,
   requireExactPublicRootCount,
+  requireNoBroadDeadCodeAllowances,
   requireNoFixtureApi,
   testFixturePublicRootCount,
   requireToolVersion,
@@ -17,6 +22,41 @@ import {
   runPublicApi,
   runRustdocCargo,
 } from "./check-stt-architecture.mjs";
+
+test("gateway-stt keeps module dead-code diagnostics active", () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const sources = readRustSources(
+    join(root, "crates", "gateway-stt", "src"),
+  );
+
+  assert.ok(sources.length > 1);
+  assert.doesNotThrow(() => requireNoBroadDeadCodeAllowances(sources));
+});
+
+test("dead-code guard rejects equivalent broad attributes", () => {
+  for (const source of [
+    '#[allow(dead_code, reason = "temporary")] pub(crate) mod hidden;',
+    "#[cfg_attr(not(test), allow(dead_code))]\n#[cfg(unix)]\nmod hidden;",
+    "#! [ allow ( dead_code, reason = \"module contents\" ) ]\nfn hidden() {}",
+  ]) {
+    assert.deepEqual(broadDeadCodeAllowances(source), [1]);
+    assert.throws(
+      () => requireNoBroadDeadCodeAllowances([{ path: "fixture.rs", source }]),
+      /fixture\.rs:1: broad dead-code allowance is forbidden/,
+    );
+  }
+});
+
+test("dead-code guard ignores item allowances and inert text", () => {
+  const source = String.raw`
+// #[allow(dead_code)] mod commented;
+const TEXT: &str = "#![allow(dead_code)]";
+#![cfg_attr(test, allow(unused), deny(dead_code))]
+#[cfg_attr(not(test), allow(dead_code, reason = "drop ownership"))]
+field: Resource,
+`;
+  assert.deepEqual(broadDeadCodeAllowances(source), []);
+});
 
 test("DOT parser collapses item edges to their owning modules", () => {
   const graph = parseCargoModulesDot(`

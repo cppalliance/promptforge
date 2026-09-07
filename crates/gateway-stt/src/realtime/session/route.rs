@@ -1,10 +1,8 @@
-use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
-
 use super::{Session, SessionError};
 use crate::realtime::result_mailbox::{ItemResult, SESSION_RESULT_CAPACITY};
 use crate::realtime::session::state::InterimTaskOutput;
 use crate::realtime::wire::ServerEvent;
-
+use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy};
 impl Session {
     pub(crate) fn created_event(&self) -> ServerEvent {
         ServerEvent::session_created(self.ids.event(), self.effective.clone())
@@ -13,11 +11,9 @@ impl Session {
     pub(crate) fn updated_event(&self) -> ServerEvent {
         ServerEvent::session_updated(self.ids.event(), self.effective.clone())
     }
-
     pub(crate) fn cleared_event(&self) -> ServerEvent {
         ServerEvent::input_cleared(self.ids.event())
     }
-
     pub(crate) fn next_event_id(&self) -> String {
         self.ids.event()
     }
@@ -32,7 +28,6 @@ impl Session {
         }
         Ok(())
     }
-
     pub(crate) fn schedule_interim(&mut self) -> Result<(), SessionError> {
         if self.interim_task.is_some() {
             return Ok(());
@@ -81,11 +76,11 @@ impl Session {
         }));
         Ok(())
     }
-
     pub(super) fn accept_scheduled_interim(
         &mut self,
         output: InterimTaskOutput,
     ) -> Result<Option<ServerEvent>, SessionError> {
+        #[cfg(any(test, feature = "test-fixtures"))]
         let InterimTaskOutput::Decode {
             epoch,
             item_id,
@@ -97,6 +92,15 @@ impl Session {
         else {
             unreachable!("fixture interims are accepted by the fixture path");
         };
+        #[cfg(not(any(test, feature = "test-fixtures")))]
+        let InterimTaskOutput::Decode {
+            epoch,
+            item_id,
+            segment_start,
+            audio_start,
+            audio_end,
+            transcript,
+        } = output;
         if self.current_epoch != Some(epoch) {
             return Ok(None);
         }
@@ -152,7 +156,6 @@ impl Session {
             })
             .collect()
     }
-
     pub(crate) fn committed_events(
         &self,
         receipt: &crate::realtime::CommitReceipt,
@@ -164,14 +167,12 @@ impl Session {
             receipt.previous_item_id().map(str::to_owned),
         )
     }
-
     pub(crate) fn drain_events(&mut self) -> Vec<ServerEvent> {
         self.drain_results()
             .into_iter()
             .map(|result: ItemResult| ServerEvent::item_result(self.ids.event(), result))
             .collect()
     }
-
     pub(crate) async fn finish_ready(&mut self) -> Result<Vec<ServerEvent>, SessionError> {
         let ready = self
             .committed
@@ -184,7 +185,6 @@ impl Session {
         }
         Ok(self.drain_events())
     }
-
     pub(crate) fn replacement_events(&self) -> Vec<ServerEvent> {
         let mut events = self
             .committed

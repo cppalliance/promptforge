@@ -23,6 +23,7 @@ pub(crate) use interim::InterimSnapshot;
 use state::TakeState;
 use window::WholeWindowState;
 
+#[cfg(any(test, feature = "test-fixtures"))]
 fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
@@ -82,6 +83,7 @@ impl Take {
         TakeState::lock(&self.state.segmenter).consumed()
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn uncommitted_snapshot(&self, window_samples: usize) -> Vec<f32> {
         let consumed = self.consumed();
         let buffer = TakeState::lock(&self.state.buffer);

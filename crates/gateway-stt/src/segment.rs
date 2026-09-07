@@ -53,6 +53,7 @@ pub(crate) struct Segmenter {
 impl Segmenter {
     /// A fresh segmenter positioned at the start of a take buffer.
     #[must_use]
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn new() -> Self {
         Self::default()
     }

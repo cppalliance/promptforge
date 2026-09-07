@@ -4,12 +4,10 @@
 //! publication, batch transcription, and Realtime transcription.
 
 mod artifacts;
-#[allow(dead_code)]
 mod audio;
 mod batch;
 mod generation;
 mod model;
-#[allow(dead_code)]
 mod realtime;
 mod replacement;
 mod segment;

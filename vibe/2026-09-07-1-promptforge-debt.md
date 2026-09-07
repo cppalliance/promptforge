@@ -376,7 +376,7 @@ isProject: false
 - Exclusions: no production behavior changes, no new feature, and no weakened Miri ownership or queue coverage.
 - Focused verification: from the repository root run `cargo test -p gateway-stt -F test-fixtures`, `cargo test -p gateway-stt-engine -F test-fixtures`, `cargo +nightly-2026-09-05 miri test -p gateway-stt -F test-fixtures`, `cargo +nightly-2026-09-05 miri test -p gateway-stt-engine -F test-fixtures`, and `node tools/check-stt-architecture.mjs`.
 
-### Step 13: Restore dead-code diagnostics
+### Step 13: Restore dead-code diagnostics [completed]
 
 - Component and piece: Component 4 of 8, STT test infrastructure; remove broad dead-code allowances and resolve only actual configuration-specific exceptions.
 - Dependency: depends on Step 12 because narrowing fixture symbols first prevents allowances from masking obsolete controls.

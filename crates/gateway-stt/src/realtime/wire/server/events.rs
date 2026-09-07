@@ -4,7 +4,6 @@ use super::{
 use crate::realtime::result_mailbox::{ItemFailure, ItemResult};
 use crate::realtime::wire::shared::{OptionalNullable, RequiredNullable};
 use crate::take::InterimSnapshot;
-
 impl ServerEvent {
     pub(in crate::realtime) fn session_created(
         event_id: String,
@@ -79,10 +78,12 @@ impl ServerEvent {
 
     pub(in crate::realtime) fn item_result(event_id: String, result: ItemResult) -> Self {
         match result {
+            #[cfg(any(test, feature = "test-fixtures"))]
             ItemResult::Delta {
                 item_id,
                 transcript,
             } => Self::transcription_delta(event_id, item_id, transcript),
+            #[cfg(any(test, feature = "test-fixtures"))]
             ItemResult::Hypothesis {
                 item_id,
                 revision,
@@ -168,7 +169,6 @@ fn item_failure_error(failure: &ItemFailure) -> WireError {
         event_id: OptionalNullable::Missing,
     }
 }
-
 fn replacement_error(event_id: OptionalNullable<String>) -> WireError {
     WireError {
         r#type: "server_error".to_owned(),

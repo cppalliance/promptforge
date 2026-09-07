@@ -130,6 +130,7 @@ pub(crate) enum RequiredNullable<T> {
 }
 
 impl<T> RequiredNullable<T> {
+    #[cfg(test)]
     pub(super) fn as_ref(&self) -> Option<&T> {
         match self {
             Self::Null => None,
@@ -137,6 +138,7 @@ impl<T> RequiredNullable<T> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
@@ -183,6 +185,7 @@ impl<T> OptionalNullable<T> {
         matches!(self, Self::Missing)
     }
 
+    #[cfg(test)]
     pub(super) fn invalid_empty(&self) -> bool
     where
         T: AsRef<str>,

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
-use super::input::{InputSnapshot, SealedInput};
+#[cfg(any(test, feature = "test-fixtures"))]
+use super::input::InputSnapshot;
+use super::input::SealedInput;
 use super::result_mailbox::{ItemFailure, ItemResult};
 use crate::take::Take;
 
@@ -35,7 +37,12 @@ impl CommitReceipt {
 pub(crate) struct CommittedItem {
     id: String,
     previous_item_id: Option<String>,
+    #[cfg(any(test, feature = "test-fixtures"))]
     snapshot: InputSnapshot,
+    #[cfg_attr(
+        not(any(test, feature = "test-fixtures")),
+        allow(dead_code, reason = "retains take ownership until item retirement")
+    )]
     take: Arc<Take>,
     duration_seconds: f64,
     finalization: Option<FinalizationTask>,
@@ -58,6 +65,7 @@ impl CommittedItem {
             Self {
                 id: sealed.item_id,
                 previous_item_id,
+                #[cfg(any(test, feature = "test-fixtures"))]
                 snapshot: sealed.snapshot,
                 take,
                 duration_seconds: sealed.duration_seconds,
@@ -76,14 +84,17 @@ impl CommittedItem {
         &self.id
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) const fn snapshot(&self) -> &InputSnapshot {
         &self.snapshot
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn take(&self) -> &Take {
         &self.take
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) const fn is_finalizing(&self) -> bool {
         self.finalization.is_some()
     }

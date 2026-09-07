@@ -301,7 +301,6 @@ fn event_id(event: &ClientEvent) -> Option<String> {
         | ClientEvent::Clear { event_id } => event_id.clone(),
     }
 }
-
 fn session_error(error: &SessionError, client_event_id: Option<String>) -> ClientError {
     match error {
         SessionError::Audio(AudioError::InvalidBase64) => ClientError::request(
@@ -340,13 +339,15 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
             None,
             client_event_id,
         ),
-        SessionError::InterimAtCapacity | SessionError::Mailbox(MailboxError::ResultAtCapacity) => {
-            ClientError::overload(
-                "result_queue_overload",
-                "The session result queue is full",
-                None,
-                client_event_id,
-            )
+        SessionError::InterimAtCapacity => ClientError::overload(
+            "result_queue_overload",
+            "The session result queue is full",
+            None,
+            client_event_id,
+        ),
+        #[cfg(any(test, feature = "test-fixtures"))]
+        SessionError::Mailbox(MailboxError::ResultAtCapacity) => {
+            session_error(&SessionError::InterimAtCapacity, client_event_id)
         }
         SessionError::PendingPrecommitFailure(_) => ClientError::request(
             "precommit_transcription_failed",
@@ -381,7 +382,6 @@ fn session_error(error: &SessionError, client_event_id: Option<String>) -> Clien
         }
     }
 }
-
 async fn send_events(socket: &mut WebSocket, events: &[ServerEvent], policy: &RoutePolicy) -> bool {
     for event in events {
         if !send_event(socket, event, policy).await {
@@ -390,7 +390,6 @@ async fn send_events(socket: &mut WebSocket, events: &[ServerEvent], policy: &Ro
     }
     true
 }
-
 async fn send_client_error(
     socket: &mut WebSocket,
     session: &Session,
@@ -404,7 +403,6 @@ async fn send_client_error(
     )
     .await
 }
-
 async fn send_event(socket: &mut WebSocket, event: &ServerEvent, policy: &RoutePolicy) -> bool {
     match serde_json::to_value(event) {
         Ok(value) => send_json(socket, value, policy).await,

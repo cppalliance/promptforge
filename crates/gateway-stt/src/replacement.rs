@@ -1,29 +1,23 @@
 //! Serialized generation replacement and explicit work ownership.
-
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Instant;
-
 use tokio::sync::Notify;
-
 #[derive(Debug, Default)]
 struct CoordinatorState {
     active: Option<Arc<PermitIdentity>>,
     valid: bool,
     shutting_down: bool,
 }
-
 #[derive(Debug)]
 struct PermitIdentity;
-
 /// One service-wide replacement lane.
 #[derive(Debug, Default)]
 pub(crate) struct ReplacementCoordinator {
     state: Mutex<CoordinatorState>,
     changed: Condvar,
 }
-
 impl ReplacementCoordinator {
     pub(crate) fn acquire(self: &Arc<Self>) -> ReplacementPermit {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -57,13 +51,11 @@ impl ReplacementCoordinator {
         }
     }
 }
-
 /// Exclusive ownership of one staged replacement transaction.
 pub(crate) struct ReplacementPermit {
     coordinator: Arc<ReplacementCoordinator>,
     identity: Option<Arc<PermitIdentity>>,
 }
-
 impl fmt::Debug for ReplacementPermit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -72,7 +64,6 @@ impl fmt::Debug for ReplacementPermit {
             .finish_non_exhaustive()
     }
 }
-
 impl ReplacementPermit {
     pub(crate) fn with_current<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let identity = self.identity.as_ref()?;
@@ -137,6 +128,7 @@ impl Drop for ShutdownPermit {
 
 #[derive(Debug)]
 struct EpochState {
+    #[cfg(any(test, feature = "test-fixtures"))]
     id: u64,
     cancelled: AtomicBool,
     changed: Notify,
@@ -149,9 +141,10 @@ pub(crate) struct SessionEpoch {
 }
 
 impl SessionEpoch {
-    fn new(id: u64) -> Self {
+    fn new(#[cfg(any(test, feature = "test-fixtures"))] id: u64) -> Self {
         Self {
             state: Arc::new(EpochState {
+                #[cfg(any(test, feature = "test-fixtures"))]
                 id,
                 cancelled: AtomicBool::new(false),
                 changed: Notify::new(),
@@ -159,6 +152,7 @@ impl SessionEpoch {
         }
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn id(&self) -> u64 {
         self.state.id
     }
@@ -199,6 +193,7 @@ struct AdmissionState {
     requests: usize,
     jobs: usize,
     epoch: SessionEpoch,
+    #[cfg(any(test, feature = "test-fixtures"))]
     next_epoch: u64,
 }
 
@@ -216,7 +211,11 @@ impl Default for AdmissionGate {
                 admission: Admission::Open,
                 requests: 0,
                 jobs: 0,
-                epoch: SessionEpoch::new(1),
+                epoch: SessionEpoch::new(
+                    #[cfg(any(test, feature = "test-fixtures"))]
+                    1,
+                ),
+                #[cfg(any(test, feature = "test-fixtures"))]
                 next_epoch: 2,
             }),
             changed: Condvar::new(),
@@ -259,8 +258,14 @@ impl AdmissionGate {
                 return None;
             }
             let identity = Arc::new(CloseIdentity);
-            let next_epoch = SessionEpoch::new(state.next_epoch);
-            state.next_epoch = state.next_epoch.wrapping_add(1).max(1);
+            let next_epoch = SessionEpoch::new(
+                #[cfg(any(test, feature = "test-fixtures"))]
+                state.next_epoch,
+            );
+            #[cfg(any(test, feature = "test-fixtures"))]
+            {
+                state.next_epoch = state.next_epoch.wrapping_add(1).max(1);
+            }
             let old_epoch = std::mem::replace(&mut state.epoch, next_epoch);
             state.admission = Admission::Closed(Arc::clone(&identity));
             (old_epoch, CloseToken { identity })
@@ -305,6 +310,7 @@ impl AdmissionGate {
         )
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn counts(&self) -> (usize, usize) {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         (state.requests, state.jobs)

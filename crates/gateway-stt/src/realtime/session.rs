@@ -1,11 +1,10 @@
-use std::future::Future;
-
 use super::input::{InputSnapshot, UncommittedInput};
 use super::item::CommittedItem;
 use super::registry::SessionRegistration;
 use super::wire::{ClientError, EffectiveSession, IdGenerator, ServerEvent};
 use crate::generation::GenerationLease;
-
+#[cfg(any(test, feature = "test-fixtures"))]
+use std::future::Future;
 mod items;
 mod route;
 mod state;
@@ -49,6 +48,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) const fn input(&self) -> Option<&UncommittedInput> {
         self.input.as_ref()
     }
@@ -87,6 +87,7 @@ impl Session {
         Ok(epoch)
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn spawn_interim<F>(&mut self, task: F) -> Result<InterimEpoch, SessionError>
     where
         F: Future<Output = String> + Send + 'static,
@@ -106,6 +107,7 @@ impl Session {
         Ok(epoch)
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn accept_interim(
         &mut self,
         epoch: InterimEpoch,
@@ -129,6 +131,7 @@ impl Session {
         let result = task.await;
         self.interim_task = None;
         match result.map_err(|_| SessionError::CanceledTaskFailed)? {
+            #[cfg(any(test, feature = "test-fixtures"))]
             InterimTaskOutput::Fixture(epoch, transcript) => {
                 Ok(self.accept_interim(epoch, transcript))
             }
@@ -142,6 +145,7 @@ impl Session {
             .is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) const fn canceled_join_count(&self) -> usize {
         self.canceled_tasks.len()
     }
@@ -171,6 +175,7 @@ impl Session {
         self.ids.event_count()
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) async fn join_canceled(&mut self) -> Result<(), SessionError> {
         while let Some(task) = self.canceled_tasks.first_mut() {
             let result = task.await;

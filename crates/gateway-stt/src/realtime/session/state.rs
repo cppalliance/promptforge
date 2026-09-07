@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-
-use tokio::task::JoinHandle;
-
 use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 use crate::realtime::input::UncommittedInput;
@@ -9,16 +5,16 @@ use crate::realtime::item::CommittedItem;
 use crate::realtime::registry::SessionRegistration;
 use crate::realtime::result_mailbox::{MailboxError, ResultMailbox};
 use crate::realtime::wire::{EffectiveSession, IdGenerator};
-
+use std::collections::HashMap;
+use tokio::task::JoinHandle;
 pub(super) const SESSION_CANCEL_JOIN_CAPACITY: usize = 8;
 pub(super) const MAX_COMMITTED_ITEMS_PER_SESSION: usize = 4;
 pub(super) type InterimTask = JoinHandle<InterimTaskOutput>;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct InterimEpoch(pub(super) u64);
-
 #[derive(Debug)]
 pub(super) enum InterimTaskOutput {
+    #[cfg(any(test, feature = "test-fixtures"))]
     Fixture(InterimEpoch, String),
     Decode {
         epoch: InterimEpoch,
@@ -29,7 +25,6 @@ pub(super) enum InterimTaskOutput {
         transcript: Result<String, String>,
     },
 }
-
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum SessionError {
     #[error(transparent)]
@@ -55,9 +50,18 @@ pub(crate) enum SessionError {
     #[error("{0}")]
     Finalization(String),
     #[error(transparent)]
-    Mailbox(#[from] MailboxError),
+    Mailbox(MailboxError),
 }
 
+impl From<MailboxError> for SessionError {
+    fn from(error: MailboxError) -> Self {
+        #[cfg(any(test, feature = "test-fixtures"))]
+        if error == MailboxError::ResultAtCapacity {
+            return Self::InterimAtCapacity;
+        }
+        Self::Mailbox(error)
+    }
+}
 #[derive(Debug)]
 pub(crate) struct Session {
     pub(super) registration: Option<SessionRegistration>,

@@ -36,6 +36,7 @@ impl CommittedAudio {
         &self.samples
     }
 
+    #[cfg(test)]
     pub(super) const fn input_samples(&self) -> usize {
         self.input_samples
     }
@@ -90,6 +91,7 @@ impl AudioBuffer {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn commit(&mut self) -> Result<CommittedAudio, AudioError> {
         self.validate_commit()?;
         Ok(self.commit_validated())
@@ -126,6 +128,7 @@ impl AudioBuffer {
         std::mem::take(&mut self.resampler.output)
     }
 
+    #[cfg(test)]
     #[allow(clippy::cast_precision_loss)]
     pub(super) fn buffered_duration_seconds(&self) -> f64 {
         self.input_samples as f64 / INPUT_SAMPLE_RATE as f64

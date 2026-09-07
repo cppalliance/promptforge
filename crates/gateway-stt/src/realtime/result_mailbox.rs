@@ -18,6 +18,7 @@ impl ItemFailure {
         }
     }
 
+    #[cfg(feature = "test-fixtures")]
     pub(crate) fn diagnostic(&self) -> &str {
         match self {
             Self::FinalSegmentOverload(message)
@@ -29,10 +30,9 @@ impl ItemFailure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ItemResult {
-    Delta {
-        item_id: String,
-        transcript: String,
-    },
+    #[cfg(any(test, feature = "test-fixtures"))]
+    Delta { item_id: String, transcript: String },
+    #[cfg(any(test, feature = "test-fixtures"))]
     Hypothesis {
         item_id: String,
         revision: u64,
@@ -52,10 +52,9 @@ pub(crate) enum ItemResult {
 impl ItemResult {
     pub(crate) fn item_id(&self) -> &str {
         match self {
-            Self::Delta { item_id, .. }
-            | Self::Hypothesis { item_id, .. }
-            | Self::Completed { item_id, .. }
-            | Self::Failed { item_id, .. } => item_id,
+            #[cfg(any(test, feature = "test-fixtures"))]
+            Self::Delta { item_id, .. } | Self::Hypothesis { item_id, .. } => item_id,
+            Self::Completed { item_id, .. } | Self::Failed { item_id, .. } => item_id,
         }
     }
 
@@ -66,12 +65,14 @@ impl ItemResult {
 
 #[derive(Debug, Default)]
 struct ItemSlots {
+    #[cfg(any(test, feature = "test-fixtures"))]
     hypothesis: Option<ItemResult>,
     terminal: Option<ItemResult>,
 }
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum MailboxError {
+    #[cfg(any(test, feature = "test-fixtures"))]
     #[error("the realtime session result capacity is reached")]
     ResultAtCapacity,
     #[error("the committed item already reached a terminal outcome")]
@@ -82,8 +83,10 @@ pub(crate) enum MailboxError {
 
 #[derive(Debug, Default)]
 pub(crate) struct ResultMailbox {
+    #[cfg(any(test, feature = "test-fixtures"))]
     results: VecDeque<ItemResult>,
     slots: HashMap<String, ItemSlots>,
+    #[cfg(any(test, feature = "test-fixtures"))]
     hypothesis_order: VecDeque<String>,
     terminal_order: VecDeque<String>,
 }
@@ -94,6 +97,7 @@ impl ResultMailbox {
         debug_assert!(replaced.is_none(), "opaque item IDs must be unique");
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn push_delta(
         &mut self,
         item_id: &str,
@@ -113,6 +117,7 @@ impl ResultMailbox {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn replace_hypothesis(
         &mut self,
         item_id: &str,
@@ -157,7 +162,11 @@ impl ResultMailbox {
     }
 
     pub(crate) fn drain(&mut self) -> Vec<ItemResult> {
+        #[cfg(any(test, feature = "test-fixtures"))]
         let mut drained = self.results.drain(..).collect::<Vec<_>>();
+        #[cfg(not(any(test, feature = "test-fixtures")))]
+        let mut drained = Vec::new();
+        #[cfg(any(test, feature = "test-fixtures"))]
         while let Some(item_id) = self.hypothesis_order.pop_front() {
             if let Some(result) = self
                 .slots

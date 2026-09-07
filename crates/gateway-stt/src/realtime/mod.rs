@@ -9,6 +9,7 @@ mod wire;
 
 pub(crate) use item::CommitReceipt;
 pub(crate) use registry::SessionRegistry;
+#[cfg(feature = "test-fixtures")]
 pub(crate) use result_mailbox::ItemResult;
 #[cfg(feature = "test-fixtures")]
 pub(crate) use route::ForcedPrecommitFailure;

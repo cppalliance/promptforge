@@ -1,7 +1,6 @@
 use crate::audio::{AudioBuffer, AudioError};
 use crate::generation::GenerationLease;
 use crate::take::Take;
-
 const INPUT_FORMAT: &str = "audio/pcm";
 const INPUT_RATE: u32 = 24_000;
 const INPUT_MODEL: &str = "realtime-transcribe";
@@ -26,18 +25,22 @@ impl InputSnapshot {
         }
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn prompt(&self) -> &str {
         &self.prompt
     }
 
+    #[cfg(test)]
     pub(crate) const fn format(&self) -> &str {
         self.format
     }
 
+    #[cfg(test)]
     pub(crate) const fn rate(&self) -> u32 {
         self.rate
     }
 
+    #[cfg(test)]
     pub(crate) const fn model(&self) -> &str {
         self.model
     }
@@ -58,12 +61,13 @@ pub(crate) struct UncommittedInput {
 #[derive(Debug)]
 pub(crate) struct SealedInput {
     pub(crate) item_id: String,
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) snapshot: InputSnapshot,
     pub(crate) take: Take,
     pub(crate) duration_seconds: f64,
 }
-
 impl UncommittedInput {
+    #[cfg(test)]
     pub(crate) fn new(
         item_id: String,
         snapshot: InputSnapshot,
@@ -124,6 +128,7 @@ impl UncommittedInput {
         &self.take
     }
 
+    #[cfg(test)]
     pub(crate) fn buffered_duration_seconds(&self) -> f64 {
         self.audio.buffered_duration_seconds()
     }
@@ -145,6 +150,7 @@ impl UncommittedInput {
         self.take.append(committed.samples());
         SealedInput {
             item_id: self.item_id,
+            #[cfg(any(test, feature = "test-fixtures"))]
             snapshot: self.snapshot,
             take: self.take,
             duration_seconds: committed.duration_seconds(),

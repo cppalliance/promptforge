@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -18,6 +18,222 @@ const FIXTURE_STT_CRATES = new Set(["gateway-stt", "gateway-stt-engine"]);
 
 function fail(message) {
   throw new Error(message);
+}
+
+function maskRustCommentsAndLiterals(source) {
+  const masked = source.split("");
+  const blank = (index) => {
+    if (masked[index] !== "\n" && masked[index] !== "\r") {
+      masked[index] = " ";
+    }
+  };
+  let index = 0;
+  while (index < source.length) {
+    if (source.startsWith("//", index)) {
+      while (index < source.length && source[index] !== "\n") {
+        blank(index);
+        index += 1;
+      }
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      let depth = 1;
+      blank(index);
+      blank(index + 1);
+      index += 2;
+      while (index < source.length && depth > 0) {
+        if (source.startsWith("/*", index)) {
+          depth += 1;
+          blank(index);
+          blank(index + 1);
+          index += 2;
+        } else if (source.startsWith("*/", index)) {
+          depth -= 1;
+          blank(index);
+          blank(index + 1);
+          index += 2;
+        } else {
+          blank(index);
+          index += 1;
+        }
+      }
+      continue;
+    }
+
+    const raw = /^(?:br|r)(#*)"/.exec(source.slice(index));
+    if (raw !== null) {
+      const terminator = `"${raw[1]}`;
+      let end = source.indexOf(terminator, index + raw[0].length);
+      end = end === -1 ? source.length : end + terminator.length;
+      while (index < end) {
+        blank(index);
+        index += 1;
+      }
+      continue;
+    }
+
+    const quoteOffset =
+      source[index] === '"' ? 0 : source[index] === "b" && source[index + 1] === '"' ? 1 : -1;
+    if (quoteOffset !== -1) {
+      const openingQuote = index + quoteOffset;
+      while (index <= openingQuote) {
+        blank(index);
+        index += 1;
+      }
+      let escaped = false;
+      while (index < source.length) {
+        const character = source[index];
+        blank(index);
+        index += 1;
+        if (character === '"' && !escaped) {
+          break;
+        }
+        escaped = character === "\\" && !escaped;
+        if (character !== "\\") {
+          escaped = false;
+        }
+      }
+      continue;
+    }
+
+    const characterLength =
+      source[index] === "'" && source[index + 1] === "\\"
+        ? source[index + 3] === "'"
+          ? 4
+          : 0
+        : source[index] === "'" && source[index + 2] === "'"
+          ? 3
+          : 0;
+    if (characterLength > 0) {
+      const end = index + characterLength;
+      while (index < end) {
+        blank(index);
+        index += 1;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return masked.join("");
+}
+
+function allowsDeadCode(attribute) {
+  const pattern = /\ballow\s*\(/g;
+  for (const match of attribute.matchAll(pattern)) {
+    const open = match.index + match[0].lastIndexOf("(");
+    let depth = 1;
+    let index = open + 1;
+    while (index < attribute.length && depth > 0) {
+      if (attribute[index] === "(") {
+        depth += 1;
+      } else if (attribute[index] === ")") {
+        depth -= 1;
+      }
+      index += 1;
+    }
+    if (
+      depth === 0 &&
+      /\bdead_code\b/.test(attribute.slice(open + 1, index - 1))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function attributeEnd(source, start) {
+  let index = start;
+  while (/\s/.test(source[index] ?? "")) {
+    index += 1;
+  }
+  if (source[index] !== "#") {
+    return undefined;
+  }
+  index += 1;
+  while (/\s/.test(source[index] ?? "")) {
+    index += 1;
+  }
+  if (source[index] === "!") {
+    index += 1;
+    while (/\s/.test(source[index] ?? "")) {
+      index += 1;
+    }
+  }
+  if (source[index] !== "[") {
+    return undefined;
+  }
+  let depth = 1;
+  index += 1;
+  while (index < source.length && depth > 0) {
+    if (source[index] === "[") {
+      depth += 1;
+    } else if (source[index] === "]") {
+      depth -= 1;
+    }
+    index += 1;
+  }
+  return depth === 0 ? index : undefined;
+}
+
+function targetsModule(source, afterAttribute) {
+  let index = afterAttribute;
+  for (;;) {
+    while (/\s/.test(source[index] ?? "")) {
+      index += 1;
+    }
+    const nextAttribute = attributeEnd(source, index);
+    if (nextAttribute === undefined) {
+      break;
+    }
+    index = nextAttribute;
+  }
+  return /^(?:(?:pub(?:\s*\([^)]*\))?|unsafe)\s+)*mod\b/.test(source.slice(index));
+}
+
+export function broadDeadCodeAllowances(source) {
+  const masked = maskRustCommentsAndLiterals(source);
+  const findings = [];
+  for (let index = 0; index < masked.length; index += 1) {
+    if (masked[index] !== "#") {
+      continue;
+    }
+    const end = attributeEnd(masked, index);
+    if (end === undefined) {
+      continue;
+    }
+    const attribute = masked.slice(index, end);
+    const inner = /^#\s*!/.test(attribute);
+    if (allowsDeadCode(attribute) && (inner || targetsModule(masked, end))) {
+      findings.push(source.slice(0, index).split(/\r?\n/).length);
+    }
+    index = end - 1;
+  }
+  return findings;
+}
+
+export function readRustSources(root) {
+  const sources = [];
+  function collect(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        collect(path);
+      } else if (entry.isFile() && entry.name.endsWith(".rs")) {
+        sources.push({ path, source: readFileSync(path, "utf8") });
+      }
+    }
+  }
+  collect(root);
+  return sources.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export function requireNoBroadDeadCodeAllowances(sources) {
+  for (const { path, source } of sources) {
+    const lines = broadDeadCodeAllowances(source);
+    if (lines.length > 0) {
+      fail(`${path}:${lines.join(",")}: broad dead-code allowance is forbidden`);
+    }
+  }
 }
 
 export function requireToolVersion(tool, output, expected) {
@@ -358,6 +574,9 @@ function checkNodeVersion() {
 function main() {
   checkNodeVersion();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  requireNoBroadDeadCodeAllowances(
+    readRustSources(join(root, "crates", "gateway-stt", "src")),
+  );
   requireCargoVersion(runCargo(root, ["--version"]));
   requireToolVersion(
     "cargo-modules",

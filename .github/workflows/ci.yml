@@ -73,6 +73,11 @@ jobs:
       - name: Check STT module and public API architecture
         run: node tools/check-stt-architecture.mjs
 
+      - name: Check production gateway-stt warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p gateway-stt --lib
+
       - name: Check STT Cargo and ceiling architecture
         run: cargo test -p gateway-stt --test it architecture
 

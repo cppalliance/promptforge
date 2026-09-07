@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 
 use super::client::parse_client_event;
@@ -104,6 +105,7 @@ impl EffectiveSession {
         !self.include.is_empty()
     }
 
+    #[cfg(test)]
     fn validate(&self) -> Result<(), String> {
         if self.id.is_empty()
             || self.object != SESSION_OBJECT
@@ -241,12 +243,14 @@ impl ServerEvent {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::realtime) fn from_value(value: Value) -> Result<Self, String> {
         let event: Self = serde_json::from_value(value).map_err(|error| error.to_string())?;
         event.validate()?;
         Ok(event)
     }
 
+    #[cfg(test)]
     fn validate(&self) -> Result<(), String> {
         let (event_id, item_id, content_index) = match self {
             Self::SessionCreated { event_id, session }
@@ -335,6 +339,7 @@ impl ServerEvent {
 }
 
 impl ConversationItem {
+    #[cfg(test)]
     fn validate(&self) -> Result<(), String> {
         validate_id(&self.id)?;
         if self.r#type != "message"
@@ -351,6 +356,7 @@ impl ConversationItem {
 }
 
 impl DurationUsage {
+    #[cfg(test)]
     fn validate(&self) -> Result<(), String> {
         if self.r#type != "duration" || !self.seconds.is_finite() || self.seconds < 0.0 {
             return Err("invalid duration usage".to_owned());
@@ -360,10 +366,12 @@ impl DurationUsage {
 }
 
 impl WireError {
+    #[cfg(test)]
     fn has_event_id(&self) -> bool {
         !self.event_id.is_missing()
     }
 
+    #[cfg(test)]
     fn validate(&self) -> Result<(), String> {
         if self.r#type.is_empty()
             || self.code.is_empty()
@@ -377,6 +385,7 @@ impl WireError {
     }
 }
 
+#[cfg(test)]
 fn validate_id(id: &str) -> Result<(), String> {
     if id.is_empty() {
         Err("opaque ID must not be empty".to_owned())
@@ -385,6 +394,7 @@ fn validate_id(id: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
 fn validate_optional_id(id: Option<&str>) -> Result<(), String> {
     id.map_or(Ok(()), validate_id)
 }

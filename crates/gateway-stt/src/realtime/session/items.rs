@@ -45,10 +45,12 @@ impl Session {
         Ok(receipt)
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn committed_count(&self) -> usize {
         self.committed.len()
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn finalizing_count(&self) -> usize {
         self.committed
             .values()
@@ -73,12 +75,14 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn committed_prompt_and_guidance(&self, item_id: &str) -> Option<(&str, &[String])> {
         self.committed
             .get(item_id)
             .map(|item| (item.snapshot().prompt(), item.take().guidance()))
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn push_delta(
         &mut self,
         item_id: &str,
@@ -88,6 +92,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn replace_hypothesis(
         &mut self,
         item_id: &str,
@@ -99,6 +104,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn finalize_completed(
         &mut self,
         item_id: &str,
@@ -115,6 +121,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn finalize_failed(
         &mut self,
         item_id: &str,

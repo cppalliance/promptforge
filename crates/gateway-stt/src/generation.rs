@@ -5,10 +5,14 @@ use std::sync::{Arc, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
-use gateway_stt_engine::{DecodeMode, EnginePolicy, ModelFactory};
+#[cfg(feature = "test-fixtures")]
+use gateway_stt_engine::ModelFactory;
+use gateway_stt_engine::{DecodeMode, EnginePolicy};
 
 use crate::artifacts::{PreparedSpeech, SpeechError};
-use crate::model::{ModelNames, SpeechModelInfo};
+#[cfg(feature = "test-fixtures")]
+use crate::model::ModelNames;
+use crate::model::SpeechModelInfo;
 use crate::replacement::{DrainOutcome, ReplacementCoordinator, ReplacementPermit};
 use crate::status::SpeechStatus;
 
@@ -274,6 +278,7 @@ impl GenerationState {
             .map(|generation| generation.admission.counts())
     }
 
+    #[cfg(feature = "test-fixtures")]
     fn replace_with(
         &self,
         timeout: Duration,

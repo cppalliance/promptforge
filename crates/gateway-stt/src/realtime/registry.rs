@@ -1,3 +1,4 @@
+#[cfg(feature = "test-fixtures")]
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -31,10 +32,12 @@ impl CleanupSignal {
         self.notified.notify_waiters();
     }
 
+    #[cfg(feature = "test-fixtures")]
     fn event_count(&self) -> usize {
         self.generation.load(Ordering::Acquire)
     }
 
+    #[cfg(feature = "test-fixtures")]
     fn notified(&self) -> impl Future<Output = ()> + '_ {
         let observed = self.generation.load(Ordering::Acquire);
         async move {
@@ -131,6 +134,7 @@ impl SessionRegistry {
         })
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn active(&self) -> usize {
         self.shared
             .state
