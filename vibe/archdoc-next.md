@@ -186,3 +186,5 @@ N57 | observation | surface-growth @ crates/workshop-server/ui/src/ui/stt.ts::St
 N58 | observation | constructor-injection @ crates/workshop-server/ui/src/ui/agent-session-view.ts::AgentSessionView: receives shared microphone capture through the panel constructor chain | Migrate Workshop dictation to Realtime; Require a model before built-in chat turns
 N59 | observation | Violates A96 @ crates/workshop-server/ui/src/ui/realtime-stt.ts::setupStt: bounded third-party model content is not determinable from diff | Bind live hypotheses before commit acknowledgment
 N60 | observation | Violates A2 @ crates/gateway-stt/src/take: credential ownership is not determinable from diff | Reconcile explicitly skipped final ranges
+N61 | observation | oversized-unit @ crates/gateway-logging/src/queue.rs::byte_blocked_producers_wake_after_drain_and_close: adds a 98-line byte-blocked producer concurrency test | Order and bound logging queue admission
+N62 | observation | Violates A2 @ crates/gateway-logging/src/queue.rs: credential ownership in gateway logging is not determinable from diff | Order and bound logging queue admission

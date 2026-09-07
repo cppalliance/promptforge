@@ -294,7 +294,7 @@ isProject: false
 - Exclusions: no queue-order change, producer timeout, disk rotation, or redaction expansion yet; log message content otherwise stays unchanged.
 - Focused verification: from the repository root run `cargo test -p gateway-logging`.
 
-### Step 5: Order and account the logging queue
+### Step 5: Order and account the logging queue [completed]
 
 - Component and piece: Component 2 of 8, `gateway-logging`; make queue admission enforce aggregate bytes, assign sequence under the mutex, and close one pressure episode at a defined low-water transition.
 - Dependency: depends on Step 4 because admission must use the shared record and aggregate byte limits and its loss accounting; it precedes timeout work because wait outcomes need final admission semantics.
