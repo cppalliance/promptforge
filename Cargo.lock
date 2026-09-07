@@ -1893,6 +1893,7 @@ dependencies = [
  "gateway-logging",
  "gateway-routing",
  "gateway-stt",
+ "gateway-stt-engine",
  "gateway-web-search",
  "hound",
  "ksni",
@@ -2046,6 +2047,7 @@ dependencies = [
 name = "gateway-stt-engine"
 version = "0.2.0"
 dependencies = [
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
 ]

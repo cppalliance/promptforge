@@ -1,5 +1,8 @@
 //! Deterministic decoder fixtures for downstream integration tests.
 
+/// Native asset resolution for ignored integration tests.
+pub mod native;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::ThreadId;

@@ -54,6 +54,7 @@ const DEPENDENCY_POLICIES: [DependencyPolicy; 7] = [
             "gateway-logging",
             "gateway-routing",
             "gateway-stt",
+            "gateway-stt-engine",
             "gateway-web-search",
             "promptforge-core",
             "shared-loopback",

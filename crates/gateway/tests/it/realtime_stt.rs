@@ -12,6 +12,7 @@ use gateway_stt::SpeechService;
 use gateway_stt::test_fixtures::{
     ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, scripted_service,
 };
+use gateway_stt_engine::test_fixtures::native::require_fixture;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -183,19 +184,24 @@ fn audio_samples(samples: &[i16]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn native_fixture(variable: &str, name: &str) -> PathBuf {
-    std::env::var_os(variable).map_or_else(
-        || {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../local/stt-fixtures")
-                .join(name)
-        },
-        PathBuf::from,
-    )
+fn native_fixture_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/stt-fixtures")
+}
+
+#[test]
+fn gateway_native_realtime_keeps_its_workspace_local_fixture_root() {
+    assert_eq!(
+        native_fixture_root(),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../local/stt-fixtures")
+    );
 }
 
 fn native_jfk_24khz() -> Vec<i16> {
-    let path = native_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
+    let path = require_fixture(
+        "PROMPTFORGE_WHISPER_AUDIO",
+        &native_fixture_root(),
+        "jfk.wav",
+    );
     let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000);
@@ -216,7 +222,11 @@ fn native_jfk_24khz() -> Vec<i16> {
 }
 
 fn native_speech_service() -> SpeechService {
-    let model = native_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &native_fixture_root(),
+        "ggml-tiny.en.bin",
+    );
     let model = model.display().to_string().replace('\\', "/");
     std::thread::spawn(move || {
         let cache = tempfile::tempdir().expect("native test cache creates");

@@ -7,12 +7,22 @@
 
 use std::path::{Path, PathBuf};
 
+use gateway_stt_engine::test_fixtures::native::require_fixture;
+
 pub(crate) fn require_model() -> PathBuf {
-    require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin")
+    require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &native_fixture_root(),
+        "ggml-tiny.en.bin",
+    )
 }
 
 pub(crate) fn jfk_samples() -> Vec<f32> {
-    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
+    let path = require_fixture(
+        "PROMPTFORGE_WHISPER_AUDIO",
+        &native_fixture_root(),
+        "jfk.wav",
+    );
     let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
@@ -24,19 +34,14 @@ pub(crate) fn jfk_samples() -> Vec<f32> {
         .collect()
 }
 
-fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
-    let path = std::env::var_os(variable).map_or_else(
-        || {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../gateway-stt-backend-whisper/tests/fixtures")
-                .join(fallback)
-        },
-        PathBuf::from,
+fn native_fixture_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../gateway-stt-backend-whisper/tests/fixtures")
+}
+
+#[test]
+fn native_service_fixtures_keep_the_backend_fixture_root() {
+    assert_eq!(
+        native_fixture_root(),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../gateway-stt-backend-whisper/tests/fixtures")
     );
-    assert!(
-        path.is_file(),
-        "native test fixture is missing: {}",
-        path.display()
-    );
-    path
 }

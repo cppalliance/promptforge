@@ -16,6 +16,7 @@ shared-progress.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+gateway-stt-engine = { workspace = true, features = ["test-fixtures"] }
 hound.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

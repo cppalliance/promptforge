@@ -103,32 +103,36 @@ pub(crate) fn final_prompt(
 mod tests {
     use std::path::{Path, PathBuf};
 
+    use gateway_stt_engine::test_fixtures::native::require_fixture;
     use gateway_whisper_ffi::WhisperLibrary;
 
     use super::*;
 
     static NATIVE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
-        let path = std::env::var_os(variable).map_or_else(
-            || {
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures")
-                    .join(fallback)
-            },
-            PathBuf::from,
+    fn native_fixture_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+    }
+
+    #[test]
+    fn native_prompt_test_keeps_its_backend_fixture_root() {
+        assert_eq!(
+            native_fixture_root(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
         );
-        assert!(
-            path.is_file(),
-            "native test fixture is missing: {}",
-            path.display()
-        );
-        path
     }
 
     fn require_context() -> WhisperContext {
-        let library_path = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
-        let model_path = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+        let library_path = require_fixture(
+            "PROMPTFORGE_WHISPER_LIBRARY",
+            &native_fixture_root(),
+            "whisper.dll",
+        );
+        let model_path = require_fixture(
+            "PROMPTFORGE_WHISPER_MODEL",
+            &native_fixture_root(),
+            "ggml-tiny.en.bin",
+        );
         let library = WhisperLibrary::load(&library_path).expect("packaged whisper runtime loads");
         WhisperContext::new(&library, &model_path).expect("whisper fixture model loads")
     }

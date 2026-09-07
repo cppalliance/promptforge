@@ -69,12 +69,7 @@ async fn realtime_stt_native_incremental() {
         ("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin"),
         ("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav"),
     ] {
-        let path = native_fixture(variable, name);
-        assert!(
-            path.is_file(),
-            "native test fixture is missing: {}",
-            path.display()
-        );
+        let _fixture = require_fixture(variable, &native_fixture_root(), name);
     }
     let service = native_speech_service();
     let server = server(true, &service).await;

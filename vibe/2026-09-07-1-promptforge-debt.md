@@ -346,7 +346,7 @@ isProject: false
 - Focused verification: from the repository root run `cargo test -p gateway-config`; from `crates/gateway-config-ui/ui` run `npm run typecheck`, `npm run build`, and `npm test`; in PowerShell compare `Get-FileHash C:\Users\Vinnie\.promptforge\gateway.toml -Algorithm SHA256` before and after the read-only local check.
 - Component boundary: ends Component 3; review Step 9 against the Step 8 commit, including the paired Rust and TypeScript deletion and the local hash evidence.
 
-### Step 10: Centralize native STT fixture resolution
+### Step 10: Centralize native STT fixture resolution [completed]
 
 - Component and piece: Component 4 of 8, STT test infrastructure; replace the five resolver copies with the existing feature-gated `gateway-stt-engine` fixture boundary and explicit caller fallback roots.
 - Dependency: depends on Step 3's stable test layout; it precedes API snapshots because the canonical resolver surface must exist before its feature-enabled contract is recorded.

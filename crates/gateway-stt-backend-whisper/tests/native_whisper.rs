@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
+use gateway_stt_engine::test_fixtures::native::require_fixture;
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
 use shared_progress::{ProgressHandle, ProgressHub};
 
@@ -25,19 +26,16 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-fn require_fixture(variable: &str, fallback: &str) -> PathBuf {
-    let path =
-        std::env::var_os(variable).map_or_else(|| fixture_dir().join(fallback), PathBuf::from);
-    assert!(
-        path.is_file(),
-        "native test fixture is missing: {}",
-        path.display()
+#[test]
+fn native_backend_suite_keeps_its_backend_fixture_root() {
+    assert_eq!(
+        fixture_dir(),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
     );
-    path
 }
 
 fn jfk_samples() -> Vec<f32> {
-    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav");
+    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", &fixture_dir(), "jfk.wav");
     let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
@@ -80,10 +78,14 @@ fn request(
 async fn packaged_runtime_preserves_native_transcription_contract() {
     let _guard = NATIVE_TEST.lock().await;
     let temp = tempfile::tempdir().expect("temporary packaged-runtime directory");
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
     let model = temp.path().join("ggml-tiny.en.bin");
     std::fs::copy(
-        require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin"),
+        require_fixture(
+            "PROMPTFORGE_WHISPER_MODEL",
+            &fixture_dir(),
+            "ggml-tiny.en.bin",
+        ),
         &model,
     )
     .expect("copy the exact tiny model fixture");
@@ -168,8 +170,12 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn independent_final_jobs_do_not_require_a_reset() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
-    let model = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
 
@@ -188,8 +194,12 @@ async fn independent_final_jobs_do_not_require_a_reset() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn one_final_job_cannot_change_another_jobs_history() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
-    let model = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
     let prompt_sensitive = samples[6 * 16_000..8 * 16_000].to_vec();
@@ -237,8 +247,12 @@ async fn one_final_job_cannot_change_another_jobs_history() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn final_decode_is_absent_without_a_final_model() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
-    let model = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
     let engine = engine(library, model, None);
     let error = engine
         .decode(request(DecodeMode::Final, jfk_samples(), Vec::new(), ""))
@@ -256,8 +270,12 @@ async fn final_decode_is_absent_without_a_final_model() {
 #[ignore = "requires packaged whisper and model fixtures"]
 async fn configured_model_branches_finish_prewarm_and_init_progress() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll");
-    let model = require_fixture("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin");
+    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture(
+        "PROMPTFORGE_WHISPER_MODEL",
+        &fixture_dir(),
+        "ggml-tiny.en.bin",
+    );
     let hub = Arc::new(ProgressHub::new());
     let tree = hub.operation();
     let models = tree.register("models", 1.0);

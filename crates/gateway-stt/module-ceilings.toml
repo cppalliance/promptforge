@@ -46,5 +46,5 @@ public_root_count = 6
 "take/window.rs" = 250
 "test_fixtures.rs" = 444
 "test_fixtures/generation.rs" = 100
-"test_fixtures/native.rs" = 42
+"test_fixtures/native.rs" = 47
 "test_fixtures/segment.rs" = 14

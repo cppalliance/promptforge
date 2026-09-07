@@ -143,6 +143,7 @@ tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 gateway-routing = { workspace = true, features = ["test-helpers"] }
 gateway-stt = { workspace = true, features = ["test-fixtures"] }
+gateway-stt-engine = { workspace = true, features = ["test-fixtures"] }
 tempfile.workspace = true
 # Drives build_router in-process with forged peer addresses, so the
 # loopback-wall tests can present a LAN peer no real TCP connection could.
