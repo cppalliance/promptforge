@@ -2,7 +2,6 @@
 async fn admission_is_bounded_and_replacement_closes_with_1012() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_next();
     final_decoder.push_text("too late");
     let service = speech(&interim, Some(&final_decoder));
     let server = server(true, &service).await;
@@ -12,16 +11,8 @@ async fn admission_is_bounded_and_replacement_closes_with_1012() {
         expect_type(&mut socket, "session.created").await;
         sockets.push(socket);
     }
-    assert_eq!(
-        rejected(
-            server.addr,
-            "intent=transcription",
-            Some("test-token"),
-            None
-        )
-        .await,
-        429
-    );
+    let status = rejected(server.addr, "intent=transcription", Some("test-token"), None).await;
+    assert_eq!(status, 429);
     for mut socket in sockets.drain(1..) {
         socket.close(None).await.expect("socket closes");
     }
@@ -35,53 +26,58 @@ async fn admission_is_bounded_and_replacement_closes_with_1012() {
         )
         .await;
     }
-    send(
-        &mut sockets[0],
-        serde_json::json!({"type": "input_audio_buffer.commit"}),
-    )
-    .await;
-    let committed = expect_type(&mut sockets[0], "input_audio_buffer.committed").await;
-    let item_id = committed["item_id"].as_str().expect("item ID").to_owned();
-    expect_type(&mut sockets[0], "conversation.item.created").await;
-    let parked = final_decoder.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("park observer joins"),
-        "committed item owns its final decode"
-    );
-
     let replacement = ScriptedDecoder::new();
     let replacement_final = ScriptedDecoder::new();
-    let replacement_service = service.clone();
-    let replacement_task = tokio::task::spawn_blocking(move || {
-        begin_scripted_replacement(
-            &replacement_service,
-            ScriptedModelFactory::new(replacement).with_final(replacement_final),
-            true,
+    let scenario_service = service.clone();
+    let replacement_task = final_decoder
+        .with_next_decode_blocked(
             PHASE_TIMEOUT,
+            || async {
+                send(
+                    &mut sockets[0],
+                    serde_json::json!({"type": "input_audio_buffer.commit"}),
+                )
+                .await;
+                let committed =
+                    expect_type(&mut sockets[0], "input_audio_buffer.committed").await;
+                let item_id = committed["item_id"].as_str().expect("item ID").to_owned();
+                expect_type(&mut sockets[0], "conversation.item.created").await;
+                (&mut sockets, item_id)
+            },
+            |(sockets, item_id)| async move {
+                let replacement_service = scenario_service;
+                let replacement_task = tokio::task::spawn_blocking(move || {
+                    begin_scripted_replacement(
+                        &replacement_service,
+                        ScriptedModelFactory::new(replacement).with_final(replacement_final),
+                        true,
+                        PHASE_TIMEOUT,
+                    )
+                });
+                let replaced = expect_type(
+                    &mut sockets[0],
+                    "conversation.item.input_audio_transcription.failed",
+                )
+                .await;
+                assert_eq!(replaced["item_id"], item_id);
+                assert_eq!(replaced["error"]["code"], "engine_replaced");
+                let message = tokio::time::timeout(PHASE_TIMEOUT, sockets[0].next())
+                    .await
+                    .expect("replacement closes the socket before its deadline")
+                    .expect("socket emits a close frame")
+                    .expect("close frame is valid");
+                let Message::Close(Some(close)) = message else {
+                    panic!("replacement emits a close frame, got {message:?}");
+                };
+                assert_eq!(u16::from(close.code), 1012);
+                assert_eq!(close.reason, "engine_replaced");
+                sockets.clear();
+                (replacement_task,)
+            },
         )
-    });
-    let replaced = expect_type(
-        &mut sockets[0],
-        "conversation.item.input_audio_transcription.failed",
-    )
-    .await;
-    assert_eq!(replaced["item_id"], item_id);
-    assert_eq!(replaced["error"]["code"], "engine_replaced");
-    let message = tokio::time::timeout(PHASE_TIMEOUT, sockets[0].next())
         .await
-        .expect("replacement closes the socket before its deadline")
-        .expect("socket emits a close frame")
-        .expect("close frame is valid");
-    let Message::Close(Some(close)) = message else {
-        panic!("replacement emits a close frame, got {message:?}");
-    };
-    assert_eq!(u16::from(close.code), 1012);
-    assert_eq!(close.reason, "engine_replaced");
-    drop(sockets);
-    final_decoder.release();
-
+        .expect("the committed item owns one blocked final decode");
+    let (replacement_task,) = replacement_task;
     let staged = replacement_task
         .await
         .expect("replacement task joins")

@@ -5,15 +5,17 @@
       "testTotal": 19,
       "entry": {
         "path": "crates/gateway/tests/it/realtime_stt.rs",
-        "ceiling": 669
+        "ceiling": 567
       },
       "files": {
         "authentication.rs": 89,
         "canonical_sequence.rs": 102,
-        "lifecycle.rs": 227,
-        "overload.rs": 162,
-        "protocol.rs": 377,
-        "recovery.rs": 151
+        "capacity.rs": 207,
+        "lifecycle.rs": 149,
+        "overload.rs": 65,
+        "protocol.rs": 372,
+        "recovery.rs": 147,
+        "scheduling.rs": 90
       }
     },
     "crates/workshop-server/tests/it/chat_gate": {

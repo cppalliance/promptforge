@@ -10,23 +10,19 @@ pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::fail_next_constructio
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::new() -> Self
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::panic_next(&self)
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::panic_on_drop(&self)
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::park_construction(&self)
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::park_next(&self)
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::push_error(&self, impl core::convert::Into<alloc::string::String>)
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::push_text(&self, impl core::convert::Into<alloc::string::String>)
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::release(&self)
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::release_construction(&self)
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::requests(&self) -> alloc::vec::Vec<gateway_stt_engine::DecodeRequest>
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::wait_for_completed(&self, usize, core::time::Duration) -> bool
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::wait_for_requests(&self, usize, core::time::Duration) -> bool
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::wait_until_construction_parked(&self, core::time::Duration) -> bool
-pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::wait_until_parked(&self, core::time::Duration) -> bool
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::wait_until_worker_dropped(&self, core::time::Duration) -> bool
+pub async fn gateway_stt_engine::test_fixtures::ScriptedDecoder::with_next_decode_blocked<Start, Started, Context, Scenario, Running, Output>(&self, core::time::Duration, Start, Scenario) -> core::option::Option<Output> where Start: core::ops::function::FnOnce() -> Started, Started: core::future::future::Future<Output = Context>, Scenario: core::ops::function::FnOnce(Context) -> Running, Running: core::future::future::Future<Output = Output>
 pub fn gateway_stt_engine::test_fixtures::ScriptedDecoder::worker_dropped(&self) -> bool
 pub struct gateway_stt_engine::test_fixtures::ScriptedModelFactory
 impl gateway_stt_engine::test_fixtures::ScriptedModelFactory
 pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::gpu_available(&self) -> bool
 pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::new(gateway_stt_engine::test_fixtures::ScriptedDecoder) -> Self
+pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::with_construction_blocked<Start, Result, Scenario, Observation>(self, core::time::Duration, core::time::Duration, Start, Scenario) -> core::option::Option<(Result, Observation)> where Start: core::ops::function::FnOnce(Self) -> Result + core::marker::Send, Result: core::marker::Send, Scenario: core::ops::function::FnOnce() -> Observation
 pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::with_final(self, gateway_stt_engine::test_fixtures::ScriptedDecoder) -> Self
 pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::with_final_failure(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn gateway_stt_engine::test_fixtures::ScriptedModelFactory::with_final_panic(self) -> Self

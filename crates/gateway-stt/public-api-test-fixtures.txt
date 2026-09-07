@@ -20,13 +20,11 @@ impl gateway_stt::test_fixtures::RealtimeInputSnapshotFixture
 pub const fn gateway_stt::test_fixtures::RealtimeInputSnapshotFixture::include_hypothesis(&self) -> bool
 pub fn gateway_stt::test_fixtures::RealtimeInputSnapshotFixture::item_id(&self) -> &str
 pub fn gateway_stt::test_fixtures::RealtimeInputSnapshotFixture::prompt(&self) -> &str
-pub struct gateway_stt::test_fixtures::RealtimeInterimEpoch(_)
 pub struct gateway_stt::test_fixtures::RealtimeSessionFixture
 impl gateway_stt::test_fixtures::RealtimeSessionFixture
-pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::accept_interim(&mut self, gateway_stt::test_fixtures::RealtimeInterimEpoch, alloc::string::String) -> core::result::Result<core::option::Option<serde_json::value::Value>, serde_json::error::Error>
+pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::accept_interim_across_clear(&mut self, &str, &str) -> core::result::Result<(core::option::Option<serde_json::value::Value>, core::option::Option<serde_json::value::Value>), alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::allocated_event_count(&self) -> u64
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::append_base64(&mut self, &str) -> core::result::Result<(), alloc::string::String>
-pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::begin_interim(&mut self) -> core::result::Result<gateway_stt::test_fixtures::RealtimeInterimEpoch, alloc::string::String>
 pub const fn gateway_stt::test_fixtures::RealtimeSessionFixture::canceled_join_count(&self) -> usize
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::clear(&mut self) -> core::result::Result<(), alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::commit(&mut self) -> core::result::Result<gateway_stt::test_fixtures::RealtimeCommitFixture, alloc::string::String>
@@ -47,7 +45,7 @@ pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::push_delta(&mut self,
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::replace_finalization<F>(&mut self, &str, F) -> core::result::Result<(), alloc::string::String> where F: core::future::future::Future<Output = core::result::Result<alloc::string::String, alloc::string::String>> + core::marker::Send + 'static
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::replace_hypothesis(&mut self, &str, u64, &str) -> core::result::Result<(), alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::resampled_audio(&self) -> core::option::Option<alloc::vec::Vec<f32>>
-pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::spawn_interim<F>(&mut self, F) -> core::result::Result<gateway_stt::test_fixtures::RealtimeInterimEpoch, alloc::string::String> where F: core::future::future::Future<Output = alloc::string::String> + core::marker::Send + 'static
+pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::spawn_interim<F>(&mut self, F) -> core::result::Result<(), alloc::string::String> where F: core::future::future::Future<Output = alloc::string::String> + core::marker::Send + 'static
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::update_text(&mut self, &str) -> core::result::Result<(), alloc::string::String>
 pub struct gateway_stt::test_fixtures::RealtimeSessionRegistryFixture
 impl gateway_stt::test_fixtures::RealtimeSessionRegistryFixture

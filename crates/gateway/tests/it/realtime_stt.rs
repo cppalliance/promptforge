@@ -345,7 +345,6 @@ async fn assert_stop_reconciles_skipped_range(short_input_samples: usize) {
     interim.push_text("last word");
     let final_decoder = ScriptedDecoder::new();
     final_decoder.push_text("corrected first");
-    final_decoder.park_next();
     let service = speech_with_policy(&interim, Some(&final_decoder), 15, 50);
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
@@ -369,34 +368,37 @@ async fn assert_stop_reconciles_skipped_range(short_input_samples: usize) {
         vec![8_192; short_input_samples],
     ]
     .concat();
-    append_audio(&mut socket, audio_samples(&before_stop)).await;
-    let hypothesis = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    assert!(
-        hypothesis["transcript"]
-            .as_str()
-            .is_some_and(|text| text.ends_with("last word"))
-    );
-    let parked = final_decoder.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("finalization park observer joins"),
-        "the accepted hypothesis is captured while earlier final work is parked"
-    );
-
-    append_audio(&mut socket, audio_samples(&vec![0; 72_000])).await;
-    send(
-        &mut socket,
-        serde_json::json!({"type": "input_audio_buffer.commit"}),
-    )
-    .await;
-    expect_type(&mut socket, "input_audio_buffer.committed").await;
-    expect_type(&mut socket, "conversation.item.created").await;
-    final_decoder.release();
+    let hypothesis = final_decoder
+        .with_next_decode_blocked(
+            PHASE_TIMEOUT,
+            || async {
+                append_audio(&mut socket, audio_samples(&before_stop)).await;
+                let hypothesis = expect_type(
+                    &mut socket,
+                    "conversation.item.input_audio_transcription.hypothesis",
+                )
+                .await;
+                (&mut socket, hypothesis)
+            },
+            |(socket, hypothesis)| async {
+                assert!(
+                    hypothesis["transcript"]
+                        .as_str()
+                        .is_some_and(|text| text.ends_with("last word"))
+                );
+                append_audio(socket, audio_samples(&vec![0; 72_000])).await;
+                send(
+                    socket,
+                    serde_json::json!({"type": "input_audio_buffer.commit"}),
+                )
+                .await;
+                expect_type(socket, "input_audio_buffer.committed").await;
+                expect_type(socket, "conversation.item.created").await;
+                hypothesis
+            },
+        )
+        .await
+        .expect("the accepted hypothesis is captured while earlier final work is blocked");
     let completed = loop {
         let event = receive(&mut socket).await;
         if event["type"] == "conversation.item.input_audio_transcription.completed" {
@@ -430,7 +432,6 @@ async fn assert_same_range_final_authority(final_text: &str, expected: &str) {
     interim.push_text("provisional words");
     let final_decoder = ScriptedDecoder::new();
     final_decoder.push_text(final_text);
-    final_decoder.park_next();
     let service = speech_with_policy(&interim, Some(&final_decoder), 15, 50);
     let server = server(true, &service).await;
     let mut socket = connect(server.addr, Some("test-token"), None, None).await;
@@ -448,28 +449,29 @@ async fn assert_same_range_final_authority(final_text: &str, expected: &str) {
     .await;
     expect_type(&mut socket, "session.updated").await;
 
-    append_audio(&mut socket, audio_samples(&vec![8_192; 12_000])).await;
-    let hypothesis = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    assert_eq!(hypothesis["transcript"], "provisional words");
-    send(
-        &mut socket,
-        serde_json::json!({"type": "input_audio_buffer.commit"}),
-    )
-    .await;
-    expect_type(&mut socket, "input_audio_buffer.committed").await;
-    expect_type(&mut socket, "conversation.item.created").await;
-    let parked = final_decoder.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("finalization park observer joins"),
-        "the exact accepted range reaches authoritative final decoding"
-    );
-    final_decoder.release();
+    final_decoder
+        .with_next_decode_blocked(
+            PHASE_TIMEOUT,
+            || async {
+                append_audio(&mut socket, audio_samples(&vec![8_192; 12_000])).await;
+                let hypothesis = expect_type(
+                    &mut socket,
+                    "conversation.item.input_audio_transcription.hypothesis",
+                )
+                .await;
+                assert_eq!(hypothesis["transcript"], "provisional words");
+                send(
+                    &mut socket,
+                    serde_json::json!({"type": "input_audio_buffer.commit"}),
+                )
+                .await;
+                expect_type(&mut socket, "input_audio_buffer.committed").await;
+                expect_type(&mut socket, "conversation.item.created").await;
+            },
+            |()| async {},
+        )
+        .await
+        .expect("the exact accepted range reaches blocked authoritative final decoding");
     let completed = expect_type(
         &mut socket,
         "conversation.item.input_audio_transcription.completed",
@@ -555,115 +557,11 @@ async fn assert_final_speech_route_surface(http: &reqwest::Client, address: Sock
     }
 }
 
-async fn commit_existing_item(
-    socket: &mut Socket,
-    append: &serde_json::Value,
-    previous: Option<&String>,
-) -> String {
-    for _ in 0..5 {
-        send(socket, append.clone()).await;
-    }
-    send(
-        socket,
-        serde_json::json!({"type": "input_audio_buffer.commit"}),
-    )
-    .await;
-    let committed = expect_type(socket, "input_audio_buffer.committed").await;
-    let item_id = committed["item_id"]
-        .as_str()
-        .expect("committed item has an ID")
-        .to_owned();
-    assert_eq!(
-        committed["previous_item_id"],
-        previous.map_or(serde_json::Value::Null, |item| {
-            serde_json::Value::String(item.clone())
-        }),
-        "{committed}"
-    );
-    let created = expect_type(socket, "conversation.item.created").await;
-    assert_eq!(created["item"]["id"], item_id, "{created}");
-    item_id
-}
-
-async fn expect_existing_completions(
-    socket: &mut Socket,
-    existing_items: &[String],
-    expected_release: &serde_json::Value,
-) {
-    let mut completed_items = Vec::new();
-    let mut released_item = None;
-    for _ in existing_items {
-        let completed = expect_type(
-            socket,
-            "conversation.item.input_audio_transcription.completed",
-        )
-        .await;
-        if completed["transcript"] == expected_release["transcript"] {
-            assert_eq!(
-                completed["usage"]["type"], expected_release["usage"]["type"],
-                "{completed}"
-            );
-            assert!(
-                completed["usage"]["seconds"]
-                    .as_f64()
-                    .is_some_and(|seconds| seconds > 0.0),
-                "{completed}"
-            );
-            released_item = completed["item_id"].as_str().map(str::to_owned);
-        }
-        completed_items.push(
-            completed["item_id"]
-                .as_str()
-                .expect("completion has an item ID")
-                .to_owned(),
-        );
-    }
-    assert!(
-        released_item.is_some(),
-        "the canonical capacity-release completion is observed"
-    );
-    assert!(
-        existing_items
-            .iter()
-            .all(|item| completed_items.contains(item)),
-        "only the four existing items complete"
-    );
-}
-
-async fn expect_retried_item(
-    socket: &mut Socket,
-    retry: serde_json::Value,
-    existing_items: &[String],
-) {
-    send(socket, retry).await;
-    let retried = expect_type(socket, "input_audio_buffer.committed").await;
-    let retried_item = retried["item_id"]
-        .as_str()
-        .expect("retried commit has an item ID")
-        .to_owned();
-    assert_eq!(
-        retried["previous_item_id"],
-        serde_json::Value::String(existing_items.last().expect("four existing items").clone()),
-        "{retried}"
-    );
-    assert!(
-        !existing_items.contains(&retried_item),
-        "retry promotes the preserved provisional input as a new durable item"
-    );
-    let created = expect_type(socket, "conversation.item.created").await;
-    assert_eq!(created["item"]["id"], retried_item, "{created}");
-    let completed = expect_type(
-        socket,
-        "conversation.item.input_audio_transcription.completed",
-    )
-    .await;
-    assert_eq!(completed["item_id"], retried_item, "{completed}");
-    assert_eq!(completed["transcript"], "retried canonical input");
-}
-
 include!("realtime_stt/authentication.rs");
 include!("realtime_stt/protocol.rs");
+include!("realtime_stt/scheduling.rs");
 include!("realtime_stt/lifecycle.rs");
 include!("realtime_stt/recovery.rs");
 include!("realtime_stt/overload.rs");
+include!("realtime_stt/capacity.rs");
 include!("realtime_stt/canonical_sequence.rs");

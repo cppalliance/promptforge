@@ -143,33 +143,29 @@ fn final_first_startup_failure_preserves_interim_cleanup_panic() {
 #[test]
 fn both_workers_start_concurrently_under_one_absolute_deadline() {
     let interim = ScriptedDecoder::new();
-    interim.park_construction();
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_construction();
     let factory = ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone());
     let policy = policy().with_startup_timeout(Duration::from_millis(200));
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let constructor = std::thread::spawn(move || {
-        let result = SttEngine::new(factory, policy);
-        drop(result_tx.send(result));
-    });
-
-    assert!(
-        interim.wait_until_construction_parked(Duration::from_secs(1)),
-        "interim construction reaches its rendezvous"
-    );
-    assert!(
-        final_decoder.wait_until_construction_parked(Duration::from_secs(1)),
-        "final construction starts before the interim outcome is available"
-    );
-    let result = result_rx.recv_timeout(Duration::from_millis(350));
-    interim.release_construction();
-    final_decoder.release_construction();
-    constructor.join().expect("constructor does not panic");
-
-    let error = result
-        .expect("both outcomes share the original 200 ms deadline")
-        .expect_err("both parked workers time out");
+    let (result, ()) = factory
+        .with_construction_blocked(
+            Duration::from_secs(1),
+            Duration::from_millis(350),
+            |factory| SttEngine::new(factory, policy),
+            || {
+                assert_eq!(
+                    interim.creation_thread(),
+                    None,
+                    "interim is observed parked before construction can complete"
+                );
+                assert_eq!(
+                    final_decoder.creation_thread(),
+                    None,
+                    "final is observed parked before construction can complete"
+                );
+            },
+        )
+        .expect("both roles park before the bounded constructor result arrives");
+    let error = result.expect_err("both parked workers share one startup deadline");
     let TranscribeError::StartupFailures { failures, .. } = error else {
         panic!("both role-specific timeouts must be preserved");
     };

@@ -3625,24 +3625,24 @@ mod provisioning_tests {
         let service = scripted_service(ScriptedModelFactory::new(old.clone()), 15, 500)
             .expect("old speech starts");
         let next = ScriptedDecoder::new();
-        next.park_construction();
         let replacement_service = service.clone();
         let next_factory = ScriptedModelFactory::new(next.clone());
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        let constructor = std::thread::spawn(move || {
-            let result = begin_scripted_replacement(
-                &replacement_service,
-                next_factory,
-                false,
-                Duration::from_millis(20),
-            );
-            drop(result_tx.send(result));
-        });
-        assert!(next.wait_until_construction_parked(Duration::from_secs(1)));
-        let error = result_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("startup returns at the shared deadline")
-            .expect_err("parked native-equivalent startup times out");
+        let (result, ()) = next_factory
+            .with_construction_blocked(
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+                |factory| {
+                    begin_scripted_replacement(
+                        &replacement_service,
+                        factory,
+                        false,
+                        Duration::from_millis(20),
+                    )
+                },
+                || (),
+            )
+            .expect("next construction reaches the blocked scenario");
+        let error = result.expect_err("parked native-equivalent startup times out");
         let crate::RuntimeStageFailure::Fatal(error) = crate::classify_speech_stage_failure(error)
         else {
             panic!("non-preemptible speech timeout must be fatal");
@@ -3660,8 +3660,6 @@ mod provisioning_tests {
             "the old generation was joined before startup"
         );
         assert!(!state.speech.status().ready());
-        next.release_construction();
-        constructor.join().expect("constructor thread joins");
         assert!(
             next.wait_until_worker_dropped(Duration::from_secs(1)),
             "abandoned startup worker exits after construction returns"

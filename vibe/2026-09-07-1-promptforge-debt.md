@@ -366,7 +366,7 @@ isProject: false
 - Exclusions: no production public API expansion and no low-level fixture removal in this baseline step.
 - Focused verification: from the repository root run `node tools/check-stt-architecture.test.mjs`, `node tools/check-stt-architecture.mjs`, `cargo test -p gateway-stt -F test-fixtures`, and `cargo test -p gateway-stt-engine -F test-fixtures`.
 
-### Step 12: Narrow fixture APIs to scenarios
+### Step 12: Narrow fixture APIs to scenarios [completed]
 
 - Component and piece: Component 4 of 8, STT test infrastructure; replace consumer-visible synchronization controls with scenario-level fixture operations.
 - Dependency: depends on Step 11 because every current consumer and feature-enabled symbol must be inventoried and snapshotted before contraction.

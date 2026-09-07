@@ -172,67 +172,71 @@ fn replacement_is_serial_and_publishes_one_complete_snapshot() {
 #[tokio::test]
 async fn active_replacement_drains_request_and_job_before_unload_and_publication() {
     let old = ScriptedDecoder::new();
-    old.park_next();
     let service = service(&old);
-    let request_service = service.clone();
-    let request = tokio::spawn(async move {
-        transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
-    });
-    let parked = old.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(WAIT))
-            .await
-            .expect("park observer joins"),
-        "the old generation owns one running native-equivalent job"
-    );
-    assert_eq!(generation_counts(&service), Some((1, 1)));
-
     let next_interim = ScriptedDecoder::new();
     let next_final = ScriptedDecoder::new();
     let next_factory = factory(&next_interim)
         .with_final(next_final.clone())
         .with_gpu_available(true);
-    let replacement_service = service.clone();
-    let replacement = tokio::task::spawn_blocking(move || {
-        begin_scripted_replacement(&replacement_service, next_factory, true, WAIT)
-    });
+    let replacement = old
+        .with_next_decode_blocked(
+            WAIT,
+            || {
+                let request_service = service.clone();
+                async move {
+                    (tokio::spawn(async move {
+                        transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
+                    }),)
+                }
+            },
+            |(request,)| async {
+                assert_eq!(generation_counts(&service), Some((1, 1)));
+                let replacement_service = service.clone();
+                let replacement = tokio::task::spawn_blocking(move || {
+                    begin_scripted_replacement(&replacement_service, next_factory, true, WAIT)
+                });
 
-    tokio::time::timeout(WAIT, async {
-        while generation_counts(&service) != Some((0, 1)) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("request ownership drains while the parked job remains");
-    tokio::time::timeout(WAIT, request)
+                tokio::time::timeout(WAIT, async {
+                    while generation_counts(&service) != Some((0, 1)) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("request ownership drains while the parked job remains");
+                tokio::time::timeout(WAIT, request)
+                    .await
+                    .expect("canceled old request returns")
+                    .expect("old request task joins");
+                let draining = service.status();
+                assert!(
+                    draining.configured(),
+                    "draining keeps the published configuration"
+                );
+                assert!(!draining.ready(), "closed admission is not ready");
+                assert_eq!(
+                    draining.generation(),
+                    None,
+                    "draining never exposes a generation that refuses admission"
+                );
+                assert!(
+                    service.models().is_empty(),
+                    "draining publishes no discoverable speech model"
+                );
+                assert!(
+                    next_interim.creation_thread().is_none()
+                        && next_final.creation_thread().is_none(),
+                    "replacement construction waits for every old worker job"
+                );
+                assert!(
+                    !old.worker_dropped(),
+                    "the running old worker remains owned until native work returns"
+                );
+                (replacement,)
+            },
+        )
         .await
-        .expect("canceled old request returns")
-        .expect("old request task joins");
-    let draining = service.status();
-    assert!(
-        draining.configured(),
-        "draining keeps the published configuration"
-    );
-    assert!(!draining.ready(), "closed admission is not ready");
-    assert_eq!(
-        draining.generation(),
-        None,
-        "draining never exposes a generation that refuses admission"
-    );
-    assert!(
-        service.models().is_empty(),
-        "draining publishes no discoverable speech model"
-    );
-    assert!(
-        next_interim.creation_thread().is_none() && next_final.creation_thread().is_none(),
-        "replacement construction waits for every old worker job"
-    );
-    assert!(
-        !old.worker_dropped(),
-        "the running old worker remains owned until native work returns"
-    );
-
-    old.release();
+        .expect("the old generation owns one blocked native-equivalent job");
+    let (replacement,) = replacement;
     let replacement = tokio::time::timeout(WAIT, replacement)
         .await
         .expect("active replacement finishes after old work drains")
@@ -380,55 +384,55 @@ fn rollback_attempts_reconstruction_after_staged_worker_shutdown_fails() {
 #[tokio::test]
 async fn canceled_request_keeps_its_worker_job_owned_until_decode_returns() {
     let old = ScriptedDecoder::new();
-    old.park_next();
     let service = service(&old);
-    let request_service = service.clone();
-    let request = tokio::spawn(async move {
-        transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
-    });
-    let parked = old.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(WAIT))
-            .await
-            .expect("park observer joins"),
-        "decode reaches the native-equivalent rendezvous"
-    );
-    assert_eq!(generation_counts(&service), Some((1, 1)));
-
-    request.abort();
-    assert!(
-        request
-            .await
-            .expect_err("request is canceled")
-            .is_cancelled()
-    );
-    tokio::time::timeout(WAIT, async {
-        while generation_counts(&service) != Some((0, 1)) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("request ownership drops while worker ownership remains");
-    assert_eq!(generation_counts(&service), Some((0, 1)));
-
     let replacement = ScriptedDecoder::new();
-    let replacement_control = replacement.clone();
-    let replacement_service = service.clone();
-    let attempt = tokio::task::spawn_blocking(move || {
-        begin_scripted_replacement(
-            &replacement_service,
-            factory(&replacement_control),
-            false,
-            Duration::from_millis(20),
-        )
-    })
-    .await
-    .expect("replacement attempt joins");
-    let error = attempt.expect_err("the live worker job prevents quiescence");
-    assert!(error.to_string().contains("quiescence deadline"));
-    assert!(replacement.creation_thread().is_none());
+    old.with_next_decode_blocked(
+        WAIT,
+        || {
+            let request_service = service.clone();
+            async move {
+                (tokio::spawn(async move {
+                    transcribe_batch(request_service, "scripted-interim", &[0.25; 16]).await
+                }),)
+            }
+        },
+        |(request,)| async {
+            assert_eq!(generation_counts(&service), Some((1, 1)));
+            request.abort();
+            assert!(
+                request
+                    .await
+                    .expect_err("request is canceled")
+                    .is_cancelled()
+            );
+            tokio::time::timeout(WAIT, async {
+                while generation_counts(&service) != Some((0, 1)) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("request ownership drops while worker ownership remains");
+            assert_eq!(generation_counts(&service), Some((0, 1)));
 
-    old.release();
+            let replacement_control = replacement.clone();
+            let replacement_service = service.clone();
+            let attempt = tokio::task::spawn_blocking(move || {
+                begin_scripted_replacement(
+                    &replacement_service,
+                    factory(&replacement_control),
+                    false,
+                    Duration::from_millis(20),
+                )
+            })
+            .await
+            .expect("replacement attempt joins");
+            let error = attempt.expect_err("the live worker job prevents quiescence");
+            assert!(error.to_string().contains("quiescence deadline"));
+            assert!(replacement.creation_thread().is_none());
+        },
+    )
+    .await
+    .expect("decode reaches the blocked native-equivalent scenario");
     tokio::time::timeout(WAIT, async {
         while generation_counts(&service) != Some((0, 0)) {
             tokio::task::yield_now().await;

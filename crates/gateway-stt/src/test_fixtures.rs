@@ -4,7 +4,7 @@
 use std::future::Future;
 
 #[cfg(feature = "test-fixtures")]
-use crate::realtime::{CommitReceipt, InterimEpoch, ItemResult, Session, SessionRegistry};
+use crate::realtime::{CommitReceipt, ItemResult, Session, SessionRegistry};
 
 #[cfg(feature = "test-fixtures")]
 mod generation;
@@ -89,11 +89,6 @@ impl RealtimeSessionRegistryFixture {
         self.inner.cleanup_notified()
     }
 }
-
-/// An opaque interim epoch used by the Realtime session fixture.
-#[cfg(feature = "test-fixtures")]
-#[derive(Clone, Copy, Debug)]
-pub struct RealtimeInterimEpoch(InterimEpoch);
 
 /// The immutable first-append configuration captured by a fixture session.
 #[cfg(feature = "test-fixtures")]
@@ -328,44 +323,47 @@ impl RealtimeSessionFixture {
             .map_err(|error| error.to_string())
     }
 
-    /// Begins an interim epoch without spawning work.
-    ///
-    /// # Errors
-    /// Returns the session ownership or epoch error.
-    pub fn begin_interim(&mut self) -> Result<RealtimeInterimEpoch, String> {
-        self.session
-            .begin_interim()
-            .map(RealtimeInterimEpoch)
-            .map_err(|error| error.to_string())
-    }
-
     /// Spawns one session-owned interim task.
     ///
     /// # Errors
     /// Returns the bounded cleanup or epoch error.
-    pub fn spawn_interim<F>(&mut self, task: F) -> Result<RealtimeInterimEpoch, String>
+    pub fn spawn_interim<F>(&mut self, task: F) -> Result<(), String>
     where
         F: Future<Output = String> + Send + 'static,
     {
         self.session
             .spawn_interim(task)
-            .map(RealtimeInterimEpoch)
+            .map(|_| ())
             .map_err(|error| error.to_string())
     }
 
-    /// Accepts a result and allocates its event ID only after epoch validation.
+    /// Accepts one interim, clears its input, then rejects the stale epoch.
     ///
     /// # Errors
-    /// Returns a serialization error if the accepted server event cannot serialize.
-    pub fn accept_interim(
+    /// Returns an ownership, cleanup, epoch, or serialization error.
+    pub fn accept_interim_across_clear(
         &mut self,
-        epoch: RealtimeInterimEpoch,
-        transcript: String,
-    ) -> Result<Option<serde_json::Value>, serde_json::Error> {
-        self.session
-            .accept_interim(epoch.0, transcript)
+        current: &str,
+        stale: &str,
+    ) -> Result<(Option<serde_json::Value>, Option<serde_json::Value>), String> {
+        let epoch = self
+            .session
+            .begin_interim()
+            .map_err(|error| error.to_string())?;
+        let current = self
+            .session
+            .accept_interim(epoch, current.to_owned())
             .map(serde_json::to_value)
             .transpose()
+            .map_err(|error| error.to_string())?;
+        self.session.clear().map_err(|error| error.to_string())?;
+        let stale = self
+            .session
+            .accept_interim(epoch, stale.to_owned())
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|error| error.to_string())?;
+        Ok((current, stale))
     }
 
     /// Awaits and accepts the current interim task without relinquishing ownership.

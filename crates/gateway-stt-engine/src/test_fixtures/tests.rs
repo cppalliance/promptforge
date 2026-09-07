@@ -1,5 +1,7 @@
 use super::*;
-use crate::{EnginePolicy, SttEngine};
+use crate::{DecodeRequest, EnginePolicy, SttEngine};
+
+mod scenario_cleanup;
 
 fn policy() -> EnginePolicy {
     EnginePolicy::new(15, 500, false).expect("test policy is valid")
@@ -22,13 +24,8 @@ fn assert_invalid_config(error: TranscribeError, expected: &str) {
 }
 
 fn wait_until_waiter_is_registered(decoder: &ScriptedDecoder) {
-    let (state, changed) = &*decoder.shared;
-    let state = state.lock().unwrap_or_else(PoisonError::into_inner);
-    let (state, timeout) = changed
-        .wait_timeout_while(state, Duration::from_secs(1), |state| state.waiters == 0)
-        .unwrap_or_else(PoisonError::into_inner);
     assert!(
-        !timeout.timed_out() && state.waiters == 1,
+        decoder.wait_until_waiter_registered(Duration::from_secs(1)),
         "request waiter must enter the condition-variable wait"
     );
 }
@@ -228,61 +225,6 @@ fn scripted_final_factory_error_reaches_the_constructor_and_cleans_up_interim() 
     assert!(interim.worker_dropped());
     assert_eq!(final_decoder.creation_thread(), None);
     assert!(!final_decoder.worker_dropped());
-}
-
-#[test]
-fn parked_interim_construction_has_a_bounded_classified_outcome() {
-    let interim = ScriptedDecoder::new();
-    interim.park_construction();
-    let factory = ScriptedModelFactory::new(interim.clone());
-    let timeout = policy().with_startup_timeout(Duration::from_millis(20));
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let constructor = std::thread::spawn(move || {
-        let result = SttEngine::new(factory, timeout);
-        drop(result_tx.send(result));
-    });
-    assert!(interim.wait_until_construction_parked(Duration::from_secs(1)));
-    let error = result_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("startup returns by its deadline")
-        .expect_err("parked interim construction times out");
-    assert!(matches!(error, TranscribeError::InterimStartupTimedOut));
-    constructor.join().expect("constructor does not panic");
-    interim.release_construction();
-    assert!(interim.wait_for(Duration::from_secs(1), |state| state.worker_dropped));
-}
-
-#[test]
-fn parked_final_construction_cleans_up_the_initialized_interim_worker() {
-    let interim = ScriptedDecoder::new();
-    let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_construction();
-    let factory = ScriptedModelFactory::new(interim.clone()).with_final(final_decoder.clone());
-    let timeout = policy().with_startup_timeout(Duration::from_millis(20));
-    let (result_tx, result_rx) = std::sync::mpsc::channel();
-    let constructor = std::thread::spawn(move || {
-        let result = SttEngine::new(factory, timeout);
-        drop(result_tx.send(result));
-    });
-    assert!(
-        final_decoder.wait_until_construction_parked(Duration::from_secs(1)),
-        "final construction reaches its deterministic park"
-    );
-    let error = result_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("startup returns by its deadline")
-        .expect_err("parked final construction times out");
-    assert!(matches!(error, TranscribeError::FinalStartupTimedOut));
-    assert!(
-        interim.worker_dropped(),
-        "the worker initialized first is joined and cleaned up"
-    );
-    constructor.join().expect("constructor does not panic");
-    final_decoder.release_construction();
-    assert!(
-        final_decoder.wait_for(Duration::from_secs(1), |state| state.worker_dropped),
-        "the abandoned constructor releases its decoder after returning"
-    );
 }
 
 #[test]

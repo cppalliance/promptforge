@@ -1,90 +1,4 @@
 #[tokio::test]
-async fn interim_scheduler_enforces_cadence_minimum_silence_and_coalescing() {
-    let interim = ScriptedDecoder::new();
-    interim.push_text("first window");
-    interim.push_text("newest window");
-    let service = speech_with_policy(&interim, Some(&ScriptedDecoder::new()), 15, 500);
-    let server = server(true, &service).await;
-    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
-    expect_type(&mut socket, "session.created").await;
-
-    for _ in 0..4 {
-        append_audio(&mut socket, audio()).await;
-    }
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert!(
-        interim.requests().is_empty(),
-        "sub-500 ms audio never enters the decoder"
-    );
-
-    interim.park_next();
-    append_audio(&mut socket, audio()).await;
-    let parked = interim.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("park observer joins"),
-        "the first eligible scheduled decode parks"
-    );
-    for _ in 0..5 {
-        append_audio(&mut socket, audio()).await;
-    }
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert_eq!(
-        interim.requests().len(),
-        1,
-        "only one interim decode may be in flight"
-    );
-
-    interim.release();
-    let coalesced = interim.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || coalesced.wait_for_requests(2, PHASE_TIMEOUT))
-            .await
-            .expect("coalesced request observer joins"),
-        "the newest eligible snapshot runs after release"
-    );
-    assert_eq!(interim.requests()[1].samples().len(), 16_000);
-
-    interim.park_next();
-    for _ in 0..5 {
-        append_audio(&mut socket, audio()).await;
-    }
-    let canceled = interim.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || canceled.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("cancellation park observer joins")
-    );
-    send(
-        &mut socket,
-        serde_json::json!({"type": "input_audio_buffer.clear"}),
-    )
-    .await;
-    expect_type(&mut socket, "input_audio_buffer.cleared").await;
-    interim.release();
-    let cleaned = interim.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || cleaned.wait_for_completed(3, PHASE_TIMEOUT))
-            .await
-            .expect("canceled worker observer joins"),
-        "cleared scheduled work releases its underlying worker job"
-    );
-    for _ in 0..5 {
-        append_audio(&mut socket, audio_samples(&vec![0; 2_400])).await;
-    }
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert_eq!(
-        interim.requests().len(),
-        3,
-        "eligible silent windows are suppressed"
-    );
-
-    socket.close(None).await.expect("socket closes");
-    drop(socket);
-    server.shutdown().await;
-}
-#[tokio::test]
 async fn completion_cadence_reaps_more_than_eight_canceled_interims() {
     let interim = ScriptedDecoder::new();
     let service = speech_with_policy(&interim, Some(&ScriptedDecoder::new()), 15, 50);
@@ -93,31 +7,37 @@ async fn completion_cadence_reaps_more_than_eight_canceled_interims() {
     expect_type(&mut socket, "session.created").await;
 
     for request_count in 1..=10 {
-        interim.park_next();
-        for _ in 0..5 {
-            append_audio(&mut socket, audio()).await;
-        }
-        let parked = interim.clone();
-        assert!(
-            tokio::task::spawn_blocking(move || {
-                parked.wait_for_requests(request_count, PHASE_TIMEOUT)
-                    && parked.wait_until_parked(PHASE_TIMEOUT)
-            })
+        interim
+            .with_next_decode_blocked(
+                PHASE_TIMEOUT,
+                || async {
+                    for _ in 0..5 {
+                        append_audio(&mut socket, audio()).await;
+                    }
+                    &mut socket
+                },
+                |socket| async {
+                    assert_eq!(
+                        interim.requests().len(),
+                        request_count,
+                        "scheduled interim {request_count} reaches its worker"
+                    );
+                    send(
+                        socket,
+                        serde_json::json!({"type": "input_audio_buffer.clear"}),
+                    )
+                    .await;
+                    assert_eq!(
+                        expect_type(socket, "input_audio_buffer.cleared").await["type"],
+                        "input_audio_buffer.cleared",
+                        "completed canceled joins free bounded capacity before cycle {request_count}"
+                    );
+                },
+            )
             .await
-            .expect("park observer joins"),
-            "scheduled interim {request_count} reaches its worker"
-        );
-        send(
-            &mut socket,
-            serde_json::json!({"type": "input_audio_buffer.clear"}),
-        )
-        .await;
-        assert_eq!(
-            expect_type(&mut socket, "input_audio_buffer.cleared").await["type"],
-            "input_audio_buffer.cleared",
-            "completed canceled joins free bounded capacity before cycle {request_count}"
-        );
-        interim.release();
+            .unwrap_or_else(|| {
+                panic!("scheduled interim {request_count} reaches the blocked scenario")
+            });
         let completed = interim.clone();
         assert!(
             tokio::task::spawn_blocking(move || {
@@ -169,27 +89,29 @@ async fn consumed_boundary_rebases_before_delayed_finalization_completes() {
     .await;
     assert_eq!(first["transcript"], "first phrase");
 
-    final_decoder.park_next();
-    append_audio(
-        &mut socket,
-        audio_samples(&[vec![0; 72_000], vec![8_192; 12_000]].concat()),
-    )
-    .await;
-    let parked = final_decoder.clone();
-    assert!(
-        tokio::task::spawn_blocking(move || parked.wait_until_parked(PHASE_TIMEOUT))
-            .await
-            .expect("finalization park observer joins")
-    );
-    let pending = expect_type(
-        &mut socket,
-        "conversation.item.input_audio_transcription.hypothesis",
-    )
-    .await;
-    assert_eq!(pending["transcript"], "first phrase second phrase");
-    assert_eq!(pending["finalized"], "");
-
-    final_decoder.release();
+    final_decoder
+        .with_next_decode_blocked(
+            PHASE_TIMEOUT,
+            || async {
+                append_audio(
+                    &mut socket,
+                    audio_samples(&[vec![0; 72_000], vec![8_192; 12_000]].concat()),
+                )
+                .await;
+                &mut socket
+            },
+            |socket| async {
+                let pending = expect_type(
+                    socket,
+                    "conversation.item.input_audio_transcription.hypothesis",
+                )
+                .await;
+                assert_eq!(pending["transcript"], "first phrase second phrase");
+                assert_eq!(pending["finalized"], "");
+            },
+        )
+        .await
+        .expect("delayed finalization reaches the blocked scenario");
     let finalized = final_decoder.clone();
     assert!(
         tokio::task::spawn_blocking(move || finalized.wait_for_completed(1, PHASE_TIMEOUT))

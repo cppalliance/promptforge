@@ -472,21 +472,12 @@ fn stale_interim_is_rejected_before_event_id_allocation() {
     session
         .append_base64(&encoded(&[0, 0]))
         .expect("input appends");
-    let stale = session.begin_interim().expect("epoch begins");
-    let current_event = session
-        .accept_interim(stale, "current".to_owned())
-        .expect("event serializes")
-        .expect("current epoch is accepted");
+    let (current_event, stale_event) = session
+        .accept_interim_across_clear("current", "stale")
+        .expect("interim clear scenario succeeds");
+    let current_event = current_event.expect("current epoch is accepted");
     assert_eq!(current_event["delta"], "current");
-    assert_eq!(session.allocated_event_count(), 1);
-
-    session.clear().expect("input clears");
-    assert!(
-        session
-            .accept_interim(stale, "stale".to_owned())
-            .expect("rejection does not serialize")
-            .is_none()
-    );
+    assert!(stale_event.is_none());
     assert_eq!(
         session.allocated_event_count(),
         1,
@@ -571,7 +562,6 @@ fn committed_capacity_is_reserved_before_input_detach_and_retryable() {
 async fn four_items_finalize_in_reverse_order_without_crossing_ownership() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_next();
     for index in 0..COMMITTED_ITEM_CAPACITY {
         final_decoder.push_text(format!("result-{index}"));
     }
@@ -582,24 +572,29 @@ async fn four_items_finalize_in_reverse_order_without_crossing_ownership() {
         )
         .expect("scripted session starts");
     let mut ids = Vec::new();
-    for index in 0..COMMITTED_ITEM_CAPACITY {
-        session
-            .update_text(&update(&format!("prompt-{index}"), true))
-            .expect("item prompt updates");
-        append_decodable(&mut session);
-        ids.push(session.commit().expect("item commits").item_id().to_owned());
-    }
-    assert_eq!(
-        session.finalizing_count(),
-        COMMITTED_ITEM_CAPACITY,
-        "every committed take owns an asynchronous finalization"
-    );
-    tokio::task::yield_now().await;
-    assert!(
-        final_decoder.wait_until_parked(Duration::from_secs(1)),
-        "one accurate final decode parks while all item tasks remain owned"
-    );
-    final_decoder.release();
+    final_decoder
+        .with_next_decode_blocked(
+            Duration::from_secs(1),
+            || async {
+                for index in 0..COMMITTED_ITEM_CAPACITY {
+                    session
+                        .update_text(&update(&format!("prompt-{index}"), true))
+                        .expect("item prompt updates");
+                    append_decodable(&mut session);
+                    ids.push(session.commit().expect("item commits").item_id().to_owned());
+                }
+                &session
+            },
+            |session| async {
+                assert_eq!(
+                    session.finalizing_count(),
+                    COMMITTED_ITEM_CAPACITY,
+                    "every committed take owns an asynchronous finalization"
+                );
+            },
+        )
+        .await
+        .expect("one accurate final decode blocks while all item tasks remain owned");
 
     for (index, item_id) in ids.iter().enumerate().rev() {
         assert_eq!(
@@ -640,31 +635,34 @@ async fn canceling_item_finish_keeps_finalization_owned_for_retry() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
     final_decoder.push_text("authoritative");
-    final_decoder.park_next();
     let registry = RealtimeSessionRegistryFixture::default();
     let mut session = registry
         .register_with_scripted_engine(
             ScriptedModelFactory::new(interim).with_final(final_decoder.clone()),
         )
         .expect("scripted session starts");
-    append_decodable(&mut session);
-    let item = session.commit().expect("item commits");
-    let item_id = item.item_id().to_owned();
-
-    tokio::task::yield_now().await;
-    assert!(
-        final_decoder.wait_until_parked(Duration::from_secs(1)),
-        "the accurate decode remains parked"
-    );
-    assert!(
-        session
-            .finish_finalization(&item_id)
-            .now_or_never()
-            .is_none(),
-        "canceling the first join poll cannot detach finalization"
-    );
-    assert_eq!(session.finalizing_count(), 1);
-    final_decoder.release();
+    let item_id = final_decoder
+        .with_next_decode_blocked(
+            Duration::from_secs(1),
+            || async {
+                append_decodable(&mut session);
+                let item_id = session.commit().expect("item commits").item_id().to_owned();
+                (&mut session, item_id)
+            },
+            |(session, item_id)| async {
+                assert!(
+                    session
+                        .finish_finalization(&item_id)
+                        .now_or_never()
+                        .is_none(),
+                    "canceling the first join poll cannot detach finalization"
+                );
+                assert_eq!(session.finalizing_count(), 1);
+                item_id
+            },
+        )
+        .await
+        .expect("the accurate decode reaches the blocked scenario");
     session
         .finish_finalization(&item_id)
         .await
@@ -773,7 +771,6 @@ async fn asynchronous_final_failure_is_observed_before_the_next_append_and_at_co
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
     final_decoder.push_error("late accurate failure");
-    final_decoder.park_next();
     let registry = RealtimeSessionRegistryFixture::default();
     let mut session = registry
         .register_with_scripted_engine(
@@ -781,15 +778,18 @@ async fn asynchronous_final_failure_is_observed_before_the_next_append_and_at_co
         )
         .expect("scripted session starts");
 
-    session
-        .append_base64(&closed_segment())
-        .expect("closed segment enters the production take");
-    tokio::task::yield_now().await;
-    assert!(
-        final_decoder.wait_until_parked(Duration::from_secs(1)),
-        "the accurate segment is running between appends"
-    );
-    final_decoder.release();
+    final_decoder
+        .with_next_decode_blocked(
+            Duration::from_secs(1),
+            || async {
+                session
+                    .append_base64(&closed_segment())
+                    .expect("closed segment enters the production take");
+            },
+            |()| async {},
+        )
+        .await
+        .expect("the accurate segment blocks between appends");
     wait_until(|| session.pending_failure().is_some()).await;
     let failure = session
         .pending_failure()
@@ -816,7 +816,6 @@ async fn asynchronous_final_failure_is_observed_before_the_next_append_and_at_co
 async fn production_final_segment_admission_is_exact_and_fails_atomically() {
     let interim = ScriptedDecoder::new();
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.park_next();
     final_decoder.push_text("first");
     let registry = RealtimeSessionRegistryFixture::default();
     let mut session = registry
@@ -825,40 +824,45 @@ async fn production_final_segment_admission_is_exact_and_fails_atomically() {
         )
         .expect("scripted session starts");
 
-    session
-        .append_base64(&closed_segment())
-        .expect("first closed segment is admitted");
-    tokio::task::yield_now().await;
-    assert!(
-        final_decoder.wait_until_parked(Duration::from_secs(1)),
-        "the first production segment parks in final decoding"
-    );
-    assert_eq!(session.pending_final_segments(), Some(1));
+    final_decoder
+        .with_next_decode_blocked(
+            Duration::from_secs(1),
+            || async {
+                session
+                    .append_base64(&closed_segment())
+                    .expect("first closed segment is admitted");
+                &mut session
+            },
+            |session| async {
+                assert_eq!(session.pending_final_segments(), Some(1));
 
-    for expected in 2..=4 {
-        session
-            .append_base64(&closed_segment())
-            .expect("segment is accepted through exact capacity");
-        assert_eq!(session.pending_final_segments(), Some(expected));
-        assert!(session.pending_failure().is_none());
-    }
+                for expected in 2..=4 {
+                    session
+                        .append_base64(&closed_segment())
+                        .expect("segment is accepted through exact capacity");
+                    assert_eq!(session.pending_final_segments(), Some(expected));
+                    assert!(session.pending_failure().is_none());
+                }
 
-    session
-        .append_base64(&closed_segment())
-        .expect("audio ingestion remains recoverable at segment saturation");
-    assert_eq!(session.pending_final_segments(), Some(4));
-    assert_eq!(
-        session.pending_failure().as_deref(),
-        Some("final segment capacity is reached")
-    );
-    let item = session
-        .commit()
-        .expect("capacity failure atomically becomes an item failure");
-    let results = session.drain_results();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["item_id"], item.item_id());
-    assert_eq!(results[0]["message"], "final segment capacity is reached");
-    final_decoder.release();
+                session
+                    .append_base64(&closed_segment())
+                    .expect("audio ingestion remains recoverable at segment saturation");
+                assert_eq!(session.pending_final_segments(), Some(4));
+                assert_eq!(
+                    session.pending_failure().as_deref(),
+                    Some("final segment capacity is reached")
+                );
+                let item = session
+                    .commit()
+                    .expect("capacity failure atomically becomes an item failure");
+                let results = session.drain_results();
+                assert_eq!(results.len(), 1);
+                assert_eq!(results[0]["item_id"], item.item_id());
+                assert_eq!(results[0]["message"], "final segment capacity is reached");
+            },
+        )
+        .await
+        .expect("the first production segment blocks in final decoding");
 }
 
 #[tokio::test]

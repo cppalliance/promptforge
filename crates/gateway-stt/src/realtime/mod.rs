@@ -13,4 +13,4 @@ pub(crate) use result_mailbox::ItemResult;
 #[cfg(feature = "test-fixtures")]
 pub(crate) use route::ForcedPrecommitFailure;
 pub(crate) use route::{RoutePolicy, routes};
-pub(crate) use session::{InterimEpoch, Session};
+pub(crate) use session::Session;
