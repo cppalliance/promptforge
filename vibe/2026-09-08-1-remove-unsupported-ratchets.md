@@ -421,7 +421,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Consolidate only duplicated test fault injection when the resulting harness still reaches direct write, flush, rename, sync, crash, recovery, and release boundaries.
 - Run focused `gateway-logging` redaction, queue, worker, writer, rotation, recovery, disk-budget, and shutdown tests, including every retained fault boundary. Commit the characterized simplification without unrelated cleanup.
 
-### Step 6: Establish process-lifetime Gateway ownership
+### Step 6: Establish process-lifetime Gateway ownership [completed]
 
 - Add `GatewayInstanceLease` in `crates/shared-sidecar/src/lock.rs`, with its dedicated run-directory path in `paths.rs` and export in `lib.rs`. The nonblocking operating-system lock is owned by its file handle and releases on graceful exit, panic, crash, or termination. Keep parent-side `LaunchLock` unchanged.
 - Integrate the lease through `crates/gateway/src/main.rs` and `relaunch.rs`. Acquire it before canonical logging, stale cleanup, recovery, bind, or publication, then re-resolve the connection record. A validated owner triggers ordinary handoff; an absent or stale record lets the lease holder boot.

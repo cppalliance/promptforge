@@ -7,7 +7,7 @@ use std::time::Duration;
 use gateway::{ProfileName, ServeOptions};
 use serde_json::Value;
 
-use crate::support::{PHASE_TIMEOUT, json_within, send_within};
+use crate::support::{GatewayProcess, PHASE_TIMEOUT, json_within, send_within};
 
 /// Writes the config and returns its path; the profile selects every model
 /// the body declares.
@@ -15,6 +15,151 @@ fn write_config(temp: &tempfile::TempDir, body: String) -> std::path::PathBuf {
     let path = temp.path().join("gateway.toml");
     std::fs::write(&path, body).expect("write config");
     path
+}
+
+fn race_config(temp: &tempfile::TempDir) -> std::path::PathBuf {
+    write_config(
+        temp,
+        "config-version = 2\n\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n\
+         [[profile]]\nname = \"main\"\nmodels = []\n"
+            .to_string(),
+    )
+}
+
+#[cfg(feature = "test-fixtures")]
+fn spawn_at_ownership_rendezvous(
+    config: &std::path::Path,
+    home: &std::path::Path,
+) -> (GatewayProcess, GatewayProcess) {
+    let first_ready = home.join("first-before-ownership.ready");
+    let second_ready = home.join("second-before-ownership.ready");
+    let release = home.join("release-ownership-race");
+    let mut first = GatewayProcess::spawn_gated(config, home, &first_ready, &release);
+    let mut second = GatewayProcess::spawn_gated(config, home, &second_ready, &release);
+    let deadline = std::time::Instant::now() + PHASE_TIMEOUT;
+    while !(first_ready.is_file() && second_ready.is_file()) {
+        assert!(
+            first.try_wait().is_none() && second.try_wait().is_none(),
+            "both Gateway processes remain blocked at the ownership rendezvous"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "both Gateway processes reached the ownership rendezvous"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        !shared_sidecar::connection_file_path(&home.join(".promptforge").join("run")).exists(),
+        "neither process can acquire ownership or publish before release"
+    );
+    std::fs::write(&release, b"release").expect("release both ownership contenders");
+    (first, second)
+}
+
+fn wait_for_connection(
+    run_dir: &std::path::Path,
+    timeout: Duration,
+) -> shared_sidecar::ConnectionFile {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(connection) =
+            shared_sidecar::ConnectionFile::read(run_dir).expect("read the connection file")
+        {
+            return connection;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a Gateway owner did not publish within {timeout:?}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(feature = "test-fixtures")]
+fn assert_exactly_one_process_owns(
+    first: &mut GatewayProcess,
+    second: &mut GatewayProcess,
+    connection: &shared_sidecar::ConnectionFile,
+) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let first_status = first.try_wait();
+        let second_status = second.try_wait();
+        match (first_status, second_status) {
+            (Some(status), None) => {
+                assert!(status.success(), "the first launch hands off: {status}");
+                assert_eq!(
+                    connection.pid,
+                    second.id(),
+                    "the published connection names the surviving owner"
+                );
+                let output = first.stdout();
+                assert!(
+                    output.contains(&format!("http://127.0.0.1:{}/auth?key=", connection.port)),
+                    "the first launch printed the owner's handoff URL: {output}"
+                );
+                return false;
+            }
+            (None, Some(status)) => {
+                assert!(status.success(), "the second launch hands off: {status}");
+                assert_eq!(
+                    connection.pid,
+                    first.id(),
+                    "the published connection names the surviving owner"
+                );
+                let output = second.stdout();
+                assert!(
+                    output.contains(&format!("http://127.0.0.1:{}/auth?key=", connection.port)),
+                    "the second launch printed the owner's handoff URL: {output}"
+                );
+                return true;
+            }
+            (Some(first_status), Some(second_status)) => {
+                panic!(
+                    "both Gateway launches exited instead of leaving one owner: \
+                     {first_status}, {second_status}"
+                );
+            }
+            (None, None) => {}
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "both Gateway launches kept serving instead of electing one owner"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(feature = "test-fixtures")]
+fn assert_one_canonical_log(home: &std::path::Path) {
+    let logs = home.join(".promptforge").join("logs");
+    let log_path = logs.join("gateway.log");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let log = loop {
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if log.contains("logging to") {
+            break log;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the owner did not write its canonical startup log"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "a losing process never rotates the owner's canonical log"
+    );
+    assert_eq!(
+        log.matches("promptforge-gateway").count(),
+        1,
+        "only the owner writes the versioned startup record: {log}"
+    );
+    assert_eq!(
+        log.matches("logging to").count(),
+        1,
+        "only the owner initializes canonical logging: {log}"
+    );
 }
 
 /// Polls `/v1/models` until the catalog is exactly `expected`, so the test
@@ -448,6 +593,225 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
         1,
         "only the serving instance wrote a startup line: {log}"
     );
+}
+
+/// Two direct process launches against an absent record elect one process
+/// owner before either can initialize logging or bind.
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let (mut first, mut second) = spawn_at_ownership_rendezvous(&config, temp.path());
+
+    let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
+    let first_owns = assert_exactly_one_process_owns(&mut first, &mut second, &connection);
+    assert_one_canonical_log(temp.path());
+    assert!(
+        shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+            .expect("contend for the live Gateway's process lease")
+            .is_none(),
+        "the surviving process keeps its lease for its serving lifetime"
+    );
+
+    if first_owns {
+        first.stop(Duration::from_secs(5));
+    } else {
+        second.stop(Duration::from_secs(5));
+    }
+}
+
+/// A Workshop-elected launch keeps the parent-side `LaunchLock` while two
+/// real Gateway processes race. Gateway ownership must not contend on that
+/// parent lock, and only one child may survive.
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let shared_sidecar::LaunchDecision::Launch(workshop_lock) =
+        shared_sidecar::launch_or_attach(&run_dir, Duration::from_secs(5))
+            .expect("Workshop wins the parent launch election")
+    else {
+        panic!("an empty run directory elects the Workshop launcher");
+    };
+
+    let (mut workshop_launch, mut direct_launch) =
+        spawn_at_ownership_rendezvous(&config, temp.path());
+    let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
+    let workshop_owns =
+        assert_exactly_one_process_owns(&mut workshop_launch, &mut direct_launch, &connection);
+    assert_one_canonical_log(temp.path());
+    drop(workshop_lock);
+
+    if workshop_owns {
+        workshop_launch.stop(Duration::from_secs(5));
+    } else {
+        direct_launch.stop(Duration::from_secs(5));
+    }
+}
+
+/// The ordinary production binary has no compiled rendezvous hook: even
+/// environment names used by the feature-enabled fixture are inert.
+#[cfg(not(feature = "test-fixtures"))]
+#[test]
+fn the_default_binary_ignores_test_rendezvous_environment() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let ready = temp.path().join("default-build-ready");
+    let absent_release = temp.path().join("default-build-release");
+    let mut gateway =
+        GatewayProcess::spawn_with_inert_rendezvous(&config, temp.path(), &ready, &absent_release);
+
+    let connection = wait_for_connection(&run_dir, PHASE_TIMEOUT);
+    assert_eq!(
+        connection.pid,
+        gateway.id(),
+        "the default binary serves without consulting test rendezvous state"
+    );
+    assert!(
+        !ready.exists(),
+        "the default binary never writes the test synchronization marker"
+    );
+    gateway.stop(Duration::from_secs(5));
+}
+
+/// A process that loses the lifetime lease to a silent owner exits nonzero
+/// after the bounded publication wait. The failure stays on stderr and never
+/// initializes or rotates canonical logging.
+#[test]
+fn a_silent_process_lease_owner_causes_a_bounded_console_only_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let state_dir = temp.path().join(".promptforge");
+    let run_dir = state_dir.join("run");
+    let logs = state_dir.join("logs");
+    std::fs::create_dir_all(&logs).expect("create seeded log directory");
+    let log_path = logs.join("gateway.log");
+    std::fs::write(&log_path, "owner-log-sentinel").expect("seed the owner's canonical log");
+    let _owner = shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+        .expect("acquire the silent owner lease")
+        .expect("the test owns the process lease");
+    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    std::fs::write(&connection_path, b"owner-is-still-publishing")
+        .expect("seed an unreadable owner record");
+
+    let mut loser = GatewayProcess::spawn(&config, temp.path());
+    let status = loser.wait_for_exit(Duration::from_secs(15));
+    assert!(
+        !status.success(),
+        "a lease loser without a validated owner record exits nonzero"
+    );
+    let stderr = loser.stderr();
+    assert!(
+        stderr.contains("process owner published no validated connection"),
+        "the console error names the bounded ownership failure: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log_path).expect("read the seeded canonical log"),
+        "owner-log-sentinel",
+        "the losing process never initializes canonical logging"
+    );
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "the losing process never rotates the canonical log"
+    );
+    assert_eq!(
+        std::fs::read(&connection_path).expect("read the seeded owner record"),
+        b"owner-is-still-publishing",
+        "the losing process never cleans or rewrites shared connection state"
+    );
+}
+
+/// A lease holder that cannot read existing shared state exits through the
+/// console-only startup path, preserving the source chain and canonical log.
+#[test]
+fn a_connection_resolution_failure_is_console_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let state_dir = temp.path().join(".promptforge");
+    let run_dir = state_dir.join("run");
+    let logs = state_dir.join("logs");
+    std::fs::create_dir_all(&logs).expect("create seeded log directory");
+    let log_path = logs.join("gateway.log");
+    std::fs::write(&log_path, "owner-log-sentinel").expect("seed the canonical log");
+    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
+
+    let mut gateway = GatewayProcess::spawn(&config, temp.path());
+    let status = gateway.wait_for_exit(Duration::from_secs(5));
+
+    assert!(
+        !status.success(),
+        "an unresolved connection record prevents boot"
+    );
+    let stderr = gateway.stderr();
+    assert!(
+        stderr.contains("resolve existing Gateway connection before startup")
+            && stderr.contains("caused by: read"),
+        "stderr retains the resolution failure and source chain: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log_path).expect("read the seeded log"),
+        "owner-log-sentinel",
+        "the failure never initializes or rotates canonical logging"
+    );
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "the failure creates no retained log"
+    );
+    assert!(
+        connection_path.is_dir(),
+        "the failure leaves uncertain connection state untouched"
+    );
+}
+
+/// Terminating the real owner leaves its connection record behind but
+/// releases the operating-system lease, so a later direct launch cleans the
+/// stale record and becomes the sole owner.
+#[test]
+fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = race_config(&temp);
+    let run_dir = temp.path().join(".promptforge").join("run");
+    let mut first = GatewayProcess::spawn(&config, temp.path());
+    let first_connection = wait_for_connection(&run_dir, Duration::from_secs(30));
+    assert_eq!(first_connection.pid, first.id());
+    assert!(
+        shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+            .expect("contend for the first owner's process lease")
+            .is_none(),
+        "the first process owns the lifetime lease"
+    );
+    first.stop(Duration::from_secs(5));
+
+    let mut replacement = GatewayProcess::spawn(&config, temp.path());
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let replacement_connection = loop {
+        if let Some(connection) =
+            shared_sidecar::ConnectionFile::read(&run_dir).expect("read replacement connection")
+            && connection.pid == replacement.id()
+        {
+            break connection;
+        }
+        assert!(
+            replacement.try_wait().is_none(),
+            "the replacement exited before taking the dead owner's lease"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the replacement did not publish after the owner was terminated"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_ne!(
+        replacement_connection.pid, first_connection.pid,
+        "the stale owner record was replaced"
+    );
+    replacement.stop(Duration::from_secs(5));
 }
 
 /// `--version` and `--help` exit before logging starts: a pre-existing log

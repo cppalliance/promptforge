@@ -126,7 +126,7 @@ pub(crate) use crate::profile_switch::LOCAL_MODELS_UNSUPPORTED;
 #[cfg(not(feature = "stt"))]
 pub(crate) use crate::profile_switch::STT_RUNTIME_UNAVAILABLE;
 pub(crate) use crate::profile_switch::StatePersistence;
-pub use crate::relaunch::running_gateway_settings_url;
+pub use crate::relaunch::{GatewayStartup, GatewayStartupError, settle_gateway_startup};
 pub use crate::runner::{
     Gateway, GatewayHandle, ProfilesContext, ServeOptions, run, run_printing_url, spawn,
 };

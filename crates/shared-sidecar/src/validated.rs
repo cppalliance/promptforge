@@ -4,7 +4,7 @@
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::health::{self, ConnectionProbe};
 use crate::stale::StaleReason;
@@ -39,9 +39,8 @@ pub enum ValidationError {
 /// A Gateway connection proven live and authorized at construction time.
 ///
 /// Safe code outside this crate cannot construct the capability directly.
-/// [`ValidatedConnection::validate`] is the only production entry point,
-/// and it succeeds only after checking the process image, boot identity,
-/// health endpoint, and bearer acceptance.
+/// Construction succeeds only after checking the process image, boot
+/// identity, health endpoint, and bearer acceptance.
 ///
 /// Validation observes the OS process boot immediately before and after
 /// one TCP connection carries both network checks. This closes the
@@ -107,6 +106,19 @@ impl ValidatedConnection {
         Self::validate_named(connection, GATEWAY_IMAGE_NAME)
     }
 
+    /// Validates a raw connection against the production Gateway image
+    /// without allowing the network proof to outlive `deadline`.
+    ///
+    /// # Errors
+    /// Returns the first [`StaleReason`] that prevents the raw connection
+    /// from proving a live, authorized Gateway boot before `deadline`.
+    pub fn validate_before(
+        connection: ConnectionFile,
+        deadline: Instant,
+    ) -> Result<Self, StaleReason> {
+        Self::validate_named_before(connection, GATEWAY_IMAGE_NAME, deadline)
+    }
+
     /// Validates a raw connection while observing caller cancellation.
     ///
     /// # Errors
@@ -127,8 +139,24 @@ impl ValidatedConnection {
             connection,
             image_name,
             process_identity,
-            |address, bearer, budget| {
-                health::probe_connection(address, KEY_PROBE_PATH, bearer, budget)
+            |address, bearer, deadline| {
+                health::probe_connection_until(address, KEY_PROBE_PATH, bearer, deadline)
+            },
+        )
+    }
+
+    fn validate_named_before(
+        connection: ConnectionFile,
+        image_name: &str,
+        deadline: Instant,
+    ) -> Result<Self, StaleReason> {
+        validate_before_with(
+            connection,
+            image_name,
+            deadline,
+            process_identity,
+            |address, bearer, deadline| {
+                health::probe_connection_until(address, KEY_PROBE_PATH, bearer, deadline)
             },
         )
     }
@@ -233,9 +261,28 @@ impl fmt::Debug for ValidatedConnection {
 fn validate_with(
     connection: ConnectionFile,
     image_name: &str,
-    mut observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
-    prove_connection: impl FnOnce(&str, &str, Duration) -> ConnectionProbe,
+    observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
+    prove_connection: impl FnOnce(&str, &str, Instant) -> ConnectionProbe,
 ) -> Result<ValidatedConnection, StaleReason> {
+    validate_before_with(
+        connection,
+        image_name,
+        Instant::now() + LIVENESS_BUDGET,
+        observe_process,
+        prove_connection,
+    )
+}
+
+fn validate_before_with(
+    connection: ConnectionFile,
+    image_name: &str,
+    deadline: Instant,
+    mut observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
+    prove_connection: impl FnOnce(&str, &str, Instant) -> ConnectionProbe,
+) -> Result<ValidatedConnection, StaleReason> {
+    if Instant::now() >= deadline {
+        return Err(StaleReason::HealthFailed);
+    }
     if connection.validation_error().is_some() {
         return Err(StaleReason::Invalid);
     }
@@ -248,8 +295,11 @@ fn validate_with(
     if !connection.has_boot_identity() {
         return Err(StaleReason::BootIdentityInvalid);
     }
+    if Instant::now() >= deadline {
+        return Err(StaleReason::HealthFailed);
+    }
     let address = format!("127.0.0.1:{}", connection.port);
-    match prove_connection(&address, &connection.api_key, LIVENESS_BUDGET) {
+    match prove_connection(&address, &connection.api_key, deadline) {
         ConnectionProbe::Cancelled | ConnectionProbe::HealthFailed => {
             return Err(StaleReason::HealthFailed);
         }
@@ -478,6 +528,32 @@ mod tests {
         assert_eq!(
             ValidatedConnection::validate_named(file, &own_image_name()),
             Err(StaleReason::HealthFailed)
+        );
+    }
+
+    #[test]
+    fn an_absolute_validation_deadline_bounds_a_slow_owner() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow owner");
+        let port = listener.local_addr().expect("slow owner address").port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept validation");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let timeout = Duration::from_millis(100);
+        let started = Instant::now();
+
+        let result = ValidatedConnection::validate_named_before(
+            connection(port, "key"),
+            &own_image_name(),
+            started + timeout,
+        );
+
+        assert_eq!(result, Err(StaleReason::HealthFailed));
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "the caller's deadline caps the real network proof"
         );
     }
 

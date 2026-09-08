@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use futures_util::{SinkExt as _, StreamExt as _};
-use gateway::{Config, Gateway, ProfilesContext};
+use gateway::{Config, Gateway, ProfilesContext, ServeOptions};
 use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -91,6 +91,83 @@ fn mounted_no_alignment_is_drained_through_production_logging() {
             "protected value survived: {protected}"
         );
     }
+}
+
+#[test]
+fn a_process_lease_loser_leaves_the_canonical_log_untouched() {
+    let temp = tempfile::tempdir().expect("temporary Gateway state");
+    let state_dir = temp.path().join(".promptforge");
+    let run_dir = state_dir.join("run");
+    let logs = state_dir.join("logs");
+    std::fs::create_dir_all(&logs).expect("create seeded log directory");
+    let log_path = logs.join("gateway.log");
+    std::fs::write(&log_path, "owner-log-sentinel").expect("seed the owner's canonical log");
+    let _owner = shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
+        .expect("acquire the owner lease")
+        .expect("the test owns the process lease");
+    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    std::fs::write(&connection_path, b"owner-is-still-publishing")
+        .expect("seed an unreadable owner record");
+    let options = ServeOptions::new(None, None::<gateway::ProfileName>).with_run_dir(run_dir);
+
+    let error = gateway::settle_gateway_startup(&options, Duration::from_millis(150))
+        .expect_err("the process lease loser times out before logging");
+    assert!(
+        error.to_string().contains("process owner"),
+        "the console-only error names the ownership timeout: {error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log_path).expect("read the seeded log"),
+        "owner-log-sentinel",
+        "the loser never initializes or rotates canonical logging"
+    );
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "the loser creates no retained log"
+    );
+    assert_eq!(
+        std::fs::read(&connection_path).expect("read the seeded owner record"),
+        b"owner-is-still-publishing",
+        "the loser never cleans or rewrites shared connection state"
+    );
+}
+
+#[test]
+fn a_lease_holder_resolution_failure_leaves_the_canonical_log_untouched() {
+    let temp = tempfile::tempdir().expect("temporary Gateway state");
+    let state_dir = temp.path().join(".promptforge");
+    let run_dir = state_dir.join("run");
+    let logs = state_dir.join("logs");
+    std::fs::create_dir_all(&logs).expect("create seeded log directory");
+    let log_path = logs.join("gateway.log");
+    std::fs::write(&log_path, "owner-log-sentinel").expect("seed the canonical log");
+    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
+    let options = ServeOptions::new(None, None::<gateway::ProfileName>).with_run_dir(run_dir);
+
+    let error = gateway::settle_gateway_startup(&options, Duration::from_millis(150))
+        .expect_err("connection resolution fails before logging");
+
+    assert!(
+        matches!(
+            error,
+            gateway::GatewayStartupError::Resolve(shared_sidecar::SidecarError::Read { .. })
+        ),
+        "the console-only failure preserves its source: {error:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&log_path).expect("read the seeded log"),
+        "owner-log-sentinel",
+        "failed resolution never initializes or rotates canonical logging"
+    );
+    assert!(
+        !logs.join("gateway.log.1").exists(),
+        "failed resolution creates no retained log"
+    );
+    assert!(
+        connection_path.is_dir(),
+        "failed resolution leaves uncertain connection state untouched"
+    );
 }
 
 fn audio_payload() -> String {

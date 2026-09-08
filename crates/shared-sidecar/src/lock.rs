@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::SidecarError;
-use crate::paths::lock_file_path;
+use crate::paths::{instance_lock_file_path, lock_file_path};
 use crate::stale::{self, GATEWAY_IMAGE_NAME, Resolution};
 use crate::{CancellationToken, ConnectionFile};
 
@@ -28,6 +28,53 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(25);
 pub struct LaunchLock {
     // The handle owns the OS lock; dropping it releases.
     _file: File,
+}
+
+/// The Gateway process-lifetime ownership lease.
+///
+/// This lock is distinct from [`LaunchLock`]: a Workshop parent may hold the
+/// launch election while the spawned Gateway acquires this lease. The file
+/// handle owns the operating-system lock, so dropping it or terminating its
+/// process releases ownership without pid files or explicit cleanup.
+#[derive(Debug)]
+pub struct GatewayInstanceLease {
+    // The handle owns the OS lock; dropping it releases.
+    _file: File,
+}
+
+impl GatewayInstanceLease {
+    /// Attempts to acquire process-lifetime Gateway ownership without
+    /// blocking. `Ok(None)` means another process owns the lease.
+    ///
+    /// # Errors
+    /// Returns [`SidecarError::CreateDir`] when the run directory cannot be
+    /// created, or [`SidecarError::Lock`] when the lease file cannot be opened
+    /// or an unexpected operating-system lock error occurs.
+    pub fn try_acquire(run_dir: &Path) -> Result<Option<Self>, SidecarError> {
+        std::fs::create_dir_all(run_dir).map_err(|source| SidecarError::CreateDir {
+            path: run_dir.to_owned(),
+            source,
+        })?;
+        let lock_path = instance_lock_file_path(run_dir);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| SidecarError::Lock {
+                path: lock_path.clone(),
+                source,
+            })?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(source)) => Err(SidecarError::Lock {
+                path: lock_path,
+                source,
+            }),
+        }
+    }
 }
 
 /// What [`launch_or_attach`] decided.
@@ -287,6 +334,33 @@ mod tests {
         assert!(
             lock_file_path(dir.path()).exists(),
             "the lock file was created"
+        );
+    }
+
+    #[test]
+    fn process_ownership_is_separate_from_parent_launch_election() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let lease = GatewayInstanceLease::try_acquire(dir.path())
+            .expect("attempt the process lease")
+            .expect("the first process acquires its lease");
+        let decision = launch_or_attach_named(dir.path(), "irrelevant", Duration::from_millis(100))
+            .expect("the independent parent launch election settles");
+        assert!(
+            matches!(decision, LaunchDecision::Launch(_)),
+            "holding the process lease never contends with LaunchLock"
+        );
+        assert!(
+            GatewayInstanceLease::try_acquire(dir.path())
+                .expect("contend for process ownership")
+                .is_none(),
+            "a second process lease cannot coexist"
+        );
+        drop(lease);
+        assert!(
+            GatewayInstanceLease::try_acquire(dir.path())
+                .expect("reacquire released process ownership")
+                .is_some(),
+            "dropping the handle releases ownership"
         );
     }
 

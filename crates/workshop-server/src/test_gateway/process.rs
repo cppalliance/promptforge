@@ -3,7 +3,7 @@
 use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 
-use super::{CONTROL_ADDRESS_ENV, EXPECTED_KEY_ENV};
+use super::{CONTROL_ADDRESS_ENV, EXPECTED_KEY_ENV, INSTANCE_LEASE_RUN_DIR_ENV};
 
 /// Serves health, bearer, and shutdown requests inside the named child.
 #[expect(
@@ -14,6 +14,11 @@ pub(super) fn run() {
     let Ok(control_address) = std::env::var(CONTROL_ADDRESS_ENV) else {
         return;
     };
+    let _instance_lease = std::env::var_os(INSTANCE_LEASE_RUN_DIR_ENV).map(|run_dir| {
+        shared_sidecar::GatewayInstanceLease::try_acquire(std::path::Path::new(&run_dir))
+            .expect("acquire named fixture process lease")
+            .expect("the named fixture is the process lease owner")
+    });
     let expected_key =
         std::env::var(EXPECTED_KEY_ENV).expect("the fixture child receives an expected key");
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind named fixture Gateway");

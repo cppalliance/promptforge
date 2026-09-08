@@ -105,17 +105,28 @@ pub(crate) enum ConnectionProbe {
 /// Proves that one address is healthy and accepts the presented bearer.
 /// Both requests use one TCP connection, so authority cannot come from a
 /// listener that replaced the endpoint after the health response.
+#[cfg(test)]
 pub(crate) fn probe_connection(
     address: &str,
     bearer_path: &str,
     bearer: &str,
     health_budget: Duration,
 ) -> ConnectionProbe {
+    probe_connection_until(address, bearer_path, bearer, Instant::now() + health_budget)
+}
+
+/// Proves one connection within the caller's absolute deadline.
+pub(crate) fn probe_connection_until(
+    address: &str,
+    bearer_path: &str,
+    bearer: &str,
+    deadline: Instant,
+) -> ConnectionProbe {
     probe_connection_with(
         address,
         bearer_path,
         bearer,
-        health_budget,
+        deadline,
         &CancellationToken::new(),
         ATTEMPT_TIMEOUT,
     )
@@ -133,7 +144,7 @@ pub(crate) fn probe_connection_cancellable(
         address,
         bearer_path,
         bearer,
-        health_budget,
+        Instant::now() + health_budget,
         cancellation,
         CANCELLABLE_ATTEMPT_TIMEOUT,
     )
@@ -143,7 +154,7 @@ fn probe_connection_with(
     address: &str,
     bearer_path: &str,
     bearer: &str,
-    health_budget: Duration,
+    deadline: Instant,
     cancellation: &CancellationToken,
     attempt_timeout: Duration,
 ) -> ConnectionProbe {
@@ -151,7 +162,7 @@ fn probe_connection_with(
         address,
         bearer_path,
         bearer,
-        health_budget,
+        deadline,
         cancellation,
         attempt_timeout,
         probe_connection_once,
@@ -162,12 +173,11 @@ fn probe_connection_with_probe(
     address: &str,
     bearer_path: &str,
     bearer: &str,
-    health_budget: Duration,
+    deadline: Instant,
     cancellation: &CancellationToken,
     attempt_timeout: Duration,
     mut probe: impl FnMut(&str, &str, &str, Instant) -> ConnectionAttempt,
 ) -> ConnectionProbe {
-    let deadline = Instant::now() + health_budget;
     loop {
         let attempt_deadline = (Instant::now() + attempt_timeout).min(deadline);
         let Some(attempt) =
@@ -993,7 +1003,7 @@ mod tests {
                 "127.0.0.1:1",
                 "/v1/models",
                 "key",
-                Duration::from_secs(30),
+                Instant::now() + Duration::from_secs(30),
                 &worker_cancellation,
                 CANCELLABLE_ATTEMPT_TIMEOUT,
                 |_, _, _, _| {

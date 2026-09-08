@@ -21,8 +21,11 @@
 //!    [`ValidatedConnection`] carries that point-in-time proof without
 //!    exposing a forgeable constructor.
 //! 3. Launch races take [`launch_or_attach`]: the `gateway.json.lock`
-//!    advisory lock elects one launcher; losers attach to the winner.
-//! 4. A reader holding a [`ValidatedConnection`] asks the gateway to exit
+//!    advisory lock elects one parent launcher; losers attach to the winner.
+//! 4. Every Gateway process holds [`GatewayInstanceLease`] from before
+//!    startup side effects until process exit, independently of that parent
+//!    launch election.
+//! 5. A reader holding a [`ValidatedConnection`] asks the gateway to exit
 //!    with [`request_shutdown`], which posts its bearer key to
 //!    `POST /shutdown`.
 //!
@@ -46,10 +49,13 @@ pub use crate::cancellation::CancellationToken;
 pub use crate::error::SidecarError;
 pub use crate::file::{ConnectionFile, remove_if_mine};
 pub use crate::health::{HealthError, ProbeError, wait_for_health, wait_for_health_cancellable};
-pub use crate::lock::{LaunchDecision, LaunchLock, launch_or_attach, launch_or_attach_cancellable};
+pub use crate::lock::{
+    GatewayInstanceLease, LaunchDecision, LaunchLock, launch_or_attach,
+    launch_or_attach_cancellable,
+};
 pub use crate::paths::{
-    CONNECTION_FILE_NAME, LOCK_FILE_NAME, connection_file_path, default_run_dir, lock_file_path,
-    run_dir,
+    CONNECTION_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME, connection_file_path,
+    default_run_dir, instance_lock_file_path, lock_file_path, run_dir,
 };
 pub use crate::shutdown::{ShutdownError, request_shutdown};
 pub use crate::stale::resolve_cancellable;

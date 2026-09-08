@@ -9,9 +9,48 @@
 use std::time::Duration;
 
 use shared_sidecar::{
-    ConnectionFile, LaunchDecision, Resolution, SidecarError, StaleReason, connection_file_path,
-    launch_or_attach, lock_file_path, resolve, wait_for_health,
+    ConnectionFile, GatewayInstanceLease, LaunchDecision, Resolution, SidecarError, StaleReason,
+    connection_file_path, instance_lock_file_path, launch_or_attach, lock_file_path, resolve,
+    wait_for_health,
 };
+
+const LEASE_CHILD_RUN_DIR: &str = "PROMPTFORGE_LEASE_CHILD_RUN_DIR";
+
+struct BoundedChild(std::process::Child);
+
+impl BoundedChild {
+    fn stop(&mut self, timeout: Duration) {
+        let _ = self.0.kill();
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self
+                .0
+                .try_wait()
+                .expect("observe lease fixture process")
+                .is_some()
+            {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lease fixture did not stop within {timeout:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for BoundedChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while self.0.try_wait().ok().flatten().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
 
 /// A valid connection file; the pid is the test process's own.
 fn valid_file() -> ConnectionFile {
@@ -148,6 +187,74 @@ fn launch_or_attach_elects_one_launcher_and_times_out_the_loser() {
         matches!(error, SidecarError::LaunchTimeout { .. }),
         "the loser reports the timeout: {error}"
     );
+}
+
+#[test]
+fn a_process_lifetime_lease_recovers_after_its_owner_is_terminated() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let ready = dir.path().join("lease-ready");
+    let mut child = BoundedChild(
+        std::process::Command::new(std::env::current_exe().expect("current test executable"))
+            .args([
+                "--exact",
+                "gateway_instance_lease_fixture_process",
+                "--ignored",
+            ])
+            .env(LEASE_CHILD_RUN_DIR, dir.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn lease fixture process"),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !ready.is_file() {
+        assert!(
+            child
+                .0
+                .try_wait()
+                .expect("observe lease fixture process")
+                .is_none(),
+            "the lease fixture exited before readiness"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the lease fixture did not acquire its lock"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        GatewayInstanceLease::try_acquire(dir.path())
+            .expect("contend for the process lease")
+            .is_none(),
+        "a second process cannot acquire the live owner's lease"
+    );
+    assert!(
+        instance_lock_file_path(dir.path()).is_file(),
+        "the process lease uses its dedicated run-directory path"
+    );
+
+    child.stop(Duration::from_secs(5));
+    assert!(
+        GatewayInstanceLease::try_acquire(dir.path())
+            .expect("recover the dead owner's process lease")
+            .is_some(),
+        "the operating system releases the lease when its process dies"
+    );
+}
+
+#[test]
+#[ignore = "spawned by the process-lifetime lease parent"]
+fn gateway_instance_lease_fixture_process() {
+    let Some(run_dir) = std::env::var_os(LEASE_CHILD_RUN_DIR) else {
+        return;
+    };
+    let run_dir = std::path::PathBuf::from(run_dir);
+    let _lease = GatewayInstanceLease::try_acquire(&run_dir)
+        .expect("acquire the fixture process lease")
+        .expect("the fixture process owns the lease");
+    std::fs::write(run_dir.join("lease-ready"), b"ready").expect("announce lease readiness");
+    std::thread::sleep(Duration::from_secs(60));
 }
 
 #[test]

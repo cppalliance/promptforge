@@ -14,7 +14,10 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use gateway::{ProfileName, ServeOptions, run, run_printing_url, run_with_tray};
+use gateway::{
+    GatewayStartup, ProfileName, ServeOptions, run, run_printing_url, run_with_tray,
+    settle_gateway_startup,
+};
 use gateway_logging::{LogConfig, LogRuntime};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt;
@@ -24,6 +27,15 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// (a download or a switch must say what it is doing), the chatty HTTP
 /// dependencies at `warn`. `RUST_LOG` overrides the whole string.
 const DEFAULT_LOG_FILTER: &str = "info,whisper_cpp=warn,hyper=warn,h2=warn,reqwest=warn,tower=warn";
+
+/// Maximum time a process-lease loser waits for the owner's validated record.
+const OWNER_PUBLICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(feature = "test-fixtures")]
+const TEST_START_READY_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_READY";
+#[cfg(feature = "test-fixtures")]
+const TEST_START_RELEASE_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_RELEASE";
+#[cfg(feature = "test-fixtures")]
+const TEST_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 const USAGE: &str = concat!(
     "usage: promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
@@ -91,24 +103,37 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // A second launch never boots a duplicate server: when a live gateway
-    // owns the connection file, hand off to it and exit. This runs before
-    // logging starts and before any bind attempt - a handoff must not
-    // rotate the running gateway's log out from under it. On the desktop
-    // it is also the `.desktop` launcher's relaunch behavior.
-    if let Some(url) = gateway::running_gateway_settings_url(&invocation.serve) {
-        if invocation.print_url {
-            println!("{url}");
-        } else if invocation.login {
-            // A login-triggered start never opens a browser; the running
-            // gateway leaves this launch nothing to do.
-        } else if let Err(error) = open::that(&url) {
-            eprintln!(
-                "could not open the browser: {error}; the running gateway's Settings URL is {url}"
-            );
-        }
-        return ExitCode::SUCCESS;
+    #[cfg(feature = "test-fixtures")]
+    if let Err(error) = wait_for_test_start_rendezvous() {
+        eprintln!("error: {error}");
+        return ExitCode::FAILURE;
     }
+
+    // Process ownership settles before canonical logging, stale cleanup by a
+    // loser, recovery, bind, or publication. The lease holder re-resolves the
+    // connection record; a loser waits only for the holder's validated record
+    // and exits through this console-only path.
+    let _instance_lease = match settle_gateway_startup(&invocation.serve, OWNER_PUBLICATION_TIMEOUT)
+    {
+        Ok(GatewayStartup::Boot(lease)) => lease,
+        Ok(GatewayStartup::OpenSettings(url)) => {
+            if invocation.print_url {
+                println!("{url}");
+            } else if invocation.login {
+                // A login-triggered start never opens a browser; the running
+                // gateway leaves this launch nothing to do.
+            } else if let Err(error) = open::that(&url) {
+                eprintln!(
+                    "could not open the browser: {error}; the running gateway's Settings URL is {url}"
+                );
+            }
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            print_error_chain(&error);
+            return ExitCode::FAILURE;
+        }
+    };
 
     // Logging starts only on the serving path: `--help`, `--version`, and
     // a second-instance handoff must not rotate the running gateway's log
@@ -151,6 +176,38 @@ fn main() -> ExitCode {
         eprintln!("could not shut down the log worker: {error}");
     }
     exit
+}
+
+/// Test-only process rendezvous used by integration tests that must place
+/// multiple production binaries immediately before lease acquisition.
+#[cfg(feature = "test-fixtures")]
+fn wait_for_test_start_rendezvous() -> Result<(), String> {
+    let ready = std::env::var_os(TEST_START_READY_ENV);
+    let release = std::env::var_os(TEST_START_RELEASE_ENV);
+    let (Some(ready), Some(release)) = (&ready, &release) else {
+        return if ready.is_none() && release.is_none() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{TEST_START_READY_ENV} and {TEST_START_RELEASE_ENV} must be set together"
+            ))
+        };
+    };
+    let ready = PathBuf::from(ready);
+    let release = PathBuf::from(release);
+    std::fs::write(&ready, b"ready")
+        .map_err(|error| format!("write test start marker {}: {error}", ready.display()))?;
+    let deadline = std::time::Instant::now() + TEST_START_TIMEOUT;
+    while !release.is_file() {
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "test start release {} did not arrive within {TEST_START_TIMEOUT:?}",
+                release.display()
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    Ok(())
 }
 
 /// Installs the global subscriber and starts the log pipeline: the filtered

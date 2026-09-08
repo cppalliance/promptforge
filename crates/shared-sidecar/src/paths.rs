@@ -10,6 +10,9 @@ pub const CONNECTION_FILE_NAME: &str = "gateway.json";
 /// The launch lock's name, beside the connection file.
 pub const LOCK_FILE_NAME: &str = "gateway.json.lock";
 
+/// The process-lifetime Gateway instance lock's name.
+pub const INSTANCE_LOCK_FILE_NAME: &str = "gateway.instance.lock";
+
 /// The run directory under the state dir: `<home>/.promptforge/run`.
 #[must_use]
 pub fn run_dir(home: &Path) -> PathBuf {
@@ -37,6 +40,12 @@ pub fn lock_file_path(run_dir: &Path) -> PathBuf {
     run_dir.join(LOCK_FILE_NAME)
 }
 
+/// The process-lifetime Gateway instance lock inside `run_dir`.
+#[must_use]
+pub fn instance_lock_file_path(run_dir: &Path) -> PathBuf {
+    run_dir.join(INSTANCE_LOCK_FILE_NAME)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -50,7 +59,7 @@ mod tests {
     }
 
     #[test]
-    fn the_connection_file_and_lock_sit_beside_each_other() {
+    fn the_connection_file_and_locks_sit_beside_each_other() {
         let dir = Path::new("run");
         assert_eq!(
             connection_file_path(dir),
@@ -59,6 +68,10 @@ mod tests {
         assert_eq!(
             lock_file_path(dir),
             Path::new("run").join("gateway.json.lock")
+        );
+        assert_eq!(
+            instance_lock_file_path(dir),
+            Path::new("run").join("gateway.instance.lock")
         );
     }
 }
