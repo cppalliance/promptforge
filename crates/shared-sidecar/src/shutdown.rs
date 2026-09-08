@@ -63,16 +63,15 @@ impl From<ProbeError> for ShutdownError {
 pub fn request_shutdown(file: &ConnectionFile) -> Result<(), ShutdownError> {
     let address = format!("127.0.0.1:{}", file.port);
     let head = health::request_head(&address, "POST", SHUTDOWN_PATH, Some(&file.api_key))?;
-    let accepted = head
+    let status = head
         .split_whitespace()
         .nth(1)
-        .and_then(|code| code.parse::<u16>().ok())
-        .is_some_and(|code| (200..300).contains(&code));
-    if accepted {
+        .and_then(|code| code.parse::<u16>().ok());
+    if status.is_some_and(|code| (200..300).contains(&code)) {
         return Ok(());
     }
     Err(ShutdownError::Rejected {
-        status_line: head.lines().next().unwrap_or("<empty>").to_owned(),
+        status_line: status.map_or_else(|| "<malformed>".to_owned(), |code| code.to_string()),
     })
 }
 
@@ -145,6 +144,22 @@ mod tests {
         assert!(
             matches!(error, ShutdownError::Rejected { .. }),
             "a non-2xx answer is a rejection: {error}"
+        );
+    }
+
+    #[test]
+    fn a_reflected_bearer_is_absent_from_shutdown_errors() {
+        let secret = "capability-secret";
+        let response = format!("HTTP/1.1 401 rejected-{secret}\r\nContent-Length: 0\r\n\r\n");
+        let response: &'static [u8] = Box::leak(response.into_bytes().into_boxed_slice());
+        let (port, _received) = fixture_gateway(response);
+        let mut connection = file(port);
+        connection.api_key = secret.to_owned();
+
+        let error = request_shutdown(&connection).expect_err("a 401 is a refusal");
+        assert!(
+            !format!("{error:?} {error}").contains(secret),
+            "bearer values never enter error diagnostics"
         );
     }
 

@@ -1,42 +1,21 @@
 //! Stale detection: decide whether a connection file names a live
 //! gateway, and remove it when it does not.
 //!
-//! A file is live when the pid is alive, the pid's process image is a
-//! `promptforge-gateway` binary (a reused pid cannot impersonate the
-//! gateway), `GET /health` answers 200, and the file's bearer key is
-//! accepted on a key-gated route. Anything else is stale - the Jupyter
+//! A file is live when one OS process boot with a `promptforge-gateway`
+//! image is unchanged across a same-socket health and bearer proof, and
+//! the file carries a boot identity. Anything else is stale - the Jupyter
 //! phantom-server bug class - and the file is deleted so the next reader
 //! relaunches instead of retrying a corpse.
 
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::Path;
-use std::time::Duration;
 
 use crate::ConnectionFile;
 use crate::error::SidecarError;
-use crate::health::{self, KeyProbe};
 use crate::paths::connection_file_path;
-use crate::sys::process_image_path;
-
-/// The image file name a live gateway process must have.
-#[cfg(windows)]
-pub(crate) const GATEWAY_IMAGE_NAME: &str = "promptforge-gateway.exe";
-/// The image file name a live gateway process must have.
-#[cfg(not(windows))]
-pub(crate) const GATEWAY_IMAGE_NAME: &str = "promptforge-gateway";
-
-/// The bearer-gated route used to prove the presented key is accepted.
-/// `GET /v1/models` is key-gated in every gateway build.
-const KEY_PROBE_PATH: &str = "/v1/models";
-
-/// Budget the health probe gets before a file is condemned: the writer
-/// lands the file before its serve loop starts accepting, and a busy
-/// runtime can starve one probe, so a single failed attempt must never
-/// read as stale - a false stale deletes a live gateway's file and a
-/// reader relaunches a duplicate.
-const LIVENESS_BUDGET: Duration = Duration::from_secs(2);
+pub(crate) use crate::validated::GATEWAY_IMAGE_NAME;
+use crate::validated::ValidatedConnection;
 
 /// What [`resolve`] found in the run directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,19 +30,30 @@ pub enum Resolution {
 }
 
 /// Why a connection file was judged stale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StaleReason {
     /// The file was not valid JSON or failed validation.
+    #[error("the connection file is invalid")]
     Invalid,
     /// The pid is dead.
+    #[error("the recorded gateway process is dead")]
     ProcessDead,
     /// The pid is alive but its image is not a `promptforge-gateway`
     /// binary (a reused pid).
+    #[error("the recorded pid belongs to another process image")]
     ImageMismatch,
+    /// The connection file does not carry a usable boot identity.
+    #[error("the connection file has no usable boot identity")]
+    BootIdentityInvalid,
+    /// The pid changed process boot while validation was in progress.
+    #[error("the recorded process identity changed during validation")]
+    ProcessChanged,
     /// The health endpoint did not answer 200.
+    #[error("the recorded gateway does not answer its health probe")]
     HealthFailed,
     /// The bearer key was rejected.
+    #[error("the connection file bearer was rejected")]
     KeyRejected,
 }
 
@@ -100,9 +90,9 @@ pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resoluti
         }
         Err(error) => return Err(error),
     };
-    match liveness_failure(&file, image_name) {
-        None => Ok(Resolution::Attach(file)),
-        Some(reason) => {
+    match ValidatedConnection::validate_named(file, image_name) {
+        Ok(validated) => Ok(Resolution::Attach(validated.into_connection_file())),
+        Err(reason) => {
             remove_stale(run_dir)?;
             Ok(Resolution::Stale(reason))
         }
@@ -133,30 +123,7 @@ pub(crate) fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
 /// check a launch-race loser runs, since deleting is the lock holder's
 /// privilege.
 pub(crate) fn is_live(file: &ConnectionFile, image_name: &str) -> bool {
-    liveness_failure(file, image_name).is_none()
-}
-
-/// The first liveness check the file fails, or `None` when it is fully
-/// live.
-fn liveness_failure(file: &ConnectionFile, image_name: &str) -> Option<StaleReason> {
-    let Some(image) = process_image_path(file.pid) else {
-        return Some(StaleReason::ProcessDead);
-    };
-    if !image_name_matches(&image, image_name) {
-        return Some(StaleReason::ImageMismatch);
-    }
-    let port = file.port;
-    let address = format!("127.0.0.1:{port}");
-    if health::wait_for_health(&format!("http://{address}"), LIVENESS_BUDGET).is_err() {
-        return Some(StaleReason::HealthFailed);
-    }
-    match health::probe_bearer(&address, KEY_PROBE_PATH, &file.api_key) {
-        KeyProbe::Accepted => None,
-        KeyProbe::Rejected => Some(StaleReason::KeyRejected),
-        // The health probe answered moments ago; a now-silent server is a
-        // health failure, not a key rejection.
-        KeyProbe::Unreachable => Some(StaleReason::HealthFailed),
-    }
+    ValidatedConnection::validate_named(file.clone(), image_name).is_ok()
 }
 
 /// Deletes the stale connection file, tolerating a concurrent deletion.
@@ -170,28 +137,6 @@ fn remove_stale(run_dir: &Path) -> Result<(), SidecarError> {
             source: error,
         }),
     }
-}
-
-/// Whether the image path's file name matches the expected gateway image
-/// name.
-fn image_name_matches(image: &Path, expected: &str) -> bool {
-    let Some(name) = image.file_name() else {
-        return false;
-    };
-    image_file_name_matches(name, expected)
-}
-
-/// Windows filesystems are case-insensitive; match the image name the
-/// same way.
-#[cfg(windows)]
-fn image_file_name_matches(name: &OsStr, expected: &str) -> bool {
-    name.to_string_lossy().eq_ignore_ascii_case(expected)
-}
-
-/// Unix filesystems are case-sensitive; match the image name exactly.
-#[cfg(not(windows))]
-fn image_file_name_matches(name: &OsStr, expected: &str) -> bool {
-    name == OsStr::new(expected)
 }
 
 #[cfg(test)]
@@ -248,19 +193,23 @@ mod tests {
         let port = listener.local_addr().expect("fixture address").port();
         std::thread::spawn(move || {
             while let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0u8; 1024];
-                let Ok(read) = stream.read(&mut buffer) else {
-                    continue;
-                };
-                let request = String::from_utf8_lossy(&buffer[..read]);
-                let response = if request.starts_with("GET /health ")
-                    || request.contains(&format!("Authorization: Bearer {expected_key}\r\n"))
-                {
-                    &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
-                } else {
-                    &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
-                };
-                let _ = stream.write_all(response);
+                for _ in 0..2 {
+                    let mut buffer = [0u8; 1024];
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
+                    let request = String::from_utf8_lossy(&buffer[..read]);
+                    let accepted = request.starts_with("GET /health ")
+                        || request.contains(&format!("Authorization: Bearer {expected_key}\r\n"));
+                    let response = if accepted {
+                        &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
+                    } else {
+                        &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
+                    };
+                    if stream.write_all(response).is_err() {
+                        break;
+                    }
+                }
             }
         });
         port
@@ -328,9 +277,18 @@ mod tests {
                     drop(stream);
                     continue;
                 }
-                let mut buffer = [0u8; 1024];
-                let _ = stream.read(&mut buffer);
-                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                for _ in 0..2 {
+                    let mut buffer = [0u8; 1024];
+                    if stream.read(&mut buffer).is_err() {
+                        break;
+                    }
+                    if stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
         });
         let file = live_file(port, "key");

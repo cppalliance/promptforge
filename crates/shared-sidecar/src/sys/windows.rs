@@ -1,19 +1,20 @@
-//! Windows process image lookup: `OpenProcess` +
-//! `QueryFullProcessImageNameW` answer liveness and identity together - a
-//! dead pid opens no handle once its last handle closes.
+//! Windows process identity lookup: one process handle supplies the image
+//! and creation FILETIME, so pid reuse cannot join two observations.
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt as _;
 use std::path::PathBuf;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 
-/// The full image path of process `pid`, or `None` when the process is
-/// dead or refuses a limited query.
-pub(crate) fn process_image_path(pid: u32) -> Option<PathBuf> {
+use super::ProcessIdentity;
+
+/// The image and creation time of process `pid`, or `None` when the
+/// process is dead or refuses a limited query.
+pub(crate) fn process_identity(pid: u32) -> Option<ProcessIdentity> {
     // SAFETY: `OpenProcess` takes a valid access mask and pid; the
     // returned handle is either null (checked) or a live process handle
     // that `CloseHandle` below releases exactly once.
@@ -21,13 +22,41 @@ pub(crate) fn process_image_path(pid: u32) -> Option<PathBuf> {
     if handle.is_null() {
         return None;
     }
-    let image = query_image_path(handle);
+    let identity = query_identity(handle);
     // SAFETY: `handle` is the live process handle returned by the
     // `OpenProcess` above, closed exactly once here.
     unsafe {
         CloseHandle(handle);
     }
-    image
+    identity
+}
+
+/// Reads one coherent image and creation time from an open process handle.
+fn query_identity(handle: HANDLE) -> Option<ProcessIdentity> {
+    let image = query_image_path(handle)?;
+    let mut creation = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exit = creation;
+    let mut kernel = creation;
+    let mut user = creation;
+    // SAFETY: all pointers name initialized writable FILETIME values, and
+    // `handle` remains open for the complete query.
+    let ok = unsafe {
+        GetProcessTimes(
+            handle,
+            &raw mut creation,
+            &raw mut exit,
+            &raw mut kernel,
+            &raw mut user,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let started = u128::from(creation.dwHighDateTime) << 32 | u128::from(creation.dwLowDateTime);
+    Some(ProcessIdentity::new(image, started))
 }
 
 /// Reads the image path from an open process handle.

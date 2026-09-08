@@ -15,10 +15,11 @@
 //!    relies on the user profile's ACL, which already restricts it to the
 //!    owner) and removes it on clean shutdown with [`remove_if_mine`].
 //! 2. A reader ([`resolve`]) attaches only when the file is live: the pid
-//!    is alive, its process image is a `promptforge-gateway` binary (a
-//!    reused pid cannot impersonate the gateway), `GET /health` answers
-//!    200, and the file's bearer key is accepted on a key-gated route.
-//!    Anything else is stale and the file is deleted.
+//!    is alive, one OS process boot with a `promptforge-gateway` image
+//!    brackets a same-socket health and bearer proof, and the file carries
+//!    a boot identity. Anything else is stale and the file is deleted.
+//!    [`ValidatedConnection`] carries that point-in-time proof without
+//!    exposing a forgeable constructor.
 //! 3. Launch races take [`launch_or_attach`]: the `gateway.json.lock`
 //!    advisory lock elects one launcher; losers attach to the winner.
 //! 4. A reader asks the gateway to exit with [`request_shutdown`], which
@@ -37,6 +38,7 @@ mod paths;
 mod shutdown;
 mod stale;
 mod sys;
+mod validated;
 
 pub use crate::error::SidecarError;
 pub use crate::file::{ConnectionFile, remove_if_mine};
@@ -51,3 +53,4 @@ pub use crate::shutdown::{ShutdownError, request_shutdown};
 #[doc(hidden)]
 pub use crate::stale::resolve_for_test;
 pub use crate::stale::{Resolution, StaleReason, is_running, resolve};
+pub use crate::validated::ValidatedConnection;

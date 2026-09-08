@@ -144,9 +144,18 @@ mod tests {
         let port = listener.local_addr().expect("fixture address").port();
         std::thread::spawn(move || {
             while let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0u8; 1024];
-                let _ = stream.read(&mut buffer);
-                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+                for _ in 0..2 {
+                    let mut buffer = [0u8; 1024];
+                    if stream.read(&mut buffer).is_err() {
+                        break;
+                    }
+                    if stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
         });
         port

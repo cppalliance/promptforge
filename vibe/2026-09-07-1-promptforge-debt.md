@@ -490,7 +490,7 @@ isProject: false
 - Focused verification: from the repository root run `cargo test -p workshop-server`.
 - Component boundary: ends Component 7; review cumulative Steps 22 and 23 against the Step 21 commit and update architecture records only for supervisor facts now present.
 
-### Step 24: Introduce ValidatedConnection
+### Step 24: Introduce ValidatedConnection [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; make successful validation produce a public but unforgeable capability.
 - Dependency: depends on stable existing sidecar resolution tests and precedes all publication changes because raw files must become incapable of crossing the Workshop mutation boundary.

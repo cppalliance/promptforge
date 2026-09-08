@@ -1,6 +1,7 @@
 //! The `gateway.json` connection-file type: what the gateway writes after
 //! a successful bind and what readers validate before attaching.
 
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -16,7 +17,7 @@ use crate::paths::connection_file_path;
 ///
 /// Readers must tolerate unknown fields: a newer gateway may write fields
 /// an older reader does not know, and serde ignores them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionFile {
     /// The gateway's bound port; readers connect to `127.0.0.1:{port}`.
     pub port: u16,
@@ -32,7 +33,26 @@ pub struct ConnectionFile {
     pub started_at: String,
 }
 
+impl fmt::Debug for ConnectionFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectionFile")
+            .field("port", &self.port)
+            .field("api_key", &"[REDACTED]")
+            .field("pid", &self.pid)
+            .field("epoch", &self.epoch)
+            .field("version", &"[REDACTED]")
+            .field("started_at", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl ConnectionFile {
+    /// Whether the connection names one particular Gateway boot.
+    pub(crate) fn has_boot_identity(&self) -> bool {
+        self.epoch != 0 && !self.started_at.trim().is_empty()
+    }
+
     /// The reason the file fails validation, or `None` when it is valid.
     ///
     /// Validation covers the fields attach depends on: a real port, a
@@ -44,6 +64,9 @@ impl ConnectionFile {
         }
         if self.api_key.is_empty() {
             return Some("api_key must not be empty");
+        }
+        if self.api_key.contains(['\r', '\n']) {
+            return Some("api_key must not contain line breaks");
         }
         if self.pid == 0 {
             return Some("pid must not be 0");
@@ -178,6 +201,26 @@ mod tests {
     }
 
     #[test]
+    fn debug_redacts_bearer_and_untrusted_metadata() {
+        let secret = "capability-secret";
+        let mut file = valid_file();
+        file.api_key = secret.to_owned();
+        file.version = format!("version-{secret}\r\n");
+        file.started_at = format!("started-{secret}\t");
+
+        let debug = format!("{file:?}");
+        assert!(!debug.contains(secret), "debug output redacts the bearer");
+        assert!(
+            !debug.contains(['\r', '\n', '\t']),
+            "untrusted metadata cannot inject debug output"
+        );
+        assert!(
+            debug.contains(&file.port.to_string()),
+            "the endpoint remains visible"
+        );
+    }
+
+    #[test]
     fn unknown_fields_are_tolerated_for_forward_compatibility() {
         let json = r#"{"port":8081,"api_key":"k","pid":1,"epoch":0,"version":"0","started_at":"","future":true}"#;
         let file: ConnectionFile = serde_json::from_str(json).expect("unknown fields ignored");
@@ -185,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_a_zero_port_empty_key_and_zero_pid() {
+    fn validation_rejects_invalid_attach_fields() {
         let mut file = valid_file();
         assert_eq!(file.validation_error(), None);
         file.port = 0;
@@ -193,6 +236,12 @@ mod tests {
         file = valid_file();
         file.api_key.clear();
         assert_eq!(file.validation_error(), Some("api_key must not be empty"));
+        file = valid_file();
+        file.api_key = "key\r\ninjected: value".to_owned();
+        assert_eq!(
+            file.validation_error(),
+            Some("api_key must not contain line breaks")
+        );
         file = valid_file();
         file.pid = 0;
         assert_eq!(file.validation_error(), Some("pid must not be 0"));
