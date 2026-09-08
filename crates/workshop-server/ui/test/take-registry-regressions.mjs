@@ -223,3 +223,35 @@ test("a duplicate capture completion cannot recommit an older retained take", ()
   assert.equal(commits.length, 1);
   assert.equal(commits[0].takeId, secondOwner.takeId);
 });
+
+test("audio flushed while capture stops remains owned by the stopping take", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+  const stopping = stop(state);
+  const owner = stopping.effects.find(
+    (effect) => effect.domain === "capture" && effect.command === "stop",
+  );
+  assert.ok(owner);
+
+  const flushed = reduce(stopping.state, {
+    type: "capture.audio",
+    chunk: Uint8Array.from([1, 0, 2, 0]).buffer,
+  });
+  const append = flushed.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(append);
+  assert.equal(append.takeId, owner.takeId);
+
+  state = reduce(flushed.state, {
+    type: "wire.result",
+    requestId: append.requestId,
+    eventId: "flushed_append",
+  }).state;
+  const stopped = finishCapture(state, owner.takeId);
+  assert.ok(
+    stopped.effects.some(
+      (effect) => effect.domain === "wire" && effect.command === "commit",
+    ),
+    "the carried append is followed by commit after capture flushes",
+  );
+});

@@ -3,6 +3,7 @@ import {
   connectionLost,
   failTake,
   serverEvent,
+  serviceError,
 } from "./take-registry-events";
 import {
   activeTake,
@@ -79,6 +80,9 @@ export function reduceTakeRegistry(
       break;
     case "server.event":
       serverEvent(reduction, input.event);
+      break;
+    case "service.error":
+      serviceError(reduction, input.eventId);
       break;
     case "connection.lost":
       connectionLost(reduction);
@@ -158,7 +162,7 @@ function stopTake(reduction: Reduction): void {
 
 function appendAudio(reduction: Reduction, chunk: ArrayBuffer): void {
   const take = activeTake(reduction.state);
-  if (take === null || reduction.state.capture !== "recording") {
+  if (take === null || reduction.state.capture === "idle") {
     return;
   }
   const requestId = reserveWireRequest(reduction.state, "append", take.id);

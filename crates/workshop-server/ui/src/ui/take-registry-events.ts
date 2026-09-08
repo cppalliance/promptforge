@@ -54,7 +54,7 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
       return;
     }
     case "error":
-      applyServerError(reduction, event.error.event_id ?? null);
+      serviceError(reduction, event.error.event_id ?? null);
       return;
     default: {
       const exhaustive: never = event;
@@ -210,7 +210,11 @@ function completeTake(
   }
 }
 
-function applyServerError(reduction: Reduction, eventId: string | null): void {
+/** Applies a locally classified service failure without trusting remote wording. */
+export function serviceError(
+  reduction: Reduction,
+  eventId: string | null,
+): void {
   const takeId =
     eventId === null
       ? reduction.state.activeTakeId
@@ -236,7 +240,6 @@ export function connectionLost(reduction: Reduction): void {
     reduction.effects.push(
       { domain: "capture", command: "clear" },
       { domain: "capture", command: "stop", takeId: activeTakeId },
-      { domain: "wire", command: "clear" },
     );
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = activeTakeId;

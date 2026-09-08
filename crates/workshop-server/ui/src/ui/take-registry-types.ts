@@ -64,6 +64,7 @@ export type TakeRegistryInput =
       readonly eventId: string | null;
     }
   | { readonly type: "server.event"; readonly event: RealtimeEvent }
+  | { readonly type: "service.error"; readonly eventId: string | null }
   | { readonly type: "connection.lost" }
   | { readonly type: "connection.ready" };
 

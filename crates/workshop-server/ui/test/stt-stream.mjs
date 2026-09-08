@@ -220,6 +220,170 @@ await assertNoLeaks(lifecycle, async () => {
 });
 
 await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    let nextEventId = 1;
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({
+      eventId: () => `client_once_${nextEventId++}`,
+      socket: () => socket,
+    });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+
+    const captureTrace = [];
+    const capture = new SpeechCaptureService({
+      async open() {
+        return {
+          clear() {
+            captureTrace.push("clear");
+          },
+          async stop() {
+            captureTrace.push("stop");
+          },
+          dispose() {},
+        };
+      },
+    });
+    const status = {
+      local: [],
+      recording: [],
+      showLocal(label, severity) {
+        this.local.push({ label, severity });
+      },
+      setRecording(recording) {
+        this.recording.push(recording);
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    mic.click();
+    for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
+      await Promise.resolve();
+    }
+    captureTrace.length = 0;
+    status.local.length = 0;
+    status.recording.length = 0;
+
+    socket.message(server.error_uncorrelated);
+
+    assert.deepEqual(captureTrace, ["clear", "stop"]);
+    assert.deepEqual(status.recording, [false]);
+    assert.deepEqual(status.local, [
+      {
+        label: "Dictation is temporarily unavailable. Try again.",
+        severity: "error",
+      },
+    ]);
+    assert.equal(
+      socket.sent.filter(
+        (event) => event.type === "input_audio_buffer.clear",
+      ).length,
+      1,
+      "one decoded failure produces one reducer-owned wire clear",
+    );
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    const trace = [];
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({
+      eventId: () => "client_loss_update",
+      socket: () => socket,
+    });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+
+    const capture = new SpeechCaptureService({
+      async open() {
+        return {
+          clear() {
+            trace.push("capture.clear");
+          },
+          async stop() {
+            trace.push("capture.stop");
+          },
+          dispose() {},
+        };
+      },
+    });
+    const status = {
+      showLocal(label) {
+        trace.push(`status.local:${label}`);
+      },
+      setRecording(recording) {
+        trace.push(`status.recording:${recording}`);
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    mic.click();
+    for (
+      let turn = 0;
+      turn < 4 && trace.at(-1) !== "status.local:Listening...";
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+    trace.length = 0;
+    const sentBeforeLoss = structuredClone(socket.sent);
+
+    socket.close();
+
+    assert.deepEqual(trace, [
+      "capture.clear",
+      "capture.stop",
+      "status.recording:false",
+      "status.local:Dictation is temporarily unavailable. Try again.",
+    ]);
+    assert.deepEqual(
+      socket.sent,
+      sentBeforeLoss,
+      "connection loss cannot emit a clear on the already unavailable socket",
+    );
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
   const sockets = [];
   const service = new RealtimeTranscriptionService({
     prompt: "meeting notes",
@@ -239,15 +403,23 @@ await assertNoLeaks(lifecycle, async () => {
     },
   });
   const states = [];
-  const snapshots = [];
-  const completions = [];
-  const failures = [];
+  const events = [];
   const errors = [];
   service.onState((value) => states.push(value));
-  service.onSnapshot((value) => snapshots.push(value));
-  service.onCompleted((value) => completions.push(value));
-  service.onFailed((value) => failures.push(value));
+  service.onEvent((value) => events.push(value));
   service.onError((value) => errors.push(value));
+  for (const legacyCallback of [
+    "onCommitted",
+    "onSnapshot",
+    "onCompleted",
+    "onFailed",
+  ]) {
+    assert.equal(
+      legacyCallback in service,
+      false,
+      `${legacyCallback} cannot retain callback-owned take state`,
+    );
+  }
 
   assert.equal(sockets.length, 1);
   assert.match(sockets[0].url, /\/v1\/realtime$/);
@@ -273,17 +445,24 @@ await assertNoLeaks(lifecycle, async () => {
   sockets[0].message(server.transcription_completed);
   sockets[0].message(server.transcription_failed);
   sockets[0].message(server.error_correlated);
-  assert.deepEqual(snapshots, [{ itemId: "item_alpha", text: "Hello, world" }]);
-  assert.deepEqual(completions, [{ itemId: "item_alpha", transcript: "Hello, world" }]);
-  assert.deepEqual(failures, [{ itemId: "item_beta", code: "transcription_failed" }]);
-  assert.deepEqual(errors, [
-    {
-      code: "unsupported_model",
-      scope: "event",
-      eventId: "client_bad_update",
-      recoverable: true,
-    },
-  ]);
+  assert.deepEqual(
+    events.map((event) => event.type),
+    [
+      "session.created",
+      "session.updated",
+      "input_audio_buffer.committed",
+      "conversation.item.input_audio_transcription.hypothesis",
+      "conversation.item.input_audio_transcription.completed",
+      "conversation.item.input_audio_transcription.failed",
+      "error",
+    ],
+    "the production service publishes strict decoded events for reducer ownership",
+  );
+  assert.deepEqual(
+    errors,
+    [],
+    "decoded server failures publish only through the reducer event seam",
+  );
 
   service.dispose();
   assert.equal(sockets[0].readyState, ScriptedSocket.CLOSED);
@@ -299,16 +478,15 @@ await assertNoLeaks(lifecycle, async () => {
       return socket;
     },
   });
-  const committed = [];
-  const completions = [];
+  const events = [];
   const errors = [];
-  service.onCommitted((value) => committed.push(value));
-  service.onCompleted((value) => completions.push(value));
+  service.onEvent((value) => events.push(value));
   service.onError((value) => errors.push(value));
 
   sockets[0].open();
   sockets[0].message(server.session_created);
   sockets[0].message(server.session_updated);
+  events.length = 0;
   sockets[0].message({
     ...server.input_audio_buffer_committed,
     unexpected: true,
@@ -322,8 +500,7 @@ await assertNoLeaks(lifecycle, async () => {
     type: "response.created",
   });
 
-  assert.deepEqual(committed, []);
-  assert.deepEqual(completions, []);
+  assert.deepEqual(events, []);
   assert.deepEqual(
     errors,
     Array.from({ length: 3 }, () => ({
@@ -348,11 +525,9 @@ await assertNoLeaks(lifecycle, async () => {
         return socket;
       },
     });
-    const snapshots = [];
-    const completions = [];
     const errors = [];
-    service.onSnapshot((value) => snapshots.push(value));
-    service.onCompleted((value) => completions.push(value));
+    const events = [];
+    service.onEvent((value) => events.push(value));
     service.onError((value) => errors.push(value));
 
     const fallbackSessionUpdated = {
@@ -444,19 +619,53 @@ await assertNoLeaks(lifecycle, async () => {
       transcript: "hypothesis wins",
     });
 
-    assert.deepEqual(snapshots, [
-      { itemId: "item_shared", text: "stale" },
-      { itemId: "item_shared", text: "stale prefix" },
-      { itemId: "item_shared", text: "fresh" },
-      { itemId: "item_isolated", text: "other" },
-      { itemId: "item_shared", text: "fresh transcript" },
-      { itemId: "item_isolated", text: "other item" },
-      { itemId: "item_isolated", text: "hypothesis wins" },
-    ]);
-    assert.deepEqual(completions, [
-      { itemId: "item_shared", transcript: "fresh transcript" },
-      { itemId: "item_isolated", transcript: "hypothesis wins" },
-    ]);
+    assert.deepEqual(
+      events
+        .filter(
+          (event) =>
+            event.type ===
+            "conversation.item.input_audio_transcription.delta",
+        )
+        .map((event) => event.event_id),
+      [
+        "evt_stale_delta_1",
+        "evt_stale_delta_2",
+        "evt_fresh_delta_1",
+        "evt_isolated_delta_1",
+        "evt_fresh_delta_2",
+        "evt_isolated_delta_2",
+      ],
+      "fallback deltas reach the reducer seam until hypotheses are negotiated",
+    );
+    assert.deepEqual(
+      events
+        .filter(
+          (event) =>
+            event.type ===
+              "conversation.item.input_audio_transcription.hypothesis" ||
+            event.type ===
+              "conversation.item.input_audio_transcription.completed",
+        )
+        .map((event) => [event.type, event.item_id, event.transcript]),
+      [
+        [
+          "conversation.item.input_audio_transcription.completed",
+          "item_shared",
+          "fresh transcript",
+        ],
+        [
+          "conversation.item.input_audio_transcription.hypothesis",
+          "item_isolated",
+          "hypothesis wins",
+        ],
+        [
+          "conversation.item.input_audio_transcription.completed",
+          "item_isolated",
+          "hypothesis wins",
+        ],
+      ],
+      "strict decoded events carry every take transition without service snapshots",
+    );
     assert.deepEqual(errors.at(-1), {
       code: "invalid_server_event",
       scope: "session",

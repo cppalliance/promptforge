@@ -458,7 +458,7 @@ isProject: false
 - Exclusions: no DOM, socket, capture-service, status-service, or document-structure access inside the reducer and no production wiring yet.
 - Focused verification: from `crates/workshop-server/ui` run `npm run typecheck`, `npm run build`, and `npm test`.
 
-### Step 21: Wire production through TakeRegistry
+### Step 21: Wire production through TakeRegistry [completed]
 
 - Component and piece: Component 6 of 8, Workshop Realtime UI; make `setupStt` interpret reducer effects and remove the callback-owned maps, sets, flags, and editor offsets.
 - Dependency: depends on Step 20 because production wiring must consume a fully tested pure transition surface rather than define state transitions in callbacks.

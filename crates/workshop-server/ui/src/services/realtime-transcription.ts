@@ -1,6 +1,9 @@
 import { Emitter, type Event as ServiceEvent } from "../base/event";
 import { Disposable } from "../base/lifecycle";
-import { decodeRealtimeEvent } from "./realtime-event-decoder";
+import {
+  decodeRealtimeEvent,
+  type RealtimeEvent,
+} from "./realtime-event-decoder";
 
 const HYPOTHESIS_INCLUDE = "item.input_audio_transcription.hypothesis";
 const RECONNECT_INITIAL_MS = 1000;
@@ -9,28 +12,10 @@ const RECONNECT_MAX_MS = 30_000;
 /** Readiness of the browser's Realtime transcription connection. */
 export type RealtimeTranscriptionState = "connecting" | "ready" | "unavailable";
 
-/** A complete replacement snapshot for one committed audio item. */
-export interface RealtimeTranscriptSnapshot {
-  readonly itemId: string;
-  readonly text: string;
-}
-
-/** The authoritative transcript for one committed audio item. */
-export interface RealtimeTranscriptCompletion {
-  readonly itemId: string;
-  readonly transcript: string;
-}
-
-/** A recoverable terminal failure for one committed audio item. */
-export interface RealtimeTranscriptFailure {
-  readonly itemId: string;
-  readonly code: string;
-}
-
-/** A recoverable connection, session, or client-event failure. */
+/** A recoverable transport or server-event decoding failure. */
 export interface RealtimeTranscriptionError {
   readonly code: string;
-  readonly scope: "connection" | "session" | "event";
+  readonly scope: "connection" | "session";
   readonly eventId: string | null;
   readonly recoverable: true;
 }
@@ -84,19 +69,12 @@ function base64(buffer: ArrayBuffer): string {
 
 /**
  * Owns one OpenAI-compatible Realtime transcription socket. It sends only
- * canonical client events and exposes item-keyed replacement snapshots so
- * views never need to interpret wire deltas or server-authored status text.
+ * canonical client events and publishes only strictly decoded server events.
  */
 export class RealtimeTranscriptionService extends Disposable {
   private readonly stateEmitter = this._register(new Emitter<RealtimeTranscriptionState>());
-  private readonly committedEmitter = this._register(new Emitter<string>());
-  private readonly snapshotEmitter = this._register(new Emitter<RealtimeTranscriptSnapshot>());
-  private readonly completedEmitter = this._register(
-    new Emitter<RealtimeTranscriptCompletion>(),
-  );
-  private readonly failedEmitter = this._register(new Emitter<RealtimeTranscriptFailure>());
+  private readonly eventEmitter = this._register(new Emitter<RealtimeEvent>());
   private readonly errorEmitter = this._register(new Emitter<RealtimeTranscriptionError>());
-  private readonly deltas = new Map<string, string>();
   private socket: RealtimeSocket | null = null;
   private disposed = false;
   private negotiatedHypotheses = false;
@@ -106,15 +84,9 @@ export class RealtimeTranscriptionService extends Disposable {
 
   /** Fires when connection readiness changes. */
   readonly onState: ServiceEvent<RealtimeTranscriptionState> = this.stateEmitter.event;
-  /** Fires when the server assigns an item ID to the oldest committed take. */
-  readonly onCommitted: ServiceEvent<string> = this.committedEmitter.event;
-  /** Fires complete replacement text for one item. */
-  readonly onSnapshot: ServiceEvent<RealtimeTranscriptSnapshot> = this.snapshotEmitter.event;
-  /** Fires the authoritative completion for one item. */
-  readonly onCompleted: ServiceEvent<RealtimeTranscriptCompletion> = this.completedEmitter.event;
-  /** Fires a recoverable item-scoped failure. */
-  readonly onFailed: ServiceEvent<RealtimeTranscriptFailure> = this.failedEmitter.event;
-  /** Fires a recoverable connection, protocol, or unscoped failure. */
+  /** Fires each server event after strict decoding succeeds. */
+  readonly onEvent: ServiceEvent<RealtimeEvent> = this.eventEmitter.event;
+  /** Fires a recoverable transport or server-event decoding failure. */
   readonly onError: ServiceEvent<RealtimeTranscriptionError> = this.errorEmitter.event;
 
   constructor(private readonly options: RealtimeTranscriptionOptions = {}) {
@@ -212,7 +184,6 @@ export class RealtimeTranscriptionService extends Disposable {
     const socket = this.socket;
     this.socket = null;
     socket?.close();
-    this.deltas.clear();
     super.dispose();
   }
 
@@ -233,6 +204,13 @@ export class RealtimeTranscriptionService extends Disposable {
       this.reportError("invalid_server_event", "session");
       return;
     }
+    if (
+      event.type === "conversation.item.input_audio_transcription.delta" &&
+      this.negotiatedHypotheses
+    ) {
+      return;
+    }
+    this.eventEmitter.fire(event);
 
     switch (event.type) {
       case "session.created":
@@ -268,49 +246,15 @@ export class RealtimeTranscriptionService extends Disposable {
         this.setState("ready");
         return;
       case "input_audio_buffer.committed":
-        this.committedEmitter.fire(event.item_id);
-        return;
       case "input_audio_buffer.cleared":
       case "conversation.item.created":
-        return;
       case "conversation.item.input_audio_transcription.hypothesis":
-        this.snapshotEmitter.fire({
-          itemId: event.item_id,
-          text: event.transcript,
-        });
-        return;
-      case "conversation.item.input_audio_transcription.delta": {
-        if (this.negotiatedHypotheses) {
-          return;
-        }
-        const text = (this.deltas.get(event.item_id) ?? "") + event.delta;
-        this.deltas.set(event.item_id, text);
-        this.snapshotEmitter.fire({ itemId: event.item_id, text });
-        return;
-      }
+      case "conversation.item.input_audio_transcription.delta":
       case "conversation.item.input_audio_transcription.completed":
-        this.deltas.delete(event.item_id);
-        this.completedEmitter.fire({
-          itemId: event.item_id,
-          transcript: event.transcript,
-        });
-        return;
       case "conversation.item.input_audio_transcription.failed":
-        this.deltas.delete(event.item_id);
-        this.failedEmitter.fire({
-          itemId: event.item_id,
-          code: event.error.code,
-        });
         return;
-      case "error": {
-        const eventId = event.error.event_id ?? null;
-        this.reportError(
-          event.error.code,
-          eventId === null ? "session" : "event",
-          eventId,
-        );
+      case "error":
         return;
-      }
       default: {
         const exhaustive: never = event;
         return exhaustive;
@@ -348,7 +292,6 @@ export class RealtimeTranscriptionService extends Disposable {
 
   private resetConnectionState(): void {
     this.negotiatedHypotheses = false;
-    this.deltas.clear();
   }
 
   private scheduleReconnect(): void {
