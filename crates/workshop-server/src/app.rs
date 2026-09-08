@@ -93,7 +93,7 @@ impl AppState {
         &self.gateway
     }
 
-    /// The restricted local-sidecar replacement handle for an embedding host.
+    /// Restricted local-Gateway authority for an embedding host.
     pub(crate) fn gateway_updater(&self) -> GatewayUpdater {
         self.gateway.updater()
     }

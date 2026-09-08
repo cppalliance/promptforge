@@ -73,11 +73,15 @@
 # New module: one atomically replaceable Gateway URL and bearer generation
 # shared by HTTP, Realtime, progress, heartbeat, and agent model clients.
 "gateway_binding.rs" = 267
+# Current validated-snapshot shutdown authority for the embedding host.
+"gateway_binding/shutdown.rs" = 24
 # Capability-only publication and coherent immutable snapshot coverage.
 "gateway_binding/tests.rs" = 95
 # Deterministically synchronized publisher and reader coverage for complete
 # immutable Gateway generations.
 "gateway_binding/tests/atomic.rs" = 80
+# Replacement-versus-quit coherence and configured-LAN denial coverage.
+"gateway_binding/tests/shutdown.rs" = 77
 # Split from gateway.rs: fixed-target authenticated WebSocket connections
 # for the Realtime relay path.
 "gateway/socket.rs" = 94
@@ -237,8 +241,9 @@
 "session/menu.rs" = 165
 "status.rs" = 199
 # Crate-private named local process used to exercise production sidecar
-# validation without exposing a fixture capability constructor.
-"test_gateway.rs" = 163
+# validation and observe authenticated shutdown without exposing a fixture
+# capability constructor.
+"test_gateway.rs" = 197
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its

@@ -2,10 +2,10 @@
 //!
 //! The shell's only menu item quits the app; when boot attached to or
 //! launched a local sidecar gateway, the item first posts the gateway's
-//! `/shutdown` with the connection file's key, so one gesture stops the
-//! window, the in-process server, and the gateway. Attached to a LAN
-//! gateway through explicit config, the item stops the shell only and
-//! says so: a client never stops a shared gateway.
+//! `/shutdown` through the server's current validated Gateway snapshot, so
+//! one gesture stops the window, the in-process server, and the Gateway.
+//! Attached to a LAN Gateway through explicit config, the snapshot grants
+//! no shutdown authority, so the item stops the shell only and says so.
 
 use std::sync::PoisonError;
 
@@ -13,7 +13,7 @@ use shared_sidecar::ConnectionFile;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Manager as _, Wry};
 
-use crate::GatewaySlot;
+use crate::ServerSlot;
 
 /// The quit item's menu id, matched by the event handler.
 pub(crate) const QUIT_MENU_ID: &str = "quit-promptforge";
@@ -83,21 +83,25 @@ pub(crate) fn install(app: &tauri::App, sidecar: Option<&ConnectionFile>) -> tau
     Ok(())
 }
 
-/// Handles the quit item: post the sidecar gateway's `/shutdown` when one
-/// is attached, then exit the shell (the `RunEvent::Exit` handler stops
-/// the in-process server). A refused or undeliverable shutdown request is
-/// reported and the shell exits anyway - quit always works, even when
-/// the gateway is wedged.
+/// Handles the quit item: ask the server's current validated local Gateway
+/// snapshot to post `/shutdown`, then exit the shell (the `RunEvent::Exit`
+/// handler stops the in-process server). A configured LAN Gateway grants no
+/// shutdown authority. A refused or undeliverable request is reported and
+/// the shell exits anyway - quit always works, even when the Gateway is
+/// wedged.
 pub(crate) fn handle_event(app: &AppHandle<Wry>, event: tauri::menu::MenuEvent) {
     let tauri::menu::MenuEvent { id } = event;
     if id != QUIT_MENU_ID {
         return;
     }
-    let file = app
-        .try_state::<GatewaySlot>()
-        .map(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).clone());
-    if let Some(Some(file)) = file
-        && let Err(error) = shared_sidecar::request_shutdown(&file)
+    let gateway = app.try_state::<ServerSlot>().and_then(|slot| {
+        slot.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(workshop_server::ServerHandle::gateway_updater)
+    });
+    if let Some(gateway) = gateway
+        && let Err(error) = gateway.request_shutdown()
     {
         eprintln!(
             "the gateway did not accept the shutdown request; quitting the shell anyway: {error}"

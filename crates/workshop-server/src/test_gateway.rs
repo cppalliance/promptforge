@@ -18,6 +18,7 @@ const EXPECTED_KEY_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_EXPECTED_KEY";
 pub(crate) struct ValidatedGateway {
     child: Child,
     port: u16,
+    control: TcpStream,
     _directory: tempfile::TempDir,
 }
 
@@ -78,6 +79,7 @@ impl ValidatedGateway {
         Self {
             child,
             port: u16::from_be_bytes(port),
+            control: stream,
             _directory: directory,
         }
     }
@@ -111,6 +113,28 @@ impl ValidatedGateway {
             started_at: started_at.to_owned(),
         }
     }
+
+    pub(crate) fn received_shutdown(&mut self, timeout: Duration) -> bool {
+        self.control
+            .set_read_timeout(Some(timeout))
+            .expect("set fixture control timeout");
+        let mut marker = [0_u8; 1];
+        match self.control.read_exact(&mut marker) {
+            Ok(()) => {
+                assert_eq!(marker, [1], "the fixture reports only shutdown requests");
+                true
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                false
+            }
+            Err(error) => panic!("read fixture shutdown marker: {error}"),
+        }
+    }
 }
 
 impl Drop for ValidatedGateway {
@@ -133,23 +157,30 @@ fn validated_gateway_fixture_process() {
         .local_addr()
         .expect("read named fixture address")
         .port();
-    TcpStream::connect(control_address)
-        .and_then(|mut stream| stream.write_all(&port.to_be_bytes()))
+    let mut control = TcpStream::connect(control_address).expect("connect fixture control");
+    control
+        .write_all(&port.to_be_bytes())
         .expect("announce named fixture readiness");
 
     for stream in listener.incoming() {
         let mut stream = stream.expect("accept named fixture request");
-        while answer_request(&mut stream, &expected_key) {}
+        while let Some(shutdown) = answer_request(&mut stream, &expected_key) {
+            if shutdown {
+                control
+                    .write_all(&[1])
+                    .expect("report the accepted shutdown request");
+            }
+        }
     }
 }
 
-fn answer_request(stream: &mut TcpStream, expected_key: &str) -> bool {
+fn answer_request(stream: &mut TcpStream, expected_key: &str) -> Option<bool> {
     let mut buffer = [0_u8; 4096];
     let Ok(read) = stream.read(&mut buffer) else {
-        return false;
+        return None;
     };
     if read == 0 {
-        return false;
+        return None;
     }
     let request = String::from_utf8_lossy(&buffer[..read]);
     let accepted = request.starts_with("GET /health ")
@@ -159,5 +190,8 @@ fn answer_request(stream: &mut TcpStream, expected_key: &str) -> bool {
     } else {
         "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"
     };
-    stream.write_all(response.as_bytes()).is_ok()
+    stream
+        .write_all(response.as_bytes())
+        .is_ok()
+        .then(|| accepted && request.starts_with("POST /shutdown "))
 }

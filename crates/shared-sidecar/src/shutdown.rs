@@ -1,13 +1,13 @@
 //! The `POST /shutdown` request: how a reader asks the gateway to exit.
 //!
 //! The workshop shell's quit-everything menu item is the caller: it posts
-//! the connection file's bearer key to the gateway's shutdown route, which
-//! answers `202 Accepted` and drains. Raw HTTP/1.0 over `TcpStream` like
-//! the health probe, matching the crate's dependency diet - no HTTP
-//! client.
+//! the current validated connection's bearer key to the gateway's shutdown
+//! route, which answers `202 Accepted` and drains. Raw HTTP/1.0 over
+//! `TcpStream` like the health probe, matching the crate's dependency diet -
+//! no HTTP client.
 
-use crate::ConnectionFile;
 use crate::health::{self, ProbeError};
+use crate::{ConnectionFile, ValidatedConnection};
 
 /// The shutdown route's path on the gateway.
 const SHUTDOWN_PATH: &str = "/shutdown";
@@ -44,9 +44,9 @@ impl From<ProbeError> for ShutdownError {
     }
 }
 
-/// Posts `POST /shutdown` to the gateway `file` names, presenting the
-/// file's bearer key. A 2xx answer means the gateway accepted and is
-/// draining; the caller exits without waiting for the process to die.
+/// Posts `POST /shutdown` to the validated local Gateway, presenting its
+/// bearer key. A 2xx answer means the Gateway accepted and is draining;
+/// the caller exits without waiting for the process to die.
 ///
 /// # Errors
 /// Returns [`ShutdownError::Io`] when the gateway cannot be connected or
@@ -55,12 +55,23 @@ impl From<ProbeError> for ShutdownError {
 ///
 /// # Examples
 /// ```no_run
-/// # let dir = tempfile::tempdir()?;
-/// # let file = shared_sidecar::ConnectionFile::read(dir.path())?.expect("a live file");
-/// shared_sidecar::request_shutdown(&file)?;
+/// # let file = shared_sidecar::ConnectionFile {
+/// #     port: 8081,
+/// #     api_key: "secret".into(),
+/// #     pid: 42,
+/// #     epoch: 1,
+/// #     version: "0.2.0".into(),
+/// #     started_at: "2026-09-07T00:00:00Z".into(),
+/// # };
+/// let connection = shared_sidecar::ValidatedConnection::validate(file)?;
+/// shared_sidecar::request_shutdown(&connection)?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn request_shutdown(file: &ConnectionFile) -> Result<(), ShutdownError> {
+pub fn request_shutdown(connection: &ValidatedConnection) -> Result<(), ShutdownError> {
+    request_shutdown_file(connection.connection_file())
+}
+
+fn request_shutdown_file(file: &ConnectionFile) -> Result<(), ShutdownError> {
     let address = format!("127.0.0.1:{}", file.port);
     let head = health::request_head(&address, "POST", SHUTDOWN_PATH, Some(&file.api_key))?;
     let status = head
@@ -118,7 +129,7 @@ mod tests {
     fn an_accepted_shutdown_posts_the_route_with_the_files_key() {
         let (port, received) =
             fixture_gateway(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n");
-        request_shutdown(&file(port)).expect("the gateway accepted");
+        request_shutdown_file(&file(port)).expect("the gateway accepted");
         let request = received
             .recv_timeout(Duration::from_secs(5))
             .expect("the request arrived");
@@ -140,7 +151,7 @@ mod tests {
     fn a_refused_shutdown_is_rejected() {
         let (port, _received) =
             fixture_gateway(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
-        let error = request_shutdown(&file(port)).expect_err("a 401 is a refusal");
+        let error = request_shutdown_file(&file(port)).expect_err("a 401 is a refusal");
         assert!(
             matches!(error, ShutdownError::Rejected { .. }),
             "a non-2xx answer is a rejection: {error}"
@@ -156,7 +167,7 @@ mod tests {
         let mut connection = file(port);
         connection.api_key = secret.to_owned();
 
-        let error = request_shutdown(&connection).expect_err("a 401 is a refusal");
+        let error = request_shutdown_file(&connection).expect_err("a 401 is a refusal");
         assert!(
             !format!("{error:?} {error}").contains(secret),
             "bearer values never enter error diagnostics"
@@ -166,7 +177,7 @@ mod tests {
     #[test]
     fn a_dead_gateway_is_an_io_error() {
         // Port 1 is never listening, so the connect fails fast.
-        let error = request_shutdown(&file(1)).expect_err("a dead port cannot answer");
+        let error = request_shutdown_file(&file(1)).expect_err("a dead port cannot answer");
         assert!(
             matches!(error, ShutdownError::Io { .. }),
             "an undelivered request is an I/O error: {error}"

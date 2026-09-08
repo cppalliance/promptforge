@@ -35,7 +35,7 @@ mod navigation;
 
 use std::ffi::OsStr;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -52,12 +52,6 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 /// shuts it down. `shutdown` consumes the handle, so the slot hands it over
 /// exactly once.
 type ServerSlot = Mutex<Option<ServerHandle>>;
-
-/// The managed slot holding the attached or launched sidecar gateway's
-/// connection file, for the quit-everything menu item's `/shutdown` post.
-/// `None` when the gateway came from explicit config (a LAN gateway the
-/// shell never stops).
-type GatewaySlot = Arc<Mutex<Option<shared_sidecar::ConnectionFile>>>;
 
 /// The managed local-sidecar supervisor, absent for an explicit LAN Gateway.
 type GatewaySupervisorSlot = Mutex<Option<gateway::GatewaySupervisor>>;
@@ -193,11 +187,10 @@ fn run() -> anyhow::Result<()> {
 /// and the failure exit code.
 fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     match boot() {
-        Ok((server, url, attachment, gateway_slot, supervisor)) => {
+        Ok((server, url, attachment, supervisor)) => {
             // The capability must exist before the window does: the
             // authority resolves a window's grants at creation.
             app.add_capability(window_capability(&url))?;
-            app.manage(gateway_slot);
             app.manage(GatewaySupervisorSlot::new(supervisor));
             app.manage(ServerSlot::new(Some(server)));
             menu::install(app, attachment.sidecar_file())?;
@@ -220,7 +213,6 @@ fn boot() -> anyhow::Result<(
     ServerHandle,
     url::Url,
     gateway::GatewayAttachment,
-    GatewaySlot,
     Option<gateway::GatewaySupervisor>,
 )> {
     let config = config::load().context("load the workshop configuration")?;
@@ -231,12 +223,7 @@ fn boot() -> anyhow::Result<(
     {
         Ok(()) => {
             let url = url::Url::parse(server.url()).context("parse the workshop URL")?;
-            let gateway_slot = Arc::new(Mutex::new(attachment.sidecar_file().cloned()));
-            let supervisor = match gateway::supervise(
-                &attachment,
-                server.gateway_updater(),
-                Arc::clone(&gateway_slot),
-            ) {
+            let supervisor = match gateway::supervise(&attachment, server.gateway_updater()) {
                 Ok(supervisor) => supervisor,
                 Err(error) => {
                     if let Err(shutdown_error) = server.shutdown() {
@@ -245,7 +232,7 @@ fn boot() -> anyhow::Result<(
                     return Err(error.context("supervise the local gateway"));
                 }
             };
-            Ok((server, url, attachment, gateway_slot, supervisor))
+            Ok((server, url, attachment, supervisor))
         }
         Err(error) => {
             if let Err(shutdown_error) = server.shutdown() {

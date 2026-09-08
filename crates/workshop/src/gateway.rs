@@ -15,7 +15,8 @@
 //!
 //! The shell never reads `gateway.toml`, never deletes `gateway.json`,
 //! and never kills the gateway on exit; the quit-everything menu item
-//! (`crate::menu`) is the only path that stops the gateway.
+//! (`crate::menu`) is the only path that stops the Gateway, through the
+//! server's current validated binding snapshot.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -79,8 +80,8 @@ impl GatewaySupervisor {
     }
 }
 
-/// How boot connected the gateway: the fact the quit-everything menu
-/// item labels and behaves from.
+/// How boot connected the Gateway: the fact the quit-everything menu labels
+/// from and the supervisor uses to decide whether it owns local recovery.
 #[derive(Debug)]
 pub(crate) enum GatewayAttachment {
     /// A local sidecar gateway the shell attached to or launched:
@@ -91,8 +92,7 @@ pub(crate) enum GatewayAttachment {
 }
 
 impl GatewayAttachment {
-    /// The connection file of a sidecar attachment, for the
-    /// quit-everything shutdown post.
+    /// The initial connection file of a sidecar attachment.
     pub(crate) fn sidecar_file(&self) -> Option<&ConnectionFile> {
         match self {
             Self::Sidecar(file) => Some(file),
@@ -308,7 +308,6 @@ fn spawn_detached(exe: &Path) -> std::io::Result<()> {
 pub(crate) fn supervise(
     attachment: &GatewayAttachment,
     updater: workshop_server::GatewayUpdater,
-    slot: crate::GatewaySlot,
 ) -> anyhow::Result<Option<GatewaySupervisor>> {
     let Some(initial) = attachment.sidecar_file().cloned() else {
         return Ok(None);
@@ -346,9 +345,6 @@ pub(crate) fn supervise(
                     updater
                         .replace_sidecar(&validated)
                         .context("publish the replacement gateway endpoint")?;
-                    *slot
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(file.clone());
                     Ok(())
                 },
                 |delay| match stop_rx.recv_timeout(delay) {
@@ -835,19 +831,19 @@ mod tests {
     }
 
     #[test]
-    fn an_explicit_config_attachment_holds_no_file_for_the_shutdown_post() {
+    fn an_explicit_config_attachment_holds_no_local_sidecar_file() {
         let file = live_file(1, "k");
         let sidecar = GatewayAttachment::Sidecar(file.clone());
         assert_eq!(
             sidecar.sidecar_file(),
             Some(&file),
-            "a sidecar attachment hands the quit item the connection file"
+            "a sidecar attachment carries its initial local connection file"
         );
         let config = GatewayAttachment::Config;
         assert_eq!(
             config.sidecar_file(),
             None,
-            "a LAN gateway from explicit config never gets a shutdown post"
+            "a LAN Gateway from explicit config carries no local sidecar identity"
         );
     }
 

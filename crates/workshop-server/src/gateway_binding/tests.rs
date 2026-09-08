@@ -1,6 +1,7 @@
 use super::*;
 
 mod atomic;
+mod shutdown;
 
 fn validated_connection(
     gateway: &crate::test_gateway::ValidatedGateway,

@@ -10,6 +10,7 @@ The shared sidecar discovery seam for PromptForge: the `gateway.json` connection
 - `ValidatedConnection` - an unforgeable point-in-time live-connection capability created only after one unchanged OS process boot brackets same-socket health and bearer acceptance checks; external test fixtures cannot choose the accepted image, and debug output redacts bearer and untrusted string metadata.
 - `resolve` - stale detection: attach parameters for a live gateway, or stale-file cleanup plus the reason.
 - `launch_or_attach` - the launch-race lock: the winner launches, losers attach to the winner.
+- `request_shutdown` - post the authenticated shutdown request for a validated local Gateway capability.
 - `wait_for_health` - poll `GET /health` until it answers 200 or the timeout elapses.
 - `run_dir` / `default_run_dir` / `connection_file_path` / `lock_file_path` - the path layout under `<home>/.promptforge/run`.
 

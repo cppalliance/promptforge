@@ -67,8 +67,9 @@ impl ServerHandle {
         &self.url
     }
 
-    /// Returns the restricted publisher used by an embedding desktop host
-    /// to atomically replace a relaunched local sidecar's port and bearer.
+    /// Returns the restricted local-Gateway handle used by an embedding
+    /// desktop host to replace a sidecar atomically and request shutdown from
+    /// the current validated generation.
     #[must_use]
     pub fn gateway_updater(&self) -> GatewayUpdater {
         self.gateway.clone()

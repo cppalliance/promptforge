@@ -22,8 +22,9 @@
 //!    exposing a forgeable constructor.
 //! 3. Launch races take [`launch_or_attach`]: the `gateway.json.lock`
 //!    advisory lock elects one launcher; losers attach to the winner.
-//! 4. A reader asks the gateway to exit with [`request_shutdown`], which
-//!    posts the file's bearer key to `POST /shutdown`.
+//! 4. A reader holding a [`ValidatedConnection`] asks the gateway to exit
+//!    with [`request_shutdown`], which posts its bearer key to
+//!    `POST /shutdown`.
 //!
 //! URLs normalize to a literal `127.0.0.1`, never `localhost`, and probes
 //! send the bound address as the `Host` header, matching the gateway's

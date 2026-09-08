@@ -6,6 +6,8 @@
 //! atomic store, then notifies long-lived tasks to reconnect. Explicitly
 //! configured endpoints never receive an updater from the desktop shell.
 
+mod shutdown;
+
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -183,9 +185,11 @@ impl GatewayBinding {
     }
 }
 
-/// A restricted publisher for a replacement validated local sidecar.
+/// Restricted local-Gateway authority for an embedding desktop host.
 ///
-/// Raw connection files cannot cross this publication boundary:
+/// Replacements accept only validated capabilities, and shutdown reads the
+/// same current immutable snapshot as every Workshop consumer. Raw connection
+/// files cannot cross the publication boundary:
 ///
 /// ```compile_fail
 /// use shared_sidecar::ConnectionFile;

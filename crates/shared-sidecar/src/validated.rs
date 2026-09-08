@@ -158,6 +158,10 @@ impl ValidatedConnection {
         &self.connection.api_key
     }
 
+    pub(crate) fn connection_file(&self) -> &ConnectionFile {
+        &self.connection
+    }
+
     pub(crate) fn into_connection_file(self) -> ConnectionFile {
         self.connection
     }

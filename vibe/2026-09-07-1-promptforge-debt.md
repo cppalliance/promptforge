@@ -510,7 +510,7 @@ isProject: false
 - Exclusions: no separate identity store, no per-process bearer rotation, no LAN Gateway shutdown authority, and no supervision move across components.
 - Focused verification: from the repository root run `cargo test -p shared-sidecar`, `cargo test -p workshop-server`, and `cargo test -p workshop`.
 
-### Step 26: Route quit through the authoritative snapshot
+### Step 26: Route quit through the authoritative snapshot [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; remove duplicate Gateway identity ownership from the desktop shell.
 - Dependency: depends on Step 25 because quit must read the same validated snapshot that current HTTP and model clients use, including after replacement.
