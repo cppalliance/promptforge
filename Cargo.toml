@@ -171,6 +171,8 @@ block2 = "0.6"
 # already in the tree transitively.
 libc = "0.2"
 windows-sys = { version = "0.61", default-features = false }
+# Cross-platform console interruption for the Workshop build orchestrator.
+ctrlc = "3.5"
 # Compiles the gateway exe's Windows icon resource in its build script;
 # already in the tree through tauri-build (via tauri-winres).
 embed-resource = "3"

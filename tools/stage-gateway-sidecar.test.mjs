@@ -33,11 +33,29 @@ test("maps the Linux target to Tauri's suffix without an extension", () => {
   );
 });
 
-test("rejects an unsupported target", () => {
-  assert.throws(
-    () => gatewaySidecarName("aarch64-apple-darwin"),
-    /unsupported Gateway sidecar target/,
+test("maps every valid non-Windows target without an extension", () => {
+  for (const target of [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+  ]) {
+    assert.equal(gatewayBinaryName(target), "promptforge-gateway");
+    assert.equal(
+      gatewaySidecarName(target),
+      `promptforge-gateway-${target}`,
+    );
+  }
+});
+
+test("maps other valid Windows targets with an executable extension", () => {
+  assert.equal(
+    gatewaySidecarName("x86_64-pc-windows-gnu"),
+    "promptforge-gateway-x86_64-pc-windows-gnu.exe",
   );
+});
+
+test("rejects a malformed target triple", () => {
+  assert.throws(() => gatewaySidecarName("../outside"), /invalid target triple/);
 });
 
 test("rejects a missing source binary", () => {

@@ -70,13 +70,13 @@ npm ci --prefix crates/workshop-server/ui
 npm ci --prefix crates/gateway-config-ui/ui
 ```
 
-`cargo build` builds the gateway, the default workspace member. `cargo build -p workshop` builds the desktop app. Platform notes:
+`cargo build` builds only the gateway, the default workspace member. `cargo workshop` is the normal one-command Workshop build: it builds the gateway first, stages Tauri's target-suffixed temporary sidecar, builds the desktop app in the same profile and target, and removes the staged copy. Use `cargo workshop --release` for release binaries or `cargo workshop --target <triple>` for an explicit target. Ctrl+C terminates the active build subprocess, removes staging when staging has begun, and exits with failure. Platform notes:
 
 - **Ubuntu 22.04**: `sudo apt install build-essential pkg-config cmake clang libclang-dev`; the desktop app also needs `libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev`.
-- **macOS**: `xcode-select --install` and `brew install cmake node`, then `cargo build -p workshop`.
-- **Windows**: install Visual Studio with the "Desktop development with C++" workload and Node.js 22, then `cargo build -p workshop`.
+- **macOS**: `xcode-select --install` and `brew install cmake node`, then `cargo workshop`.
+- **Windows**: install Visual Studio with the "Desktop development with C++" workload and Node.js 22, then `cargo workshop`.
 
-Bundling the desktop app with `cargo tauri build` takes one more step: the bundle ships the gateway as an external binary, so build it with `cargo build --release -p gateway` and stage it at `crates/workshop/binaries/promptforge-gateway-<target-triple>` before bundling (the release workflows under `.github/workflows/` show the exact commands per platform). Plain `cargo build` and `cargo run` need no staging.
+`cargo build -p workshop` is a low-level package build. It requires a real gateway executable to have already been staged at `crates/workshop/binaries/promptforge-gateway-<target-triple>` and does not clean that staging afterward. Bundling with `cargo tauri build` has the same staging requirement; the release workflows under `.github/workflows/` show the exact packaging commands per platform.
 
 The first build downloads the tool picker's embedding model (~130MB from Hugging Face, pinned and checksummed). Later builds reuse the cache.
 

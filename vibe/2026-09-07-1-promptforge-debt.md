@@ -593,14 +593,14 @@ isProject: false
 - Focused verification: run Gateway, gateway-stt, Workshop relay, both UI suites, guide generation twice, formatting, strict lint, Miri, and architecture gates.
 - Component boundary: ends Component 9; review cumulative Steps 29 through 32 against the Step 28 commit.
 
-### Step 33: Restore direct Workshop builds
+### Step 33: Add one-command Workshop builds [completed]
 
-- Component and piece: release ergonomics; restore the documented contract that plain `cargo build -p workshop --release` does not require manual Tauri sidecar staging while preserving explicit installer staging.
+- Component and piece: release ergonomics; add the supported `cargo workshop` command that builds Gateway and Workshop together while preserving explicit installer staging.
 - Dependency: follows functional dictation closure so the final operator build uses the corrected binaries.
-- Artifacts: `crates/workshop/build.rs`, Tauri build configuration or narrowly scoped build helper, build tests, and `README.md`.
-- Scope: distinguish direct Cargo compilation from Tauri bundling; direct compilation uses the sibling Cargo output without requiring `crates/workshop/binaries`, while installer builds retain target-suffixed external-binary staging.
-- Exclusions: no recursive Cargo invocation from `build.rs`, placeholder executable, product rename, embedded Gateway, or release-workflow weakening.
-- Focused verification: from a clean missing staging directory run `cargo build -p gateway --release` then `cargo build -p workshop --release`; separately stage the Gateway and run the unsigned NSIS package command.
+- Artifacts: `.cargo/config.toml`, a `build-workshop` orchestration crate following the repository's `build-*` convention, `tools/stage-gateway-sidecar.mjs`, focused command tests, and `README.md`.
+- Scope: `cargo workshop` and `cargo workshop --release` build Gateway first, derive the host triple, stage the normal Gateway output under Tauri's required target-suffixed temporary name, build Workshop in the identical profile, and remove staging on success and every handled failure. `--target <triple>` applies the same explicit target to both builds and their target paths. The command accepts only the documented release and target options, rejects product features and every other unsupported argument, preserves the primary failure when cleanup also fails, reports cleanup failure separately, and leaves `promptforge-gateway[.exe]` and `promptforge-workshop[.exe]` as the final outputs.
+- Exclusions: no recursive Cargo invocation from `workshop/build.rs`, unstable binary artifact dependencies, placeholder executable, product rename, embedded Gateway, persistent staged copy, or release-workflow weakening. Plain `cargo build -p workshop` remains a low-level package build that requires its external binary to exist.
+- Focused verification: from a clean missing staging directory run `cargo test -p build-workshop`, `cargo workshop`, and `cargo workshop --release`; prove both normal executable names exist; inject Gateway, staging, Workshop, and cleanup failures in deterministic command-runner tests; run `node --test tools/stage-gateway-sidecar.test.mjs`, Workshop build and tests, repository formatting, warnings-denied lint, and strict documentation; require staging to be absent afterward.
 
 ### Step 34: Run complete release verification
 

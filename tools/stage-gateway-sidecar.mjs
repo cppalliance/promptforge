@@ -8,31 +8,17 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const TARGETS = new Map([
-  [
-    "x86_64-pc-windows-msvc",
-    {
-      binary: "promptforge-gateway.exe",
-      sidecar: "promptforge-gateway-x86_64-pc-windows-msvc.exe",
-    },
-  ],
-  [
-    "x86_64-unknown-linux-gnu",
-    {
-      binary: "promptforge-gateway",
-      sidecar: "promptforge-gateway-x86_64-unknown-linux-gnu",
-    },
-  ],
-]);
-
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function targetNames(target) {
-  const names = TARGETS.get(target);
-  if (names === undefined) {
-    throw new Error(`unsupported Gateway sidecar target: ${target}`);
+  if (!/^[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+){2,}$/.test(target)) {
+    throw new Error(`invalid target triple: ${target}`);
   }
-  return names;
+  const extension = target.split("-").includes("windows") ? ".exe" : "";
+  return {
+    binary: `promptforge-gateway${extension}`,
+    sidecar: `promptforge-gateway-${target}${extension}`,
+  };
 }
 
 export function gatewayBinaryName(target) {

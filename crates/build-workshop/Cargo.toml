@@ -1,0 +1,23 @@
+[package]
+name = "build-workshop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "Builds the PromptForge Gateway and Workshop desktop app together"
+
+[[bin]]
+name = "build-workshop"
+path = "src/main.rs"
+
+[dependencies]
+ctrlc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
