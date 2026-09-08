@@ -6,7 +6,7 @@ public_root_count = 7
 test_fixture_public_root_count = 8
 
 [modules]
-"decoder.rs" = 110
+"decoder.rs" = 198
 "engine.rs" = 251
 "error.rs" = 83
 "lib.rs" = 18

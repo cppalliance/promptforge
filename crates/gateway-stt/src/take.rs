@@ -10,6 +10,7 @@ use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 
 mod agreement;
+mod final_decode;
 mod final_outcome;
 mod finalization;
 mod interim;
@@ -185,15 +186,9 @@ impl Take {
 
     pub(crate) fn finalization(&self) -> Option<finalization::TakeFinalization> {
         let pipeline = self.final_pipeline.as_ref()?;
-        let consumed = self.consumed();
-        let mut buffer = TakeState::lock(&self.state.buffer);
-        let committed_samples = buffer.end();
-        let tail = buffer
-            .transfer_range(consumed..committed_samples)
-            .unwrap_or_else(|_| panic!("final tail range must remain resident"));
-        drop(buffer);
+        let committed_samples = TakeState::lock(&self.state.buffer).end();
         let accepted = TakeState::lock(&self.whole_window).accepted_hypotheses(committed_samples);
-        Some(pipeline.finalization(tail, consumed, committed_samples, accepted))
+        Some(pipeline.finalization(committed_samples, accepted))
     }
 }
 
@@ -260,9 +255,6 @@ mod tests {
     async fn completed_pipeline_releases_its_retained_dependency() {
         let (commands, receiver) = mpsc::channel(super::FINAL_SEGMENT_CAPACITY);
         let state = Arc::new(super::TakeState::default());
-        let tail = super::TakeState::lock(&state.buffer)
-            .transfer_range(0..0)
-            .expect("empty completion owns an empty absolute range");
         let retained = Arc::new(());
         let weak: Weak<()> = Arc::downgrade(&retained);
         let pipeline_retained = Arc::clone(&retained);
@@ -282,8 +274,6 @@ mod tests {
         let (reply, completion) = oneshot::channel();
         commands
             .send(FinalCommand::Complete {
-                tail,
-                start: 0,
                 committed_samples: 0,
                 accepted: Vec::new(),
                 reply,

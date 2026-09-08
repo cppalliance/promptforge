@@ -36,12 +36,12 @@ impl RetainedPcmBudget {
         }
     }
 
-    fn reserve(&self, samples: usize) -> Result<RetainedPcmOwner, AudioError> {
+    fn reserve(&self, capacity: usize) -> Result<RetainedPcmOwner, AudioError> {
         self.state
             .retained
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |retained| {
                 retained
-                    .checked_add(samples)
+                    .checked_add(capacity)
                     .filter(|total| *total <= self.state.limit)
             })
             .map_err(|_| AudioError::BufferTooLong {
@@ -49,8 +49,29 @@ impl RetainedPcmBudget {
             })?;
         Ok(RetainedPcmOwner {
             budget: self.clone(),
-            samples,
+            capacity,
         })
+    }
+
+    fn reserve_remaining(&self) -> RetainedPcmOwner {
+        let mut retained = self.state.retained.load(Ordering::Acquire);
+        loop {
+            let remaining = self.state.limit.saturating_sub(retained);
+            match self.state.retained.compare_exchange_weak(
+                retained,
+                self.state.limit,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return RetainedPcmOwner {
+                        budget: self.clone(),
+                        capacity: remaining,
+                    };
+                }
+                Err(actual) => retained = actual,
+            }
+        }
     }
 
     #[cfg(test)]
@@ -75,37 +96,36 @@ impl PcmBudgetProbe {
 #[derive(Debug)]
 pub(crate) struct RetainedPcmOwner {
     budget: RetainedPcmBudget,
-    samples: usize,
+    capacity: usize,
 }
 
 impl RetainedPcmOwner {
     fn absorb(&mut self, mut other: Self) {
         debug_assert!(Arc::ptr_eq(&self.budget.state, &other.budget.state));
-        self.samples += other.samples;
-        other.samples = 0;
+        self.capacity += other.capacity;
+        other.capacity = 0;
     }
 
-    fn transfer(&mut self, samples: usize) -> Self {
-        debug_assert!(samples <= self.samples);
-        self.samples -= samples;
+    fn take_all(&mut self) -> Self {
+        let capacity = std::mem::take(&mut self.capacity);
         Self {
             budget: self.budget.clone(),
-            samples,
+            capacity,
         }
     }
 
-    fn release(&mut self, samples: usize) {
-        debug_assert!(samples <= self.samples);
-        self.samples -= samples;
+    fn release(&mut self, capacity: usize) {
+        debug_assert!(capacity <= self.capacity);
+        self.capacity -= capacity;
         self.budget
             .state
             .retained
-            .fetch_sub(samples, Ordering::AcqRel);
+            .fetch_sub(capacity, Ordering::AcqRel);
     }
 
     #[cfg(test)]
     fn samples(&self) -> usize {
-        self.samples
+        self.capacity
     }
 }
 
@@ -114,7 +134,7 @@ impl Drop for RetainedPcmOwner {
         self.budget
             .state
             .retained
-            .fetch_sub(self.samples, Ordering::AcqRel);
+            .fetch_sub(self.capacity, Ordering::AcqRel);
     }
 }
 
@@ -136,6 +156,17 @@ impl RetainedPcm {
     pub(crate) fn into_decode(self) -> (Vec<f32>, RetainedPcmOwner) {
         (self.samples, self.owner)
     }
+
+    pub(super) fn retain_tail(
+        mut samples: Vec<f32>,
+        owner: RetainedPcmOwner,
+        retained_samples: usize,
+    ) -> Self {
+        debug_assert!(retained_samples <= samples.len());
+        let released = samples.len() - retained_samples;
+        samples.drain(..released);
+        Self { samples, owner }
+    }
 }
 
 #[derive(Debug)]
@@ -147,7 +178,10 @@ pub(super) struct RollingPcm {
 
 impl RollingPcm {
     pub(super) fn new(budget: RetainedPcmBudget) -> Self {
-        let owner = RetainedPcmOwner { budget, samples: 0 };
+        let owner = RetainedPcmOwner {
+            budget,
+            capacity: 0,
+        };
         Self {
             origin: 0,
             samples: Vec::new(),
@@ -169,9 +203,39 @@ impl RollingPcm {
             .ok_or(AudioError::BufferTooLong {
                 maximum_seconds: MAX_RETAINED_SECONDS,
             })?;
-        let owner = self.owner.budget.reserve(samples.len())?;
+
+        if samples.is_empty() {
+            return Ok(());
+        }
+        if self.samples.is_empty() && self.samples.capacity() == 0 {
+            let owner = self.owner.budget.reserve(samples.capacity())?;
+            self.samples = samples;
+            self.owner.absorb(owner);
+            return Ok(());
+        }
+
+        let old_capacity = self.samples.capacity();
+        if next_len > old_capacity {
+            let mut headroom = self.owner.budget.reserve_remaining();
+            let required = next_len - old_capacity;
+            if required > headroom.capacity || self.samples.try_reserve_exact(required).is_err() {
+                return Err(AudioError::BufferTooLong {
+                    maximum_seconds: MAX_RETAINED_SECONDS,
+                });
+            }
+            if self.samples.capacity() - old_capacity > headroom.capacity {
+                self.samples.shrink_to(next_len);
+            }
+            let allocated = self.samples.capacity() - old_capacity;
+            if allocated > headroom.capacity {
+                return Err(AudioError::BufferTooLong {
+                    maximum_seconds: MAX_RETAINED_SECONDS,
+                });
+            }
+            headroom.release(headroom.capacity - allocated);
+            self.owner.absorb(headroom);
+        }
         self.samples.extend(samples);
-        self.owner.absorb(owner);
         Ok(())
     }
 
@@ -205,11 +269,6 @@ impl RollingPcm {
     }
 
     #[cfg(test)]
-    pub(super) fn retained_samples(&self) -> usize {
-        self.owner.budget.state.retained.load(Ordering::Acquire)
-    }
-
-    #[cfg(test)]
     pub(super) fn budget_probe(&self) -> PcmBudgetProbe {
         PcmBudgetProbe {
             state: Arc::clone(&self.owner.budget.state),
@@ -218,11 +277,21 @@ impl RollingPcm {
 
     pub(super) fn copy_range(&self, range: Range<u64>) -> Result<RetainedPcm, AudioError> {
         let local = self.local_range(&range);
-        let owner = self.owner.budget.reserve(local.len())?;
-        Ok(RetainedPcm {
-            samples: self.samples[local].to_vec(),
-            owner,
-        })
+        let mut owner = self.owner.budget.reserve_remaining();
+        if local.len() > owner.capacity {
+            return Err(AudioError::BufferTooLong {
+                maximum_seconds: MAX_RETAINED_SECONDS,
+            });
+        }
+        let mut samples = Vec::new();
+        if samples.try_reserve_exact(local.len()).is_err() || samples.capacity() > owner.capacity {
+            return Err(AudioError::BufferTooLong {
+                maximum_seconds: MAX_RETAINED_SECONDS,
+            });
+        }
+        owner.release(owner.capacity - samples.capacity());
+        samples.extend_from_slice(&self.samples[local]);
+        Ok(RetainedPcm { samples, owner })
     }
 
     pub(super) fn transfer_range(
@@ -230,9 +299,32 @@ impl RollingPcm {
         range: Range<u64>,
     ) -> Result<RetainedPcm, PcmRangeError> {
         let local = self.try_local_range(&range)?;
-        let transferred = self.owner.transfer(local.len());
-        self.owner.release(local.start);
-        let samples = self.samples.drain(..local.end).skip(local.start).collect();
+        let tail = if local.end == self.samples.len() {
+            None
+        } else {
+            let tail_capacity = self.samples.len() - local.end;
+            let mut tail_owner = self.owner.budget.reserve_remaining();
+            if tail_capacity > tail_owner.capacity {
+                return Err(PcmRangeError);
+            }
+            let mut tail = Vec::new();
+            tail.try_reserve_exact(tail_capacity)
+                .map_err(|_| PcmRangeError)?;
+            if tail.capacity() > tail_owner.capacity {
+                return Err(PcmRangeError);
+            }
+            tail_owner.release(tail_owner.capacity - tail.capacity());
+            tail.extend_from_slice(&self.samples[local.end..]);
+            self.samples.truncate(local.end);
+            Some((tail, tail_owner))
+        };
+        self.samples.drain(..local.start);
+        let samples = std::mem::take(&mut self.samples);
+        let transferred = self.owner.take_all();
+        if let Some((tail, tail_owner)) = tail {
+            self.samples = tail;
+            self.owner.absorb(tail_owner);
+        }
         self.origin = range.end;
         Ok(RetainedPcm {
             samples,
@@ -242,9 +334,37 @@ impl RollingPcm {
 
     pub(super) fn compact_to(&mut self, end: u64) -> Result<(), PcmRangeError> {
         let local = self.try_local_range(&(self.origin..end))?;
-        self.owner.release(local.end);
         self.samples.drain(..local.end);
         self.origin = end;
+        if self.samples.is_empty() {
+            self.samples = Vec::new();
+            let released = self.owner.capacity;
+            self.owner.release(released);
+        }
+        Ok(())
+    }
+
+    pub(super) fn restore_prefix(
+        &mut self,
+        range: Range<u64>,
+        mut prefix: RetainedPcm,
+    ) -> Result<(), PcmRangeError> {
+        let length = range
+            .end
+            .checked_sub(range.start)
+            .and_then(|length| usize::try_from(length).ok())
+            .ok_or(PcmRangeError)?;
+        if range.end != self.origin || length != prefix.len() {
+            return Err(PcmRangeError);
+        }
+        if prefix.samples.capacity() - prefix.samples.len() < self.samples.len() {
+            return Err(PcmRangeError);
+        }
+        prefix.samples.append(&mut self.samples);
+        let previous_owner = std::mem::replace(&mut self.owner, prefix.owner);
+        self.samples = prefix.samples;
+        self.origin = range.start;
+        drop(previous_owner);
         Ok(())
     }
 
@@ -267,70 +387,4 @@ impl RollingPcm {
 pub(super) struct PcmRangeError;
 
 #[cfg(test)]
-mod tests {
-    use super::{RetainedPcmBudget, RollingPcm};
-
-    #[test]
-    fn miri_resident_queue_and_decode_share_one_exact_reservation() {
-        let budget = RetainedPcmBudget::with_limit(12);
-        let mut resident = RollingPcm::new(budget.clone());
-        resident
-            .append(vec![0.0; 10])
-            .expect("resident PCM reserves");
-        assert_eq!(budget.retained_samples(), 10);
-
-        let queued = resident
-            .transfer_range(2..6)
-            .expect("the queued range transfers before compaction");
-        assert_eq!(resident.origin(), 6);
-        assert_eq!(resident.len(), 4);
-        assert_eq!(queued.len(), 4);
-        assert_eq!(budget.retained_samples(), 8);
-
-        let (samples, decoding) = queued.into_decode();
-        assert_eq!(samples.len(), 4);
-        assert_eq!(decoding.samples(), 4);
-        assert_eq!(budget.retained_samples(), 8);
-        drop(samples);
-        drop(decoding);
-        assert_eq!(budget.retained_samples(), 4);
-    }
-
-    #[test]
-    fn aggregate_limit_counts_resident_and_copied_interim_pcm() {
-        let budget = RetainedPcmBudget::with_limit(8);
-        let mut resident = RollingPcm::new(budget.clone());
-        resident
-            .append(vec![0.0; 6])
-            .expect("resident PCM reserves");
-        let interim = resident
-            .copy_range(2..4)
-            .expect("interim PCM reserves independently");
-        assert_eq!(budget.retained_samples(), 8);
-        assert!(resident.copy_range(0..1).is_err());
-        drop(interim);
-        assert_eq!(budget.retained_samples(), 6);
-    }
-
-    #[test]
-    fn multiple_compactions_keep_absolute_origins() {
-        let budget = RetainedPcmBudget::with_limit(16);
-        let mut resident = RollingPcm::new(budget);
-        resident
-            .append((0_u8..12).map(f32::from).collect())
-            .expect("resident PCM reserves");
-
-        let first = resident
-            .transfer_range(2..4)
-            .expect("first range transfers");
-        assert_eq!(first.samples(), &[2.0, 3.0]);
-        drop(first);
-        resident.append(vec![12.0, 13.0]).expect("PCM appends");
-        let second = resident
-            .transfer_range(8..12)
-            .expect("second absolute range transfers");
-        assert_eq!(second.samples(), &[8.0, 9.0, 10.0, 11.0]);
-        assert_eq!(resident.origin(), 12);
-        assert_eq!(resident.samples(), &[12.0, 13.0]);
-    }
-}
+mod tests;

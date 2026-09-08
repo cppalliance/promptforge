@@ -3,11 +3,14 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 #[cfg(test)]
 use gateway_stt_engine::TranscribeError;
 
-use super::final_outcome::{FinalRangeOutcome, FinalRangeResult, assemble_completion};
+use super::agreement::matching_suffix_prefix_start;
+use super::final_outcome::{
+    FinalBoundary, FinalRangeOutcome, FinalRangeResult, assemble_completion,
+};
 use super::pcm::{RetainedPcmBudget, RollingPcm};
 use super::text::append_transcript;
 use super::window::AcceptedHypothesis;
-use crate::segment::Segmenter;
+use crate::segment::{ForcedBoundary, Segmenter};
 
 pub(super) const MAX_PENDING_FINAL_OUTCOMES: usize = 4_096;
 
@@ -18,6 +21,13 @@ struct FinalizedState {
     samples: u64,
     outcomes: Vec<FinalRangeOutcome>,
     has_skipped_coverage: bool,
+    pending_forced: Option<PendingForced>,
+}
+
+#[derive(Debug)]
+struct PendingForced {
+    boundary: ForcedBoundary,
+    text: String,
 }
 
 #[derive(Debug)]
@@ -89,22 +99,16 @@ impl TakeState {
         if state.failure.is_some() {
             return;
         }
-        if let FinalRangeResult::Decoded(text) = &outcome.result
-            && !state.has_skipped_coverage
-        {
-            append_transcript(&mut state.text, text);
-            state.samples = outcome.range.end;
-            return;
+        match outcome.boundary.clone() {
+            FinalBoundary::Natural => record_natural_outcome(&mut state, outcome),
+            FinalBoundary::Forced(boundary) => {
+                let FinalRangeResult::Decoded(text) = outcome.result else {
+                    state.failure = Some("forced final window was not decoded".to_owned());
+                    return;
+                };
+                record_forced_outcome(&mut state, boundary, text);
+            }
         }
-        if state.outcomes.len() == MAX_PENDING_FINAL_OUTCOMES {
-            state.failure = Some("final outcome capacity is reached".to_owned());
-            return;
-        }
-        match &outcome.result {
-            FinalRangeResult::Decoded(_) => {}
-            FinalRangeResult::Skipped(_) => state.has_skipped_coverage = true,
-        }
-        state.outcomes.push(outcome);
     }
 
     pub(super) fn record_failure(&self, failure: String) {
@@ -133,6 +137,9 @@ impl TakeState {
         committed_samples: u64,
     ) -> Result<String, String> {
         let mut state = Self::lock(&self.finalized);
+        if state.failure.is_none() && !flush_pending_forced(&mut state) {
+            state.failure = Some("final outcome capacity is reached".to_owned());
+        }
         match state.failure.take() {
             Some(failure) => Err(failure),
             None if state.outcomes.is_empty() => Ok(state.text.clone()),
@@ -147,6 +154,91 @@ impl TakeState {
     }
 }
 
+fn record_natural_outcome(state: &mut FinalizedState, outcome: FinalRangeOutcome) {
+    let pending_slots = usize::from(state.pending_forced.is_some() && state.has_skipped_coverage);
+    let outcome_slots = usize::from(
+        matches!(outcome.result, FinalRangeResult::Skipped(_)) || state.has_skipped_coverage,
+    );
+    if state.outcomes.len() + pending_slots + outcome_slots > MAX_PENDING_FINAL_OUTCOMES {
+        state.failure = Some("final outcome capacity is reached".to_owned());
+        return;
+    }
+    let flushed = flush_pending_forced(state);
+    debug_assert!(flushed);
+    match &outcome.result {
+        FinalRangeResult::Decoded(text) if !state.has_skipped_coverage => {
+            append_transcript(&mut state.text, text);
+            state.samples = outcome.range.end;
+        }
+        FinalRangeResult::Decoded(_) => state.outcomes.push(outcome),
+        FinalRangeResult::Skipped(_) => {
+            state.has_skipped_coverage = true;
+            state.outcomes.push(outcome);
+        }
+    }
+}
+
+fn record_forced_outcome(state: &mut FinalizedState, boundary: ForcedBoundary, text: String) {
+    let Some(overlap) = boundary.overlap() else {
+        if state.pending_forced.is_some() {
+            state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+            return;
+        }
+        state.pending_forced = Some(PendingForced { boundary, text });
+        return;
+    };
+    let Some(previous) = state.pending_forced.take() else {
+        state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+        return;
+    };
+    if previous.boundary.decode_range().end != overlap.end
+        || boundary.new_audio().start != overlap.end
+    {
+        state.pending_forced = Some(previous);
+        state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
+        return;
+    }
+    let Some(prefix_end) = matching_suffix_prefix_start(&previous.text, &text) else {
+        state.pending_forced = Some(previous);
+        state.failure = Some("forced final overlap could not be aligned".to_owned());
+        return;
+    };
+    if state.has_skipped_coverage && state.outcomes.len() == MAX_PENDING_FINAL_OUTCOMES {
+        state.pending_forced = Some(previous);
+        state.failure = Some("final outcome capacity is reached".to_owned());
+        return;
+    }
+    settle_decoded(
+        state,
+        previous.boundary.decode_range().start..overlap.start,
+        previous.text[..prefix_end].trim_end(),
+    );
+    state.pending_forced = Some(PendingForced { boundary, text });
+}
+
+fn flush_pending_forced(state: &mut FinalizedState) -> bool {
+    let Some(pending) = state.pending_forced.take() else {
+        return true;
+    };
+    if state.has_skipped_coverage && state.outcomes.len() == MAX_PENDING_FINAL_OUTCOMES {
+        state.pending_forced = Some(pending);
+        return false;
+    }
+    settle_decoded(state, pending.boundary.decode_range(), &pending.text);
+    true
+}
+
+fn settle_decoded(state: &mut FinalizedState, range: std::ops::Range<u64>, text: &str) {
+    if state.has_skipped_coverage {
+        state
+            .outcomes
+            .push(FinalRangeOutcome::decoded(range, text.to_owned()));
+    } else {
+        append_transcript(&mut state.text, text);
+        state.samples = range.end;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -156,6 +248,7 @@ mod tests {
     use gateway_stt_engine::TranscribeError;
 
     use super::{MAX_PENDING_FINAL_OUTCOMES, TakeState};
+    use crate::segment::ForcedBoundary;
     use crate::take::final_outcome::{FinalRangeOutcome, SkipReason};
 
     #[test]
@@ -200,6 +293,82 @@ mod tests {
         assert_eq!(
             state.pending_failure().as_deref(),
             Some("final outcome capacity is reached")
+        );
+    }
+
+    #[test]
+    fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
+        let state = TakeState::default();
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::first(0..160_000),
+            "alpha beta ECHO, now".to_owned(),
+        ));
+        assert_eq!(state.finalized_snapshot(), (String::new(), 0));
+
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
+            "echo now revised ending".to_owned(),
+        ));
+        assert_eq!(
+            state.finalized_snapshot(),
+            ("alpha beta".to_owned(), 32_000)
+        );
+
+        state.record_final_outcome(FinalRangeOutcome::decoded(
+            320_000..336_000,
+            "tail".to_owned(),
+        ));
+        assert_eq!(
+            state.finalized_snapshot(),
+            (
+                "alpha beta echo now revised ending tail".to_owned(),
+                336_000
+            )
+        );
+    }
+
+    #[test]
+    fn forced_overlap_preserves_repeated_phrases_at_distinct_ranges() {
+        let state = TakeState::default();
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::first(0..160_000),
+            "echo now echo now".to_owned(),
+        ));
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
+            "echo now corrected".to_owned(),
+        ));
+        state.record_final_outcome(FinalRangeOutcome::skipped(
+            320_000..320_000,
+            SkipReason::BelowFinalWindow,
+        ));
+
+        assert_eq!(state.finalized(), "echo now echo now corrected");
+        assert!(state.pending_failure().is_none());
+    }
+
+    #[test]
+    fn missing_forced_overlap_fails_without_changing_canonical_text() {
+        let state = TakeState::default();
+        state.record_final_outcome(FinalRangeOutcome::decoded(
+            0..16_000,
+            "canonical".to_owned(),
+        ));
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::first(16_000..176_000),
+            "old overlap".to_owned(),
+        ));
+        let before = state.finalized_snapshot();
+
+        state.record_final_outcome(FinalRangeOutcome::forced(
+            ForcedBoundary::overlapping(48_000..176_000, 176_000..336_000),
+            "unrelated revision".to_owned(),
+        ));
+
+        assert_eq!(state.finalized_snapshot(), before);
+        assert_eq!(
+            state.pending_failure().as_deref(),
+            Some("forced final overlap could not be aligned")
         );
     }
 }

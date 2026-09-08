@@ -255,7 +255,7 @@ impl Decoder for WorkerDecoder {
     fn decode(&mut self, request: DecodeRequest) -> Result<String, TranscribeError> {
         let (state, changed) = &*self.0.shared;
         let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.requests.push(request);
+        state.requests.push(request.clone());
         state.decode_threads.push(std::thread::current().id());
         changed.notify_all();
         if state.park == ParkState::Armed {

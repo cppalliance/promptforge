@@ -123,7 +123,7 @@ isProject: false
 - Arbitrary-duration Realtime settlement:
   - Keep one provisional item ID, one logical `Take`, one commit, and one completion for the full recording. Do not roll the browser into periodic items.
   - Track lifetime 24 kHz input samples separately from retained 16 kHz PCM. Represent all segment, interim, accepted-hypothesis, final-outcome, and compaction positions as absolute 64-bit sample ranges.
-  - Force a final range every 20 seconds when no natural silence boundary closes continuous speech. Decode each later forced range with the prior 8 seconds of overlap, so no forced window exceeds 28 seconds.
+  - Force a final range every 10 seconds when no natural silence boundary closes continuous speech. Decode every forced, natural, or terminal successor to a forced range with the prior 8 seconds of overlap, so no overlapping final window exceeds 18 seconds.
   - Transfer PCM ownership to the bounded final pipeline before compacting the source buffer. The 30-second budget includes resident, queued, and actively decoding PCM; a slower-than-realtime backend returns explicit bounded overload without deleting accepted text.
   - Reconcile forced-window overlap with the existing punctuation-insensitive token matcher. Freeze only text before the aligned overlap and carry the newest overlap forward. A missing alignment fails closed without duplicating or omitting canonical text.
   - Keep only the canonical finalized transcript, one unresolved overlap, bounded accepted candidates, and exact lifetime duration. Completion remains one authoritative event and interim wire snapshots remain complete replacement text.
@@ -145,7 +145,7 @@ isProject: false
 - `PF-RTSTT-DC-006` and `DC-PF-P2-004`: test count before and after every split is identical; new source and test ceilings pass.
 - `DC-PF-P2-001`: block each sidecar resolve, validation, launch, and health phase, request Workshop exit, and prove joined termination within budget with no later publication.
 - `DC-PF-P2-002` and `DC-PF-P2-003`: raw connection files cannot publish; wrong image, boot identity, health, or bearer cannot create a capability; same-port and same-key replacement works; configured-key replacement is atomic; replacement raced with quit targets one current generation.
-- Arbitrary-duration Realtime: run hour-equivalent synthetic input with varied append sizes and continuous speech. Assert one item and completion, exact 3,600-second usage, gap-free absolute coverage, retained PCM at or below 30 seconds, forced windows at or below 28 seconds, bounded commands and text state, stable interim replacement across compaction, and no deletion or duplication at pause, overlap, punctuation, repeated-phrase, stop, clear, cancellation, or overload boundaries.
+- Arbitrary-duration Realtime: run hour-equivalent synthetic input with varied append sizes and continuous speech. Assert one item and completion, exact 3,600-second usage, gap-free absolute coverage, retained PCM allocation capacity at or below 30 seconds, forced windows at or below 18 seconds, bounded commands and text state, stable interim replacement across compaction, and no deletion or duplication at pause, overlap, punctuation, repeated-phrase, stop before, on, and after a forced cut, clear, cancellation, or overload boundaries.
 - Exit checks: repository formatting, warnings-denied workspace lint, workspace tests, documentation tests, architecture gates, feature-enabled API snapshots, native Whisper, both Miri targets, both UI suites, guide generation cleanliness, unsigned local package recovery, and existing signed release CI.
 
 ## Decision Record
@@ -161,7 +161,7 @@ isProject: false
   - Centralize native fixtures in existing feature-gated test infrastructure, not a new production crate.
   - Extract internal transaction and reducer modules without changing wire or installed behavior.
   - Split tests before adding ceilings so counts prove semantic preservation.
-  - Use a 20-second forced-final stride with 8 seconds of overlap under the existing 30-second retained-audio budget. These constants may change from measurements without changing ownership.
+  - Use a 10-second forced-final stride with 8 seconds of overlap under the existing 30-second retained-audio budget. Every later decode is at most 18 seconds, leaving at least 12 seconds of allocation capacity for the next 10-second stride; these constants may change from measurements without changing ownership.
 - Assumptions and risks:
   - Other unpublished installations using `[workshop.stt]` will fail validation after removal. That break is intentional for the selected pre-1.0 scope.
   - Bounded logging deliberately permits loss during permanent sink stalls; summaries and emergency diagnostics are part of the contract.
@@ -574,12 +574,12 @@ isProject: false
 - Exclusions: no forced speech cut or changed wire event yet; no unbounded outcome, PCM, queue, or accepted-hypothesis history.
 - Focused verification: run `cargo test -p gateway-stt -F test-fixtures`, both gateway-stt Miri filters, strict lint, and architecture gates.
 
-### Step 31: Force and reconcile bounded final windows
+### Step 31: Force and reconcile bounded final windows [completed]
 
 - Component and piece: Component 9 of 9, arbitrary-duration Realtime; process nonstop speech through bounded overlapping final windows without changing the logical item.
 - Dependency: depends on Step 30 because forced windows require absolute ranges, retained-sample reservation, and compaction ownership.
 - Artifacts: `crates/gateway-stt/src/segment.rs`, `take/finalization.rs`, `take/final_outcome.rs`, `take/state.rs`, `take/window.rs`, Realtime session scheduling, scripted decoder fixtures, and ceilings.
-- Scope: force 20-second strides, include the prior 8 seconds in later final decodes, keep each decode at or below 28 seconds, reconcile overlap before freezing text, and keep completion authoritative and ordered.
+- Scope: force 10-second strides, include the prior 8 seconds in every later forced, natural, or terminal successor decode, keep each decode at or below 18 seconds, retain overlap without an unaccounted PCM copy, count allocation capacity under the 30-second budget, reject punctuation-only token matches, exercise advancing-window normalization through the mounted Gateway route, reconcile overlap before canonical mutation, and keep completion authoritative and ordered.
 - Exclusions: no periodic Realtime commits, multiple browser takes, raised lifetime cap, unbounded retry, or silent text guess when overlap cannot be aligned.
 - Focused verification: run full and feature-enabled gateway-stt tests, Miri, mounted Gateway Realtime tests, strict lint, and architecture gates.
 

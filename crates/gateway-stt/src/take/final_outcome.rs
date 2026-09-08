@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use crate::segment::ForcedBoundary;
+
 use super::text::append_transcript;
 use super::window::AcceptedHypothesis;
 
@@ -17,8 +19,15 @@ pub(super) enum FinalRangeResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum FinalBoundary {
+    Natural,
+    Forced(ForcedBoundary),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct FinalRangeOutcome {
     pub(super) range: Range<u64>,
+    pub(super) boundary: FinalBoundary,
     pub(super) result: FinalRangeResult,
 }
 
@@ -26,6 +35,15 @@ impl FinalRangeOutcome {
     pub(super) fn decoded(range: Range<u64>, text: String) -> Self {
         Self {
             range,
+            boundary: FinalBoundary::Natural,
+            result: FinalRangeResult::Decoded(text),
+        }
+    }
+
+    pub(super) fn forced(boundary: ForcedBoundary, text: String) -> Self {
+        Self {
+            range: boundary.decode_range(),
+            boundary: FinalBoundary::Forced(boundary),
             result: FinalRangeResult::Decoded(text),
         }
     }
@@ -33,6 +51,7 @@ impl FinalRangeOutcome {
     pub(super) fn skipped(range: Range<u64>, reason: SkipReason) -> Self {
         Self {
             range,
+            boundary: FinalBoundary::Natural,
             result: FinalRangeResult::Skipped(reason),
         }
     }

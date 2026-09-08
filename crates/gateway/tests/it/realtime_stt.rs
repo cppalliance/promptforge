@@ -565,3 +565,4 @@ include!("realtime_stt/recovery.rs");
 include!("realtime_stt/overload.rs");
 include!("realtime_stt/capacity.rs");
 include!("realtime_stt/canonical_sequence.rs");
+include!("realtime_stt/window_revision.rs");

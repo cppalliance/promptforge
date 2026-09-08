@@ -1,10 +1,11 @@
 use std::ops::Range;
 
-use super::agreement::{matching_token_prefix_end, token_spans};
+use super::agreement::{equivalent_token, matching_token_prefix_end, token_spans};
 use super::interim::InterimSnapshot;
 use super::text::append_transcript;
 
 pub(super) const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
+const MIN_LEADING_REPLACEMENT_TOKENS: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct AcceptedHypothesisCapacity;
@@ -185,17 +186,19 @@ fn rebase_sliding_window(previous: &str, current: &str) -> Option<String> {
             return Some(rebased);
         }
     }
+    if previous_tokens.len() >= MIN_LEADING_REPLACEMENT_TOKENS
+        && current_tokens.len() >= MIN_LEADING_REPLACEMENT_TOKENS
+        && previous_tokens
+            .iter()
+            .zip(&current_tokens)
+            .take(MIN_LEADING_REPLACEMENT_TOKENS)
+            .all(|((previous, _, _), (current, _, _))| {
+                previous.chars().any(char::is_alphanumeric) && equivalent_token(previous, current)
+            })
+    {
+        return Some(current.to_owned());
+    }
     None
-}
-
-fn equivalent_token(left: &str, right: &str) -> bool {
-    left.chars()
-        .filter(|character| character.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .eq(right
-            .chars()
-            .filter(|character| character.is_alphanumeric())
-            .flat_map(char::to_lowercase))
 }
 
 fn owned_piece(has_prefix: bool, piece: &str) -> String {
@@ -229,6 +232,37 @@ mod tests {
                 " this".to_owned(),
             )
         );
+    }
+
+    #[test]
+    fn advancing_window_replaces_a_revision_with_two_equivalent_leading_tokens() {
+        let mut state = WholeWindowState::default();
+        state.next("", 0, 0, 0, 16_000, "Why, IS it");
+        let snapshot = state
+            .next("", 0, 0, 8_000, 24_000, "why is this")
+            .expect("a trustworthy leading prefix permits replacement");
+
+        assert_eq!(snapshot.into_parts().0, "why is this");
+        let accepted = state.accepted_hypotheses(24_000);
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].range(), 0..24_000);
+        assert_eq!(accepted[0].text(), "why is this");
+    }
+
+    #[test]
+    fn advancing_window_rejects_one_generic_equivalent_leading_token() {
+        let mut state = WholeWindowState::default();
+        state.next("", 0, 0, 0, 16_000, "And this stays");
+
+        assert!(
+            state
+                .next("", 0, 0, 8_000, 24_000, "and unrelated fragment")
+                .is_none()
+        );
+        let accepted = state.accepted_hypotheses(16_000);
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].range(), 0..16_000);
+        assert_eq!(accepted[0].text(), "And this stays");
     }
 
     #[test]

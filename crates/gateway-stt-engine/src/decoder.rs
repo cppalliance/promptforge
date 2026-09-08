@@ -18,7 +18,7 @@ pub enum DecodeMode {
 #[derive(Clone, Debug)]
 pub struct DecodeRequest {
     mode: DecodeMode,
-    samples: Vec<f32>,
+    samples: RequestSamples,
     guidance: Vec<String>,
     finalized: String,
     lifetime_guard: Option<RequestLifetime>,
@@ -33,6 +33,41 @@ impl fmt::Debug for RequestLifetime {
     }
 }
 
+struct RequestSamples {
+    values: Vec<f32>,
+    retirement: Option<Box<dyn FnOnce(Vec<f32>) + Send + 'static>>,
+}
+
+impl Clone for RequestSamples {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            retirement: None,
+        }
+    }
+}
+
+impl Debug for RequestSamples {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RequestSamples")
+            .field("values", &self.values)
+            .field(
+                "retirement",
+                &self.retirement.as_ref().map(|_| "SampleRetirement"),
+            )
+            .finish()
+    }
+}
+
+impl Drop for RequestSamples {
+    fn drop(&mut self) {
+        if let Some(retire) = self.retirement.take() {
+            retire(std::mem::take(&mut self.values));
+        }
+    }
+}
+
 impl DecodeRequest {
     /// Creates one owned decode request.
     #[must_use]
@@ -44,7 +79,10 @@ impl DecodeRequest {
     ) -> Self {
         Self {
             mode,
-            samples,
+            samples: RequestSamples {
+                values: samples,
+                retirement: None,
+            },
             guidance,
             finalized,
             lifetime_guard: None,
@@ -58,6 +96,18 @@ impl DecodeRequest {
         self
     }
 
+    /// Returns the owned sample buffer when this request retires.
+    ///
+    /// Cloned diagnostic snapshots never clone the callback.
+    #[must_use]
+    pub fn with_sample_retirement(
+        mut self,
+        retire: impl FnOnce(Vec<f32>) + Send + 'static,
+    ) -> Self {
+        self.samples.retirement = Some(Box::new(retire));
+        self
+    }
+
     /// Requested worker and decode policy.
     #[must_use]
     pub fn mode(&self) -> DecodeMode {
@@ -67,7 +117,7 @@ impl DecodeRequest {
     /// Owned mono 16 kHz floating-point PCM.
     #[must_use]
     pub fn samples(&self) -> &[f32] {
-        &self.samples
+        &self.samples.values
     }
 
     /// Immutable user guidance for this job.
@@ -107,4 +157,42 @@ pub trait ModelFactory: Debug + Send + Sync + 'static {
     /// # Errors
     /// Returns a backend-translated model construction failure.
     fn create(&self, mode: DecodeMode) -> Result<Option<Box<dyn Decoder>>, TranscribeError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::{DecodeMode, DecodeRequest};
+
+    #[test]
+    fn miri_sample_retirement_returns_the_owned_buffer_once() {
+        let (returned, receiver) = mpsc::sync_channel(1);
+        let request = DecodeRequest::new(
+            DecodeMode::Final,
+            vec![1.0, 2.0, 3.0],
+            Vec::new(),
+            String::new(),
+        )
+        .with_sample_retirement(move |samples| {
+            returned
+                .send(samples)
+                .expect("the retirement receiver remains");
+        });
+
+        drop(request.clone());
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        drop(request);
+        assert_eq!(
+            receiver.recv().expect("the owned samples retire"),
+            [1.0, 2.0, 3.0]
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
 }

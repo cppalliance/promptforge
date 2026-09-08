@@ -4,14 +4,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, TranscribeError};
+use gateway_stt_engine::{DecodeRequest, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::generation::GenerationLease;
-use crate::segment::SegmentOutcome;
+use crate::segment::{ForcedBoundary, SegmentOutcome};
 
+use super::final_decode::process_samples;
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
-use super::pcm::RetainedPcm;
 use super::state::TakeState;
 use super::window::AcceptedHypothesis;
 
@@ -21,8 +21,8 @@ pub(super) const FINAL_SEGMENT_CAPACITY: usize = 4;
 #[derive(Debug)]
 pub(super) enum FinalCommand {
     Segment {
-        samples: RetainedPcm,
         range: Range<u64>,
+        forced: Option<ForcedBoundary>,
         leading_silence: Option<Range<u64>>,
         owner: FinalSegmentOwner,
     },
@@ -33,8 +33,6 @@ pub(super) enum FinalCommand {
         owner: FinalSegmentOwner,
     },
     Complete {
-        tail: RetainedPcm,
-        start: u64,
         committed_samples: u64,
         accepted: Vec<AcceptedHypothesis>,
         reply: oneshot::Sender<Result<String, String>>,
@@ -58,7 +56,7 @@ impl FinalPipeline {
     pub(super) fn submit_closed_segments(&self, state: &TakeState) {
         loop {
             let command = {
-                let mut buffer = TakeState::lock(&state.buffer);
+                let buffer = TakeState::lock(&state.buffer);
                 let mut segmenter = TakeState::lock(&state.segmenter);
                 let previous_consumed = segmenter.consumed();
                 let Some(outcome) = segmenter.poll(buffer.samples(), buffer.origin()) else {
@@ -69,30 +67,30 @@ impl FinalPipeline {
                     break;
                 };
                 let range = match &outcome {
-                    SegmentOutcome::Decode(range) | SegmentOutcome::Skipped(range) => range,
+                    SegmentOutcome::Decode(range) | SegmentOutcome::Skipped(range) => range.clone(),
+                    SegmentOutcome::Forced(boundary) => boundary.decode_range(),
                 };
                 let leading_silence =
                     (previous_consumed < range.start).then(|| previous_consumed..range.start);
                 match outcome {
                     SegmentOutcome::Decode(range) => FinalCommand::Segment {
-                        samples: buffer.transfer_range(range.clone()).unwrap_or_else(|_| {
-                            panic!("closed segment range must remain resident")
-                        }),
                         range,
+                        forced: None,
                         leading_silence,
                         owner,
                     },
-                    SegmentOutcome::Skipped(range) => {
-                        buffer.compact_to(range.end).unwrap_or_else(|_| {
-                            panic!("skipped segment range must remain resident")
-                        });
-                        FinalCommand::Skipped {
-                            range,
-                            reason: SkipReason::BelowSpeechThreshold,
-                            leading_silence,
-                            owner,
-                        }
-                    }
+                    SegmentOutcome::Forced(boundary) => FinalCommand::Segment {
+                        range,
+                        forced: Some(boundary),
+                        leading_silence,
+                        owner,
+                    },
+                    SegmentOutcome::Skipped(range) => FinalCommand::Skipped {
+                        range,
+                        reason: SkipReason::BelowSpeechThreshold,
+                        leading_silence,
+                        owner,
+                    },
                 }
             };
             match self.commands.try_send(command) {
@@ -116,8 +114,6 @@ impl FinalPipeline {
 
     pub(super) fn finalization(
         &self,
-        tail: RetainedPcm,
-        start: u64,
         committed_samples: u64,
         accepted: Vec<AcceptedHypothesis>,
     ) -> TakeFinalization {
@@ -126,8 +122,6 @@ impl FinalPipeline {
             let (reply, reply_rx) = oneshot::channel();
             if commands
                 .send(FinalCommand::Complete {
-                    tail,
-                    start,
                     committed_samples,
                     accepted,
                     reply,
@@ -208,13 +202,16 @@ pub(super) async fn run_final_pipeline<D, F>(
     while let Some(command) = receiver.recv().await {
         match command {
             FinalCommand::Segment {
-                samples,
                 range,
+                forced,
                 leading_silence,
                 owner,
             } => {
                 record_leading_silence(&state, leading_silence);
-                process_samples(&state, &guidance, &mut decode, samples, range).await;
+                let samples = TakeState::lock(&state.buffer)
+                    .transfer_range(range.clone())
+                    .unwrap_or_else(|_| panic!("ordered segment range must remain resident"));
+                process_samples(&state, &guidance, &mut decode, samples, range, forced).await;
                 drop(owner);
             }
             FinalCommand::Skipped {
@@ -224,24 +221,31 @@ pub(super) async fn run_final_pipeline<D, F>(
                 owner,
             } => {
                 record_leading_silence(&state, leading_silence);
+                TakeState::lock(&state.buffer)
+                    .compact_to(range.end)
+                    .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
                 state.record_final_outcome(FinalRangeOutcome::skipped(range, reason));
                 drop(owner);
             }
             FinalCommand::Complete {
-                tail,
-                start,
                 committed_samples,
                 accepted,
                 reply,
             } => {
-                process_samples(
-                    &state,
-                    &guidance,
-                    &mut decode,
-                    tail,
-                    start..committed_samples,
-                )
-                .await;
+                let (start, forced) = {
+                    let segmenter = TakeState::lock(&state.segmenter);
+                    (
+                        segmenter.consumed(),
+                        segmenter.terminal_boundary(committed_samples),
+                    )
+                };
+                let range = forced
+                    .as_ref()
+                    .map_or(start..committed_samples, ForcedBoundary::decode_range);
+                let tail = TakeState::lock(&state.buffer)
+                    .transfer_range(range.clone())
+                    .unwrap_or_else(|_| panic!("ordered final tail must remain resident"));
+                process_samples(&state, &guidance, &mut decode, tail, range, forced).await;
                 drop(reply.send(state.completion(&accepted, committed_samples)));
                 break;
             }
@@ -252,46 +256,6 @@ pub(super) async fn run_final_pipeline<D, F>(
 fn record_leading_silence(state: &TakeState, range: Option<Range<u64>>) {
     if let Some(range) = range {
         state.record_final_outcome(FinalRangeOutcome::skipped(range, SkipReason::Silence));
-    }
-}
-
-async fn process_samples<D, F>(
-    state: &TakeState,
-    guidance: &[String],
-    decode: &mut D,
-    samples: RetainedPcm,
-    range: Range<u64>,
-) where
-    D: FnMut(DecodeRequest) -> F,
-    F: Future<Output = Option<Result<String, TranscribeError>>>,
-{
-    if state.has_failure() {
-        return;
-    }
-    let skipped = if samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES {
-        Some(SkipReason::BelowFinalWindow)
-    } else if EnginePolicy::is_silence(samples.samples()) {
-        Some(SkipReason::Silence)
-    } else {
-        None
-    };
-    if let Some(reason) = skipped {
-        state.record_final_outcome(FinalRangeOutcome::skipped(range, reason));
-        return;
-    }
-    let finalized = state.finalized();
-    let (samples, owner) = samples.into_decode();
-    let request = DecodeRequest::new(DecodeMode::Final, samples, guidance.to_vec(), finalized)
-        .with_lifetime_guard(owner);
-    let outcome = decode(request).await;
-    match outcome {
-        Some(Ok(text)) => {
-            state.record_final_outcome(FinalRangeOutcome::decoded(range, text));
-        }
-        Some(Err(error)) => state.record_failure(error.to_string()),
-        None => {
-            state.record_failure("final transcription worker is unavailable".to_owned());
-        }
     }
 }
 
@@ -319,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn natural_handoff_owns_pcm_before_compacting_the_source() {
+    async fn natural_handoff_stays_resident_until_ordered_pipeline_transfer() {
         let (commands, mut receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
         let pending = Arc::new(AtomicUsize::new(0));
         let pipeline = FinalPipeline {
@@ -337,21 +301,14 @@ mod tests {
         pipeline.submit_closed_segments(&state);
 
         let command = receiver.try_recv().expect("closed segment queues");
-        let FinalCommand::Segment {
-            samples,
-            range,
-            owner,
-            ..
-        } = command
-        else {
+        let FinalCommand::Segment { range, owner, .. } = command else {
             panic!("ordinary speech queues a final decode");
         };
         let resident = TakeState::lock(&state.buffer);
-        assert_eq!(resident.origin(), range.end);
-        assert_eq!(resident.retained_samples(), resident.len() + samples.len());
+        assert_eq!(resident.origin(), 0);
+        assert!(resident.end() >= range.end);
         assert_eq!(pending.load(Ordering::Acquire), 1);
         drop(resident);
-        drop(samples);
         drop(owner);
         assert_eq!(pending.load(Ordering::Acquire), 0);
     }
@@ -388,9 +345,6 @@ mod tests {
         let take = Take::without_final(Vec::new());
         take.append(vec![0.5; 4_800]).expect("tail PCM reserves");
         let accepted = accepted_from_snapshot(&take, 0..4_800, "last word", 4_800);
-        let tail = TakeState::lock(&take.state.buffer)
-            .transfer_range(0..4_800)
-            .expect("tail transfers from resident PCM");
         let state = Arc::clone(&take.state);
         let calls = Arc::new(AtomicUsize::new(0));
         let decode_calls = Arc::clone(&calls);
@@ -406,8 +360,6 @@ mod tests {
         let (reply, completion) = oneshot::channel();
         commands
             .send(FinalCommand::Complete {
-                tail,
-                start: 0,
                 committed_samples: 4_800,
                 accepted,
                 reply,
@@ -429,9 +381,7 @@ mod tests {
         let take = Take::without_final(Vec::new());
         take.append(vec![0.5; 8_000]).expect("tail PCM reserves");
         let accepted = accepted_from_snapshot(&take, 0..8_000, "must not inherit", 8_000);
-        let tail = TakeState::lock(&take.state.buffer)
-            .transfer_range(4_000..8_000)
-            .expect("partial tail transfers from resident PCM");
+        TakeState::lock(&take.state.segmenter).set_consumed_for_test(4_000);
         let state = Arc::clone(&take.state);
         let calls = Arc::new(AtomicUsize::new(0));
         let decode_calls = Arc::clone(&calls);
@@ -447,8 +397,6 @@ mod tests {
         let (reply, completion) = oneshot::channel();
         commands
             .send(FinalCommand::Complete {
-                tail,
-                start: 4_000,
                 committed_samples: 8_000,
                 accepted,
                 reply,

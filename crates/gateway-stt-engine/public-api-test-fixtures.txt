@@ -68,6 +68,7 @@ pub fn gateway_stt_engine::DecodeRequest::mode(&self) -> gateway_stt_engine::Dec
 pub fn gateway_stt_engine::DecodeRequest::new(gateway_stt_engine::DecodeMode, alloc::vec::Vec<f32>, alloc::vec::Vec<alloc::string::String>, alloc::string::String) -> Self
 pub fn gateway_stt_engine::DecodeRequest::samples(&self) -> &[f32]
 pub fn gateway_stt_engine::DecodeRequest::with_lifetime_guard(self, impl core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn gateway_stt_engine::DecodeRequest::with_sample_retirement(self, impl core::ops::function::FnOnce(alloc::vec::Vec<f32>) + core::marker::Send + 'static) -> Self
 pub struct gateway_stt_engine::EnginePolicy
 impl gateway_stt_engine::EnginePolicy
 pub const gateway_stt_engine::EnginePolicy::MIN_WINDOW_SAMPLES: usize

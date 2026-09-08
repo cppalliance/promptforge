@@ -13,6 +13,8 @@ mod generation;
 #[cfg(not(miri))]
 mod realtime_fixtures;
 #[cfg(not(miri))]
+mod realtime_forced_windows;
+#[cfg(not(miri))]
 mod realtime_session;
 #[cfg(not(miri))]
 mod service;

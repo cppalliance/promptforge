@@ -144,7 +144,9 @@ impl AudioBuffer {
 
     pub(super) fn take_resampled(&mut self) -> Vec<f32> {
         self.input_bytes = usize::from(self.odd_byte.is_some());
-        std::mem::take(&mut self.resampler.output)
+        let mut output = std::mem::take(&mut self.resampler.output);
+        output.shrink_to_fit();
+        output
     }
 
     #[cfg(test)]

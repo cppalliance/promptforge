@@ -13,14 +13,14 @@ use std::ops::Range;
 
 use gateway_stt_engine::EnginePolicy;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum SegmentOutcome {
-    Decode(Range<u64>),
-    Skipped(Range<u64>),
-}
+mod boundary;
+
+pub(crate) use boundary::{ForcedBoundary, SegmentOutcome};
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
 const FRAME_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 30 / 1000;
+const FORCED_STRIDE_SAMPLES: u64 = (EnginePolicy::SAMPLE_RATE * 10) as u64;
+pub(crate) const FORCED_OVERLAP_SAMPLES: usize = EnginePolicy::SAMPLE_RATE * 8;
 
 /// Silence must persist this long after speech to close a segment: 700 ms,
 /// long enough to survive sentence-internal pauses and natural breathing
@@ -48,6 +48,9 @@ pub(crate) struct Segmenter {
     /// End of the last completed segment: everything before this index has
     /// been handed to the final pass (or discarded as a click).
     consumed: u64,
+    /// End of the preceding forced stride when uninterrupted speech may
+    /// overlap it.
+    forced_predecessor: Option<u64>,
 }
 
 impl Segmenter {
@@ -64,11 +67,22 @@ impl Segmenter {
         *self = Self::new();
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_consumed_for_test(&mut self, consumed: u64) {
+        self.consumed = consumed;
+    }
+
     /// Index past which all audio has been segmented; the unprocessed tail
     /// of the take is `buffer[self.consumed()..]`.
     #[must_use]
     pub(crate) fn consumed(&self) -> u64 {
         self.consumed
+    }
+
+    pub(crate) fn terminal_boundary(&self, end: u64) -> Option<ForcedBoundary> {
+        (self.consumed < end)
+            .then(|| self.overlapping_successor(self.consumed..end, false))
+            .flatten()
     }
 
     /// Scans newly arrived frames and returns the range of the next
@@ -77,9 +91,20 @@ impl Segmenter {
     pub(crate) fn poll(&mut self, buffer: &[f32], buffer_origin: u64) -> Option<SegmentOutcome> {
         debug_assert!(self.cursor >= buffer_origin);
         let frame_samples = FRAME_SAMPLES as u64;
-        while self.cursor - buffer_origin + frame_samples
-            <= u64::try_from(buffer.len()).unwrap_or(u64::MAX)
-        {
+        let buffer_end =
+            buffer_origin.checked_add(u64::try_from(buffer.len()).unwrap_or(u64::MAX))?;
+        loop {
+            if let Some(start) = self.speech_start {
+                let forced_end = start.checked_add(FORCED_STRIDE_SAMPLES)?;
+                if forced_end <= buffer_end
+                    && self.cursor.saturating_add(frame_samples) > forced_end
+                {
+                    return Some(self.force_boundary(start, forced_end));
+                }
+            }
+            if self.cursor.saturating_add(frame_samples) > buffer_end {
+                return None;
+            }
             let start = usize::try_from(self.cursor - buffer_origin).ok()?;
             let frame = &buffer[start..start + FRAME_SAMPLES];
             let silent = EnginePolicy::is_silence(frame);
@@ -93,8 +118,14 @@ impl Segmenter {
                         self.cursor += frame_samples;
                         self.consumed = end;
                         if end - start >= MIN_SPEECH_SAMPLES as u64 {
-                            return Some(SegmentOutcome::Decode(start..end));
+                            let range = start..end;
+                            let outcome = self
+                                .overlapping_successor(range.clone(), false)
+                                .map_or(SegmentOutcome::Decode(range), SegmentOutcome::Forced);
+                            self.forced_predecessor = None;
+                            return Some(outcome);
                         }
+                        self.forced_predecessor = None;
                         return Some(SegmentOutcome::Skipped(start..end));
                     }
                 }
@@ -108,7 +139,38 @@ impl Segmenter {
             }
             self.cursor += frame_samples;
         }
-        None
+    }
+
+    fn force_boundary(&mut self, start: u64, end: u64) -> SegmentOutcome {
+        let boundary = if self.forced_predecessor == Some(start) {
+            ForcedBoundary::overlapping(start - FORCED_OVERLAP_SAMPLES as u64..start, start..end)
+        } else {
+            ForcedBoundary::first(start..end)
+        };
+        self.speech_start = self.silence_begin.is_none().then_some(end);
+        self.silence_begin = None;
+        self.cursor = end;
+        self.consumed = end;
+        self.forced_predecessor = Some(end);
+        SegmentOutcome::Forced(boundary)
+    }
+
+    fn overlapping_successor(
+        &self,
+        new_audio: Range<u64>,
+        retain_overlap: bool,
+    ) -> Option<ForcedBoundary> {
+        (self.forced_predecessor == Some(new_audio.start)).then(|| {
+            let overlap_start = new_audio
+                .start
+                .checked_sub(FORCED_OVERLAP_SAMPLES as u64)
+                .unwrap_or_else(|| unreachable!("a forced stride is longer than its overlap"));
+            if retain_overlap {
+                ForcedBoundary::overlapping(overlap_start..new_audio.start, new_audio)
+            } else {
+                ForcedBoundary::overlapping_final(overlap_start..new_audio.start, new_audio)
+            }
+        })
     }
 }
 
@@ -135,8 +197,10 @@ mod tests {
     fn close_all(segmenter: &mut Segmenter, buffer: &[f32]) -> Vec<Range<u64>> {
         let mut ranges = Vec::new();
         while let Some(outcome) = segmenter.poll(buffer, 0) {
-            if let SegmentOutcome::Decode(range) = outcome {
-                ranges.push(range);
+            match outcome {
+                SegmentOutcome::Decode(range) => ranges.push(range),
+                SegmentOutcome::Forced(boundary) => ranges.push(boundary.decode_range()),
+                SegmentOutcome::Skipped(_) => {}
             }
         }
         ranges
@@ -280,5 +344,68 @@ mod tests {
         let _: Range<u64> = second.clone();
         assert!(second.start >= first.end);
         assert_eq!(segmenter.consumed(), second.end);
+    }
+
+    #[test]
+    fn continuous_speech_forces_exact_absolute_strides_with_bounded_overlap() {
+        let buffer = speech(20);
+        let mut segmenter = Segmenter::new();
+
+        let SegmentOutcome::Forced(first) = segmenter
+            .poll(&buffer, 0)
+            .expect("ten seconds forces the first final window")
+        else {
+            panic!("continuous speech uses an explicit forced boundary");
+        };
+        assert_eq!(first.decode_range(), 0..160_000);
+        assert_eq!(first.new_audio(), 0..160_000);
+        assert_eq!(first.overlap(), None);
+        assert_eq!(
+            first.decode_range().end - first.decode_range().start,
+            160_000
+        );
+
+        let SegmentOutcome::Forced(second) = segmenter
+            .poll(&buffer, 0)
+            .expect("the next ten seconds force another final window")
+        else {
+            panic!("later continuous speech retains forced metadata");
+        };
+        assert_eq!(second.decode_range(), 32_000..320_000);
+        assert_eq!(second.new_audio(), 160_000..320_000);
+        assert_eq!(second.overlap(), Some(32_000..160_000));
+        assert_eq!(
+            second.decode_range().end - second.decode_range().start,
+            288_000
+        );
+        assert_eq!(segmenter.consumed(), 320_000);
+    }
+
+    #[test]
+    fn first_natural_boundary_carries_then_resets_forced_overlap_ownership() {
+        let buffer = take(&[speech(10), speech(1), silence(3), speech(10)]);
+        let mut segmenter = Segmenter::new();
+        assert!(matches!(
+            segmenter.poll(&buffer, 0),
+            Some(SegmentOutcome::Forced(_))
+        ));
+        let SegmentOutcome::Forced(natural) = segmenter
+            .poll(&buffer, 0)
+            .expect("the first natural boundary retains forced overlap")
+        else {
+            panic!("the forced successor carries reconciliation metadata");
+        };
+        assert_eq!(natural.overlap(), Some(32_000..160_000));
+        assert!(natural.new_audio().start == 160_000);
+        assert!(natural.new_audio().end < 320_000);
+
+        let SegmentOutcome::Forced(after_silence) = segmenter
+            .poll(&buffer, 0)
+            .expect("the next continuous run reaches its own forced boundary")
+        else {
+            panic!("speech after a natural boundary is forced independently");
+        };
+        assert_eq!(after_silence.overlap(), None);
+        assert_eq!(after_silence.decode_range(), after_silence.new_audio());
     }
 }
