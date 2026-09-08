@@ -240,3 +240,6 @@ N110 | observation | oversized-unit @ crates/gateway/tests/it/realtime_stt/windo
 - N112 | observation | global-state @ crates/build-workshop/src/main.rs::PROCESS_INTERRUPT: stores process-wide interrupt state in a one-time global | Add interruptible one-command Workshop builds
 - N113 | observation | event-hook @ crates/build-workshop/src/main.rs::install_interrupt_handler: registers a process-wide console callback that kills the active build child | Add interruptible one-command Workshop builds
 - N114 | observation | hidden-dependency @ crates/build-workshop/src/main.rs::BuildEnvironment::discover: reads the Cargo executable and target directory from the process environment outside its interface | Add interruptible one-command Workshop builds
+
+- N115 | observation | event-hook @ .github/workflows/workshop-installer-smoke.yml: installer-sensitive pull requests and manual dispatch invoke the Windows NSIS smoke job | Restore dark installer checkbox text
+- N116 | observation | surface-growth @ tools/check-workshop-installer-theme.test.mjs::assertWorkshopInstallerTheme: exports the installer source validator from its test module | Restore dark installer checkbox text

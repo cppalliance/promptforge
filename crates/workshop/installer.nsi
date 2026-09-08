@@ -462,6 +462,13 @@ Var AppStartMenuFolder
 !define /ifndef WM_SETTEXT 0x000C
 
 Function FinishPageShow
+ ; Windows visual styles override SetCtlColors for checkbox text. Disable
+ ; the theme on these controls before restoring the dark palette.
+ ; https://sourceforge.net/p/nsis/bugs/443/
+ System::Call 'UXTHEME::SetWindowTheme(p$mui.FinishPage.Run,w" ",w" ")'
+ SetCtlColors $mui.FinishPage.Run "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
+ System::Call 'UXTHEME::SetWindowTheme(p$mui.FinishPage.ShowReadme,w" ",w" ")'
+ SetCtlColors $mui.FinishPage.ShowReadme "${MUI_TEXTCOLOR}" "${MUI_BGCOLOR}"
  ; The Run checkbox follows the components: the Workshop shell when
  ; installed; on a Gateway-only install it becomes the first-run browser
  ; handoff to the gateway's Settings page; hidden when neither landed.

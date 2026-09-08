@@ -1,0 +1,63 @@
+name: Workshop installer smoke
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/workshop-installer-smoke.yml
+      - crates/build-workshop/**
+      - crates/workshop/installer.nsi
+      - crates/workshop/tauri*.conf.json
+      - tools/stage-gateway-sidecar.mjs
+  workflow_dispatch:
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+jobs:
+  compile-nsis:
+    runs-on: windows-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache the embedding model
+        uses: ./.github/actions/hf-model-cache
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/workshop-server/ui
+        run: npm ci
+
+      - name: Build featureless Gateway
+        run: cargo build --locked -p gateway --no-default-features
+
+      - name: Stage Gateway sidecar
+        run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe
+
+      - name: Compile unsigned debug NSIS installer
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: crates/workshop
+          args: --debug --bundles nsis --config tauri.nightly.conf.json
+
+      - name: Remove Gateway sidecar
+        if: always()
+        run: node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc
+
+      - name: Clean tree
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "the installer smoke dirtied the repository:"
+            git status --porcelain
+            exit 1
+          fi
