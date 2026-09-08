@@ -19,12 +19,12 @@
 //! server's current validated binding snapshot.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use shared_sidecar::{
-    ConnectionFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
+    CancellationToken, ConnectionFile, LaunchDecision, Resolution, SidecarError,
+    ValidatedConnection,
 };
 use workshop_server::Config;
 
@@ -52,6 +52,9 @@ const SUPERVISION_BASE_DELAY: Duration = Duration::from_millis(250);
 /// Ceiling on repeated sidecar recovery attempts.
 const SUPERVISION_MAX_DELAY: Duration = Duration::from_secs(30);
 
+/// Maximum designed supervisor shutdown latency.
+const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
+
 /// One sidecar liveness observation.
 enum SupervisionProbe {
     /// Another process already published a live replacement.
@@ -63,20 +66,49 @@ enum SupervisionProbe {
 /// The running local-sidecar supervisor.
 #[derive(Debug)]
 pub(crate) struct GatewaySupervisor {
-    stop: Option<mpsc::Sender<()>>,
+    cancellation: CancellationToken,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl GatewaySupervisor {
-    /// Stops supervision without waiting for a probe or backoff interval.
+    fn spawn(supervise: impl FnOnce(CancellationToken) + Send + 'static) -> anyhow::Result<Self> {
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let thread = std::thread::Builder::new()
+            .name("gateway-supervisor".to_owned())
+            .spawn(move || supervise(worker_cancellation))
+            .context("spawn the gateway supervisor")?;
+        Ok(Self {
+            cancellation,
+            thread: Some(thread),
+        })
+    }
+
+    /// Cancels supervision and joins its thread.
     pub(crate) fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
+        self.cancel_and_join();
+    }
+
+    fn cancel_and_join(&mut self) {
+        let started = Instant::now();
+        self.cancellation.cancel();
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            eprintln!("the gateway supervisor panicked during shutdown");
         }
-        // A synchronous liveness probe or launch race cannot be interrupted.
-        // Detaching here keeps application shutdown bounded; process exit
-        // tears down any in-flight supervisor work moments later.
-        drop(self.thread.take());
+        let elapsed = started.elapsed();
+        if elapsed > SUPERVISOR_SHUTDOWN_BUDGET {
+            eprintln!(
+                "the gateway supervisor exceeded its {SUPERVISOR_SHUTDOWN_BUDGET:?} shutdown budget: {elapsed:?}"
+            );
+        }
+    }
+}
+
+impl Drop for GatewaySupervisor {
+    fn drop(&mut self) {
+        self.cancel_and_join();
     }
 }
 
@@ -220,6 +252,67 @@ fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<ConnectionFil
     }
 }
 
+fn launch_and_attach_cancellable(
+    run_dir: &Path,
+    exe: &Path,
+    cancellation: &CancellationToken,
+) -> anyhow::Result<ConnectionFile> {
+    launch_and_attach_cancellable_with(
+        run_dir,
+        exe,
+        cancellation,
+        shared_sidecar::launch_or_attach_cancellable,
+        |exe, _| spawn_detached(exe),
+        wait_for_launched_file_cancellable,
+    )
+}
+
+fn launch_and_attach_cancellable_with<Settle, Spawn, Wait>(
+    run_dir: &Path,
+    exe: &Path,
+    cancellation: &CancellationToken,
+    settle: Settle,
+    spawn: Spawn,
+    wait: Wait,
+) -> anyhow::Result<ConnectionFile>
+where
+    Settle: FnOnce(&Path, Duration, &CancellationToken) -> Result<LaunchDecision, SidecarError>,
+    Spawn: FnOnce(&Path, &CancellationToken) -> std::io::Result<()>,
+    Wait: FnOnce(&Path, Duration, &CancellationToken) -> anyhow::Result<ConnectionFile>,
+{
+    match settle(run_dir, LAUNCH_TIMEOUT, cancellation).context("settle the gateway launch race")? {
+        LaunchDecision::Attach(file) => {
+            if cancellation.is_cancelled() {
+                anyhow::bail!("gateway attachment was cancelled");
+            }
+            Ok(file)
+        }
+        LaunchDecision::Launch(lock) => {
+            run_effect_if_active(cancellation, "gateway launch", |cancellation| {
+                if cancellation.is_cancelled() {
+                    anyhow::bail!("gateway launch was cancelled");
+                }
+                spawn(exe, cancellation).with_context(|| format!("spawn {}", exe.display()))
+            })?;
+            let file = wait(run_dir, LAUNCH_TIMEOUT, cancellation)?;
+            drop(lock);
+            Ok(file)
+        }
+        decision => anyhow::bail!("an unknown launch decision: {decision:?}"),
+    }
+}
+
+fn run_effect_if_active<T>(
+    cancellation: &CancellationToken,
+    phase: &'static str,
+    operation: impl FnOnce(&CancellationToken) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    match cancellation.run_if_active(|| operation(cancellation)) {
+        Some(result) => result,
+        None => anyhow::bail!("{phase} was cancelled"),
+    }
+}
+
 /// Waits for the launched gateway's connection file to appear, become ready,
 /// and pass the shared process-image, health, and bearer validation.
 fn wait_for_launched_file(run_dir: &Path, timeout: Duration) -> anyhow::Result<ConnectionFile> {
@@ -253,6 +346,71 @@ where
             );
         }
         std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn wait_for_launched_file_cancellable(
+    run_dir: &Path,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+) -> anyhow::Result<ConnectionFile> {
+    wait_for_launched_file_cancellable_with(
+        run_dir,
+        timeout,
+        cancellation,
+        shared_sidecar::wait_for_health_cancellable,
+        shared_sidecar::resolve_cancellable,
+    )
+}
+
+fn wait_for_launched_file_cancellable_with<Health, Resolve>(
+    run_dir: &Path,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    mut health: Health,
+    mut resolve: Resolve,
+) -> anyhow::Result<ConnectionFile>
+where
+    Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), shared_sidecar::HealthError>,
+    Resolve: FnMut(&Path, &CancellationToken) -> Result<Resolution, shared_sidecar::SidecarError>,
+{
+    let deadline = Instant::now() + timeout;
+    loop {
+        if cancellation.is_cancelled() {
+            anyhow::bail!("the launched gateway wait was cancelled");
+        }
+        if let Ok(Some(file)) = ConnectionFile::read(run_dir) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let url = format!("http://127.0.0.1:{}", file.port);
+            health(&url, remaining, cancellation)
+                .context("the launched gateway did not answer its health probe")?;
+            if cancellation.is_cancelled() {
+                anyhow::bail!("the launched gateway wait was cancelled");
+            }
+            match resolve(run_dir, cancellation) {
+                Ok(Resolution::Attach(validated)) => {
+                    if cancellation.is_cancelled() {
+                        anyhow::bail!("the launched gateway wait was cancelled");
+                    }
+                    return Ok(validated);
+                }
+                Err(SidecarError::Cancelled) => {
+                    anyhow::bail!("the launched gateway wait was cancelled");
+                }
+                Ok(_) | Err(_) => {}
+            }
+        }
+        if cancellation.is_cancelled() {
+            anyhow::bail!("the launched gateway wait was cancelled");
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "the launched gateway wrote no validated connection file within {timeout:?}"
+            );
+        }
+        if cancellation.wait_timeout(POLL_INTERVAL) {
+            anyhow::bail!("the launched gateway wait was cancelled");
+        }
     }
 }
 
@@ -301,6 +459,19 @@ fn spawn_detached(exe: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn validate_and_publish_with<T>(
+    file: &ConnectionFile,
+    cancellation: &CancellationToken,
+    validate: impl FnOnce(&ConnectionFile, &CancellationToken) -> anyhow::Result<T>,
+    publish: impl FnOnce(&T, &CancellationToken) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let validated = validate(file, cancellation)?;
+    if cancellation.is_cancelled() {
+        anyhow::bail!("gateway publication was cancelled");
+    }
+    publish(&validated, cancellation)
+}
+
 /// Starts runtime supervision only for a connection-file sidecar.
 ///
 /// Explicitly configured LAN endpoints return `None`: their address is fixed,
@@ -319,45 +490,48 @@ pub(crate) fn supervise(
         .map(Path::to_path_buf)
         .context("the executable has no parent directory")?;
     let sibling = sibling_gateway(&exe_dir);
-    let (stop_tx, stop_rx) = mpsc::channel();
-    let thread = std::thread::Builder::new()
-        .name("gateway-supervisor".to_owned())
-        .spawn(move || {
-            run_supervision(
-                initial,
-                |_| match shared_sidecar::resolve(&run_dir) {
-                    Ok(Resolution::Attach(file)) => SupervisionProbe::Replacement(file),
-                    Ok(_) => SupervisionProbe::Missing,
-                    Err(error) => {
-                        eprintln!("could not re-resolve the local gateway: {error}");
-                        SupervisionProbe::Missing
-                    }
-                },
-                || {
-                    let exe = sibling.as_deref().context(
-                        "the local gateway disappeared and no sibling gateway executable is installed",
-                    )?;
-                    launch_and_attach(&run_dir, exe)
-                },
-                |file| {
-                    let validated = ValidatedConnection::validate(file.clone())
-                        .context("validate the replacement gateway identity")?;
-                    updater
-                        .replace_sidecar(&validated)
-                        .context("publish the replacement gateway endpoint")?;
-                    Ok(())
-                },
-                |delay| match stop_rx.recv_timeout(delay) {
-                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => true,
-                    Err(mpsc::RecvTimeoutError::Timeout) => false,
-                },
-            );
-        })
-        .context("spawn the gateway supervisor")?;
-    Ok(Some(GatewaySupervisor {
-        stop: Some(stop_tx),
-        thread: Some(thread),
-    }))
+    GatewaySupervisor::spawn(move |cancellation| {
+        run_supervision(
+            initial,
+            |_, cancellation| match shared_sidecar::resolve_cancellable(&run_dir, cancellation) {
+                Ok(Resolution::Attach(file)) => SupervisionProbe::Replacement(file),
+                Ok(_) | Err(SidecarError::Cancelled) => SupervisionProbe::Missing,
+                Err(error) => {
+                    eprintln!("could not re-resolve the local gateway: {error}");
+                    SupervisionProbe::Missing
+                }
+            },
+            |cancellation| {
+                let exe = sibling.as_deref().context(
+                    "the local gateway disappeared and no sibling gateway executable is installed",
+                )?;
+                launch_and_attach_cancellable(&run_dir, exe, cancellation)
+            },
+            |file, cancellation| {
+                validate_and_publish_with(
+                    file,
+                    cancellation,
+                    |file, cancellation| {
+                        ValidatedConnection::validate_cancellable(file.clone(), cancellation)
+                            .context("validate the replacement gateway identity")
+                    },
+                    |validated, cancellation| {
+                        if updater
+                            .replace_sidecar_cancellable(validated, cancellation)
+                            .context("publish the replacement gateway endpoint")?
+                        {
+                            Ok(())
+                        } else {
+                            anyhow::bail!("gateway publication was cancelled")
+                        }
+                    },
+                )
+            },
+            |delay, cancellation| cancellation.wait_timeout(delay),
+            &cancellation,
+        );
+    })
+    .map(Some)
 }
 
 /// Runs the supervision state machine with I/O injected for deterministic
@@ -368,25 +542,36 @@ fn run_supervision<Probe, Recover, Publish, Wait, Error>(
     mut recover: Recover,
     mut publish: Publish,
     mut wait: Wait,
+    cancellation: &CancellationToken,
 ) where
-    Probe: FnMut(&ConnectionFile) -> SupervisionProbe,
-    Recover: FnMut() -> Result<ConnectionFile, Error>,
-    Publish: FnMut(&ConnectionFile) -> Result<(), Error>,
-    Wait: FnMut(Duration) -> bool,
+    Probe: FnMut(&ConnectionFile, &CancellationToken) -> SupervisionProbe,
+    Recover: FnMut(&CancellationToken) -> Result<ConnectionFile, Error>,
+    Publish: FnMut(&ConnectionFile, &CancellationToken) -> Result<(), Error>,
+    Wait: FnMut(Duration, &CancellationToken) -> bool,
     Error: std::fmt::Display,
 {
     let mut retry_delay = SUPERVISION_BASE_DELAY;
     loop {
-        match probe(&current) {
+        if cancellation.is_cancelled() {
+            return;
+        }
+        let observation = probe(&current, cancellation);
+        if cancellation.is_cancelled() {
+            return;
+        }
+        match observation {
             SupervisionProbe::Replacement(file) if same_gateway_identity(&file, &current) => {
                 retry_delay = SUPERVISION_BASE_DELAY;
-                if wait(SUPERVISION_INTERVAL) {
+                if wait(SUPERVISION_INTERVAL, cancellation) {
                     return;
                 }
                 continue;
             }
-            SupervisionProbe::Replacement(file) => match publish(&file) {
+            SupervisionProbe::Replacement(file) => match publish(&file, cancellation) {
                 Ok(()) => {
+                    if cancellation.is_cancelled() {
+                        return;
+                    }
                     current = file;
                     retry_delay = SUPERVISION_BASE_DELAY;
                     continue;
@@ -395,9 +580,13 @@ fn run_supervision<Probe, Recover, Publish, Wait, Error>(
                     eprintln!("could not publish a replacement local gateway: {error}");
                 }
             },
-            SupervisionProbe::Missing => match recover() {
-                Ok(file) => match publish(&file) {
+            SupervisionProbe::Missing => match recover(cancellation) {
+                Ok(_) if cancellation.is_cancelled() => return,
+                Ok(file) => match publish(&file, cancellation) {
                     Ok(()) => {
+                        if cancellation.is_cancelled() {
+                            return;
+                        }
                         current = file;
                         retry_delay = SUPERVISION_BASE_DELAY;
                         continue;
@@ -411,7 +600,7 @@ fn run_supervision<Probe, Recover, Publish, Wait, Error>(
                 }
             },
         }
-        if wait(retry_delay) {
+        if cancellation.is_cancelled() || wait(retry_delay, cancellation) {
             return;
         }
         retry_delay = retry_delay.saturating_mul(2).min(SUPERVISION_MAX_DELAY);
@@ -430,7 +619,8 @@ mod tests {
     use std::io::{Read, Write as _};
     use std::net::{TcpListener, TcpStream};
     use std::process::{Child, Command, Stdio};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
 
     /// The test process's own image name, so the probe's pid and image
     /// checks pass and the test reaches the liveness probes.
@@ -892,29 +1082,30 @@ mod tests {
         let elapsed = Cell::new(Duration::ZERO);
         let recoveries = Cell::new(0_u8);
         let published = RefCell::new(Vec::new());
+        let cancellation = CancellationToken::new();
 
         run_supervision(
             original.clone(),
-            |current| {
+            |current, _| {
                 if !published.borrow().is_empty() || elapsed.get() <= Duration::from_secs(65) {
                     SupervisionProbe::Replacement(current.clone())
                 } else {
                     SupervisionProbe::Missing
                 }
             },
-            || {
+            |_| {
                 recoveries.set(recoveries.get() + 1);
                 if recoveries.get() < 3 {
                     anyhow::bail!("injected launch failure");
                 }
                 Ok(replacement.clone())
             },
-            |file| {
+            |file, _| {
                 publish_replacement(file)?;
                 published.borrow_mut().push(file.clone());
                 Ok::<(), anyhow::Error>(())
             },
-            |delay| {
+            |delay, _| {
                 assert!(
                     delay <= SUPERVISION_MAX_DELAY,
                     "every supervision wait is capped: {delay:?}"
@@ -922,6 +1113,7 @@ mod tests {
                 elapsed.set(elapsed.get() + delay);
                 !published.borrow().is_empty()
             },
+            &cancellation,
         );
 
         assert!(
@@ -964,24 +1156,26 @@ mod tests {
             ..original.clone()
         };
         let published = RefCell::new(Vec::new());
+        let cancellation = CancellationToken::new();
 
         run_supervision(
             original.clone(),
-            |current| {
+            |current, _| {
                 if published.borrow().is_empty() {
                     SupervisionProbe::Replacement(replacement.clone())
                 } else {
                     SupervisionProbe::Replacement(current.clone())
                 }
             },
-            || -> anyhow::Result<ConnectionFile> {
+            |_| -> anyhow::Result<ConnectionFile> {
                 panic!("a validated replacement does not need a relaunch")
             },
-            |file| {
+            |file, _| {
                 published.borrow_mut().push(file.clone());
                 Ok(())
             },
-            |_| !published.borrow().is_empty(),
+            |_, _| !published.borrow().is_empty(),
+            &cancellation,
         );
 
         assert_eq!(
@@ -1014,5 +1208,302 @@ mod tests {
         assert!(!same_gateway_identity(&original, &new_pid));
         assert!(!same_gateway_identity(&original, &new_boot));
         assert!(same_gateway_identity(&original, &endpoint_only));
+    }
+
+    fn assert_bounded_supervisor_shutdown(supervisor: GatewaySupervisor, finished: &AtomicBool) {
+        let started = Instant::now();
+        supervisor.shutdown();
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "Workshop exit joins the cancelled supervisor within its budget"
+        );
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "shutdown returns only after the supervisor thread exits"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_in_resolve_before_recovery() {
+        let (entered, blocked) = mpsc::channel();
+        let recoveries = Arc::new(AtomicUsize::new(0));
+        let worker_recoveries = Arc::clone(&recoveries);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            run_supervision(
+                live_file(54_375, "stable-key"),
+                |_, cancellation| {
+                    entered.send(()).expect("announce blocked resolve");
+                    let _ = cancellation.wait_timeout(Duration::from_secs(30));
+                    SupervisionProbe::Missing
+                },
+                |_| {
+                    worker_recoveries.fetch_add(1, Ordering::SeqCst);
+                    anyhow::bail!("recovery must not start after cancellation")
+                },
+                |_, _| Ok::<(), anyhow::Error>(()),
+                |delay, cancellation| cancellation.wait_timeout(delay),
+                &cancellation,
+            );
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the resolve phase blocks deterministically");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            recoveries.load(Ordering::SeqCst),
+            0,
+            "cancellation prevents every later recovery launch"
+        );
+    }
+
+    #[test]
+    fn exit_wakes_the_supervision_wait_without_a_later_probe() {
+        let (entered, blocked) = mpsc::channel();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let worker_probes = Arc::clone(&probes);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            run_supervision(
+                live_file(54_375, "stable-key"),
+                |current, _| {
+                    worker_probes.fetch_add(1, Ordering::SeqCst);
+                    SupervisionProbe::Replacement(current.clone())
+                },
+                |_| -> anyhow::Result<ConnectionFile> {
+                    panic!("a healthy Gateway does not recover")
+                },
+                |_, _| Ok::<(), anyhow::Error>(()),
+                |delay, cancellation| {
+                    entered.send(()).expect("announce supervision wait");
+                    cancellation.wait_timeout(delay)
+                },
+                &cancellation,
+            );
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the supervision wait blocks deterministically");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "cancellation prevents every later liveness probe"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_in_validation_before_publication() {
+        let (entered, blocked) = mpsc::channel();
+        let publications = Arc::new(AtomicUsize::new(0));
+        let worker_publications = Arc::clone(&publications);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            let result = validate_and_publish_with(
+                &live_file(54_375, "stable-key"),
+                &cancellation,
+                |_, cancellation| -> anyhow::Result<()> {
+                    entered.send(()).expect("announce blocked validation");
+                    let _ = cancellation.wait_timeout(Duration::from_secs(30));
+                    anyhow::bail!("validation cancelled")
+                },
+                |(), _| {
+                    worker_publications.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
+            assert!(result.is_err(), "the cancelled validation is rejected");
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the validation phase blocks deterministically");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            publications.load(Ordering::SeqCst),
+            0,
+            "cancelled validation cannot publish into the snapshot"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_in_health_wait_before_resolve() {
+        let run = tempfile::TempDir::new().expect("tempdir");
+        live_file(54_375, "stable-key")
+            .write_to(run.path())
+            .expect("write candidate");
+        let run_dir = run.path().to_owned();
+        let (entered, blocked) = mpsc::channel();
+        let resolves = Arc::new(AtomicUsize::new(0));
+        let worker_resolves = Arc::clone(&resolves);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            let result = wait_for_launched_file_cancellable_with(
+                &run_dir,
+                Duration::from_secs(30),
+                &cancellation,
+                |_, _, cancellation| {
+                    entered.send(()).expect("announce blocked health wait");
+                    let _ = cancellation.wait_timeout(Duration::from_secs(30));
+                    Err(shared_sidecar::HealthError::Cancelled)
+                },
+                |_, _| {
+                    worker_resolves.fetch_add(1, Ordering::SeqCst);
+                    Ok(Resolution::Absent)
+                },
+            );
+            assert!(result.is_err(), "the cancelled health wait is rejected");
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the health-wait phase blocks deterministically");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            resolves.load(Ordering::SeqCst),
+            0,
+            "cancelled health waiting cannot start a later resolve"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_in_launch_race_before_spawn() {
+        let run = tempfile::TempDir::new().expect("tempdir");
+        let decision = shared_sidecar::launch_or_attach(run.path(), Duration::from_secs(1))
+            .expect("acquire a launch decision");
+        let run_dir = run.path().to_owned();
+        let (entered, blocked) = mpsc::channel();
+        let launches = Arc::new(AtomicUsize::new(0));
+        let worker_launches = Arc::clone(&launches);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            let mut decision = Some(decision);
+            let result = launch_and_attach_cancellable_with(
+                &run_dir,
+                Path::new("unused-gateway"),
+                &cancellation,
+                |_, _, cancellation| {
+                    entered.send(()).expect("announce blocked launch race");
+                    let _ = cancellation.wait_timeout(Duration::from_secs(30));
+                    Ok(decision.take().expect("one launch decision"))
+                },
+                |_, _| {
+                    worker_launches.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                |_, _, _| anyhow::bail!("the cancelled launch cannot wait for health"),
+            );
+            assert!(result.is_err(), "the cancelled launch race is rejected");
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the launch race blocks deterministically");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            launches.load(Ordering::SeqCst),
+            0,
+            "cancelled launch racing cannot create a process"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_inside_launch_without_process_creation() {
+        let run = tempfile::TempDir::new().expect("tempdir");
+        let decision = shared_sidecar::launch_or_attach(run.path(), Duration::from_secs(1))
+            .expect("acquire a launch decision");
+        let run_dir = run.path().to_owned();
+        let (entered, blocked) = mpsc::channel();
+        let launches = Arc::new(AtomicUsize::new(0));
+        let worker_launches = Arc::clone(&launches);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            let mut decision = Some(decision);
+            let result = launch_and_attach_cancellable_with(
+                &run_dir,
+                Path::new("unused-gateway"),
+                &cancellation,
+                |_, _, _| Ok(decision.take().expect("one launch decision")),
+                |_, cancellation| {
+                    entered.send(()).expect("announce blocked launch");
+                    if cancellation.wait_timeout(Duration::from_secs(30)) {
+                        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                    }
+                    worker_launches.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+                |_, _, _| anyhow::bail!("the cancelled launch cannot wait for health"),
+            );
+            assert!(result.is_err(), "the cancelled launch is rejected");
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the process launch blocks deterministically inside its effect gate");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            launches.load(Ordering::SeqCst),
+            0,
+            "the cancelled launch has no post-cancel effect"
+        );
+    }
+
+    #[test]
+    fn exit_joins_a_supervisor_blocked_inside_publication_without_replacement() {
+        let (entered, blocked) = mpsc::channel();
+        let publications = Arc::new(AtomicUsize::new(0));
+        let worker_publications = Arc::clone(&publications);
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = Arc::clone(&finished);
+        let supervisor = GatewaySupervisor::spawn(move |cancellation| {
+            let result = validate_and_publish_with(
+                &live_file(54_375, "stable-key"),
+                &cancellation,
+                |_, _| Ok(()),
+                |(), cancellation| {
+                    run_effect_if_active(cancellation, "gateway publication", |cancellation| {
+                        entered.send(()).expect("announce blocked publication");
+                        if cancellation.wait_timeout(Duration::from_secs(30)) {
+                            anyhow::bail!("gateway publication was cancelled");
+                        }
+                        worker_publications.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                },
+            );
+            assert!(result.is_err(), "the cancelled publication is rejected");
+            worker_finished.store(true, Ordering::SeqCst);
+        })
+        .expect("spawn test supervisor");
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("snapshot publication blocks deterministically inside its effect gate");
+
+        assert_bounded_supervisor_shutdown(supervisor, &finished);
+        assert_eq!(
+            publications.load(Ordering::SeqCst),
+            0,
+            "cancellation prevents authoritative snapshot replacement"
+        );
     }
 }

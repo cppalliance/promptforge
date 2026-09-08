@@ -6,10 +6,10 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::ConnectionFile;
 use crate::health::{self, ConnectionProbe};
 use crate::stale::StaleReason;
 use crate::sys::{ProcessIdentity, process_identity};
+use crate::{CancellationToken, ConnectionFile};
 
 /// The image file name a live Gateway process must have.
 #[cfg(windows)]
@@ -23,6 +23,18 @@ const KEY_PROBE_PATH: &str = "/v1/models";
 
 /// Budget for proving health without condemning one transient failure.
 const LIVENESS_BUDGET: Duration = Duration::from_secs(2);
+
+/// A cancellable validation failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ValidationError {
+    /// The caller cancelled validation.
+    #[error("connection validation was cancelled")]
+    Cancelled,
+    /// The connection failed one of the liveness or authority checks.
+    #[error(transparent)]
+    Stale(#[from] StaleReason),
+}
 
 /// A Gateway connection proven live and authorized at construction time.
 ///
@@ -95,6 +107,18 @@ impl ValidatedConnection {
         Self::validate_named(connection, GATEWAY_IMAGE_NAME)
     }
 
+    /// Validates a raw connection while observing caller cancellation.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError::Cancelled`] when cancellation wins, or
+    /// [`ValidationError::Stale`] when a liveness or authority check fails.
+    pub fn validate_cancellable(
+        connection: ConnectionFile,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, ValidationError> {
+        Self::validate_named_cancellable(connection, GATEWAY_IMAGE_NAME, cancellation)
+    }
+
     pub(crate) fn validate_named(
         connection: ConnectionFile,
         image_name: &str,
@@ -105,6 +129,28 @@ impl ValidatedConnection {
             process_identity,
             |address, bearer, budget| {
                 health::probe_connection(address, KEY_PROBE_PATH, bearer, budget)
+            },
+        )
+    }
+
+    pub(crate) fn validate_named_cancellable(
+        connection: ConnectionFile,
+        image_name: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, ValidationError> {
+        validate_cancellable_with(
+            connection,
+            image_name,
+            cancellation,
+            process_identity,
+            |address, bearer, budget, cancellation| {
+                health::probe_connection_cancellable(
+                    address,
+                    KEY_PROBE_PATH,
+                    bearer,
+                    budget,
+                    cancellation,
+                )
             },
         )
     }
@@ -204,7 +250,9 @@ fn validate_with(
     }
     let address = format!("127.0.0.1:{}", connection.port);
     match prove_connection(&address, &connection.api_key, LIVENESS_BUDGET) {
-        ConnectionProbe::HealthFailed => return Err(StaleReason::HealthFailed),
+        ConnectionProbe::Cancelled | ConnectionProbe::HealthFailed => {
+            return Err(StaleReason::HealthFailed);
+        }
         ConnectionProbe::KeyRejected => return Err(StaleReason::KeyRejected),
         ConnectionProbe::Accepted => {}
     }
@@ -213,6 +261,65 @@ fn validate_with(
     };
     if before != after {
         return Err(StaleReason::ProcessChanged);
+    }
+    Ok(ValidatedConnection {
+        connection,
+        process_identity: before,
+    })
+}
+
+fn validate_cancellable_with(
+    connection: ConnectionFile,
+    image_name: &str,
+    cancellation: &CancellationToken,
+    mut observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
+    prove_connection: impl FnOnce(&str, &str, Duration, &CancellationToken) -> ConnectionProbe,
+) -> Result<ValidatedConnection, ValidationError> {
+    if cancellation.is_cancelled() {
+        return Err(ValidationError::Cancelled);
+    }
+    if connection.validation_error().is_some() {
+        return Err(StaleReason::Invalid.into());
+    }
+    let Some(before_observation) = cancellation.run_if_active(|| observe_process(connection.pid))
+    else {
+        return Err(ValidationError::Cancelled);
+    };
+    let Some(before) = before_observation else {
+        return Err(StaleReason::ProcessDead.into());
+    };
+    if cancellation.is_cancelled() {
+        return Err(ValidationError::Cancelled);
+    }
+    if !image_name_matches(&before.image, image_name) {
+        return Err(StaleReason::ImageMismatch.into());
+    }
+    if !connection.has_boot_identity() {
+        return Err(StaleReason::BootIdentityInvalid.into());
+    }
+    let address = format!("127.0.0.1:{}", connection.port);
+    let proof = prove_connection(&address, &connection.api_key, LIVENESS_BUDGET, cancellation);
+    if cancellation.is_cancelled() || proof == ConnectionProbe::Cancelled {
+        return Err(ValidationError::Cancelled);
+    }
+    match proof {
+        ConnectionProbe::HealthFailed => return Err(StaleReason::HealthFailed.into()),
+        ConnectionProbe::KeyRejected => return Err(StaleReason::KeyRejected.into()),
+        ConnectionProbe::Accepted => {}
+        ConnectionProbe::Cancelled => return Err(ValidationError::Cancelled),
+    }
+    let Some(after_observation) = cancellation.run_if_active(|| observe_process(connection.pid))
+    else {
+        return Err(ValidationError::Cancelled);
+    };
+    let Some(after) = after_observation else {
+        return Err(StaleReason::ProcessChanged.into());
+    };
+    if cancellation.is_cancelled() {
+        return Err(ValidationError::Cancelled);
+    }
+    if before != after {
+        return Err(StaleReason::ProcessChanged.into());
     }
     Ok(ValidatedConnection {
         connection,
@@ -243,6 +350,8 @@ mod tests {
 
     use std::io::{Read, Write as _};
     use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
 
     use crate::ConnectionFile;
 
@@ -437,6 +546,95 @@ mod tests {
             ),
             Err(StaleReason::ProcessChanged),
             "a reused pid cannot complete a mixed proof"
+        );
+    }
+
+    #[test]
+    fn cancellation_inside_the_first_identity_probe_prevents_observation() {
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let image_name = own_image_name();
+        let identity = ProcessIdentity::for_test(std::path::PathBuf::from(&image_name), 41);
+        let observations = Arc::new(AtomicUsize::new(0));
+        let worker_observations = Arc::clone(&observations);
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            validate_cancellable_with(
+                connection(8081, "key"),
+                &image_name,
+                &worker_cancellation,
+                |_| {
+                    entered.send(()).expect("announce identity probe");
+                    if !worker_cancellation.wait_timeout(Duration::from_secs(30)) {
+                        worker_observations.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Some(identity.clone())
+                },
+                |_, _, _, _| ConnectionProbe::Accepted,
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the first process identity probe blocks deterministically");
+
+        let started = std::time::Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the validation worker joins");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "cancellation wakes the in-progress process identity probe"
+        );
+        assert!(matches!(result, Err(ValidationError::Cancelled)));
+        assert_eq!(
+            observations.load(Ordering::SeqCst),
+            0,
+            "no process observation occurs after cancellation"
+        );
+    }
+
+    #[test]
+    fn cancellation_during_validation_prevents_the_second_identity_observation() {
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let image_name = own_image_name();
+        let identity = ProcessIdentity::for_test(std::path::PathBuf::from(&image_name), 41);
+        let observations = Arc::new(AtomicUsize::new(0));
+        let worker_observations = Arc::clone(&observations);
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            validate_cancellable_with(
+                connection(8081, "key"),
+                &image_name,
+                &worker_cancellation,
+                |_| {
+                    worker_observations.fetch_add(1, Ordering::SeqCst);
+                    Some(identity.clone())
+                },
+                |_, _, _, cancellation| {
+                    entered.send(()).expect("announce blocked validation");
+                    let _ = cancellation.wait_timeout(Duration::from_secs(30));
+                    ConnectionProbe::Accepted
+                },
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the validation phase blocks deterministically");
+
+        let started = std::time::Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the validation worker joins");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "cancellation bounds the blocked validation"
+        );
+        assert!(matches!(result, Err(ValidationError::Cancelled)));
+        assert_eq!(
+            observations.load(Ordering::SeqCst),
+            1,
+            "validation performs no post-cancel process probe"
         );
     }
 

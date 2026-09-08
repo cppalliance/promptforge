@@ -6,6 +6,7 @@
 //! atomic store, then notifies long-lived tasks to reconnect. Explicitly
 //! configured endpoints never receive an updater from the desktop shell.
 
+mod publication;
 mod shutdown;
 
 use std::fmt;
@@ -166,15 +167,20 @@ impl GatewayBinding {
         api_key: &str,
         identity: Option<shared_sidecar::ValidatedConnection>,
     ) -> Result<(), GatewayError> {
+        let snapshot = build_snapshot(base_url, api_key, 0, identity)?;
         let _replacement = self
             .replacement
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
-        let snapshot = Arc::new(build_snapshot(base_url, api_key, generation, identity)?);
-        self.current.store(snapshot);
-        self.changed.send_replace(generation);
+        self.publish_snapshot(snapshot);
         Ok(())
+    }
+
+    fn publish_snapshot(&self, mut snapshot: GatewaySnapshot) {
+        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+        snapshot.generation = generation;
+        self.current.store(Arc::new(snapshot));
+        self.changed.send_replace(generation);
     }
 
     /// Creates the restricted handle the desktop host uses for sidecar updates.

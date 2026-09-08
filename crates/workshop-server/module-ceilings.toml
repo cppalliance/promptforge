@@ -73,6 +73,8 @@
 # New module: one atomically replaceable Gateway URL and bearer generation
 # shared by HTTP, Realtime, progress, heartbeat, and agent model clients.
 "gateway_binding.rs" = 267
+# Cancellable replacement lock acquisition and validated snapshot publication.
+"gateway_binding/publication.rs" = 85
 # Current validated-snapshot shutdown authority for the embedding host.
 "gateway_binding/shutdown.rs" = 24
 # Capability-only publication and coherent immutable snapshot coverage.
@@ -80,6 +82,8 @@
 # Deterministically synchronized publisher and reader coverage for complete
 # immutable Gateway generations.
 "gateway_binding/tests/atomic.rs" = 80
+# Real publication-lock contention and cancellation coverage.
+"gateway_binding/tests/publication.rs" = 59
 # Replacement-versus-quit coherence and configured-LAN denial coverage.
 "gateway_binding/tests/shutdown.rs" = 77
 # Split from gateway.rs: fixed-target authenticated WebSocket connections

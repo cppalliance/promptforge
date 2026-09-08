@@ -520,7 +520,7 @@ isProject: false
 - Exclusions: no shutdown of configured LAN Gateways, no second identity cache, no credential rotation, and no menu redesign.
 - Focused verification: from the repository root run `cargo test -p workshop-server` and `cargo test -p workshop`.
 
-### Step 27: Join cancellation-aware sidecar shutdown
+### Step 27: Join cancellation-aware sidecar shutdown [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; make resolve, validation, wait, launch, supervision, and publication cancellation-aware and finitely joined.
 - Dependency: depends on Steps 25 and 26 because cancellation must prevent publication into the authoritative snapshot and quit must target that same snapshot.

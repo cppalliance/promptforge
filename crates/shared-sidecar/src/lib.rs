@@ -31,6 +31,7 @@
 //! loopback `Host` allowlist.
 
 mod atomic;
+mod cancellation;
 mod error;
 mod file;
 mod health;
@@ -41,17 +42,19 @@ mod stale;
 mod sys;
 mod validated;
 
+pub use crate::cancellation::CancellationToken;
 pub use crate::error::SidecarError;
 pub use crate::file::{ConnectionFile, remove_if_mine};
-pub use crate::health::{HealthError, ProbeError, wait_for_health};
-pub use crate::lock::{LaunchDecision, LaunchLock, launch_or_attach};
+pub use crate::health::{HealthError, ProbeError, wait_for_health, wait_for_health_cancellable};
+pub use crate::lock::{LaunchDecision, LaunchLock, launch_or_attach, launch_or_attach_cancellable};
 pub use crate::paths::{
     CONNECTION_FILE_NAME, LOCK_FILE_NAME, connection_file_path, default_run_dir, lock_file_path,
     run_dir,
 };
 pub use crate::shutdown::{ShutdownError, request_shutdown};
+pub use crate::stale::resolve_cancellable;
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]
 pub use crate::stale::resolve_for_test;
 pub use crate::stale::{Resolution, StaleReason, is_running, resolve};
-pub use crate::validated::ValidatedConnection;
+pub use crate::validated::{ValidatedConnection, ValidationError};

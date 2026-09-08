@@ -1,6 +1,7 @@
 use super::*;
 
 mod atomic;
+mod publication;
 mod shutdown;
 
 fn validated_connection(

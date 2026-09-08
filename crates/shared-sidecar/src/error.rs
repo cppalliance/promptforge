@@ -10,6 +10,10 @@ use std::time::Duration;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SidecarError {
+    /// The caller cancelled the sidecar operation.
+    #[error("the sidecar operation was cancelled")]
+    Cancelled,
+
     /// The run directory could not be created.
     #[error("create the run directory {path}")]
     CreateDir {

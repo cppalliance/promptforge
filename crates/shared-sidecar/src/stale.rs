@@ -11,11 +11,11 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::ConnectionFile;
 use crate::error::SidecarError;
 use crate::paths::connection_file_path;
 pub(crate) use crate::validated::GATEWAY_IMAGE_NAME;
-use crate::validated::ValidatedConnection;
+use crate::validated::{ValidatedConnection, ValidationError};
+use crate::{CancellationToken, ConnectionFile};
 
 /// What [`resolve`] found in the run directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +68,20 @@ pub fn resolve(run_dir: &Path) -> Result<Resolution, SidecarError> {
     resolve_named(run_dir, GATEWAY_IMAGE_NAME)
 }
 
+/// Resolves the connection file while observing caller cancellation.
+///
+/// Cancellation never classifies or deletes the current file.
+///
+/// # Errors
+/// Returns [`SidecarError::Cancelled`] when cancellation wins, plus the
+/// read and remove failures documented by [`resolve`].
+pub fn resolve_cancellable(
+    run_dir: &Path,
+    cancellation: &CancellationToken,
+) -> Result<Resolution, SidecarError> {
+    resolve_named_cancellable(run_dir, GATEWAY_IMAGE_NAME, cancellation)
+}
+
 /// [`resolve`] against a caller-named process image, so a consumer's test
 /// binary - never named `promptforge-gateway` - can run the full liveness
 /// gauntlet. Test builds only, behind the `test-fixtures` feature.
@@ -99,6 +113,86 @@ pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resoluti
     }
 }
 
+pub(crate) fn resolve_named_cancellable(
+    run_dir: &Path,
+    image_name: &str,
+    cancellation: &CancellationToken,
+) -> Result<Resolution, SidecarError> {
+    resolve_named_cancellable_with(
+        run_dir,
+        image_name,
+        cancellation,
+        ValidatedConnection::validate_named_cancellable,
+    )
+}
+
+fn resolve_named_cancellable_with(
+    run_dir: &Path,
+    image_name: &str,
+    cancellation: &CancellationToken,
+    validate: impl FnOnce(
+        ConnectionFile,
+        &str,
+        &CancellationToken,
+    ) -> Result<ValidatedConnection, ValidationError>,
+) -> Result<Resolution, SidecarError> {
+    resolve_named_cancellable_with_effects(
+        run_dir,
+        image_name,
+        cancellation,
+        validate,
+        || {},
+        remove_stale,
+    )
+}
+
+fn resolve_named_cancellable_with_effects(
+    run_dir: &Path,
+    image_name: &str,
+    cancellation: &CancellationToken,
+    validate: impl FnOnce(
+        ConnectionFile,
+        &str,
+        &CancellationToken,
+    ) -> Result<ValidatedConnection, ValidationError>,
+    mut before_remove: impl FnMut(),
+    mut remove: impl FnMut(&Path) -> Result<(), SidecarError>,
+) -> Result<Resolution, SidecarError> {
+    if cancellation.is_cancelled() {
+        return Err(SidecarError::Cancelled);
+    }
+    let file = match ConnectionFile::read(run_dir) {
+        Ok(Some(file)) => file,
+        Ok(None) if cancellation.is_cancelled() => return Err(SidecarError::Cancelled),
+        Ok(None) => return Ok(Resolution::Absent),
+        Err(SidecarError::Parse { .. } | SidecarError::Invalid { .. }) => {
+            before_remove();
+            remove_stale_if_active(run_dir, cancellation, &mut remove)?;
+            return Ok(Resolution::Stale(StaleReason::Invalid));
+        }
+        Err(error) => return Err(error),
+    };
+    match validate(file, image_name, cancellation) {
+        Ok(validated) => Ok(Resolution::Attach(validated.into_connection_file())),
+        Err(ValidationError::Cancelled) => Err(SidecarError::Cancelled),
+        Err(ValidationError::Stale(reason)) => {
+            before_remove();
+            remove_stale_if_active(run_dir, cancellation, &mut remove)?;
+            Ok(Resolution::Stale(reason))
+        }
+    }
+}
+
+fn remove_stale_if_active(
+    run_dir: &Path,
+    cancellation: &CancellationToken,
+    remove: &mut impl FnMut(&Path) -> Result<(), SidecarError>,
+) -> Result<(), SidecarError> {
+    cancellation
+        .run_if_active(|| remove(run_dir))
+        .unwrap_or(Err(SidecarError::Cancelled))
+}
+
 /// Whether the connection file in `run_dir` names a live gateway right
 /// now, with no cleanup: the read-only check a diagnostics report runs.
 /// Stale-file deletion is the prospective owner's privilege, so a stale
@@ -126,6 +220,18 @@ pub(crate) fn is_live(file: &ConnectionFile, image_name: &str) -> bool {
     ValidatedConnection::validate_named(file.clone(), image_name).is_ok()
 }
 
+pub(crate) fn is_live_cancellable(
+    file: &ConnectionFile,
+    image_name: &str,
+    cancellation: &CancellationToken,
+) -> Result<bool, SidecarError> {
+    match ValidatedConnection::validate_named_cancellable(file.clone(), image_name, cancellation) {
+        Ok(_) => Ok(true),
+        Err(ValidationError::Stale(_)) => Ok(false),
+        Err(ValidationError::Cancelled) => Err(SidecarError::Cancelled),
+    }
+}
+
 /// Deletes the stale connection file, tolerating a concurrent deletion.
 fn remove_stale(run_dir: &Path) -> Result<(), SidecarError> {
     let path = connection_file_path(run_dir);
@@ -145,6 +251,7 @@ mod tests {
 
     use std::io::{Read, Write as _};
     use std::net::TcpListener;
+    use std::sync::mpsc;
 
     use crate::paths::connection_file_path;
 
@@ -334,6 +441,142 @@ mod tests {
         assert!(
             connection_file_path(dir.path()).exists(),
             "a live file is left in place"
+        );
+    }
+
+    #[test]
+    fn cancellation_during_resolve_leaves_the_connection_file_untouched() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        live_file(1, "key").write_to(dir.path()).expect("write");
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let run_dir = dir.path().to_owned();
+        let image_name = own_image_name();
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            resolve_named_cancellable_with(
+                &run_dir,
+                &image_name,
+                &worker_cancellation,
+                |_, _, cancellation| {
+                    entered.send(()).expect("announce blocked resolve");
+                    let _ = cancellation.wait_timeout(std::time::Duration::from_secs(30));
+                    Err(crate::ValidationError::Cancelled)
+                },
+            )
+        });
+        blocked
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("the resolve phase blocks deterministically");
+
+        let started = std::time::Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the resolve worker joins");
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(250),
+            "cancellation bounds the blocked resolve"
+        );
+        assert!(matches!(result, Err(SidecarError::Cancelled)));
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "cancellation never classifies or deletes the connection file"
+        );
+    }
+
+    #[test]
+    fn cancellation_immediately_before_invalid_file_removal_preserves_the_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        fs::write(connection_file_path(dir.path()), b"not json").expect("write invalid fixture");
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let run_dir = dir.path().to_owned();
+        let (entered, blocked) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let removals = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker_removals = std::sync::Arc::clone(&removals);
+        let worker = std::thread::spawn(move || {
+            resolve_named_cancellable_with_effects(
+                &run_dir,
+                "unused",
+                &worker_cancellation,
+                |_, _, _| -> Result<ValidatedConnection, ValidationError> {
+                    panic!("an invalid file never reaches validation")
+                },
+                || {
+                    entered.send(()).expect("announce invalid-file removal");
+                    released.recv().expect("release invalid-file removal");
+                },
+                |run_dir| {
+                    worker_removals.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    remove_stale(run_dir)
+                },
+            )
+        });
+        blocked
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("resolution pauses immediately before invalid-file removal");
+
+        cancellation.cancel();
+        release.send(()).expect("release invalid-file removal");
+        let result = worker.join().expect("resolve worker joins");
+
+        assert!(matches!(result, Err(SidecarError::Cancelled)));
+        assert_eq!(
+            removals.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "invalid-file cleanup cannot begin after cancellation returns"
+        );
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "the cancelled invalid file remains untouched"
+        );
+    }
+
+    #[test]
+    fn cancellation_immediately_before_failed_validation_removal_preserves_the_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        live_file(1, "key").write_to(dir.path()).expect("write");
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let run_dir = dir.path().to_owned();
+        let (entered, blocked) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let removals = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker_removals = std::sync::Arc::clone(&removals);
+        let worker = std::thread::spawn(move || {
+            resolve_named_cancellable_with_effects(
+                &run_dir,
+                "unused",
+                &worker_cancellation,
+                |_, _, _| Err(ValidationError::Stale(StaleReason::HealthFailed)),
+                || {
+                    entered.send(()).expect("announce stale-file removal");
+                    released.recv().expect("release stale-file removal");
+                },
+                |run_dir| {
+                    worker_removals.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    remove_stale(run_dir)
+                },
+            )
+        });
+        blocked
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("resolution pauses immediately before stale-file removal");
+
+        cancellation.cancel();
+        release.send(()).expect("release stale-file removal");
+        let result = worker.join().expect("resolve worker joins");
+
+        assert!(matches!(result, Err(SidecarError::Cancelled)));
+        assert_eq!(
+            removals.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "failed-validation cleanup cannot begin after cancellation returns"
+        );
+        assert!(
+            connection_file_path(dir.path()).exists(),
+            "the cancelled stale file remains untouched"
         );
     }
 

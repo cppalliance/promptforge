@@ -8,8 +8,10 @@
 //! allowlist.
 
 use std::io::{Read, Write as _};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
+
+use crate::CancellationToken;
 
 /// Delay between probes while the server comes up.
 const RETRY_INTERVAL: Duration = Duration::from_millis(25);
@@ -17,13 +19,22 @@ const RETRY_INTERVAL: Duration = Duration::from_millis(25);
 /// Per-attempt connect and read timeout, so one hung attempt cannot eat
 /// the whole budget.
 const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Per-attempt I/O budget while a supervisor may be cancelled.
+const CANCELLABLE_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(100);
 /// Maximum accepted response head for the two-request validation proof.
 const RESPONSE_HEAD_LIMIT: usize = 16 * 1024;
+/// Maximum body drained between the health and bearer responses.
+const RESPONSE_BODY_LIMIT: usize = 64 * 1024;
 
 /// A failure of [`wait_for_health`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HealthError {
+    /// The caller cancelled the health wait.
+    #[error("the health wait was cancelled")]
+    Cancelled,
+
     /// The URL is not an `http://` URL.
     #[error("health probe needs an http:// URL, got {url}")]
     NotHttp {
@@ -83,6 +94,8 @@ pub(crate) enum KeyProbe {
 pub(crate) enum ConnectionProbe {
     /// Health answered and the bearer was accepted.
     Accepted,
+    /// The caller cancelled validation.
+    Cancelled,
     /// Health failed, including a bearer probe that became unreachable.
     HealthFailed,
     /// Health answered but the bearer was rejected.
@@ -98,16 +111,81 @@ pub(crate) fn probe_connection(
     bearer: &str,
     health_budget: Duration,
 ) -> ConnectionProbe {
+    probe_connection_with(
+        address,
+        bearer_path,
+        bearer,
+        health_budget,
+        &CancellationToken::new(),
+        ATTEMPT_TIMEOUT,
+    )
+}
+
+/// Proves one connection while observing supervisor cancellation.
+pub(crate) fn probe_connection_cancellable(
+    address: &str,
+    bearer_path: &str,
+    bearer: &str,
+    health_budget: Duration,
+    cancellation: &CancellationToken,
+) -> ConnectionProbe {
+    probe_connection_with(
+        address,
+        bearer_path,
+        bearer,
+        health_budget,
+        cancellation,
+        CANCELLABLE_ATTEMPT_TIMEOUT,
+    )
+}
+
+fn probe_connection_with(
+    address: &str,
+    bearer_path: &str,
+    bearer: &str,
+    health_budget: Duration,
+    cancellation: &CancellationToken,
+    attempt_timeout: Duration,
+) -> ConnectionProbe {
+    probe_connection_with_probe(
+        address,
+        bearer_path,
+        bearer,
+        health_budget,
+        cancellation,
+        attempt_timeout,
+        probe_connection_once,
+    )
+}
+
+fn probe_connection_with_probe(
+    address: &str,
+    bearer_path: &str,
+    bearer: &str,
+    health_budget: Duration,
+    cancellation: &CancellationToken,
+    attempt_timeout: Duration,
+    mut probe: impl FnMut(&str, &str, &str, Instant) -> ConnectionAttempt,
+) -> ConnectionProbe {
     let deadline = Instant::now() + health_budget;
     loop {
-        match probe_connection_once(address, bearer_path, bearer) {
+        let attempt_deadline = (Instant::now() + attempt_timeout).min(deadline);
+        let Some(attempt) =
+            cancellation.run_if_active(|| probe(address, bearer_path, bearer, attempt_deadline))
+        else {
+            return ConnectionProbe::Cancelled;
+        };
+        match attempt {
             ConnectionAttempt::Accepted => return ConnectionProbe::Accepted,
             ConnectionAttempt::KeyRejected => return ConnectionProbe::KeyRejected,
             ConnectionAttempt::ProofInterrupted => return ConnectionProbe::HealthFailed,
             ConnectionAttempt::HealthFailed if Instant::now() >= deadline => {
                 return ConnectionProbe::HealthFailed;
             }
-            ConnectionAttempt::HealthFailed => std::thread::sleep(RETRY_INTERVAL),
+            ConnectionAttempt::HealthFailed if cancellation.wait_timeout(RETRY_INTERVAL) => {
+                return ConnectionProbe::Cancelled;
+            }
+            ConnectionAttempt::HealthFailed => {}
         }
     }
 }
@@ -124,26 +202,40 @@ enum ConnectionAttempt {
 /// Checks health and bearer acceptance over one socket. Once health has
 /// succeeded, any socket loss fails the proof instead of reconnecting to a
 /// potentially different endpoint.
-fn probe_connection_once(address: &str, bearer_path: &str, bearer: &str) -> ConnectionAttempt {
-    let Ok(mut stream) = TcpStream::connect(address) else {
+fn probe_connection_once(
+    address: &str,
+    bearer_path: &str,
+    bearer: &str,
+    deadline: Instant,
+) -> ConnectionAttempt {
+    let Ok(socket) = address.parse::<SocketAddr>() else {
         return ConnectionAttempt::HealthFailed;
     };
-    if configure_stream(&stream).is_err() {
+    let Ok(mut stream) = connect_until(&socket, deadline) else {
+        return ConnectionAttempt::HealthFailed;
+    };
+    if write_request(&mut stream, address, "/health", None, false, deadline).is_err() {
         return ConnectionAttempt::HealthFailed;
     }
-    if write_request(&mut stream, address, "/health", None, false).is_err() {
-        return ConnectionAttempt::HealthFailed;
-    }
-    let Ok(health_head) = read_framed_response_head(&mut stream) else {
+    let Ok(health_head) = read_framed_response_head(&mut stream, deadline) else {
         return ConnectionAttempt::HealthFailed;
     };
     if response_status(&health_head) != Some(200) {
         return ConnectionAttempt::HealthFailed;
     }
-    if write_request(&mut stream, address, bearer_path, Some(bearer), true).is_err() {
+    if write_request(
+        &mut stream,
+        address,
+        bearer_path,
+        Some(bearer),
+        true,
+        deadline,
+    )
+    .is_err()
+    {
         return ConnectionAttempt::ProofInterrupted;
     }
-    let Ok(bearer_head) = read_framed_response_head(&mut stream) else {
+    let Ok(bearer_head) = read_framed_response_head(&mut stream, deadline) else {
         return ConnectionAttempt::ProofInterrupted;
     };
     if response_status(&bearer_head).is_some_and(|code| (200..300).contains(&code)) {
@@ -153,19 +245,39 @@ fn probe_connection_once(address: &str, bearer_path: &str, bearer: &str) -> Conn
     }
 }
 
-/// Applies the fixed per-attempt read and write budgets.
-fn configure_stream(stream: &TcpStream) -> Result<(), ProbeError> {
+/// Connects within the one absolute attempt deadline.
+fn connect_until(address: &SocketAddr, deadline: Instant) -> Result<TcpStream, ProbeError> {
+    let timeout = remaining(deadline)?;
+    TcpStream::connect_timeout(address, timeout).map_err(|source| ProbeError::Io {
+        operation: "connect",
+        source,
+    })
+}
+
+/// Applies the remaining absolute attempt budget to reads and writes.
+fn configure_stream(stream: &TcpStream, deadline: Instant) -> Result<(), ProbeError> {
+    let timeout = remaining(deadline)?;
     stream
-        .set_read_timeout(Some(ATTEMPT_TIMEOUT))
+        .set_read_timeout(Some(timeout))
         .map_err(|source| ProbeError::Io {
             operation: "configure the read timeout",
             source,
         })?;
     stream
-        .set_write_timeout(Some(ATTEMPT_TIMEOUT))
+        .set_write_timeout(Some(timeout))
         .map_err(|source| ProbeError::Io {
             operation: "configure the write timeout",
             source,
+        })
+}
+
+fn remaining(deadline: Instant) -> Result<Duration, ProbeError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| ProbeError::Io {
+            operation: "validation deadline elapsed",
+            source: std::io::Error::from(std::io::ErrorKind::TimedOut),
         })
 }
 
@@ -176,6 +288,7 @@ fn write_request(
     path: &str,
     bearer: Option<&str>,
     close: bool,
+    deadline: Instant,
 ) -> Result<(), ProbeError> {
     let connection = if close { "close" } else { "keep-alive" };
     let mut request =
@@ -186,6 +299,7 @@ fn write_request(
         request.push_str("\r\n");
     }
     request.push_str("\r\n");
+    configure_stream(stream, deadline)?;
     stream
         .write_all(request.as_bytes())
         .map_err(|source| ProbeError::Io {
@@ -196,7 +310,10 @@ fn write_request(
 
 /// Reads one response head and drains its fixed-length body so the next
 /// response starts at a framing boundary on the same socket.
-fn read_framed_response_head(stream: &mut TcpStream) -> Result<String, ProbeError> {
+fn read_framed_response_head(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> Result<String, ProbeError> {
     let mut response = Vec::with_capacity(512);
     let header_end = loop {
         if let Some(end) = response.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
@@ -208,10 +325,15 @@ fn read_framed_response_head(stream: &mut TcpStream) -> Result<String, ProbeErro
             });
         }
         let mut buffer = [0_u8; 512];
-        let read = stream.read(&mut buffer).map_err(|source| ProbeError::Io {
-            operation: "read the validation response",
-            source,
-        })?;
+        let available = RESPONSE_HEAD_LIMIT - response.len();
+        let chunk = available.min(buffer.len());
+        configure_stream(stream, deadline)?;
+        let read = stream
+            .read(&mut buffer[..chunk])
+            .map_err(|source| ProbeError::Io {
+                operation: "read the validation response",
+                source,
+            })?;
         if read == 0 {
             return Err(ProbeError::Io {
                 operation: "read the validation response",
@@ -225,12 +347,23 @@ fn read_framed_response_head(stream: &mut TcpStream) -> Result<String, ProbeErro
         response_content_length(&head).ok_or_else(|| ProbeError::UnexpectedStatus {
             status_line: "<missing or invalid content-length>".to_owned(),
         })?;
+    if content_length > RESPONSE_BODY_LIMIT {
+        return Err(ProbeError::UnexpectedStatus {
+            status_line: "<response body too large>".to_owned(),
+        });
+    }
     let body_already_read = response.len() - header_end;
+    if body_already_read > content_length {
+        return Err(ProbeError::UnexpectedStatus {
+            status_line: "<response body exceeds content-length>".to_owned(),
+        });
+    }
     if body_already_read < content_length {
         let mut remaining = content_length - body_already_read;
         let mut buffer = [0_u8; 512];
         while remaining > 0 {
             let chunk_len = remaining.min(buffer.len());
+            configure_stream(stream, deadline)?;
             let read = stream
                 .read(&mut buffer[..chunk_len])
                 .map_err(|source| ProbeError::Io {
@@ -281,6 +414,60 @@ fn response_status(head: &str) -> Option<u16> {
 /// # Ok::<(), shared_sidecar::HealthError>(())
 /// ```
 pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthError> {
+    wait_for_health_cancellable_with(
+        base_url,
+        timeout,
+        &CancellationToken::new(),
+        ATTEMPT_TIMEOUT,
+        probe_health_until,
+    )
+}
+
+/// Polls `GET {base_url}/health` until it answers 200, the timeout elapses,
+/// or the caller cancels the wait.
+///
+/// # Errors
+/// Returns [`HealthError::Cancelled`] when `cancellation` is signalled, plus
+/// the URL and timeout failures documented by [`wait_for_health`].
+pub fn wait_for_health_cancellable(
+    base_url: &str,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+) -> Result<(), HealthError> {
+    wait_for_health_cancellable_with(
+        base_url,
+        timeout,
+        cancellation,
+        CANCELLABLE_ATTEMPT_TIMEOUT,
+        probe_health_until,
+    )
+}
+
+fn wait_for_health_cancellable_with(
+    base_url: &str,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    attempt_timeout: Duration,
+    mut probe: impl FnMut(&str, Instant) -> Result<(), ProbeError>,
+) -> Result<(), HealthError> {
+    wait_for_health_cancellable_with_start(
+        base_url,
+        timeout,
+        cancellation,
+        attempt_timeout,
+        || {},
+        |address, deadline| probe(address, deadline),
+    )
+}
+
+fn wait_for_health_cancellable_with_start(
+    base_url: &str,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    attempt_timeout: Duration,
+    mut before_probe: impl FnMut(),
+    mut probe: impl FnMut(&str, Instant) -> Result<(), ProbeError>,
+) -> Result<(), HealthError> {
     let address = base_url
         .strip_prefix("http://")
         .ok_or_else(|| HealthError::NotHttp {
@@ -288,9 +475,17 @@ pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthEr
         })?;
     let deadline = Instant::now() + timeout;
     loop {
-        match probe_health(address) {
+        let attempt_deadline = (Instant::now() + attempt_timeout).min(deadline);
+        before_probe();
+        let Some(attempt) = cancellation.run_if_active(|| probe(address, attempt_deadline)) else {
+            return Err(HealthError::Cancelled);
+        };
+        match attempt {
             Ok(()) => return Ok(()),
             Err(error) => {
+                if cancellation.is_cancelled() {
+                    return Err(HealthError::Cancelled);
+                }
                 if Instant::now() >= deadline {
                     return Err(HealthError::Timeout {
                         url: base_url.to_owned(),
@@ -298,15 +493,16 @@ pub fn wait_for_health(base_url: &str, timeout: Duration) -> Result<(), HealthEr
                         source: error,
                     });
                 }
-                std::thread::sleep(RETRY_INTERVAL);
+                if cancellation.wait_timeout(RETRY_INTERVAL) {
+                    return Err(HealthError::Cancelled);
+                }
             }
         }
     }
 }
 
-/// Issues one `GET /health` and requires a 200 status line.
-pub(crate) fn probe_health(address: &str) -> Result<(), ProbeError> {
-    let head = request_head(address, "GET", "/health", None)?;
+fn probe_health_until(address: &str, deadline: Instant) -> Result<(), ProbeError> {
+    let head = request_head_until(address, "GET", "/health", None, deadline)?;
     let status_ok = head
         .split_whitespace()
         .nth(1)
@@ -349,11 +545,33 @@ pub(crate) fn request_head(
     path: &str,
     bearer: Option<&str>,
 ) -> Result<String, ProbeError> {
-    let mut stream = TcpStream::connect(address).map_err(|source| ProbeError::Io {
-        operation: "connect",
-        source,
-    })?;
-    configure_stream(&stream)?;
+    request_head_with_timeout(address, method, path, bearer, ATTEMPT_TIMEOUT)
+}
+
+fn request_head_with_timeout(
+    address: &str,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    timeout: Duration,
+) -> Result<String, ProbeError> {
+    request_head_until(address, method, path, bearer, Instant::now() + timeout)
+}
+
+fn request_head_until(
+    address: &str,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    deadline: Instant,
+) -> Result<String, ProbeError> {
+    let socket = address
+        .parse::<SocketAddr>()
+        .map_err(|source| ProbeError::Io {
+            operation: "parse the loopback address",
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, source),
+        })?;
+    let mut stream = connect_until(&socket, deadline)?;
     let mut request = format!("{method} {path} HTTP/1.0\r\nHost: {address}\r\n");
     if let Some(key) = bearer {
         request.push_str("Authorization: Bearer ");
@@ -361,6 +579,7 @@ pub(crate) fn request_head(
         request.push_str("\r\n");
     }
     request.push_str("\r\n");
+    configure_stream(&stream, deadline)?;
     stream
         .write_all(request.as_bytes())
         .map_err(|source| ProbeError::Io {
@@ -368,6 +587,7 @@ pub(crate) fn request_head(
             source,
         })?;
     let mut buffer = [0u8; 256];
+    configure_stream(&stream, deadline)?;
     let read = stream.read(&mut buffer).map_err(|source| ProbeError::Io {
         operation: "read the status line",
         source,
@@ -380,7 +600,8 @@ mod tests {
     use super::*;
 
     use std::net::TcpListener;
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
 
     /// Answers every connection with a canned response until the test
     /// stops it.
@@ -577,6 +798,312 @@ mod tests {
                 .expect("fixture reports its connection count"),
             1,
             "validation never reconnects after health succeeds"
+        );
+    }
+
+    #[test]
+    fn a_real_connect_attempt_obeys_one_absolute_deadline() {
+        let started = Instant::now();
+        let result = probe_connection_once(
+            "192.0.2.1:9",
+            "/v1/models",
+            "key",
+            Instant::now() + Duration::from_millis(100),
+        );
+
+        assert_eq!(result, ConnectionAttempt::HealthFailed);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "connect_timeout bounds a stalled or unreachable route"
+        );
+    }
+
+    #[test]
+    fn slow_drip_response_head_cannot_refresh_the_attempt_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow-head fixture");
+        let address = listener
+            .local_addr()
+            .expect("slow-head address")
+            .to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept slow-head probe");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            for byte in b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}" {
+                if stream.write_all(&[*byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        let started = Instant::now();
+        let result = probe_connection_once(
+            &address,
+            "/v1/models",
+            "key",
+            Instant::now() + CANCELLABLE_ATTEMPT_TIMEOUT,
+        );
+
+        assert_eq!(result, ConnectionAttempt::HealthFailed);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "one absolute deadline bounds a slow-drip response head"
+        );
+    }
+
+    #[test]
+    fn slow_drip_response_body_cannot_refresh_the_attempt_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow-body fixture");
+        let address = listener
+            .local_addr()
+            .expect("slow-body address")
+            .to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept slow-body probe");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            if stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n")
+                .is_err()
+            {
+                return;
+            }
+            for byte in b"0123456789abcdef" {
+                if stream.write_all(&[*byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        let started = Instant::now();
+        let result = probe_connection_once(
+            &address,
+            "/v1/models",
+            "key",
+            Instant::now() + CANCELLABLE_ATTEMPT_TIMEOUT,
+        );
+
+        assert_eq!(result, ConnectionAttempt::HealthFailed);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "one absolute deadline bounds a slow-drip response body"
+        );
+    }
+
+    #[test]
+    fn an_unbounded_declared_body_is_rejected_without_draining() {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            RESPONSE_BODY_LIMIT + 1
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind oversized-body fixture");
+        let address = listener
+            .local_addr()
+            .expect("oversized-body address")
+            .to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept oversized-body probe");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(response.as_bytes());
+            std::thread::sleep(Duration::from_secs(1));
+        });
+
+        let started = Instant::now();
+        let result = probe_connection_once(
+            &address,
+            "/v1/models",
+            "key",
+            Instant::now() + CANCELLABLE_ATTEMPT_TIMEOUT,
+        );
+
+        assert_eq!(result, ConnectionAttempt::HealthFailed);
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "an oversized declared body is rejected before its bytes arrive"
+        );
+    }
+
+    #[test]
+    fn cancellation_joins_a_real_slow_drip_probe_without_retrying() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind cancelled-drip fixture");
+        let address = listener
+            .local_addr()
+            .expect("cancelled-drip address")
+            .to_string();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let server_connections = Arc::clone(&connections);
+        let (entered, blocked) = mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept cancelled-drip probe");
+            server_connections.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            entered.send(()).expect("announce real slow-drip probe");
+            for byte in b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}" {
+                if stream.write_all(&[*byte]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let worker = std::thread::spawn(move || {
+            probe_connection_cancellable(
+                &address,
+                "/v1/models",
+                "key",
+                Duration::from_secs(30),
+                &worker_cancellation,
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the real probe begins its slow response");
+
+        let started = Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the real probe worker joins");
+
+        assert_eq!(result, ConnectionProbe::Cancelled);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "the attempt deadline bounds joined cancellation during real I/O"
+        );
+        assert_eq!(
+            connections.load(Ordering::SeqCst),
+            1,
+            "cancellation starts no later network probe"
+        );
+    }
+
+    #[test]
+    fn cancellation_at_validation_probe_start_prevents_the_probe() {
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let probe_cancellation = worker_cancellation.clone();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let worker_probes = Arc::clone(&probes);
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            probe_connection_with_probe(
+                "127.0.0.1:1",
+                "/v1/models",
+                "key",
+                Duration::from_secs(30),
+                &worker_cancellation,
+                CANCELLABLE_ATTEMPT_TIMEOUT,
+                |_, _, _, _| {
+                    entered
+                        .send(())
+                        .expect("announce validation probe boundary");
+                    if probe_cancellation.wait_timeout(Duration::from_secs(30)) {
+                        ConnectionAttempt::HealthFailed
+                    } else {
+                        worker_probes.fetch_add(1, Ordering::SeqCst);
+                        ConnectionAttempt::Accepted
+                    }
+                },
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("validation pauses immediately before probe admission");
+
+        cancellation.cancel();
+        let result = worker.join().expect("validation worker joins");
+
+        assert_eq!(result, ConnectionProbe::Cancelled);
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            0,
+            "no validation probe starts after cancellation returns"
+        );
+    }
+
+    #[test]
+    fn cancellation_at_health_probe_start_prevents_the_probe() {
+        let cancellation = CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let worker_probes = Arc::clone(&probes);
+        let (entered, blocked) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait_for_health_cancellable_with_start(
+                "http://127.0.0.1:1",
+                Duration::from_secs(30),
+                &worker_cancellation,
+                CANCELLABLE_ATTEMPT_TIMEOUT,
+                || {
+                    entered.send(()).expect("announce health probe boundary");
+                    released.recv().expect("release health probe boundary");
+                },
+                |_, _| {
+                    worker_probes.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("health wait pauses immediately before probe admission");
+
+        cancellation.cancel();
+        release.send(()).expect("release health probe boundary");
+        let result = worker.join().expect("health worker joins");
+
+        assert!(matches!(result, Err(HealthError::Cancelled)));
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            0,
+            "no health probe starts after cancellation returns"
+        );
+    }
+
+    #[test]
+    fn cancellation_joins_a_blocked_health_wait_without_another_probe() {
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let worker_probes = Arc::clone(&probes);
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait_for_health_cancellable_with(
+                "http://127.0.0.1:1",
+                Duration::from_secs(30),
+                &worker_cancellation,
+                CANCELLABLE_ATTEMPT_TIMEOUT,
+                |_, _| {
+                    worker_probes.fetch_add(1, Ordering::SeqCst);
+                    entered.send(()).expect("announce blocked health probe");
+                    let _ = worker_cancellation.wait_timeout(Duration::from_secs(30));
+                    Err(ProbeError::UnexpectedStatus {
+                        status_line: "blocked".to_owned(),
+                    })
+                },
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the health phase blocks deterministically");
+
+        let started = Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the health worker joins");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "cancellation bounds the blocked health wait"
+        );
+        assert!(matches!(result, Err(HealthError::Cancelled)));
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "no probe starts after cancellation"
         );
     }
 }

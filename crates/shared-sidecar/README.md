@@ -12,6 +12,11 @@ The shared sidecar discovery seam for PromptForge: the `gateway.json` connection
 - `launch_or_attach` - the launch-race lock: the winner launches, losers attach to the winner.
 - `request_shutdown` - post the authenticated shutdown request for a validated local Gateway capability.
 - `wait_for_health` - poll `GET /health` until it answers 200 or the timeout elapses.
+- `CancellationToken` - a clonable signal that wakes bounded sidecar work and linearizes cleanup or other effects so none begin after cancellation returns.
+- `resolve_cancellable` - resolve and validate while allowing cancellation to stop probes and prevent stale-file deletion.
+- `launch_or_attach_cancellable` - settle the launch race while allowing cancellation to stop lock waits and prevent a later launch decision.
+- `wait_for_health_cancellable` - poll health with cancellation, timed connects, one absolute deadline per attempt, and bounded response framing.
+- `ValidationError` and `ValidatedConnection::validate_cancellable` - distinguish cancellation from a stale identity without weakening the validated capability.
 - `run_dir` / `default_run_dir` / `connection_file_path` / `lock_file_path` - the path layout under `<home>/.promptforge/run`.
 
 ## Minimum Rust Version

@@ -14,10 +14,10 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::ConnectionFile;
 use crate::error::SidecarError;
 use crate::paths::lock_file_path;
 use crate::stale::{self, GATEWAY_IMAGE_NAME, Resolution};
+use crate::{CancellationToken, ConnectionFile};
 
 /// Delay between lock retries while a winner finishes its launch.
 const RETRY_INTERVAL: Duration = Duration::from_millis(25);
@@ -58,6 +58,19 @@ pub enum LaunchDecision {
 /// errors when the lock holder's own re-validation fails.
 pub fn launch_or_attach(run_dir: &Path, timeout: Duration) -> Result<LaunchDecision, SidecarError> {
     launch_or_attach_named(run_dir, GATEWAY_IMAGE_NAME, timeout)
+}
+
+/// Settles a launch race while observing caller cancellation.
+///
+/// # Errors
+/// Returns [`SidecarError::Cancelled`] when cancellation wins, plus the
+/// file, lock, and timeout failures documented by [`launch_or_attach`].
+pub fn launch_or_attach_cancellable(
+    run_dir: &Path,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+) -> Result<LaunchDecision, SidecarError> {
+    launch_or_attach_named_cancellable(run_dir, GATEWAY_IMAGE_NAME, timeout, cancellation)
 }
 
 /// [`launch_or_attach`] against a caller-named process image, so tests
@@ -120,12 +133,100 @@ pub(crate) fn launch_or_attach_named(
     }
 }
 
+fn launch_or_attach_named_cancellable(
+    run_dir: &Path,
+    image_name: &str,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+) -> Result<LaunchDecision, SidecarError> {
+    launch_or_attach_named_cancellable_with(run_dir, image_name, timeout, cancellation, |delay| {
+        cancellation.wait_timeout(delay)
+    })
+}
+
+fn launch_or_attach_named_cancellable_with(
+    run_dir: &Path,
+    image_name: &str,
+    timeout: Duration,
+    cancellation: &CancellationToken,
+    mut wait: impl FnMut(Duration) -> bool,
+) -> Result<LaunchDecision, SidecarError> {
+    if cancellation.is_cancelled() {
+        return Err(SidecarError::Cancelled);
+    }
+    std::fs::create_dir_all(run_dir).map_err(|source| SidecarError::CreateDir {
+        path: run_dir.to_owned(),
+        source,
+    })?;
+    if cancellation.is_cancelled() {
+        return Err(SidecarError::Cancelled);
+    }
+    let lock_path = lock_file_path(run_dir);
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|source| SidecarError::Lock {
+            path: lock_path.clone(),
+            source,
+        })?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(SidecarError::Cancelled);
+        }
+        match lock.try_lock() {
+            Ok(()) => {
+                let resolution =
+                    stale::resolve_named_cancellable(run_dir, image_name, cancellation)?;
+                if cancellation.is_cancelled() {
+                    return Err(SidecarError::Cancelled);
+                }
+                return Ok(match resolution {
+                    Resolution::Attach(file) => LaunchDecision::Attach(file),
+                    Resolution::Absent | Resolution::Stale(_) => {
+                        LaunchDecision::Launch(LaunchLock { _file: lock })
+                    }
+                });
+            }
+            Err(TryLockError::WouldBlock) => {
+                if cancellation.is_cancelled() {
+                    return Err(SidecarError::Cancelled);
+                }
+                if let Ok(Some(file)) = ConnectionFile::read(run_dir)
+                    && stale::is_live_cancellable(&file, image_name, cancellation)?
+                {
+                    if cancellation.is_cancelled() {
+                        return Err(SidecarError::Cancelled);
+                    }
+                    return Ok(LaunchDecision::Attach(file));
+                }
+                if Instant::now() >= deadline {
+                    return Err(SidecarError::LaunchTimeout { timeout });
+                }
+                if wait(RETRY_INTERVAL) {
+                    return Err(SidecarError::Cancelled);
+                }
+            }
+            Err(TryLockError::Error(source)) => {
+                return Err(SidecarError::Lock {
+                    path: lock_path.clone(),
+                    source,
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use std::io::{Read, Write as _};
     use std::net::TcpListener;
+    use std::sync::mpsc;
 
     /// The test process's own image name, so the pid and image checks
     /// pass and the loser reaches the probe path.
@@ -275,5 +376,52 @@ mod tests {
             matches!(error, SidecarError::LaunchTimeout { .. }),
             "the loser reports the timeout: {error}"
         );
+    }
+
+    #[test]
+    fn cancellation_joins_a_blocked_launch_race_without_launching() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let image = own_image_name();
+        let LaunchDecision::Launch(winner) =
+            launch_or_attach_named(dir.path(), &image, Duration::from_secs(5))
+                .expect("the first caller wins the lock")
+        else {
+            panic!("an empty run dir elects a launcher");
+        };
+        let cancellation = crate::CancellationToken::new();
+        let worker_cancellation = cancellation.clone();
+        let run_dir = dir.path().to_owned();
+        let worker_image = image.clone();
+        let (entered, blocked) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            launch_or_attach_named_cancellable_with(
+                &run_dir,
+                &worker_image,
+                Duration::from_secs(30),
+                &worker_cancellation,
+                |delay| {
+                    entered.send(()).expect("announce blocked launch race");
+                    worker_cancellation.wait_timeout(delay)
+                },
+            )
+        });
+        blocked
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the launch-race phase blocks deterministically");
+
+        let started = Instant::now();
+        cancellation.cancel();
+        let result = worker.join().expect("the launch-race worker joins");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "cancellation bounds the blocked launch race"
+        );
+        assert!(matches!(result, Err(SidecarError::Cancelled)));
+        assert!(
+            !crate::paths::connection_file_path(dir.path()).exists(),
+            "the cancelled loser never publishes or launches"
+        );
+        drop(winner);
     }
 }
