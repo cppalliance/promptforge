@@ -495,6 +495,55 @@ fn the_root_invocation_serves_with_boot_discovery() {
     );
 }
 
+/// The clean-machine package fixture must be a complete existing profile:
+/// Workshop launches the sibling Gateway without profile arguments, so the
+/// fixture itself has to select an empty profile before readiness can publish.
+#[test]
+fn the_workshop_package_smoke_profile_boots_without_cli_arguments() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = temp.path().join(".promptforge");
+    std::fs::create_dir(&profile).expect("create isolated profile");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.github/fixtures/workshop-package-smoke");
+    for entry in std::fs::read_dir(&fixture).expect("read package smoke fixture") {
+        let entry = entry.expect("read fixture entry");
+        std::fs::copy(entry.path(), profile.join(entry.file_name())).expect("copy fixture entry");
+    }
+    let connection = profile.join("run").join("gateway.json");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        .arg("--no-tray")
+        .env("USERPROFILE", temp.path())
+        .env("HOME", temp.path())
+        .env_remove("PROMPTFORGE_PROFILE")
+        .env_remove("PROMPTFORGE_GATEWAY_CONFIG")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the packaged Gateway binary spawns");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !connection.is_file() {
+        assert!(
+            child.try_wait().expect("poll packaged Gateway").is_none(),
+            "the package smoke profile keeps the bare Gateway serving"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the package smoke profile publishes a connection file"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let file = shared_sidecar::ConnectionFile::read(&profile.join("run"))
+        .expect("read package connection")
+        .expect("package connection exists");
+    assert_eq!(
+        file.pid,
+        child.id(),
+        "the launched Gateway owns publication"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// A second launch hands off to the running gateway and exits: under
 /// `--print-url` it prints the running gateway's own Settings URL. Because
 /// the handoff runs before logging starts, the running gateway's log is

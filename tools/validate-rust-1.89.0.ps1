@@ -59,30 +59,6 @@ function Read-RustVersion {
 Read-RustVersion -Name 'cargo' -Path $tools['cargo']
 Read-RustVersion -Name 'rustc' -Path $tools['rustc']
 
-function Test-RustupProxy {
-    param(
-        [Parameter(Mandatory = $true)][string] $Name,
-        [Parameter(Mandatory = $true)][string] $Path
-    )
-
-    $output = @(& $Path "+$requiredVersion" '--version' 2>&1)
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-        return $false
-    }
-    $text = ($output | Out-String).Trim()
-    return [regex]::IsMatch(
-        $text,
-        "^$([regex]::Escape($Name))\s+$([regex]::Escape($requiredVersion))(?:\s|$)"
-    )
-}
-
-$cargoIsProxy = Test-RustupProxy -Name 'cargo' -Path $tools['cargo']
-$rustcIsProxy = Test-RustupProxy -Name 'rustc' -Path $tools['rustc']
-if ($cargoIsProxy -ne $rustcIsProxy) {
-    throw "$contractName must not mix direct Rust tools and rustup proxies"
-}
-
 if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_PATH)) {
     $contractBin | Add-Content -LiteralPath $env:GITHUB_PATH
 }

@@ -177,7 +177,9 @@ async fn ready_switch_is_durable_for_immediate_restart_readers() {
     )
     .expect("a restart reads the committed profile");
     assert_eq!(
-        restarted.active_profile().map(|profile| profile.name()),
+        restarted
+            .active_profile()
+            .map(gateway_config::ProfileConfig::name),
         Some("beta"),
         "ready is reported only after the durable profile selects the published runtime"
     );
@@ -185,7 +187,7 @@ async fn ready_switch_is_durable_for_immediate_restart_readers() {
         restarted
             .models()
             .iter()
-            .map(|model| model.name())
+            .map(gateway_config::ModelConfig::name)
             .collect::<Vec<_>>(),
         ["beta-model"]
     );

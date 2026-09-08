@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "build-llama-cuda"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -546,18 +546,18 @@ dependencies = [
 
 [[package]]
 name = "build-ui"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "build-user-guide"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "build-workshop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ctrlc",
  "tempfile",
@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "gateway"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -1966,7 +1966,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-config-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "build-ui",
@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-local"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "flate2",
@@ -2006,7 +2006,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-logging"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -2014,7 +2014,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-routing"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gateway-config",
  "shared-protocol",
@@ -2024,7 +2024,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-stt"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-stt-backend-whisper"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gateway-stt-engine",
  "gateway-whisper-ffi",
@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-stt-engine"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.19",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-web-search"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gateway-config",
  "reqwest 0.12.28",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-whisper-ffi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libloading 0.8.9",
  "thiserror 2.0.19",
@@ -4620,7 +4620,7 @@ dependencies = [
 
 [[package]]
 name = "product-integration-tests"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "gateway",
@@ -4632,7 +4632,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "promptforge-agent",
  "promptforge-core",
@@ -4640,7 +4640,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-agent"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4657,7 +4657,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4680,7 +4680,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-core-support"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rand 0.9.5",
  "serde",
@@ -4691,7 +4691,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-lua"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "mlua",
@@ -4706,7 +4706,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-model-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-parser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "mlua",
  "promptforge-core-support",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.19",
@@ -4745,7 +4745,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-tool-picker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -4765,7 +4765,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-tools"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -4774,7 +4774,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-web-search"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-webfetch"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -5886,7 +5886,7 @@ dependencies = [
 
 [[package]]
 name = "shared-loopback"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "tokio",
@@ -5895,7 +5895,7 @@ dependencies = [
 
 [[package]]
 name = "shared-progress"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5905,7 +5905,7 @@ dependencies = [
 
 [[package]]
 name = "shared-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -5921,7 +5921,7 @@ dependencies = [
 
 [[package]]
 name = "shared-sidecar"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "serde",
@@ -8334,7 +8334,7 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 
 [[package]]
 name = "workshop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -8357,7 +8357,7 @@ dependencies = [
 
 [[package]]
 name = "workshop-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arc-swap",

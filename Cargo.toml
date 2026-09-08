@@ -11,7 +11,7 @@ exclude = ["crates/shared-ui"]
 default-members = ["crates/gateway"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSL-1.0"
@@ -19,34 +19,34 @@ repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
 base64 = "0.22"
-promptforge = { path = "crates/promptforge", version = "0.2.0" }
-promptforge-core = { path = "crates/promptforge-core", version = "0.2.0" }
-promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.2.0" }
-gateway = { path = "crates/gateway", version = "0.2.0" }
-gateway-config = { path = "crates/gateway-config", version = "0.2.0" }
-gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.2.0" }
-gateway-local = { path = "crates/gateway-local", version = "0.2.0" }
-gateway-logging = { path = "crates/gateway-logging", version = "0.2.0" }
-shared-loopback = { path = "crates/shared-loopback", version = "0.2.0" }
-shared-protocol = { path = "crates/shared-protocol", version = "0.2.0" }
-shared-sidecar = { path = "crates/shared-sidecar", version = "0.2.0" }
-gateway-routing = { path = "crates/gateway-routing", version = "0.2.0" }
-promptforge-lua = { path = "crates/promptforge-lua", version = "0.2.0" }
-promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.2.0" }
-promptforge-parser = { path = "crates/promptforge-parser", version = "0.2.0" }
-shared-progress = { path = "crates/shared-progress", version = "0.2.0" }
-gateway-stt = { path = "crates/gateway-stt", version = "0.2.0" }
-promptforge-store = { path = "crates/promptforge-store", version = "0.2.0" }
-promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.2.0" }
-promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.2.0" }
-promptforge-tools = { path = "crates/promptforge-tools", version = "0.2.0" }
-gateway-stt-engine = { path = "crates/gateway-stt-engine", version = "0.2.0" }
-gateway-stt-backend-whisper = { path = "crates/gateway-stt-backend-whisper", version = "0.2.0" }
-promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.2.0" }
-gateway-web-search = { path = "crates/gateway-web-search", version = "0.2.0" }
-workshop-server = { path = "crates/workshop-server", version = "0.2.0" }
-gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.2.0" }
-promptforge-agent = { path = "crates/promptforge-agent", version = "0.2.0" }
+promptforge = { path = "crates/promptforge", version = "0.3.0" }
+promptforge-core = { path = "crates/promptforge-core", version = "0.3.0" }
+promptforge-core-support = { path = "crates/promptforge-core-support", version = "0.3.0" }
+gateway = { path = "crates/gateway", version = "0.3.0" }
+gateway-config = { path = "crates/gateway-config", version = "0.3.0" }
+gateway-config-ui = { path = "crates/gateway-config-ui", version = "0.3.0" }
+gateway-local = { path = "crates/gateway-local", version = "0.3.0" }
+gateway-logging = { path = "crates/gateway-logging", version = "0.3.0" }
+shared-loopback = { path = "crates/shared-loopback", version = "0.3.0" }
+shared-protocol = { path = "crates/shared-protocol", version = "0.3.0" }
+shared-sidecar = { path = "crates/shared-sidecar", version = "0.3.0" }
+gateway-routing = { path = "crates/gateway-routing", version = "0.3.0" }
+promptforge-lua = { path = "crates/promptforge-lua", version = "0.3.0" }
+promptforge-model-client = { path = "crates/promptforge-model-client", version = "0.3.0" }
+promptforge-parser = { path = "crates/promptforge-parser", version = "0.3.0" }
+shared-progress = { path = "crates/shared-progress", version = "0.3.0" }
+gateway-stt = { path = "crates/gateway-stt", version = "0.3.0" }
+promptforge-store = { path = "crates/promptforge-store", version = "0.3.0" }
+promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.3.0" }
+promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.3.0" }
+promptforge-tools = { path = "crates/promptforge-tools", version = "0.3.0" }
+gateway-stt-engine = { path = "crates/gateway-stt-engine", version = "0.3.0" }
+gateway-stt-backend-whisper = { path = "crates/gateway-stt-backend-whisper", version = "0.3.0" }
+promptforge-web-search = { path = "crates/promptforge-web-search", version = "0.3.0" }
+gateway-web-search = { path = "crates/gateway-web-search", version = "0.3.0" }
+workshop-server = { path = "crates/workshop-server", version = "0.3.0" }
+gateway-whisper-ffi = { path = "crates/gateway-whisper-ffi", version = "0.3.0" }
+promptforge-agent = { path = "crates/promptforge-agent", version = "0.3.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"

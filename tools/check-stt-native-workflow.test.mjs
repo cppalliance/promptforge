@@ -53,15 +53,14 @@ function createToolLayout(names = ["cargo", "rustc"]) {
 
 function runValidator({
   bin,
-  cargoProxy = false,
   cargoVersion = "1.89.0",
   contract = bin,
-  rustcProxy = false,
   rustcVersion = "1.89.0",
 } = {}) {
   const environment = { ...process.env };
   const runRoot = mkdtempSync(join(fixtureRoot, "run-"));
   const githubPath = join(runRoot, "github-path");
+  const invocationLog = join(runRoot, "invocations");
 
   deleteEnvironmentVariable(environment, "PROMPTFORGE_RUST_1_89_0_BIN");
   if (contract !== undefined) {
@@ -72,8 +71,7 @@ function runValidator({
     );
   }
   setEnvironmentVariable(environment, "GITHUB_PATH", githubPath);
-  setEnvironmentVariable(environment, "FAKE_CARGO_PROXY", cargoProxy ? "1" : "0");
-  setEnvironmentVariable(environment, "FAKE_RUSTC_PROXY", rustcProxy ? "1" : "0");
+  setEnvironmentVariable(environment, "FAKE_INVOCATION_LOG", invocationLog);
   setEnvironmentVariable(environment, "FAKE_CARGO_VERSION", cargoVersion);
   setEnvironmentVariable(environment, "FAKE_RUSTC_VERSION", rustcVersion);
 
@@ -99,6 +97,7 @@ function runValidator({
   return {
     ...result,
     githubPath,
+    invocationLog,
     output: `${result.stdout ?? ""}${result.stderr ?? ""}`.replace(/\s+/g, " "),
   };
 }
@@ -107,6 +106,8 @@ before(() => {
   writeFileSync(
     fakeToolSource,
     String.raw`use std::env;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 fn main() {
     let name = env::current_exe()
@@ -115,11 +116,13 @@ fn main() {
         .expect("executable stem")
         .to_string_lossy()
         .to_ascii_lowercase();
-    let proxy_probe = env::args().nth(1).is_some_and(|arg| arg.starts_with('+'));
-    let proxy_variable = format!("FAKE_{}_PROXY", name.to_ascii_uppercase());
-    if proxy_probe && env::var(proxy_variable).as_deref() != Ok("1") {
-        std::process::exit(2);
-    }
+    let arguments: Vec<_> = env::args().skip(1).collect();
+    let mut log = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(env::var("FAKE_INVOCATION_LOG").expect("invocation log"))
+        .expect("open invocation log");
+    writeln!(log, "{name} {}", arguments.join(" ")).expect("write invocation log");
     let version = match name.as_str() {
         "cargo" => env::var("FAKE_CARGO_VERSION").expect("cargo version"),
         "rustc" => env::var("FAKE_RUSTC_VERSION").expect("rustc version"),
@@ -145,7 +148,7 @@ after(() => {
   rmSync(fixtureRoot, { force: true, recursive: true });
 });
 
-test("accepts one absolute directory with exact direct Rust tools", () => {
+test("accepts valid direct Rust tools", () => {
   const bin = createToolLayout();
   const result = runValidator({ bin });
 
@@ -155,16 +158,15 @@ test("accepts one absolute directory with exact direct Rust tools", () => {
   assert.equal(readFileSync(result.githubPath, "utf8").trim(), resolve(bin));
 });
 
-test("accepts matching rustup proxies that report exact Rust versions", () => {
+test("never passes a toolchain selector to either executable", () => {
   const bin = createToolLayout();
-  const result = runValidator({
-    bin,
-    cargoProxy: true,
-    rustcProxy: true,
-  });
+  const result = runValidator({ bin });
 
   assert.equal(result.status, 0, result.output);
-  assert.equal(readFileSync(result.githubPath, "utf8").trim(), resolve(bin));
+  assert.deepEqual(
+    readFileSync(result.invocationLog, "utf8").trim().split(/\r?\n/),
+    ["cargo --version", "rustc --version"],
+  );
 });
 
 test("rejects an unset contract instead of discovering Rust", () => {
@@ -217,20 +219,5 @@ test("rejects every wrong or mixed Rust version", () => {
     const result = runValidator({ bin: createToolLayout(), ...versions });
     assert.notEqual(result.status, 0);
     assert.match(result.output, /requires exactly 1\.89\.0/);
-  }
-});
-
-test("rejects mixed direct tools and rustup proxies", () => {
-  for (const proxy of [
-    { cargoProxy: true },
-    { rustcProxy: true },
-  ]) {
-    const result = runValidator({
-      bin: createToolLayout(),
-      ...proxy,
-    });
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.output, /must not mix direct Rust tools and rustup proxies/);
   }
 });

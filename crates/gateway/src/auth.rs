@@ -57,21 +57,23 @@ where
 {
     type Rejection = Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Caller, Infallible> {
-        Ok(Caller {
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Caller, Infallible>> {
+        std::future::ready(Ok(Caller {
             headers: parts.headers.clone(),
             peer: parts
                 .extensions
                 .get::<ConnectInfo<SocketAddr>>()
                 .map(|ConnectInfo(peer)| *peer),
-        })
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::Body;
-    use axum::extract::FromRequestParts as _;
     use axum::http::Request;
     use axum::http::header::AUTHORIZATION;
 

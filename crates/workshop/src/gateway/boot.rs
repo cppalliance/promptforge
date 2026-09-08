@@ -25,6 +25,18 @@ const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Delay between polls for the launched Gateway connection file.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+#[cfg(windows)]
+const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+#[cfg(windows)]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(windows)]
+const WINDOWS_DETACHED_CREATION_FLAGS: u32 = CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS;
+#[cfg(windows)]
+const WINDOWS_BREAKAWAY_CREATION_FLAGS: u32 =
+    CREATE_BREAKAWAY_FROM_JOB | WINDOWS_DETACHED_CREATION_FLAGS;
+
 /// What the boot decision concluded.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum GatewayPlan {
@@ -192,29 +204,46 @@ where
     }
 }
 
-/// Spawns the Gateway detached from the shell lifetime.
-pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
+#[cfg(windows)]
+pub(super) fn spawn_detached_windows_with<T, Spawn>(mut spawn: Spawn) -> std::io::Result<T>
+where
+    Spawn: FnMut(u32) -> std::io::Result<T>,
+{
+    match spawn(WINDOWS_BREAKAWAY_CREATION_FLAGS) {
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Hosted runners can forbid breakaway from their job object.
+            // https://github.com/actions/runner/issues/595
+            spawn(WINDOWS_DETACHED_CREATION_FLAGS)
+        }
+        result => result,
+    }
+}
+
+fn detached_command(exe: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(exe);
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    command
+}
+
+/// Spawns the Gateway detached from the shell lifetime.
+pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
     #[cfg(windows)]
-    {
+    let mut child = spawn_detached_windows_with(|flags| {
         use std::os::windows::process::CommandExt as _;
-        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        command.creation_flags(
-            CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-        );
-    }
+        detached_command(exe).creation_flags(flags).spawn()
+    })?;
     #[cfg(unix)]
-    {
+    let mut child = {
         use std::os::unix::process::CommandExt as _;
+        let mut command = detached_command(exe);
         command.process_group(0);
-    }
-    let mut child = command.spawn()?;
+        command.spawn()?
+    };
+    #[cfg(not(any(windows, unix)))]
+    let mut child = detached_command(exe).spawn()?;
     let child_pid = child.id();
     if let Err(error) = std::thread::Builder::new().spawn(move || {
         let _ = child.wait();

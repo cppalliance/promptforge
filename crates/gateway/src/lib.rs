@@ -238,6 +238,9 @@ pub(crate) struct ProfileSelection {
     pub(crate) model_allowlist: Option<Vec<String>>,
 }
 
+#[cfg(all(test, feature = "local"))]
+type LocalRuntimeRestarter = fn(&Config) -> LocalRuntime;
+
 /// Shared handler state: live routing/key/local runtime, configuration path,
 /// and switch coordination.
 #[derive(Debug, Clone)]
@@ -300,7 +303,7 @@ pub(crate) struct AppState {
     switch_fault: Option<switch_park::SwitchFault>,
     /// Test-only replacement for local-runtime reconstruction after rollback.
     #[cfg(all(test, feature = "local"))]
-    local_restarter: Option<fn(&Config) -> Result<LocalRuntime, crate::local::LocalError>>,
+    local_restarter: Option<LocalRuntimeRestarter>,
 }
 
 /// The test-only phase rendezvous for [`run_switch_with_config`].
@@ -2117,10 +2120,8 @@ mod provisioning_tests {
     }
 
     #[cfg(feature = "test-fixtures")]
-    fn restart_local_fixture(
-        _config: &Config,
-    ) -> Result<crate::local::LocalRuntime, crate::local::LocalError> {
-        Ok(local_runtime_fixture("restored-local"))
+    fn restart_local_fixture(_config: &Config) -> crate::local::LocalRuntime {
+        local_runtime_fixture("restored-local")
     }
 
     #[cfg(feature = "test-fixtures")]

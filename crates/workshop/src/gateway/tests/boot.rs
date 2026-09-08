@@ -5,6 +5,8 @@ use std::time::Duration;
 use shared_sidecar::ConnectionFile;
 
 use super::{dead_pid, exe_dir, fixture_gateway, live_file, probe_own_image, probe_read_failure};
+#[cfg(windows)]
+use crate::gateway::boot::spawn_detached_windows_with;
 use crate::gateway::boot::{
     GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway,
     wait_for_launched_file_with,
@@ -12,11 +14,76 @@ use crate::gateway::boot::{
 use crate::gateway::identity::GatewayAttachment;
 use crate::gateway::supervisor::{RecoveryCandidate, RecoveryOwnership};
 
+const FIXTURE_PHASE_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn owned_candidate(identity: shared_sidecar::ValidatedConnection) -> RecoveryCandidate {
     match RecoveryCandidate::authenticate(identity.pid(), identity) {
         RecoveryOwnership::Owned(candidate) => candidate,
         RecoveryOwnership::Unowned(_) => panic!("the validated child pid authenticates ownership"),
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_detached_spawn_first_attempt_uses_all_required_flags() {
+    let mut attempts = Vec::new();
+
+    let child_pid = spawn_detached_windows_with(|flags| {
+        attempts.push(flags);
+        Ok(41)
+    })
+    .expect("the first spawn succeeds");
+
+    assert_eq!(child_pid, 41);
+    assert_eq!(attempts, [0x0100_0208]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_detached_spawn_retries_access_denied_without_breakaway() {
+    let mut attempts = Vec::new();
+
+    let child_pid = spawn_detached_windows_with(|flags| {
+        attempts.push(flags);
+        if attempts.len() == 1 {
+            Err(std::io::Error::from_raw_os_error(5))
+        } else {
+            Ok(42)
+        }
+    })
+    .expect("access denied retries without breakaway");
+
+    assert_eq!(child_pid, 42);
+    assert_eq!(attempts, [0x0100_0208, 0x0000_0208]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_detached_spawn_does_not_retry_after_success() {
+    let mut attempts = 0;
+
+    spawn_detached_windows_with(|_| {
+        attempts += 1;
+        Ok(43)
+    })
+    .expect("the first spawn succeeds");
+
+    assert_eq!(attempts, 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_detached_spawn_does_not_retry_other_errors() {
+    let mut attempts = 0;
+
+    let error = spawn_detached_windows_with::<u32, _>(|_| {
+        attempts += 1;
+        Err(std::io::Error::from_raw_os_error(123))
+    })
+    .expect_err("non-permission errors propagate");
+
+    assert_eq!(error.raw_os_error(), Some(123));
+    assert_eq!(attempts, 1);
 }
 
 fn workshop_server(port: u16, api_key: &str) -> (tempfile::TempDir, workshop_server::ServerHandle) {
@@ -251,7 +318,7 @@ fn closed_boot_publication_cleans_unpublished_owner_then_continues_teardown() {
     let attachment = attachment.reconcile_publication(Some(published_identity));
     drop(attachment);
     assert!(
-        launched.received_shutdown(Duration::from_secs(1)),
+        launched.received_shutdown(FIXTURE_PHASE_TIMEOUT),
         "a closed boot cleans only its unpublished authenticated child"
     );
     assert_eq!(

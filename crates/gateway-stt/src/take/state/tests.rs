@@ -16,20 +16,29 @@ fn finalized_snapshot_cannot_mix_text_and_sample_ownership() {
     let state = Arc::new(TakeState::default());
     state.record_finalized(Ok::<_, TranscribeError>("old".to_owned()), Some(100));
     let writer_state = Arc::clone(&state);
-    let (start, started) = mpsc::channel();
+    let (writer_ready, ready) = mpsc::channel();
+    let (allow_write, write_allowed) = mpsc::channel();
     let writer = std::thread::spawn(move || {
-        start.send(()).expect("snapshot knows the writer is ready");
+        writer_ready
+            .send(())
+            .expect("snapshot knows the writer is ready");
+        write_allowed
+            .recv_timeout(Duration::from_secs(1))
+            .expect("snapshot allows the writer to attempt finalization");
         writer_state.record_finalized(Ok::<_, TranscribeError>("new".to_owned()), Some(200));
     });
 
     let snapshot = state.finalized_snapshot_with(|| {
-        started
+        ready
             .recv_timeout(Duration::from_secs(1))
             .expect("writer reaches the synchronized snapshot boundary");
         assert!(
             state.finalized.try_lock().is_err(),
             "the text and sample watermark share one held lock"
         );
+        allow_write
+            .send(())
+            .expect("writer waits for the finalized lock");
     });
     writer.join().expect("finalization writer joins");
 

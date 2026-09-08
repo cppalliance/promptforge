@@ -157,6 +157,7 @@ impl PreparedFile {
         std::fs::read(&self.target).is_ok_and(|current| current == self.contents)
     }
 
+    #[cfg(unix)]
     fn target(&self) -> &Path {
         &self.target
     }
@@ -254,20 +255,9 @@ fn persistence_temporary(target: &Path, pid: u32, nonce: u128, sequence: u64) ->
     target.with_file_name(name)
 }
 
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the cross-platform contract reports Unix directory sync failures; unsupported platforms are a no-op"
-)]
+#[cfg(unix)]
 fn sync_parent(path: &Path) -> Result<(), std::io::Error> {
-    #[cfg(unix)]
-    {
-        std::fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    std::fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
 }
 
 /// Synced profile files and shadow captures awaiting terminal commit.
@@ -350,6 +340,7 @@ impl PreparedPersistence {
                     ))),
                 ));
             }
+            #[cfg(unix)]
             sync_parent(file.target()).map_err(|error| {
                 PersistenceCommitError::Indeterminate(GatewayError::ConfigWriteIo(Box::new(error)))
             })?;
@@ -1359,13 +1350,15 @@ async fn capture_runtime_snapshot(state: &AppState) -> PriorRuntimeSnapshot {
 
 #[cfg(feature = "local")]
 fn restart_local_runtime(
-    _state: &AppState,
+    state: &AppState,
     config: &Config,
 ) -> Result<LocalRuntime, crate::local::LocalError> {
     #[cfg(test)]
-    if let Some(restarter) = _state.local_restarter {
-        return restarter(config);
+    if let Some(restarter) = state.local_restarter {
+        return Ok(restarter(config));
     }
+    #[cfg(not(test))]
+    let _ = state;
     LocalRuntime::start(config, None)
 }
 

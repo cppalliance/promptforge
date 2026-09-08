@@ -305,7 +305,9 @@ pub(crate) mod macos {
             rgba.len().is_multiple_of(4),
             "an RGBA buffer is whole pixels"
         );
-        rgba.chunks_exact(4)
+        rgba.as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|px| [0, 0, 0, px[3]])
             .collect()
     }
@@ -409,7 +411,9 @@ pub(crate) mod linux {
             rgba.len().is_multiple_of(4),
             "an RGBA buffer is whole pixels"
         );
-        rgba.chunks_exact(4)
+        rgba.as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|px| [px[3], px[0], px[1], px[2]])
             .collect()
     }
@@ -441,7 +445,9 @@ fn tint(rgba: &[u8], f: impl Fn(u8, u8, u8) -> (u8, u8, u8)) -> Vec<u8> {
         rgba.len().is_multiple_of(4),
         "an RGBA buffer is whole pixels"
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|px| {
             let (r, g, b) = f(px[0], px[1], px[2]);
             [r, g, b, px[3]]

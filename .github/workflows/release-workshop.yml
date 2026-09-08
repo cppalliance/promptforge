@@ -1,11 +1,14 @@
 name: Release Workshop
-run-name: PromptForge Workshop ${{ github.ref_name }}
+run-name: PromptForge Workshop ${{ github.event_name == 'workflow_dispatch' && 'nonpublishing' || github.ref_name }}
 
 # Builds the PromptForge Workshop desktop installers for Windows, macOS
 # (ARM and Intel), and Linux (x86_64 and ARM64) on a workshop-v* tag,
 # tests each installer on a clean machine of the same kind, and publishes
 # one GitHub Release with all seven installers and a SHA256SUMS file.
 # A failed test means no release.
+#
+# A manual run builds and tests the same unsigned installer matrix as
+# temporary workflow artifacts. It can never reach the publish job.
 #
 # Platform code signing is still absent. Tauri updater bundles are signed
 # independently with the release minisign key.
@@ -14,23 +17,60 @@ on:
   push:
     tags:
       - "workshop-v**[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-workshop-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
-  # GitHub expressions have no .replace(); shell steps extract the version.
-  TAG_NAME: ${{ github.ref_name }}
   # The repo's rust-toolchain.toml pins the MSRV for local builds; CI tests
   # the current stable.
   RUSTUP_TOOLCHAIN: stable
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      execution-sha: ${{ steps.identity.outputs.sha }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Report the execution identity
+        id: identity
+        shell: bash
+        run: |
+          set -e
+          sha=$(git rev-parse HEAD)
+          [ "$sha" = "$GITHUB_SHA" ] || { echo "checkout $sha does not match event SHA $GITHUB_SHA"; exit 1; }
+          version=$(python3 - <<'PY'
+          import tomllib
+
+          with open("Cargo.toml", "rb") as manifest:
+              print(tomllib.load(manifest)["workspace"]["package"]["version"])
+          PY
+          )
+          [ "$version" = "0.3.0" ] || { echo "workspace version is $version, expected 0.3.0"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag_version="${GITHUB_REF_NAME#workshop-v}"
+            [ "$tag_version" = "$version" ] || { echo "tag version $tag_version does not match workspace version $version"; exit 1; }
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "Execution SHA: $sha"
+            echo "Workspace version: $version"
+            echo "Mode: $GITHUB_EVENT_NAME"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +93,16 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.execution-sha }}
+
+      - name: Report the execution SHA
+        shell: bash
+        run: |
+          actual=$(git rev-parse HEAD)
+          expected="${{ needs.prepare.outputs.execution-sha }}"
+          [ "$actual" = "$expected" ] || { echo "checkout $actual does not match execution SHA $expected"; exit 1; }
+          echo "Execution SHA: $actual"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -122,10 +172,16 @@ jobs:
               ;;
           esac
           mkdir -p crates/workshop/binaries
-          cp "$src" "crates/workshop/binaries/promptforge-gateway-$triple$ext"
+          staged="crates/workshop/binaries/promptforge-gateway-$triple$ext"
+          cp "$src" "$staged"
+          output=$("$staged" --version)
+          version="${{ needs.prepare.outputs.version }}"
+          expected="promptforge-gateway $version"
+          [ "$output" = "$expected" ] || { echo "staged Gateway printed '$output', expected '$expected'"; exit 1; }
 
-      - name: Build the app
-        id: build
+      - name: Build the signed release app
+        if: github.event_name == 'push'
+        id: release-build
         uses: tauri-apps/tauri-action@v0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -134,21 +190,41 @@ jobs:
           projectPath: crates/workshop
           args: ${{ matrix.args }}
 
-      - name: The built version matches the tag
+      - name: Build the unsigned temporary app
+        if: github.event_name == 'workflow_dispatch'
+        id: temporary-build
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: crates/workshop
+          args: ${{ matrix.args }} --config tauri.nightly.conf.json
+
+      - name: The signed build has the workspace version
+        if: github.event_name == 'push'
         shell: bash
         run: |
-          version="${TAG_NAME#workshop-v}"
-          built="${{ steps.build.outputs.appVersion }}"
+          version="${{ needs.prepare.outputs.version }}"
+          built="${{ steps.release-build.outputs.appVersion }}"
           if [ "$built" != "$version" ]; then
-            echo "tag version $version does not match the crate version $built"
+            echo "workspace version $version does not match the crate version $built"
+            exit 1
+          fi
+
+      - name: The temporary build has the workspace version
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          version="${{ needs.prepare.outputs.version }}"
+          built="${{ steps.temporary-build.outputs.appVersion }}"
+          if [ "$built" != "$version" ]; then
+            echo "workspace version $version does not match the crate version $built"
             exit 1
           fi
 
       - name: Give macOS updater bundles architecture-specific names
-        if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
+        if: github.event_name == 'push' && (matrix.name == 'macos-arm' || matrix.name == 'macos-intel')
         shell: bash
         run: |
-          version="${TAG_NAME#workshop-v}"
+          version="${{ needs.prepare.outputs.version }}"
           if [[ "${{ matrix.name }}" == "macos-arm" ]]; then
             arch="aarch64"
           else
@@ -172,9 +248,10 @@ jobs:
             target/**/bundle/**/*.sig
             target/**/bundle/macos/*.app.tar.gz
           if-no-files-found: error
+          retention-days: 7
 
   test:
-    needs: build
+    needs: [prepare, build]
     strategy:
       fail-fast: false
       matrix:
@@ -191,6 +268,18 @@ jobs:
             runs-on: ubuntu-22.04-arm
     runs-on: ${{ matrix.runs-on }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.execution-sha }}
+
+      - name: Report the execution SHA
+        shell: bash
+        run: |
+          actual=$(git rev-parse HEAD)
+          expected="${{ needs.prepare.outputs.execution-sha }}"
+          [ "$actual" = "$expected" ] || { echo "checkout $actual does not match execution SHA $expected"; exit 1; }
+          echo "Execution SHA: $actual"
+
       - name: Download the installers
         uses: actions/download-artifact@v4
         with:
@@ -215,9 +304,10 @@ jobs:
             ForEach-Object { Get-ChildItem $_ -Recurse -Filter promptforge-gateway.exe -ErrorAction SilentlyContinue } |
             Select-Object -First 1
           if (-not $gateway) { throw "promptforge-gateway.exe not found after install" }
-          $output = & $exe.FullName --version | Out-String
-          $version = $env:TAG_NAME -replace '^workshop-v', ''
-          if ($output -notmatch [regex]::Escape($version)) { throw "--version printed '$output', expected $version" }
+          $output = (& $exe.FullName --version | Out-String).Trim()
+          $version = "${{ needs.prepare.outputs.version }}"
+          $expected = "promptforge-workshop $version"
+          if ($output -ne $expected) { throw "--version printed '$output', expected '$expected'" }
           $output
           $configDir = Join-Path $env:USERPROFILE ".promptforge"
           New-Item -ItemType Directory -Path $configDir -Force | Out-Null
@@ -226,38 +316,46 @@ jobs:
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
           # sibling gateway exists.
-          @'
-          config-version = 2
-
-          [server]
-          bind = "127.0.0.1:0"
-          api_key = "release-smoke"
-          '@ | Set-Content (Join-Path $configDir "gateway.toml")
+          Copy-Item ".github/fixtures/workshop-package-smoke/gateway.toml" $configDir
+          Copy-Item ".github/fixtures/workshop-package-smoke/gateway.state.toml" $configDir
           @'
           [gateway]
           base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
           '@ | Set-Content (Join-Path $configDir "workshop.toml")
-          Start-Process $exe.FullName
+          $stdout = Join-Path $env:RUNNER_TEMP "workshop.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "workshop.stderr.log"
+          $proc = Start-Process $exe.FullName -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           $page = $null
           $port = $null
           foreach ($i in 1..60) {
-            if (-not $port) {
-              $proc = Get-Process promptforge-workshop -ErrorAction SilentlyContinue | Select-Object -First 1
-              if ($proc) {
-                $conn = Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -eq "127.0.0.1" } | Select-Object -First 1
-                if ($conn) { $port = $conn.LocalPort }
-              }
-              if (-not $port) { Start-Sleep -Seconds 1; continue }
+            $proc.Refresh()
+            if ($proc.HasExited) {
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+              throw "promptforge-workshop exited before serving the page with code $($proc.ExitCode)"
             }
-            try { $page = Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 2; break } catch { Start-Sleep -Seconds 1 }
+            $ports = Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
+              Where-Object { $_.LocalAddress -eq "127.0.0.1" } |
+              Select-Object -ExpandProperty LocalPort -Unique
+            foreach ($candidate in $ports) {
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/" -UseBasicParsing -TimeoutSec 2
+                if ($response.Content -match "<title>PromptForge</title>") {
+                  $page = $response
+                  $port = $candidate
+                  break
+                }
+              } catch {
+              }
+            }
+            if ($page) { break }
+            Start-Sleep -Seconds 1
           }
           if (-not $page) { throw "the workshop page never answered" }
-          if ($page.Content -notmatch "<title>PromptForge</title>") { throw "unexpected workshop page content" }
           $js = Invoke-WebRequest -Uri "http://127.0.0.1:$port/app.js" -UseBasicParsing
           # The current minified workbench is about 2.5 MB.
           if ($js.RawContentLength -gt 3000000) { throw "app.js is unexpectedly large ($($js.RawContentLength) bytes)" }
-          Get-Process promptforge-workshop -ErrorAction SilentlyContinue | Stop-Process -Force
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
 
       - name: Install and check (macOS)
         if: matrix.name == 'macos-arm' || matrix.name == 'macos-intel'
@@ -272,22 +370,18 @@ jobs:
           # externalBin beside the main binary); pick the shell by name.
           bin="/tmp/PromptForge.app/Contents/MacOS/promptforge-workshop"
           [ -x "$bin" ] || { echo "promptforge-workshop not in the bundle"; exit 1; }
-          version="${TAG_NAME#workshop-v}"
+          version="${{ needs.prepare.outputs.version }}"
           output=$("$bin" --version)
-          echo "$output" | grep -F "$version"
+          expected="promptforge-workshop $version"
+          [ "$output" = "$expected" ] || { echo "--version printed '$output', expected '$expected'"; exit 1; }
           mkdir -p "$HOME/.promptforge"
           # A default install lays the gateway beside the shell, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
           # sibling gateway exists.
-          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
-          config-version = 2
-
-          [server]
-          bind = "127.0.0.1:0"
-          api_key = "release-smoke"
-          EOF
+          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.promptforge/"
+          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.promptforge/"
           cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"
@@ -323,52 +417,84 @@ jobs:
           # shell by name.
           bin=$(dpkg -L "$package" | grep -E '/usr/bin/promptforge-workshop$' | head -1)
           [ -n "$bin" ] || { echo "no promptforge-workshop in the deb"; exit 1; }
-          version="${TAG_NAME#workshop-v}"
+          version="${{ needs.prepare.outputs.version }}"
           output=$("$bin" --version)
-          echo "$output" | grep -F "$version"
+          expected="promptforge-workshop $version"
+          [ "$output" = "$expected" ] || { echo "--version printed '$output', expected '$expected'"; exit 1; }
           # The AppImage is not installed; check it exists and runs --version.
           appimage=$(find dist -name "*.AppImage" | head -1)
           [ -n "$appimage" ] || { echo "no AppImage in the artifact"; exit 1; }
           chmod +x "$appimage"
-          "$appimage" --version | grep -F "$version"
+          output=$("$appimage" --version)
+          [ "$output" = "$expected" ] || { echo "AppImage --version printed '$output', expected '$expected'"; exit 1; }
           mkdir -p "$HOME/.promptforge"
           # A default install lays the gateway beside the shell, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
           # sibling gateway exists.
-          cat > "$HOME/.promptforge/gateway.toml" <<'EOF'
-          config-version = 2
-
-          [server]
-          bind = "127.0.0.1:0"
-          api_key = "release-smoke"
-          EOF
+          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.promptforge/"
+          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.promptforge/"
           cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
           EOF
-          xvfb-run -a "$bin" &
-          port=""
+          pid_file=$(mktemp)
+          stdout=/tmp/workshop.stdout.log
+          stderr=/tmp/workshop.stderr.log
+          xvfb-run -a sh -c 'echo $$ > "$1"; exec "$2"' sh "$pid_file" "$bin" >"$stdout" 2>"$stderr" &
+          xvfb_pid=$!
+          app_pid=""
+          trap '[ -z "$app_pid" ] || kill "$app_pid" 2>/dev/null || true; kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          page_port=""
           for i in $(seq 1 60); do
-            app_pid=$(pgrep -f promptforge-workshop | head -1)
-            if [ -n "$app_pid" ]; then
-              port=$(lsof -nP -iTCP -sTCP:LISTEN -a -p "$app_pid" 2>/dev/null | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)
+            if [ -z "$app_pid" ] && [ -s "$pid_file" ]; then
+              app_pid=$(cat "$pid_file")
             fi
-            if [ -n "$port" ] && curl -sf "http://127.0.0.1:$port/" -o /tmp/workshop.html; then break; fi
+            if ! kill -0 "$xvfb_pid" 2>/dev/null; then
+              if wait "$xvfb_pid"; then status=0; else status=$?; fi
+              cat "$stdout" "$stderr"
+              echo "xvfb-run exited before Workshop served the page with code $status"
+              exit 1
+            fi
+            if [ -n "$app_pid" ] && ! kill -0 "$app_pid" 2>/dev/null; then
+              if wait "$xvfb_pid"; then status=0; else status=$?; fi
+              cat "$stdout" "$stderr"
+              echo "promptforge-workshop exited before serving the page with code $status"
+              exit 1
+            fi
+            if [ -n "$app_pid" ]; then
+              ports=$(lsof -nP -a -p "$app_pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null |
+                sed -n 's/^n127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p' | sort -u)
+              for candidate in $ports; do
+                if curl -sf "http://127.0.0.1:$candidate/" -o /tmp/workshop-candidate.html &&
+                   grep -Fq "<title>PromptForge</title>" /tmp/workshop-candidate.html; then
+                  page_port=$candidate
+                  mv /tmp/workshop-candidate.html /tmp/workshop.html
+                  break
+                fi
+              done
+            fi
+            [ -z "$page_port" ] || break
             sleep 1
           done
-          [ -n "$port" ] || { echo "the workshop server never listened"; exit 1; }
+          [ -n "$page_port" ] || { echo "the workshop server never answered"; exit 1; }
           grep -F "<title>PromptForge</title>" /tmp/workshop.html
-          size=$(curl -sf "http://127.0.0.1:$port/app.js" | wc -c)
+          size=$(curl -sf "http://127.0.0.1:$page_port/app.js" | wc -c)
           # The current minified workbench is about 2.5 MB.
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
-          pkill -f "$(basename "$bin")" || true
+          kill "$app_pid" 2>/dev/null || true
+          wait "$xvfb_pid" 2>/dev/null || true
 
   publish:
-    needs: test
+    needs: [prepare, test]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/workshop-v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ github.ref_name }}
     steps:
       - name: Download every installer's artifact
         uses: actions/download-artifact@v4

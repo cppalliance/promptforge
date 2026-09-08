@@ -18,6 +18,8 @@ isProject: false
 ---
 # Remove Unsupported Ratchets and Repair Runtime Defects
 
+<product-contract>
+
 ## Product Requirements
 
 - Problem and users:
@@ -94,6 +96,11 @@ isProject: false
   - The non-Windows Gateway resource helper returns unit while `main` retains fallible environment handling and Windows resource errors.
   - Profile behavior is proven directly before profile source parsing is removed.
   - Real-process launch races, real-socket reconnect, publication races, uncooperative shutdown, native runner preflight, and unsigned installer workflows satisfy their stated outcomes.
+
+</product-contract>
+
+<implementation-contract>
+
 ## Technical Design
 
 ### Structural policy and enforcement
@@ -224,6 +231,11 @@ isProject: false
   - Build unsigned packages without signing credentials or updater signatures.
   - Upload temporary test artifacts and run the existing installer-test matrices for Windows, both macOS architectures, Linux x64, and Linux ARM.
   - Make the publish job unreachable from this mode.
+
+</implementation-contract>
+
+<verification-contract>
+
 ## Testing Plan
 
 - Unit:
@@ -236,7 +248,7 @@ isProject: false
   - Run real direct-versus-direct, Workshop-versus-direct, and dead-owner Gateway process races on Windows and Linux.
   - Run the real two-socket reconnect path through `RealtimeTranscriptionService`, `setupStt`, and `TakeRegistry`.
   - Preserve FIFO acknowledgment, overlapping takes, rollback, sequential spacing, textarea, ProseMirror, network-limit, configured-LAN, same-socket, and validated-publication behavior.
-  - Run the checked-in PowerShell preflight against valid, wrong-version, missing, mixed, malformed, relative, nonexistent, and unset directory fixtures.
+  - Run the checked-in PowerShell preflight against valid, wrong-version, missing, mixed-version, malformed, relative, nonexistent, and unset directory fixtures.
   - Run unsigned package build and clean-machine installer tests on Windows, both macOS architectures, Linux x64, and Linux ARM.
 - Regression, security, and performance:
   - Compile the three safe STT crates with unsafe code denied and the FFI crate under its explicit lint policy.
@@ -252,6 +264,11 @@ isProject: false
   - The nonpublishing Workshop package matrix runs against that same commit and cannot enter publication.
   - Generated guides and UI bundles leave the worktree clean.
   - The final diff contains no structural gate beyond the four approved product-dependency rules and no unrelated refactor or historical-record rewrite.
+
+</verification-contract>
+
+<decision-record>
+
 ## Decision Record
 
 - Decisions:
@@ -285,7 +302,14 @@ isProject: false
   - Runner validation and native Whisper remain externally blockable; blocked evidence stays incomplete.
   - Real-process race tests are platform-sensitive and require bounded fixture cleanup.
   - Confidence is high that the design separates proven runtime defects from unsupported repository-shape preferences.
-## Project survey
+
+</decision-record>
+
+<project-survey>
+
+## Project Survey
+
+- Status: complete
 
 - Build command:
   - Prerequisites are Rust 1.89 and Node.js 22, followed once per checkout by `npm ci` in `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`.
@@ -368,6 +392,11 @@ isProject: false
   - `crates/workshop/icons/AGENTS.md` governs `crates/workshop/icons/`.
   - `crates/workshop-server/AGENTS.md` governs `crates/workshop-server/`.
   - `crates/workshop-server/ui/AGENTS.md` governs `crates/workshop-server/ui/`.
+
+</project-survey>
+
+<execution-plan>
+
 ## Execution Instructions
 
 ### Component order and construction
@@ -381,6 +410,8 @@ Every step runs its listed focused tests. Steps 4, 6, 8, and 10 also run their c
 
 Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation redesign, logging module split, queue redesign, logger API change, new dependency, registry collection rewrite, unrelated fixture-framework consolidation, signed publication, structural enforcement beyond the four approved Cargo rules, or deletion-driven refactor.
 
+<step-1>
+
 ### Step 1: Establish the execution baseline and repository policy [completed]
 
 - Before any edit, require an empty `git status`. Stop if dirty.
@@ -390,11 +421,19 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Validate that all 31 original files have one recorded keep, rewrite, or remove disposition and that the policy permits the structural deletions in this plan without weakening behavior tests.
 - Commit the policy changes only after whitespace validation and the baseline record are complete.
 
+</step-1>
+
+<step-2>
+
 ### Step 2: Correct the cross-platform Gateway build helper [completed]
 
 - In `crates/gateway/build.rs`, change non-Windows `embed_resources` to return unit. Keep the Windows implementation fallible, and keep `main` responsible for propagating Windows resource failures before returning success.
 - Do not add a lint exemption; correct the signatures and call sites directly.
 - Run focused warnings-denied Clippy for the Gateway build script on a non-Windows target and the existing Windows resource embedding test. Commit this isolated defect and its platform coverage.
+
+</step-2>
+
+<step-3>
 
 ### Step 3: Replace Rust structural proxies with direct behavior evidence [completed]
 
@@ -404,6 +443,10 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Remove the Rust module-ceiling tests and manifests under `crates/gateway-stt*`, `crates/workshop`, and `crates/workshop-server`; structural cases in `crates/workshop-server/tests/it/ratchet.rs`; the manifest parser in `crates/gateway-logging/tests/it/main.rs`; Gateway cfg source assertions in `crates/gateway/src/main.rs`; and exact counts and symbol scans from `crates/promptforge-core/tests/suite/shipped.rs` while preserving shipped-prompt parsing.
 - Replace unsafe-lint manifest inspection with compiler checks that deny unsafe code in the three safe STT crates and retain the explicit `gateway-whisper-ffi` policy. Remove Rust parser dependencies, test registrations, and CI consumers with their final use.
 - Run focused Cargo metadata adversarial fixtures, profile and STT generation tests, safe-crate compiler lanes, Workshop structural-test replacements, Gateway logging behavior tests, Gateway tests, and PromptForge shipped-prompt tests. Commit all Rust cleanup and direct replacement evidence together.
+
+</step-3>
+
+<step-4>
 
 ### Step 4: Remove the remaining structural tools and CI wiring [completed]
 
@@ -415,12 +458,20 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused tests for both UI packages, production bundles, retained Realtime fixtures, installer smoke behavior, JavaScript tools, and clean-tree generation.
 - Component boundary: run the cleanup-focused Rust compiler and behavior lanes plus both UI builds and tests. Do not run the complete repository suite. Commit the remaining snapshots, tools, package scripts, and CI cleanup together.
 
+</step-4>
+
+<step-5>
+
 ### Step 5: Preserve logging while removing internal duplication [completed]
 
 - Limit production edits to `crates/gateway-logging/src/redact.rs` and shared fault support used by `queue.rs`, `worker.rs`, and `writer.rs`. Do not split modules, redesign queue ownership, change the public API, or add dependencies.
 - Keep structured credential classification before formatting and the bounded final-output pass. Preserve queue ordering, byte accounting, exact loss, bounded settlement, detached loss, stall handling, rotation rename and sync behavior, crash recovery, segment naming, pruning, and disk limits.
 - Consolidate only duplicated test fault injection when the resulting harness still reaches direct write, flush, rename, sync, crash, recovery, and release boundaries.
 - Run focused `gateway-logging` redaction, queue, worker, writer, rotation, recovery, disk-budget, and shutdown tests, including every retained fault boundary. Commit the characterized simplification without unrelated cleanup.
+
+</step-5>
+
+<step-6>
 
 ### Step 6: Establish process-lifetime Gateway ownership [completed]
 
@@ -432,6 +483,10 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused shared-sidecar, Gateway boot, relaunch, handoff, diagnostics, logging, and process-race tests.
 - Component boundary: run the Gateway and shared-sidecar focused suites on Windows and a Unix host, including all real-process races. Do not run the complete repository suite. Commit the lease API, startup integration, fixtures, and race proof together without directly editing either architecture record.
 
+</step-6>
+
+<step-7>
+
 ### Step 7: Carry connection generation through Workshop dictation [completed]
 
 - In `crates/workshop-server/ui/src/services/realtime-transcription.ts`, assign every WebSocket a monotonically increasing immutable generation. Typed envelopes for decoded events, connection state, errors, and append, commit, or clear results retain the originating socket generation and the existing current-socket guard.
@@ -440,6 +495,10 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Update `ui/src/ui/realtime-stt.ts` so `setupStt` stamps user, audio, connection, error, server, wire, and capture inputs with their origin. Preserve that generation through interpreted effects and asynchronous request results.
 - Extend `ui/test/stt-stream.mjs`, `take-registry.mjs`, `take-registry-regressions.mjs`, and `agent-stt.mjs` with service, reducer, integration, and real two-socket reconnect cases. Prove immediate same-item-ID reuse and rejection of every stale callback, event, error, wire result, user action, audio input, and capture completion class.
 - Run focused Workshop UI typecheck, production bundle, Realtime service tests, reducer regressions, and two-socket tests. Update only `design/generic-realtime-stt.md` with the tested contract. Commit the typed service, reducer, integration, tests, and current design text together.
+
+</step-7>
+
+<step-8>
 
 ### Step 8: Close publication and bound the Gateway lifecycle [completed]
 
@@ -452,15 +511,23 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused Workshop server binding, Workshop supervisor, recovery, boot, teardown, and shared-sidecar shutdown tests.
 - Component boundary: run the Workshop UI generation slice from Step 7 and the Workshop shell and server lifecycle slices from this step. Do not run the complete repository suite. Commit publication closure, supervision, recovery authentication, teardown wiring, and tests together without directly editing either architecture record.
 
+</step-8>
+
+<step-9>
+
 ### Step 9: Migrate the native runner to one PowerShell contract [completed]
 
 - External gate: under the actual native Whisper service account, verify that `PROMPTFORGE_RUST_1_89_0_BIN` is an absolute directory containing regular `cargo.exe` and `rustc.exe` files and that both report exactly Rust 1.89.0. If unavailable, leave this step incomplete with the account and failure boundary. Do not infer success or block the completed local Steps 1 through 8.
-- Add `tools/validate-rust-1.89.0.ps1`. It reads only that environment contract, performs no discovery or installation, and rejects unset, relative, nonexistent, mixed, malformed, missing, or wrong-version inputs.
+- Add `tools/validate-rust-1.89.0.ps1`. It reads only that environment contract, performs no discovery or installation, and rejects unset, relative, nonexistent, mixed-version, malformed, missing, or wrong-version inputs.
 - Rewrite `tools/check-stt-native-workflow.test.mjs` to execute the script with controlled fake executables, removing all YAML extraction and workflow-text assertions.
 - Update the `native-whisper` job in `.github/workflows/stt-miri.yml` to run the script before cache restoration and use only the validated directory. Preserve the Miri matrix and explicit native FFI lint policy.
 - Run the focused PowerShell fixture matrix for every accepted and rejected input class, plus the native-job preflight where the service account is available. Commit the script, direct tests, and workflow migration together.
 
-### Step 10: Validate packages, converge verification, and drain architecture observations
+</step-9>
+
+<step-10>
+
+### Step 10: Validate packages, converge verification, and drain architecture observations [completed]
 
 - Bump the workspace package version from `0.2.0` to `0.3.0`, update `Cargo.lock` and current user-facing version references, and leave historical records unchanged.
 - Add a manual nonpublishing mode to `.github/workflows/release-workshop.yml`. Read expected version `0.3.0` from the workspace, build without signing credentials or updater signatures, upload temporary artifacts, and run the existing installer tests for Windows, macOS ARM, macOS Intel, Linux x64, and Linux ARM.
@@ -471,3 +538,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run one review-only search for orphaned structural tools, snapshots, obsolete dependencies, stale policy claims, and structural gates. Do not retain a parser, policy linter, source search, or CI search. Require no structural enforcement beyond the four Cargo rules, no unrelated refactor, no generated-tree dirt, and no dated-plan or historical-log rewrite.
 - Component boundary: this complete verification is the sole full-suite run. Regenerate guides and UI bundles and require a clean worktree.
 - Collect architecture observations emitted by the ten commit messages, then stop for the operator-owned `vibe/archdoc-next.md` queue drain. The implementation executor never edits or commits `vibe/archdoc.md` or `vibe/archdoc-next.md`. Resume closure only after the operator states that every observation was promoted, rejected, or intentionally left open.
+
+</step-10>
+
+</execution-plan>

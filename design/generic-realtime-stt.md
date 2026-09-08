@@ -102,14 +102,14 @@ The Workshop server exposes `/v1/realtime` on its own origin. It validates Origi
 
 ## Architecture and CI gates
 
-- `node tools/check-stt-architecture.mjs` pins Cargo 1.89, `cargo-modules` 0.25.0, and `cargo-public-api` 0.52.0; rejects malformed tool output; proves every STT production-library module graph acyclic; and requires exact public-root counts.
-- `cargo test -p gateway-stt --test it architecture` enforces exact final workspace edges, exact source manifests, the 500-line maximum for every source module, unsafe isolation, zero legacy speech seams, generic discovery, explicit lifecycle ownership, and transactional replacement.
+- `cargo test -p gateway-stt --test it architecture` reads Cargo metadata and enforces only four direct local product boundaries across normal, development, build, renamed, and target-specific dependencies: Gateway cannot depend on Workshop or PromptForge, PromptForge cannot depend on Gateway or Workshop, and Workshop cannot depend on Gateway.
+- Compiler lanes deny unsafe code in `gateway-stt`, `gateway-stt-engine`, and `gateway-stt-backend-whisper`; `gateway-whisper-ffi` compiles under its explicit unsafe boundary and warnings-denied policy.
 - Normal CI installs only config UI dependencies before building Gateway, proving the default Gateway build cannot invoke Workshop UI tooling.
-- Normal CI runs the architecture driver tests, the architecture driver, and the Rust architecture suite before formatting, linting, and tests.
+- TypeScript checking, production bundles, and behavior tests validate both UIs without an import walker or source-topology gate.
 - Miri runs backend-neutral worker, generation, queue, audio, registry, item, mailbox, and replacement-state targets. Native FFI, callbacks, sockets, and model loading remain on native CI.
 
 ## Debt result
 
-The initial architecture-ratchet snapshot contained one temporary workspace edge, six migration-target exceptions, three source modules above 500 lines, a maximum module size of 712 lines, and a `gateway-stt` public-root allowance of 9.
+The implementation removed internal API snapshots, module and test counts, line ceilings, source parsers, topology assertions, and import walkers. Those measurements remain historical evidence only and are not current acceptance gates.
 
-The final snapshot contains zero temporary edges, zero migration exceptions, zero modules above 500 lines, a maximum module size of 481 lines, and exact public-root counts of 6, 7, 2, and 6. The forbidden `gateway-stt -> workshop-server` edge fell from one to zero. The larger final source total reflects the delivered Realtime protocol, ownership, and test surface; the debt measures are responsibility size, dependency direction, cycles, unsafe isolation, and public exposure, all enforced as failing gates.
+Current verification protects the stable product dependency boundaries, compiler and unsafe policies, Realtime wire behavior, generation ownership, profile replacement, native integration, and installed package behavior without constraining repository shape.

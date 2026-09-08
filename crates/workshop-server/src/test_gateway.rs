@@ -55,14 +55,14 @@ impl ValidatedGateway {
     /// Panics when the fixture listener, copied test image, child process, or
     /// readiness handshake cannot be created.
     #[must_use]
-    #[expect(
-        clippy::expect_used,
-        reason = "test fixture setup fails immediately with the failed invariant"
-    )]
     pub fn spawn_in(expected_key: &str, fixture_test: &str) -> Self {
         Self::spawn_in_with_lease(expected_key, fixture_test, None)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture setup fails immediately with the failed invariant"
+    )]
     fn spawn_in_with_lease(
         expected_key: &str,
         fixture_test: &str,

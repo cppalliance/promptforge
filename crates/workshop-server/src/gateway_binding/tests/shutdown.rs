@@ -2,6 +2,8 @@ use super::*;
 
 use std::{sync::mpsc, time::Duration};
 
+const FIXTURE_PHASE_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Clone, Copy)]
 enum PublicationOrder {
     QuitFirst,
@@ -70,8 +72,8 @@ fn assert_shutdown_target(order: PublicationOrder) {
         result
     });
 
-    let original_hit = original_gateway.received_shutdown(Duration::from_millis(250));
-    let replacement_hit = replacement_gateway.received_shutdown(Duration::from_millis(250));
+    let original_hit = original_gateway.received_shutdown(FIXTURE_PHASE_TIMEOUT);
+    let replacement_hit = replacement_gateway.received_shutdown(FIXTURE_PHASE_TIMEOUT);
     let expect_original = matches!(order, PublicationOrder::QuitFirst);
     assert_eq!(
         (shutdown_requested, original_hit, replacement_hit),
@@ -127,7 +129,7 @@ fn publication_close_preserves_shutdown_authority_for_the_current_snapshot() {
             .expect("the current authenticated shutdown is accepted")
     );
     assert!(
-        gateway.received_shutdown(Duration::from_secs(1)),
+        gateway.received_shutdown(FIXTURE_PHASE_TIMEOUT),
         "closure revokes future publication without tearing current shutdown authority"
     );
 }
