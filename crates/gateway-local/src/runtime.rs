@@ -187,6 +187,21 @@ impl LocalRuntime {
         }
     }
 
+    /// Builds a child-free runtime around supplied model bindings.
+    ///
+    /// This fixture lets profile-switch tests prove routing replacement without
+    /// downloading a model or launching `llama-server`.
+    #[cfg(feature = "test-fixtures")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_test_models(models: Vec<Arc<Model>>) -> LocalRuntime {
+        LocalRuntime {
+            models,
+            upstreams: Vec::new(),
+            cache_dir: None,
+        }
+    }
+
     /// Provisions binaries/models and starts one `llama-server` per local model.
     ///
     /// When the config declares no `[[local_model]]`, returns an empty runtime

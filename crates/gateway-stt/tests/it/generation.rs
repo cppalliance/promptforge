@@ -301,6 +301,61 @@ fn aborting_a_staged_replacement_reconstructs_the_old_generation() {
 }
 
 #[test]
+fn dropping_a_staged_replacement_restores_admission_without_publishing_it() {
+    let old = ScriptedDecoder::new();
+    let service = service(&old);
+    let old_generation = service.status().generation();
+    let next_interim = ScriptedDecoder::new();
+    let next_final = ScriptedDecoder::new();
+    let replacement = begin_scripted_replacement(
+        &service,
+        factory(&next_interim).with_final(next_final.clone()),
+        true,
+        WAIT,
+    )
+    .expect("replacement stages");
+
+    assert!(!service.status().ready(), "staging closes old admission");
+    assert!(
+        service.models().is_empty(),
+        "an uncommitted replacement publishes no models"
+    );
+    drop(replacement);
+
+    let restored = service.status();
+    assert!(restored.ready(), "drop reconstructs the old generation");
+    assert_ne!(
+        restored.generation(),
+        old_generation,
+        "reconstruction publishes a fresh generation"
+    );
+    assert_eq!(
+        service
+            .models()
+            .iter()
+            .map(gateway_stt::SpeechModelInfo::name)
+            .collect::<Vec<_>>(),
+        ["scripted-interim"],
+        "drop restores the old model set instead of publishing the staged target"
+    );
+    assert_eq!(
+        generation_counts(&service),
+        Some((0, 0)),
+        "replacement drop leaks no admission or worker ownership"
+    );
+    let request = generation_ownership(&service).expect("restored generation admits");
+    let job = request
+        .own_worker_job()
+        .expect("restored admission owns worker work");
+    assert_eq!(generation_counts(&service), Some((1, 1)));
+    drop((job, request));
+    assert_eq!(generation_counts(&service), Some((0, 0)));
+    assert!(next_interim.worker_dropped());
+    assert!(next_final.worker_dropped());
+    service.shutdown();
+}
+
+#[test]
 fn determinate_start_failure_reconstructs_the_old_generation() {
     let old = ScriptedDecoder::new();
     let service = service(&old);

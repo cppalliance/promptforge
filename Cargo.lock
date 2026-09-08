@@ -1923,7 +1923,6 @@ dependencies = [
  "objc2-service-management",
  "open",
  "png 0.18.1",
- "promptforge-core",
  "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
@@ -2044,7 +2043,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
- "toml 0.8.2",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -4618,6 +4616,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "product-integration-tests"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "gateway",
+ "promptforge-model-client",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -8327,7 +8337,6 @@ name = "workshop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "serde",
  "serde_json",
  "shared-sidecar",
  "tauri",
@@ -8339,7 +8348,6 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tempfile",
- "toml 0.8.2",
  "url",
  "webkit2gtk",
  "webview2-com",

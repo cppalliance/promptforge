@@ -30,7 +30,6 @@ futures-util.workspace = true
 # GPU name and VRAM for GET /admin/system; probes NVML at runtime, so builds
 # and machines without an NVIDIA driver keep working.
 nvml-wrapper.workspace = true
-promptforge-core.workspace = true
 gateway-config.workspace = true
 # Optional: the embedded config UI SPA served at /config/ behind the
 # `config-ui` feature; headless builds never pull rust-embed or the Node
@@ -132,6 +131,8 @@ config-ui = ["dep:gateway-config-ui"]
 # Default on, so every default build ships STT; a --no-default-features
 # build stubs the route and refuses a configuration declaring [[stt_model]].
 stt = ["dep:gateway-stt"]
+# Deterministic local-runtime bindings for cross-crate behavior tests.
+test-fixtures = ["local", "gateway-local/test-fixtures"]
 
 [dev-dependencies]
 base64.workspace = true

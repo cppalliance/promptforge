@@ -1,0 +1,21 @@
+[package]
+name = "product-integration-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "Boundary-neutral end-to-end compatibility tests for PromptForge products"
+
+[dev-dependencies]
+axum.workspace = true
+gateway.workspace = true
+promptforge-model-client.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

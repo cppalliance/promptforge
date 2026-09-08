@@ -1,6 +1,5 @@
-//! End-to-end tests: a fake OpenAI backend behind the real gateway, driven by
-//! the executor's real `GatewayClient`. This keeps the two independent
-//! definitions of the wire shape honest.
+//! End-to-end Gateway route tests against fake OpenAI backends. Cross-product
+//! model-client compatibility lives in the boundary-neutral integration crate.
 //!
 //! Determinism: the gateway is served on a caller-owned ephemeral listener
 //! (no port race), shutdown is driven by a rendezvous `TestServer` fixture,

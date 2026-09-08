@@ -249,3 +249,4 @@ N110 | observation | oversized-unit @ crates/gateway/tests/it/realtime_stt/windo
 - N120 | observation | hidden-dependency @ crates/gateway/src/main/logging_tests.rs::gateway_no_alignment_uses_production_logging_child: reads child state from the process environment outside its interface | Repair installed rolling dictation failures; Repair rolling dictation reconciliation
 
 - N121 | observation | surface-growth @ crates/workshop/installer.nsi: exposes named Workshop, Gateway, and transcription choices in a fixed installer order | Name and order the installer components; Name installer components in product order
+- N122 | observation | parallel-abstraction @ crates/product-integration-tests/tests/gateway_client.rs::TestServer: mirrors the Gateway integration server fixture in a second test crate | Replace Rust ratchets with behavioral evidence

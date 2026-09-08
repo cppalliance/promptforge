@@ -442,6 +442,7 @@ impl StopSet {
 
 /// Live runtime state captured immediately before cutover.
 pub(super) struct PriorRuntimeSnapshot {
+    #[cfg(any(test, not(feature = "local")))]
     routing: Arc<Routing>,
     routing_was_empty: bool,
     config: Arc<Config>,
@@ -1343,6 +1344,7 @@ async fn capture_runtime_snapshot(state: &AppState) -> PriorRuntimeSnapshot {
     let live = state.live.read().await;
     PriorRuntimeSnapshot {
         routing_was_empty: live.routing.models().is_empty(),
+        #[cfg(any(test, not(feature = "local")))]
         routing: Arc::clone(&live.routing),
         config: Arc::clone(&live.config),
         #[cfg(feature = "web-search")]
@@ -1355,6 +1357,18 @@ async fn capture_runtime_snapshot(state: &AppState) -> PriorRuntimeSnapshot {
     }
 }
 
+#[cfg(feature = "local")]
+fn restart_local_runtime(
+    _state: &AppState,
+    config: &Config,
+) -> Result<LocalRuntime, crate::local::LocalError> {
+    #[cfg(test)]
+    if let Some(restarter) = _state.local_restarter {
+        return restarter(config);
+    }
+    LocalRuntime::start(config, None)
+}
+
 async fn restore_runtime_snapshot(
     state: &AppState,
     prior: PriorRuntimeSnapshot,
@@ -1362,9 +1376,10 @@ async fn restore_runtime_snapshot(
     #[cfg(feature = "local")]
     let local = if prior.restart_local {
         let config = Arc::clone(&prior.config);
+        let restart_state = state.clone();
         tokio::time::timeout(
             STAGE_TIMEOUT,
-            tokio::task::spawn_blocking(move || LocalRuntime::start(&config, None)),
+            tokio::task::spawn_blocking(move || restart_local_runtime(&restart_state, &config)),
         )
         .await
         .map_err(|_| {
@@ -1381,9 +1396,25 @@ async fn restore_runtime_snapshot(
     } else {
         LocalRuntime::empty()
     };
+    #[cfg(feature = "local")]
+    let routing = if prior.routing_was_empty {
+        Routing::empty()
+    } else {
+        Routing::from_config(&prior.config)
+            .map_err(|error| GatewayError::switch_failed("rollback-routing", error))?
+            .merge(local.models().iter().cloned())
+            .map_err(|error| GatewayError::switch_failed("rollback-routing", error))?
+    };
     let mut live = state.live.write().await;
     if !prior.routing_was_empty {
-        live.routing = prior.routing;
+        #[cfg(feature = "local")]
+        {
+            live.routing = Arc::new(routing);
+        }
+        #[cfg(not(feature = "local"))]
+        {
+            live.routing = prior.routing;
+        }
     }
     live.config = prior.config;
     #[cfg(feature = "web-search")]

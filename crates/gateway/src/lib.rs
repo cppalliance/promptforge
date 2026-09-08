@@ -298,6 +298,9 @@ pub(crate) struct AppState {
     /// a switch task.
     #[cfg(test)]
     switch_fault: Option<switch_park::SwitchFault>,
+    /// Test-only replacement for local-runtime reconstruction after rollback.
+    #[cfg(all(test, feature = "local"))]
+    local_restarter: Option<fn(&Config) -> Result<LocalRuntime, crate::local::LocalError>>,
 }
 
 /// The test-only phase rendezvous for [`run_switch_with_config`].
@@ -440,6 +443,8 @@ impl AppState {
             park: None,
             #[cfg(test)]
             switch_fault: None,
+            #[cfg(all(test, feature = "local"))]
+            local_restarter: None,
         }
     }
 
@@ -1888,7 +1893,8 @@ mod provisioning_tests {
     use gateway_config::{Config, ProfileName};
     #[cfg(feature = "stt")]
     use gateway_stt::test_fixtures::{
-        ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, scripted_service,
+        ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, generation_ownership,
+        scripted_service,
     };
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt as _;
@@ -2076,6 +2082,71 @@ mod provisioning_tests {
     fn persisted_two_remote_profiles(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
         let config_path = temp.path().join("gateway.toml");
         std::fs::write(&config_path, two_remote_catalog()).expect("write catalog");
+        let state_path = gateway_config::profile_state_path(&config_path);
+        std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
+        let config = Config::load(
+            &config_path,
+            &gateway_config::ProfileSelection::new(Some("alpha"), None),
+        )
+        .expect("load alpha profile");
+        let state = app_state(
+            config,
+            Some(crate::test_support::AdminPaths {
+                fixture_dir: temp.path().to_path_buf(),
+                active: "alpha".to_owned(),
+                config_path,
+            }),
+        );
+        (state, state_path)
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn local_runtime_fixture(upstream_name: &str) -> crate::local::LocalRuntime {
+        let config = Config::from_toml_str(&format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"local-fixture\"\nprotocol = \"openai\"\n\
+             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha-local\"\ndescription = \"local fixture\"\n\
+             context = 4096\nupstream = \"{upstream_name}\"\nendpoints = [\"local-fixture\"]\n"
+        ))
+        .expect("local fixture config parses");
+        let routing =
+            crate::routing::Routing::from_config(&config).expect("local fixture routing builds");
+        crate::local::LocalRuntime::from_test_models(routing.models().to_vec())
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn restart_local_fixture(
+        _config: &Config,
+    ) -> Result<crate::local::LocalRuntime, crate::local::LocalError> {
+        Ok(local_runtime_fixture("restored-local"))
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    fn persisted_profiles_with_local(temp: &tempfile::TempDir) -> (AppState, std::path::PathBuf) {
+        let local_source = temp
+            .path()
+            .join("alpha-local.gguf")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let catalog = format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\n\
+             base_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\n\
+             context = 8192\nupstream = \"a\"\nendpoints = [\"e\"]\n\
+             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\n\
+             context = 8192\nupstream = \"b\"\nendpoints = [\"e\"]\n\
+             [[local_model]]\nname = \"alpha-local\"\ndescription = \"local\"\n\
+             source = \"{local_source}\"\ncontext = 4096\n\
+             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\", \"alpha-local\"]\n\
+             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+        );
+        let config_path = temp.path().join("gateway.toml");
+        std::fs::write(&config_path, catalog).expect("write local catalog");
         let state_path = gateway_config::profile_state_path(&config_path);
         std::fs::write(&state_path, "active_profile = \"alpha\"\n").expect("write state");
         let config = Config::load(
@@ -2405,6 +2476,169 @@ mod provisioning_tests {
 
     #[cfg(feature = "stt")]
     #[tokio::test]
+    async fn determinate_persistence_failure_reconstructs_speech_and_persisted_profile() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
+        let old = ScriptedDecoder::new();
+        state.speech =
+            scripted_service(ScriptedModelFactory::new(old), 15, 500).expect("old speech starts");
+        let old_generation = state.speech.status().generation();
+        let next = ScriptedDecoder::new();
+        let speech = begin_scripted_replacement(
+            &state.speech,
+            ScriptedModelFactory::new(next.clone()),
+            false,
+            Duration::from_secs(1),
+        )
+        .expect("new speech stages");
+        let persistence = crate::profile_switch::PreparedPersistence::for_test(
+            state_path.clone(),
+            "active_profile = \"beta\"\n".to_owned(),
+        )
+        .expect("prepare state");
+        persistence.discard_temporaries();
+        let name = ProfileName::parse("beta").expect("profile name");
+        let tree = state.hub.operation();
+        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
+            .await
+            .expect("target prepares");
+        let replacement = crate::profile_switch::RuntimeReplacement {
+            #[cfg(feature = "local")]
+            local: crate::local::LocalRuntime::empty(),
+            #[cfg(feature = "local")]
+            start_failures: Vec::new(),
+            speech,
+        };
+        let token = CancellationToken::new();
+
+        let error = crate::profile_switch::commit_for_test(
+            &state,
+            name,
+            target,
+            replacement,
+            persistence,
+            token.clone(),
+        )
+        .await
+        .expect_err("missing prepared file makes persistence fail determinately");
+
+        assert!(
+            matches!(error, crate::error::GatewayError::ConfigWriteIo(_)),
+            "the original persistence failure is returned: {error:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("read state"),
+            "active_profile = \"alpha\"\n",
+            "determinate failure leaves the persisted profile unchanged"
+        );
+        let live = state.live.read().await;
+        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
+        assert!(live.routing.model("alpha-model").is_ok());
+        assert!(live.routing.model("beta-model").is_err());
+        drop(live);
+        let restored = state.speech.status();
+        assert!(restored.ready(), "old speech is reconstructed");
+        assert_ne!(restored.generation(), old_generation);
+        assert!(
+            generation_ownership(&state.speech).is_some(),
+            "reconstructed speech admits work"
+        );
+        assert!(next.worker_dropped(), "the staged worker is joined");
+        assert!(!token.is_cancelled());
+        assert!(!state.shutdown.is_fired());
+        state.speech.shutdown();
+    }
+
+    #[cfg(all(feature = "stt", feature = "test-fixtures"))]
+    #[tokio::test]
+    async fn determinate_persistence_failure_reconstructs_and_republishes_local_models() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (mut state, state_path) = persisted_profiles_with_local(&temp);
+        let old_speech = ScriptedDecoder::new();
+        state.speech = scripted_service(ScriptedModelFactory::new(old_speech), 15, 500)
+            .expect("old speech starts");
+        let old_local = local_runtime_fixture("retired-local");
+        {
+            let mut live = state.live.write().await;
+            live.routing = Arc::new(
+                live.routing
+                    .as_ref()
+                    .clone()
+                    .merge(old_local.models().iter().cloned())
+                    .expect("old local model routes"),
+            );
+            live.local = old_local;
+        }
+        state.local_restarter = Some(restart_local_fixture);
+
+        let next = ScriptedDecoder::new();
+        let speech = begin_scripted_replacement(
+            &state.speech,
+            ScriptedModelFactory::new(next.clone()),
+            false,
+            Duration::from_secs(1),
+        )
+        .expect("new speech stages");
+        let persistence = crate::profile_switch::PreparedPersistence::for_test(
+            state_path.clone(),
+            "active_profile = \"beta\"\n".to_owned(),
+        )
+        .expect("prepare state");
+        persistence.discard_temporaries();
+        let name = ProfileName::parse("beta").expect("profile name");
+        let tree = state.hub.operation();
+        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
+            .await
+            .expect("target prepares");
+        let replacement = crate::profile_switch::RuntimeReplacement {
+            local: crate::local::LocalRuntime::empty(),
+            start_failures: Vec::new(),
+            speech,
+        };
+        let token = CancellationToken::new();
+
+        let error = crate::profile_switch::commit_for_test(
+            &state,
+            name,
+            target,
+            replacement,
+            persistence,
+            token.clone(),
+        )
+        .await
+        .expect_err("missing prepared file makes persistence fail determinately");
+
+        assert!(matches!(
+            error,
+            crate::error::GatewayError::ConfigWriteIo(_)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&state_path).expect("read state"),
+            "active_profile = \"alpha\"\n"
+        );
+        let live = state.live.read().await;
+        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
+        assert!(live.routing.model("alpha-model").is_ok());
+        assert!(live.routing.model("beta-model").is_err());
+        let local = live
+            .routing
+            .model("alpha-local")
+            .expect("reconstructed local model is republished");
+        assert_eq!(
+            local.upstream_name, "restored-local",
+            "routing uses the reconstructed binding, not the retired one"
+        );
+        assert_eq!(live.local.models().len(), 1);
+        assert_eq!(live.local.models()[0].upstream_name, "restored-local");
+        drop(live);
+        assert!(next.worker_dropped(), "the staged worker is joined");
+        assert!(!token.is_cancelled());
+        assert!(!state.shutdown.is_fired());
+        state.speech.shutdown();
+    }
+
+    #[cfg(feature = "stt")]
+    #[tokio::test]
     async fn indeterminate_persistence_invalidates_staging_and_requests_shutdown() {
         let state = two_remote_profiles();
         let next = ScriptedDecoder::new();
@@ -2440,7 +2674,7 @@ mod provisioning_tests {
         };
         let token = CancellationToken::new();
 
-        crate::profile_switch::commit_for_test(
+        let error = crate::profile_switch::commit_for_test(
             &state,
             name,
             target,
@@ -2450,9 +2684,24 @@ mod provisioning_tests {
         )
         .await
         .expect_err("indeterminate persistence is fatal");
+        let crate::error::GatewayError::SwitchFailed { stage, source } = &error else {
+            panic!("fatal persistence error retains its phase and cause: {error:?}");
+        };
+        assert_eq!(*stage, "persist-profile-indeterminate");
+        assert!(
+            source
+                .downcast_ref::<crate::error::GatewayError>()
+                .is_some_and(|cause| matches!(cause, crate::error::GatewayError::ConfigWriteIo(_))),
+            "fatal persistence retains the originating I/O error: {error:?}"
+        );
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
         assert!(next.worker_dropped(), "invalidated staging is still joined");
+        assert_eq!(
+            std::fs::read_to_string(&target_path).expect("read uncertain state"),
+            "uncertain authoritative contents",
+            "fatal handling does not claim or overwrite indeterminate persistence"
+        );
         let live = state.live.read().await;
         assert!(live.routing.model("alpha-model").is_ok());
         assert!(live.routing.model("beta-model").is_err());

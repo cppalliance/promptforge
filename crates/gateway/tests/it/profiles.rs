@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt as _;
 use gateway::{Config, Gateway, ProfileName, ProfilesContext};
-use gateway_config::{shadow_path, write_shadow};
+use gateway_config::{ProfileSelection, shadow_path, write_shadow};
 use serde_json::Value;
 
 use crate::support::{
@@ -155,6 +155,40 @@ async fn switch_preserves_stage_names_and_persists_success() {
     let state =
         fs::read_to_string(temp.path().join("gateway.state.toml")).expect("read persisted state");
     assert_eq!(state, "active_profile = \"beta\"\n");
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn ready_switch_is_durable_for_immediate_restart_readers() {
+    let (backend, _arrivals) = slow_fake_backend().await;
+    let (temp, server) = profile_server(backend).await;
+    let http = reqwest::Client::new();
+
+    let events = switch_events(&http, server.addr, "beta").await;
+
+    assert_eq!(
+        events.last(),
+        Some(&serde_json::json!({"status": "ready", "profile": "beta"}))
+    );
+    assert_eq!(catalog_ids(&http, server.addr).await, ["beta-model"]);
+    let restarted = Config::load(
+        &temp.path().join("gateway.toml"),
+        &ProfileSelection::default(),
+    )
+    .expect("a restart reads the committed profile");
+    assert_eq!(
+        restarted.active_profile().map(|profile| profile.name()),
+        Some("beta"),
+        "ready is reported only after the durable profile selects the published runtime"
+    );
+    assert_eq!(
+        restarted
+            .models()
+            .iter()
+            .map(|model| model.name())
+            .collect::<Vec<_>>(),
+        ["beta-model"]
+    );
     server.shutdown().await;
 }
 

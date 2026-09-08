@@ -1,5 +1,4 @@
-//! Shipped-prompt policy: every prompt under the workspace `prompts/` tree
-//! parses offline and declares semantic capabilities rather than concrete tools.
+//! Every shipped prompt under the workspace `prompts/` tree parses offline.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,15 +25,9 @@ fn every_shipped_prompt_parses_offline() {
     let mut files = Vec::new();
     collect_markdown(&prompts, &mut files);
     files.sort();
-    assert_eq!(files.len(), 5, "every shipped markdown prompt is covered");
 
     for path in files {
         let source = fs::read_to_string(&path).expect("read shipped prompt");
-        assert!(
-            !source.contains("web_search") && !source.contains("web_fetch"),
-            "{} must declare semantic capabilities, not concrete tools",
-            path.display()
-        );
         Prompt::parse(&source, SHIPPED_PARSE, &NullObserver::default())
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
     }

@@ -17,14 +17,6 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-/// Pinned tiny Qwen3-0.6B GGUF, used only by the ignored live-local test.
-#[cfg(feature = "local")]
-pub(crate) const SCENARIO_MODEL_URL: &str =
-    "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true";
-#[cfg(feature = "local")]
-pub(crate) const SCENARIO_MODEL_SHA256: &str =
-    "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
-
 /// Pinned tiny bge-small-en-v1.5 GGUF, used only by the ignored live-local
 /// embeddings test.
 #[cfg(feature = "local")]

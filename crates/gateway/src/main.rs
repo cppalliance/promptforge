@@ -413,33 +413,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_manifest_constant_is_compiled_only_for_windows() {
-        let source: String = include_str!("../build.rs")
-            .chars()
-            .filter(|character| !character.is_ascii_whitespace())
-            .collect();
-        assert!(
-            source.contains("#[cfg(windows)]constMANIFEST:&str="),
-            "the manifest constant must not exist on hosts that cannot embed it"
-        );
-    }
-
-    #[test]
-    fn the_dpi_unsafe_expectation_exists_only_for_windows() {
-        let source: String = include_str!("main.rs")
-            .chars()
-            .filter(|character| !character.is_ascii_whitespace())
-            .collect();
-        let main = source
-            .find("fnmain()->ExitCode")
-            .expect("the binary entry point exists");
-        assert!(
-            source[..main].contains("#[cfg_attr(windows,expect(unsafe_code,reason="),
-            "the unsafe expectation must exist only with the Windows DPI shim"
-        );
-    }
-
-    #[test]
     fn the_default_filter_keeps_gateway_info_and_quiets_whisper_cpp() {
         let filter = tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER);
         assert_eq!(

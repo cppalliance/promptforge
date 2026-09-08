@@ -1,4 +1,4 @@
-//! Chat-completions, models-catalog, and health routes through the real client.
+//! Chat-completions, models-catalog, and health route behavior.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -7,8 +7,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use futures_util::StreamExt as _;
 use gateway::{Config, Gateway, ProfilesContext};
-use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
-use promptforge_core::model::CompletionOptions;
 use serde_json::Value;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
@@ -18,35 +16,6 @@ use crate::support::{
     gateway_with_queue, join_within, json_within, next_arrival, recording_backend, send_within,
     spawn_backend, spawn_chat,
 };
-
-#[tokio::test]
-async fn happy_path_through_the_real_client() {
-    let backend = fake_backend().await;
-    let gateway = gateway_for(backend).await;
-
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{}/v1", gateway.addr)).expect("valid test endpoint"),
-        SecretString::new("test-token").expect("non-empty test key"),
-    );
-    let options = CompletionOptions::new("test-model");
-    let result = tokio::time::timeout(
-        PHASE_TIMEOUT,
-        client.complete(
-            &[promptforge_core::client::Message::user("ping")],
-            None,
-            &options,
-            |_delta| {},
-        ),
-    )
-    .await
-    .expect("client completion exceeded the phase timeout")
-    .unwrap();
-    match result.result() {
-        promptforge_core::client::CompletionResult::Text(reply) => assert_eq!(reply, "pong"),
-        other => panic!("expected text reply, got {other:?}"),
-    }
-    gateway.shutdown().await;
-}
 
 /// IT-005/006: the fake backend records the request, so we can assert exactly
 /// what the gateway forwarded: method, path, the rewritten upstream model, the

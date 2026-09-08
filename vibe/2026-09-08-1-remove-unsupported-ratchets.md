@@ -395,7 +395,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Do not add a lint exemption; correct the signatures and call sites directly.
 - Run focused warnings-denied Clippy for the Gateway build script on a non-Windows target and the existing Windows resource embedding test. Commit this isolated defect and its platform coverage.
 
-### Step 3: Replace Rust structural proxies with direct behavior evidence
+### Step 3: Replace Rust structural proxies with direct behavior evidence [completed]
 
 - Rewrite `crates/gateway-stt/tests/it/architecture.rs` around Cargo metadata. Retain exactly the four product rules from the Technical Design across normal, development, build, renamed, and target-specific direct local dependencies. Remove exact allowlists, counts, ceilings, source scans, reference-count scans, ownership-shape checks, and parser-only helpers.
 - Before deleting the profile parser, add deterministic direct tests around `crates/gateway/src/profile_switch.rs`, `crates/gateway/tests/it/profiles.rs`, and `crates/gateway-stt/src/generation.rs`. Prove durable persistence before publication, local and speech rollback reconstruction, fatal indeterminate handling with cause retention, and dropped or aborted `SpeechReplacement` rollback without leaked admission.

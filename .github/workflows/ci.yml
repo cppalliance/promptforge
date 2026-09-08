@@ -76,12 +76,20 @@ jobs:
       - name: Check STT module and public API architecture
         run: node tools/check-stt-architecture.mjs
 
-      - name: Check production gateway-stt warnings
+      - name: Check safe STT crates without unsafe code
         env:
           RUSTFLAGS: -D warnings
-        run: cargo check --locked -p gateway-stt --lib
+        run: |
+          cargo rustc --locked -p gateway-stt-engine --lib -- -F unsafe-code
+          cargo rustc --locked -p gateway-stt-backend-whisper --lib -- -F unsafe-code
+          cargo rustc --locked -p gateway-stt --lib -- -F unsafe-code
 
-      - name: Check STT Cargo and ceiling architecture
+      - name: Check native STT FFI lint policy
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked -p gateway-whisper-ffi --lib
+
+      - name: Check product dependency boundaries
         run: cargo test -p gateway-stt --test it architecture
 
       - name: Format
