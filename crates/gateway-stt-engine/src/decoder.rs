@@ -1,6 +1,7 @@
 //! Backend-neutral model construction and stateless decoding contracts.
 
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
+use std::sync::Arc;
 
 use crate::TranscribeError;
 
@@ -20,6 +21,16 @@ pub struct DecodeRequest {
     samples: Vec<f32>,
     guidance: Vec<String>,
     finalized: String,
+    lifetime_guard: Option<RequestLifetime>,
+}
+
+#[derive(Clone)]
+struct RequestLifetime(Arc<dyn Send + Sync>);
+
+impl fmt::Debug for RequestLifetime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RequestLifetime")
+    }
 }
 
 impl DecodeRequest {
@@ -36,7 +47,15 @@ impl DecodeRequest {
             samples,
             guidance,
             finalized,
+            lifetime_guard: None,
         }
+    }
+
+    /// Keeps `guard` alive until the worker retires this request.
+    #[must_use]
+    pub fn with_lifetime_guard(mut self, guard: impl Send + Sync + 'static) -> Self {
+        self.lifetime_guard = Some(RequestLifetime(Arc::new(guard)));
+        self
     }
 
     /// Requested worker and decode policy.
@@ -61,6 +80,10 @@ impl DecodeRequest {
     #[must_use]
     pub fn finalized(&self) -> &str {
         &self.finalized
+    }
+
+    pub(crate) fn take_lifetime_guard(&mut self) -> Option<Arc<dyn Send + Sync>> {
+        self.lifetime_guard.take().map(|guard| guard.0)
     }
 }
 

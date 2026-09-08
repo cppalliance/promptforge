@@ -39,9 +39,9 @@ impl Session {
             .engine
             .as_ref()
             .ok_or(SessionError::GenerationUnavailable)?;
-        let window = input.take().interim_window(engine.window_samples());
+        let window = input.take().interim_window(engine.window_samples())?;
         if window.samples.len() < EnginePolicy::MIN_WINDOW_SAMPLES
-            || EnginePolicy::is_silence(&window.samples)
+            || EnginePolicy::is_silence(window.samples.samples())
         {
             return Ok(());
         }
@@ -55,14 +55,12 @@ impl Session {
         let finalized = input.take().finalized();
         let epoch = self.begin_interim()?;
         self.last_interim_window = Some(origin);
+        let (samples, samples_owner) = window.samples.into_decode();
         self.interim_task = Some(tokio::spawn(async move {
+            let request = DecodeRequest::new(DecodeMode::Interim, samples, guidance, finalized)
+                .with_lifetime_guard(samples_owner);
             let transcript = engine
-                .decode(DecodeRequest::new(
-                    DecodeMode::Interim,
-                    window.samples,
-                    guidance,
-                    finalized,
-                ))
+                .decode(request)
                 .await
                 .map_err(|error| error.to_string());
             InterimTaskOutput::Decode {
@@ -199,7 +197,10 @@ impl Session {
     }
 }
 
-fn sample_millis(samples: usize) -> u64 {
-    let millis = samples.saturating_mul(1_000) / EnginePolicy::SAMPLE_RATE;
+fn sample_millis(samples: u64) -> u64 {
+    let millis = u128::from(samples) * 1_000 / EnginePolicy::SAMPLE_RATE as u128;
     u64::try_from(millis).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests;

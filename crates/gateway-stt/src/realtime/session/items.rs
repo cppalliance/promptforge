@@ -21,7 +21,6 @@ impl Session {
         }
 
         self.invalidate_epoch()?;
-        self.results.reserve_item(&item_id);
         if let Some(task) = self.interim_task.take() {
             task.abort();
             self.canceled_tasks.push(task);
@@ -30,7 +29,15 @@ impl Session {
         let Some(input) = self.input.take() else {
             return Err(SessionError::NoInput);
         };
-        let sealed = input.seal();
+        let sealed = match input.seal() {
+            Ok(sealed) => sealed,
+            Err(failure) => {
+                let (input, error) = *failure;
+                self.input = Some(input);
+                return Err(error.into());
+            }
+        };
+        self.results.reserve_item(&item_id);
         let previous_item_id = self.previous_item_id.clone();
         let (mut item, pending_failure) = CommittedItem::from_sealed(sealed, previous_item_id);
         let receipt = item.receipt();
@@ -160,3 +167,6 @@ impl Session {
         results
     }
 }
+
+#[cfg(all(test, feature = "test-fixtures"))]
+mod tests;

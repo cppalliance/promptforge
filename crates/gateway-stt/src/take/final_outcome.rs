@@ -18,19 +18,19 @@ pub(super) enum FinalRangeResult {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct FinalRangeOutcome {
-    pub(super) range: Range<usize>,
+    pub(super) range: Range<u64>,
     pub(super) result: FinalRangeResult,
 }
 
 impl FinalRangeOutcome {
-    pub(super) fn decoded(range: Range<usize>, text: String) -> Self {
+    pub(super) fn decoded(range: Range<u64>, text: String) -> Self {
         Self {
             range,
             result: FinalRangeResult::Decoded(text),
         }
     }
 
-    pub(super) fn skipped(range: Range<usize>, reason: SkipReason) -> Self {
+    pub(super) fn skipped(range: Range<u64>, reason: SkipReason) -> Self {
         Self {
             range,
             result: FinalRangeResult::Skipped(reason),
@@ -41,7 +41,7 @@ impl FinalRangeOutcome {
 pub(super) fn assemble_completion(
     outcomes: &[FinalRangeOutcome],
     accepted: &[AcceptedHypothesis],
-    committed_samples: usize,
+    committed_samples: u64,
 ) -> String {
     let mut transcript = String::new();
     let mut used = vec![false; accepted.len()];
@@ -71,7 +71,7 @@ pub(super) fn assemble_completion(
 fn skipped_outcomes_exactly_cover(
     outcomes: &[FinalRangeOutcome],
     first: usize,
-    hypothesis: &Range<usize>,
+    hypothesis: &Range<u64>,
 ) -> bool {
     if outcomes[first].range.start > hypothesis.start
         || outcomes[first].range.end <= hypothesis.start
@@ -95,4 +95,33 @@ fn skipped_outcomes_exactly_cover(
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FinalRangeOutcome, SkipReason, assemble_completion};
+    use crate::take::window::AcceptedHypothesis;
+
+    #[test]
+    fn final_outcomes_and_accepted_text_keep_absolute_ranges() {
+        let origin = u64::from(u32::MAX) + 32_000;
+        let outcomes = [
+            FinalRangeOutcome::decoded(origin..origin + 16_000, "first".to_owned()),
+            FinalRangeOutcome::skipped(
+                origin + 16_000..origin + 24_000,
+                SkipReason::BelowFinalWindow,
+            ),
+        ];
+        let accepted = [AcceptedHypothesis::new(
+            origin + 16_000..origin + 24_000,
+            "tail".to_owned(),
+        )];
+
+        let range: std::ops::Range<u64> = outcomes[1].range.clone();
+        assert_eq!(
+            assemble_completion(&outcomes, &accepted, origin + 24_000),
+            "first tail"
+        );
+        assert_eq!(range.start, origin + 16_000);
+    }
 }

@@ -4,18 +4,23 @@ use super::agreement::{matching_token_prefix_end, token_spans};
 use super::interim::InterimSnapshot;
 use super::text::append_transcript;
 
+pub(super) const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AcceptedHypothesisCapacity;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct AcceptedHypothesis {
-    range: Range<usize>,
+    range: Range<u64>,
     text: String,
 }
 
 impl AcceptedHypothesis {
-    pub(super) fn new(range: Range<usize>, text: String) -> Self {
+    pub(super) fn new(range: Range<u64>, text: String) -> Self {
         Self { range, text }
     }
 
-    pub(super) fn range(&self) -> Range<usize> {
+    pub(super) fn range(&self) -> Range<u64> {
         self.range.clone()
     }
 
@@ -26,28 +31,49 @@ impl AcceptedHypothesis {
 
 #[derive(Debug, Default)]
 pub(super) struct WholeWindowState {
-    segment_start: usize,
-    window_start: Option<usize>,
+    segment_start: u64,
+    window_start: Option<u64>,
     active: String,
-    active_range: Option<Range<usize>>,
+    active_range: Option<Range<u64>>,
     pending: Vec<AcceptedHypothesis>,
     last: Option<InterimSnapshot>,
 }
 
 impl WholeWindowState {
+    #[cfg(test)]
     pub(super) fn next(
         &mut self,
         finalized: &str,
-        finalized_samples: usize,
-        segment_start: usize,
-        window_start: usize,
-        window_end: usize,
+        finalized_samples: u64,
+        segment_start: u64,
+        window_start: u64,
+        window_end: u64,
         hypothesis: &str,
     ) -> Option<InterimSnapshot> {
+        self.try_next(
+            finalized,
+            finalized_samples,
+            segment_start,
+            window_start,
+            window_end,
+            hypothesis,
+        )
+        .unwrap_or(None)
+    }
+
+    pub(super) fn try_next(
+        &mut self,
+        finalized: &str,
+        finalized_samples: u64,
+        segment_start: u64,
+        window_start: u64,
+        window_end: u64,
+        hypothesis: &str,
+    ) -> Result<Option<InterimSnapshot>, AcceptedHypothesisCapacity> {
         self.pending
             .retain(|accepted| accepted.range.start >= finalized_samples);
         if self.window_start.is_some() && self.segment_start != segment_start {
-            self.finish_active_region(finalized_samples);
+            self.finish_active_region(finalized_samples)?;
             self.window_start = None;
         }
         self.segment_start = segment_start;
@@ -60,11 +86,13 @@ impl WholeWindowState {
                     .as_ref()
                     .is_some_and(|range| window_start >= range.end) =>
             {
-                self.finish_active_region(finalized_samples);
+                self.finish_active_region(finalized_samples)?;
                 (hypothesis.to_owned(), window_start)
             }
             Some(previous_start) if window_start > previous_start => {
-                let replacement = rebase_sliding_window(&self.active, hypothesis)?;
+                let Some(replacement) = rebase_sliding_window(&self.active, hypothesis) else {
+                    return Ok(None);
+                };
                 let active_start = self
                     .active_range
                     .as_ref()
@@ -94,13 +122,13 @@ impl WholeWindowState {
         );
         let snapshot = InterimSnapshot::new(finalized.to_owned(), agreed, tentative);
         if self.last.as_ref() == Some(&snapshot) {
-            return (!hypothesis.is_empty()).then_some(snapshot);
+            return Ok((!hypothesis.is_empty()).then_some(snapshot));
         }
         self.last = Some(snapshot.clone());
-        Some(snapshot)
+        Ok(Some(snapshot))
     }
 
-    pub(super) fn accepted_hypotheses(&self, committed_samples: usize) -> Vec<AcceptedHypothesis> {
+    pub(super) fn accepted_hypotheses(&self, committed_samples: u64) -> Vec<AcceptedHypothesis> {
         let mut accepted = self
             .pending
             .iter()
@@ -116,18 +144,26 @@ impl WholeWindowState {
         accepted
     }
 
-    fn finish_active_region(&mut self, finalized_samples: usize) {
+    fn finish_active_region(
+        &mut self,
+        finalized_samples: u64,
+    ) -> Result<(), AcceptedHypothesisCapacity> {
         let range = self.active_range.take();
         if !self.active.is_empty()
             && let Some(range) = range
             && range.start >= finalized_samples
         {
+            if self.pending.len() + 1 >= MAX_PENDING_ACCEPTED_HYPOTHESES {
+                self.active_range = Some(range);
+                return Err(AcceptedHypothesisCapacity);
+            }
             self.pending.push(AcceptedHypothesis::new(
                 range,
                 std::mem::take(&mut self.active),
             ));
         }
         self.active.clear();
+        Ok(())
     }
 }
 
@@ -172,7 +208,7 @@ fn owned_piece(has_prefix: bool, piece: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::WholeWindowState;
+    use super::{MAX_PENDING_ACCEPTED_HYPOTHESES, WholeWindowState};
     use crate::take::final_outcome::{FinalRangeOutcome, SkipReason, assemble_completion};
 
     #[test]
@@ -369,5 +405,38 @@ mod tests {
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].range(), 32_000..44_800);
         assert_eq!(accepted[0].text(), "last word");
+    }
+
+    #[test]
+    fn accepted_ranges_remain_absolute_beyond_native_indices() {
+        let origin = u64::from(u32::MAX) + 16_000;
+        let mut state = WholeWindowState::default();
+        state.next(
+            "",
+            origin,
+            origin,
+            origin,
+            origin + 16_000,
+            "absolute words",
+        );
+
+        let accepted = state.accepted_hypotheses(origin + 16_000);
+        let range: std::ops::Range<u64> = accepted[0].range();
+        assert_eq!(range, origin..origin + 16_000);
+    }
+
+    #[test]
+    fn pending_accepted_hypotheses_have_an_exact_bound() {
+        let mut state = WholeWindowState::default();
+        for index in 0..=MAX_PENDING_ACCEPTED_HYPOTHESES {
+            let start = u64::try_from(index).expect("test index fits") * 2;
+            let result = state.try_next("", 0, start, start, start + 1, "word");
+            if index < MAX_PENDING_ACCEPTED_HYPOTHESES {
+                assert!(result.is_ok());
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        assert!(state.pending.len() <= MAX_PENDING_ACCEPTED_HYPOTHESES);
     }
 }

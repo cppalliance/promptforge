@@ -1,15 +1,16 @@
 use base64::Engine as _;
 
-const INPUT_SAMPLE_RATE: usize = 24_000;
-const OUTPUT_SAMPLE_RATE: usize = 16_000;
+const INPUT_SAMPLE_RATE: u64 = 24_000;
+const INPUT_SAMPLE_RATE_USIZE: usize = 24_000;
 const BYTES_PER_SAMPLE: usize = size_of::<i16>();
 const MAX_BUFFERED_SECONDS: usize = 30;
 const MIN_COMMIT_MILLISECONDS: usize = 100;
 
 pub(super) const MAX_APPEND_AUDIO_BYTES: usize = 15 * 1024 * 1024;
 pub(super) const MAX_BUFFERED_AUDIO_BYTES: usize =
-    INPUT_SAMPLE_RATE * BYTES_PER_SAMPLE * MAX_BUFFERED_SECONDS;
-pub(super) const MIN_COMMIT_SAMPLES: usize = INPUT_SAMPLE_RATE * MIN_COMMIT_MILLISECONDS / 1_000;
+    INPUT_SAMPLE_RATE_USIZE * BYTES_PER_SAMPLE * MAX_BUFFERED_SECONDS;
+pub(super) const MIN_COMMIT_SAMPLES: usize =
+    INPUT_SAMPLE_RATE_USIZE * MIN_COMMIT_MILLISECONDS / 1_000;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub(super) enum AudioError {
@@ -28,16 +29,17 @@ pub(super) enum AudioError {
 #[derive(Debug, PartialEq)]
 pub(super) struct CommittedAudio {
     samples: Vec<f32>,
-    input_samples: usize,
+    input_samples: u64,
 }
 
 impl CommittedAudio {
+    #[cfg(test)]
     pub(super) fn samples(&self) -> &[f32] {
         &self.samples
     }
 
     #[cfg(test)]
-    pub(super) const fn input_samples(&self) -> usize {
+    pub(super) const fn input_samples(&self) -> u64 {
         self.input_samples
     }
 
@@ -45,12 +47,16 @@ impl CommittedAudio {
     pub(super) fn duration_seconds(&self) -> f64 {
         self.input_samples as f64 / INPUT_SAMPLE_RATE as f64
     }
+
+    pub(super) fn into_samples(self) -> Vec<f32> {
+        self.samples
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct AudioBuffer {
     input_bytes: usize,
-    input_samples: usize,
+    input_samples: u64,
     odd_byte: Option<u8>,
     resampler: Resampler24To16,
 }
@@ -69,6 +75,18 @@ impl AudioBuffer {
                 maximum_seconds: MAX_BUFFERED_SECONDS,
             });
         }
+        let carried = usize::from(self.odd_byte.is_some());
+        let complete_samples = (bytes.len() + carried) / BYTES_PER_SAMPLE;
+        let _ = self
+            .input_samples
+            .checked_add(u64::try_from(complete_samples).map_err(|_| {
+                AudioError::BufferTooLong {
+                    maximum_seconds: MAX_BUFFERED_SECONDS,
+                }
+            })?)
+            .ok_or(AudioError::BufferTooLong {
+                maximum_seconds: MAX_BUFFERED_SECONDS,
+            })?;
 
         self.input_bytes = next_bytes;
         let mut bytes = bytes.into_iter();
@@ -112,7 +130,7 @@ impl AudioBuffer {
         if self.odd_byte.is_some() {
             return Err(AudioError::IncompletePcm16Sample);
         }
-        if self.input_samples < MIN_COMMIT_SAMPLES {
+        if self.input_samples < MIN_COMMIT_SAMPLES as u64 {
             return Err(AudioError::CommitTooShort {
                 minimum_ms: MIN_COMMIT_MILLISECONDS,
             });
@@ -125,6 +143,7 @@ impl AudioBuffer {
     }
 
     pub(super) fn take_resampled(&mut self) -> Vec<f32> {
+        self.input_bytes = usize::from(self.odd_byte.is_some());
         std::mem::take(&mut self.resampler.output)
     }
 
@@ -158,46 +177,35 @@ pub(super) fn decode_base64(payload: &str) -> Result<Vec<u8>, AudioError> {
     Ok(decoded)
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct Resampler24To16 {
-    input_index: usize,
-    next_output_twice: usize,
+    phase: u8,
     previous: Option<f32>,
     output: Vec<f32>,
-    output_samples: usize,
 }
 
 impl Resampler24To16 {
     fn push(&mut self, sample: f32) {
-        let input_twice = self.input_index * 2;
-        if self.next_output_twice == input_twice {
-            self.emit(sample);
-            self.next_output_twice += 3;
-        } else if self.next_output_twice < input_twice {
-            let previous = self.previous.unwrap_or(sample);
-            self.emit(previous.midpoint(sample));
-            self.next_output_twice += 3;
+        match self.phase {
+            0 => self.emit(sample),
+            1 => {}
+            2 => self.emit(self.previous.unwrap_or(sample).midpoint(sample)),
+            _ => unreachable!("the resampler phase is modulo three"),
         }
         self.previous = Some(sample);
-        self.input_index += 1;
+        self.phase = if self.phase == 2 { 0 } else { self.phase + 1 };
     }
 
     fn flush(&mut self) {
-        if self.next_output_twice < self.input_index * 2
-            && let Some(previous) = self.previous
+        if self.phase == 2
+            && let Some(sample) = self.previous
         {
-            self.emit(previous);
-            self.next_output_twice += 3;
+            self.emit(sample);
         }
-        debug_assert_eq!(
-            self.output_samples,
-            (self.input_index * OUTPUT_SAMPLE_RATE).div_ceil(INPUT_SAMPLE_RATE)
-        );
     }
 
     fn emit(&mut self, sample: f32) {
         self.output.push(sample);
-        self.output_samples += 1;
     }
 }
 
@@ -396,5 +404,95 @@ mod tests {
                 maximum_seconds: 30,
             })
         );
+    }
+
+    #[test]
+    fn lifetime_duration_survives_output_drains_past_thirty_seconds() {
+        let one_second = encoded(&pcm_bytes(&vec![123_i16; 24_000]));
+        let mut audio = AudioBuffer::default();
+        let mut retained = 0;
+        for _ in 0..31 {
+            audio
+                .append_base64(&one_second)
+                .expect("lifetime input is not a retained-PCM limit");
+            retained += audio.take_resampled().len();
+        }
+        let committed = audio.commit().expect("lifetime input commits");
+
+        assert_eq!(committed.input_samples(), 31_u64 * 24_000);
+        assert_eq!(retained + committed.samples().len(), 31 * 16_000);
+        assert!((committed.duration_seconds() - 31.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn odd_byte_and_resampler_continuity_survive_repeated_output_drains() {
+        let input = (0..31 * 24_000 + 5)
+            .map(|index| i16::try_from(index % 2_048).expect("fixture sample fits") - 1_024)
+            .collect::<Vec<_>>();
+        let bytes = pcm_bytes(&input);
+
+        let mut coarse = AudioBuffer::default();
+        let coarse_split = 29 * 24_000 * 2 + 1;
+        coarse
+            .append_base64(&encoded(&bytes[..coarse_split]))
+            .expect("coarse odd chunk appends");
+        let mut expected = coarse.take_resampled();
+        coarse
+            .append_base64(&encoded(&bytes[coarse_split..]))
+            .expect("coarse carry completes");
+        let committed = coarse.commit().expect("coarse stream commits");
+        expected.extend_from_slice(committed.samples());
+
+        let mut compacted = AudioBuffer::default();
+        let mut actual = Vec::new();
+        let mut start = 0;
+        for end in [1, 9_601, 48_003, 240_007, bytes.len()] {
+            compacted
+                .append_base64(&encoded(&bytes[start..end]))
+                .expect("compacted chunk appends");
+            actual.extend(compacted.take_resampled());
+            start = end;
+        }
+        let committed = compacted.commit().expect("compacted stream commits");
+        actual.extend_from_slice(committed.samples());
+
+        assert_eq!(actual, expected);
+        assert_eq!(committed.input_samples(), 31_u64 * 24_000 + 5);
+    }
+
+    #[test]
+    fn odd_byte_and_drained_output_cross_the_u64_lifetime_boundary_without_phase_overflow() {
+        let samples = [123_i16, -456, 789];
+        let bytes = pcm_bytes(&samples);
+        let mut near_limit = AudioBuffer {
+            input_samples: u64::MAX - 3,
+            ..AudioBuffer::default()
+        };
+        near_limit
+            .append_base64(&encoded(&bytes[..1]))
+            .expect("the odd byte is carried at the lifetime boundary");
+        assert!(near_limit.take_resampled().is_empty());
+        near_limit
+            .append_base64(&encoded(&bytes[1..]))
+            .expect("the carried sample reaches the exact lifetime limit");
+        let actual = near_limit.take_resampled();
+
+        let mut ordinary = AudioBuffer::default();
+        ordinary
+            .append_base64(&encoded(&bytes[..1]))
+            .expect("ordinary odd byte is carried");
+        assert!(ordinary.take_resampled().is_empty());
+        ordinary
+            .append_base64(&encoded(&bytes[1..]))
+            .expect("ordinary carried samples append");
+        assert_eq!(actual, ordinary.take_resampled());
+        assert_eq!(near_limit.input_samples, u64::MAX);
+        assert_eq!(
+            near_limit.append_base64(&encoded(&0_i16.to_le_bytes())),
+            Err(AudioError::BufferTooLong {
+                maximum_seconds: 30,
+            })
+        );
+        assert!(near_limit.take_resampled().is_empty());
     }
 }

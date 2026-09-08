@@ -15,8 +15,8 @@ use gateway_stt_engine::EnginePolicy;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum SegmentOutcome {
-    Decode(Range<usize>),
-    Skipped(Range<usize>),
+    Decode(Range<u64>),
+    Skipped(Range<u64>),
 }
 
 /// Analysis frame length: 30 ms at 16 kHz, whisper.cpp's own VAD frame.
@@ -40,14 +40,14 @@ const MIN_SPEECH_SAMPLES: usize = EnginePolicy::SAMPLE_RATE / 4;
 #[derive(Debug, Default)]
 pub(crate) struct Segmenter {
     /// Next unscanned sample index.
-    cursor: usize,
+    cursor: u64,
     /// Start of the speech run currently being tracked, if any.
-    speech_start: Option<usize>,
+    speech_start: Option<u64>,
     /// Start of the silent run following the tracked speech, if one began.
-    silence_begin: Option<usize>,
+    silence_begin: Option<u64>,
     /// End of the last completed segment: everything before this index has
     /// been handed to the final pass (or discarded as a click).
-    consumed: usize,
+    consumed: u64,
 }
 
 impl Segmenter {
@@ -67,27 +67,32 @@ impl Segmenter {
     /// Index past which all audio has been segmented; the unprocessed tail
     /// of the take is `buffer[self.consumed()..]`.
     #[must_use]
-    pub(crate) fn consumed(&self) -> usize {
+    pub(crate) fn consumed(&self) -> u64 {
         self.consumed
     }
 
     /// Scans newly arrived frames and returns the range of the next
     /// completed speech segment, if one closed. Call in a loop: a large
     /// arrival can complete more than one segment.
-    pub(crate) fn poll(&mut self, buffer: &[f32]) -> Option<SegmentOutcome> {
-        while self.cursor + FRAME_SAMPLES <= buffer.len() {
-            let frame = &buffer[self.cursor..self.cursor + FRAME_SAMPLES];
+    pub(crate) fn poll(&mut self, buffer: &[f32], buffer_origin: u64) -> Option<SegmentOutcome> {
+        debug_assert!(self.cursor >= buffer_origin);
+        let frame_samples = FRAME_SAMPLES as u64;
+        while self.cursor - buffer_origin + frame_samples
+            <= u64::try_from(buffer.len()).unwrap_or(u64::MAX)
+        {
+            let start = usize::try_from(self.cursor - buffer_origin).ok()?;
+            let frame = &buffer[start..start + FRAME_SAMPLES];
             let silent = EnginePolicy::is_silence(frame);
             match (self.speech_start, silent) {
                 (Some(start), true) => {
                     let begin = self.silence_begin.get_or_insert(self.cursor);
-                    if self.cursor + FRAME_SAMPLES - *begin >= MIN_SILENCE_SAMPLES {
+                    if self.cursor + frame_samples - *begin >= MIN_SILENCE_SAMPLES as u64 {
                         let end = *begin;
                         self.speech_start = None;
                         self.silence_begin = None;
-                        self.cursor += FRAME_SAMPLES;
+                        self.cursor += frame_samples;
                         self.consumed = end;
-                        if end - start >= MIN_SPEECH_SAMPLES {
+                        if end - start >= MIN_SPEECH_SAMPLES as u64 {
                             return Some(SegmentOutcome::Decode(start..end));
                         }
                         return Some(SegmentOutcome::Skipped(start..end));
@@ -101,7 +106,7 @@ impl Segmenter {
                 }
                 (None, true) => {}
             }
-            self.cursor += FRAME_SAMPLES;
+            self.cursor += frame_samples;
         }
         None
     }
@@ -127,9 +132,9 @@ mod tests {
     }
 
     /// Drains every segment the segmenter can close over `buffer`.
-    fn close_all(segmenter: &mut Segmenter, buffer: &[f32]) -> Vec<Range<usize>> {
+    fn close_all(segmenter: &mut Segmenter, buffer: &[f32]) -> Vec<Range<u64>> {
         let mut ranges = Vec::new();
-        while let Some(outcome) = segmenter.poll(buffer) {
+        while let Some(outcome) = segmenter.poll(buffer, 0) {
             if let SegmentOutcome::Decode(range) = outcome {
                 ranges.push(range);
             }
@@ -165,11 +170,11 @@ mod tests {
         let range = &ranges[0];
         assert_eq!(range.start, 0);
         assert!(
-            range.end <= 2 * EnginePolicy::SAMPLE_RATE + FRAME_SAMPLES,
+            range.end <= (2 * EnginePolicy::SAMPLE_RATE + FRAME_SAMPLES) as u64,
             "the segment ends where the silence began: {range:?}"
         );
         assert!(
-            range.end - range.start >= 2 * EnginePolicy::SAMPLE_RATE - FRAME_SAMPLES,
+            range.end - range.start >= (2 * EnginePolicy::SAMPLE_RATE - FRAME_SAMPLES) as u64,
             "the segment holds the whole speech run: {range:?}"
         );
         assert_eq!(segmenter.consumed(), range.end);
@@ -198,11 +203,11 @@ mod tests {
         ]);
         let mut segmenter = Segmenter::new();
         let outcome = segmenter
-            .poll(&buffer)
+            .poll(&buffer, 0)
             .expect("the discarded click is an explicit outcome");
         assert_eq!(
             outcome,
-            SegmentOutcome::Skipped(0..EnginePolicy::SAMPLE_RATE * 3 / 25),
+            SegmentOutcome::Skipped(0..(EnginePolicy::SAMPLE_RATE * 3 / 25) as u64),
             "the frame-aligned click coverage is retained for reconciliation"
         );
         assert!(
@@ -228,27 +233,52 @@ mod tests {
     fn poll_is_incremental_over_a_growing_buffer() {
         let mut buffer = speech(1);
         let mut segmenter = Segmenter::new();
-        assert!(segmenter.poll(&buffer).is_none());
+        assert!(segmenter.poll(&buffer, 0).is_none());
         buffer.extend_from_slice(&silence(3));
-        let SegmentOutcome::Decode(first) = segmenter.poll(&buffer).expect("the segment closes")
+        let SegmentOutcome::Decode(first) = segmenter.poll(&buffer, 0).expect("the segment closes")
         else {
             panic!("ordinary speech is decoded");
         };
         assert_eq!(first.start, 0);
         // Polling again without new audio returns nothing.
-        assert!(segmenter.poll(&buffer).is_none());
+        assert!(segmenter.poll(&buffer, 0).is_none());
     }
 
     #[test]
     fn reset_rewinds_for_a_new_take() {
         let buffer = take(&[speech(1), silence(3)]);
         let mut segmenter = Segmenter::new();
-        assert!(segmenter.poll(&buffer).is_some());
+        assert!(segmenter.poll(&buffer, 0).is_some());
         segmenter.reset();
         assert_eq!(segmenter.consumed(), 0);
         assert!(
-            segmenter.poll(&buffer).is_some(),
+            segmenter.poll(&buffer, 0).is_some(),
             "after reset the same buffer segments again"
         );
+    }
+
+    #[test]
+    fn compacted_buffers_keep_absolute_segment_ranges() {
+        let mut buffer = take(&[speech(1), silence(3)]);
+        let mut segmenter = Segmenter::new();
+        let SegmentOutcome::Decode(first) = segmenter
+            .poll(&buffer, 0)
+            .expect("the first absolute segment closes")
+        else {
+            panic!("ordinary speech decodes");
+        };
+        let first_end = usize::try_from(first.end).expect("test range fits");
+        buffer.drain(..first_end);
+        buffer.extend(take(&[speech(1), silence(3)]));
+
+        let SegmentOutcome::Decode(second) = segmenter
+            .poll(&buffer, first.end)
+            .expect("the compacted segment closes")
+        else {
+            panic!("ordinary speech decodes");
+        };
+        let _: Range<u64> = second.clone();
+        assert!(second.start >= first.end);
+        assert_eq!(segmenter.consumed(), second.end);
     }
 }

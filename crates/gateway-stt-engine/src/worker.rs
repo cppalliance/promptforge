@@ -12,6 +12,7 @@ pub(crate) const FINAL_JOB_CAPACITY: usize = 8;
 struct Job {
     request: DecodeRequest,
     reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
+    lifetime_guard: Option<Arc<dyn Send + Sync>>,
 }
 
 /// Handle to a decoder confined to its worker thread.
@@ -61,16 +62,21 @@ impl Transcriber {
 
     fn submit(
         &self,
-        request: DecodeRequest,
+        mut request: DecodeRequest,
     ) -> Result<tokio::sync::oneshot::Receiver<Result<String, TranscribeError>>, TranscribeError>
     {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
+        let lifetime_guard = request.take_lifetime_guard();
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(job_tx) = &state.job_tx else {
             return Err(TranscribeError::WorkerGone);
         };
         job_tx
-            .try_send(Job { request, reply })
+            .try_send(Job {
+                request,
+                reply,
+                lifetime_guard,
+            })
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => TranscribeError::Overloaded,
                 mpsc::TrySendError::Disconnected(_) => TranscribeError::WorkerGone,
@@ -173,6 +179,7 @@ fn worker_loop(
             continue;
         }
         let result = catch_unwind(AssertUnwindSafe(|| decoder.decode(job.request)));
+        drop(job.lifetime_guard);
         if let Ok(result) = result {
             if !stopping.load(Ordering::Acquire) {
                 // A disconnected caller no longer needs this stateless result.

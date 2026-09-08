@@ -59,7 +59,7 @@ pub fn gateway_stt::test_fixtures::begin_scripted_replacement(&gateway_stt::Spee
 pub fn gateway_stt::test_fixtures::generation_counts(&gateway_stt::SpeechService) -> core::option::Option<(usize, usize)>
 pub fn gateway_stt::test_fixtures::generation_ownership(&gateway_stt::SpeechService) -> core::option::Option<gateway_stt::test_fixtures::GenerationOwnershipFixture>
 pub fn gateway_stt::test_fixtures::scripted_service(gateway_stt_engine::test_fixtures::ScriptedModelFactory, u64, u64) -> core::result::Result<gateway_stt::SpeechService, gateway_stt::SpeechError>
-pub fn gateway_stt::test_fixtures::segment_ranges(&[f32]) -> alloc::vec::Vec<core::ops::range::Range<usize>>
+pub fn gateway_stt::test_fixtures::segment_ranges(&[f32]) -> alloc::vec::Vec<core::ops::range::Range<u64>>
 #[non_exhaustive] pub enum gateway_stt::SpeechError
 #[non_exhaustive] pub gateway_stt::SpeechError::Artifact
 pub gateway_stt::SpeechError::Artifact::model: alloc::string::String

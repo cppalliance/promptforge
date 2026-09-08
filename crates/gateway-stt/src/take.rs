@@ -6,34 +6,34 @@ use std::sync::Mutex;
 #[cfg(test)]
 use gateway_stt_engine::TranscribeError;
 
+use crate::audio::AudioError;
 use crate::generation::GenerationLease;
 
 mod agreement;
 mod final_outcome;
 mod finalization;
 mod interim;
+mod pcm;
 mod state;
 mod text;
 mod window;
 
 #[cfg(test)]
-use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, reserve_segment, run_final_pipeline};
+use finalization::{FINAL_SEGMENT_CAPACITY, FinalCommand, FinalSegmentOwner, run_final_pipeline};
 use finalization::{FinalPipeline, spawn_final_pipeline};
 pub(crate) use interim::InterimSnapshot;
+#[cfg(test)]
+use pcm::PcmBudgetProbe;
+use pcm::RetainedPcm;
 use state::TakeState;
 use window::WholeWindowState;
 
-#[cfg(any(test, feature = "test-fixtures"))]
-fn tail(buffer: &[f32], window: usize) -> &[f32] {
-    &buffer[buffer.len().saturating_sub(window)..]
-}
-
 #[derive(Debug)]
 pub(crate) struct InterimAudioWindow {
-    pub(crate) samples: Vec<f32>,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
-    pub(crate) segment_start: usize,
+    pub(crate) samples: RetainedPcm,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+    pub(crate) segment_start: u64,
 }
 
 /// All mutable and immutable state belonging to one speech take.
@@ -47,8 +47,16 @@ pub(crate) struct Take {
 
 impl Take {
     pub(crate) fn new(guidance: Vec<String>, engine: Option<GenerationLease>) -> Self {
+        Self::with_state(guidance, engine, TakeState::default())
+    }
+
+    fn with_state(
+        guidance: Vec<String>,
+        engine: Option<GenerationLease>,
+        state: TakeState,
+    ) -> Self {
         let guidance = Arc::<[String]>::from(guidance);
-        let state = Arc::new(TakeState::default());
+        let state = Arc::new(state);
         let final_pipeline = engine
             .filter(GenerationLease::has_final_pass)
             .map(|engine| spawn_final_pipeline(engine, Arc::clone(&guidance), Arc::clone(&state)));
@@ -61,6 +69,15 @@ impl Take {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_pcm_limit(
+        guidance: Vec<String>,
+        engine: Option<GenerationLease>,
+        limit: usize,
+    ) -> Self {
+        Self::with_state(guidance, engine, TakeState::with_pcm_limit(limit))
+    }
+
+    #[cfg(test)]
     fn without_final(guidance: Vec<String>) -> Self {
         Self::new(guidance, None)
     }
@@ -69,8 +86,8 @@ impl Take {
         &self.guidance
     }
 
-    pub(crate) fn append(&self, samples: &[f32]) {
-        TakeState::lock(&self.state.buffer).extend_from_slice(samples);
+    pub(crate) fn append(&self, samples: Vec<f32>) -> Result<(), AudioError> {
+        TakeState::lock(&self.state.buffer).append(samples)
     }
 
     pub(crate) fn submit_closed_segments(&self) {
@@ -79,7 +96,7 @@ impl Take {
         }
     }
 
-    pub(crate) fn consumed(&self) -> usize {
+    pub(crate) fn consumed(&self) -> u64 {
         TakeState::lock(&self.state.segmenter).consumed()
     }
 
@@ -87,21 +104,24 @@ impl Take {
     pub(crate) fn uncommitted_snapshot(&self, window_samples: usize) -> Vec<f32> {
         let consumed = self.consumed();
         let buffer = TakeState::lock(&self.state.buffer);
-        let uncommitted = &buffer[consumed.min(buffer.len())..];
-        tail(uncommitted, window_samples).to_vec()
+        buffer.snapshot_from(consumed, window_samples)
     }
 
-    pub(crate) fn interim_window(&self, window_samples: usize) -> InterimAudioWindow {
+    pub(crate) fn interim_window(
+        &self,
+        window_samples: usize,
+    ) -> Result<InterimAudioWindow, AudioError> {
         let segment_start = self.consumed();
         let buffer = TakeState::lock(&self.state.buffer);
-        let end = buffer.len();
-        let start = segment_start.max(end.saturating_sub(window_samples));
-        InterimAudioWindow {
-            samples: buffer[start.min(end)..].to_vec(),
+        let end = buffer.end();
+        let start = segment_start
+            .max(end.saturating_sub(u64::try_from(window_samples).unwrap_or(u64::MAX)));
+        Ok(InterimAudioWindow {
+            samples: buffer.copy_range(start..end)?,
             start,
             end,
             segment_start,
-        }
+        })
     }
 
     pub(crate) fn finalized(&self) -> String {
@@ -111,19 +131,26 @@ impl Take {
     pub(crate) fn next_window_snapshot(
         &self,
         hypothesis: &str,
-        segment_start: usize,
-        window_start: usize,
-        window_end: usize,
+        segment_start: u64,
+        window_start: u64,
+        window_end: u64,
     ) -> Option<InterimSnapshot> {
         let (finalized, finalized_samples) = self.state.finalized_snapshot();
-        TakeState::lock(&self.whole_window).next(
+        let update = TakeState::lock(&self.whole_window).try_next(
             &finalized,
             finalized_samples,
             segment_start,
             window_start,
             window_end,
             hypothesis,
-        )
+        );
+        if let Ok(snapshot) = update {
+            snapshot
+        } else {
+            self.state
+                .record_failure("accepted hypothesis capacity is reached".to_owned());
+            None
+        }
     }
 
     #[cfg(test)]
@@ -137,6 +164,11 @@ impl Take {
 
     pub(crate) fn pending_failure(&self) -> Option<String> {
         self.state.pending_failure()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pcm_budget_probe(&self) -> PcmBudgetProbe {
+        TakeState::lock(&self.state.buffer).budget_probe()
     }
 
     #[cfg(any(test, feature = "test-fixtures"))]
@@ -154,9 +186,11 @@ impl Take {
     pub(crate) fn finalization(&self) -> Option<finalization::TakeFinalization> {
         let pipeline = self.final_pipeline.as_ref()?;
         let consumed = self.consumed();
-        let buffer = TakeState::lock(&self.state.buffer);
-        let committed_samples = buffer.len();
-        let tail = buffer[consumed.min(buffer.len())..].to_vec();
+        let mut buffer = TakeState::lock(&self.state.buffer);
+        let committed_samples = buffer.end();
+        let tail = buffer
+            .transfer_range(consumed..committed_samples)
+            .unwrap_or_else(|_| panic!("final tail range must remain resident"));
         drop(buffer);
         let accepted = TakeState::lock(&self.whole_window).accepted_hypotheses(committed_samples);
         Some(pipeline.finalization(tail, consumed, committed_samples, accepted))
@@ -171,27 +205,24 @@ mod tests {
 
     use tokio::sync::{mpsc, oneshot};
 
-    use super::{FinalCommand, Take, reserve_segment, run_final_pipeline};
+    use super::{FinalCommand, FinalSegmentOwner, Take, run_final_pipeline};
 
     #[test]
     fn miri_final_segment_reservation_is_exact() {
-        let pending = AtomicUsize::new(0);
+        let pending = Arc::new(AtomicUsize::new(0));
+        let mut owners = Vec::new();
         for _ in 0..super::FINAL_SEGMENT_CAPACITY {
-            assert!(reserve_segment(&pending));
+            owners.push(
+                FinalSegmentOwner::reserve(&pending).expect("capacity owns the admitted segment"),
+            );
         }
-        assert!(!reserve_segment(&pending));
+        assert!(FinalSegmentOwner::reserve(&pending).is_none());
         assert_eq!(
             pending.load(Ordering::Acquire),
             super::FINAL_SEGMENT_CAPACITY
         );
-    }
-
-    #[test]
-    fn tail_returns_the_trailing_window() {
-        let buffer: Vec<f32> = (0u8..10).map(f32::from).collect();
-        assert_eq!(super::tail(&buffer, 4), &[6.0, 7.0, 8.0, 9.0]);
-        assert_eq!(super::tail(&buffer, 100), &buffer);
-        assert_eq!(super::tail(&[], 4), &[] as &[f32]);
+        drop(owners);
+        assert_eq!(pending.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -229,6 +260,9 @@ mod tests {
     async fn completed_pipeline_releases_its_retained_dependency() {
         let (commands, receiver) = mpsc::channel(super::FINAL_SEGMENT_CAPACITY);
         let state = Arc::new(super::TakeState::default());
+        let tail = super::TakeState::lock(&state.buffer)
+            .transfer_range(0..0)
+            .expect("empty completion owns an empty absolute range");
         let retained = Arc::new(());
         let weak: Weak<()> = Arc::downgrade(&retained);
         let pipeline_retained = Arc::clone(&retained);
@@ -236,8 +270,7 @@ mod tests {
             receiver,
             Arc::from([]),
             state,
-            Arc::new(AtomicUsize::new(0)),
-            move |_, _, _| {
+            move |_| {
                 let retained = Arc::clone(&pipeline_retained);
                 async move {
                     drop(retained);
@@ -249,7 +282,7 @@ mod tests {
         let (reply, completion) = oneshot::channel();
         commands
             .send(FinalCommand::Complete {
-                tail: Vec::new(),
+                tail,
                 start: 0,
                 committed_samples: 0,
                 accepted: Vec::new(),

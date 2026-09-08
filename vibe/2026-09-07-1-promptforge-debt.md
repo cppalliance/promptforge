@@ -565,7 +565,7 @@ isProject: false
 - Exclusions: no blind append fallback, fuzzy unbounded alignment, browser-side accumulation, protocol change, or final-authority change.
 - Focused verification: from the repository root run `cargo test -p gateway-stt`, `cargo clippy -p gateway-stt --all-targets --all-features -- -D warnings`, and `node tools/check-stt-architecture.mjs`.
 
-### Step 30: Make take audio ownership absolute and compactable
+### Step 30: Make take audio ownership absolute and compactable [completed]
 
 - Component and piece: Component 9 of 9, arbitrary-duration Realtime; separate lifetime duration from retained PCM and make every range survive source-buffer compaction.
 - Dependency: depends on Step 29 because compaction may retain only text whose window ownership is already stable.

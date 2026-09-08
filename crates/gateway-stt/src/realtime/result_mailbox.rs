@@ -97,6 +97,11 @@ impl ResultMailbox {
         debug_assert!(replaced.is_none(), "opaque item IDs must be unique");
     }
 
+    #[cfg(test)]
+    pub(crate) fn reserved_items(&self) -> usize {
+        self.slots.len()
+    }
+
     #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn push_delta(
         &mut self,

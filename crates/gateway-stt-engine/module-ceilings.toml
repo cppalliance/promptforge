@@ -6,7 +6,7 @@ public_root_count = 7
 test_fixture_public_root_count = 8
 
 [modules]
-"decoder.rs" = 87
+"decoder.rs" = 110
 "engine.rs" = 251
 "error.rs" = 83
 "lib.rs" = 18
@@ -20,4 +20,4 @@ test_fixture_public_root_count = 8
 "test_fixtures/tests/scenario_cleanup/construction.rs" = 100
 "test_fixtures/tests/scenario_cleanup/decode.rs" = 150
 "translation.rs" = 50
-"worker.rs" = 460
+"worker.rs" = 467

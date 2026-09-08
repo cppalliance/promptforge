@@ -19,9 +19,9 @@ pub(super) enum InterimTaskOutput {
     Decode {
         epoch: InterimEpoch,
         item_id: String,
-        segment_start: usize,
-        audio_start: usize,
-        audio_end: usize,
+        segment_start: u64,
+        audio_start: u64,
+        audio_end: u64,
         transcript: Result<String, String>,
     },
 }
@@ -72,7 +72,7 @@ pub(crate) struct Session {
     pub(super) current_epoch: Option<InterimEpoch>,
     pub(super) next_epoch: u64,
     pub(super) interim_task: Option<InterimTask>,
-    pub(super) last_interim_window: Option<(usize, usize, usize)>,
+    pub(super) last_interim_window: Option<(u64, u64, u64)>,
     pub(super) canceled_tasks: Vec<InterimTask>,
     pub(super) canceled_task_failed: bool,
     pub(super) committed: HashMap<String, CommittedItem>,

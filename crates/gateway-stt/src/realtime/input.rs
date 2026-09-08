@@ -74,6 +74,7 @@ impl UncommittedInput {
         engine: Option<GenerationLease>,
     ) -> Self {
         Self::from_audio(item_id, snapshot, engine, AudioBuffer::default())
+            .unwrap_or_else(|_| unreachable!("an empty audio buffer owns no retained PCM"))
     }
 
     pub(crate) fn first_append(
@@ -84,35 +85,64 @@ impl UncommittedInput {
     ) -> Result<Self, AudioError> {
         let mut audio = AudioBuffer::default();
         audio.append_base64(payload)?;
-        Ok(Self::from_audio(item_id, snapshot, engine, audio))
+        Self::from_audio(item_id, snapshot, engine, audio)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn first_append_with_pcm_limit(
+        item_id: String,
+        snapshot: InputSnapshot,
+        engine: Option<GenerationLease>,
+        payload: &str,
+        limit: usize,
+    ) -> Result<Self, AudioError> {
+        let mut audio = AudioBuffer::default();
+        audio.append_base64(payload)?;
+        let guidance = Self::guidance(&snapshot);
+        let take = Take::with_pcm_limit(guidance, engine, limit);
+        Self::from_audio_and_take(item_id, snapshot, audio, take)
     }
 
     fn from_audio(
         item_id: String,
         snapshot: InputSnapshot,
         engine: Option<GenerationLease>,
-        mut audio: AudioBuffer,
-    ) -> Self {
-        let guidance = if snapshot.prompt.is_empty() {
+        audio: AudioBuffer,
+    ) -> Result<Self, AudioError> {
+        let take = Take::new(Self::guidance(&snapshot), engine);
+        Self::from_audio_and_take(item_id, snapshot, audio, take)
+    }
+
+    fn guidance(snapshot: &InputSnapshot) -> Vec<String> {
+        if snapshot.prompt.is_empty() {
             Vec::new()
         } else {
             vec![snapshot.prompt.clone()]
-        };
-        let take = Take::new(guidance, engine);
-        take.append(&audio.take_resampled());
-        let mut input = Self {
+        }
+    }
+
+    fn from_audio_and_take(
+        item_id: String,
+        snapshot: InputSnapshot,
+        mut audio: AudioBuffer,
+        take: Take,
+    ) -> Result<Self, AudioError> {
+        take.append(audio.take_resampled())?;
+        take.submit_closed_segments();
+        Ok(Self {
             item_id,
             snapshot,
             audio,
             take,
-        };
-        input.submit_resampled();
-        input
+        })
     }
 
     pub(crate) fn append_base64(&mut self, payload: &str) -> Result<(), AudioError> {
-        self.audio.append_base64(payload)?;
-        self.submit_resampled();
+        let mut audio = self.audio.clone();
+        audio.append_base64(payload)?;
+        self.take.append(audio.take_resampled())?;
+        self.audio = audio;
+        self.take.submit_closed_segments();
         Ok(())
     }
 
@@ -145,21 +175,20 @@ impl UncommittedInput {
         self.audio.validate_commit()
     }
 
-    pub(crate) fn seal(mut self) -> SealedInput {
-        let committed = self.audio.commit_validated();
-        self.take.append(committed.samples());
-        SealedInput {
+    pub(crate) fn seal(self) -> Result<SealedInput, Box<(Self, AudioError)>> {
+        let mut audio = self.audio.clone();
+        let committed = audio.commit_validated();
+        let duration_seconds = committed.duration_seconds();
+        if let Err(error) = self.take.append(committed.into_samples()) {
+            return Err(Box::new((self, error)));
+        }
+        Ok(SealedInput {
             item_id: self.item_id,
             #[cfg(any(test, feature = "test-fixtures"))]
             snapshot: self.snapshot,
             take: self.take,
-            duration_seconds: committed.duration_seconds(),
-        }
-    }
-
-    fn submit_resampled(&mut self) {
-        self.take.append(&self.audio.take_resampled());
-        self.take.submit_closed_segments();
+            duration_seconds,
+        })
     }
 }
 
