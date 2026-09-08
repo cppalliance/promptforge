@@ -190,7 +190,7 @@ Components, in dependency order:
 - `crates/gateway/src/lib.rs`: add the `audio_voices` handler following the `list_models` pattern over `routing.models()`, taking the union of the active profile's speech models' `voices`, deduplicated and sorted, entries as `{"id", "name"}` objects; register `/v1/audio/voices` in `build_router`.
 - Tests in `crates/gateway/tests/it/speech.rs`: the voices-union shape (the id-first entry shape is a compatibility surface and is test-pinned), deduplication and ordering, an empty union when the profile has no speech models, and non-speech models contributing nothing.
 
-### Step 7: Live-provider parity script and verification note
+### Step 7: Live-provider parity script and verification note [completed]
 
 - `tools/gateway-tts-parity.py` (new, dev-only, never in CI): drives the official OpenAI SDK against the gateway behind a throwaway profile, running the speech call with the default format and with `wav` plus the voices call, and, when `TOGETHER_API_KEY` is set, re-runs the same assertions against the live provider.
 - `design/note-gateway-tts-phase-1-verification.md`: record the observed dialect (default-format `Content-Type` proving the mp3 pin reached the provider, chunked vs `Content-Length`, emotion-tag handling, 429/503 envelopes if provocable, rejected or ignored fields); when the key is absent, write the same note as a recipe with a deferral line and do not block on it.
