@@ -14,6 +14,9 @@ todos:
   - id: sidecar-boundary
     content: Validate sidecar capabilities and unify replacement and shutdown ownership
     status: pending
+  - id: arbitrary-dictation
+    content: Keep one logical dictation take for arbitrary duration through bounded rolling audio ownership
+    status: pending
   - id: verify-removal
     content: Run focused, architecture, native, UI, and release exit gates
     status: pending
@@ -38,6 +41,7 @@ isProject: false
   - Replace temporal lifecycle meshes with explicit transaction or reducer state.
   - Make sidecar validation a type-level precondition and use one authoritative Gateway identity snapshot.
   - Split oversized integration suites and ratchet both production and test surfaces.
+  - Let one Realtime item and one Workshop take continue for arbitrary duration while retained PCM remains bounded.
 - Non-goals:
   - Unrelated pre-existing debt.
   - A fifth production STT crate, a new speech protocol, or changed installed STT behavior.
@@ -50,6 +54,7 @@ isProject: false
   - Configuration version 2 accepts canonical top-level `[stt]` only, and the local installed configuration remains valid without rewriting.
   - Feature-enabled fixture API size is measured, temporary dead-code allowances are gone, and native CI validates an exact toolchain contract.
   - Gateway profile switching, Workshop Realtime parsing, dictation ownership, agent supervision, and sidecar recovery have explicit bounded state owners.
+  - The 30-second audio budget applies to resident, queued, and actively decoding PCM rather than total dictation duration; finalized text and exact lifetime duration survive compaction.
   - Existing public wire behavior, config version 2, installed behavior, and release gates remain green.
 
 ## Debt Inventory
@@ -115,6 +120,13 @@ isProject: false
   - Store the validated connection identity in the same immutable `GatewayBinding` snapshot as HTTP and model clients. Route quit through the current authoritative snapshot and remove the separate `GatewaySlot`.
   - Make resolve, validation, wait, and launch loops cancellation-aware. `GatewaySupervisor` owns and joins its thread under a finite shutdown budget, and publication is impossible after cancellation.
   - Split boot planning and one-shot launch from continuous supervision, identity, and recovery tests. Ratchet each resulting module.
+- Arbitrary-duration Realtime settlement:
+  - Keep one provisional item ID, one logical `Take`, one commit, and one completion for the full recording. Do not roll the browser into periodic items.
+  - Track lifetime 24 kHz input samples separately from retained 16 kHz PCM. Represent all segment, interim, accepted-hypothesis, final-outcome, and compaction positions as absolute 64-bit sample ranges.
+  - Force a final range every 20 seconds when no natural silence boundary closes continuous speech. Decode each later forced range with the prior 8 seconds of overlap, so no forced window exceeds 28 seconds.
+  - Transfer PCM ownership to the bounded final pipeline before compacting the source buffer. The 30-second budget includes resident, queued, and actively decoding PCM; a slower-than-realtime backend returns explicit bounded overload without deleting accepted text.
+  - Reconcile forced-window overlap with the existing punctuation-insensitive token matcher. Freeze only text before the aligned overlap and carry the newest overlap forward. A missing alignment fails closed without duplicating or omitting canonical text.
+  - Keep only the canonical finalized transcript, one unresolved overlap, bounded accepted candidates, and exact lifetime duration. Completion remains one authoritative event and interim wire snapshots remain complete replacement text.
 
 ## Testing Plan
 
@@ -133,6 +145,7 @@ isProject: false
 - `PF-RTSTT-DC-006` and `DC-PF-P2-004`: test count before and after every split is identical; new source and test ceilings pass.
 - `DC-PF-P2-001`: block each sidecar resolve, validation, launch, and health phase, request Workshop exit, and prove joined termination within budget with no later publication.
 - `DC-PF-P2-002` and `DC-PF-P2-003`: raw connection files cannot publish; wrong image, boot identity, health, or bearer cannot create a capability; same-port and same-key replacement works; configured-key replacement is atomic; replacement raced with quit targets one current generation.
+- Arbitrary-duration Realtime: run hour-equivalent synthetic input with varied append sizes and continuous speech. Assert one item and completion, exact 3,600-second usage, gap-free absolute coverage, retained PCM at or below 30 seconds, forced windows at or below 28 seconds, bounded commands and text state, stable interim replacement across compaction, and no deletion or duplication at pause, overlap, punctuation, repeated-phrase, stop, clear, cancellation, or overload boundaries.
 - Exit checks: repository formatting, warnings-denied workspace lint, workspace tests, documentation tests, architecture gates, feature-enabled API snapshots, native Whisper, both Miri targets, both UI suites, guide generation cleanliness, unsigned local package recovery, and existing signed release CI.
 
 ## Decision Record
@@ -148,11 +161,13 @@ isProject: false
   - Centralize native fixtures in existing feature-gated test infrastructure, not a new production crate.
   - Extract internal transaction and reducer modules without changing wire or installed behavior.
   - Split tests before adding ceilings so counts prove semantic preservation.
+  - Use a 20-second forced-final stride with 8 seconds of overlap under the existing 30-second retained-audio budget. These constants may change from measurements without changing ownership.
 - Assumptions and risks:
   - Other unpublished installations using `[workshop.stt]` will fail validation after removal. That break is intentional for the selected pre-1.0 scope.
   - Bounded logging deliberately permits loss during permanent sink stalls; summaries and emergency diagnostics are part of the contract.
   - A validated capability expands `shared-sidecar` public API but narrows Workshop mutation authority.
   - External runner provisioning may already pin Rust; repository checks must match the actual service image before enforcement.
+  - No finite-memory implementation can accept infinite input when final decoding remains slower than capture forever. The supported arbitrary-duration path requires steady-state final throughput at least equal to capture and fails boundedly without erasing accepted text when that invariant is violated.
 
 ## Project survey
 
@@ -533,10 +548,66 @@ isProject: false
 ### Step 28: Split and ratchet sidecar lifecycle ownership [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; separate boot planning and one-shot launch from continuous supervision, validated identity, and recovery tests, then freeze the new boundaries.
-- Dependency: depends on Step 27 because the selected order is to settle cancellation and joined ownership before extracting modules and recording their final ceilings; it is last because full exit gates may run only after every debt ID is closed.
+- Dependency: depends on Step 27 because the selected order is to settle cancellation and joined ownership before extracting modules and recording their final ceilings.
 - Debt IDs: `DC-PF-P2-004`, with closure verification for every debt ID in this plan.
 - Artifacts: `crates/workshop/src/gateway.rs`; create `crates/workshop/src/gateway/boot.rs`, `supervisor.rs`, `identity.rs`, `tests/boot.rs`, `tests/recovery.rs`, and `tests/identity.rs`; add `crates/workshop/module-ceilings.toml` and `crates/workshop/tests/module_ceiling.rs`; append settled implementation facts only to `vibe/archdoc-next.md`, and update public documentation only for facts settled by Steps 15 through 28. Never edit `vibe/archdoc.md` during the run.
-- Scope: preserve boot, launch, validation, recovery, publication, and shutdown behavior; record ceilings for every resulting module; run focused tests first, then formatting, workspace lint, workspace tests, documentation, architecture, feature-enabled API, native Whisper, both Miri, both UI, guide-generation, unsigned-package recovery, and signed-release gates.
+- Scope: preserve boot, launch, validation, recovery, publication, and shutdown behavior; record ceilings for every resulting module and run its focused component gates.
 - Exclusions: no pre-documentation of planned APIs, unrelated debt cleanup, component ownership reassignment, speech behavior change, or expansion beyond defects introduced, worsened, or exposed by this plan.
-- Focused verification: from the repository root run `cargo test -p shared-sidecar -p workshop-server -p workshop`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --locked`, `cargo doc --workspace --no-deps`, `node tools/check-stt-architecture.test.mjs`, `node tools/check-stt-architecture.mjs`, and `cargo run -p build-user-guide`; run `npm run typecheck`, `npm run build`, and `npm test` in both UI directories; then require the native Whisper, both Miri, unsigned-package recovery, and signed-release workflow jobs to pass.
-- Component boundary: ends Component 8 and the plan; review cumulative Steps 24 through 28 against the Step 23 commit, then run the complete exit gates from a clean tree.
+- Focused verification: from the repository root run `cargo test -p shared-sidecar -p workshop-server -p workshop`, `cargo fmt --all --check`, focused warnings-denied lint, Workshop module ceilings, strict documentation, and `cargo run -p build-user-guide`; require a second guide generation to be clean.
+- Component boundary: ends Component 8; review cumulative Steps 24 through 28 against the Step 23 commit.
+
+### Step 29: Preserve live hypotheses across disjoint revisions [completed]
+
+- Component and piece: Component 9 of 9, arbitrary-duration Realtime; prevent an overlapping rolling window with no trustworthy token overlap from deleting or duplicating the current hypothesis.
+- Dependency: follows Step 28 only for component closure and precedes audio compaction because rolling text ownership must be stable before ranges become absolute.
+- Artifacts: `crates/gateway-stt/src/take/window.rs`, its focused transition tests, and `crates/gateway-stt/module-ceilings.toml`.
+- Scope: preserve the current active hypothesis while audio windows still overlap; append a new region exactly once only when audio ranges are disjoint; retire a prior region immediately when the finalized watermark already owns its full range.
+- Exclusions: no blind append fallback, fuzzy unbounded alignment, browser-side accumulation, protocol change, or final-authority change.
+- Focused verification: from the repository root run `cargo test -p gateway-stt`, `cargo clippy -p gateway-stt --all-targets --all-features -- -D warnings`, and `node tools/check-stt-architecture.mjs`.
+
+### Step 30: Make take audio ownership absolute and compactable
+
+- Component and piece: Component 9 of 9, arbitrary-duration Realtime; separate lifetime duration from retained PCM and make every range survive source-buffer compaction.
+- Dependency: depends on Step 29 because compaction may retain only text whose window ownership is already stable.
+- Artifacts: `crates/gateway-stt/src/audio.rs`, `segment.rs`, `take.rs`, `take/state.rs`, `take/window.rs`, `take/final_outcome.rs`, `take/finalization.rs`, `realtime/input.rs`, focused unit and Miri tests, and module ceilings.
+- Scope: use absolute 64-bit sample positions, a compactable rolling PCM buffer with an origin, exact lifetime 24 kHz duration, and aggregate retained-sample reservation across resident, queued, and decoding owners. Transfer ownership before draining.
+- Exclusions: no forced speech cut or changed wire event yet; no unbounded outcome, PCM, queue, or accepted-hypothesis history.
+- Focused verification: run `cargo test -p gateway-stt -F test-fixtures`, both gateway-stt Miri filters, strict lint, and architecture gates.
+
+### Step 31: Force and reconcile bounded final windows
+
+- Component and piece: Component 9 of 9, arbitrary-duration Realtime; process nonstop speech through bounded overlapping final windows without changing the logical item.
+- Dependency: depends on Step 30 because forced windows require absolute ranges, retained-sample reservation, and compaction ownership.
+- Artifacts: `crates/gateway-stt/src/segment.rs`, `take/finalization.rs`, `take/final_outcome.rs`, `take/state.rs`, `take/window.rs`, Realtime session scheduling, scripted decoder fixtures, and ceilings.
+- Scope: force 20-second strides, include the prior 8 seconds in later final decodes, keep each decode at or below 28 seconds, reconcile overlap before freezing text, and keep completion authoritative and ordered.
+- Exclusions: no periodic Realtime commits, multiple browser takes, raised lifetime cap, unbounded retry, or silent text guess when overlap cannot be aligned.
+- Focused verification: run full and feature-enabled gateway-stt tests, Miri, mounted Gateway Realtime tests, strict lint, and architecture gates.
+
+### Step 32: Prove arbitrary-duration one-take dictation
+
+- Component and piece: Component 9 of 9, arbitrary-duration Realtime; close the end-to-end contract and operator-visible failure behavior.
+- Dependency: depends on Step 31 because the hour-equivalent proof consumes final rolling ownership and reconciliation.
+- Artifacts: Gateway Realtime integration fixtures, Workshop relay and UI tests only where the unchanged one-item contract needs proof, user guides, generated guides, and acceptance evidence.
+- Scope: simulate at least one hour of varied-size continuous input without sleeping; prove one item, one logical take, one completion, exact usage, bounded retained PCM and work, stable hypotheses, stop, clear, cancellation, and explicit throughput overload that preserves accepted text.
+- Exclusions: no browser auto-rollover, extra item IDs, changed microphone format, or new configuration surface.
+- Focused verification: run Gateway, gateway-stt, Workshop relay, both UI suites, guide generation twice, formatting, strict lint, Miri, and architecture gates.
+- Component boundary: ends Component 9; review cumulative Steps 29 through 32 against the Step 28 commit.
+
+### Step 33: Restore direct Workshop builds
+
+- Component and piece: release ergonomics; restore the documented contract that plain `cargo build -p workshop --release` does not require manual Tauri sidecar staging while preserving explicit installer staging.
+- Dependency: follows functional dictation closure so the final operator build uses the corrected binaries.
+- Artifacts: `crates/workshop/build.rs`, Tauri build configuration or narrowly scoped build helper, build tests, and `README.md`.
+- Scope: distinguish direct Cargo compilation from Tauri bundling; direct compilation uses the sibling Cargo output without requiring `crates/workshop/binaries`, while installer builds retain target-suffixed external-binary staging.
+- Exclusions: no recursive Cargo invocation from `build.rs`, placeholder executable, product rename, embedded Gateway, or release-workflow weakening.
+- Focused verification: from a clean missing staging directory run `cargo build -p gateway --release` then `cargo build -p workshop --release`; separately stage the Gateway and run the unsigned NSIS package command.
+
+### Step 34: Run complete release verification
+
+- Component and piece: final closure; run every local and runner-backed exit gate after arbitrary-duration dictation and direct-build recovery.
+- Dependency: depends on Steps 29 through 33 and runs only from a clean tree with no open finding.
+- Artifacts: verification logs, the completed markers and ledger, release workflows, unsigned local installer, and signed CI results.
+- Scope: run formatting, warnings-denied workspace lint, workspace tests, strict docs, architecture, feature APIs, native Whisper, both Miri targets, both UI suites, guide-generation cleanliness, direct and unsigned package builds, installed long-dictation acceptance, and signed release CI.
+- Exclusions: no additional feature or cleanup.
+- Focused verification: use the complete exit matrix already recorded in the Project survey and require installed continuous dictation beyond 30 seconds to preserve one take without deletion or duplication.
+- Component boundary: closes the plan.
