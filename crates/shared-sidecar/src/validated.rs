@@ -47,8 +47,8 @@ const LIVENESS_BUDGET: Duration = Duration::from_secs(2);
 /// };
 /// ```
 ///
-/// Even with the public test-fixture feature enabled, external code cannot
-/// choose the process image used to mint a production capability:
+/// No test-fixture feature exposes another production-capability
+/// constructor:
 ///
 /// ```compile_fail
 /// use shared_sidecar::{ConnectionFile, ValidatedConnection};
@@ -61,7 +61,7 @@ const LIVENESS_BUDGET: Duration = Duration::from_secs(2);
 ///     version: "test".into(),
 ///     started_at: "2026-09-07T00:00:00Z".into(),
 /// };
-/// let _ = ValidatedConnection::validate_for_test(raw, "my-test-binary");
+/// let _ = ValidatedConnection::validate_for_test(raw);
 /// ```
 ///
 /// The crate-private named validator is equally unavailable:

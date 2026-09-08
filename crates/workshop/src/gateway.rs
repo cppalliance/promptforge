@@ -22,7 +22,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use shared_sidecar::{ConnectionFile, LaunchDecision, Resolution, SidecarError};
+use shared_sidecar::{
+    ConnectionFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
+};
 use workshop_server::Config;
 
 /// The sibling executable the shell launches, beside its own.
@@ -339,8 +341,10 @@ pub(crate) fn supervise(
                     launch_and_attach(&run_dir, exe)
                 },
                 |file| {
+                    let validated = ValidatedConnection::validate(file.clone())
+                        .context("validate the replacement gateway identity")?;
                     updater
-                        .replace_sidecar(file)
+                        .replace_sidecar(&validated)
                         .context("publish the replacement gateway endpoint")?;
                     *slot
                         .lock()
@@ -428,7 +432,9 @@ mod tests {
     use super::*;
 
     use std::io::{Read, Write as _};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+    use std::process::{Child, Command, Stdio};
+    use std::sync::Arc;
 
     /// The test process's own image name, so the probe's pid and image
     /// checks pass and the test reaches the liveness probes.
@@ -484,27 +490,165 @@ mod tests {
 
     /// A fixture gateway: answers `GET /health` with 200 and the key
     /// probe with 200 only when the bearer matches `expected_key`.
-    fn fixture_gateway(expected_key: &'static str) -> u16 {
+    fn fixture_gateway(expected_key: impl Into<String>) -> u16 {
+        let expected_key = Arc::new(expected_key.into());
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture");
         let port = listener.local_addr().expect("fixture address").port();
         std::thread::spawn(move || {
             while let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0u8; 1024];
-                let Ok(read) = stream.read(&mut buffer) else {
-                    continue;
-                };
-                let request = String::from_utf8_lossy(&buffer[..read]);
-                let response = if request.starts_with("GET /health ")
-                    || request.contains(&format!("Authorization: Bearer {expected_key}\r\n"))
-                {
-                    &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
-                } else {
-                    &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
-                };
-                let _ = stream.write_all(response);
+                let expected_key = Arc::clone(&expected_key);
+                std::thread::spawn(move || {
+                    loop {
+                        let mut buffer = [0u8; 1024];
+                        let Ok(read) = stream.read(&mut buffer) else {
+                            break;
+                        };
+                        if read == 0 {
+                            break;
+                        }
+                        let request = String::from_utf8_lossy(&buffer[..read]);
+                        let accepted = request.starts_with("GET /health ")
+                            || request.lines().any(|line| {
+                                line.eq_ignore_ascii_case(&format!(
+                                    "Authorization: Bearer {expected_key}"
+                                ))
+                            });
+                        let response = if accepted {
+                            &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
+                        } else {
+                            &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
+                        };
+                        if stream.write_all(response).is_err() {
+                            break;
+                        }
+                    }
+                });
             }
         });
         port
+    }
+
+    const CONTROL_ADDRESS_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_CONTROL_ADDRESS";
+    const EXPECTED_KEY_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_EXPECTED_KEY";
+
+    struct NamedGateway {
+        child: Child,
+        port: u16,
+        _directory: tempfile::TempDir,
+    }
+
+    impl NamedGateway {
+        fn spawn(expected_key: &str) -> Self {
+            let control = TcpListener::bind("127.0.0.1:0").expect("bind fixture control");
+            control
+                .set_nonblocking(true)
+                .expect("make fixture control nonblocking");
+            let directory = tempfile::TempDir::new().expect("create fixture executable directory");
+            let executable = directory.path().join(GATEWAY_EXE_NAME);
+            std::fs::copy(
+                std::env::current_exe().expect("locate test executable"),
+                &executable,
+            )
+            .expect("copy test executable under the Gateway image name");
+            let mut child = Command::new(&executable)
+                .args([
+                    "--exact",
+                    "gateway::tests::validated_gateway_fixture_process",
+                    "--ignored",
+                ])
+                .env(
+                    CONTROL_ADDRESS_ENV,
+                    control
+                        .local_addr()
+                        .expect("read fixture control address")
+                        .to_string(),
+                )
+                .env(EXPECTED_KEY_ENV, expected_key)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start the named Gateway fixture process");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut stream = loop {
+                match control.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            child.try_wait().expect("observe fixture process").is_none(),
+                            "the named Gateway fixture exited before becoming ready"
+                        );
+                        assert!(
+                            Instant::now() < deadline,
+                            "the named Gateway fixture did not become ready"
+                        );
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept fixture control connection: {error}"),
+                }
+            };
+            let mut port = [0_u8; 2];
+            stream
+                .read_exact(&mut port)
+                .expect("read fixture Gateway port");
+            Self {
+                child,
+                port: u16::from_be_bytes(port),
+                _directory: directory,
+            }
+        }
+
+        fn connection_file(&self, api_key: &str, epoch: u64, started_at: &str) -> ConnectionFile {
+            ConnectionFile {
+                port: self.port,
+                api_key: api_key.to_owned(),
+                pid: self.child.id(),
+                epoch,
+                version: "test".to_owned(),
+                started_at: started_at.to_owned(),
+            }
+        }
+    }
+
+    impl Drop for NamedGateway {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    #[ignore = "runs only as a named child process"]
+    fn validated_gateway_fixture_process() {
+        let Ok(control_address) = std::env::var(CONTROL_ADDRESS_ENV) else {
+            return;
+        };
+        let expected_key =
+            std::env::var(EXPECTED_KEY_ENV).expect("the fixture child receives an expected key");
+        let port = fixture_gateway(expected_key);
+        TcpStream::connect(control_address)
+            .and_then(|mut stream| stream.write_all(&port.to_be_bytes()))
+            .expect("announce named fixture readiness");
+        loop {
+            std::thread::park();
+        }
+    }
+
+    fn get(url: &str, path: &str) -> String {
+        let url = url::Url::parse(url).expect("the Workshop URL parses");
+        let host = url.host_str().expect("the Workshop URL has a host");
+        let port = url.port().expect("the Workshop URL has a port");
+        let mut stream = TcpStream::connect((host, port)).expect("connect to Workshop");
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
+        )
+        .expect("send Workshop request");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("read Workshop response");
+        response
     }
 
     /// An executable directory, with or without the sibling gateway.
@@ -724,13 +868,30 @@ mod tests {
     fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_atomically() {
         use std::cell::{Cell, RefCell};
 
-        let original = live_file(54_375, "old-key");
-        let replacement = ConnectionFile {
-            api_key: "new-key".to_owned(),
-            pid: original.pid + 1,
-            epoch: original.epoch + 1,
-            started_at: "2026-09-03T12:00:01Z".to_owned(),
-            ..original.clone()
+        let gateway = NamedGateway::spawn("new-key");
+        let original = gateway.connection_file("old-key", 1_757_000_000, "2026-09-03T12:00:00Z");
+        let replacement = gateway.connection_file("new-key", 1_757_000_001, "2026-09-03T12:00:01Z");
+        let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
+        let server = workshop_server::fixtures::spawn(workshop_server::Config {
+            gateway: workshop_server::GatewayConfig {
+                base_url: format!("http://127.0.0.1:{}", original.port),
+                api_key: original.api_key.clone(),
+            },
+            server: workshop_server::ServerConfig {
+                bind: "127.0.0.1:0".to_owned(),
+                open_browser: false,
+                state_dir: state_dir.path().to_owned(),
+            },
+            agents: workshop_server::AgentsConfig::default(),
+        })
+        .expect("spawn Workshop against the original same-port key");
+        let updater = server.gateway_updater();
+        let publish_replacement = |file: &ConnectionFile| -> anyhow::Result<()> {
+            let validated = ValidatedConnection::validate(file.clone())
+                .context("validate the named local Gateway")?;
+            updater
+                .replace_sidecar(&validated)
+                .context("publish through the production updater")
         };
         let elapsed = Cell::new(Duration::ZERO);
         let recoveries = Cell::new(0_u8);
@@ -753,8 +914,9 @@ mod tests {
                 Ok(replacement.clone())
             },
             |file| {
+                publish_replacement(file)?;
                 published.borrow_mut().push(file.clone());
-                Ok(())
+                Ok::<(), anyhow::Error>(())
             },
             |delay| {
                 assert!(
@@ -786,6 +948,12 @@ mod tests {
             original.api_key,
             "a configured key edit propagates with the replacement identity"
         );
+        let response = get(server.url(), "/gateway/api/admin/status");
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "the real publisher replaces the bearer on the reused port: {response}"
+        );
+        server.shutdown().expect("stop the Workshop fixture");
     }
 
     #[test]

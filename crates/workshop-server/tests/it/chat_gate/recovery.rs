@@ -24,19 +24,11 @@ async fn a_live_chat_session_restarts_on_the_replacement_port_and_key() {
         }),
     ))
     .await;
-    let port = url::Url::parse(&replacement)
-        .expect("the replacement URL parses")
-        .port()
-        .expect("the replacement URL carries a port");
-    gateway_updater(&server.state)
-        .replace_sidecar(&shared_sidecar::ConnectionFile {
-            port,
-            api_key: "replacement-key".to_owned(),
-            pid: std::process::id(),
-            epoch: 1_757_000_000,
-            version: "test".to_owned(),
-            started_at: "2026-09-07T14:14:31Z".to_owned(),
-        })
+    replace_gateway(
+        &gateway_updater(&server.state),
+        &replacement,
+        "replacement-key",
+    )
         .expect("the replacement publishes");
 
     let replacement_wait = next_wait_token(&mut socket).await;

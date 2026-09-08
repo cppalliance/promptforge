@@ -170,8 +170,12 @@ pub fn state_with_gateway(
     // Startup phases are reported as they run; with no client connected
     // yet these land on an empty bus, ready for the first session.
     crate::resolve::report(gateway, &push);
-    let gateway_binding =
-        GatewayBinding::new(gateway.base_url(), gateway.api_key()).map_err(StateError::Gateway)?;
+    let gateway_binding = GatewayBinding::new_with_identity(
+        gateway.base_url(),
+        gateway.api_key(),
+        gateway.identity().cloned(),
+    )
+    .map_err(StateError::Gateway)?;
     let progress = Arc::new(ProgressHub::new());
     let backoff = ReconnectBackoff::new();
     let workspace = Workspace::new();

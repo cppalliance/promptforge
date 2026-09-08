@@ -213,3 +213,5 @@ N84 | observation | clone-block @ crates/shared-sidecar/src/validated.rs::fixtur
 N85 | observation | clone-block @ crates/shared-sidecar/src/stale.rs::fixture_gateway: repeats the two-request Gateway fixture server in capability tests | Add validated sidecar connection capability
 N86 | observation | clone-block @ crates/shared-sidecar/src/lock.rs::fixture_gateway: repeats the two-response socket loop from stale-resolution tests | Add validated sidecar connection capability
 N87 | observation | clone-block @ crates/shared-sidecar/src/stale.rs::a_transiently_silent_health_endpoint_is_not_stale: repeats the two-response socket loop from launch-lock tests | Add validated sidecar connection capability
+N88 | observation | clone-block @ crates/workshop-server/src/test_gateway.rs::ValidatedGateway::spawn: duplicates named child Gateway setup in Workshop supervision tests | Require capability-based Gateway publication
+N89 | observation | clone-block @ crates/workshop/src/gateway.rs::tests::NamedGateway::spawn: duplicates named child Gateway setup in workshop-server capability tests | Require capability-based Gateway publication

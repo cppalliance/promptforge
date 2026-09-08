@@ -37,7 +37,7 @@ use promptforge_model_client::client::{
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_store::StoreRef;
 use promptforge_tools::{Tool, ToolCatalog};
-use workshop_server::fixtures::{gateway_updater, state_with_gateway};
+use workshop_server::fixtures::{gateway_updater, replace_gateway, state_with_gateway};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, InputFrame, InputResponse, ResolvedGateway,
     ServerConfig, UserInputTool, WaitRegistry, WorkshopObserver, deliver_input_response, router,

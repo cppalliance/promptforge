@@ -500,7 +500,7 @@ isProject: false
 - Exclusions: no caller-only validation, no public constructor, no secret-bearing debug output, and no shift of supervision ownership into `workshop-server`.
 - Focused verification: from the repository root run `cargo test -p shared-sidecar` and `cargo doc -p shared-sidecar --no-deps`.
 
-### Step 25: Require capability-based Gateway publication
+### Step 25: Require capability-based Gateway publication [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; narrow the public updater and place validated identity in the immutable binding snapshot.
 - Dependency: depends on Step 24 because `GatewayUpdater` must accept the unforgeable capability rather than revalidate or trust a raw `ConnectionFile`; it also supplies the authoritative identity consumed by Steps 26 and 27.

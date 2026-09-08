@@ -62,6 +62,8 @@ At startup the server resolves the gateway endpoint: a live `gateway.json` conne
 
 A background heartbeat polls the gateway's `GET /health` every five seconds and reports transitions on the status bus: "Gateway unreachable" when the gateway stops answering, "Connected to gateway" when it comes back. While the gateway is known down, `GET /v1/models` answers 502 `gateway_unreachable` instead of waiting on a dead connection, and the Model menu's `chat_ready` reads false. A reconnect re-fetches the model catalog and pushes it to every `/ws` session as a `{"type":"models",...}` frame, so a UI that booted during the outage refreshes its model picker by itself. Once an endpoint has resolved, the server boots and serves the UI whether or not the gateway has ever answered.
 
+An embedding host can publish a local Gateway replacement only by presenting `shared_sidecar::ValidatedConnection`; raw connection files are not accepted. The server publishes the HTTP client, model client, endpoint, bearer, generation, and validated process identity together as one immutable snapshot, so long-lived consumers never observe mixed replacement state. Explicitly configured LAN gateways have no local process identity and are never supervised or stopped by the desktop shell.
+
 ## UI development
 
 The chat UI is TypeScript under `ui/src/`, bundled by esbuild. Building the crate requires Node.js 22: run `npm ci` in `ui/` once per checkout. Every `cargo build` runs the UI build through the crate's `build.rs` (via the shared `build-ui` helper), writing the bundle to `$OUT_DIR/ui-dist/` - never into the repository. Debug builds read the bundle from disk on every request; release builds minify and embed it into the binary. `ui/node_modules/` and `ui/dist/` are gitignored.

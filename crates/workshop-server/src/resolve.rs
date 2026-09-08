@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use shared_sidecar::{Resolution, SidecarError, StaleReason};
+use shared_sidecar::{Resolution, SidecarError, StaleReason, ValidatedConnection};
 
 use crate::config::GatewayConfig;
 use crate::protocol::Activity;
@@ -22,6 +22,7 @@ use crate::push::Push;
 pub struct ResolvedGateway {
     base_url: String,
     api_key: String,
+    identity: Option<ValidatedConnection>,
     source: GatewaySource,
     stale: Option<StaleReason>,
 }
@@ -45,6 +46,7 @@ impl ResolvedGateway {
         Self {
             base_url: config.base_url.clone(),
             api_key: config.api_key.clone(),
+            identity: None,
             source: GatewaySource::Config,
             stale: None,
         }
@@ -60,6 +62,11 @@ impl ResolvedGateway {
     #[must_use]
     pub fn api_key(&self) -> &str {
         &self.api_key
+    }
+
+    /// The validated local Gateway boot, when discovery won.
+    pub(crate) fn identity(&self) -> Option<&ValidatedConnection> {
+        self.identity.as_ref()
     }
 
     /// Which source won the resolution.
@@ -151,14 +158,18 @@ fn resolve_with(
     let mut stale = None;
     if let Some(run_dir) = run_dir {
         match probe(run_dir) {
-            Ok(Resolution::Attach(file)) => {
-                return Ok(ResolvedGateway {
-                    base_url: format!("http://127.0.0.1:{}", file.port),
-                    api_key: file.api_key,
-                    source: GatewaySource::ConnectionFile,
-                    stale: None,
-                });
-            }
+            Ok(Resolution::Attach(file)) => match validate_resolved(file) {
+                Ok(identity) => {
+                    return Ok(ResolvedGateway {
+                        base_url: format!("http://127.0.0.1:{}", identity.port()),
+                        api_key: identity.api_key().to_owned(),
+                        identity: Some(identity),
+                        source: GatewaySource::ConnectionFile,
+                        stale: None,
+                    });
+                }
+                Err(reason) => stale = Some(reason),
+            },
             Ok(Resolution::Stale(reason)) => {
                 tracing::warn!(
                     reason = stale_clause(reason),
@@ -179,11 +190,20 @@ fn resolve_with(
         return Ok(ResolvedGateway {
             base_url: config.base_url.clone(),
             api_key: config.api_key.clone(),
+            identity: None,
             source: GatewaySource::Config,
             stale,
         });
     }
     Err(ResolveError::new(stale))
+}
+
+/// Reifies the shared resolver's live result as the capability stored in
+/// Workshop's immutable Gateway snapshot.
+fn validate_resolved(
+    file: shared_sidecar::ConnectionFile,
+) -> Result<ValidatedConnection, StaleReason> {
+    ValidatedConnection::validate(file)
 }
 
 /// Reports the resolution outcome where the house surfaces startup state:
@@ -299,19 +319,23 @@ mod tests {
         let port = listener.local_addr().expect("fixture address").port();
         std::thread::spawn(move || {
             while let Ok((mut stream, _)) = listener.accept() {
-                let mut buffer = [0u8; 1024];
-                let Ok(read) = stream.read(&mut buffer) else {
-                    continue;
-                };
-                let request = String::from_utf8_lossy(&buffer[..read]);
-                let response = if request.starts_with("GET /health ")
-                    || request.contains(&format!("Authorization: Bearer {expected_key}\r\n"))
-                {
-                    &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
-                } else {
-                    &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
-                };
-                let _ = stream.write_all(response);
+                for _ in 0..2 {
+                    let mut buffer = [0u8; 1024];
+                    let Ok(read) = stream.read(&mut buffer) else {
+                        break;
+                    };
+                    let request = String::from_utf8_lossy(&buffer[..read]);
+                    let accepted = request.starts_with("GET /health ")
+                        || request.contains(&format!("Authorization: Bearer {expected_key}\r\n"));
+                    let response = if accepted {
+                        &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"[..]
+                    } else {
+                        &b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"[..]
+                    };
+                    if stream.write_all(response).is_err() {
+                        break;
+                    }
+                }
             }
         });
         port
@@ -328,16 +352,23 @@ mod tests {
     #[test]
     fn a_live_connection_file_wins_over_explicit_config() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let port = fixture_gateway("file-key");
-        live_file(port, "file-key")
+        let gateway = crate::test_gateway::ValidatedGateway::spawn("file-key");
+        let port = gateway.port();
+        gateway
+            .connection_file("file-key", 1_757_000_000, "2026-09-03T12:00:00Z")
             .write_to(dir.path())
             .expect("write");
 
-        let resolved = resolve_with(Some(dir.path()), &explicit_config(), probe_own_image)
+        let resolved = resolve_with(Some(dir.path()), &explicit_config(), probe)
             .expect("a live file resolves");
         assert_eq!(resolved.source(), GatewaySource::ConnectionFile);
         assert_eq!(resolved.base_url(), format!("http://127.0.0.1:{port}"));
         assert_eq!(resolved.api_key(), "file-key");
+        assert_eq!(
+            resolved.identity().map(ValidatedConnection::port),
+            Some(port),
+            "the winning sidecar retains its validated identity for the initial snapshot"
+        );
         assert_eq!(resolved.stale(), None);
     }
 
@@ -527,6 +558,7 @@ mod tests {
         let resolved = ResolvedGateway {
             base_url: "http://127.0.0.1:4000".to_owned(),
             api_key: "k".to_owned(),
+            identity: None,
             source: GatewaySource::Config,
             stale: Some(StaleReason::KeyRejected),
         };

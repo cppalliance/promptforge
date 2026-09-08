@@ -23,7 +23,9 @@ use axum::routing::post;
 use serde_json::json;
 use tokio::sync::Notify;
 
-use workshop_server::fixtures::{gateway_updater, state_with_gateway};
+use workshop_server::fixtures::{
+    gateway_updater, replace_gateway as replace_fixture_gateway, state_with_gateway,
+};
 use workshop_server::{
     AgentsConfig, AppState, Config, GatewayConfig, ResolvedGateway, ServerConfig, router,
 };
@@ -177,20 +179,8 @@ async fn spawn_agent_server_for_gateway(base_url: String) -> (String, tempfile::
 }
 
 /// Publishes `base_url` as the next complete Gateway generation.
-fn replace_gateway(state: &AppState, base_url: &str, epoch: u64) {
-    let port = url::Url::parse(base_url)
-        .expect("the replacement URL parses")
-        .port()
-        .expect("the replacement URL carries a port");
-    gateway_updater(state)
-        .replace_sidecar(&shared_sidecar::ConnectionFile {
-            port,
-            api_key: "replacement-key".to_owned(),
-            pid: std::process::id(),
-            epoch,
-            version: "test".to_owned(),
-            started_at: "2026-09-07T14:14:31Z".to_owned(),
-        })
+fn replace_gateway(state: &AppState, base_url: &str, _epoch: u64) {
+    replace_fixture_gateway(&gateway_updater(state), base_url, "replacement-key")
         .expect("the replacement Gateway publishes");
 }
 

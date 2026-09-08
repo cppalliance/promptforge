@@ -52,6 +52,7 @@ default = []
 
 [dev-dependencies]
 tempfile.workspace = true
+workshop-server = { workspace = true, features = ["test-fixtures"] }
 # The test-fixtures feature exposes `resolve_for_test`, so the boot
 # decision tests run the real liveness gauntlet against the test binary's
 # own process image.

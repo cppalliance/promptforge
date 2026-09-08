@@ -22,12 +22,16 @@ use crate::gateway::{GatewayClient, GatewayError};
 pub(crate) struct GatewaySnapshot {
     /// HTTP and Realtime client used by Workshop routes and the heartbeat.
     client: GatewayClient,
+    /// Normalized Gateway base URL paired with both clients.
+    base_url: String,
     /// Bearer paired with `client`, retained for the progress subscriber.
     api_key: String,
     /// Agent completion client built from the same URL and bearer.
     model_client: Option<ModelClient>,
     /// Monotonic generation assigned before this snapshot is published.
     generation: u64,
+    /// Proven local Gateway boot, absent for an explicitly configured endpoint.
+    identity: Option<shared_sidecar::ValidatedConnection>,
 }
 
 impl fmt::Debug for GatewaySnapshot {
@@ -35,8 +39,11 @@ impl fmt::Debug for GatewaySnapshot {
         formatter
             .debug_struct("GatewaySnapshot")
             .field("client", &self.client)
+            .field("base_url", &self.base_url)
+            .field("api_key", &"<redacted>")
             .field("model_client", &"<redacted>")
             .field("generation", &self.generation)
+            .field("identity", &self.identity)
             .finish_non_exhaustive()
     }
 }
@@ -54,7 +61,7 @@ impl GatewaySnapshot {
 
     /// The Gateway base URL in this generation.
     pub(crate) fn base_url(&self) -> &str {
-        self.client.base_url()
+        &self.base_url
     }
 
     /// The Gateway bearer in this generation.
@@ -88,8 +95,18 @@ impl fmt::Debug for GatewayBinding {
 
 impl GatewayBinding {
     /// Builds generation zero from one endpoint and credential pair.
+    #[cfg(test)]
     pub(crate) fn new(base_url: &str, api_key: &str) -> Result<Self, GatewayError> {
-        let snapshot = Arc::new(build_snapshot(base_url, api_key, 0)?);
+        Self::new_with_identity(base_url, api_key, None)
+    }
+
+    /// Builds generation zero with an optional validated local identity.
+    pub(crate) fn new_with_identity(
+        base_url: &str,
+        api_key: &str,
+        identity: Option<shared_sidecar::ValidatedConnection>,
+    ) -> Result<Self, GatewayError> {
+        let snapshot = Arc::new(build_snapshot(base_url, api_key, 0, identity)?);
         Ok(Self {
             current: Arc::new(ArcSwap::from(snapshot)),
             next_generation: Arc::new(AtomicU64::new(1)),
@@ -101,12 +118,15 @@ impl GatewayBinding {
     /// Builds a binding around a client carrying test-specific timeouts.
     pub(crate) fn from_client(client: GatewayClient) -> Self {
         let model_client = model_client(&client.base_url, &client.api_key);
+        let base_url = client.base_url.clone();
         let api_key = client.api_key.clone();
         let snapshot = Arc::new(GatewaySnapshot {
             client,
+            base_url,
             api_key,
             model_client,
             generation: 0,
+            identity: None,
         });
         Self {
             current: Arc::new(ArcSwap::from(snapshot)),
@@ -132,13 +152,24 @@ impl GatewayBinding {
     }
 
     /// Builds and atomically publishes a replacement, then wakes consumers.
+    #[cfg(any(test, feature = "test-fixtures"))]
     pub(crate) fn replace(&self, base_url: &str, api_key: &str) -> Result<(), GatewayError> {
+        self.replace_with_identity(base_url, api_key, None)
+    }
+
+    /// Builds and atomically publishes a complete replacement generation.
+    fn replace_with_identity(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        identity: Option<shared_sidecar::ValidatedConnection>,
+    ) -> Result<(), GatewayError> {
         let _replacement = self
             .replacement
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
-        let snapshot = Arc::new(build_snapshot(base_url, api_key, generation)?);
+        let snapshot = Arc::new(build_snapshot(base_url, api_key, generation, identity)?);
         self.current.store(snapshot);
         self.changed.send_replace(generation);
         Ok(())
@@ -152,7 +183,20 @@ impl GatewayBinding {
     }
 }
 
-/// A restricted publisher for a replacement local-sidecar connection file.
+/// A restricted publisher for a replacement validated local sidecar.
+///
+/// Raw connection files cannot cross this publication boundary:
+///
+/// ```compile_fail
+/// use shared_sidecar::ConnectionFile;
+///
+/// # fn publish(
+/// #     updater: &workshop_server::GatewayUpdater,
+/// #     raw: &ConnectionFile,
+/// # ) -> Result<(), workshop_server::GatewayError> {
+/// updater.replace_sidecar(raw)
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct GatewayUpdater {
     binding: GatewayBinding,
@@ -171,18 +215,28 @@ impl GatewayUpdater {
     /// long-lived Workshop consumer only after the complete snapshot is live.
     ///
     /// # Errors
-    /// Returns [`GatewayError::InvalidSidecar`] if the file is structurally
-    /// invalid, or [`GatewayError::Build`] if the replacement HTTP client
-    /// cannot initialize.
+    /// Returns [`GatewayError::Build`] if the replacement HTTP client cannot
+    /// initialize.
     pub fn replace_sidecar(
         &self,
-        file: &shared_sidecar::ConnectionFile,
+        connection: &shared_sidecar::ValidatedConnection,
     ) -> Result<(), GatewayError> {
-        if let Some(reason) = file.validation_error() {
-            return Err(GatewayError::InvalidSidecar { reason });
-        }
-        self.binding
-            .replace(&format!("http://127.0.0.1:{}", file.port), &file.api_key)
+        self.binding.replace_with_identity(
+            &format!("http://127.0.0.1:{}", connection.port()),
+            connection.api_key(),
+            Some(connection.clone()),
+        )
+    }
+
+    /// Replaces the configured Gateway in the crate's integration fixtures
+    /// without manufacturing a production sidecar capability.
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn replace_fixture(
+        &self,
+        base_url: &str,
+        api_key: &str,
+    ) -> Result<(), GatewayError> {
+        self.binding.replace(base_url, api_key)
     }
 }
 
@@ -191,14 +245,18 @@ fn build_snapshot(
     base_url: &str,
     api_key: &str,
     generation: u64,
+    identity: Option<shared_sidecar::ValidatedConnection>,
 ) -> Result<GatewaySnapshot, GatewayError> {
     let client = GatewayClient::new(base_url, api_key)?;
-    let model_client = model_client(base_url, api_key);
+    let base_url = client.base_url().to_owned();
+    let model_client = model_client(&base_url, api_key);
     Ok(GatewaySnapshot {
         client,
+        base_url,
         api_key: api_key.to_owned(),
         model_client,
         generation,
+        identity,
     })
 }
 
@@ -223,45 +281,4 @@ pub(crate) fn model_client(base_url: &str, api_key: &str) -> Option<ModelClient>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn endpoint_and_credential_replace_as_one_snapshot() {
-        let binding =
-            GatewayBinding::new("http://127.0.0.1:54375", "old-key").expect("binding builds");
-        let old = binding.snapshot();
-
-        binding
-            .replace("http://127.0.0.1:54379", "new-key")
-            .expect("replacement builds");
-        let new = binding.snapshot();
-
-        assert_eq!(old.client().base_url, "http://127.0.0.1:54375");
-        assert_eq!(old.client().api_key, "old-key");
-        assert_eq!(new.client().base_url, "http://127.0.0.1:54379");
-        assert_eq!(new.client().api_key, "new-key");
-        assert!(new.generation() > old.generation());
-        assert_eq!(binding.generation(), new.generation());
-    }
-
-    #[test]
-    fn updater_rejects_an_invalid_connection_file_before_publication() {
-        let binding =
-            GatewayBinding::new("http://127.0.0.1:54375", "old-key").expect("binding builds");
-        let before = binding.snapshot();
-        let error = binding
-            .updater()
-            .replace_sidecar(&shared_sidecar::ConnectionFile {
-                port: 0,
-                api_key: "new-key".to_owned(),
-                pid: 7,
-                epoch: 0,
-                version: "test".to_owned(),
-                started_at: String::new(),
-            })
-            .expect_err("an invalid connection file is refused");
-        assert!(matches!(error, GatewayError::InvalidSidecar { .. }));
-        assert_eq!(binding.generation(), before.generation());
-    }
-}
+mod tests;

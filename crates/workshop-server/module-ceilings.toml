@@ -60,6 +60,9 @@
 # `not_granted`) and its case in the seam test. Shrank in the chat-relay
 # excision: `BadRequest` and `StreamUnsupported` left with their tests.
 "error.rs" = 494
+# Integration-test exports and feature-gated setup live outside the crate
+# root so fixture growth cannot regrow public composition.
+"fixtures.rs" = 57
 # Grew by the config-panel proxy seam: the `base_url` accessor,
 # `ForwardedResponse`, and the `forward` relay the /gateway/api route
 # calls - one more request shape on the same gateway HTTP client. Shrank
@@ -70,6 +73,11 @@
 # New module: one atomically replaceable Gateway URL and bearer generation
 # shared by HTTP, Realtime, progress, heartbeat, and agent model clients.
 "gateway_binding.rs" = 267
+# Capability-only publication and coherent immutable snapshot coverage.
+"gateway_binding/tests.rs" = 95
+# Deterministically synchronized publisher and reader coverage for complete
+# immutable Gateway generations.
+"gateway_binding/tests/atomic.rs" = 80
 # Split from gateway.rs: fixed-target authenticated WebSocket connections
 # for the Realtime relay path.
 "gateway/socket.rs" = 94
@@ -148,8 +156,9 @@
 # the count is its in-file unit tests. Grew by the review round's branch
 # coverage: the probe-I/O-failure degradation, the no-run-directory skip,
 # and the explicitly-configured-default-URL pin - same responsibility,
-# more tests.
-"resolve.rs" = 553
+# more tests. Grew by retaining a validated sidecar identity in the resolved
+# value and proving the initial immutable binding receives it.
+"resolve.rs" = 588
 "routes.rs" = 8
 # Asset route handlers and their tests are separate responsibilities. The
 # split lowers the production module and records the test module independently.
@@ -227,6 +236,9 @@
 "session/log.rs" = 15
 "session/menu.rs" = 165
 "status.rs" = 199
+# Crate-private named local process used to exercise production sidecar
+# validation without exposing a fixture capability constructor.
+"test_gateway.rs" = 163
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its

@@ -35,6 +35,8 @@ mod serve;
 mod session;
 mod session_agents;
 mod status;
+#[cfg(test)]
+mod test_gateway;
 mod workspace;
 
 /// Crate-internal test seams, re-exported to the integration-test binary.
@@ -46,50 +48,7 @@ mod workspace;
 /// `test-fixtures` feature, which the crate's own dev-dependency enables
 /// for every test build while production builds do not.
 #[doc(hidden)]
-pub mod fixtures {
-    pub use crate::app::state_with_gateway;
-    pub use crate::backoff::ReconnectBackoff;
-    pub use crate::catalog::CatalogBus;
-    pub use crate::heartbeat::{GatewayHealth, Heartbeat};
-    pub use crate::menu::{MenuBus, MenuRefusal};
-    pub use crate::protocol::{Activity, Progress, Severity, StatusBarUpdate};
-    pub use crate::push::Push;
-    pub use crate::status::StatusBus;
-
-    #[cfg(feature = "test-fixtures")]
-    pub use crate::app::fixtures::spawn_gateway;
-
-    /// Returns the host-only Gateway publisher from fixture state.
-    #[cfg(feature = "test-fixtures")]
-    #[must_use]
-    pub fn gateway_updater(state: &crate::AppState) -> crate::GatewayUpdater {
-        state.gateway_updater()
-    }
-
-    /// Starts a heartbeat around a fixture Gateway client.
-    #[must_use]
-    pub fn spawn_heartbeat(
-        client: crate::GatewayClient,
-        push: crate::Push,
-        health: GatewayHealth,
-        interval: std::time::Duration,
-        backoff: ReconnectBackoff,
-    ) -> Heartbeat {
-        crate::heartbeat::spawn(
-            crate::gateway_binding::GatewayBinding::from_client(client),
-            push,
-            health,
-            interval,
-            backoff,
-        )
-    }
-
-    /// Spawns a Workshop test server against the explicit configured Gateway.
-    #[cfg(feature = "test-fixtures")]
-    pub fn spawn(config: crate::Config) -> Result<crate::ServerHandle, crate::SpawnError> {
-        crate::serve::spawn_resolved(config)
-    }
-}
+pub mod fixtures;
 
 pub use app::{AppState, DEFAULT_ADDR, StateError, router};
 pub use config::{
