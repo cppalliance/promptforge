@@ -200,13 +200,19 @@
 # Thinking LED, which only on_assistant_reply's idle otherwise clears)
 # and its pinning test.
 "session_agents.rs" = 1028
-# New module: cancellation provenance and accepted-turn settlement.
-"session_agents/lifecycle.rs" = 102
+# Cancellation provenance moved into the pure supervisor transition model;
+# this module retains the shared handle and accepted-turn notification.
+"session_agents/lifecycle.rs" = 95
 # New module: one agent session's run lifecycle across turn cancellation,
 # delayed catalog readiness, and usable chat-catalog replacement.
 "session_agents/supervisor.rs" = 170
 # Catalog-generation waits split from agent run orchestration.
 "session_agents/supervisor/catalog.rs" = 53
+# New pure supervisor event reducer. The async loop remains unchanged until
+# its separate wiring step.
+"session_agents/supervisor/transition.rs" = 431
+# Exhaustive event and effect tables plus exactly-once settlement invariants.
+"session_agents/supervisor/transition/tests.rs" = 336
 # New module: the /agents/ws socket - one select! loop owning the
 # socket, the launch/attach/input_response/cancel frame handling, the
 # cursor-driven durable event drain, and the reconnect replay-and-resend

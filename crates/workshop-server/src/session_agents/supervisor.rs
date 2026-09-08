@@ -16,10 +16,10 @@ use super::{
     AgentSession, AgentSessions, CancelOrigin, SessionHost, SessionObserver, build_model_catalog,
     delta_stamp, ui_provider,
 };
-
 mod catalog;
+#[cfg_attr(not(test), expect(dead_code, reason = "wiring lands separately"))]
+pub(super) mod transition;
 use catalog::{wait_for_chat_catalog, wait_for_replacement_catalog};
-
 /// Spawns one session supervisor. Each run freezes one usable chat
 /// catalog; cancellation or a genuinely new usable generation relaunches
 /// over the retained event log.

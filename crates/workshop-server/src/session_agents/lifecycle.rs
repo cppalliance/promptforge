@@ -5,16 +5,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use promptforge_core_support::cancel::CancelHandle;
 use tokio::sync::Notify;
 
-/// Why the current run's cancellation handle fired.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CancelOrigin {
-    /// The operator explicitly cancelled the current turn.
-    Operator,
-    /// The supervisor retired an idle run for a new catalog generation.
-    Catalog,
-    /// The desktop host published a relaunched local Gateway generation.
-    Gateway,
-}
+pub(super) use super::supervisor::transition::CancelOrigin;
 
 /// State shared by input acceptance, the supervisor, and terminal events.
 pub(super) struct RunLifecycle {

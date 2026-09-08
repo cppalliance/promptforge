@@ -469,7 +469,7 @@ isProject: false
 - Focused verification: from `crates/workshop-server/ui` run `npm run typecheck`, `npm run build`, and `npm test`.
 - Component boundary: ends Component 6; review cumulative Steps 18 through 21 against the Step 17 commit and update architecture records only for decoder and reducer facts now present.
 
-### Step 22: Define agent-supervisor transitions
+### Step 22: Define agent-supervisor transitions [completed]
 
 - Component and piece: Component 7 of 8, Workshop agent supervision; build a pure event and transition model before changing the async loop.
 - Dependency: depends on Step 21 only for prior component closure; it deliberately retains the existing `GatewayBinding` generation interface, which later sidecar publication changes must preserve.
