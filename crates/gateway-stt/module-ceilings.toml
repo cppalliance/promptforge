@@ -62,6 +62,6 @@ test_fixture_public_root_count = 7
 "take/window/tests/live_prefix.rs" = 118
 "test_fixtures.rs" = 484
 "test_fixtures/generation.rs" = 100
-"test_fixtures/hour.rs" = 420
+"test_fixtures/hour.rs" = 422
 "test_fixtures/native.rs" = 47
 "test_fixtures/segment.rs" = 18

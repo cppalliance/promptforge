@@ -71,7 +71,7 @@ impl FinalPipeline {
                     SegmentOutcome::Forced(boundary) => boundary.decode_range(),
                 };
                 let leading_silence =
-                    (previous_consumed < range.start).then(|| previous_consumed..range.start);
+                    (previous_consumed < range.start).then_some(previous_consumed..range.start);
                 match outcome {
                     SegmentOutcome::Decode(range) => FinalCommand::Segment {
                         range,

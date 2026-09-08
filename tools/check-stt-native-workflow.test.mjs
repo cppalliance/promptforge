@@ -170,6 +170,7 @@ fn main() {
         .and_then(|parent| parent.file_name())
         .is_some_and(|parent| parent.to_string_lossy().starts_with("proxy-bin-"));
     if env::args().nth(1).is_some_and(|arg| arg.starts_with('+')) && !is_proxy {
+        eprintln!("error: no such command: direct tool rejects rustup prefix");
         std::process::exit(2);
     }
     match name.as_str() {
@@ -193,7 +194,9 @@ fn main() {
   );
   writeFileSync(
     preflightScript,
-    stepScript(jobSource("native-whisper"), "Verify preinstalled MSRV Rust"),
+    `${stepScript(jobSource("native-whisper"), "Verify preinstalled MSRV Rust")}
+if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+`,
   );
 });
 

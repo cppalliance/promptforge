@@ -246,12 +246,29 @@ jobs:
               [Parameter(Mandatory = $true)][string] $ToolPath
             )
 
-            $proxyVersionLines = @(& $ToolPath "+$env:RUSTUP_TOOLCHAIN" '--version' 2>&1)
-            $proxyExitCode = $LASTEXITCODE
+            $startInfo = [Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $ToolPath
+            $startInfo.Arguments = "+$env:RUSTUP_TOOLCHAIN --version"
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            try {
+              if (-not $process.Start()) {
+                return $false
+              }
+              $proxyVersionText = $process.StandardOutput.ReadToEnd()
+              $proxyErrorText = $process.StandardError.ReadToEnd()
+              $process.WaitForExit()
+              $proxyExitCode = $process.ExitCode
+            } finally {
+              $process.Dispose()
+            }
             if ($proxyExitCode -ne 0) {
               return $false
             }
-            $proxyVersionText = ($proxyVersionLines | Out-String).Trim()
+            $proxyVersionText = "$proxyVersionText`n$proxyErrorText".Trim()
             return [regex]::IsMatch(
               $proxyVersionText,
               "^cargo\s+$([regex]::Escape($requiredVersion))(?:\s|$)"

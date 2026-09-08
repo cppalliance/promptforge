@@ -396,7 +396,7 @@ mod tests {
             panic!("the forced successor carries reconciliation metadata");
         };
         assert_eq!(natural.overlap(), Some(32_000..160_000));
-        assert!(natural.new_audio().start == 160_000);
+        assert_eq!(natural.new_audio().start, 160_000);
         assert!(natural.new_audio().end < 320_000);
 
         let SegmentOutcome::Forced(after_silence) = segmenter

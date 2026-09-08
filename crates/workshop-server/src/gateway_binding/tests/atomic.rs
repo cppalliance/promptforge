@@ -23,7 +23,7 @@ fn synchronized_reads_never_observe_a_torn_replacement_snapshot() {
                 loop {
                     let snapshot = reader_binding.snapshot();
                     samples += 1;
-                    if snapshot.generation() % 2 == 0 {
+                    if snapshot.generation().is_multiple_of(2) {
                         assert_eq!(snapshot.client().base_url, "http://127.0.0.1:54375");
                         assert_eq!(snapshot.client().api_key, "old-key");
                         assert_eq!(snapshot.base_url(), "http://127.0.0.1:54375");

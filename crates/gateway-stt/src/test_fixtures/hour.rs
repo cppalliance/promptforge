@@ -85,7 +85,7 @@ struct SimulationState {
 pub fn hour_marker_input(start: u64, samples: usize) -> Vec<i16> {
     (0..samples)
         .map(|offset| {
-            let offset = u64::try_from(offset).map_or(u64::MAX, |value| value);
+            let offset = u64::try_from(offset).unwrap_or(u64::MAX);
             let input = start.saturating_add(offset);
             let output = input / 3 * 2 + u64::from(input % 3 != 0);
             marker_sample(output)
@@ -370,7 +370,9 @@ mod tests {
     fn input_markers_survive_the_production_resampler_mapping() {
         let input = hour_marker_input(0, 24_000);
         let actual = input
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|group| {
                 [
                     f32::from(group[0]) / 32_768.0,

@@ -14,6 +14,19 @@ Verification round 3 passed the complete automated release suite, rebuilt and si
 - Signing: not tested; release signing remains release-CI-only
 - Commit created: no
 
+## 2026-09-08 installed rolling-dictation acceptance
+
+- Package: fresh unsigned NSIS installer containing bounded estimated overlap reconciliation and live pending-prefix continuity
+- Installed paths: `C:\Users\Vinnie\AppData\Local\PromptForge\promptforge-workshop.exe` and sibling `promptforge-gateway.exe`
+- Physical microphone: passed
+- Live trailing hypothesis replacement: passed
+- Operator verdict: `The microphone worked really well.`
+- Installer finish-page contrast: passed; the operator confirmed the contrast problem was solved
+- Installer component wording: changed afterward to `PromptForge Workshop`, `PromptForge Gateway`, and `Speech to Text (Transcription)` and pending package confirmation
+- Remote release and path-gated installer smoke checks: passed
+- Remaining remote full-CI and native-Whisper waits: explicitly waived by the operator after local verification and physical microphone acceptance
+- Signing: not tested; release signing remains release-CI-only
+
 ## Step 32 deterministic arbitrary-duration acceptance
 
 ### Acceptance boundary

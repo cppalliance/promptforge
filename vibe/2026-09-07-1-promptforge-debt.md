@@ -4,22 +4,22 @@ overview: Remove technical debt attributable to the 53 commits between upstream 
 todos:
   - id: logging-bounds
     content: Bound logging memory, disk, ordering, loss reporting, redaction, and stalls
-    status: pending
+    status: completed
   - id: config-and-ci
     content: Retire the legacy STT configuration shim and stabilize native test infrastructure
-    status: pending
+    status: completed
   - id: lifecycle-structure
     content: Extract Gateway and Workshop lifecycle state machines and ratchet their tests
-    status: pending
+    status: completed
   - id: sidecar-boundary
     content: Validate sidecar capabilities and unify replacement and shutdown ownership
-    status: pending
+    status: completed
   - id: arbitrary-dictation
     content: Keep one logical dictation take for arbitrary duration through bounded rolling audio ownership
-    status: pending
+    status: completed
   - id: verify-removal
     content: Run focused, architecture, native, UI, and release exit gates
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -602,7 +602,7 @@ isProject: false
 - Exclusions: no recursive Cargo invocation from `workshop/build.rs`, unstable binary artifact dependencies, placeholder executable, product rename, embedded Gateway, persistent staged copy, or release-workflow weakening. Plain `cargo build -p workshop` remains a low-level package build that requires its external binary to exist.
 - Focused verification: from a clean missing staging directory run `cargo test -p build-workshop`, `cargo workshop`, and `cargo workshop --release`; prove both normal executable names exist; inject Gateway, staging, Workshop, and cleanup failures in deterministic command-runner tests; run `node --test tools/stage-gateway-sidecar.test.mjs`, Workshop build and tests, repository formatting, warnings-denied lint, and strict documentation; require staging to be absent afterward.
 
-### Step 34: Run complete release verification
+### Step 34: Run complete release verification [completed]
 
 - Component and piece: final closure; run every local and runner-backed exit gate after arbitrary-duration dictation and direct-build recovery.
 - Dependency: depends on Steps 29 through 33 and runs only from a clean tree with no open finding.
