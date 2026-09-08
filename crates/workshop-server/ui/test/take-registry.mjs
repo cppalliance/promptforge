@@ -103,6 +103,21 @@ function completion(itemId, transcript) {
   };
 }
 
+function transcriptionFailure(itemId, eventId = `failure_${itemId}`) {
+  return {
+    type: "conversation.item.input_audio_transcription.failed",
+    event_id: eventId,
+    item_id: itemId,
+    content_index: 0,
+    error: {
+      type: "server_error",
+      code: "precommit_transcription_failed",
+      message: "must stay local",
+      param: null,
+    },
+  };
+}
+
 function editorReplacements(effects) {
   return effects.filter(
     (effect) => effect.domain === "editor" && effect.command === "replace",
@@ -282,7 +297,7 @@ test("overlapping takes shift isolated regions and complete in reverse order", (
   assert.equal(result.state.takes.length, 0);
 });
 
-test("rollback shifts later takes back and preserves their authority", () => {
+test("terminal failure preserves visible text and later take coordinates", () => {
   let state = start(createTakeRegistry(), context(0)).state;
   state = stopAndCommit(state, "commit_a").state;
   state = server(state, hypothesis("a", "temporary")).state;
@@ -303,24 +318,16 @@ test("rollback shifts later takes back and preserves their authority", () => {
       message: "must stay local",
     },
   });
-  assert.deepEqual(editorReplacements(result.effects), [
-    {
-      domain: "editor",
-      command: "replace",
-      from: 0,
-      to: 9,
-      text: "",
-    },
-  ]);
-  assert.equal(result.state.takes[0].from, 0);
+  assert.deepEqual(editorReplacements(result.effects), []);
+  assert.equal(result.state.takes[0].from, 9);
 
   result = server(result.state, completion("b", "KEPT"));
   assert.deepEqual(editorReplacements(result.effects), [
     {
       domain: "editor",
       command: "replace",
-      from: 0,
-      to: 5,
+      from: 9,
+      to: 14,
       text: " KEPT",
     },
   ]);
@@ -524,6 +531,201 @@ test("retained-audio overload stops capture and commits accepted visible text", 
     ),
     "the still-valid accepted input commits after capture flushes",
   );
+});
+
+test("precommit and terminal transcription failures preserve visible editor text", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+  state = server(state, hypothesis("failed_take", "accepted visible words")).state;
+  let result = reduceTakeRegistry(state, {
+    type: "capture.audio",
+    chunk: Uint8Array.from([1, 0]).buffer,
+  });
+  const append = result.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(append);
+  state = reduceTakeRegistry(result.state, {
+    type: "wire.result",
+    requestId: append.requestId,
+    eventId: "failed_append",
+  }).state;
+  const precommit = {
+    type: "error",
+    event_id: "precommit_error",
+    error: {
+      type: "invalid_request_error",
+      code: "precommit_transcription_failed",
+      message: "must stay local",
+      param: "audio",
+      event_id: "failed_append",
+    },
+  };
+
+  result = server(state, precommit);
+  assert.equal(result.state.capture, "stopping");
+  assert.equal(result.state.takes[0].text, "accepted visible words");
+  assert.equal(editorReplacements(result.effects).length, 0);
+  assert.equal(
+    result.effects.some(
+      (effect) =>
+        (effect.domain === "capture" && effect.command === "clear") ||
+        (effect.domain === "wire" && effect.command === "clear"),
+    ),
+    false,
+  );
+  assert.equal(
+    result.effects.filter(
+      (effect) => effect.domain === "capture" && effect.command === "stop",
+    ).length,
+    1,
+  );
+  const duplicatePrecommit = server(result.state, precommit);
+  assert.deepEqual(duplicatePrecommit.effects, []);
+
+  const stopped = reduceTakeRegistry(duplicatePrecommit.state, {
+    type: "capture.stopped",
+    takeId: result.state.stoppingTakeId,
+    ok: true,
+  });
+  const commit = stopped.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "commit",
+  );
+  assert.ok(commit);
+  state = reduceTakeRegistry(stopped.state, {
+    type: "wire.result",
+    requestId: commit.requestId,
+    eventId: "failed_commit",
+  }).state;
+  state = server(state, committed("failed_take")).state;
+
+  result = server(state, transcriptionFailure("failed_take"));
+  assert.equal(result.state.takes.length, 0);
+  assert.ok(result.state.retiredItemIds.includes("failed_take"));
+  assert.equal(editorReplacements(result.effects).length, 0);
+  assert.ok(
+    result.effects.some(
+      (effect) =>
+        effect.domain === "editor" &&
+        effect.command === "read-only" &&
+        effect.readOnly === false,
+    ),
+  );
+  assert.ok(
+    result.effects.some(
+      (effect) =>
+        effect.domain === "status" &&
+        effect.command === "local" &&
+        effect.label ===
+          "Dictation could not be fully transcribed. Visible text was kept and can be edited." &&
+        effect.severity === "error",
+    ),
+  );
+
+  const duplicateFailure = server(
+    result.state,
+    transcriptionFailure("failed_take", "duplicate_failure"),
+  );
+  assert.deepEqual(duplicateFailure.effects, []);
+  assert.deepEqual(server(duplicateFailure.state, hypothesis("failed_take", "late")).effects, []);
+  assert.deepEqual(
+    server(duplicateFailure.state, completion("failed_take", "LATE")).effects,
+    [],
+  );
+});
+
+test("precommit recovery requires the active take's latest append correlation", () => {
+  function precommit(eventId, includeCorrelation = true) {
+    const error = {
+      type: "invalid_request_error",
+      code: "precommit_transcription_failed",
+      message: "must stay local",
+      param: "audio",
+    };
+    if (includeCorrelation) {
+      error.event_id = eventId;
+    }
+    return {
+      type: "error",
+      event_id: `server_${String(eventId)}`,
+      error,
+    };
+  }
+
+  let state = start(createTakeRegistry(), context(0)).state;
+  state = server(state, hypothesis("retired_take", "visible old text")).state;
+  let append = reduceTakeRegistry(state, {
+    type: "capture.audio",
+    chunk: new ArrayBuffer(2),
+  });
+  const retiredRequest = append.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(retiredRequest);
+  state = reduceTakeRegistry(append.state, {
+    type: "wire.result",
+    requestId: retiredRequest.requestId,
+    eventId: "retired_append",
+  }).state;
+  const terminal = server(state, transcriptionFailure("retired_take"));
+  const terminalStop = terminal.effects.find(
+    (effect) => effect.domain === "capture" && effect.command === "stop",
+  );
+  assert.ok(terminalStop);
+  state = reduceTakeRegistry(terminal.state, {
+    type: "capture.stopped",
+    takeId: terminalStop.takeId,
+    ok: true,
+  }).state;
+
+  state = start(state, context(16)).state;
+  append = reduceTakeRegistry(state, {
+    type: "capture.audio",
+    chunk: new ArrayBuffer(2),
+  });
+  const supersededRequest = append.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(supersededRequest);
+  state = reduceTakeRegistry(append.state, {
+    type: "wire.result",
+    requestId: supersededRequest.requestId,
+    eventId: "superseded_append",
+  }).state;
+  append = reduceTakeRegistry(state, {
+    type: "capture.audio",
+    chunk: new ArrayBuffer(2),
+  });
+  const liveRequest = append.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(liveRequest);
+  state = reduceTakeRegistry(append.state, {
+    type: "wire.result",
+    requestId: liveRequest.requestId,
+    eventId: "live_append",
+  }).state;
+
+  for (const stale of [
+    precommit(null),
+    precommit(undefined, false),
+    precommit("retired_append"),
+    precommit("superseded_append"),
+  ]) {
+    const ignored = server(state, stale);
+    assert.equal(ignored.state.capture, "recording");
+    assert.deepEqual(ignored.effects, []);
+    state = ignored.state;
+  }
+
+  const matched = server(state, precommit("live_append"));
+  assert.equal(matched.state.capture, "stopping");
+  assert.equal(
+    matched.effects.filter(
+      (effect) => effect.domain === "capture" && effect.command === "stop",
+    ).length,
+    1,
+  );
+  assert.deepEqual(server(matched.state, precommit("live_append")).effects, []);
 });
 
 test("every transition preserves registry invariants without mutating its input", () => {

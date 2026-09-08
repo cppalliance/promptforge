@@ -567,3 +567,5 @@ include!("realtime_stt/capacity.rs");
 include!("realtime_stt/canonical_sequence.rs");
 include!("realtime_stt/window_revision.rs");
 include!("realtime_stt/hour.rs");
+include!("realtime_stt/live_prefix.rs");
+include!("realtime_stt/estimated_overlap.rs");

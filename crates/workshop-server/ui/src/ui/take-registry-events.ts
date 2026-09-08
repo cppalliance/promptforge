@@ -15,7 +15,10 @@ import {
 import type { Reduction } from "./take-registry-types";
 
 const UNAVAILABLE_LABEL = "Dictation is temporarily unavailable. Try again.";
-const TRANSCRIPTION_FAILED_LABEL = "Dictation could not be transcribed. Try again.";
+const PRESERVED_TRANSCRIPTION_FAILED_LABEL =
+  "Dictation could not be fully transcribed. Visible text was kept and can be edited.";
+const PRECOMMIT_FAILED_LABEL =
+  "Dictation stopped because transcription failed. Captured audio is being finalized.";
 
 /** Applies one trusted decoded server event to the registry. */
 export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
@@ -42,13 +45,14 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
       return;
     case "conversation.item.input_audio_transcription.failed": {
       const take = takeByItem(reduction.state, event.item_id);
-      if (take !== null) {
-        rollbackTake(reduction, take.id);
+      if (take === null) {
+        return;
       }
+      preserveFailedTake(reduction, take.id);
       reduction.effects.push({
         domain: "status",
         command: "local",
-        label: TRANSCRIPTION_FAILED_LABEL,
+        label: PRESERVED_TRANSCRIPTION_FAILED_LABEL,
         severity: "error",
       });
       return;
@@ -56,6 +60,8 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
     case "error":
       if (event.error.code === "too_much_unfinalized_audio") {
         retainedAudioOverload(reduction, event.error.event_id ?? null);
+      } else if (event.error.code === "precommit_transcription_failed") {
+        precommitTranscriptionFailure(reduction, event.error.event_id ?? null);
       } else {
         serviceError(reduction, event.error.event_id ?? null);
       }
@@ -65,6 +71,40 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
       return exhaustive;
     }
   }
+}
+
+function precommitTranscriptionFailure(
+  reduction: Reduction,
+  eventId: string | null,
+): void {
+  if (eventId === null) {
+    return;
+  }
+  const binding = reduction.state.clientEvents.find(
+    (candidate) =>
+      candidate.eventId === eventId && candidate.command === "append",
+  );
+  const take =
+    binding === undefined ? null : takeById(reduction.state, binding.takeId);
+  if (
+    take === null ||
+    reduction.state.activeTakeId !== take.id ||
+    reduction.state.capture !== "recording"
+  ) {
+    return;
+  }
+  reduction.state.capture = "stopping";
+  reduction.state.stoppingTakeId = take.id;
+  reduction.effects.push(
+    { domain: "capture", command: "stop", takeId: take.id },
+    { domain: "status", command: "recording", recording: false },
+    {
+      domain: "status",
+      command: "local",
+      label: PRECOMMIT_FAILED_LABEL,
+      severity: "error",
+    },
+  );
 }
 
 function retainedAudioOverload(
@@ -106,6 +146,21 @@ function retainedAudioOverload(
       severity: "error",
     });
   }
+}
+
+function preserveFailedTake(reduction: Reduction, takeId: number): void {
+  if (
+    reduction.state.activeTakeId === takeId &&
+    reduction.state.capture === "recording"
+  ) {
+    reduction.state.capture = "stopping";
+    reduction.state.stoppingTakeId = takeId;
+    reduction.effects.push(
+      { domain: "capture", command: "stop", takeId },
+      { domain: "status", command: "recording", recording: false },
+    );
+  }
+  removeTake(reduction, takeId);
 }
 
 function acknowledgeCommit(reduction: Reduction, itemId: string): void {

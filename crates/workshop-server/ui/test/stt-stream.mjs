@@ -44,6 +44,12 @@ const client = JSON.parse(await readFile(path.join(fixtures, "client-events.json
 const server = JSON.parse(await readFile(path.join(fixtures, "server-events.json"), "utf8"));
 globalThis.location = new URL("http://127.0.0.1:7910/");
 
+function timelineText(start, end) {
+  return Array.from({ length: end - start }, (_, index) =>
+    `word${String(start + index).padStart(4, "0")}`
+  ).join(" ");
+}
+
 {
   const dom = new JSDOM("<!doctype html><textarea></textarea>");
   const textarea = dom.window.document.querySelector("textarea");
@@ -209,6 +215,353 @@ await assertNoLeaks(lifecycle, async () => {
     );
     assert.equal(textarea.selectionStart, 11);
     assert.equal(dom.window.document.activeElement, textarea);
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({ socket: () => socket });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+    const captureTrace = [];
+    const capture = new SpeechCaptureService({
+      async open() {
+        return {
+          clear() {},
+          async stop() {
+            captureTrace.push("stop");
+          },
+          dispose() {},
+        };
+      },
+    });
+    const status = {
+      recording: false,
+      showLocal() {},
+      setRecording(recording) {
+        this.recording = recording;
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    mic.click();
+    for (let turn = 0; turn < 4 && !status.recording; turn++) {
+      await Promise.resolve();
+    }
+    const snapshots = [
+      {
+        transcript: timelineText(0, 11),
+        finalized: "",
+        agreed: timelineText(0, 10),
+        tentative: ` ${timelineText(10, 11)}`,
+      },
+      {
+        transcript: timelineText(0, 21),
+        finalized: timelineText(0, 2),
+        agreed: ` ${timelineText(2, 20)}`,
+        tentative: ` ${timelineText(20, 21)}`,
+      },
+    ];
+    let previousLength = 0;
+    for (const [revision, snapshot] of snapshots.entries()) {
+      socket.message({
+        ...server.transcription_hypothesis,
+        event_id: `evt_live_prefix_${revision}`,
+        item_id: "item_live_prefix",
+        revision: revision + 1,
+        ...snapshot,
+      });
+      assert.equal(textarea.value, snapshot.transcript);
+      assert.ok(
+        textarea.value.length >= previousLength,
+        "the production editor never drops the revisable forced middle",
+      );
+      previousLength = textarea.value.length;
+    }
+
+    mic.click();
+    for (
+      let turn = 0;
+      turn < 4 &&
+      socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 0;
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+    assert.deepEqual(captureTrace, ["stop"]);
+    socket.message({
+      ...server.input_audio_buffer_committed,
+      event_id: "evt_live_prefix_committed",
+      item_id: "item_live_prefix",
+    });
+    socket.message({
+      ...server.transcription_completed,
+      event_id: "evt_live_prefix_completed",
+      item_id: "item_live_prefix",
+      transcript: timelineText(0, 21),
+    });
+    assert.equal(
+      textarea.value,
+      timelineText(0, 21),
+      "Stop preserves the same full text shown while recording",
+    );
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    let nextEventId = 1;
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({
+      eventId: () => `client_failure_${nextEventId++}`,
+      socket: () => socket,
+    });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+
+    const captureTrace = [];
+    let emitAudio = null;
+    const capture = new SpeechCaptureService({
+      async open(onAudio) {
+        emitAudio = onAudio;
+        return {
+          clear() {
+            captureTrace.push("clear");
+          },
+          async stop() {
+            captureTrace.push("stop");
+          },
+          dispose() {},
+        };
+      },
+    });
+    const status = {
+      local: [],
+      recording: [],
+      showLocal(label, severity) {
+        this.local.push({ label, severity });
+      },
+      setRecording(recording) {
+        this.recording.push(recording);
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    mic.click();
+    for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
+      await Promise.resolve();
+    }
+    emitAudio(Uint8Array.from([1, 0]).buffer);
+    socket.message({
+      ...server.transcription_hypothesis,
+      event_id: "evt_failure_hypothesis",
+      item_id: "item_failure",
+      transcript: "accepted visible words",
+      finalized: "accepted ",
+      agreed: "visible ",
+      tentative: "words",
+    });
+    const precommit = {
+      event_id: "evt_precommit_failure",
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        code: "precommit_transcription_failed",
+        message: "Further appends are rejected after accurate precommit failure",
+        param: "audio",
+        event_id: "client_failure_2",
+      },
+    };
+    const sentBeforeFailure = socket.sent.length;
+    socket.message(precommit);
+    socket.message({ ...precommit, event_id: "evt_precommit_failure_duplicate" });
+    for (
+      let turn = 0;
+      turn < 4 &&
+      socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 0;
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+
+    assert.equal(textarea.value, "accepted visible words");
+    assert.deepEqual(captureTrace, ["stop"]);
+    assert.equal(
+      socket.sent
+        .slice(sentBeforeFailure)
+        .filter((event) => event.type === "input_audio_buffer.clear").length,
+      0,
+    );
+    assert.equal(
+      socket.sent
+        .slice(sentBeforeFailure)
+        .filter((event) => event.type === "input_audio_buffer.commit").length,
+      1,
+    );
+
+    socket.message({
+      ...server.input_audio_buffer_committed,
+      event_id: "evt_failure_committed",
+      item_id: "item_failure",
+    });
+    const terminalFailure = {
+      ...server.transcription_failed,
+      event_id: "evt_terminal_failure",
+      item_id: "item_failure",
+      error: {
+        ...server.transcription_failed.error,
+        code: "precommit_transcription_failed",
+      },
+    };
+    status.local.length = 0;
+    socket.message(terminalFailure);
+    assert.equal(textarea.value, "accepted visible words");
+    assert.equal(textarea.readOnly, false);
+    assert.deepEqual(status.local, [
+      {
+        label:
+          "Dictation could not be fully transcribed. Visible text was kept and can be edited.",
+        severity: "error",
+      },
+    ]);
+
+    socket.message({ ...terminalFailure, event_id: "evt_terminal_failure_duplicate" });
+    socket.message({
+      ...server.transcription_hypothesis,
+      event_id: "evt_stale_failure_hypothesis",
+      item_id: "item_failure",
+      transcript: "MUST NOT REPLACE",
+      finalized: "",
+      agreed: "",
+      tentative: "MUST NOT REPLACE",
+    });
+    socket.message({
+      ...server.transcription_completed,
+      event_id: "evt_stale_failure_completion",
+      item_id: "item_failure",
+      transcript: "MUST NOT REPLACE",
+    });
+    assert.equal(textarea.value, "accepted visible words");
+    assert.equal(status.local.length, 1);
+
+    mic.click();
+    for (
+      let turn = 0;
+      turn < 4 && status.recording.at(-1) !== true;
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+    emitAudio(Uint8Array.from([2, 0]).buffer);
+    emitAudio(Uint8Array.from([3, 0]).buffer);
+    const laterAppends = socket.sent.filter(
+      (event) => event.type === "input_audio_buffer.append",
+    );
+    assert.equal(laterAppends.length, 3);
+    const supersededAppendId = laterAppends[1].event_id;
+    const liveAppendId = laterAppends[2].event_id;
+    const commitsBeforeStale = socket.sent.filter(
+      (event) => event.type === "input_audio_buffer.commit",
+    ).length;
+    const staleFailures = [
+      {
+        ...precommit,
+        event_id: "evt_stale_null_precommit",
+        error: { ...precommit.error, event_id: null },
+      },
+      {
+        ...precommit,
+        event_id: "evt_stale_missing_precommit",
+        error: { ...precommit.error },
+      },
+      {
+        ...precommit,
+        event_id: "evt_stale_retired_precommit",
+        error: { ...precommit.error, event_id: "client_failure_2" },
+      },
+      {
+        ...precommit,
+        event_id: "evt_stale_superseded_precommit",
+        error: { ...precommit.error, event_id: supersededAppendId },
+      },
+    ];
+    delete staleFailures[1].error.event_id;
+    for (const staleFailure of staleFailures) {
+      socket.message(staleFailure);
+    }
+    await Promise.resolve();
+    assert.deepEqual(captureTrace, ["stop"]);
+    assert.equal(
+      socket.sent.filter(
+        (event) => event.type === "input_audio_buffer.commit",
+      ).length,
+      commitsBeforeStale,
+      "uncorrelated and stale failures cannot commit the later take",
+    );
+
+    const liveFailure = {
+      ...precommit,
+      event_id: "evt_live_precommit",
+      error: { ...precommit.error, event_id: liveAppendId },
+    };
+    socket.message(liveFailure);
+    socket.message({ ...liveFailure, event_id: "evt_live_precommit_duplicate" });
+    for (
+      let turn = 0;
+      turn < 4 &&
+      socket.sent.filter((event) => event.type === "input_audio_buffer.commit")
+        .length === commitsBeforeStale;
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+    assert.deepEqual(captureTrace, ["stop", "stop"]);
+    assert.equal(
+      socket.sent.filter(
+        (event) => event.type === "input_audio_buffer.commit",
+      ).length,
+      commitsBeforeStale + 1,
+      "the live append failure stops and commits exactly once",
+    );
 
     stt.dispose();
     capture.dispose();

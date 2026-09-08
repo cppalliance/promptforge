@@ -195,8 +195,16 @@ fn assert_hour_hypothesis(hypothesis: &serde_json::Value, item_id: &str, stride:
     let transcript = hypothesis["transcript"]
         .as_str()
         .expect("a complete replacement is text");
-    assert_eq!(transcript.matches(&current_live).count(), 1);
-    assert!(transcript.ends_with(&current_live));
+    let expected_prefix = timeline_text(0, stride * 10);
+    let expected_visible = if expected_prefix.is_empty() {
+        current_live
+    } else {
+        format!("{expected_prefix} {current_live}")
+    };
+    assert_eq!(
+        transcript, expected_visible,
+        "no forced stride may shrink or omit its revisable middle"
+    );
     assert_eq!(
         transcript,
         format!(
@@ -363,10 +371,19 @@ async fn one_item_reconciles_bounded_forced_windows() {
 }
 
 #[tokio::test]
-async fn unaligned_forced_overlap_becomes_one_item_failure() {
+async fn five_unaligned_forced_overlaps_remain_one_healthy_item() {
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.push_text("old overlap");
-    final_decoder.push_text("unrelated revision");
+    let windows = (0..6)
+        .map(|window| {
+            (0..if window == 0 { 10 } else { 18 })
+                .map(|token| format!("w{window}t{token}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>();
+    for window in &windows {
+        final_decoder.push_text(window);
+    }
     let mut session = scripted_session(&final_decoder);
     let payload = encoded_speech();
 
@@ -374,34 +391,49 @@ async fn unaligned_forced_overlap_becomes_one_item_failure() {
         .append_base64(&payload)
         .expect("the first continuous stride appends");
     wait_for_decodes(&final_decoder, 1).await;
-    append_after_retirement(&mut session, &payload).await;
-    wait_for_decodes(&final_decoder, 2).await;
-
     let provisional = session
         .input_snapshot()
-        .expect("the failed take remains one input")
+        .expect("the live take remains one input")
         .item_id()
         .to_owned();
-    let deadline = Instant::now() + WAIT;
-    while session.pending_failure().is_none() && Instant::now() < deadline {
-        tokio::task::yield_now().await;
+    for count in 2..=6 {
+        append_after_retirement(&mut session, &payload).await;
+        wait_for_decodes(&final_decoder, count).await;
+        assert_eq!(
+            session
+                .input_snapshot()
+                .expect("the recording accepts another stride")
+                .item_id(),
+            provisional
+        );
+        assert!(session.pending_failure().is_none());
     }
-    assert_eq!(
-        session.pending_failure().as_deref(),
-        Some("forced final overlap could not be aligned")
-    );
 
-    let committed = session
-        .commit()
-        .expect("the failed take still promotes its sole item");
+    let committed = session.commit().expect("the healthy take commits");
     assert_eq!(committed.item_id(), provisional);
+    assert_eq!(session.committed_count(), 1);
+    session
+        .finish_finalization(committed.item_id())
+        .await
+        .expect("the pending current window flushes once");
     let results = session.drain_results();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["type"], "failed");
+    assert_eq!(results[0]["type"], "completed");
     assert_eq!(results[0]["item_id"], provisional);
+
+    let mut expected = windows[0]
+        .split_whitespace()
+        .take(2)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    for window in &windows[1..5] {
+        expected.extend(window.split_whitespace().take(10).map(str::to_owned));
+    }
+    expected.extend(windows[5].split_whitespace().map(str::to_owned));
     assert_eq!(
-        results[0]["message"],
-        "forced final overlap could not be aligned"
+        results[0]["transcript"],
+        expected.join(" "),
+        "estimated ownership is ordered, gap-free, and contains no whole duplicate window"
     );
 }
 
@@ -515,8 +547,8 @@ async fn stop_exactly_on_the_cut_does_not_decode_the_overlap_twice() {
 #[tokio::test]
 async fn stop_after_the_cut_reconciles_the_overlapping_terminal_tail() {
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.push_text("alpha OVERLAP");
-    final_decoder.push_text("overlap terminal");
+    final_decoder.push_text("alpha trusted OVERLAP");
+    final_decoder.push_text("trusted overlap terminal");
     let mut session = scripted_session(&final_decoder);
     session
         .append_base64(&encoded_speech())
@@ -536,15 +568,15 @@ async fn stop_after_the_cut_reconciles_the_overlapping_terminal_tail() {
     assert_eq!(requests[1].samples().len(), 16_000 * 10);
     assert_eq!(
         session.drain_results()[0]["transcript"],
-        "alpha overlap terminal"
+        "alpha trusted overlap terminal"
     );
 }
 
 #[tokio::test]
 async fn first_natural_boundary_after_a_cut_reconciles_the_forced_predecessor() {
     let final_decoder = ScriptedDecoder::new();
-    final_decoder.push_text("alpha OVERLAP");
-    final_decoder.push_text("overlap natural");
+    final_decoder.push_text("alpha trusted OVERLAP");
+    final_decoder.push_text("trusted overlap natural");
     let mut session = scripted_session(&final_decoder);
     session
         .append_base64(&encoded_speech())
@@ -570,6 +602,6 @@ async fn first_natural_boundary_after_a_cut_reconciles_the_forced_predecessor() 
     assert!(requests[1].samples().len() > 16_000 * 8 && requests[1].samples().len() < 16_000 * 10);
     assert_eq!(
         session.drain_results()[0]["transcript"],
-        "alpha overlap natural"
+        "alpha trusted overlap natural"
     );
 }

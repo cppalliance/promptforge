@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use super::agreement::{equivalent_token, matching_token_prefix_end, token_spans};
 use super::interim::InterimSnapshot;
+use super::live_prefix::LivePrefixSnapshot;
 use super::text::append_transcript;
 
 pub(super) const MAX_PENDING_ACCEPTED_HYPOTHESES: usize = 2_048;
@@ -51,9 +52,9 @@ impl WholeWindowState {
         window_end: u64,
         hypothesis: &str,
     ) -> Option<InterimSnapshot> {
+        let live_prefix = LivePrefixSnapshot::for_test(finalized, finalized_samples, None);
         self.try_next(
-            finalized,
-            finalized_samples,
+            &live_prefix,
             segment_start,
             window_start,
             window_end,
@@ -64,17 +65,26 @@ impl WholeWindowState {
 
     pub(super) fn try_next(
         &mut self,
-        finalized: &str,
-        finalized_samples: u64,
+        live_prefix: &LivePrefixSnapshot,
         segment_start: u64,
         window_start: u64,
         window_end: u64,
         hypothesis: &str,
     ) -> Result<Option<InterimSnapshot>, AcceptedHypothesisCapacity> {
+        let coverage_end = live_prefix.coverage_end();
         self.pending
-            .retain(|accepted| accepted.range.start >= finalized_samples);
+            .retain(|accepted| accepted.range.start >= coverage_end);
+        if self
+            .active_range
+            .as_ref()
+            .is_some_and(|range| range.start < coverage_end)
+        {
+            self.active.clear();
+            self.active_range = None;
+            self.window_start = None;
+        }
         if self.window_start.is_some() && self.segment_start != segment_start {
-            self.finish_active_region(finalized_samples)?;
+            self.finish_active_region(coverage_end)?;
             self.window_start = None;
         }
         self.segment_start = segment_start;
@@ -87,7 +97,7 @@ impl WholeWindowState {
                     .as_ref()
                     .is_some_and(|range| window_start >= range.end) =>
             {
-                self.finish_active_region(finalized_samples)?;
+                self.finish_active_region(coverage_end)?;
                 (hypothesis.to_owned(), window_start)
             }
             Some(previous_start) if window_start > previous_start => {
@@ -112,16 +122,19 @@ impl WholeWindowState {
         self.window_start = Some(window_start);
 
         let mut agreed = String::new();
+        if let Some((pending_forced, _)) = live_prefix.pending_forced() {
+            append_transcript(&mut agreed, pending_forced);
+        }
         for accepted in &self.pending {
             append_transcript(&mut agreed, accepted.text());
         }
         append_transcript(&mut agreed, self.active[..agreed_end].trim());
-        let agreed = owned_piece(!finalized.is_empty(), &agreed);
+        let agreed = owned_piece(!live_prefix.finalized().is_empty(), &agreed);
         let tentative = owned_piece(
-            !finalized.is_empty() || !agreed.is_empty(),
+            !live_prefix.finalized().is_empty() || !agreed.is_empty(),
             &self.active[agreed_end..],
         );
-        let snapshot = InterimSnapshot::new(finalized.to_owned(), agreed, tentative);
+        let snapshot = InterimSnapshot::new(live_prefix.finalized().to_owned(), agreed, tentative);
         if self.last.as_ref() == Some(&snapshot) {
             return Ok((!hypothesis.is_empty()).then_some(snapshot));
         }
@@ -218,6 +231,8 @@ fn owned_piece(has_prefix: bool, piece: &str) -> String {
 mod tests {
     use super::{MAX_PENDING_ACCEPTED_HYPOTHESES, WholeWindowState};
     use crate::take::final_outcome::{FinalRangeOutcome, SkipReason, assemble_completion};
+
+    mod live_prefix;
 
     #[test]
     fn whole_window_revision_replaces_a_promoted_leading_phrase() {
@@ -467,9 +482,10 @@ mod tests {
     #[test]
     fn pending_accepted_hypotheses_have_an_exact_bound() {
         let mut state = WholeWindowState::default();
+        let live_prefix = crate::take::live_prefix::LivePrefixSnapshot::for_test("", 0, None);
         for index in 0..=MAX_PENDING_ACCEPTED_HYPOTHESES {
             let start = u64::try_from(index).expect("test index fits") * 2;
-            let result = state.try_next("", 0, start, start, start + 1, "word");
+            let result = state.try_next(&live_prefix, start, start, start + 1, "word");
             if index < MAX_PENDING_ACCEPTED_HYPOTHESES {
                 assert!(result.is_ok());
             } else {

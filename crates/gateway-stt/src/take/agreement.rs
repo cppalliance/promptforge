@@ -1,3 +1,9 @@
+mod final_overlap;
+mod projection;
+
+pub(super) use final_overlap::{final_transcript_within_limit, range_guided_suffix_prefix_start};
+pub(super) use projection::projected_prefix_end;
+
 pub(super) fn matching_token_prefix_end(previous: &str, current: &str) -> usize {
     let previous = token_spans(previous);
     let current = token_spans(current);
@@ -29,23 +35,6 @@ pub(super) fn token_spans(text: &str) -> Vec<(&str, usize, usize)> {
     tokens
 }
 
-pub(super) fn matching_suffix_prefix_start(previous: &str, current: &str) -> Option<usize> {
-    let previous = token_spans(previous);
-    let current = token_spans(current);
-    for overlap in (1..=previous.len().min(current.len())).rev() {
-        let previous_start = previous.len() - overlap;
-        if previous[previous_start..]
-            .iter()
-            .map(|(token, _, _)| *token)
-            .zip(current[..overlap].iter().map(|(token, _, _)| *token))
-            .all(|(previous, current)| equivalent_token(previous, current))
-        {
-            return Some(previous[previous_start].1);
-        }
-    }
-    None
-}
-
 pub(super) fn equivalent_token(left: &str, right: &str) -> bool {
     left.chars().any(char::is_alphanumeric)
         && left
@@ -60,13 +49,19 @@ pub(super) fn equivalent_token(left: &str, right: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{equivalent_token, matching_suffix_prefix_start};
+    use super::{equivalent_token, range_guided_suffix_prefix_start};
 
     #[test]
     fn punctuation_only_tokens_never_establish_overlap() {
         assert!(!equivalent_token("...", "?!"));
         assert_eq!(
-            matching_suffix_prefix_start("canonical ...", "?! replacement"),
+            range_guided_suffix_prefix_start(
+                "canonical ...",
+                0..100,
+                "?! replacement",
+                50..150,
+                50..100,
+            ),
             None
         );
     }

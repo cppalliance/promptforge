@@ -14,6 +14,7 @@ mod final_decode;
 mod final_outcome;
 mod finalization;
 mod interim;
+mod live_prefix;
 mod pcm;
 mod state;
 mod text;
@@ -154,10 +155,9 @@ impl Take {
         window_start: u64,
         window_end: u64,
     ) -> Option<InterimSnapshot> {
-        let (finalized, finalized_samples) = self.state.finalized_snapshot();
+        let live_prefix = self.state.live_prefix_snapshot();
         let update = TakeState::lock(&self.whole_window).try_next(
-            &finalized,
-            finalized_samples,
+            &live_prefix,
             segment_start,
             window_start,
             window_end,

@@ -161,14 +161,18 @@ fn main() -> ExitCode {
 /// be opened warns on stdout and never stops the gateway. The returned
 /// runtime must be shut down last.
 fn init_logging() -> Option<LogRuntime> {
+    let state_dir =
+        shared_sidecar::default_run_dir().and_then(|run_dir| run_dir.parent().map(PathBuf::from));
+    init_logging_for_state(state_dir)
+}
+
+fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
     let filter = || {
         tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_LOG_FILTER))
     };
     let stdout = tracing_subscriber::fmt::layer().with_filter(filter());
-    let runtime = shared_sidecar::default_run_dir()
-        .and_then(|run_dir| run_dir.parent().map(PathBuf::from))
-        .map(|state_dir| LogRuntime::start(LogConfig::new(state_dir)));
+    let runtime = state_dir.map(|state_dir| LogRuntime::start(LogConfig::new(state_dir)));
     match runtime {
         Some(Ok(runtime)) => {
             let file_writer = runtime.writer();
@@ -197,6 +201,10 @@ fn init_logging() -> Option<LogRuntime> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "main/logging_tests.rs"]
+mod logging_tests;
 
 /// Log the error and its full `source()` chain through the subscriber, so
 /// the fatal outcome lands in the drained queue.

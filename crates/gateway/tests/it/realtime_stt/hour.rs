@@ -99,3 +99,54 @@ async fn mounted_hour_stream_keeps_one_item_commit_and_completion() {
     drop(socket);
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn mounted_installed_whisper_sequence_reconciles_without_duplicate_phrases() {
+    let final_decoder = ScriptedDecoder::new();
+    for transcript in [
+        "The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances.",
+        "Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances.",
+        "quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window",
+    ] {
+        final_decoder.push_text(transcript);
+    }
+    let service = speech(&ScriptedDecoder::new(), Some(&final_decoder));
+    let server = server(true, &service).await;
+    let mut socket = connect(server.addr, Some("test-token"), None, None).await;
+    expect_type(&mut socket, "session.created").await;
+    let stride = audio_samples(&vec![8_192; INPUT_STRIDE_SAMPLES]);
+
+    for expected in 1..=3 {
+        append_audio(&mut socket, stride.clone()).await;
+        let deadline = std::time::Instant::now() + PHASE_TIMEOUT;
+        while final_decoder.requests().len() < expected {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "mounted installed decode {expected} completes"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+    send(
+        &mut socket,
+        serde_json::json!({"type": "input_audio_buffer.commit"}),
+    )
+    .await;
+
+    let completed = loop {
+        let event = receive(&mut socket).await;
+        match event["type"].as_str() {
+            Some("conversation.item.input_audio_transcription.completed") => break event,
+            Some("input_audio_buffer.committed" | "conversation.item.created") => {}
+            other => panic!("unexpected installed sequence event {other:?}: {event}"),
+        }
+    };
+    assert_eq!(
+        completed["transcript"],
+        "The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window advances. The silver bird circles the quiet garden. Then the silver bird returns beside the river. We continue speaking clearly while the rolling window"
+    );
+
+    socket.close(None).await.expect("socket closes");
+    drop(socket);
+    server.shutdown().await;
+}
