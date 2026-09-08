@@ -1,0 +1,30 @@
+# Module size ratchet for the Workshop binary and its tests. The
+# `tests/module_ceiling.rs` integration test enforces this file.
+#
+# Counting rule: physical lines. Blank lines and comments count. A module
+# may grow by at most 30 lines above its recorded measured size. Growth
+# beyond that requires a responsibility split, not a ceiling increase.
+#
+# Every Rust file under src/ and tests/ has exactly one entry. New modules
+# record their actual size in the same change, and deleted modules remove
+# their stale entry.
+
+[source_modules]
+"bridge.rs" = 372
+"config.rs" = 243
+"drops.rs" = 84
+"gateway.rs" = 15
+"gateway/boot.rs" = 184
+"gateway/identity.rs" = 41
+"gateway/supervisor.rs" = 360
+"gateway/tests.rs" = 140
+"gateway/tests/boot.rs" = 191
+"gateway/tests/identity.rs" = 44
+"gateway/tests/recovery.rs" = 445
+"linux_media.rs" = 42
+"main.rs" = 364
+"menu.rs" = 111
+"navigation.rs" = 125
+
+[test_modules]
+"module_ceiling.rs" = 147

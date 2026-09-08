@@ -11,6 +11,8 @@ pub use crate::status::StatusBus;
 
 #[cfg(feature = "test-fixtures")]
 pub use crate::app::fixtures::spawn_gateway;
+#[cfg(feature = "test-fixtures")]
+pub use crate::test_gateway::{ValidatedGateway, run_validated_gateway_fixture_process};
 
 /// Returns the host-only Gateway publisher from fixture state.
 #[cfg(feature = "test-fixtures")]

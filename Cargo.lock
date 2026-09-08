@@ -8295,6 +8295,7 @@ name = "workshop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "serde",
  "serde_json",
  "shared-sidecar",
  "tauri",
@@ -8306,6 +8307,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tempfile",
+ "toml 0.8.2",
  "url",
  "webkit2gtk",
  "webview2-com",

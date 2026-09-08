@@ -9,7 +9,6 @@
 
 use std::sync::PoisonError;
 
-use shared_sidecar::ConnectionFile;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Manager as _, Wry};
 
@@ -18,15 +17,13 @@ use crate::ServerSlot;
 /// The quit item's menu id, matched by the event handler.
 pub(crate) const QUIT_MENU_ID: &str = "quit-promptforge";
 
-/// Builds and installs the app menu. `sidecar` is the attached or
-/// launched gateway's connection file: present, the quit item also stops
-/// the gateway and its label says so; absent (a LAN gateway from
-/// explicit config), the item stops the shell only.
+/// Builds and installs the app menu. A local sidecar makes the quit item
+/// stop both products; a configured LAN Gateway makes it stop only the shell.
 ///
 /// # Errors
 /// Returns an error when the menu cannot be built or installed.
-pub(crate) fn install(app: &tauri::App, sidecar: Option<&ConnectionFile>) -> tauri::Result<()> {
-    let label = if sidecar.is_some() {
+pub(crate) fn install(app: &tauri::App, has_sidecar: bool) -> tauri::Result<()> {
+    let label = if has_sidecar {
         "Quit PromptForge and Gateway"
     } else {
         "Quit PromptForge"

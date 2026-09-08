@@ -37,15 +37,16 @@ You can also run the Workshop's server on its own and use the interface in an or
 The first time you start the Workshop, the application prepares everything it needs before you see a window. Follow what happens:
 
 1. The application looks for its boot configuration.
-2. It starts its server inside its own process and waits until the server accepts connections.
-3. It waits for the interface to answer a health check, up to 15 seconds.
-4. Only then does the window open.
+2. It attaches to a running local gateway through its validated connection file. If none is running, it launches the sibling `promptforge-gateway`; a Workshop-only install instead uses the explicit gateway in `workshop.toml`.
+3. It starts its server inside its own process and waits until the server accepts connections.
+4. It waits for the interface to answer a health check, up to 15 seconds.
+5. Only then does the window open.
 
 You never see a window before the interface is ready, and the interface never opens against a dead server. If the server does not answer in time, the error message names the health endpoint and how long the application waited. If startup fails for any reason, the application prints the full error chain and exits with a failure code instead of opening a broken window.
 
 Only one instance of the Workshop runs at a time. If you launch it again while it is already running, the existing window comes into focus instead of a second copy opening. When you close the window, the application shuts its built-in server down cleanly and exits; the gateway is a separate program and keeps running. To stop the gateway together with the window, use the quit command instead: Quit PromptForge and Gateway on the application menu, or Ctrl+Q (Cmd+Q on macOS). When the Workshop is attached to a gateway on another machine, the command reads Quit PromptForge and stops only the window - a client never stops a shared gateway. In-flight connections get a 5-second grace window, so a held chat session or a stuck request cannot hang the shutdown. The interface listens on an OS-assigned loopback port, so another program holding a port can never block startup.
 
-The Workshop also keeps working when parts of its environment fail. The interface still loads when the gateway is unreachable, so a gateway outage never prevents the application from opening. If microphone setup fails at startup, you keep working and only voice input stays unavailable. On Windows, if the bridge to Explorer fails to attach, the application keeps running and loses only Explorer drag-and-drop and the microphone grant.
+The Workshop also keeps working when parts of its environment fail. After boot, if a local gateway exits, the application keeps the interface open while it looks for a validated replacement or relaunches the installed sibling with bounded backoff. A replacement is published only after its process identity, health response, and bearer key all validate, and the server switches its clients and credentials together. Explicitly configured gateways on another machine are never launched, supervised, or stopped by the Workshop. If microphone setup fails at startup, you keep working and only voice input stays unavailable. On Windows, if the bridge to Explorer fails to attach, the application keeps running and loses only Explorer drag-and-drop and the microphone grant.
 
 ## The gateway configuration
 
@@ -68,7 +69,7 @@ You configure the Workshop through a TOML file named `workshop.toml`. The applic
 
 The keys you are most likely to set:
 
-- `gateway.base_url` points the Workshop at a PromptForge gateway the connection file cannot see, such as one on another machine. When the value is empty, the Workshop attaches to a locally running gateway through its connection file, and with no gateway running, startup fails with an error that names both remedies.
+- `gateway.base_url` points the Workshop at a PromptForge gateway the connection file cannot see, such as one on another machine. When the value is empty, the Workshop attaches to a locally running gateway through its connection file or launches the sibling `promptforge-gateway`. A Workshop-only install has no sibling, so with neither a running gateway nor an explicit value, startup fails with an error that names both remedies.
 - `gateway.api_key` supplies the bearer key for the gateway API. An empty key sends no `Authorization` header, which is right for a gateway running with authentication disabled.
 - `server.bind` is honored only by the standalone `workshop-server` binary. The desktop application owns its listener and always binds `127.0.0.1` on an OS-assigned port.
 - `server.state_dir` chooses where the Workshop keeps persistent state. Agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written there. It defaults to the config file's own directory.

@@ -530,7 +530,7 @@ isProject: false
 - Exclusions: no abandoned supervisor thread, unbounded join, process kill, emergency supervisor, or change to separate Gateway process ownership.
 - Focused verification: from the repository root run `cargo test -p shared-sidecar`, `cargo test -p workshop-server`, and `cargo test -p workshop`.
 
-### Step 28: Split and ratchet sidecar lifecycle ownership
+### Step 28: Split and ratchet sidecar lifecycle ownership [completed]
 
 - Component and piece: Component 8 of 8, sidecar trust and lifecycle; separate boot planning and one-shot launch from continuous supervision, validated identity, and recovery tests, then freeze the new boundaries.
 - Dependency: depends on Step 27 because the selected order is to settle cancellation and joined ownership before extracting modules and recording their final ceilings; it is last because full exit gates may run only after every debt ID is closed.

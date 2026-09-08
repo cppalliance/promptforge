@@ -193,7 +193,7 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             app.add_capability(window_capability(&url))?;
             app.manage(GatewaySupervisorSlot::new(supervisor));
             app.manage(ServerSlot::new(Some(server)));
-            menu::install(app, attachment.sidecar_file())?;
+            menu::install(app, attachment.sidecar_identity().is_some())?;
             open_window(app, &url)
         }
         Err(error) => {

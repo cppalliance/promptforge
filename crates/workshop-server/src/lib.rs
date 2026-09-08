@@ -35,7 +35,7 @@ mod serve;
 mod session;
 mod session_agents;
 mod status;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-fixtures"))]
 mod test_gateway;
 mod workspace;
 

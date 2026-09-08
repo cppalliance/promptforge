@@ -43,10 +43,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 promptforge-agent.workspace = true
+tempfile = { workspace = true, optional = true }
 
 [features]
 default = []
-test-fixtures = []
+test-fixtures = ["dep:tempfile"]
 
 [dev-dependencies]
 workshop-server = { path = ".", features = ["test-fixtures"] }

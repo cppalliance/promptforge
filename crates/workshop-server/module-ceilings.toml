@@ -244,10 +244,11 @@
 "session/log.rs" = 15
 "session/menu.rs" = 165
 "status.rs" = 199
-# Crate-private named local process used to exercise production sidecar
-# validation and observe authenticated shutdown without exposing a fixture
-# capability constructor.
+# Parent-side adapter for the shared named process fixture. Retains its
+# pre-adapter ceiling rather than absorbing the child protocol.
 "test_gateway.rs" = 197
+# Child request protocol, exact bearer authentication, and shutdown reporting.
+"test_gateway/process.rs" = 122
 # Grew by grant revocation: `Workspace::revoke` (exact canonical match,
 # with a literal-key fallback so a deleted root stays revocable; nested
 # grants independent), the `POST /workspace/revoke` handler with its
