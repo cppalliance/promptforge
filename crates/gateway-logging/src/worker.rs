@@ -43,6 +43,8 @@ struct FaultInjector {
     simulated_crash: bool,
     #[cfg(test)]
     failed_operation: Option<&'static str>,
+    #[cfg(test)]
+    commit_marker_written: bool,
 }
 
 impl FaultInjector {
@@ -73,6 +75,14 @@ impl FaultInjector {
         #[cfg(not(test))]
         {
             false
+        }
+    }
+
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
+    fn record_commit_marker(&mut self) {
+        #[cfg(test)]
+        {
+            self.commit_marker_written = true;
         }
     }
 }
@@ -246,19 +256,15 @@ fn remove_file_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "directory syncing is supported on Unix and intentionally a no-op elsewhere"
-)]
 fn sync_parent(path: &Path, fault: &mut FaultInjector) -> io::Result<()> {
+    fault.checkpoint("sync parent directory")?;
     #[cfg(unix)]
     {
-        fault.checkpoint("sync parent directory")?;
         File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
     }
     #[cfg(not(unix))]
     {
-        let _ = (path, fault);
+        let _ = path;
         Ok(())
     }
 }
@@ -582,6 +588,7 @@ fn rotate_files(
         std::fs::rename(staged_current, current)?;
         sync_parent(current, fault)?;
         write_durable_file(&rotation_committed_path(current), b"", fault)?;
+        fault.record_commit_marker();
         sync_parent(current, fault)
     })();
     if let Err(error) = result {
@@ -1204,6 +1211,30 @@ mod tests {
         }
     }
 
+    fn assert_injected_checkpoint(fault: &FaultInjector, fail_at: usize, transaction: &str) {
+        assert_eq!(
+            fault.calls, fail_at,
+            "only the selected filesystem checkpoint interrupts {transaction}"
+        );
+        assert!(
+            fault.failed_operation.is_some(),
+            "an injected {transaction} crash records its filesystem operation"
+        );
+    }
+
+    fn observed_rotation_commit(current: &Path, fault: &FaultInjector) -> bool {
+        rotation_committed_path(current).exists() || fault.commit_marker_written
+    }
+
+    fn interrupted_final_commit_cleanup(current: &Path, fault: &FaultInjector) -> bool {
+        fault.failed_operation == Some("sync parent directory")
+            && fault.commit_marker_written
+            && !rotation_committed_path(current).exists()
+            && find_rotation_prepared(current)
+                .expect("inspect prepared rotation marker")
+                .is_none()
+    }
+
     #[test]
     fn restart_compaction_recovers_every_injected_filesystem_failure() {
         let original = "old-prefix-".repeat(20) + "terminal diagnostic\n";
@@ -1222,12 +1253,13 @@ mod tests {
             );
             if result.is_ok() {
                 completed = true;
-                assert!(
-                    failures >= 6,
-                    "the loop injected every staged replacement operation"
+                assert_eq!(
+                    failures, fault.calls,
+                    "the loop injected every staged replacement checkpoint independently"
                 );
                 break;
             }
+            assert_injected_checkpoint(&fault, fail_at, "replacement");
             if fault.failed_operation == Some("install replacement") {
                 forced_replacement_gap = true;
                 assert!(
@@ -1258,6 +1290,7 @@ mod tests {
     #[test]
     fn live_rotation_recovers_every_injected_filesystem_failure() {
         let mut forced_staging_gap = false;
+        let mut forced_commit_cleanup_gap = false;
         let mut completed = false;
         for (failures, fail_at) in (1..=128).enumerate() {
             let temp = TempStateDir::new("rotation-crash");
@@ -1283,9 +1316,9 @@ mod tests {
             );
             if result.is_ok() {
                 completed = true;
-                assert!(
-                    failures >= 20,
-                    "the loop injected every staged chain operation"
+                assert_eq!(
+                    failures, fault.calls,
+                    "the loop injected every rotation checkpoint independently"
                 );
                 assert!(
                     total_directory_file_bytes(&logs) <= disk_budget,
@@ -1301,11 +1334,16 @@ mod tests {
                 }
                 break;
             }
+            assert_injected_checkpoint(&fault, fail_at, "rotation");
             assert!(
                 total_directory_file_bytes(&logs) <= disk_budget,
                 "transaction artifacts stay inside the aggregate budget at checkpoint {fail_at}"
             );
-            let committed = rotation_committed_path(&current).exists();
+            // Cleanup removes the marker before its final parent sync. The
+            // per-transaction state preserves that commit decision if that
+            // exact sync is the injected crash boundary.
+            let committed = observed_rotation_commit(&current, &fault);
+            forced_commit_cleanup_gap |= interrupted_final_commit_cleanup(&current, &fault);
             if fault.failed_operation == Some("stage rotation source")
                 && rotation_targets(&current, &retained).iter().any(|target| {
                     !target.exists() && artifact_path(target, ".rotation-old").exists()
@@ -1342,6 +1380,10 @@ mod tests {
             "fault injection reaches an in-place staging boundary with the source preserved"
         );
         assert!(
+            forced_commit_cleanup_gap,
+            "fault injection reaches the final sync after commit-marker cleanup"
+        );
+        assert!(
             completed,
             "the fault loop reaches the first non-failing run"
         );
@@ -1376,15 +1418,12 @@ mod tests {
             let result = cleanup_rotation_with(&current, &retained, &mut fault);
             if result.is_ok() {
                 completed = true;
-                assert!(
-                    failures >= 5,
-                    "the loop injected every sparse cleanup operation"
+                assert_eq!(
+                    failures, fault.calls,
+                    "the loop injected every sparse cleanup checkpoint independently"
                 );
             } else {
-                assert!(
-                    fault.failed_operation.is_some(),
-                    "only an injected crash interrupts cleanup"
-                );
+                assert_injected_checkpoint(&fault, fail_at, "cleanup");
                 assert!(
                     total_directory_file_bytes(&logs) <= disk_budget,
                     "interrupted cleanup never duplicates segment bytes"
