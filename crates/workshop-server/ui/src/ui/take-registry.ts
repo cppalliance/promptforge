@@ -38,13 +38,14 @@ export function createTakeRegistry(): TakeRegistry {
   return {
     takes: [],
     awaitingCommit: [],
-    retiredItemIds: [],
+    retiredItems: [],
     clientEvents: [],
     pendingWire: [],
     activeTakeId: null,
     capture: "idle",
     stoppingTakeId: null,
     connection: "ready",
+    activeGeneration: 0,
     nextTakeId: 1,
     nextRequestId: 1,
   };
@@ -59,6 +60,33 @@ export function reduceTakeRegistry(
     state: cloneRegistry(current),
     effects: [],
   };
+  const generation = input.generation ?? 0;
+  if (input.type === "connection.ready") {
+    if (generation < reduction.state.activeGeneration) {
+      return reduction;
+    }
+    if (
+      generation === reduction.state.activeGeneration &&
+      reduction.state.connection === "ready"
+    ) {
+      return reduction;
+    }
+    if (generation > reduction.state.activeGeneration) {
+      reduction.state.activeGeneration = generation;
+      reduction.state.awaitingCommit = [];
+      reduction.state.clientEvents = [];
+      reduction.state.pendingWire = [];
+      reduction.state.retiredItems = [];
+      reduction.state.capture = "idle";
+      reduction.state.stoppingTakeId = null;
+      reduction.state.activeTakeId = null;
+    }
+    reduction.state.connection = "ready";
+    return reduction;
+  }
+  if (generation !== reduction.state.activeGeneration) {
+    return reduction;
+  }
   switch (input.type) {
     case "user.start":
       startTake(reduction, input.context);
@@ -85,10 +113,9 @@ export function reduceTakeRegistry(
       serviceError(reduction, input.eventId);
       break;
     case "connection.lost":
-      connectionLost(reduction);
-      break;
-    case "connection.ready":
-      reduction.state.connection = "ready";
+      if (reduction.state.connection === "ready") {
+        connectionLost(reduction);
+      }
       break;
     default: {
       const exhaustive: never = input;
@@ -110,11 +137,13 @@ function startTake(reduction: Reduction, context: SttInsertionContext): void {
   reduction.state.nextTakeId += 1;
   const take: RegistryTake = {
     id,
+    generation: reduction.state.activeGeneration,
     from: context.range.start,
     to: context.range.end,
     original: context.original,
     compositionPrefix: context.compositionPrefix,
     itemId: null,
+    itemGeneration: null,
     text: context.original,
     deltaText: "",
   };
@@ -149,7 +178,12 @@ function stopTake(reduction: Reduction): void {
   reduction.state.capture = "stopping";
   reduction.state.stoppingTakeId = take.id;
   reduction.effects.push(
-    { domain: "capture", command: "stop", takeId: take.id },
+    {
+      domain: "capture",
+      command: "stop",
+      takeId: take.id,
+      generation: reduction.state.activeGeneration,
+    },
     { domain: "status", command: "recording", recording: false },
     {
       domain: "status",
@@ -169,6 +203,7 @@ function appendAudio(reduction: Reduction, chunk: ArrayBuffer): void {
   reduction.effects.push({
     domain: "wire",
     command: "append",
+    generation: reduction.state.activeGeneration,
     requestId,
     takeId: take.id,
     chunk,
@@ -192,7 +227,11 @@ function captureStopped(reduction: Reduction, takeId: number, ok: boolean): void
     return;
   }
   if (!ok) {
-    reduction.effects.push({ domain: "wire", command: "clear" });
+    reduction.effects.push({
+      domain: "wire",
+      command: "clear",
+      generation: reduction.state.activeGeneration,
+    });
     rollbackTake(reduction, takeId);
     reduction.effects.push({
       domain: "status",
@@ -206,6 +245,7 @@ function captureStopped(reduction: Reduction, takeId: number, ok: boolean): void
   reduction.effects.push({
     domain: "wire",
     command: "commit",
+    generation: reduction.state.activeGeneration,
     requestId,
     takeId,
   });
@@ -223,8 +263,13 @@ function discardTakes(reduction: Reduction): void {
         domain: "capture",
         command: "stop",
         takeId: activeTakeId,
+        generation: reduction.state.activeGeneration,
       },
-      { domain: "wire", command: "clear" },
+      {
+        domain: "wire",
+        command: "clear",
+        generation: reduction.state.activeGeneration,
+      },
     );
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = activeTakeId;
@@ -249,6 +294,9 @@ function wireResult(
     return;
   }
   const [request] = reduction.state.pendingWire.splice(index, 1);
+  if (request.generation !== reduction.state.activeGeneration) {
+    return;
+  }
   const take = takeById(reduction.state, request.takeId);
   if (eventId === null) {
     if (take !== null) {
@@ -258,7 +306,11 @@ function wireResult(
   }
   if (take === null) {
     if (request.command === "commit") {
-      reduction.state.awaitingCommit.push({ takeId: null, itemId: null });
+      reduction.state.awaitingCommit.push({
+        generation: request.generation,
+        takeId: null,
+        itemId: null,
+      });
     }
     return;
   }
@@ -270,11 +322,13 @@ function wireResult(
   }
   reduction.state.clientEvents.push({
     eventId,
+    generation: request.generation,
     takeId: take.id,
     command: request.command,
   });
   if (request.command === "commit") {
     reduction.state.awaitingCommit.push({
+      generation: request.generation,
       takeId: take.id,
       itemId: take.itemId,
     });

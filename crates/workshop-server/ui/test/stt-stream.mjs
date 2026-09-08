@@ -925,7 +925,7 @@ await assertNoLeaks(lifecycle, async () => {
   assert.deepEqual(sockets[0].sent, [client.session_update]);
   sockets[0].message(server.session_updated);
   assert.equal(service.state, "ready");
-  assert.deepEqual(states, ["ready"]);
+  assert.deepEqual(states, [{ state: "ready", generation: 1 }]);
 
   service.append(Uint8Array.from([0, 0, 1, 0, 255, 255]).buffer);
   service.commit();
@@ -943,7 +943,7 @@ await assertNoLeaks(lifecycle, async () => {
   sockets[0].message(server.transcription_failed);
   sockets[0].message(server.error_correlated);
   assert.deepEqual(
-    events.map((event) => event.type),
+    events.map(({ event }) => event.type),
     [
       "session.created",
       "session.updated",
@@ -1005,6 +1005,7 @@ await assertNoLeaks(lifecycle, async () => {
       scope: "session",
       eventId: null,
       recoverable: true,
+      generation: 1,
     })),
   );
   service.dispose();
@@ -1119,11 +1120,11 @@ await assertNoLeaks(lifecycle, async () => {
     assert.deepEqual(
       events
         .filter(
-          (event) =>
+          ({ event }) =>
             event.type ===
             "conversation.item.input_audio_transcription.delta",
         )
-        .map((event) => event.event_id),
+        .map(({ event }) => event.event_id),
       [
         "evt_stale_delta_1",
         "evt_stale_delta_2",
@@ -1137,13 +1138,13 @@ await assertNoLeaks(lifecycle, async () => {
     assert.deepEqual(
       events
         .filter(
-          (event) =>
+          ({ event }) =>
             event.type ===
               "conversation.item.input_audio_transcription.hypothesis" ||
             event.type ===
               "conversation.item.input_audio_transcription.completed",
         )
-        .map((event) => [event.type, event.item_id, event.transcript]),
+        .map(({ event }) => [event.type, event.item_id, event.transcript]),
       [
         [
           "conversation.item.input_audio_transcription.completed",
@@ -1168,7 +1169,81 @@ await assertNoLeaks(lifecycle, async () => {
       scope: "session",
       eventId: null,
       recoverable: true,
+      generation: 2,
     });
+
+    service.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const sockets = [];
+    const service = new RealtimeTranscriptionService({
+      eventId: (() => {
+        let id = 0;
+        return () => `generation_event_${++id}`;
+      })(),
+      socket: (url) => {
+        const socket = new ScriptedSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const states = [];
+    const events = [];
+    const errors = [];
+    service.onState((value) => states.push(value));
+    service.onEvent((value) => events.push(value));
+    service.onError((value) => errors.push(value));
+
+    sockets[0].open();
+    sockets[0].message(server.session_created);
+    sockets[0].message(server.session_updated);
+    const firstAppend = service.append(new ArrayBuffer(2));
+    sockets[0].close();
+    mock.timers.tick(1_000);
+    sockets[1].open();
+    sockets[1].message(server.session_created);
+    sockets[1].message(server.session_updated);
+    const secondAppend = service.append(new ArrayBuffer(2));
+    const secondCommit = service.commit();
+    const secondClear = service.clear();
+    sockets[1].message(server.transcription_hypothesis);
+
+    assert.deepEqual(firstAppend, {
+      generation: 1,
+      eventId: "generation_event_2",
+    });
+    assert.deepEqual(secondAppend, {
+      generation: 2,
+      eventId: "generation_event_4",
+    });
+    assert.deepEqual(secondCommit, {
+      generation: 2,
+      eventId: "generation_event_5",
+    });
+    assert.deepEqual(secondClear, {
+      generation: 2,
+      eventId: "generation_event_6",
+    });
+    assert.deepEqual(
+      states.map(({ state, generation }) => [state, generation]),
+      [
+        ["ready", 1],
+        ["unavailable", 1],
+        ["connecting", 2],
+        ["ready", 2],
+      ],
+      "connection state envelopes retain the socket generation",
+    );
+    assert.equal(events.at(-1).generation, 2);
+    assert.equal(events.at(-1).event.type, server.transcription_hypothesis.type);
+    assert.equal(errors.at(-1).generation, 1);
+    assert.equal(service.generation, 2);
 
     service.dispose();
   } finally {

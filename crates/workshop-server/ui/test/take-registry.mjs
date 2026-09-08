@@ -186,7 +186,10 @@ test("precommit binding confirms matches and rolls back mismatches", () => {
     },
   ]);
   assert.equal(result.state.takes.length, 0);
-  assert.deepEqual(result.state.retiredItemIds.sort(), ["provisional", "wrong"]);
+  assert.deepEqual(
+    result.state.retiredItems.map(({ itemId }) => itemId).sort(),
+    ["provisional", "wrong"],
+  );
   assert.ok(
     result.effects.some(
       (effect) =>
@@ -212,7 +215,7 @@ test("commit tombstones consume late acknowledgments without stealing a new take
   state = start(state, context(0)).state;
   let result = server(state, committed("discarded"));
   assert.equal(result.state.takes[0].itemId, null);
-  assert.ok(result.state.retiredItemIds.includes("discarded"));
+  assert.ok(result.state.retiredItems.some(({ itemId }) => itemId === "discarded"));
   result = server(result.state, hypothesis("discarded", "WRONG TAKE"));
   assert.equal(editorReplacements(result.effects).length, 0);
 
@@ -231,7 +234,9 @@ test("duplicate acknowledgments preserve the next FIFO owner", () => {
   state = stopAndCommit(state, "commit_b").state;
 
   state = server(state, committed("a", "duplicate_a")).state;
-  assert.deepEqual(state.awaitingCommit, [{ takeId: 2, itemId: null }]);
+  assert.deepEqual(state.awaitingCommit, [
+    { generation: 0, takeId: 2, itemId: null },
+  ]);
   const result = server(state, committed("b"));
   assert.deepEqual(
     result.state.takes.map((take) => take.itemId),
@@ -367,7 +372,7 @@ test("a reconnect rolls back live state and rejects the old session's late event
       (effect) => effect.domain === "capture" && effect.command === "clear",
     ),
   );
-  assert.ok(result.state.retiredItemIds.includes("old"));
+  assert.deepEqual(result.state.retiredItems, []);
   const stopEffect = result.effects.find(
     (effect) => effect.domain === "capture" && effect.command === "stop",
   );
@@ -460,7 +465,12 @@ test("retained-audio overload stops capture and commits accepted visible text", 
     assert.ok(state.clientEvents.length <= 1, "append correlation history stays fixed");
   }
   assert.deepEqual(state.clientEvents, [
-    { eventId: "hour_append_359", takeId: state.activeTakeId, command: "append" },
+    {
+      eventId: "hour_append_359",
+      generation: 0,
+      takeId: state.activeTakeId,
+      command: "append",
+    },
   ]);
 
   result = server(state, {
@@ -600,7 +610,9 @@ test("precommit and terminal transcription failures preserve visible editor text
 
   result = server(state, transcriptionFailure("failed_take"));
   assert.equal(result.state.takes.length, 0);
-  assert.ok(result.state.retiredItemIds.includes("failed_take"));
+  assert.ok(
+    result.state.retiredItems.some(({ itemId }) => itemId === "failed_take"),
+  );
   assert.equal(editorReplacements(result.effects).length, 0);
   assert.ok(
     result.effects.some(
@@ -755,8 +767,12 @@ test("every transition preserves registry invariants without mutating its input"
       `${input.type} left an invalid active take`,
     );
     assert.equal(
-      new Set(result.state.retiredItemIds).size,
-      result.state.retiredItemIds.length,
+      new Set(
+        result.state.retiredItems.map(
+          ({ generation, itemId }) => `${generation}:${itemId}`,
+        ),
+      ).size,
+      result.state.retiredItems.length,
       `${input.type} duplicated a tombstoned item id`,
     );
     for (let index = 1; index < result.state.takes.length; index += 1) {
@@ -766,5 +782,157 @@ test("every transition preserves registry invariants without mutating its input"
       );
     }
     state = result.state;
+  }
+});
+
+test("connection generations scope wire identity and permit immediate item ID reuse", () => {
+  let state = reduceTakeRegistry(createTakeRegistry(), {
+    type: "connection.ready",
+    generation: 1,
+  }).state;
+  state = reduceTakeRegistry(state, {
+    type: "user.start",
+    generation: 1,
+    context: context(0),
+  }).state;
+  state = reduceTakeRegistry(state, {
+    type: "server.event",
+    generation: 1,
+    event: hypothesis("reused", "old words"),
+  }).state;
+
+  let result = reduceTakeRegistry(state, {
+    type: "connection.lost",
+    generation: 1,
+  });
+  assert.equal(result.state.activeGeneration, 1);
+  state = reduceTakeRegistry(result.state, {
+    type: "connection.ready",
+    generation: 2,
+  }).state;
+  state = reduceTakeRegistry(state, {
+    type: "user.start",
+    generation: 2,
+    context: context(0),
+  }).state;
+  result = reduceTakeRegistry(state, {
+    type: "server.event",
+    generation: 2,
+    event: hypothesis("reused", "fresh words"),
+  });
+  assert.equal(result.state.takes[0].text, "fresh words");
+  assert.equal(result.state.takes[0].itemGeneration, 2);
+  assert.equal(result.state.takes[0].itemId, "reused");
+
+  const freshRecording = result.state;
+  const idle = reduceTakeRegistry(createTakeRegistry(), {
+    type: "connection.ready",
+    generation: 2,
+  }).state;
+  const stopping = reduceTakeRegistry(freshRecording, {
+    type: "user.stop",
+    generation: 2,
+  });
+  const stopEffect = stopping.effects.find(
+    (effect) => effect.domain === "capture" && effect.command === "stop",
+  );
+  assert.ok(stopEffect);
+  const appending = reduceTakeRegistry(freshRecording, {
+    type: "capture.audio",
+    generation: 2,
+    chunk: new ArrayBuffer(2),
+  });
+  const appendEffect = appending.effects.find(
+    (effect) => effect.domain === "wire" && effect.command === "append",
+  );
+  assert.ok(appendEffect);
+  const unavailable = reduceTakeRegistry(freshRecording, {
+    type: "connection.lost",
+    generation: 2,
+  }).state;
+
+  const staleCases = [
+    {
+      label: "connection readiness",
+      state: unavailable,
+      input: { type: "connection.ready", generation: 1 },
+    },
+    {
+      label: "connection loss",
+      state: freshRecording,
+      input: { type: "connection.lost", generation: 1 },
+    },
+    {
+      label: "user start",
+      state: idle,
+      input: {
+        type: "user.start",
+        generation: 1,
+        context: context(0),
+      },
+    },
+    {
+      label: "user stop",
+      state: freshRecording,
+      input: { type: "user.stop", generation: 1 },
+    },
+    {
+      label: "user discard",
+      state: freshRecording,
+      input: { type: "user.discard", generation: 1 },
+    },
+    {
+      label: "capture audio",
+      state: freshRecording,
+      input: { type: "capture.audio", generation: 1, chunk: new ArrayBuffer(2) },
+    },
+    {
+      label: "capture completion",
+      state: stopping.state,
+      input: {
+        type: "capture.stopped",
+        generation: 1,
+        takeId: stopEffect.takeId,
+        ok: true,
+      },
+    },
+    {
+      label: "wire result",
+      state: appending.state,
+      input: {
+        type: "wire.result",
+        generation: 1,
+        requestId: appendEffect.requestId,
+        eventId: "stale",
+      },
+    },
+    {
+      label: "service error",
+      state: freshRecording,
+      input: { type: "service.error", generation: 1, eventId: null },
+    },
+    {
+      label: "server event",
+      state: freshRecording,
+      input: {
+        type: "server.event",
+        generation: 1,
+        event: completion("reused", "STALE"),
+      },
+    },
+  ];
+
+  for (const { label, state: current, input } of staleCases) {
+    const before = structuredClone(current);
+    const accepted = reduceTakeRegistry(current, { ...input, generation: 2 });
+    assert.notDeepEqual(
+      { state: accepted.state, effects: accepted.effects },
+      { state: before, effects: [] },
+      `${label} fixture must exercise behavior behind the generation guard`,
+    );
+
+    const ignored = reduceTakeRegistry(current, input);
+    assert.deepEqual(ignored.state, before, `${label} from the old socket mutated state`);
+    assert.deepEqual(ignored.effects, [], `${label} from the old socket emitted effects`);
   }
 });

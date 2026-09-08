@@ -3,6 +3,7 @@ import {
   activeTake,
   bindItem,
   composeTranscript,
+  isRetiredItem,
   removeTake,
   replaceTake,
   reserveWireRequest,
@@ -96,7 +97,12 @@ function precommitTranscriptionFailure(
   reduction.state.capture = "stopping";
   reduction.state.stoppingTakeId = take.id;
   reduction.effects.push(
-    { domain: "capture", command: "stop", takeId: take.id },
+    {
+      domain: "capture",
+      command: "stop",
+      takeId: take.id,
+      generation: reduction.state.activeGeneration,
+    },
     { domain: "status", command: "recording", recording: false },
     {
       domain: "status",
@@ -125,7 +131,12 @@ function retainedAudioOverload(
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = take.id;
     reduction.effects.push(
-      { domain: "capture", command: "stop", takeId: take.id },
+      {
+        domain: "capture",
+        command: "stop",
+        takeId: take.id,
+        generation: reduction.state.activeGeneration,
+      },
       { domain: "status", command: "recording", recording: false },
       {
         domain: "status",
@@ -156,7 +167,12 @@ function preserveFailedTake(reduction: Reduction, takeId: number): void {
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = takeId;
     reduction.effects.push(
-      { domain: "capture", command: "stop", takeId },
+      {
+        domain: "capture",
+        command: "stop",
+        takeId,
+        generation: reduction.state.activeGeneration,
+      },
       { domain: "status", command: "recording", recording: false },
     );
   }
@@ -167,7 +183,9 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
   const boundTake = takeByItem(reduction.state, itemId);
   if (boundTake !== null) {
     const ownerIndex = reduction.state.awaitingCommit.findIndex(
-      (expectation) => expectation.takeId === boundTake.id,
+      (expectation) =>
+        expectation.generation === reduction.state.activeGeneration &&
+        expectation.takeId === boundTake.id,
     );
     if (ownerIndex >= 0) {
       reduction.state.awaitingCommit.splice(ownerIndex, 1);
@@ -176,13 +194,15 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
   }
   const tombstoneIndex = reduction.state.awaitingCommit.findIndex(
     (expectation) =>
-      expectation.takeId === null && expectation.itemId === itemId,
+      expectation.generation === reduction.state.activeGeneration &&
+      expectation.takeId === null &&
+      expectation.itemId === itemId,
   );
   if (tombstoneIndex >= 0) {
     reduction.state.awaitingCommit.splice(tombstoneIndex, 1);
     return;
   }
-  if (reduction.state.retiredItemIds.includes(itemId)) {
+  if (isRetiredItem(reduction.state, reduction.state.activeGeneration, itemId)) {
     return;
   }
   if (reduction.state.awaitingCommit.length === 0) {
@@ -191,7 +211,7 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
       bindItem(reduction.state, active.id, itemId);
       return;
     }
-    retireItem(reduction.state, itemId);
+    retireItem(reduction.state, reduction.state.activeGeneration, itemId);
     reduction.effects.push({
       domain: "status",
       command: "local",
@@ -203,16 +223,16 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
 
   const expectation = reduction.state.awaitingCommit.shift();
   if (expectation === undefined) {
-    retireItem(reduction.state, itemId);
+    retireItem(reduction.state, reduction.state.activeGeneration, itemId);
     return;
   }
   if (expectation.takeId === null) {
-    retireItem(reduction.state, itemId);
+    retireItem(reduction.state, expectation.generation, itemId);
     return;
   }
   const take = takeById(reduction.state, expectation.takeId);
   if (take === null) {
-    retireItem(reduction.state, itemId);
+    retireItem(reduction.state, expectation.generation, itemId);
     return;
   }
   if (take.itemId === null) {
@@ -222,7 +242,7 @@ function acknowledgeCommit(reduction: Reduction, itemId: string): void {
   if (take.itemId === itemId) {
     return;
   }
-  retireItem(reduction.state, itemId);
+  retireItem(reduction.state, reduction.state.activeGeneration, itemId);
   rollbackTake(reduction, take.id);
   reduction.effects.push({
     domain: "status",
@@ -241,10 +261,12 @@ function applySnapshot(
   let take = takeByItem(reduction.state, itemId);
   if (take === null) {
     if (
-      reduction.state.retiredItemIds.includes(itemId) ||
+      isRetiredItem(reduction.state, reduction.state.activeGeneration, itemId) ||
       reduction.state.awaitingCommit.some(
         (expectation) =>
-          expectation.takeId === null && expectation.itemId === null,
+          expectation.generation === reduction.state.activeGeneration &&
+          expectation.takeId === null &&
+          expectation.itemId === null,
       )
     ) {
       return;
@@ -281,7 +303,12 @@ function completeTake(
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = take.id;
     reduction.effects.push(
-      { domain: "capture", command: "stop", takeId: take.id },
+      {
+        domain: "capture",
+        command: "stop",
+        takeId: take.id,
+        generation: reduction.state.activeGeneration,
+      },
       { domain: "status", command: "recording", recording: false },
     );
     reduction.state.activeTakeId = null;
@@ -339,7 +366,12 @@ export function connectionLost(reduction: Reduction): void {
   if (activeTakeId !== null && reduction.state.capture !== "idle") {
     reduction.effects.push(
       { domain: "capture", command: "clear" },
-      { domain: "capture", command: "stop", takeId: activeTakeId },
+      {
+        domain: "capture",
+        command: "stop",
+        takeId: activeTakeId,
+        generation: reduction.state.activeGeneration,
+      },
     );
     reduction.state.capture = "stopping";
     reduction.state.stoppingTakeId = activeTakeId;
@@ -347,6 +379,8 @@ export function connectionLost(reduction: Reduction): void {
   rollbackAll(reduction);
   reduction.state.awaitingCommit = [];
   reduction.state.pendingWire = [];
+  reduction.state.clientEvents = [];
+  reduction.state.retiredItems = [];
   reduction.effects.push(
     { domain: "status", command: "recording", recording: false },
     {
@@ -366,8 +400,17 @@ export function failTake(reduction: Reduction, takeId: number): void {
   ) {
     reduction.effects.push(
       { domain: "capture", command: "clear" },
-      { domain: "capture", command: "stop", takeId },
-      { domain: "wire", command: "clear" },
+      {
+        domain: "capture",
+        command: "stop",
+        takeId,
+        generation: reduction.state.activeGeneration,
+      },
+      {
+        domain: "wire",
+        command: "clear",
+        generation: reduction.state.activeGeneration,
+      },
       { domain: "status", command: "recording", recording: false },
     );
     reduction.state.capture = "stopping";

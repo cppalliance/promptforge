@@ -431,7 +431,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused shared-sidecar, Gateway boot, relaunch, handoff, diagnostics, logging, and process-race tests.
 - Component boundary: run the Gateway and shared-sidecar focused suites on Windows and a Unix host, including all real-process races. Do not run the complete repository suite. Commit the lease API, startup integration, fixtures, and race proof together without directly editing either architecture record.
 
-### Step 7: Carry connection generation through Workshop dictation
+### Step 7: Carry connection generation through Workshop dictation [completed]
 
 - In `crates/workshop-server/ui/src/services/realtime-transcription.ts`, assign every WebSocket a monotonically increasing immutable generation. Typed envelopes for decoded events, connection state, errors, and append, commit, or clear results retain the originating socket generation and the existing current-socket guard.
 - Add `activeGeneration` and generation-bearing pending requests, client correlations, commit expectations, item bindings, and retired tombstones in `ui/src/ui/take-registry-types.ts`, `take-registry-state.ts`, `take-registry-events.ts`, and `take-registry.ts`.

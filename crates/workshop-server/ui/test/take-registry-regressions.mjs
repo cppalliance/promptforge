@@ -255,3 +255,57 @@ test("audio flushed while capture stops remains owned by the stopping take", () 
     "the carried append is followed by commit after capture flushes",
   );
 });
+
+test("readiness advances monotonically and stale asynchronous completions are inert", () => {
+  let state = reduce(createTakeRegistry(), {
+    type: "connection.ready",
+    generation: 7,
+  }).state;
+  const duplicate = reduce(state, {
+    type: "connection.ready",
+    generation: 7,
+  });
+  assert.deepEqual(duplicate.state, state);
+  assert.deepEqual(duplicate.effects, []);
+
+  state = reduce(state, {
+    type: "user.start",
+    generation: 7,
+    context: context(0),
+  }).state;
+  const stopping = reduce(state, { type: "user.stop", generation: 7 });
+  const owner = stopping.effects.find(
+    (effect) => effect.domain === "capture" && effect.command === "stop",
+  );
+  assert.ok(owner);
+  state = reduce(stopping.state, {
+    type: "connection.lost",
+    generation: 7,
+  }).state;
+  state = reduce(state, {
+    type: "connection.ready",
+    generation: 8,
+  }).state;
+  const before = structuredClone(state);
+
+  for (const input of [
+    { type: "connection.ready", generation: 7 },
+    {
+      type: "capture.stopped",
+      generation: 7,
+      takeId: owner.takeId,
+      ok: true,
+    },
+    {
+      type: "wire.result",
+      generation: 7,
+      requestId: 1,
+      eventId: "late_wire",
+    },
+  ]) {
+    const stale = reduce(state, input);
+    assert.deepEqual(stale.state, before);
+    assert.deepEqual(stale.effects, []);
+    state = stale.state;
+  }
+});

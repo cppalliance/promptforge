@@ -11,13 +11,14 @@ export function cloneRegistry(state: TakeRegistry): MutableRegistry {
   return {
     takes: state.takes.map((take) => ({ ...take })),
     awaitingCommit: state.awaitingCommit.map((expectation) => ({ ...expectation })),
-    retiredItemIds: [...state.retiredItemIds],
+    retiredItems: state.retiredItems.map((item) => ({ ...item })),
     clientEvents: state.clientEvents.map((binding) => ({ ...binding })),
     pendingWire: state.pendingWire.map((request) => ({ ...request })),
     activeTakeId: state.activeTakeId,
     capture: state.capture,
     stoppingTakeId: state.stoppingTakeId,
     connection: state.connection,
+    activeGeneration: state.activeGeneration,
     nextTakeId: state.nextTakeId,
     nextRequestId: state.nextRequestId,
   };
@@ -31,7 +32,12 @@ export function reserveWireRequest(
 ): number {
   const id = state.nextRequestId;
   state.nextRequestId += 1;
-  state.pendingWire.push({ id, command, takeId });
+  state.pendingWire.push({
+    id,
+    generation: state.activeGeneration,
+    command,
+    takeId,
+  });
   return id;
 }
 
@@ -103,11 +109,15 @@ export function removeTake(reduction: Reduction, takeId: number): void {
   reduction.state.awaitingCommit = reduction.state.awaitingCommit.map(
     (expectation) =>
       expectation.takeId === takeId
-        ? { takeId: null, itemId: take.itemId }
+        ? {
+            generation: expectation.generation,
+            takeId: null,
+            itemId: take.itemId,
+          }
         : expectation,
   );
   if (take.itemId !== null) {
-    retireItem(reduction.state, take.itemId);
+    retireItem(reduction.state, take.itemGeneration ?? take.generation, take.itemId);
   }
   if (reduction.state.activeTakeId === takeId) {
     reduction.state.activeTakeId = null;
@@ -140,17 +150,39 @@ export function bindItem(
   itemId: string,
 ): void {
   const index = state.takes.findIndex((take) => take.id === takeId);
-  if (index < 0 || state.retiredItemIds.includes(itemId)) {
+  if (
+    index < 0 ||
+    isRetiredItem(state, state.activeGeneration, itemId)
+  ) {
     return;
   }
-  state.takes[index] = { ...state.takes[index], itemId };
+  state.takes[index] = {
+    ...state.takes[index],
+    itemId,
+    itemGeneration: state.activeGeneration,
+  };
 }
 
 /** Records one item identifier as permanently unable to mutate a take. */
-export function retireItem(state: MutableRegistry, itemId: string): void {
-  if (!state.retiredItemIds.includes(itemId)) {
-    state.retiredItemIds.push(itemId);
+export function retireItem(
+  state: MutableRegistry,
+  generation: number,
+  itemId: string,
+): void {
+  if (!isRetiredItem(state, generation, itemId)) {
+    state.retiredItems.push({ generation, itemId });
   }
+}
+
+/** Whether one item identity is retired in its originating generation. */
+export function isRetiredItem(
+  state: MutableRegistry,
+  generation: number,
+  itemId: string,
+): boolean {
+  return state.retiredItems.some(
+    (item) => item.generation === generation && item.itemId === itemId,
+  );
 }
 
 /** Returns the active take when its owner still exists. */
@@ -173,5 +205,11 @@ export function takeByItem(
   state: MutableRegistry,
   itemId: string,
 ): RegistryTake | null {
-  return state.takes.find((take) => take.itemId === itemId) ?? null;
+  return (
+    state.takes.find(
+      (take) =>
+        take.itemId === itemId &&
+        take.itemGeneration === state.activeGeneration,
+    ) ?? null
+  );
 }

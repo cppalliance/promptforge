@@ -392,7 +392,9 @@ async function harness() {
   async function startTake() {
     mic.click();
     const started = await waitFor(() => status.recording);
-    return started ? realtime : null;
+    return started
+      ? sockets.filter((socket) => socket.url.endsWith("/v1/realtime")).at(-1)
+      : null;
   }
   const dispose = () => {
     view.dispose();
@@ -1383,6 +1385,58 @@ await assertNoLeaks(lifecycle, async () => {
       status.local.at(-1).label.includes("temporarily unavailable") &&
         !status.local.at(-1).label.includes("SERVER WORDING"),
     );
+    dispose();
+  }
+
+  // A real second socket may immediately reuse the first socket's item ID.
+
+  {
+    const { wire, input, startTake, dispose } = await harness();
+    wire.fire.inputRequired("reconnect");
+    const first = await startTake();
+    if (first === null) {
+      failures.push("two-socket reconnect: the first take did not start");
+      dispose();
+      return;
+    }
+    first.message(producerHypothesis("reused_item", "old socket words"));
+    check("the first socket owns its provisional text", input.getText() === "old socket words");
+    first.close();
+    check("closing the first socket rolls its text back", input.getText() === "");
+
+    await sleep(1_050);
+    const secondCreated = await waitFor(
+      () =>
+        sockets.filter((socket) => socket.url.endsWith("/v1/realtime")).length >= 2 &&
+        sockets.at(-1) !== first,
+    );
+    const second = sockets.at(-1);
+    check("the reconnect creates a distinct second socket", secondCreated && second !== first);
+    await waitFor(() => second.readyState === FakeWebSocket.OPEN);
+    second.message(
+      canonicalMessage("first_event_readiness", "server", "session.created"),
+    );
+    await waitFor(() => second.sent.some((event) => event.type === "session.update"));
+    second.message(
+      canonicalMessage("hypothesis_negotiation", "server", "session.updated"),
+    );
+
+    const active = await startTake();
+    check("the fresh take uses the second socket", active === second);
+    second.message(producerHypothesis("reused_item", "fresh socket words"));
+    check(
+      "the second socket immediately reuses the same item ID",
+      input.getText() === "fresh socket words",
+    );
+    first.dispatch("message", {
+      data: JSON.stringify(producerCompletion("reused_item", "STALE FINAL")),
+    });
+    check(
+      "a late first-socket callback cannot rewrite the fresh take",
+      input.getText() === "fresh socket words",
+    );
+    second.message(producerCompletion("reused_item", "fresh final"));
+    check("the second socket completion remains authoritative", input.getText() === "fresh final");
     dispose();
   }
 });

@@ -12,12 +12,34 @@ const RECONNECT_MAX_MS = 30_000;
 /** Readiness of the browser's Realtime transcription connection. */
 export type RealtimeTranscriptionState = "connecting" | "ready" | "unavailable";
 
+/** One immutable WebSocket identity assigned in construction order. */
+export type RealtimeSocketGeneration = number;
+
+/** A connection-state change retaining its originating socket generation. */
+export interface RealtimeTranscriptionStateEvent {
+  readonly state: RealtimeTranscriptionState;
+  readonly generation: RealtimeSocketGeneration;
+}
+
+/** A decoded event retaining its originating socket generation. */
+export interface RealtimeTranscriptionEvent {
+  readonly event: RealtimeEvent;
+  readonly generation: RealtimeSocketGeneration;
+}
+
 /** A recoverable transport or server-event decoding failure. */
 export interface RealtimeTranscriptionError {
   readonly code: string;
   readonly scope: "connection" | "session";
   readonly eventId: string | null;
   readonly recoverable: true;
+  readonly generation: RealtimeSocketGeneration;
+}
+
+/** A client send result retaining the socket generation used for the attempt. */
+export interface RealtimeTranscriptionResult {
+  readonly generation: RealtimeSocketGeneration;
+  readonly eventId: string | null;
 }
 
 /** The WebSocket surface used by the DOM-free Realtime service. */
@@ -72,20 +94,21 @@ function base64(buffer: ArrayBuffer): string {
  * canonical client events and publishes only strictly decoded server events.
  */
 export class RealtimeTranscriptionService extends Disposable {
-  private readonly stateEmitter = this._register(new Emitter<RealtimeTranscriptionState>());
-  private readonly eventEmitter = this._register(new Emitter<RealtimeEvent>());
+  private readonly stateEmitter = this._register(new Emitter<RealtimeTranscriptionStateEvent>());
+  private readonly eventEmitter = this._register(new Emitter<RealtimeTranscriptionEvent>());
   private readonly errorEmitter = this._register(new Emitter<RealtimeTranscriptionError>());
   private socket: RealtimeSocket | null = null;
   private disposed = false;
   private negotiatedHypotheses = false;
   private currentState: RealtimeTranscriptionState = "connecting";
+  private currentGeneration: RealtimeSocketGeneration = 0;
   private reconnectDelayMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Fires when connection readiness changes. */
-  readonly onState: ServiceEvent<RealtimeTranscriptionState> = this.stateEmitter.event;
+  readonly onState: ServiceEvent<RealtimeTranscriptionStateEvent> = this.stateEmitter.event;
   /** Fires each server event after strict decoding succeeds. */
-  readonly onEvent: ServiceEvent<RealtimeEvent> = this.eventEmitter.event;
+  readonly onEvent: ServiceEvent<RealtimeTranscriptionEvent> = this.eventEmitter.event;
   /** Fires a recoverable transport or server-event decoding failure. */
   readonly onError: ServiceEvent<RealtimeTranscriptionError> = this.errorEmitter.event;
 
@@ -99,34 +122,40 @@ export class RealtimeTranscriptionService extends Disposable {
     return this.currentState;
   }
 
+  /** Generation of the current socket or most recent connection attempt. */
+  get generation(): RealtimeSocketGeneration {
+    return this.currentGeneration;
+  }
+
   /** Opens a fresh relay connection after a recoverable outage. */
   connect(): void {
     if (this.disposed || this.socket !== null) {
       return;
     }
-    this.setState("connecting");
+    const generation = this.currentGeneration + 1;
+    this.setState("connecting", generation);
     const socketFactory = this.options.socket ?? defaultSocket;
     let socket: RealtimeSocket;
     try {
       socket = socketFactory(socketUrl());
     } catch {
-      this.setState("unavailable");
-      this.reportError("connection_failed");
+      this.setState("unavailable", generation);
+      this.reportError("connection_failed", "connection", null, generation);
       this.scheduleReconnect();
       return;
     }
     this.socket = socket;
     const onMessage = (event: MessageEvent<unknown>): void => {
       if (this.socket === socket) {
-        this.handleMessage(event.data);
+        this.handleMessage(event.data, generation);
       }
     };
     const onError = (): void => {
       if (this.socket === socket) {
         this.socket = null;
         this.resetConnectionState();
-        this.setState("unavailable");
-        this.reportError("connection_failed");
+        this.setState("unavailable", generation);
+        this.reportError("connection_failed", "connection", null, generation);
         socket.close();
         this.scheduleReconnect();
       }
@@ -138,8 +167,8 @@ export class RealtimeTranscriptionService extends Disposable {
       this.socket = null;
       this.resetConnectionState();
       if (!this.disposed) {
-        this.setState("unavailable");
-        this.reportError("connection_closed");
+        this.setState("unavailable", generation);
+        this.reportError("connection_closed", "connection", null, generation);
         this.scheduleReconnect();
       }
     };
@@ -155,7 +184,7 @@ export class RealtimeTranscriptionService extends Disposable {
   }
 
   /** Appends one exact 24 kHz mono PCM16 block and returns its client event ID. */
-  append(audio: ArrayBuffer): string | null {
+  append(audio: ArrayBuffer): RealtimeTranscriptionResult {
     return this.sendClientEvent({
       type: "input_audio_buffer.append",
       audio: base64(audio),
@@ -163,12 +192,12 @@ export class RealtimeTranscriptionService extends Disposable {
   }
 
   /** Commits the current input buffer and returns its client event ID. */
-  commit(): string | null {
+  commit(): RealtimeTranscriptionResult {
     return this.sendClientEvent({ type: "input_audio_buffer.commit" });
   }
 
   /** Clears the current input buffer and returns its client event ID. */
-  clear(): string | null {
+  clear(): RealtimeTranscriptionResult {
     return this.sendClientEvent({ type: "input_audio_buffer.clear" });
   }
 
@@ -187,21 +216,21 @@ export class RealtimeTranscriptionService extends Disposable {
     super.dispose();
   }
 
-  private handleMessage(data: unknown): void {
+  private handleMessage(data: unknown, generation: RealtimeSocketGeneration): void {
     if (typeof data !== "string") {
-      this.reportError("invalid_server_event", "session");
+      this.reportError("invalid_server_event", "session", null, generation);
       return;
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(data);
     } catch {
-      this.reportError("invalid_server_event", "session");
+      this.reportError("invalid_server_event", "session", null, generation);
       return;
     }
     const event = decodeRealtimeEvent(parsed);
     if (event === null) {
-      this.reportError("invalid_server_event", "session");
+      this.reportError("invalid_server_event", "session", null, generation);
       return;
     }
     if (
@@ -210,7 +239,7 @@ export class RealtimeTranscriptionService extends Disposable {
     ) {
       return;
     }
-    this.eventEmitter.fire(event);
+    this.eventEmitter.fire({ event, generation });
 
     switch (event.type) {
       case "session.created":
@@ -243,7 +272,7 @@ export class RealtimeTranscriptionService extends Disposable {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
-        this.setState("ready");
+        this.setState("ready", generation);
         return;
       case "input_audio_buffer.committed":
       case "input_audio_buffer.cleared":
@@ -262,9 +291,12 @@ export class RealtimeTranscriptionService extends Disposable {
     }
   }
 
-  private sendClientEvent(event: Record<string, unknown>): string | null {
+  private sendClientEvent(event: Record<string, unknown>): RealtimeTranscriptionResult {
     const eventId = (this.options.eventId ?? defaultEventId)();
-    return this.send({ ...event, event_id: eventId }) ? eventId : null;
+    return {
+      generation: this.currentGeneration,
+      eventId: this.send({ ...event, event_id: eventId }) ? eventId : null,
+    };
   }
 
   private send(event: Record<string, unknown>): boolean {
@@ -282,12 +314,16 @@ export class RealtimeTranscriptionService extends Disposable {
     }
   }
 
-  private setState(state: RealtimeTranscriptionState): void {
-    if (this.currentState === state) {
+  private setState(
+    state: RealtimeTranscriptionState,
+    generation: RealtimeSocketGeneration,
+  ): void {
+    if (this.currentState === state && this.currentGeneration === generation) {
       return;
     }
     this.currentState = state;
-    this.stateEmitter.fire(state);
+    this.currentGeneration = generation;
+    this.stateEmitter.fire({ state, generation });
   }
 
   private resetConnectionState(): void {
@@ -310,7 +346,14 @@ export class RealtimeTranscriptionService extends Disposable {
     code: string,
     scope: RealtimeTranscriptionError["scope"] = "connection",
     eventId: string | null = null,
+    generation: RealtimeSocketGeneration = this.currentGeneration,
   ): void {
-    this.errorEmitter.fire({ code, scope, eventId, recoverable: true });
+    this.errorEmitter.fire({
+      code,
+      scope,
+      eventId,
+      recoverable: true,
+      generation,
+    });
   }
 }

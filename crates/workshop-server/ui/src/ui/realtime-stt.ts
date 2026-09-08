@@ -48,7 +48,14 @@ export function setupStt(
   const store = new DisposableStore();
   const realtime = providedRealtime ?? store.add(new RealtimeTranscriptionService());
   let registry: TakeRegistry = createTakeRegistry();
+  if (realtime.state === "ready") {
+    registry = reduceTakeRegistry(registry, {
+      type: "connection.ready",
+      generation: realtime.generation,
+    }).state;
+  }
   let pendingCaptureStop: Promise<SpeechCaptureOutcome> | null = null;
+  let captureGeneration = realtime.generation;
   let disposed = false;
 
   function setRecording(recording: boolean): void {
@@ -101,6 +108,7 @@ export function setupStt(
               if (!disposed) {
                 dispatch({
                   type: "capture.stopped",
+                  generation: effect.generation,
                   takeId: effect.takeId,
                   ok: outcome.ok,
                 });
@@ -129,19 +137,27 @@ export function setupStt(
       case "wire":
         switch (effect.command) {
           case "append":
+            {
+              const result = realtime.append(effect.chunk);
             dispatch({
               type: "wire.result",
+              generation: result.generation,
               requestId: effect.requestId,
-              eventId: realtime.append(effect.chunk),
+              eventId: result.eventId,
             });
             return;
+            }
           case "commit":
+            {
+              const result = realtime.commit();
             dispatch({
               type: "wire.result",
+              generation: result.generation,
               requestId: effect.requestId,
-              eventId: realtime.commit(),
+              eventId: result.eventId,
             });
             return;
+            }
           case "clear":
             realtime.clear();
             return;
@@ -166,29 +182,40 @@ export function setupStt(
   }
 
   store.add(
-    realtime.onEvent((event) => {
-      dispatch({ type: "server.event", event });
+    realtime.onEvent(({ event, generation }) => {
+      dispatch({ type: "server.event", event, generation });
     }),
   );
   store.add(
-    realtime.onState((state) => {
+    realtime.onState(({ state, generation }) => {
       if (state === "ready") {
-        dispatch({ type: "connection.ready" });
+        dispatch({ type: "connection.ready", generation });
       }
     }),
   );
   store.add(
     realtime.onError((error) => {
       if (error.scope === "connection") {
-        dispatch({ type: "connection.lost" });
+        dispatch({
+          type: "connection.lost",
+          generation: error.generation,
+        });
       } else if (error.scope === "session") {
-        dispatch({ type: "service.error", eventId: error.eventId });
+        dispatch({
+          type: "service.error",
+          generation: error.generation,
+          eventId: error.eventId,
+        });
       }
     }),
   );
   store.add(
     capture.onAudio((chunk) => {
-      dispatch({ type: "capture.audio", chunk });
+      dispatch({
+        type: "capture.audio",
+        generation: captureGeneration,
+        chunk,
+      });
     }),
   );
 
@@ -213,6 +240,8 @@ export function setupStt(
       status.showLocal("Dictation is connecting. Try again in a moment.", "info");
       return;
     }
+    const generation = realtime.generation;
+    captureGeneration = generation;
     const outcome = await capture.start();
     if (!outcome.ok) {
       status.showLocal(captureFailureLabel(outcome), "error");
@@ -222,7 +251,11 @@ export function setupStt(
       void releaseCapture();
       return;
     }
-    dispatch({ type: "user.start", context: input.insertionContext() });
+    dispatch({
+      type: "user.start",
+      generation,
+      context: input.insertionContext(),
+    });
     if (
       registry.activeTakeId === null ||
       registry.capture !== "recording"
@@ -232,11 +265,11 @@ export function setupStt(
   }
 
   function stop(): void {
-    dispatch({ type: "user.stop" });
+    dispatch({ type: "user.stop", generation: realtime.generation });
   }
 
   function discardIfRecording(): void {
-    dispatch({ type: "user.discard" });
+    dispatch({ type: "user.discard", generation: realtime.generation });
   }
 
   const onMicClick = (): void => {

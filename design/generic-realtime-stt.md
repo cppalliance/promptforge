@@ -94,6 +94,10 @@ The new generation remains unpublished until profile persistence succeeds. Persi
 
 The browser's `SpeechCaptureService` owns the microphone graph and emits little-endian mono PCM16 at 24 kHz. `RealtimeTranscriptionService` owns protocol negotiation and reconnect backoff. The view keeps one reversible editor range per take and replaces that range from hypothesis snapshots until completion.
 
+Every browser Realtime socket receives an immutable, monotonically increasing generation. Decoded events, readiness and failure notifications, and append, commit, and clear results carry that generation. The take registry accepts newer readiness, treats duplicate readiness as idempotent, and ignores older readiness or any user, audio, capture, wire, error, or server input whose generation is not active.
+
+Pending requests, client-event correlations, commit expectations, item bindings, and retired item tombstones are generation-scoped. Connection loss performs the existing editor and capture rollback, clears the closed generation's wire identity, and retains only local capture-stop ownership until it settles or a newer generation supersedes it. A new socket can therefore reuse an item ID immediately, while late callbacks and frames from the old socket cannot mutate the new take. The service also retains its current-socket callback guard.
+
 The Workshop server exposes `/v1/realtime` on its own origin. It validates Origin, rejects subprotocols, attaches the Gateway credential upstream, preserves text, binary, close code, and close reason, and bounds relay writes. It does not parse speech JSON, report speech capability, or own speech status.
 
 ## Architecture and CI gates
