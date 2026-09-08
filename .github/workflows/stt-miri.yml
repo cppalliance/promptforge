@@ -59,6 +59,8 @@ jobs:
           $requiredVersion = '1.89.0'
           $contractName = 'PROMPTFORGE_RUST_1_89_0_BIN'
           $contractBin = [Environment]::GetEnvironmentVariable($contractName)
+          $rustBin = $null
+          $rustBinSource = $null
 
           if (-not [string]::IsNullOrWhiteSpace($contractBin)) {
             $contractBin = $contractBin.Trim()
@@ -68,29 +70,147 @@ jobs:
             if (-not (Test-Path $contractBin -PathType Container)) {
               throw "self-hosted runner Rust $requiredVersion contract $contractName directory does not exist: '$contractBin'"
             }
-            $contractBin = (Resolve-Path $contractBin).Path
+            $rustBin = (Resolve-Path $contractBin).Path
+            $rustBinSource = "contract $contractName"
+          } else {
+            $candidateBins = [Collections.Generic.List[object]]::new()
+            $seenBins = [Collections.Generic.HashSet[string]]::new(
+              [StringComparer]::OrdinalIgnoreCase
+            )
+
+            function Add-RustBinCandidate {
+              param(
+                [string] $Bin,
+                [Parameter(Mandatory = $true)][string] $Source
+              )
+
+              if ([string]::IsNullOrWhiteSpace($Bin)) {
+                return
+              }
+              try {
+                $absoluteBin = [IO.Path]::GetFullPath(
+                  [Environment]::ExpandEnvironmentVariables($Bin.Trim())
+                )
+              } catch {
+                Write-Host "Ignoring invalid Rust bin candidate from ${Source}: '$Bin'"
+                return
+              }
+              if ($seenBins.Add($absoluteBin)) {
+                $candidateBins.Add([PSCustomObject]@{
+                  Bin = $absoluteBin
+                  Source = $Source
+                })
+              }
+            }
+
+            $toolchainNames = @(
+              "$requiredVersion-x86_64-pc-windows-msvc",
+              "$env:RUSTUP_TOOLCHAIN-x86_64-pc-windows-msvc",
+              'stable-x86_64-pc-windows-msvc'
+            ) | Select-Object -Unique
+
+            function Add-RustupToolchainCandidates {
+              param(
+                [string] $RustupHome,
+                [Parameter(Mandatory = $true)][string] $Source
+              )
+
+              if ([string]::IsNullOrWhiteSpace($RustupHome)) {
+                return
+              }
+              foreach ($toolchainName in $toolchainNames) {
+                Add-RustBinCandidate `
+                  -Bin (Join-Path $RustupHome "toolchains\$toolchainName\bin") `
+                  -Source "$Source rustup toolchain $toolchainName"
+              }
+            }
+
+            $pathCargo = Get-Command 'cargo.exe' -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($pathCargo) {
+              Add-RustBinCandidate -Bin (Split-Path -Parent $pathCargo.Source) -Source 'PATH cargo.exe'
+            }
+            $pathRustc = Get-Command 'rustc.exe' -CommandType Application -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($pathRustc) {
+              Add-RustBinCandidate -Bin (Split-Path -Parent $pathRustc.Source) -Source 'PATH rustc.exe'
+            }
+
+            $rustupHome = [Environment]::GetEnvironmentVariable('RUSTUP_HOME')
+            Add-RustupToolchainCandidates -RustupHome $rustupHome -Source 'RUSTUP_HOME'
+
+            $userProfile = [Environment]::GetEnvironmentVariable('USERPROFILE')
+            if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
+              Add-RustupToolchainCandidates `
+                -RustupHome (Join-Path $userProfile '.rustup') `
+                -Source 'USERPROFILE'
+            }
+
+            # The persistent CUDA runner executes as NetworkService. Rustup's
+            # prior installer output identified this existing service profile.
+            $windowsDirectory = [Environment]::GetEnvironmentVariable('WINDIR')
+            $networkServiceProfile = $null
+            if (-not [string]::IsNullOrWhiteSpace($windowsDirectory)) {
+              $networkServiceProfile = Join-Path $windowsDirectory 'ServiceProfiles\NetworkService'
+              Add-RustupToolchainCandidates `
+                -RustupHome (Join-Path $networkServiceProfile '.rustup') `
+                -Source 'NetworkService'
+            }
+
+            $cargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME')
+            if (-not [string]::IsNullOrWhiteSpace($cargoHome)) {
+              Add-RustBinCandidate -Bin (Join-Path $cargoHome 'bin') -Source 'CARGO_HOME'
+            }
+            if (-not [string]::IsNullOrWhiteSpace($userProfile)) {
+              Add-RustBinCandidate -Bin (Join-Path $userProfile '.cargo\bin') -Source 'USERPROFILE'
+            }
+            if (-not [string]::IsNullOrWhiteSpace($networkServiceProfile)) {
+              Add-RustBinCandidate `
+                -Bin (Join-Path $networkServiceProfile '.cargo\bin') `
+                -Source 'NetworkService service profile'
+            }
+
+            $candidateReports = [Collections.Generic.List[string]]::new()
+            foreach ($candidate in $candidateBins) {
+              $missingTools = @(
+                'cargo.exe',
+                'rustc.exe'
+              ) | Where-Object {
+                -not (Test-Path (Join-Path $candidate.Bin $_) -PathType Leaf)
+              }
+              if ($missingTools.Count -eq 0) {
+                $rustBin = (Resolve-Path $candidate.Bin).Path
+                $rustBinSource = $candidate.Source
+                Write-Host "Discovered preprovisioned Rust bin from ${rustBinSource}: '$rustBin'"
+                break
+              }
+              $candidateReports.Add(
+                "$($candidate.Source) '$($candidate.Bin)' missing $($missingTools -join ', ')"
+              )
+            }
+
+            if ([string]::IsNullOrWhiteSpace($rustBin)) {
+              $identity = "$([Environment]::UserDomainName)\$([Environment]::UserName)"
+              $checked = if ($candidateReports.Count -eq 0) {
+                '(no candidate directories were available)'
+              } else {
+                $candidateReports -join '; '
+              }
+              throw "self-hosted runner Rust $requiredVersion is not provisioned for '$identity': no bounded candidate directory contained cargo.exe and rustc.exe. Checked: $checked. Provision both tools together outside CI or set $contractName to their absolute versioned bin directory"
+            }
           }
 
           function Resolve-RustTool {
             param(
               [Parameter(Mandatory = $true)][string] $Name,
-              [string] $Bin
+              [Parameter(Mandatory = $true)][string] $Bin
             )
 
-            if (-not [string]::IsNullOrWhiteSpace($Bin)) {
-              $candidate = Join-Path $Bin "$Name.exe"
-              if (-not (Test-Path $candidate -PathType Leaf)) {
-                throw "self-hosted runner Rust $requiredVersion contract $contractName is missing $Name.exe at '$candidate'"
-              }
-              return (Resolve-Path $candidate).Path
+            $candidate = Join-Path $Bin "$Name.exe"
+            if (-not (Test-Path $candidate -PathType Leaf)) {
+              throw "self-hosted runner Rust $requiredVersion selected bin from $rustBinSource is missing $Name.exe at '$candidate'; provision cargo.exe and rustc.exe together outside CI or set $contractName"
             }
-
-            $command = Get-Command "$Name.exe" -CommandType Application -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if (-not $command) {
-              throw "self-hosted runner Rust $requiredVersion is not provisioned: $Name.exe was not found on PATH; install it outside CI or set $contractName to its versioned bin directory"
-            }
-            return $command.Source
+            return (Resolve-Path $candidate).Path
           }
 
           function Assert-RustToolVersion {
@@ -138,8 +258,8 @@ jobs:
             )
           }
 
-          $cargo = Resolve-RustTool -Name 'cargo' -Bin $contractBin
-          $rustc = Resolve-RustTool -Name 'rustc' -Bin $contractBin
+          $cargo = Resolve-RustTool -Name 'cargo' -Bin $rustBin
+          $rustc = Resolve-RustTool -Name 'rustc' -Bin $rustBin
           Assert-RustToolVersion -Name 'cargo' -ToolPath $cargo
           Assert-RustToolVersion -Name 'rustc' -ToolPath $rustc
 
@@ -150,7 +270,7 @@ jobs:
             if ($cargoHash -ne $rustcHash) {
               throw "self-hosted runner Rust $requiredVersion mixes a rustup cargo proxy with a direct rustc.exe; provision both tools from one direct or rustup-managed toolchain"
             }
-            $rustup = Resolve-RustTool -Name 'rustup' -Bin $contractBin
+            $rustup = Resolve-RustTool -Name 'rustup' -Bin $rustBin
             $rustupHash = (Get-FileHash $rustup -Algorithm SHA256).Hash
             if ($cargoHash -ne $rustupHash) {
               throw "self-hosted runner Rust $requiredVersion rustup.exe does not match the selected cargo.exe and rustc.exe proxies"
@@ -160,9 +280,7 @@ jobs:
             Write-Host 'Using direct Rust tools'
           }
 
-          if (-not [string]::IsNullOrWhiteSpace($contractBin)) {
-            $contractBin | Add-Content -Path $env:GITHUB_PATH
-          }
+          $rustBin | Add-Content -Path $env:GITHUB_PATH
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   chmodSync,
   copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -57,8 +58,11 @@ function stepScript(job, name) {
     .trimEnd();
 }
 
-function createToolLayout(names, { proxy = false } = {}) {
-  const bin = mkdtempSync(join(fixtureRoot, proxy ? "proxy-bin-" : "direct-bin-"));
+function createToolLayout(names, { bin, proxy = false } = {}) {
+  bin ??= mkdtempSync(
+    join(fixtureRoot, proxy ? "proxy-bin-" : "direct-bin-"),
+  );
+  mkdirSync(bin, { recursive: true });
   for (const name of names) {
     const destination = join(bin, `${name}.exe`);
     copyFileSync(fakeTool, destination);
@@ -67,27 +71,76 @@ function createToolLayout(names, { proxy = false } = {}) {
   return bin;
 }
 
-function runPreflight({ bin, explicitBin }) {
-  const environment = { ...process.env };
-  for (const key of Object.keys(environment)) {
-    if (key.toUpperCase() === "PROMPTFORGE_RUST_1_89_0_BIN") {
-      delete environment[key];
-    }
+function environmentKey(environment, name) {
+  return Object.keys(environment).find(
+    (key) => key.toLowerCase() === name.toLowerCase(),
+  );
+}
+
+function setEnvironmentVariable(environment, name, value) {
+  const key = environmentKey(environment, name) ?? name;
+  environment[key] = value;
+}
+
+function deleteEnvironmentVariable(environment, name) {
+  const key = environmentKey(environment, name);
+  if (key) {
+    delete environment[key];
   }
-  environment.GITHUB_PATH = join(fixtureRoot, "github-path");
-  environment.RUSTUP_TOOLCHAIN = "1.89";
-  environment.RUSTUP_AUTO_INSTALL = "0";
-  if (explicitBin) {
-    environment.PROMPTFORGE_RUST_1_89_0_BIN = bin;
+}
+
+function runPreflight({
+  bin,
+  discovery,
+  explicitBin,
+  windowsDirectory,
+}) {
+  const environment = { ...process.env };
+  const runRoot = mkdtempSync(join(fixtureRoot, "preflight-run-"));
+  const githubPath = join(runRoot, "github-path");
+  const mode = discovery ?? (explicitBin ? "contract" : "path");
+
+  deleteEnvironmentVariable(environment, "PROMPTFORGE_RUST_1_89_0_BIN");
+  setEnvironmentVariable(environment, "GITHUB_PATH", githubPath);
+  setEnvironmentVariable(environment, "RUSTUP_TOOLCHAIN", "1.89");
+  setEnvironmentVariable(environment, "RUSTUP_AUTO_INSTALL", "0");
+
+  if (mode === "contract") {
+    setEnvironmentVariable(
+      environment,
+      "PROMPTFORGE_RUST_1_89_0_BIN",
+      bin,
+    );
+  } else if (mode === "path") {
+    const pathKey = environmentKey(environment, "PATH") ?? "PATH";
+    setEnvironmentVariable(
+      environment,
+      "PATH",
+      `${bin}${delimiter}${environment[pathKey] ?? ""}`,
+    );
+  } else if (mode === "network-service" || mode === "isolated") {
+    const emptyPath = join(runRoot, "empty-path");
+    const emptyProfile = join(runRoot, "empty-profile");
+    mkdirSync(emptyPath, { recursive: true });
+    mkdirSync(emptyProfile, { recursive: true });
+    deleteEnvironmentVariable(environment, "CARGO_HOME");
+    setEnvironmentVariable(environment, "PATH", emptyPath);
+    setEnvironmentVariable(environment, "USERPROFILE", emptyProfile);
+    setEnvironmentVariable(environment, "WINDIR", windowsDirectory);
   } else {
-    const pathKey =
-      Object.keys(environment).find((key) => key.toLowerCase() === "path") ??
-      "PATH";
-    environment[pathKey] = `${bin}${delimiter}${environment[pathKey] ?? ""}`;
+    throw new Error(`unknown preflight discovery mode: ${mode}`);
   }
 
-  const executable = process.platform === "win32" ? "powershell.exe" : "pwsh";
-  return spawnSync(
+  const executable = process.platform === "win32"
+    ? join(
+        process.env.SystemRoot ?? "C:\\WINDOWS",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      )
+    : "pwsh";
+  const result = spawnSync(
     executable,
     ["-NoProfile", "-NonInteractive", "-File", preflightScript],
     {
@@ -97,6 +150,7 @@ function runPreflight({ bin, explicitBin }) {
       timeout: 30_000,
     },
   );
+  return { ...result, githubPath };
 }
 
 before(() => {
@@ -152,10 +206,10 @@ test("native runner validates the exact repository MSRV before caching", () => {
   const preflight = native.indexOf("- name: Verify preinstalled MSRV Rust");
   const cache = native.indexOf("- name: Cache Cargo");
   const resolveCargo = native.indexOf(
-    "$cargo = Resolve-RustTool -Name 'cargo' -Bin $contractBin",
+    "$cargo = Resolve-RustTool -Name 'cargo' -Bin $rustBin",
   );
   const resolveRustc = native.indexOf(
-    "$rustc = Resolve-RustTool -Name 'rustc' -Bin $contractBin",
+    "$rustc = Resolve-RustTool -Name 'rustc' -Bin $rustBin",
   );
   const validateCargo = native.indexOf(
     "Assert-RustToolVersion -Name 'cargo' -ToolPath $cargo",
@@ -164,7 +218,7 @@ test("native runner validates the exact repository MSRV before caching", () => {
     "Assert-RustToolVersion -Name 'rustc' -ToolPath $rustc",
   );
   const publishContract = native.indexOf(
-    "$contractBin | Add-Content -Path $env:GITHUB_PATH",
+    "$rustBin | Add-Content -Path $env:GITHUB_PATH",
   );
 
   assert.ok(preflight > 0, "native job must have a Rust preflight");
@@ -215,7 +269,41 @@ test("rustup-managed PATH proxies use the exact preinstalled toolchain", () => {
   assert.match(result.stdout, /Using rustup proxies from /);
 });
 
-test("tool discovery supports PATH and the versioned runner contract", () => {
+test("NetworkService profile discovery executes without a repository variable", () => {
+  const windowsDirectory = mkdtempSync(
+    join(fixtureRoot, "windows-directory-"),
+  );
+  const serviceBin = join(
+    windowsDirectory,
+    "ServiceProfiles",
+    "NetworkService",
+    ".rustup",
+    "toolchains",
+    "1.89.0-x86_64-pc-windows-msvc",
+    "bin",
+  );
+  createToolLayout(["cargo", "rustc"], { bin: serviceBin });
+
+  const result = runPreflight({
+    discovery: "network-service",
+    windowsDirectory,
+  });
+
+  assert.equal(
+    result.status,
+    0,
+    `NetworkService discovery failed:\n${result.stdout}${result.stderr}`,
+  );
+  assert.match(
+    result.stdout,
+    /Discovered preprovisioned Rust bin from NetworkService rustup toolchain 1\.89\.0-x86_64-pc-windows-msvc:/,
+  );
+  assert.match(result.stdout, /Using cargo 1\.89\.0 from /);
+  assert.match(result.stdout, /Using rustc 1\.89\.0 from /);
+  assert.equal(readFileSync(result.githubPath, "utf8").trim(), serviceBin);
+});
+
+test("tool discovery uses only explicit bounded candidate directories", () => {
   const native = jobSource("native-whisper");
 
   assert.match(
@@ -224,15 +312,33 @@ test("tool discovery supports PATH and the versioned runner contract", () => {
   );
   assert.match(native, /\[IO\.Path\]::IsPathRooted\(\$contractBin\)/);
   assert.match(native, /Test-Path \$contractBin -PathType Container/);
+  assert.match(
+    native,
+    /\$networkServiceProfile = Join-Path \$windowsDirectory 'ServiceProfiles\\NetworkService'/,
+  );
+  assert.match(
+    native,
+    /Join-Path \$networkServiceProfile '\.rustup'/,
+  );
+  assert.match(
+    native,
+    /"\$requiredVersion-x86_64-pc-windows-msvc"/,
+  );
+  assert.match(
+    native,
+    /"\$env:RUSTUP_TOOLCHAIN-x86_64-pc-windows-msvc"/,
+  );
+  assert.match(native, /-Source 'NetworkService service profile'/);
+  assert.match(native, /Join-Path \$cargoHome 'bin'/);
+  assert.match(native, /Join-Path \$userProfile '\.cargo\\bin'/);
   assert.match(native, /\$candidate = Join-Path \$Bin "\$Name\.exe"/);
   assert.match(
     native,
-    /Get-Command "\$Name\.exe" -CommandType Application -ErrorAction SilentlyContinue/,
+    /Get-Command 'cargo\.exe' -CommandType Application -ErrorAction SilentlyContinue/,
   );
-  assert.match(native, /return \$command\.Source/);
-  assert.match(native, /\$contractBin \| Add-Content -Path \$env:GITHUB_PATH/);
-  assert.doesNotMatch(native, /\$env:USERPROFILE/);
-  assert.doesNotMatch(native, /\.cargo\\bin/);
+  assert.match(native, /\$rustBin \| Add-Content -Path \$env:GITHUB_PATH/);
+  assert.doesNotMatch(native, /Get-ChildItem/);
+  assert.doesNotMatch(native, /-Recurse/);
 });
 
 test("rustup proxies remain pinned and cannot auto-install", () => {
@@ -241,7 +347,7 @@ test("rustup proxies remain pinned and cannot auto-install", () => {
     "$cargoIsRustupProxy = Test-RustupProxy -ToolPath $cargo",
   );
   const resolveRustup = native.indexOf(
-    "$rustup = Resolve-RustTool -Name 'rustup' -Bin $contractBin",
+    "$rustup = Resolve-RustTool -Name 'rustup' -Bin $rustBin",
   );
 
   assert.match(native, /^\s+RUSTUP_TOOLCHAIN: 1\.89$/m);
@@ -279,14 +385,36 @@ test("native preflight reports actionable missing-tool failures", () => {
 
   assert.match(
     native,
-    /contract \$contractName is missing \$Name\.exe at '\$candidate'/,
+    /no bounded candidate directory contained cargo\.exe and rustc\.exe/,
   );
   assert.match(
     native,
-    /\$Name\.exe was not found on PATH; install it outside CI or set \$contractName to its versioned bin directory/,
+    /Provision both tools together outside CI or set \$contractName to their absolute versioned bin directory/,
+  );
+  assert.match(
+    native,
+    /selected bin from \$rustBinSource is missing \$Name\.exe at '\$candidate'/,
   );
   assert.match(native, /\$Name\.exe failed at '\$ToolPath' with exit code/);
   assert.match(native, /provision Rust \$requiredVersion outside CI/);
+});
+
+test("missing bounded candidates report every checked source", () => {
+  const windowsDirectory = mkdtempSync(
+    join(fixtureRoot, "empty-windows-directory-"),
+  );
+  const result = runPreflight({
+    discovery: "isolated",
+    windowsDirectory,
+  });
+  const output = `${result.stdout}${result.stderr}`.replace(/\s+/g, " ");
+
+  assert.notEqual(result.status, 0, "missing tools must fail the preflight");
+  assert.match(output, /no bounded candidate directory contained cargo\.exe and rustc\.exe/);
+  assert.match(output, /USERPROFILE '/);
+  assert.match(output, /NetworkService service profile '/);
+  assert.match(output, /PROMPTFORGE_RUST_1_89_0_BIN/);
+  assert.match(output, /Provision both tools together outside CI/);
 });
 
 test("native runner contains no Rust installer action", () => {
