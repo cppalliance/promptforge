@@ -145,6 +145,11 @@ impl WholeWindowState {
         accepted
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn retained_hypothesis_count(&self) -> usize {
+        self.pending.len() + usize::from(!self.active.is_empty())
+    }
+
     fn finish_active_region(
         &mut self,
         finalized_samples: u64,

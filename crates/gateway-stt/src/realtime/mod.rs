@@ -7,6 +7,8 @@ mod route;
 mod session;
 mod wire;
 
+#[cfg(feature = "test-fixtures")]
+pub(crate) use input::UncommittedInput;
 pub(crate) use item::CommitReceipt;
 pub(crate) use registry::SessionRegistry;
 #[cfg(feature = "test-fixtures")]

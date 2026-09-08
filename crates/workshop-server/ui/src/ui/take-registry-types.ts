@@ -24,6 +24,7 @@ export interface PendingWireRequest {
 export interface ClientEventBinding {
   readonly eventId: string;
   readonly takeId: number;
+  readonly command: PendingWireRequest["command"];
 }
 
 /** One FIFO commit owner or a retired owner's acknowledgment tombstone. */

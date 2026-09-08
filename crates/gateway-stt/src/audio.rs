@@ -56,7 +56,7 @@ impl CommittedAudio {
 #[derive(Clone, Debug, Default)]
 pub(super) struct AudioBuffer {
     input_bytes: usize,
-    input_samples: u64,
+    pub(super) input_samples: u64,
     odd_byte: Option<u8>,
     resampler: Resampler24To16,
 }

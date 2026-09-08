@@ -1,8 +1,8 @@
 use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use gateway_stt_engine::{DecodeRequest, TranscribeError};
 use tokio::sync::{mpsc, oneshot};
@@ -13,7 +13,7 @@ use crate::segment::{ForcedBoundary, SegmentOutcome};
 use super::final_decode::process_samples;
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
 use super::state::TakeState;
-use super::window::AcceptedHypothesis;
+use super::window::{AcceptedHypothesis, WholeWindowState};
 
 pub(super) type TakeFinalization = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
 pub(super) const FINAL_SEGMENT_CAPACITY: usize = 4;
@@ -166,6 +166,7 @@ pub(super) fn spawn_final_pipeline(
     engine: GenerationLease,
     guidance: Arc<[String]>,
     state: Arc<TakeState>,
+    whole_window: Arc<Mutex<WholeWindowState>>,
 ) -> FinalPipeline {
     let (commands, receiver) = mpsc::channel(FINAL_SEGMENT_CAPACITY);
     let pending_segments = Arc::new(AtomicUsize::new(0));
@@ -173,6 +174,7 @@ pub(super) fn spawn_final_pipeline(
         receiver,
         guidance,
         state,
+        whole_window,
         move |request| {
             let engine = engine.clone();
             async move {
@@ -194,6 +196,7 @@ pub(super) async fn run_final_pipeline<D, F>(
     mut receiver: mpsc::Receiver<FinalCommand>,
     guidance: Arc<[String]>,
     state: Arc<TakeState>,
+    whole_window: Arc<Mutex<WholeWindowState>>,
     mut decode: D,
 ) where
     D: FnMut(DecodeRequest) -> F,
@@ -207,11 +210,20 @@ pub(super) async fn run_final_pipeline<D, F>(
                 leading_silence,
                 owner,
             } => {
-                record_leading_silence(&state, leading_silence);
+                record_leading_silence(&state, &whole_window, leading_silence);
                 let samples = TakeState::lock(&state.buffer)
                     .transfer_range(range.clone())
                     .unwrap_or_else(|_| panic!("ordered segment range must remain resident"));
-                process_samples(&state, &guidance, &mut decode, samples, range, forced).await;
+                process_samples(
+                    &state,
+                    &whole_window,
+                    &guidance,
+                    &mut decode,
+                    samples,
+                    range,
+                    forced,
+                )
+                .await;
                 drop(owner);
             }
             FinalCommand::Skipped {
@@ -220,11 +232,15 @@ pub(super) async fn run_final_pipeline<D, F>(
                 leading_silence,
                 owner,
             } => {
-                record_leading_silence(&state, leading_silence);
+                record_leading_silence(&state, &whole_window, leading_silence);
                 TakeState::lock(&state.buffer)
                     .compact_to(range.end)
                     .unwrap_or_else(|_| panic!("ordered skipped range must remain resident"));
-                state.record_final_outcome(FinalRangeOutcome::skipped(range, reason));
+                record_outcome(
+                    &state,
+                    &whole_window,
+                    FinalRangeOutcome::skipped(range, reason),
+                );
                 drop(owner);
             }
             FinalCommand::Complete {
@@ -245,7 +261,16 @@ pub(super) async fn run_final_pipeline<D, F>(
                 let tail = TakeState::lock(&state.buffer)
                     .transfer_range(range.clone())
                     .unwrap_or_else(|_| panic!("ordered final tail must remain resident"));
-                process_samples(&state, &guidance, &mut decode, tail, range, forced).await;
+                process_samples(
+                    &state,
+                    &whole_window,
+                    &guidance,
+                    &mut decode,
+                    tail,
+                    range,
+                    forced,
+                )
+                .await;
                 drop(reply.send(state.completion(&accepted, committed_samples)));
                 break;
             }
@@ -253,10 +278,27 @@ pub(super) async fn run_final_pipeline<D, F>(
     }
 }
 
-fn record_leading_silence(state: &TakeState, range: Option<Range<u64>>) {
+fn record_leading_silence(
+    state: &TakeState,
+    whole_window: &Mutex<WholeWindowState>,
+    range: Option<Range<u64>>,
+) {
     if let Some(range) = range {
-        state.record_final_outcome(FinalRangeOutcome::skipped(range, SkipReason::Silence));
+        record_outcome(
+            state,
+            whole_window,
+            FinalRangeOutcome::skipped(range, SkipReason::Silence),
+        );
     }
+}
+
+pub(super) fn record_outcome(
+    state: &TakeState,
+    whole_window: &Mutex<WholeWindowState>,
+    outcome: FinalRangeOutcome,
+) {
+    let accepted = TakeState::lock(whole_window).accepted_hypotheses(outcome.range.end);
+    state.record_final_outcome(outcome, &accepted);
 }
 
 #[cfg(test)]
@@ -346,12 +388,14 @@ mod tests {
         take.append(vec![0.5; 4_800]).expect("tail PCM reserves");
         let accepted = accepted_from_snapshot(&take, 0..4_800, "last word", 4_800);
         let state = Arc::clone(&take.state);
+        let whole_window = Arc::clone(&take.whole_window);
         let calls = Arc::new(AtomicUsize::new(0));
         let decode_calls = Arc::clone(&calls);
         let task = tokio::spawn(run_final_pipeline(
             receiver,
             Arc::from([]),
             state,
+            whole_window,
             move |_| {
                 decode_calls.fetch_add(1, Ordering::SeqCst);
                 async { Some(Ok("must not decode".to_owned())) }
@@ -383,12 +427,14 @@ mod tests {
         let accepted = accepted_from_snapshot(&take, 0..8_000, "must not inherit", 8_000);
         TakeState::lock(&take.state.segmenter).set_consumed_for_test(4_000);
         let state = Arc::clone(&take.state);
+        let whole_window = Arc::clone(&take.whole_window);
         let calls = Arc::new(AtomicUsize::new(0));
         let decode_calls = Arc::clone(&calls);
         let task = tokio::spawn(run_final_pipeline(
             receiver,
             Arc::from([]),
             state,
+            whole_window,
             move |_| {
                 decode_calls.fetch_add(1, Ordering::SeqCst);
                 async { Some(Ok("must not decode".to_owned())) }

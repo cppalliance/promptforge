@@ -229,6 +229,150 @@ await assertNoLeaks(lifecycle, async () => {
     let nextEventId = 1;
     const socket = new ScriptedSocket("/v1/realtime");
     const realtime = new RealtimeTranscriptionService({
+      eventId: () => `client_overload_${nextEventId++}`,
+      socket: () => socket,
+    });
+    socket.open();
+    socket.message(server.session_created);
+    socket.message(server.session_updated);
+
+    const captureTrace = [];
+    let emitHourAudio = null;
+    const capture = new SpeechCaptureService({
+      async open(emitAudio) {
+        emitHourAudio = emitAudio;
+        return {
+          clear() {
+            captureTrace.push("clear");
+          },
+          async stop() {
+            captureTrace.push("stop");
+          },
+          dispose() {},
+        };
+      },
+    });
+    const status = {
+      local: [],
+      recording: [],
+      showLocal(label, severity) {
+        this.local.push({ label, severity });
+      },
+      setRecording(recording) {
+        this.recording.push(recording);
+      },
+    };
+    const stt = setupStt(
+      { mic, input: textareaSttTarget(textarea) },
+      status,
+      () => null,
+      capture,
+      realtime,
+    );
+
+    mic.click();
+    for (let turn = 0; turn < 4 && status.recording.at(-1) !== true; turn++) {
+      await Promise.resolve();
+    }
+    assert.equal(typeof emitHourAudio, "function");
+    const boundedChunk = Uint8Array.from([1, 0, 2, 0]).buffer;
+    for (let stride = 0; stride < 360; stride++) {
+      emitHourAudio(boundedChunk);
+    }
+    assert.equal(
+      socket.sent.filter((event) => event.type === "input_audio_buffer.append").length,
+      360,
+      "production setup streams an hour-equivalent 360 bounded chunks",
+    );
+    socket.message({
+      ...server.transcription_hypothesis,
+      event_id: "evt_hour_hypothesis",
+      item_id: "item_hour",
+      transcript: "accepted visible words",
+      finalized: "accepted ",
+      agreed: "visible ",
+      tentative: "words",
+    });
+    assert.equal(textarea.value, "accepted visible words");
+    captureTrace.length = 0;
+    status.local.length = 0;
+    status.recording.length = 0;
+    const sentBeforeOverload = socket.sent.length;
+
+    socket.message({
+      event_id: "evt_hour_overload",
+      type: "error",
+      error: {
+        type: "overload_error",
+        code: "too_much_unfinalized_audio",
+        message: "Unfinalized audio exceeds 30 seconds",
+        param: "audio",
+        event_id: "client_overload_361",
+      },
+    });
+    socket.message({
+      event_id: "evt_hour_overload_duplicate",
+      type: "error",
+      error: {
+        type: "overload_error",
+        code: "too_much_unfinalized_audio",
+        message: "Unfinalized audio exceeds 30 seconds",
+        param: "audio",
+        event_id: "client_overload_361",
+      },
+    });
+    for (
+      let turn = 0;
+      turn < 4 &&
+      socket.sent.filter((event) => event.type === "input_audio_buffer.commit").length === 0;
+      turn++
+    ) {
+      await Promise.resolve();
+    }
+
+    assert.equal(textarea.value, "accepted visible words");
+    assert.deepEqual(captureTrace, ["stop"], "duplicate overload stops capture once");
+    assert.deepEqual(status.recording, [false]);
+    assert.deepEqual(status.local, [
+      {
+        label: "Dictation stopped because transcription could not keep up. Captured audio is being finalized.",
+        severity: "error",
+      },
+    ]);
+    assert.equal(
+      socket.sent
+        .slice(sentBeforeOverload)
+        .filter((event) => event.type === "input_audio_buffer.clear").length,
+      0,
+      "the production overload path sends no clear",
+    );
+    assert.equal(
+      socket.sent
+        .slice(sentBeforeOverload)
+        .filter((event) => event.type === "input_audio_buffer.commit").length,
+      1,
+      "the production overload path commits the still-valid server input once",
+    );
+
+    stt.dispose();
+    capture.dispose();
+    realtime.dispose();
+  } finally {
+    globalThis.Event = previousEvent;
+    dom.window.close();
+  }
+});
+
+await assertNoLeaks(lifecycle, async () => {
+  const dom = new JSDOM("<!doctype html><button></button><textarea></textarea>");
+  const mic = dom.window.document.querySelector("button");
+  const textarea = dom.window.document.querySelector("textarea");
+  const previousEvent = globalThis.Event;
+  globalThis.Event = dom.window.Event;
+  try {
+    let nextEventId = 1;
+    const socket = new ScriptedSocket("/v1/realtime");
+    const realtime = new RealtimeTranscriptionService({
       eventId: () => `client_once_${nextEventId++}`,
       socket: () => socket,
     });

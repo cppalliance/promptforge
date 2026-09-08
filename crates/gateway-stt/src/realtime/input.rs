@@ -158,6 +158,11 @@ impl UncommittedInput {
         &self.take
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) const fn input_samples(&self) -> u64 {
+        self.audio.input_samples
+    }
+
     #[cfg(test)]
     pub(crate) fn buffered_duration_seconds(&self) -> f64 {
         self.audio.buffered_duration_seconds()

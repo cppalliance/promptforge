@@ -12,15 +12,12 @@ use super::text::append_transcript;
 use super::window::AcceptedHypothesis;
 use crate::segment::{ForcedBoundary, Segmenter};
 
-pub(super) const MAX_PENDING_FINAL_OUTCOMES: usize = 4_096;
-
 #[derive(Debug, Default)]
 struct FinalizedState {
     text: String,
     failure: Option<String>,
     samples: u64,
     outcomes: Vec<FinalRangeOutcome>,
-    has_skipped_coverage: bool,
     pending_forced: Option<PendingForced>,
 }
 
@@ -94,19 +91,23 @@ impl TakeState {
         }
     }
 
-    pub(super) fn record_final_outcome(&self, outcome: FinalRangeOutcome) {
+    pub(super) fn record_final_outcome(
+        &self,
+        outcome: FinalRangeOutcome,
+        accepted: &[AcceptedHypothesis],
+    ) {
         let mut state = Self::lock(&self.finalized);
         if state.failure.is_some() {
             return;
         }
         match outcome.boundary.clone() {
-            FinalBoundary::Natural => record_natural_outcome(&mut state, outcome),
+            FinalBoundary::Natural => record_natural_outcome(&mut state, outcome, accepted),
             FinalBoundary::Forced(boundary) => {
                 let FinalRangeResult::Decoded(text) = outcome.result else {
                     state.failure = Some("forced final window was not decoded".to_owned());
                     return;
                 };
-                record_forced_outcome(&mut state, boundary, text);
+                record_forced_outcome(&mut state, boundary, text, accepted);
             }
         }
     }
@@ -126,6 +127,19 @@ impl TakeState {
         Self::lock(&self.finalized).failure.clone()
     }
 
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub(super) fn coverage(&self) -> (u64, Option<std::ops::Range<u64>>, usize) {
+        let state = Self::lock(&self.finalized);
+        (
+            state.samples,
+            state
+                .pending_forced
+                .as_ref()
+                .map(|pending| pending.boundary.decode_range()),
+            state.outcomes.len(),
+        )
+    }
+
     #[cfg(test)]
     pub(super) fn take_failure(&self) -> Option<String> {
         Self::lock(&self.finalized).failure.take()
@@ -137,9 +151,10 @@ impl TakeState {
         committed_samples: u64,
     ) -> Result<String, String> {
         let mut state = Self::lock(&self.finalized);
-        if state.failure.is_none() && !flush_pending_forced(&mut state) {
+        if state.failure.is_none() && !flush_pending_forced(&mut state, accepted) {
             state.failure = Some("final outcome capacity is reached".to_owned());
         }
+        settle_skipped(&mut state, accepted, false);
         match state.failure.take() {
             Some(failure) => Err(failure),
             None if state.outcomes.is_empty() => Ok(state.text.clone()),
@@ -154,31 +169,41 @@ impl TakeState {
     }
 }
 
-fn record_natural_outcome(state: &mut FinalizedState, outcome: FinalRangeOutcome) {
-    let pending_slots = usize::from(state.pending_forced.is_some() && state.has_skipped_coverage);
-    let outcome_slots = usize::from(
-        matches!(outcome.result, FinalRangeResult::Skipped(_)) || state.has_skipped_coverage,
-    );
-    if state.outcomes.len() + pending_slots + outcome_slots > MAX_PENDING_FINAL_OUTCOMES {
-        state.failure = Some("final outcome capacity is reached".to_owned());
-        return;
-    }
-    let flushed = flush_pending_forced(state);
+fn record_natural_outcome(
+    state: &mut FinalizedState,
+    outcome: FinalRangeOutcome,
+    accepted: &[AcceptedHypothesis],
+) {
+    let flushed = flush_pending_forced(state, accepted);
     debug_assert!(flushed);
     match &outcome.result {
-        FinalRangeResult::Decoded(text) if !state.has_skipped_coverage => {
+        FinalRangeResult::Decoded(text) => {
+            settle_skipped(state, accepted, false);
             append_transcript(&mut state.text, text);
             state.samples = outcome.range.end;
         }
-        FinalRangeResult::Decoded(_) => state.outcomes.push(outcome),
         FinalRangeResult::Skipped(_) => {
-            state.has_skipped_coverage = true;
-            state.outcomes.push(outcome);
+            if let Some(previous) = state.outcomes.last_mut() {
+                if outcome.range.start <= previous.range.end {
+                    previous.range.end = previous.range.end.max(outcome.range.end);
+                } else {
+                    settle_skipped(state, accepted, false);
+                    state.outcomes.push(outcome);
+                }
+            } else {
+                state.outcomes.push(outcome);
+            }
+            settle_skipped(state, accepted, true);
         }
     }
 }
 
-fn record_forced_outcome(state: &mut FinalizedState, boundary: ForcedBoundary, text: String) {
+fn record_forced_outcome(
+    state: &mut FinalizedState,
+    boundary: ForcedBoundary,
+    text: String,
+    accepted: &[AcceptedHypothesis],
+) {
     let Some(overlap) = boundary.overlap() else {
         if state.pending_forced.is_some() {
             state.failure = Some("forced final overlap metadata is inconsistent".to_owned());
@@ -203,11 +228,7 @@ fn record_forced_outcome(state: &mut FinalizedState, boundary: ForcedBoundary, t
         state.failure = Some("forced final overlap could not be aligned".to_owned());
         return;
     };
-    if state.has_skipped_coverage && state.outcomes.len() == MAX_PENDING_FINAL_OUTCOMES {
-        state.pending_forced = Some(previous);
-        state.failure = Some("final outcome capacity is reached".to_owned());
-        return;
-    }
+    settle_skipped(state, accepted, false);
     settle_decoded(
         state,
         previous.boundary.decode_range().start..overlap.start,
@@ -216,26 +237,61 @@ fn record_forced_outcome(state: &mut FinalizedState, boundary: ForcedBoundary, t
     state.pending_forced = Some(PendingForced { boundary, text });
 }
 
-fn flush_pending_forced(state: &mut FinalizedState) -> bool {
+fn flush_pending_forced(state: &mut FinalizedState, accepted: &[AcceptedHypothesis]) -> bool {
     let Some(pending) = state.pending_forced.take() else {
         return true;
     };
-    if state.has_skipped_coverage && state.outcomes.len() == MAX_PENDING_FINAL_OUTCOMES {
-        state.pending_forced = Some(pending);
-        return false;
-    }
+    settle_skipped(state, accepted, false);
     settle_decoded(state, pending.boundary.decode_range(), &pending.text);
     true
 }
 
 fn settle_decoded(state: &mut FinalizedState, range: std::ops::Range<u64>, text: &str) {
-    if state.has_skipped_coverage {
-        state
+    append_transcript(&mut state.text, text);
+    state.samples = range.end;
+}
+
+fn settle_skipped(
+    state: &mut FinalizedState,
+    accepted: &[AcceptedHypothesis],
+    retain_partial: bool,
+) {
+    let Some(coverage) = state.outcomes.first().map(|outcome| {
+        let end = state
             .outcomes
-            .push(FinalRangeOutcome::decoded(range, text.to_owned()));
-    } else {
-        append_transcript(&mut state.text, text);
-        state.samples = range.end;
+            .last()
+            .map_or(outcome.range.end, |last| last.range.end);
+        outcome.range.start..end
+    }) else {
+        return;
+    };
+    let candidates = accepted
+        .iter()
+        .filter(|candidate| candidate.range().end > state.samples)
+        .cloned()
+        .collect::<Vec<_>>();
+    let exact = candidates.iter().find(|candidate| {
+        let range = candidate.range();
+        coverage.start <= state.samples.max(range.start)
+            && coverage.end >= range.end
+            && range.end > state.samples
+    });
+    if let Some(candidate) = exact {
+        append_transcript(&mut state.text, candidate.text());
+        state.samples = coverage.end;
+        state.outcomes.clear();
+        return;
+    }
+    let can_extend_to_candidate = retain_partial
+        && candidates.iter().any(|candidate| {
+            let range = candidate.range();
+            coverage.start <= state.samples.max(range.start)
+                && range.start < coverage.end
+                && range.end > coverage.end
+        });
+    if !can_extend_to_candidate {
+        state.samples = coverage.end;
+        state.outcomes.clear();
     }
 }
 
@@ -247,9 +303,10 @@ mod tests {
 
     use gateway_stt_engine::TranscribeError;
 
-    use super::{MAX_PENDING_FINAL_OUTCOMES, TakeState};
+    use super::TakeState;
     use crate::segment::ForcedBoundary;
     use crate::take::final_outcome::{FinalRangeOutcome, SkipReason};
+    use crate::take::window::AcceptedHypothesis;
 
     #[test]
     fn finalized_snapshot_cannot_mix_text_and_sample_ownership() {
@@ -278,46 +335,83 @@ mod tests {
     }
 
     #[test]
-    fn pending_final_outcome_history_has_an_exact_failure_bound() {
+    fn natural_speech_and_pause_cycles_settle_without_history_growth() {
         let state = TakeState::default();
-        for index in 0..MAX_PENDING_FINAL_OUTCOMES {
-            let start = u64::try_from(index).expect("test index fits");
-            let end = start + 1;
-            state.record_final_outcome(FinalRangeOutcome::skipped(start..end, SkipReason::Silence));
+        for index in 0..(4_096 * 2 + 17) {
+            let start = u64::try_from(index).expect("test index fits") * 2;
+            let decoded_end = start.saturating_add(1);
+            state.record_final_outcome(
+                FinalRangeOutcome::decoded(start..decoded_end, format!("word{index}")),
+                &[],
+            );
+            state.record_final_outcome(
+                FinalRangeOutcome::skipped(
+                    decoded_end..decoded_end.saturating_add(1),
+                    SkipReason::Silence,
+                ),
+                &[],
+            );
+            assert!(state.pending_failure().is_none());
+            assert_eq!(state.coverage().2, 0);
         }
-        assert!(state.pending_failure().is_none());
+        assert_eq!(state.coverage().0, (4_096 * 2 + 17) as u64 * 2);
+    }
 
-        let start = MAX_PENDING_FINAL_OUTCOMES as u64;
-        let end = start + 1;
-        state.record_final_outcome(FinalRangeOutcome::skipped(start..end, SkipReason::Silence));
-        assert_eq!(
-            state.pending_failure().as_deref(),
-            Some("final outcome capacity is reached")
+    #[test]
+    fn unresolved_skip_consumes_one_candidate_then_later_decode_settles_normally() {
+        let state = TakeState::default();
+        let accepted = [AcceptedHypothesis::new(0..2, "accepted".to_owned())];
+        state.record_final_outcome(
+            FinalRangeOutcome::skipped(0..1, SkipReason::BelowFinalWindow),
+            &accepted,
         );
+        assert_eq!(state.coverage(), (0, None, 1));
+
+        state.record_final_outcome(
+            FinalRangeOutcome::skipped(1..2, SkipReason::Silence),
+            &accepted,
+        );
+        assert_eq!(state.coverage(), (2, None, 0));
+        state.record_final_outcome(
+            FinalRangeOutcome::decoded(2..3, "decoded".to_owned()),
+            &accepted,
+        );
+
+        assert_eq!(
+            state.finalized_snapshot(),
+            ("accepted decoded".to_owned(), 3)
+        );
+        assert!(state.pending_failure().is_none());
     }
 
     #[test]
     fn forced_overlap_freezes_only_the_reconciled_old_prefix() {
         let state = TakeState::default();
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::first(0..160_000),
-            "alpha beta ECHO, now".to_owned(),
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::first(0..160_000),
+                "alpha beta ECHO, now".to_owned(),
+            ),
+            &[],
+        );
         assert_eq!(state.finalized_snapshot(), (String::new(), 0));
 
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
-            "echo now revised ending".to_owned(),
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
+                "echo now revised ending".to_owned(),
+            ),
+            &[],
+        );
         assert_eq!(
             state.finalized_snapshot(),
             ("alpha beta".to_owned(), 32_000)
         );
 
-        state.record_final_outcome(FinalRangeOutcome::decoded(
-            320_000..336_000,
-            "tail".to_owned(),
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::decoded(320_000..336_000, "tail".to_owned()),
+            &[],
+        );
         assert_eq!(
             state.finalized_snapshot(),
             (
@@ -330,18 +424,24 @@ mod tests {
     #[test]
     fn forced_overlap_preserves_repeated_phrases_at_distinct_ranges() {
         let state = TakeState::default();
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::first(0..160_000),
-            "echo now echo now".to_owned(),
-        ));
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
-            "echo now corrected".to_owned(),
-        ));
-        state.record_final_outcome(FinalRangeOutcome::skipped(
-            320_000..320_000,
-            SkipReason::BelowFinalWindow,
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::first(0..160_000),
+                "echo now echo now".to_owned(),
+            ),
+            &[],
+        );
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::overlapping(32_000..160_000, 160_000..320_000),
+                "echo now corrected".to_owned(),
+            ),
+            &[],
+        );
+        state.record_final_outcome(
+            FinalRangeOutcome::skipped(320_000..320_000, SkipReason::BelowFinalWindow),
+            &[],
+        );
 
         assert_eq!(state.finalized(), "echo now echo now corrected");
         assert!(state.pending_failure().is_none());
@@ -350,20 +450,26 @@ mod tests {
     #[test]
     fn missing_forced_overlap_fails_without_changing_canonical_text() {
         let state = TakeState::default();
-        state.record_final_outcome(FinalRangeOutcome::decoded(
-            0..16_000,
-            "canonical".to_owned(),
-        ));
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::first(16_000..176_000),
-            "old overlap".to_owned(),
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::decoded(0..16_000, "canonical".to_owned()),
+            &[],
+        );
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::first(16_000..176_000),
+                "old overlap".to_owned(),
+            ),
+            &[],
+        );
         let before = state.finalized_snapshot();
 
-        state.record_final_outcome(FinalRangeOutcome::forced(
-            ForcedBoundary::overlapping(48_000..176_000, 176_000..336_000),
-            "unrelated revision".to_owned(),
-        ));
+        state.record_final_outcome(
+            FinalRangeOutcome::forced(
+                ForcedBoundary::overlapping(48_000..176_000, 176_000..336_000),
+                "unrelated revision".to_owned(),
+            ),
+            &[],
+        );
 
         assert_eq!(state.finalized_snapshot(), before);
         assert_eq!(

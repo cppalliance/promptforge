@@ -432,6 +432,100 @@ test("capture and wire effects are typed and correlated to their take", () => {
   );
 });
 
+test("retained-audio overload stops capture and commits accepted visible text", () => {
+  let state = start(createTakeRegistry(), context(0)).state;
+  let result = server(state, hypothesis("long_take", "accepted visible words"));
+  state = result.state;
+  for (let stride = 0; stride < 360; stride++) {
+    const appendResult = reduceTakeRegistry(state, {
+      type: "capture.audio",
+      chunk: Uint8Array.from([1, 0]).buffer,
+    });
+    const append = appendResult.effects.find(
+      (effect) => effect.domain === "wire" && effect.command === "append",
+    );
+    assert.ok(append);
+    state = reduceTakeRegistry(appendResult.state, {
+      type: "wire.result",
+      requestId: append.requestId,
+      eventId: `hour_append_${stride}`,
+    }).state;
+    assert.ok(state.clientEvents.length <= 1, "append correlation history stays fixed");
+  }
+  assert.deepEqual(state.clientEvents, [
+    { eventId: "hour_append_359", takeId: state.activeTakeId, command: "append" },
+  ]);
+
+  result = server(state, {
+    type: "error",
+    event_id: "stale_server_overload",
+    error: {
+      type: "overload_error",
+      code: "too_much_unfinalized_audio",
+      message: "must stay local",
+      param: "audio",
+      event_id: "hour_append_0",
+    },
+  });
+  assert.equal(result.state.capture, "recording", "retired append ownership cannot stop its take");
+  state = result.state;
+
+  result = server(state, {
+    type: "error",
+    event_id: "server_overload",
+    error: {
+      type: "overload_error",
+      code: "too_much_unfinalized_audio",
+      message: "must stay local",
+      param: "audio",
+      event_id: "hour_append_359",
+    },
+  });
+  const duplicate = server(result.state, {
+    type: "error",
+    event_id: "duplicate_server_overload",
+    error: {
+      type: "overload_error",
+      code: "too_much_unfinalized_audio",
+      message: "must stay local",
+      param: "audio",
+      event_id: "hour_append_359",
+    },
+  });
+
+  assert.equal(result.state.takes[0].text, "accepted visible words");
+  assert.equal(result.state.capture, "stopping");
+  assert.equal(
+    [...result.effects, ...duplicate.effects].filter(
+      (effect) => effect.domain === "capture" && effect.command === "stop",
+    ).length,
+    1,
+    "duplicate overload emits one capture stop",
+  );
+  assert.equal(
+    result.effects.some(
+      (effect) =>
+        (effect.domain === "capture" && effect.command === "clear") ||
+        (effect.domain === "wire" && effect.command === "clear") ||
+        (effect.domain === "editor" && effect.command === "replace"),
+    ),
+    false,
+    "throughput overload cannot erase accepted visible text",
+  );
+
+  const stopped = reduceTakeRegistry(duplicate.state, {
+    type: "capture.stopped",
+    takeId: result.state.stoppingTakeId,
+    ok: true,
+  });
+  assert.ok(
+    stopped.effects.some(
+      (effect) => effect.domain === "wire" && effect.command === "commit",
+    ),
+    "the still-valid accepted input commits after capture flushes",
+  );
+});
+
 test("every transition preserves registry invariants without mutating its input", () => {
   let state = createTakeRegistry();
   const inputs = [

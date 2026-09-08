@@ -11,6 +11,16 @@ pub fn gateway_stt::test_fixtures::GenerationOwnershipFixture::own_worker_job(&s
 pub struct gateway_stt::test_fixtures::GenerationWorkerJobFixture
 impl core::ops::drop::Drop for gateway_stt::test_fixtures::GenerationWorkerJobFixture
 pub fn gateway_stt::test_fixtures::GenerationWorkerJobFixture::drop(&mut self)
+pub struct gateway_stt::test_fixtures::HourSimulationProbe
+impl gateway_stt::test_fixtures::HourSimulationProbe
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::final_decode_count(&self) -> usize
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::gap_free_coverage_samples(&self) -> u64
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::interim_decode_count(&self) -> usize
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::max_final_samples(&self) -> usize
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::new() -> Self
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::wait_for_final_decodes(&self, usize, core::time::Duration) -> bool
+impl core::default::Default for gateway_stt::test_fixtures::HourSimulationProbe
+pub fn gateway_stt::test_fixtures::HourSimulationProbe::default() -> Self
 pub struct gateway_stt::test_fixtures::RealtimeCommitFixture(_)
 impl gateway_stt::test_fixtures::RealtimeCommitFixture
 pub fn gateway_stt::test_fixtures::RealtimeCommitFixture::item_id(&self) -> &str
@@ -45,7 +55,9 @@ pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::push_delta(&mut self,
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::replace_finalization<F>(&mut self, &str, F) -> core::result::Result<(), alloc::string::String> where F: core::future::future::Future<Output = core::result::Result<alloc::string::String, alloc::string::String>> + core::marker::Send + 'static
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::replace_hypothesis(&mut self, &str, u64, &str) -> core::result::Result<(), alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::resampled_audio(&self) -> core::option::Option<alloc::vec::Vec<f32>>
+pub async fn gateway_stt::test_fixtures::RealtimeSessionFixture::run_interim(&mut self) -> core::result::Result<core::option::Option<serde_json::value::Value>, alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::spawn_interim<F>(&mut self, F) -> core::result::Result<(), alloc::string::String> where F: core::future::future::Future<Output = alloc::string::String> + core::marker::Send + 'static
+pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::take_metrics(&self) -> core::option::Option<gateway_stt::test_fixtures::RealtimeTakeMetricsFixture>
 pub fn gateway_stt::test_fixtures::RealtimeSessionFixture::update_text(&mut self, &str) -> core::result::Result<(), alloc::string::String>
 pub struct gateway_stt::test_fixtures::RealtimeSessionRegistryFixture
 impl gateway_stt::test_fixtures::RealtimeSessionRegistryFixture
@@ -53,11 +65,20 @@ pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::active(&self)
 pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::cleanup_event_count(&self) -> usize
 pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::cleanup_notified(&self) -> impl core::future::future::Future<Output = ()> + '_
 pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::register(&self) -> core::result::Result<gateway_stt::test_fixtures::RealtimeSessionFixture, alloc::string::String>
+pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::register_with_hour_simulation(&self, &gateway_stt::test_fixtures::HourSimulationProbe) -> core::result::Result<gateway_stt::test_fixtures::RealtimeSessionFixture, alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::register_with_scripted_engine(&self, gateway_stt_engine::test_fixtures::ScriptedModelFactory) -> core::result::Result<gateway_stt::test_fixtures::RealtimeSessionFixture, alloc::string::String>
 pub fn gateway_stt::test_fixtures::RealtimeSessionRegistryFixture::retired_task_failures(&self) -> usize
+pub struct gateway_stt::test_fixtures::RealtimeTakeMetricsFixture
+impl gateway_stt::test_fixtures::RealtimeTakeMetricsFixture
+pub fn gateway_stt::test_fixtures::RealtimeTakeMetricsFixture::coverage(&self) -> (u64, core::option::Option<core::ops::range::Range<u64>>)
+pub const fn gateway_stt::test_fixtures::RealtimeTakeMetricsFixture::input_samples(&self) -> u64
+pub const fn gateway_stt::test_fixtures::RealtimeTakeMetricsFixture::retained_samples(&self) -> usize
+pub const fn gateway_stt::test_fixtures::RealtimeTakeMetricsFixture::work_counts(&self) -> (usize, usize, usize)
 pub fn gateway_stt::test_fixtures::begin_scripted_replacement(&gateway_stt::SpeechService, gateway_stt_engine::test_fixtures::ScriptedModelFactory, bool, core::time::Duration) -> core::result::Result<gateway_stt::SpeechReplacement, gateway_stt::SpeechError>
 pub fn gateway_stt::test_fixtures::generation_counts(&gateway_stt::SpeechService) -> core::option::Option<(usize, usize)>
 pub fn gateway_stt::test_fixtures::generation_ownership(&gateway_stt::SpeechService) -> core::option::Option<gateway_stt::test_fixtures::GenerationOwnershipFixture>
+pub fn gateway_stt::test_fixtures::hour_marker_input(u64, usize) -> alloc::vec::Vec<i16>
+pub fn gateway_stt::test_fixtures::hour_simulation_service(gateway_stt::test_fixtures::HourSimulationProbe) -> core::result::Result<gateway_stt::SpeechService, gateway_stt::SpeechError>
 pub fn gateway_stt::test_fixtures::scripted_service(gateway_stt_engine::test_fixtures::ScriptedModelFactory, u64, u64) -> core::result::Result<gateway_stt::SpeechService, gateway_stt::SpeechError>
 pub fn gateway_stt::test_fixtures::segment_ranges(&[f32]) -> alloc::vec::Vec<core::ops::range::Range<u64>>
 #[non_exhaustive] pub enum gateway_stt::SpeechError

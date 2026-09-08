@@ -8,6 +8,8 @@ use crate::realtime::{CommitReceipt, ItemResult, Session, SessionRegistry};
 
 #[cfg(feature = "test-fixtures")]
 mod generation;
+#[cfg(feature = "test-fixtures")]
+mod hour;
 #[cfg(all(test, not(miri)))]
 mod native;
 #[cfg(feature = "test-fixtures")]
@@ -21,6 +23,10 @@ pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactor
 pub use generation::{
     GenerationOwnershipFixture, GenerationWorkerJobFixture, begin_scripted_replacement,
     generation_counts, generation_ownership, scripted_service,
+};
+#[cfg(feature = "test-fixtures")]
+pub use hour::{
+    HourSimulationProbe, RealtimeTakeMetricsFixture, hour_marker_input, hour_simulation_service,
 };
 #[cfg(all(test, not(miri)))]
 pub(crate) use native::{jfk_samples, require_model};
@@ -61,6 +67,26 @@ impl RealtimeSessionRegistryFixture {
             .state
             .active()
             .ok_or_else(|| "scripted generation did not publish".to_owned())?;
+        Ok(RealtimeSessionFixture {
+            session: Session::new(registration, Some(engine)),
+        })
+    }
+
+    /// Registers one session backed by bounded hour-equivalent decoders.
+    ///
+    /// # Errors
+    /// Returns a stable registration, policy, or worker startup error.
+    pub fn register_with_hour_simulation(
+        &self,
+        probe: &HourSimulationProbe,
+    ) -> Result<RealtimeSessionFixture, String> {
+        let registration = self.inner.register().map_err(|error| error.to_string())?;
+        let service =
+            hour::hour_simulation_service(probe.clone()).map_err(|error| error.to_string())?;
+        let engine = service
+            .state
+            .active()
+            .ok_or_else(|| "hour simulation generation did not publish".to_owned())?;
         Ok(RealtimeSessionFixture {
             session: Session::new(registration, Some(engine)),
         })
@@ -186,6 +212,11 @@ impl RealtimeSessionFixture {
                 prompt: input.snapshot().prompt().to_owned(),
                 include_hypothesis: input.snapshot().include_hypothesis(),
             })
+    }
+
+    /// Returns one bounded ownership snapshot for the active production take.
+    pub fn take_metrics(&self) -> Option<RealtimeTakeMetricsFixture> {
+        self.session.input().map(hour::take_metrics)
     }
 
     /// Returns the current input's resampled audio snapshot.
@@ -378,6 +409,17 @@ impl RealtimeSessionFixture {
             .map(serde_json::to_value)
             .transpose()
             .map_err(|error| error.to_string())
+    }
+
+    /// Schedules and accepts one production interim decode.
+    ///
+    /// # Errors
+    /// Returns an audio, generation, task, session, or serialization error.
+    pub async fn run_interim(&mut self) -> Result<Option<serde_json::Value>, String> {
+        self.session
+            .schedule_interim()
+            .map_err(|error| error.to_string())?;
+        self.finish_interim().await
     }
 
     /// Joins every canceled interim task without relinquishing ownership.

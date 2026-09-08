@@ -583,7 +583,7 @@ isProject: false
 - Exclusions: no periodic Realtime commits, multiple browser takes, raised lifetime cap, unbounded retry, or silent text guess when overlap cannot be aligned.
 - Focused verification: run full and feature-enabled gateway-stt tests, Miri, mounted Gateway Realtime tests, strict lint, and architecture gates.
 
-### Step 32: Prove arbitrary-duration one-take dictation
+### Step 32: Prove arbitrary-duration one-take dictation [completed]
 
 - Component and piece: Component 9 of 9, arbitrary-duration Realtime; close the end-to-end contract and operator-visible failure behavior.
 - Dependency: depends on Step 31 because the hour-equivalent proof consumes final rolling ownership and reconciliation.

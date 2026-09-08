@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, TranscribeError};
 use tokio::sync::oneshot;
@@ -10,9 +10,11 @@ use crate::segment::{FORCED_OVERLAP_SAMPLES, ForcedBoundary};
 use super::final_outcome::{FinalRangeOutcome, SkipReason};
 use super::pcm::RetainedPcm;
 use super::state::TakeState;
+use super::window::WholeWindowState;
 
 pub(super) async fn process_samples<D, F>(
     state: &Arc<TakeState>,
+    whole_window: &Mutex<WholeWindowState>,
     guidance: &[String],
     decode: &mut D,
     samples: RetainedPcm,
@@ -36,21 +38,28 @@ pub(super) async fn process_samples<D, F>(
         if forced.is_some() {
             state.record_failure("forced final window was not decodable".to_owned());
         } else {
-            state.record_final_outcome(FinalRangeOutcome::skipped(range, reason));
+            super::finalization::record_outcome(
+                state,
+                whole_window,
+                FinalRangeOutcome::skipped(range, reason),
+            );
         }
         return;
     }
 
     match forced {
         Some(boundary) => {
-            process_forced(state, guidance, decode, samples, boundary).await;
+            process_forced(state, whole_window, guidance, decode, samples, boundary).await;
         }
-        None => process_natural(state, guidance, decode, samples, range).await,
+        None => {
+            process_natural(state, whole_window, guidance, decode, samples, range).await;
+        }
     }
 }
 
 async fn process_natural<D, F>(
     state: &TakeState,
+    whole_window: &Mutex<WholeWindowState>,
     guidance: &[String],
     decode: &mut D,
     samples: RetainedPcm,
@@ -63,13 +72,14 @@ async fn process_natural<D, F>(
     let (samples, owner) = samples.into_decode();
     let request = DecodeRequest::new(DecodeMode::Final, samples, guidance.to_vec(), finalized)
         .with_lifetime_guard(owner);
-    record_decode(state, decode(request).await, |text| {
+    record_decode(state, whole_window, decode(request).await, |text| {
         FinalRangeOutcome::decoded(range, text)
     });
 }
 
 async fn process_forced<D, F>(
     state: &Arc<TakeState>,
+    whole_window: &Mutex<WholeWindowState>,
     guidance: &[String],
     decode: &mut D,
     samples: RetainedPcm,
@@ -103,7 +113,7 @@ async fn process_forced<D, F>(
         state.record_failure("forced final PCM ownership became inconsistent".to_owned());
         return;
     }
-    record_decode(state, outcome, |text| {
+    record_decode(state, whole_window, outcome, |text| {
         FinalRangeOutcome::forced(boundary, text)
     });
 }
@@ -129,11 +139,14 @@ fn restore_overlap(
 
 fn record_decode(
     state: &TakeState,
+    whole_window: &Mutex<WholeWindowState>,
     outcome: Option<Result<String, TranscribeError>>,
     completed: impl FnOnce(String) -> FinalRangeOutcome,
 ) {
     match outcome {
-        Some(Ok(text)) => state.record_final_outcome(completed(text)),
+        Some(Ok(text)) => {
+            super::finalization::record_outcome(state, whole_window, completed(text));
+        }
         Some(Err(error)) => state.record_failure(error.to_string()),
         None => state.record_failure("final transcription worker is unavailable".to_owned()),
     }

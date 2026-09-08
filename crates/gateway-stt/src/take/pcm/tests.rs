@@ -126,11 +126,32 @@ fn allocation_slack_is_charged_before_another_sample_is_admitted() {
         .append(next_stride)
         .expect("the exact remaining allocation fits");
     assert_eq!(budget.retained_samples(), 30);
-    resident
-        .append(vec![0.5])
-        .expect("the already charged spare slot remains usable");
     assert!(
         resident.append(vec![0.5]).is_err(),
-        "a new allocation cannot hide behind shorter logical lengths"
+        "the incoming resampler allocation is charged even when destination slack exists"
+    );
+}
+
+#[test]
+fn transient_source_and_destination_growth_obey_the_exact_peak_budget() {
+    fn append_with_limit(limit: usize) -> Result<usize, crate::audio::AudioError> {
+        let budget = RetainedPcmBudget::with_limit(limit);
+        let mut resident = RollingPcm::new(budget.clone());
+        let mut first = Vec::with_capacity(2);
+        first.extend([1.0, 2.0]);
+        resident.append(first)?;
+        let mut second = Vec::with_capacity(2);
+        second.extend([3.0, 4.0]);
+        resident.append(second)?;
+        Ok(budget.retained_samples())
+    }
+
+    assert_eq!(
+        append_with_limit(6).expect("source, old destination, and growth fit exactly"),
+        4
+    );
+    assert!(
+        append_with_limit(5).is_err(),
+        "one sample below the physical allocation peak rejects before growth and copy"
     );
 }

@@ -54,12 +54,57 @@ export function serverEvent(reduction: Reduction, event: RealtimeEvent): void {
       return;
     }
     case "error":
-      serviceError(reduction, event.error.event_id ?? null);
+      if (event.error.code === "too_much_unfinalized_audio") {
+        retainedAudioOverload(reduction, event.error.event_id ?? null);
+      } else {
+        serviceError(reduction, event.error.event_id ?? null);
+      }
       return;
     default: {
       const exhaustive: never = event;
       return exhaustive;
     }
+  }
+}
+
+function retainedAudioOverload(
+  reduction: Reduction,
+  eventId: string | null,
+): void {
+  const takeId =
+    eventId === null
+      ? reduction.state.activeTakeId
+      : reduction.state.clientEvents.find((binding) => binding.eventId === eventId)
+          ?.takeId ?? null;
+  const take = takeId === null ? null : takeById(reduction.state, takeId);
+  if (
+    take !== null &&
+    reduction.state.activeTakeId === take.id &&
+    reduction.state.capture === "recording"
+  ) {
+    reduction.state.capture = "stopping";
+    reduction.state.stoppingTakeId = take.id;
+    reduction.effects.push(
+      { domain: "capture", command: "stop", takeId: take.id },
+      { domain: "status", command: "recording", recording: false },
+      {
+        domain: "status",
+        command: "local",
+        label:
+          "Dictation stopped because transcription could not keep up. Captured audio is being finalized.",
+        severity: "error",
+      },
+    );
+    return;
+  }
+  if (take === null) {
+    reduction.effects.push({
+      domain: "status",
+      command: "local",
+      label:
+        "Dictation stopped because transcription could not keep up. Captured audio is being finalized.",
+      severity: "error",
+    });
   }
 }
 

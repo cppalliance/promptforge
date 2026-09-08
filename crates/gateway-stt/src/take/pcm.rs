@@ -74,7 +74,7 @@ impl RetainedPcmBudget {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-fixtures"))]
     fn retained_samples(&self) -> usize {
         self.state.retained.load(Ordering::Acquire)
     }
@@ -207,10 +207,10 @@ impl RollingPcm {
         if samples.is_empty() {
             return Ok(());
         }
+        let incoming = self.owner.budget.reserve(samples.capacity())?;
         if self.samples.is_empty() && self.samples.capacity() == 0 {
-            let owner = self.owner.budget.reserve(samples.capacity())?;
             self.samples = samples;
-            self.owner.absorb(owner);
+            self.owner.absorb(incoming);
             return Ok(());
         }
 
@@ -236,6 +236,7 @@ impl RollingPcm {
             self.owner.absorb(headroom);
         }
         self.samples.extend(samples);
+        drop(incoming);
         Ok(())
     }
 
@@ -273,6 +274,11 @@ impl RollingPcm {
         PcmBudgetProbe {
             state: Arc::clone(&self.owner.budget.state),
         }
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn retained_samples(&self) -> usize {
+        self.owner.budget.retained_samples()
     }
 
     pub(super) fn copy_range(&self, range: Range<u64>) -> Result<RetainedPcm, AudioError> {

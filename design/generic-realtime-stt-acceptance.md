@@ -14,6 +14,50 @@ Verification round 3 passed the complete automated release suite, rebuilt and si
 - Signing: not tested; release signing remains release-CI-only
 - Commit created: no
 
+## Step 32 deterministic arbitrary-duration acceptance
+
+### Acceptance boundary
+
+- Date: 2026-09-08
+- Scope: deterministic production-session, mounted Gateway, Workshop relay, and Workshop UI verification
+- Physical microphone acceptance: not performed and not claimed
+- Commit created: no
+
+### One-hour one-take proof
+
+`one_take_runs_for_an_hour_with_bounded_absolute_ownership` drives the production Realtime `Session`, interim scheduler, final pipeline, rolling PCM compaction, overlap reconciliation, mailbox, commit, and completion with 360 ten-second strides. It uses six rotated append sizes of 1, 23,999, 72,000, 17, 47,983, and 96,000 input samples, no sleep, and no hour-sized audio allocation. Every received 16 kHz window contains absolute second markers derived from the actual 24 kHz PCM. The decoder derives coverage and transcript ranges from those markers and rejects wrong, stale, duplicated, reordered, or incorrectly compacted samples.
+
+- Logical ownership: one provisional item ID remains unchanged for all 360 strides; one `UncommittedInput` and `Take` are promoted by one commit
+- Completion: one completed result for that same item and no second terminal
+- Usage: exactly 86,400,000 input samples at 24 kHz and exactly `3,600.0` completion seconds
+- Absolute coverage: finalized coverage plus the sole unresolved forced range remains contiguous from sample zero through 57,600,000 at 16 kHz, then completion resolves the full range
+- Final windows: 360 accurate decodes; the first owns 10 seconds and every later window owns at most 18 seconds through the fixed 8-second overlap
+- Retained ownership: allocated resident, queued, and actively decoding PCM remains under the exact 480,000-sample, 30-second budget
+- Bounded state: the hour proof retains at most one queued final, one pending final outcome, and two accepted hypotheses at each settled stride; the independent blocked-worker scenario exercises two queued finals and the exact retained-budget refusal
+- Hypotheses: 360 production interim revisions remain complete replacement snapshots with stable absolute audio spans while finalized audio compacts
+- Final transcript: the authoritative result contains each of the 3,600 timeline tokens exactly once
+- Mounted Gateway: the production WebSocket route receives the same 360 marked strides, retains one item ID, accepts one commit, emits one completion, and reports exactly 3,600 seconds
+- Natural pauses: 8,209 decoded-speech and silence cycles settle online with zero retained outcome history, while a partial short-final skip retains at most one range until it consumes its accepted hypothesis
+- Transient PCM: source resampler capacity is charged before destination growth or copying; the exact combined source, destination, and growth peak succeeds and one sample less of budget fails before mutation
+
+The focused boundary suite also covers stop before, exactly on, and after a forced cut; a natural boundary following a forced cut; repeated phrases; punctuation and case normalization; fail-closed missing alignment; clear; session and worker cancellation; and slower-than-capture overload. These are deterministic protocol and ownership claims, not claims about physical microphone capture duration.
+
+### Throughput overload behavior
+
+The mounted Gateway test blocks an accurate decoder, admits the next ten-second stride while the first decode remains owned, then rejects the following transient source-plus-destination allocation with decoded code `too_much_unfinalized_audio` and commits the still-valid input through the same mounted socket. The Workshop relay passes 360 reused bounded chunks opaquely and preserves one item, one commit, and one 3,600-second completion. The pure `TakeRegistry` and production `setupStt` tests stream 360 bounded appends while retaining only the latest active append correlation; a stale retired correlation cannot mutate the take, and duplicate overload delivery causes one capture stop and one commit with no clear or rollback. Other decoded server errors continue through the existing rollback path.
+
+### Step 32 automated results
+
+- Gateway: full package tests passed, including 96 integration tests with 5 ignored native cases; the mounted hour and slower-than-capture Realtime tests passed
+- Gateway STT: default and `test-fixtures` suites each passed 64 tests with 2 ignored native cases; the one-hour proof passed in 8.8 seconds
+- Workshop relay: 10 passed
+- Workshop UI: typecheck, production build, layer gate, 87-test suite, and dedicated leak check passed
+- Gateway Config UI: typecheck, production build, layer gate, and 129-test suite passed
+- Miri: engine filter passed 3 tests; Gateway STT filter passed 13 tests
+- Architecture and API: architecture self-tests, exact feature API snapshot, source-module ceilings, integration test manifest, crate dependency graph, and Rust architecture harness passed
+- Repository hygiene: `cargo fmt --all --check` and warnings-denied all-target all-feature workspace Clippy passed
+- Guides: source generation passed twice and the second generation produced byte-identical outputs
+
 ## Step 42 verification round 3 at HEAD 5988a6c0
 
 ### Run boundary

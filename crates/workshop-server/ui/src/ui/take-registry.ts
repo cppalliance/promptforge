@@ -262,7 +262,17 @@ function wireResult(
     }
     return;
   }
-  reduction.state.clientEvents.push({ eventId, takeId: take.id });
+  if (request.command === "append") {
+    reduction.state.clientEvents = reduction.state.clientEvents.filter(
+      (binding) =>
+        binding.takeId !== take.id || binding.command !== "append",
+    );
+  }
+  reduction.state.clientEvents.push({
+    eventId,
+    takeId: take.id,
+    command: request.command,
+  });
   if (request.command === "commit") {
     reduction.state.awaitingCommit.push({
       takeId: take.id,

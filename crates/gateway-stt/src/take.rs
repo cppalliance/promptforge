@@ -37,12 +37,22 @@ pub(crate) struct InterimAudioWindow {
     pub(crate) segment_start: u64,
 }
 
+#[cfg(feature = "test-fixtures")]
+pub(crate) struct TakeMetrics {
+    pub(crate) retained_samples: usize,
+    pub(crate) finalized_samples: u64,
+    pub(crate) unresolved_final: Option<std::ops::Range<u64>>,
+    pub(crate) pending_final_segments: usize,
+    pub(crate) pending_final_outcomes: usize,
+    pub(crate) retained_hypotheses: usize,
+}
+
 /// All mutable and immutable state belonging to one speech take.
 #[derive(Debug)]
 pub(crate) struct Take {
     guidance: Arc<[String]>,
     state: Arc<TakeState>,
-    whole_window: Mutex<WholeWindowState>,
+    whole_window: Arc<Mutex<WholeWindowState>>,
     final_pipeline: Option<FinalPipeline>,
 }
 
@@ -58,13 +68,21 @@ impl Take {
     ) -> Self {
         let guidance = Arc::<[String]>::from(guidance);
         let state = Arc::new(state);
+        let whole_window = Arc::new(Mutex::new(WholeWindowState::default()));
         let final_pipeline = engine
             .filter(GenerationLease::has_final_pass)
-            .map(|engine| spawn_final_pipeline(engine, Arc::clone(&guidance), Arc::clone(&state)));
+            .map(|engine| {
+                spawn_final_pipeline(
+                    engine,
+                    Arc::clone(&guidance),
+                    Arc::clone(&state),
+                    Arc::clone(&whole_window),
+                )
+            });
         Self {
             guidance,
             state,
-            whole_window: Mutex::new(WholeWindowState::default()),
+            whole_window,
             final_pipeline,
         }
     }
@@ -167,6 +185,21 @@ impl Take {
         self.state.pending_failure()
     }
 
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn metrics(&self) -> TakeMetrics {
+        let retained_samples = TakeState::lock(&self.state.buffer).retained_samples();
+        let (finalized_samples, unresolved_final, pending_final_outcomes) = self.state.coverage();
+        let retained_hypotheses = TakeState::lock(&self.whole_window).retained_hypothesis_count();
+        TakeMetrics {
+            retained_samples,
+            finalized_samples,
+            unresolved_final,
+            pending_final_segments: self.pending_final_segments(),
+            pending_final_outcomes,
+            retained_hypotheses,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn pcm_budget_probe(&self) -> PcmBudgetProbe {
         TakeState::lock(&self.state.buffer).budget_probe()
@@ -195,7 +228,7 @@ impl Take {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Weak};
+    use std::sync::{Arc, Mutex, Weak};
     use std::time::Duration;
 
     use tokio::sync::{mpsc, oneshot};
@@ -262,6 +295,7 @@ mod tests {
             receiver,
             Arc::from([]),
             state,
+            Arc::new(Mutex::new(super::WholeWindowState::default())),
             move |_| {
                 let retained = Arc::clone(&pipeline_retained);
                 async move {
