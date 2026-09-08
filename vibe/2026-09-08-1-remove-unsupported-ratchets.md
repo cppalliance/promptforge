@@ -30,7 +30,7 @@ isProject: false
   - Reduce all 31 original `AGENTS.md` files to stable guidance with significant correctness, security, protocol, ABI, lifecycle, data-integrity, or release benefit.
   - Preserve proven logging, speech, profile-switch, sidecar, network, packaging, and release behavior.
   - Establish deterministic Gateway process ownership, connection-generation identity, publication revocation, and bounded supervisor shutdown.
-  - Validate unsigned packages on every supported Workshop platform without publishing a release.
+  - Advance the workspace to version `0.3.0` and validate unsigned packages on every supported Workshop platform without publishing a release.
 - Non-goals:
   - Rework `ValidatedConnection` revalidation.
   - Split logging modules, redesign queue ownership, add dependencies, rewrite registry collections for style, or consolidate unrelated fixtures.
@@ -43,7 +43,7 @@ isProject: false
   - Direct-launch races produce one process owner and no losing-process canonical log mutation.
   - Reconnect accepts same-item-ID reuse while rejecting stale-generation work.
   - Supervisor shutdown returns `Joined`, `Panicked`, or `Detached` within one absolute deadline and prevents late publication.
-  - The existing package matrices run in nonpublishing mode against the same verified commit as the owning CI jobs.
+  - The existing package matrices run in nonpublishing mode against the same verified commit as the owning CI jobs, and every package and installed binary reports `0.3.0`.
 - Constraints:
   - Execution starts from a clean current branch tip, not a recreated historical tree.
   - The review anchor is `84b2c9261f96642bb3fa02836d4e98b13cde8208`; if it is not an ancestor, inspect both its direct diff and the merge-base diff.
@@ -220,7 +220,7 @@ isProject: false
 ### Package validation
 
 - `Release Workshop / build` and `Release Workshop / test` gain a manually dispatched nonpublishing mode:
-  - Read the expected version from the workspace.
+  - Set the workspace version to `0.3.0` and derive the expected package version from that manifest value.
   - Build unsigned packages without signing credentials or updater signatures.
   - Upload temporary test artifacts and run the existing installer-test matrices for Windows, both macOS architectures, Linux x64, and Linux ARM.
   - Make the publish job unreachable from this mode.
@@ -266,6 +266,7 @@ isProject: false
   - Let shutdown bounds outrank worker completion; detach after the deadline rather than force-stop or wait indefinitely.
   - Authenticate late-child cleanup with validated PID identity and a separate one-second deadline.
   - Complete package validation without signing or publication.
+  - Use version `0.3.0` for the converged workspace and packages. The user said, "we should go to 0.3.0 since we already published 0.2.0."
   - Treat deletion estimates as information, never acceptance evidence.
 - Rejected alternatives:
   - Reverting the reviewed commits wholesale is rejected because logging, cfg ownership, network limits, profile behavior, and other runtime value must remain.
@@ -451,7 +452,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused Workshop server binding, Workshop supervisor, recovery, boot, teardown, and shared-sidecar shutdown tests.
 - Component boundary: run the Workshop UI generation slice from Step 7 and the Workshop shell and server lifecycle slices from this step. Do not run the complete repository suite. Commit publication closure, supervision, recovery authentication, teardown wiring, and tests together without directly editing either architecture record.
 
-### Step 9: Migrate the native runner to one PowerShell contract
+### Step 9: Migrate the native runner to one PowerShell contract [completed]
 
 - External gate: under the actual native Whisper service account, verify that `PROMPTFORGE_RUST_1_89_0_BIN` is an absolute directory containing regular `cargo.exe` and `rustc.exe` files and that both report exactly Rust 1.89.0. If unavailable, leave this step incomplete with the account and failure boundary. Do not infer success or block the completed local Steps 1 through 8.
 - Add `tools/validate-rust-1.89.0.ps1`. It reads only that environment contract, performs no discovery or installation, and rejects unset, relative, nonexistent, mixed, malformed, missing, or wrong-version inputs.
@@ -461,10 +462,12 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 
 ### Step 10: Validate packages, converge verification, and drain architecture observations
 
-- Add a manual nonpublishing mode to `.github/workflows/release-workshop.yml`. Read the expected Workshop version from the workspace, build without signing credentials or updater signatures, upload temporary artifacts, and run the existing installer tests for Windows, macOS ARM, macOS Intel, Linux x64, and Linux ARM.
+- Bump the workspace package version from `0.2.0` to `0.3.0`, update `Cargo.lock` and current user-facing version references, and leave historical records unchanged.
+- Add a manual nonpublishing mode to `.github/workflows/release-workshop.yml`. Read expected version `0.3.0` from the workspace, build without signing credentials or updater signatures, upload temporary artifacts, and run the existing installer tests for Windows, macOS ARM, macOS Intel, Linux x64, and Linux ARM.
 - Make `publish` unreachable in nonpublishing mode with an explicit job condition while preserving ordinary tag-triggered release behavior. Ensure every build and test job reports and checks out the same execution SHA.
 - Commit the workflow change, then run the complete verification only against that commit: `CI / check`, `CI / ui`, `CI / check-workshop`, `CI / check-workshop-linux`, `CI / msrv`, `CI / supply-chain`, `STT Miri / pure-stt-state`, `STT Miri / native-whisper`, and the nonpublishing Workshop package matrix.
 - Record exact commands, execution SHA, CI URLs, runner and fixture identity, artifact names and hashes, and external failures. A blocked runner or package lane remains incomplete.
+- Require every built package, installed Workshop binary, and staged Gateway binary to report version `0.3.0`.
 - Run one review-only search for orphaned structural tools, snapshots, obsolete dependencies, stale policy claims, and structural gates. Do not retain a parser, policy linter, source search, or CI search. Require no structural enforcement beyond the four Cargo rules, no unrelated refactor, no generated-tree dirt, and no dated-plan or historical-log rewrite.
 - Component boundary: this complete verification is the sole full-suite run. Regenerate guides and UI bundles and require a clean worktree.
 - Collect architecture observations emitted by the ten commit messages, then stop for the operator-owned `vibe/archdoc-next.md` queue drain. The implementation executor never edits or commits `vibe/archdoc.md` or `vibe/archdoc-next.md`. Resume closure only after the operator states that every observation was promoted, rejected, or intentionally left open.
