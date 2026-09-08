@@ -33,12 +33,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.89.0
 
-      # cargo-public-api 0.52.0 requires nightly rustdoc JSON. Keep this exact
-      # and in sync with the explicit +toolchain invocation in the driver.
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly-2026-09-05
-
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -49,32 +43,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test integration test ceiling driver
-        run: node tools/check-integration-test-ceilings.test.mjs
-
-      - name: Check integration test ceilings
-        run: node tools/check-integration-test-ceilings.mjs
-
-      - name: Install architecture tools
-        run: |
-          RUSTUP_TOOLCHAIN=1.89.0 cargo install cargo-modules --version 0.25.0 --locked
-          RUSTUP_TOOLCHAIN=1.89.0 cargo install cargo-public-api --version 0.52.0 --locked
-
       - name: Install config UI dependencies
         working-directory: crates/gateway-config-ui/ui
         run: npm ci
 
       - name: Build Gateway without Workshop UI tooling
         run: cargo build --locked -p gateway
-
-      - name: Test STT architecture driver
-        run: node --test tools/check-stt-architecture.test.mjs
-
-      - name: Check Workshop installer dark theme
-        run: node --test tools/check-workshop-installer-theme.test.mjs
-
-      - name: Check STT module and public API architecture
-        run: node tools/check-stt-architecture.mjs
 
       - name: Check safe STT crates without unsafe code
         env:

@@ -33,22 +33,20 @@ pub const CONFIG_UI_STATIC_FILES: &[&str] = &[
 pub struct UiBuild {
     /// Files to copy next to the bundle, relative to the ui folder.
     pub static_files: &'static [&'static str],
-    /// Run the layer-rule check before bundling (workshop only).
-    pub layer_check: bool,
     /// Bake the crate version into the bundle as the `__APP_VERSION__`
     /// define.
     pub define_app_version: bool,
 }
 
-/// Runs the UI build: declares the watched inputs, runs the layer check
-/// when configured, bundles `ui/src/main.ts` with esbuild into
-/// `$OUT_DIR/ui-dist/app.js` (minified in the release profile), and copies
-/// the static files next to the bundle.
+/// Runs the UI build: declares the watched inputs, bundles
+/// `ui/src/main.ts` with esbuild into `$OUT_DIR/ui-dist/app.js` (minified
+/// in the release profile), and copies the static files next to the
+/// bundle.
 ///
 /// # Errors
-/// Returns an error string when not run through Cargo, when the layer
-/// check fails, when the local esbuild install is missing or fails, or
-/// when a static file cannot be copied.
+/// Returns an error string when not run through Cargo, when the local
+/// esbuild install is missing or fails, or when a static file cannot be
+/// copied.
 pub fn build(config: UiBuild) -> Result<(), String> {
     let manifest_dir = PathBuf::from(
         std::env::var_os("CARGO_MANIFEST_DIR")
@@ -60,10 +58,6 @@ pub fn build(config: UiBuild) -> Result<(), String> {
     let dist_dir = out_dir.join("ui-dist");
 
     watch(&ui_dir, &config);
-
-    if config.layer_check {
-        layer_check(&ui_dir)?;
-    }
 
     // The output tree is rebuilt from scratch so removed assets never
     // linger into what debug builds serve and release builds embed.
@@ -95,12 +89,6 @@ fn watch(ui_dir: &Path, config: &UiBuild) {
     ] {
         println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
     }
-    if config.layer_check {
-        println!(
-            "cargo::rerun-if-changed={}",
-            ui_dir.join("check-layers.mjs").display()
-        );
-    }
     // Both UIs bundle the shared-ui package (a `file:` dependency two
     // directories up); its sources change the bundle without touching
     // ui/src.
@@ -108,29 +96,6 @@ fn watch(ui_dir: &Path, config: &UiBuild) {
     if shared_ui.is_dir() {
         println!("cargo::rerun-if-changed={}", shared_ui.display());
     }
-}
-
-/// Runs the UI layer-rule walk (`ui/check-layers.mjs`) before bundling, so
-/// an import that crosses the layer boundaries fails the build. `node` is
-/// a real executable on every platform, so no `cmd /c` indirection is
-/// needed.
-fn layer_check(ui_dir: &Path) -> Result<(), String> {
-    let output = Command::new("node")
-        .arg("check-layers.mjs")
-        .current_dir(ui_dir)
-        .output()
-        .map_err(|error| {
-            format!("node could not be started: {error}; install Node.js 22 so it is on PATH")
-        })?;
-    if output.status.success() {
-        return Ok(());
-    }
-    Err(format!(
-        "the UI layer check failed (status {}):\n{}\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    ))
 }
 
 /// Runs the esbuild bundle step from the local `ui/node_modules` install.

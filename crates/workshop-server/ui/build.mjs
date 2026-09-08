@@ -7,7 +7,6 @@ import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
-import { checkImport } from "./check-layers.mjs";
 
 const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
@@ -36,32 +35,6 @@ const STATIC_FILES = [
   "icons/promptforge-icon@2x.png",
 ];
 
-// The layer rule (defined once, in check-layers.mjs) enforced while
-// bundling, so `esbuild.build` and watch mode fail on a violating import.
-// Only relative imports from files under src/ are checked; package
-// imports are exempt.
-const layerCheckPlugin = {
-  name: "check-layers",
-  setup(build) {
-    build.onResolve({ filter: /.*/ }, (args) => {
-      if (!args.importer || (args.namespace !== "file" && args.namespace !== "")) {
-        return null;
-      }
-      if (!args.path.startsWith(".")) {
-        return null;
-      }
-      const importer = path.resolve(args.importer);
-      if (!importer.startsWith(srcDir + path.sep)) {
-        return null;
-      }
-      const violation = checkImport(importer, path.resolve(args.resolveDir, args.path));
-      // Returning null hands the allowed import back to esbuild's own
-      // resolver; the plugin only ever vetoes.
-      return violation === null ? null : { errors: [{ text: violation }] };
-    });
-  },
-};
-
 // Always minified: the bundle is never inspected by hand, and matching the
 // release profile keeps the jsdom tests exercising what ships.
 const options = {
@@ -72,7 +45,6 @@ const options = {
   minify: true,
   outfile: path.join(distDir, "app.js"),
   logLevel: "info",
-  plugins: [layerCheckPlugin],
   ...(version !== null && { define: { __APP_VERSION__: JSON.stringify(version) } }),
 };
 

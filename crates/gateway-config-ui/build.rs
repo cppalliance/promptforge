@@ -7,7 +7,6 @@
 fn main() -> std::process::ExitCode {
     match build_ui::build(build_ui::UiBuild {
         static_files: build_ui::CONFIG_UI_STATIC_FILES,
-        layer_check: false,
         define_app_version: true,
     }) {
         Ok(()) => std::process::ExitCode::SUCCESS,

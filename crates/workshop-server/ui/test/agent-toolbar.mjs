@@ -1,13 +1,10 @@
 // The agent toolbar (src/ui/agent-toolbar.ts) in jsdom: a role=toolbar
-// flex row composing ModeChip, ModelPickerTrigger, and TokenRing - chip
-// and picker leading, the ring last so the stylesheet can pin it to the
-// trailing edge. The picker reads the constructor's ModelService;
-// dispose() cascades to all three children. jsdom has no layout engine,
-// so spacing and alignment pin against the stylesheet source (the
-// titlebar-style.mjs pattern). Runs under the shared leak check: an
-// undisposed toolbar or child fails.
+// flex row composing ModeChip, ModelPickerTrigger, and TokenRing. The picker
+// reads the constructor's ModelService; dispose() cascades to all three
+// children. Runs under the shared leak check: an undisposed toolbar or child
+// fails.
 // Run: node test/agent-toolbar.mjs
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -113,6 +110,13 @@ await assertNoLeaks(lifecycle, async () => {
         toolbar.element.querySelector(".token-ring")?.getAttribute("aria-valuenow") ===
           "0",
     );
+    for (const button of toolbar.element.querySelectorAll("button")) {
+      button.focus();
+      check(
+        `${button.getAttribute("aria-label") ?? button.textContent.trim()} accepts keyboard focus`,
+        document.activeElement === button && button.matches(":focus-visible"),
+      );
+    }
     toolbar.dispose();
     service.dispose();
     toolbar.element.remove();
@@ -161,55 +165,6 @@ await assertNoLeaks(lifecycle, async () => {
     service.dispose();
     toolbar.element.remove();
   }
-
-  // --- The stylesheet contract -------------------------------------------------------
-  // jsdom has no layout engine, so spacing and alignment pin against the
-  // CSS source.
-
-  const cssText = (
-    await readFile(path.join(testDir, "..", "src", "ui", "agent-toolbar.css"), "utf8")
-  ).replace(/\/\*[\s\S]*?\*\//g, "");
-
-  // Returns the declaration block of the first rule whose selector list
-  // contains `selector` exactly, or "" when no rule carries it.
-  function ruleBlock(selector) {
-    let from = 0;
-    for (;;) {
-      const start = cssText.indexOf(selector, from);
-      if (start === -1) return "";
-      let i = start + selector.length;
-      while (i < cssText.length && /\s/.test(cssText[i])) i += 1;
-      if (cssText[i] === "{" || cssText[i] === ",") {
-        const open = cssText.indexOf("{", i);
-        const end = open === -1 ? -1 : cssText.indexOf("}", open);
-        return end === -1 ? "" : cssText.slice(open + 1, end);
-      }
-      from = start + selector.length;
-    }
-  }
-
-  const toolbarRule = ruleBlock(".agent-toolbar");
-  check(
-    "the toolbar lays out as a centered flex row",
-    toolbarRule.includes("display: flex") && toolbarRule.includes("align-items: center"),
-  );
-  check(
-    "the toolbar uses Cursor's workspace input-row gap",
-    toolbarRule.includes("gap: 0.55rem"),
-  );
-  check(
-    "the toolbar stands at base control height",
-    toolbarRule.includes("min-block-size: var(--height-base)"),
-  );
-  check(
-    "the ring pins to the trailing edge with a logical property",
-    ruleBlock(".agent-toolbar > .token-ring").includes("margin-inline-start: auto"),
-  );
-  const varUses = cssText.match(/var\([^)]*\)/g) ?? [];
-  check(
-    "no var() in the toolbar stylesheet carries a fallback",
-    varUses.length > 0 && varUses.every((use) => !use.includes(",")),
-  );
 });
 
 if (failures.length > 0) {

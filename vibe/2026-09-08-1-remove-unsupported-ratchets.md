@@ -404,7 +404,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Replace unsafe-lint manifest inspection with compiler checks that deny unsafe code in the three safe STT crates and retain the explicit `gateway-whisper-ffi` policy. Remove Rust parser dependencies, test registrations, and CI consumers with their final use.
 - Run focused Cargo metadata adversarial fixtures, profile and STT generation tests, safe-crate compiler lanes, Workshop structural-test replacements, Gateway logging behavior tests, Gateway tests, and PromptForge shipped-prompt tests. Commit all Rust cleanup and direct replacement evidence together.
 
-### Step 4: Remove the remaining structural tools and CI wiring
+### Step 4: Remove the remaining structural tools and CI wiring [completed]
 
 - Remove the internal public API snapshot files under `crates/gateway-stt*`, `tools/check-stt-architecture.mjs`, its test, the integration-test ceiling tool, test, and JSON file, and their remaining manifest or `.github/workflows/ci.yml` consumers. Remove obsolete `cargo-modules` and `cargo-public-api` installation.
 - Delete `tools/check-workshop-installer-theme.test.mjs` and its CI consumer while preserving `crates/workshop/installer.nsi` and the real unsigned build in `.github/workflows/workshop-installer-smoke.yml`.
