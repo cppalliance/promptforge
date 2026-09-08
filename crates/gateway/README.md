@@ -22,7 +22,7 @@ The config path comes from the `--config` flag or the `PROMPTFORGE_GATEWAY_CONFI
 
 A serving run logs to `gateway.log` in the `logs` directory under the state directory, rotating the previous run aside on startup and retaining five previous runs; every record crosses a redaction pass that masks bearer tokens, authorization and cookie header values, and `api_key` assignments before it reaches disk. When a run fails before it can serve, `promptforge-gateway diagnostics` prints a read-only JSON report of the state directory, the resolved config path, the current and retained log files, and the connection file - it never serves, rotates a log, parses a config, or prints secrets.
 
-Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions`, serves a model catalog at `GET /v1/models`, and, with the default-on `stt` feature, serves Realtime transcription at `WS /v1/realtime?intent=transcription` plus OpenAI-compatible multipart transcription at `POST /v1/audio/transcriptions`.
+Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions`, serves a model catalog at `GET /v1/models`, streams speech synthesis for `kind = "speech"` models at `POST /v1/audio/speech` with the voice union at `GET /v1/audio/voices`, and, with the default-on `stt` feature, serves Realtime transcription at `WS /v1/realtime?intent=transcription` plus OpenAI-compatible multipart transcription at `POST /v1/audio/transcriptions`.
 
 Embedding hosts use the library API instead of the binary: `spawn` starts the gateway on a dedicated thread with its own runtime and blocks until the listener is bound, returning a `GatewayHandle` that carries the bound URL and a graceful-shutdown switch (`url()`, `shutdown()`, `join()`).
 
@@ -140,6 +140,34 @@ The authenticated Realtime endpoint accepts only the exact `intent=transcription
 Clients may negotiate the PromptForge extension `item.input_audio_transcription.hypothesis`. Its replacement snapshots carry the complete transcript plus finalized, agreed, and tentative regions until the authoritative completion arrives. At most eight Realtime sessions are active at once and each session may have at most four committed items finalizing concurrently; bounded overloads fail visibly rather than waiting without limit.
 
 `GET /v1/models` advertises active physical speech names for batch calls and advertises `realtime-transcribe` only when the complete interim and final pair is ready. `GET /admin/status` reports generic `speech` facts: `configured`, `ready`, `gpu`, and `generation`.
+
+### Speech synthesis models
+
+Speech synthesis models are ordinary remote catalog entries with `kind = "speech"`, served at `POST /v1/audio/speech` and backed by any OpenAI-shaped provider:
+
+```toml
+[[endpoint]]
+id = "together"
+protocol = "openai"
+base_url = "https://api.together.xyz/v1"
+api_key = "${TOGETHER_API_KEY}"
+
+[[model]]
+name = "orpheus"
+kind = "speech"
+description = "Orpheus 3B conversational speech synthesis"
+upstream = "canopylabs/orpheus-3b-0.1-ft"
+endpoints = ["together"]
+context = 8192
+voices = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `kind` | `chat` | `speech` routes the model to the speech endpoint; chat-only fields (`thinking`, the effort knobs, `default_max_tokens`, `tool_dialect`) are rejected at load. |
+| `voices` | `[]` | Speech-only voice catalog. Entries must be non-empty and unique; an empty list means no fixed voice set, and the route accepts any voice. |
+
+The route speaks the OpenAI speech dialect: `model`, `input` (capped at 4096 characters), and `voice` (a plain name or the `{"id": "..."}` object form) are required; `response_format` (`mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`) resolves an omitted field to `mp3` in the wire type, because OpenAI defaults to mp3 while Together defaults to wav; `speed`, `instructions`, and `stream_format` are optional, and every field the gateway does not name passes through verbatim. A voice outside the model's declared list is a 400 naming the valid voices, judged before queue admission; upstream 429 and 503 answers map to client-facing 429 `upstream_rate_limited` and 503 `upstream_unavailable` envelopes. The reply is the provider's audio bytes streamed through unread: the upstream `Content-Type` is forwarded (with the requested format's MIME type as fallback) and `Content-Length` is never set. `stream_format = "sse"` selects the provider's event-stream framing (Together's `stream=true` dialect is SSE of base64 PCM, not chunked binary) and passes through undecoded. `GET /v1/audio/voices` answers the active profile's deduplicated, sorted voice union as id-first `{"id", "name"}` entries, and `GET /v1/models` advertises the kind and voices verbatim. Local speech models are refused at launch: no local speech runtime exists yet.
 
 ## Local model companions
 

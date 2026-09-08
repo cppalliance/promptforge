@@ -24,11 +24,12 @@
 - [Remote Models and Endpoints](gateway/03-remote-models.md)
 - [Local Models](gateway/04-local-models.md)
 - [Speech-to-Text](gateway/05-speech.md)
-- [Profiles and Switching](gateway/06-profiles.md)
-- [Dominions and Queues](gateway/07-dominions.md)
-- [Editing Configuration Safely](gateway/08-editing-configuration.md)
-- [The Configuration UI](gateway/09-config-ui.md)
-- [Serving and Observing](gateway/10-serving-and-observing.md)
+- [Speech Synthesis](gateway/06-speech-synthesis.md)
+- [Profiles and Switching](gateway/07-profiles.md)
+- [Dominions and Queues](gateway/08-dominions.md)
+- [Editing Configuration Safely](gateway/09-editing-configuration.md)
+- [The Configuration UI](gateway/10-config-ui.md)
+- [Serving and Observing](gateway/11-serving-and-observing.md)
 
 # The Prompt Language
 

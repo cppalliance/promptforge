@@ -196,7 +196,7 @@ Components, in dependency order:
 - `design/note-gateway-tts-phase-1-verification.md`: record the observed dialect (default-format `Content-Type` proving the mp3 pin reached the provider, chunked vs `Content-Length`, emotion-tag handling, 429/503 envelopes if provocable, rejected or ignored fields); when the key is absent, write the same note as a recipe with a deferral line and do not block on it.
 - Verification: the script's gateway assertions pass.
 
-### Step 8: Documentation
+### Step 8: Documentation [completed]
 
 - `crates/gateway/README.md`: add a "Speech synthesis models" section beside "Speech-to-text models" (:100) with example catalog entries using `protocol = "openai"` and `api_key = "${TOGETHER_API_KEY}"` (the config schema's credential field with `"${VAR}"` interpolation; the design's `secret = "env:..."` example predates the schema).
 - `guide/src/gateway/06-speech-synthesis.md`: new chapter (the STT chapter `05-speech.md` already exists); `git mv` the following chapters highest-first (10→11, 09→10, 08→09, 07→08, 06→07), then regenerate `guide/src/SUMMARY.md` with `cargo run -p build-user-guide` — the assembler owns SUMMARY.md and it is never hand-edited. The chapter covers the `[[model]]` speech fields, the `voices` capability, the `/v1/audio/speech` request shape (defaults, rejections, `instructions`), the `/v1/audio/voices` route (id-first `{"id", "name"}` entries, with a note that tolerant clients also accept plain strings — the entry shape is a compatibility surface), and the `stream_format=sse` caveat: Together's `stream=true` is SSE of base64 PCM, not chunked binary, and phase 1 passes it through undecoded.

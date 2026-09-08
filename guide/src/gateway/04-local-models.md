@@ -41,7 +41,7 @@ Local inference runs on a pinned llama-server build, b10082. The gateway prefers
 
 The gateway runs one managed llama-server child per configured `[[local_model]]`. Children get supervised respawn and deterministic teardown. Staged CUDA bundle directories are prepended to the child process's PATH only; the gateway's own environment is never mutated. Local models appear to clients as ordinary routed models under their configured names.
 
-A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
+A local model's `kind` selects the child's serving mode: embedding models serve embeddings, and classifier models serve reranking. A `speech` kind has no local serving mode and is refused at launch: local speech models are not yet supported. The `parallel` key sets both the child's concurrency and its admission limit. The thinking setting changes the child's sampling preset: thinking models sample at temperature 1.0 and top-p 0.95, while non-thinking models run with reasoning switched off and sample at 0.7 and 0.8.
 
 ## Chat templates
 
