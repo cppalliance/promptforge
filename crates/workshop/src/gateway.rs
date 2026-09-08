@@ -9,7 +9,7 @@ mod supervisor;
 
 pub(crate) use boot::ensure_gateway;
 pub(crate) use identity::GatewayAttachment;
-pub(crate) use supervisor::{GatewaySupervisor, supervise};
+pub(crate) use supervisor::{GatewaySupervisor, SupervisorShutdown, supervise};
 
 #[cfg(test)]
 mod tests;

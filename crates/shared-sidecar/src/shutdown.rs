@@ -8,6 +8,7 @@
 
 use crate::health::{self, ProbeError};
 use crate::{ConnectionFile, ValidatedConnection};
+use std::time::Instant;
 
 /// The shutdown route's path on the gateway.
 const SHUTDOWN_PATH: &str = "/shutdown";
@@ -71,9 +72,40 @@ pub fn request_shutdown(connection: &ValidatedConnection) -> Result<(), Shutdown
     request_shutdown_file(connection.connection_file())
 }
 
+/// Posts authenticated shutdown without allowing network I/O to outlive the
+/// caller's absolute deadline.
+///
+/// # Errors
+/// Returns the same delivery and rejection errors as [`request_shutdown`].
+pub fn request_shutdown_before(
+    connection: &ValidatedConnection,
+    deadline: Instant,
+) -> Result<(), ShutdownError> {
+    request_shutdown_file_before(connection.connection_file(), deadline)
+}
+
 fn request_shutdown_file(file: &ConnectionFile) -> Result<(), ShutdownError> {
     let address = format!("127.0.0.1:{}", file.port);
     let head = health::request_head(&address, "POST", SHUTDOWN_PATH, Some(&file.api_key))?;
+    accepted(&head)
+}
+
+fn request_shutdown_file_before(
+    file: &ConnectionFile,
+    deadline: Instant,
+) -> Result<(), ShutdownError> {
+    let address = format!("127.0.0.1:{}", file.port);
+    let head = health::request_head_until(
+        &address,
+        "POST",
+        SHUTDOWN_PATH,
+        Some(&file.api_key),
+        deadline,
+    )?;
+    accepted(&head)
+}
+
+fn accepted(head: &str) -> Result<(), ShutdownError> {
     let status = head
         .split_whitespace()
         .nth(1)
@@ -181,6 +213,28 @@ mod tests {
         assert!(
             matches!(error, ShutdownError::Io { .. }),
             "an undelivered request is an I/O error: {error}"
+        );
+    }
+
+    #[test]
+    fn an_absolute_deadline_bounds_an_unresponsive_shutdown_target() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow shutdown fixture");
+        let port = listener.local_addr().expect("fixture address").port();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept shutdown");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let started = std::time::Instant::now();
+
+        let error = request_shutdown_file_before(&file(port), started + Duration::from_millis(100))
+            .expect_err("an unresponsive child exceeds the cleanup deadline");
+
+        assert!(matches!(error, ShutdownError::Io { .. }));
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "late-child shutdown uses one absolute network deadline"
         );
     }
 }

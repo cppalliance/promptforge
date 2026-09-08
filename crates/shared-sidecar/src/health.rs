@@ -568,7 +568,7 @@ fn request_head_with_timeout(
     request_head_until(address, method, path, bearer, Instant::now() + timeout)
 }
 
-fn request_head_until(
+pub(crate) fn request_head_until(
     address: &str,
     method: &str,
     path: &str,

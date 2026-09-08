@@ -10,9 +10,11 @@ use anyhow::Context as _;
 use shared_sidecar::{CancellationToken, ConnectionFile, Resolution, ValidatedConnection};
 
 use super::{get, live_file, validated_gateway};
+use crate::gateway::boot::RecoveryLaunch;
 use crate::gateway::supervisor::{
-    GatewaySupervisor, SUPERVISION_MAX_DELAY, SupervisedGatewayIdentity, SupervisionProbe,
-    launch_and_attach_cancellable_with, run_effect_if_active, run_supervision,
+    GatewaySupervisor, RecoveryCandidate, RecoveryOwnership, SUPERVISION_MAX_DELAY,
+    SupervisedGatewayIdentity, SupervisionProbe, SupervisorShutdown,
+    launch_and_attach_cancellable_with, run_effect_if_active, run_supervision, validate_recovery,
     wait_for_launched_file_cancellable_with,
 };
 
@@ -174,7 +176,7 @@ fn reused_pid_and_file_metadata_still_publish_a_new_validated_process_boot() {
 
 fn assert_bounded_supervisor_shutdown(supervisor: GatewaySupervisor, finished: &AtomicBool) {
     let started = Instant::now();
-    supervisor.shutdown();
+    assert_eq!(supervisor.shutdown(), SupervisorShutdown::Joined);
     assert!(
         started.elapsed() < Duration::from_millis(250),
         "Workshop exit joins the cancelled supervisor within its budget"
@@ -182,6 +184,136 @@ fn assert_bounded_supervisor_shutdown(supervisor: GatewaySupervisor, finished: &
     assert!(
         finished.load(Ordering::SeqCst),
         "shutdown returns only after the supervisor thread exits"
+    );
+}
+
+#[test]
+fn an_exact_spawned_pid_authenticates_late_child_cleanup() {
+    let mut gateway = validated_gateway("owned-key");
+    let validated = gateway.validate("owned-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let RecoveryOwnership::Owned(candidate) =
+        RecoveryCandidate::authenticate(validated.pid(), validated)
+    else {
+        panic!("the validated file names the spawned child");
+    };
+
+    drop(candidate);
+
+    assert!(
+        gateway.received_shutdown(Duration::from_secs(1)),
+        "an unpublished owned child receives authenticated shutdown"
+    );
+}
+
+#[test]
+fn a_mismatched_spawned_pid_never_claims_or_cleans_the_validated_process() {
+    let mut gateway = validated_gateway("unowned-key");
+    let validated = gateway.validate("unowned-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let run = tempfile::TempDir::new().expect("create run directory");
+    gateway
+        .connection_file("unowned-key", 1_778_000_001, "2026-09-08T18:00:01Z")
+        .write_to(run.path())
+        .expect("retain the uncertain connection record");
+
+    let RecoveryOwnership::Unowned(unowned) =
+        RecoveryCandidate::authenticate(validated.pid() + 1, validated)
+    else {
+        panic!("a different validated pid cannot prove ownership");
+    };
+    drop(unowned);
+
+    assert!(
+        !gateway.received_shutdown(Duration::from_millis(100)),
+        "an uncertain process never receives destructive cleanup"
+    );
+    assert!(
+        shared_sidecar::connection_file_path(run.path()).exists(),
+        "uncertain cleanup retains the connection record"
+    );
+}
+
+#[test]
+fn successful_publication_disarms_late_child_cleanup() {
+    let mut gateway = validated_gateway("published-key");
+    let validated = gateway.validate("published-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let RecoveryOwnership::Owned(mut candidate) =
+        RecoveryCandidate::authenticate(validated.pid(), validated)
+    else {
+        panic!("the validated file names the spawned child");
+    };
+
+    candidate.published();
+    drop(candidate);
+
+    assert!(
+        !gateway.received_shutdown(Duration::from_millis(100)),
+        "an authoritative published child remains running"
+    );
+}
+
+#[test]
+fn launched_recovery_retains_the_spawned_pid_and_releases_launch_lock() {
+    let run = tempfile::TempDir::new().expect("create run directory");
+    let decision = shared_sidecar::launch_or_attach(run.path(), Duration::from_secs(1))
+        .expect("acquire launch election");
+    let file = live_file(54_375, "candidate-key");
+    let cancellation = CancellationToken::new();
+
+    let recovery = launch_and_attach_cancellable_with(
+        run.path(),
+        Path::new("unused-gateway"),
+        &cancellation,
+        |_, _, _| Ok(decision),
+        |_, _| Ok(4242),
+        |_, _, _| Ok(file.clone()),
+    )
+    .expect("complete injected launch");
+
+    match recovery {
+        RecoveryLaunch::Launched {
+            child_pid,
+            file: observed,
+        } => {
+            assert_eq!(child_pid, 4242);
+            assert_eq!(observed, file);
+        }
+        RecoveryLaunch::Attached(_) => panic!("the elected launcher retains child ownership"),
+    }
+    assert!(
+        matches!(
+            shared_sidecar::launch_or_attach(run.path(), Duration::from_secs(1))
+                .expect("reacquire launch election"),
+            shared_sidecar::LaunchDecision::Launch(_)
+        ),
+        "returning the candidate releases LaunchLock"
+    );
+}
+
+#[test]
+fn failed_validation_never_claims_or_removes_a_spawned_process_record() {
+    let run = tempfile::TempDir::new().expect("create run directory");
+    let file = ConnectionFile {
+        pid: super::dead_pid(),
+        ..live_file(54_375, "unvalidated-key")
+    };
+    file.write_to(run.path()).expect("write uncertain record");
+    let cancellation = CancellationToken::new();
+
+    let result = validate_recovery(
+        RecoveryLaunch::Launched {
+            child_pid: file.pid,
+            file,
+        },
+        &cancellation,
+    );
+
+    assert!(
+        result.is_err(),
+        "failed validation creates no owned candidate"
+    );
+    assert!(
+        shared_sidecar::connection_file_path(run.path()).exists(),
+        "failed validation retains an uncertain process record"
     );
 }
 
@@ -367,7 +499,7 @@ fn exit_joins_a_supervisor_blocked_in_launch_race_before_spawn() {
             },
             |_, _| {
                 worker_launches.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(42)
             },
             |_, _, _| anyhow::bail!("the cancelled launch cannot wait for health"),
         );
@@ -411,7 +543,7 @@ fn exit_joins_a_supervisor_blocked_inside_launch_without_process_creation() {
                     return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                 }
                 worker_launches.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+                Ok(42)
             },
             |_, _, _| anyhow::bail!("the cancelled launch cannot wait for health"),
         );

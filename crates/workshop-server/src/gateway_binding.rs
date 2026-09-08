@@ -10,7 +10,6 @@ mod publication;
 mod shutdown;
 
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use arc_swap::ArcSwap;
@@ -82,9 +81,26 @@ impl GatewaySnapshot {
 #[derive(Clone)]
 pub(crate) struct GatewayBinding {
     current: Arc<ArcSwap<GatewaySnapshot>>,
-    next_generation: Arc<AtomicU64>,
     changed: watch::Sender<u64>,
-    replacement: Arc<Mutex<()>>,
+    publication: Arc<Mutex<PublicationState>>,
+}
+
+#[derive(Debug)]
+struct PublicationState {
+    next_generation: u64,
+    closed: bool,
+}
+
+/// A failure to publish a replacement Gateway generation.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum GatewayPublicationError {
+    /// The replacement clients could not be built.
+    #[error(transparent)]
+    Build(#[from] GatewayError),
+    /// The binding has permanently revoked replacement publication.
+    #[error("gateway replacement publication is permanently closed")]
+    PublicationClosed,
 }
 
 impl fmt::Debug for GatewayBinding {
@@ -112,9 +128,11 @@ impl GatewayBinding {
         let snapshot = Arc::new(build_snapshot(base_url, api_key, 0, identity)?);
         Ok(Self {
             current: Arc::new(ArcSwap::from(snapshot)),
-            next_generation: Arc::new(AtomicU64::new(1)),
             changed: watch::channel(0).0,
-            replacement: Arc::new(Mutex::new(())),
+            publication: Arc::new(Mutex::new(PublicationState {
+                next_generation: 1,
+                closed: false,
+            })),
         })
     }
 
@@ -133,9 +151,11 @@ impl GatewayBinding {
         });
         Self {
             current: Arc::new(ArcSwap::from(snapshot)),
-            next_generation: Arc::new(AtomicU64::new(1)),
             changed: watch::channel(0).0,
-            replacement: Arc::new(Mutex::new(())),
+            publication: Arc::new(Mutex::new(PublicationState {
+                next_generation: 1,
+                closed: false,
+            })),
         }
     }
 
@@ -156,7 +176,11 @@ impl GatewayBinding {
 
     /// Builds and atomically publishes a replacement, then wakes consumers.
     #[cfg(any(test, feature = "test-fixtures"))]
-    pub(crate) fn replace(&self, base_url: &str, api_key: &str) -> Result<(), GatewayError> {
+    pub(crate) fn replace(
+        &self,
+        base_url: &str,
+        api_key: &str,
+    ) -> Result<(), GatewayPublicationError> {
         self.replace_with_identity(base_url, api_key, None)
     }
 
@@ -166,21 +190,42 @@ impl GatewayBinding {
         base_url: &str,
         api_key: &str,
         identity: Option<shared_sidecar::ValidatedConnection>,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<(), GatewayPublicationError> {
         let snapshot = build_snapshot(base_url, api_key, 0, identity)?;
-        let _replacement = self
-            .replacement
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        self.publish_snapshot(snapshot);
-        Ok(())
+        self.publish_snapshot(snapshot)
     }
 
-    fn publish_snapshot(&self, mut snapshot: GatewaySnapshot) {
-        let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
+    fn publish_snapshot(
+        &self,
+        mut snapshot: GatewaySnapshot,
+    ) -> Result<(), GatewayPublicationError> {
+        let mut publication = self
+            .publication
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if publication.closed {
+            return Err(GatewayPublicationError::PublicationClosed);
+        }
+        let generation = publication.next_generation;
+        publication.next_generation = publication.next_generation.saturating_add(1);
         snapshot.generation = generation;
         self.current.store(Arc::new(snapshot));
         self.changed.send_replace(generation);
+        Ok(())
+    }
+
+    fn close_publication(&self) {
+        self.publication
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed = true;
+    }
+
+    fn publication_closed(&self) -> bool {
+        self.publication
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .closed
     }
 
     /// Creates the restricted handle the desktop host uses for sidecar updates.
@@ -203,7 +248,7 @@ impl GatewayBinding {
 /// # fn publish(
 /// #     updater: &workshop_server::GatewayUpdater,
 /// #     raw: &ConnectionFile,
-/// # ) -> Result<(), workshop_server::GatewayError> {
+/// # ) -> Result<(), workshop_server::GatewayPublicationError> {
 /// updater.replace_sidecar(raw)
 /// # }
 /// ```
@@ -225,12 +270,14 @@ impl GatewayUpdater {
     /// long-lived Workshop consumer only after the complete snapshot is live.
     ///
     /// # Errors
-    /// Returns [`GatewayError::Build`] if the replacement HTTP client cannot
-    /// initialize.
+    /// Returns [`GatewayPublicationError::Build`] if the replacement HTTP
+    /// client cannot initialize, or
+    /// [`GatewayPublicationError::PublicationClosed`] after teardown revokes
+    /// replacement publication.
     pub fn replace_sidecar(
         &self,
         connection: &shared_sidecar::ValidatedConnection,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<(), GatewayPublicationError> {
         self.binding.replace_with_identity(
             &format!("http://127.0.0.1:{}", connection.port()),
             connection.api_key(),
@@ -245,8 +292,20 @@ impl GatewayUpdater {
         &self,
         base_url: &str,
         api_key: &str,
-    ) -> Result<(), GatewayError> {
+    ) -> Result<(), GatewayPublicationError> {
         self.binding.replace(base_url, api_key)
+    }
+
+    /// Permanently revokes replacement publication for this binding and every
+    /// updater clone.
+    pub fn close_publication(&self) {
+        self.binding.close_publication();
+    }
+
+    /// Whether replacement publication has been permanently revoked.
+    #[must_use]
+    pub fn publication_closed(&self) -> bool {
+        self.binding.publication_closed()
     }
 }
 

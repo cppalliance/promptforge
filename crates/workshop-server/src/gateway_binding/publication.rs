@@ -3,8 +3,7 @@
 use std::sync::TryLockError;
 use std::time::Duration;
 
-use super::{GatewayBinding, GatewayUpdater, build_snapshot};
-use crate::gateway::GatewayError;
+use super::{GatewayBinding, GatewayPublicationError, GatewayUpdater, build_snapshot};
 
 /// Cancellable replacement lock retry cadence.
 const REPLACEMENT_RETRY_INTERVAL: Duration = Duration::from_millis(10);
@@ -16,7 +15,7 @@ impl GatewayBinding {
         api_key: &str,
         identity: shared_sidecar::ValidatedConnection,
         cancellation: &shared_sidecar::CancellationToken,
-    ) -> Result<bool, GatewayError> {
+    ) -> Result<bool, GatewayPublicationError> {
         self.replace_with_identity_cancellable_with_wait(
             base_url,
             api_key,
@@ -33,16 +32,20 @@ impl GatewayBinding {
         identity: shared_sidecar::ValidatedConnection,
         cancellation: &shared_sidecar::CancellationToken,
         mut wait: impl FnMut(&shared_sidecar::CancellationToken, Duration) -> bool,
-    ) -> Result<bool, GatewayError> {
+    ) -> Result<bool, GatewayPublicationError> {
         if cancellation.is_cancelled() {
-            return Ok(false);
+            return if self.publication_closed() {
+                Err(GatewayPublicationError::PublicationClosed)
+            } else {
+                Ok(false)
+            };
         }
         let snapshot = build_snapshot(base_url, api_key, 0, Some(identity))?;
         cancellation
             .run_if_active(|| {
-                let _replacement = loop {
-                    match self.replacement.try_lock() {
-                        Ok(replacement) => break replacement,
+                let mut publication = loop {
+                    match self.publication.try_lock() {
+                        Ok(publication) => break publication,
                         Err(TryLockError::Poisoned(error)) => break error.into_inner(),
                         Err(TryLockError::WouldBlock) => {
                             if wait(cancellation, REPLACEMENT_RETRY_INTERVAL) {
@@ -54,10 +57,24 @@ impl GatewayBinding {
                 if cancellation.is_cancelled() {
                     return Ok(false);
                 }
-                self.publish_snapshot(snapshot);
+                if publication.closed {
+                    return Err(GatewayPublicationError::PublicationClosed);
+                }
+                let generation = publication.next_generation;
+                publication.next_generation = publication.next_generation.saturating_add(1);
+                let mut snapshot = snapshot;
+                snapshot.generation = generation;
+                self.current.store(std::sync::Arc::new(snapshot));
+                self.changed.send_replace(generation);
                 Ok(true)
             })
-            .unwrap_or(Ok(false))
+            .unwrap_or_else(|| {
+                if self.publication_closed() {
+                    Err(GatewayPublicationError::PublicationClosed)
+                } else {
+                    Ok(false)
+                }
+            })
     }
 }
 
@@ -68,13 +85,15 @@ impl GatewayUpdater {
     /// another publisher owns the replacement lock.
     ///
     /// # Errors
-    /// Returns [`GatewayError::Build`] if the replacement clients cannot
-    /// initialize.
+    /// Returns [`GatewayPublicationError::Build`] if the replacement clients
+    /// cannot initialize, or
+    /// [`GatewayPublicationError::PublicationClosed`] after teardown revokes
+    /// replacement publication.
     pub fn replace_sidecar_cancellable(
         &self,
         connection: &shared_sidecar::ValidatedConnection,
         cancellation: &shared_sidecar::CancellationToken,
-    ) -> Result<bool, GatewayError> {
+    ) -> Result<bool, GatewayPublicationError> {
         self.binding.replace_with_identity_cancellable(
             &format!("http://127.0.0.1:{}", connection.port()),
             connection.api_key(),

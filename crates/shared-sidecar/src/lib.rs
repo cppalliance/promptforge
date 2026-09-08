@@ -57,7 +57,7 @@ pub use crate::paths::{
     CONNECTION_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME, connection_file_path,
     default_run_dir, instance_lock_file_path, lock_file_path, run_dir,
 };
-pub use crate::shutdown::{ShutdownError, request_shutdown};
+pub use crate::shutdown::{ShutdownError, request_shutdown, request_shutdown_before};
 pub use crate::stale::resolve_cancellable;
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]

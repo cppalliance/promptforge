@@ -9,6 +9,33 @@ use crate::gateway::boot::{
     GATEWAY_EXE_NAME, GatewayPlan, no_gateway_error, plan_gateway, sibling_gateway,
     wait_for_launched_file_with,
 };
+use crate::gateway::identity::GatewayAttachment;
+use crate::gateway::supervisor::{RecoveryCandidate, RecoveryOwnership};
+
+fn owned_candidate(identity: shared_sidecar::ValidatedConnection) -> RecoveryCandidate {
+    match RecoveryCandidate::authenticate(identity.pid(), identity) {
+        RecoveryOwnership::Owned(candidate) => candidate,
+        RecoveryOwnership::Unowned(_) => panic!("the validated child pid authenticates ownership"),
+    }
+}
+
+fn workshop_server(port: u16, api_key: &str) -> (tempfile::TempDir, workshop_server::ServerHandle) {
+    let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
+    let server = workshop_server::fixtures::spawn(workshop_server::Config {
+        gateway: workshop_server::GatewayConfig {
+            base_url: format!("http://127.0.0.1:{port}"),
+            api_key: api_key.to_owned(),
+        },
+        server: workshop_server::ServerConfig {
+            bind: "127.0.0.1:0".to_owned(),
+            open_browser: false,
+            state_dir: state_dir.path().to_owned(),
+        },
+        agents: workshop_server::AgentsConfig::default(),
+    })
+    .expect("spawn Workshop fixture");
+    (state_dir, server)
+}
 
 #[test]
 fn a_live_file_attaches_without_looking_for_a_sibling_exe() {
@@ -187,5 +214,48 @@ fn the_no_gateway_error_names_both_remedies() {
     assert!(
         message.contains("workshop.toml"),
         "the error names the explicit-config remedy: {message}"
+    );
+}
+
+#[test]
+fn matching_boot_publication_survives_closure_and_server_teardown() {
+    let mut launched = super::validated_gateway("launched-key");
+    let identity = launched.validate("launched-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let attachment = GatewayAttachment::Launched(owned_candidate(identity.clone()));
+    let (_state_dir, server) = workshop_server(launched.port(), "launched-key");
+
+    let attachment = attachment.reconcile_publication(Some(identity));
+    server.gateway_updater().close_publication();
+    drop(attachment);
+    let outcome = server.shutdown().expect("server teardown continues");
+
+    assert_eq!(outcome, workshop_server::Termination::Graceful);
+    assert!(
+        !launched.received_shutdown(Duration::from_millis(100)),
+        "closure cannot clean up the exact child already published at boot"
+    );
+}
+
+#[test]
+fn closed_boot_publication_cleans_unpublished_owner_then_continues_teardown() {
+    let mut launched = super::validated_gateway("launched-key");
+    let published = super::validated_gateway("published-key");
+    let launched_identity =
+        launched.validate("launched-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+    let published_identity =
+        published.validate("published-key", 1_778_000_002, "2026-09-08T18:00:02Z");
+    let attachment = GatewayAttachment::Launched(owned_candidate(launched_identity));
+    let (_state_dir, server) = workshop_server(published.port(), "published-key");
+
+    server.gateway_updater().close_publication();
+    let attachment = attachment.reconcile_publication(Some(published_identity));
+    drop(attachment);
+    assert!(
+        launched.received_shutdown(Duration::from_secs(1)),
+        "a closed boot cleans only its unpublished authenticated child"
+    );
+    assert_eq!(
+        server.shutdown().expect("server teardown continues"),
+        workshop_server::Termination::Graceful
     );
 }

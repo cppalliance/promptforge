@@ -103,3 +103,31 @@ fn configured_gateway_has_no_shutdown_authority() {
         "the absence of validated local identity denies shutdown authority"
     );
 }
+
+#[test]
+fn publication_close_preserves_shutdown_authority_for_the_current_snapshot() {
+    let mut gateway = crate::test_gateway::ValidatedGateway::spawn("current-key");
+    let current = validated_connection(
+        &gateway,
+        "current-key",
+        1_778_000_001,
+        "2026-09-07T18:00:01Z",
+    );
+    let base_url = format!("http://127.0.0.1:{}", current.port());
+    let api_key = current.api_key().to_owned();
+    let binding = GatewayBinding::new_with_identity(&base_url, &api_key, Some(current))
+        .expect("binding builds");
+    let updater = binding.updater();
+
+    updater.close_publication();
+
+    assert!(
+        updater
+            .request_shutdown()
+            .expect("the current authenticated shutdown is accepted")
+    );
+    assert!(
+        gateway.received_shutdown(Duration::from_secs(1)),
+        "closure revokes future publication without tearing current shutdown authority"
+    );
+}

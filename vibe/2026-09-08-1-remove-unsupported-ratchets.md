@@ -440,7 +440,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Extend `ui/test/stt-stream.mjs`, `take-registry.mjs`, `take-registry-regressions.mjs`, and `agent-stt.mjs` with service, reducer, integration, and real two-socket reconnect cases. Prove immediate same-item-ID reuse and rejection of every stale callback, event, error, wire result, user action, audio input, and capture completion class.
 - Run focused Workshop UI typecheck, production bundle, Realtime service tests, reducer regressions, and two-socket tests. Update only `design/generic-realtime-stt.md` with the tested contract. Commit the typed service, reducer, integration, tests, and current design text together.
 
-### Step 8: Close publication and bound the Gateway lifecycle
+### Step 8: Close publication and bound the Gateway lifecycle [completed]
 
 - Replace the publication mutex in `crates/workshop-server/src/gateway_binding.rs` and `gateway_binding/publication.rs` with binding-owned shared `Arc<Mutex<PublicationState>>`. Construct candidates before locking, linearize publish and permanent close together, and return `GatewayPublicationError::PublicationClosed` from every updater clone without advancing generation, storing, or notifying.
 - In `crates/workshop/src/gateway/supervisor.rs`, add nonblocking `StopSignal`, a panic-safe completion guard, and typed `Joined`, `Panicked`, or `Detached` shutdown outcomes. Revoke publication, signal stop, and use one absolute deadline; join only after completion and drop the handle at timeout. Make Drop use the same bounded path.

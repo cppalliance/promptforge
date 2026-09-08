@@ -54,6 +54,7 @@ pub enum Termination {
 pub struct ServerHandle {
     url: String,
     gateway: GatewayUpdater,
+    initial_gateway_identity: Option<shared_sidecar::ValidatedConnection>,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     stopped: mpsc::Receiver<Termination>,
     thread: Option<JoinHandle<std::io::Result<()>>>,
@@ -75,6 +76,13 @@ impl ServerHandle {
         self.gateway.clone()
     }
 
+    /// Returns the validated local Gateway identity initially published into
+    /// server state, or `None` when explicit configuration won resolution.
+    #[must_use]
+    pub fn initial_gateway_identity(&self) -> Option<&shared_sidecar::ValidatedConnection> {
+        self.initial_gateway_identity.as_ref()
+    }
+
     /// Signals shutdown and waits for the server thread to finish,
     /// reporting how the stop ended.
     ///
@@ -87,6 +95,7 @@ impl ServerHandle {
     /// Returns `std::io::Error` if the server stopped with an error or the
     /// server thread panicked.
     pub fn shutdown(mut self) -> std::io::Result<Termination> {
+        self.gateway.close_publication();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -120,6 +129,7 @@ impl ServerHandle {
 
 impl Drop for ServerHandle {
     fn drop(&mut self) {
+        self.gateway.close_publication();
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -185,6 +195,7 @@ fn spawn_inner(
         Some(gateway) => gateway,
         None => crate::resolve::resolve(&config.gateway).map_err(StateError::Resolution)?,
     };
+    let initial_gateway_identity = gateway.identity().cloned();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let (stopped_tx, stopped_rx) = mpsc::channel();
@@ -195,6 +206,7 @@ fn spawn_inner(
         Ok(Ok((url, gateway))) => Ok(ServerHandle {
             url,
             gateway,
+            initial_gateway_identity,
             shutdown: Some(shutdown_tx),
             stopped: stopped_rx,
             thread: Some(thread),
@@ -297,10 +309,12 @@ fn serve_thread(
             let _ = draining_rx.await;
             tokio::time::sleep(grace).await;
         };
-        tokio::select! {
+        let outcome = tokio::select! {
             result = serve => (Termination::Graceful, result),
             () = watchdog => (Termination::Forced, Ok(())),
-        }
+        };
+        state.close_gateway_publication();
+        outcome
     });
     // The barrier reports before teardown: the host's join is then bounded
     // by RUNTIME_TEARDOWN, not by whatever the abandoned tasks still hold.
@@ -509,6 +523,45 @@ mod tests {
             "an idle server must stop before the watchdog matters, took {:?}",
             begun.elapsed()
         );
+    }
+
+    #[test]
+    fn server_shutdown_permanently_closes_every_host_updater_clone() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let server = spawn_with_grace(test_config("127.0.0.1:0", dir.path()), SHUTDOWN_GRACE)
+            .expect("server spawns");
+        let updater = server.gateway_updater();
+        let clone = updater.clone();
+
+        server.shutdown().expect("graceful shutdown succeeds");
+
+        assert!(updater.publication_closed());
+        assert!(
+            clone.publication_closed(),
+            "application teardown closes the shared publication state for every clone"
+        );
+    }
+
+    #[test]
+    fn server_handle_reports_the_identity_initially_published_into_state() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let gateway = crate::test_gateway::ValidatedGateway::spawn("initial-key");
+        let identity = gateway.validate("initial-key", 1_778_000_001, "2026-09-08T18:00:01Z");
+        let resolved = ResolvedGateway::from_validated(identity.clone());
+        let server = spawn_inner(
+            test_config("127.0.0.1:0", dir.path()),
+            Some(resolved),
+            SHUTDOWN_GRACE,
+        )
+        .expect("server spawns");
+
+        assert!(
+            server
+                .initial_gateway_identity()
+                .is_some_and(|published| published.same_boot(&identity)),
+            "the host can authenticate which launch candidate entered server state"
+        );
+        server.shutdown().expect("graceful shutdown succeeds");
     }
 
     /// The stopped barrier: when `shutdown` returns, the server is really

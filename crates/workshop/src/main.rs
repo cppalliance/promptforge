@@ -157,26 +157,42 @@ fn run() -> anyhow::Result<()> {
                     .unwrap_or_else(PoisonError::into_inner)
                     .take()
             });
-            if let Some(supervisor) = supervisor {
-                supervisor.shutdown();
-            }
+            let supervisor_outcome = supervisor.map(gateway::GatewaySupervisor::shutdown);
             let server = handle
                 .try_state::<ServerSlot>()
                 .map(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
-            if let Some(Some(server)) = server {
-                match server.shutdown() {
-                    Ok(workshop_server::Termination::Graceful) => {}
-                    Ok(termination) => {
-                        eprintln!("the workshop server was forced down past its drain window: {termination:?}");
-                    }
-                    Err(error) => {
-                        eprintln!("could not shut the workshop server down cleanly: {error:?}");
+            continue_teardown(supervisor_outcome, || {
+                if let Some(Some(server)) = server {
+                    match server.shutdown() {
+                        Ok(workshop_server::Termination::Graceful) => {}
+                        Ok(termination) => {
+                            eprintln!("the workshop server was forced down past its drain window: {termination:?}");
+                        }
+                        Err(error) => {
+                            eprintln!("could not shut the workshop server down cleanly: {error:?}");
+                        }
                     }
                 }
-            }
+            });
         }
     });
     Ok(())
+}
+
+fn continue_teardown(
+    supervisor: Option<gateway::SupervisorShutdown>,
+    shutdown_server: impl FnOnce(),
+) {
+    match supervisor {
+        Some(gateway::SupervisorShutdown::Joined) | None => {}
+        Some(gateway::SupervisorShutdown::Panicked) => {
+            eprintln!("the gateway supervisor panicked during shutdown");
+        }
+        Some(gateway::SupervisorShutdown::Detached) => {
+            eprintln!("the gateway supervisor exceeded its shutdown budget and was detached");
+        }
+    }
+    shutdown_server();
 }
 
 /// The setup hook: connects the gateway (attach or launch), boots the
@@ -218,6 +234,7 @@ fn boot() -> anyhow::Result<(
     let config = config::load().context("load the workshop configuration")?;
     let attachment = gateway::ensure_gateway(&config).context("connect to the gateway")?;
     let server = workshop_server::spawn(config).context("start the in-process workshop server")?;
+    let attachment = attachment.reconcile_publication(server.initial_gateway_identity().cloned());
     match shared_sidecar::wait_for_health(server.url(), HEALTH_TIMEOUT)
         .context("wait for the in-process workshop server")
     {
@@ -358,6 +375,22 @@ mod tests {
             assert!(
                 permissions.contains(permission),
                 "the capability carries {permission}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_supervisor_outcome_continues_server_teardown() {
+        for outcome in [
+            gateway::SupervisorShutdown::Joined,
+            gateway::SupervisorShutdown::Panicked,
+            gateway::SupervisorShutdown::Detached,
+        ] {
+            let continued = std::cell::Cell::new(false);
+            continue_teardown(Some(outcome), || continued.set(true));
+            assert!(
+                continued.get(),
+                "{outcome:?} cannot prevent application teardown"
             );
         }
     }

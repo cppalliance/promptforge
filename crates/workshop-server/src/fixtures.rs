@@ -25,14 +25,15 @@ pub fn gateway_updater(state: &crate::AppState) -> crate::GatewayUpdater {
 /// sidecar capability.
 ///
 /// # Errors
-/// Returns [`crate::GatewayError::Build`] when the fixture client cannot
-/// initialize.
+/// Returns [`crate::GatewayPublicationError::Build`] when the fixture client
+/// cannot initialize, or
+/// [`crate::GatewayPublicationError::PublicationClosed`] after teardown.
 #[cfg(feature = "test-fixtures")]
 pub fn replace_gateway(
     updater: &crate::GatewayUpdater,
     base_url: &str,
     api_key: &str,
-) -> Result<(), crate::GatewayError> {
+) -> Result<(), crate::GatewayPublicationError> {
     updater.replace_fixture(base_url, api_key)
 }
 

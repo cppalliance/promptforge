@@ -59,7 +59,7 @@ pub use gateway::{
     CacheEvent, CacheResponse, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
     SwitchEvent, SwitchEventStream, SwitchResponse, switch_events,
 };
-pub use gateway_binding::GatewayUpdater;
+pub use gateway_binding::{GatewayPublicationError, GatewayUpdater};
 pub use input::{UserInputTool, WaitError, WaitRegistry, deliver_input_response};
 pub use observer::WorkshopObserver;
 pub use protocol::{Activity, InputFrame, InputResponse};

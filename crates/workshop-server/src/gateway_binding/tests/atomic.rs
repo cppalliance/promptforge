@@ -1,5 +1,7 @@
 use super::*;
 
+use std::sync::Arc;
+
 #[test]
 fn synchronized_reads_never_observe_a_torn_replacement_snapshot() {
     let gateway = crate::test_gateway::ValidatedGateway::spawn("new-key");
@@ -77,4 +79,73 @@ fn synchronized_reads_never_observe_a_torn_replacement_snapshot() {
     });
 
     assert!(samples >= 256, "every synchronized publication is sampled");
+}
+
+#[test]
+fn close_before_publish_preserves_the_complete_original_generation() {
+    let gateway = crate::test_gateway::ValidatedGateway::spawn("new-key");
+    let validated =
+        validated_connection(&gateway, "new-key", 1_778_000_001, "2026-09-07T18:00:01Z");
+    let binding = GatewayBinding::new("http://127.0.0.1:54375", "old-key").expect("binding builds");
+    let original = binding.snapshot();
+    let updater = binding.updater();
+
+    updater.close_publication();
+    assert!(matches!(
+        updater.replace_sidecar(&validated),
+        Err(GatewayPublicationError::PublicationClosed)
+    ));
+
+    let observed = binding.snapshot();
+    assert!(
+        Arc::ptr_eq(&observed, &original),
+        "close-first ordering neither stores nor advances a generation"
+    );
+    assert_eq!(observed.generation(), 0);
+    assert_eq!(observed.base_url(), "http://127.0.0.1:54375");
+    assert_eq!(observed.api_key(), "old-key");
+    assert!(observed.identity.is_none());
+}
+
+#[test]
+fn publish_before_close_preserves_the_complete_final_generation() {
+    let first_gateway = crate::test_gateway::ValidatedGateway::spawn("first-key");
+    let first = validated_connection(
+        &first_gateway,
+        "first-key",
+        1_778_000_001,
+        "2026-09-07T18:00:01Z",
+    );
+    let second_gateway = crate::test_gateway::ValidatedGateway::spawn("second-key");
+    let second = validated_connection(
+        &second_gateway,
+        "second-key",
+        1_778_000_002,
+        "2026-09-07T18:00:02Z",
+    );
+    let binding = GatewayBinding::new("http://127.0.0.1:54375", "old-key").expect("binding builds");
+    let updater = binding.updater();
+    updater
+        .replace_sidecar(&first)
+        .expect("publish wins before close");
+    let published = binding.snapshot();
+
+    updater.close_publication();
+    assert!(matches!(
+        updater.replace_sidecar(&second),
+        Err(GatewayPublicationError::PublicationClosed)
+    ));
+
+    let observed = binding.snapshot();
+    assert!(
+        Arc::ptr_eq(&observed, &published),
+        "publish-first ordering retains exactly its final stored generation"
+    );
+    assert_eq!(observed.generation(), 1);
+    assert_eq!(
+        observed.base_url(),
+        format!("http://127.0.0.1:{}", first.port())
+    );
+    assert_eq!(observed.api_key(), "first-key");
+    assert_eq!(observed.identity.as_ref(), Some(&first));
 }

@@ -98,6 +98,11 @@ impl AppState {
         self.gateway.updater()
     }
 
+    /// Permanently revokes host publication before application teardown.
+    pub(crate) fn close_gateway_publication(&self) {
+        self.gateway.updater().close_publication();
+    }
+
     /// Shared gateway reachability, published by the heartbeat; the
     /// gateway-dependent routes read it to short-circuit while the gateway
     /// is down.

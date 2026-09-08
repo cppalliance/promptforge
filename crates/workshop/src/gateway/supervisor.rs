@@ -1,6 +1,8 @@
 //! Continuous local Gateway supervision and recovery.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
@@ -27,6 +29,9 @@ const SUPERVISOR_SHUTDOWN_BUDGET: Duration = Duration::from_secs(3);
 /// Budget for recovery launch-race and readiness phases.
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Separate bound for authenticated cleanup of an unpublished owned child.
+const LATE_CHILD_SHUTDOWN_BUDGET: Duration = Duration::from_secs(1);
+
 /// Delay between recovery readiness polls.
 const RECOVERY_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -42,6 +47,63 @@ pub(super) enum SupervisionProbe<Identity> {
 pub(super) trait SupervisedGatewayIdentity {
     /// Whether both values prove the same process boot.
     fn same_boot(&self, other: &Self) -> bool;
+
+    /// Disarms cleanup after this identity becomes authoritative.
+    fn publication_succeeded(&mut self) {}
+}
+
+/// A validated recovery process whose pid proves it is the child we spawned.
+#[derive(Debug)]
+pub(crate) struct RecoveryCandidate {
+    child_pid: u32,
+    validated: ValidatedConnection,
+    published: bool,
+}
+
+pub(super) enum RecoveryOwnership {
+    Owned(RecoveryCandidate),
+    Unowned(ValidatedConnection),
+}
+
+impl RecoveryCandidate {
+    /// Claims cleanup authority only when validation names the spawned pid.
+    pub(super) fn authenticate(
+        child_pid: u32,
+        validated: ValidatedConnection,
+    ) -> RecoveryOwnership {
+        if validated.pid() != child_pid {
+            return RecoveryOwnership::Unowned(validated);
+        }
+        RecoveryOwnership::Owned(Self {
+            child_pid,
+            validated,
+            published: false,
+        })
+    }
+
+    pub(super) fn validated(&self) -> &ValidatedConnection {
+        &self.validated
+    }
+
+    pub(super) fn published(&mut self) {
+        self.published = true;
+    }
+}
+
+impl Drop for RecoveryCandidate {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        debug_assert_eq!(self.child_pid, self.validated.pid());
+        let deadline = Instant::now() + LATE_CHILD_SHUTDOWN_BUDGET;
+        if let Err(error) = shared_sidecar::request_shutdown_before(&self.validated, deadline) {
+            // Drop has no error return channel. The bounded authenticated
+            // request is best effort, so diagnostics are the only place this
+            // cleanup failure can be surfaced without aborting teardown.
+            eprintln!("could not shut down an unpublished recovered gateway: {error}");
+        }
+    }
 }
 
 impl SupervisedGatewayIdentity for ValidatedConnection {
@@ -50,55 +112,275 @@ impl SupervisedGatewayIdentity for ValidatedConnection {
     }
 }
 
+#[derive(Debug)]
+pub(super) enum RecoveryIdentity {
+    Stable(ValidatedConnection),
+    Candidate(RecoveryCandidate),
+}
+
+impl RecoveryIdentity {
+    fn validated(&self) -> &ValidatedConnection {
+        match self {
+            Self::Stable(validated) => validated,
+            Self::Candidate(candidate) => candidate.validated(),
+        }
+    }
+}
+
+impl SupervisedGatewayIdentity for RecoveryIdentity {
+    fn same_boot(&self, other: &Self) -> bool {
+        self.validated().same_boot(other.validated())
+    }
+
+    fn publication_succeeded(&mut self) {
+        if let Self::Candidate(candidate) = self {
+            candidate.published();
+        }
+    }
+}
+
 /// The running local-sidecar supervisor.
 #[derive(Debug)]
 pub(crate) struct GatewaySupervisor {
-    cancellation: CancellationToken,
+    stop: StopSignal,
+    completion: Completion,
+    stop_bridge_completion: Completion,
     thread: Option<std::thread::JoinHandle<()>>,
+    stop_bridge: Option<std::thread::JoinHandle<()>>,
+    publication: Option<workshop_server::GatewayUpdater>,
+    shutdown_budget: Duration,
+}
+
+/// How bounded supervisor shutdown ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SupervisorShutdown {
+    /// The worker completed and joined normally.
+    Joined,
+    /// The worker completed but panicked.
+    Panicked,
+    /// The deadline elapsed, so the worker handle was detached.
+    Detached,
+}
+
+/// A stop request that never waits for in-progress supervisor work.
+#[derive(Clone, Debug, Default)]
+struct StopSignal {
+    state: Arc<StopState>,
+}
+
+#[derive(Debug, Default)]
+struct StopState {
+    requested: AtomicBool,
+    waiter: Mutex<()>,
+    wake: Condvar,
+}
+
+impl StopSignal {
+    fn signal(&self) {
+        let waiter = self
+            .state
+            .waiter
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.state.requested.store(true, Ordering::SeqCst);
+        self.state.wake.notify_all();
+        drop(waiter);
+    }
+
+    fn wait(&self) {
+        if self.state.requested.load(Ordering::SeqCst) {
+            return;
+        }
+        let waiter = self
+            .state
+            .waiter
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        drop(
+            self.state
+                .wake
+                .wait_while(waiter, |()| !self.state.requested.load(Ordering::SeqCst))
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct Completion {
+    state: Arc<CompletionState>,
+}
+
+#[derive(Debug, Default)]
+struct CompletionState {
+    finished: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl Completion {
+    fn guard(&self) -> CompletionGuard {
+        CompletionGuard(self.clone())
+    }
+
+    fn wait_until(&self, deadline: Instant) -> bool {
+        let mut finished = self
+            .state
+            .finished
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        loop {
+            if *finished {
+                return true;
+            }
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            if remaining.is_zero() {
+                return false;
+            }
+            let (next, timeout) = self
+                .state
+                .wake
+                .wait_timeout(finished, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
+            finished = next;
+            if timeout.timed_out() && !*finished {
+                return false;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn wake(&self) {
+        self.state.wake.notify_all();
+    }
+}
+
+struct CompletionGuard(Completion);
+
+impl Drop for CompletionGuard {
+    fn drop(&mut self) {
+        *self
+            .0
+            .state
+            .finished
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = true;
+        self.0.state.wake.notify_all();
+    }
 }
 
 impl GatewaySupervisor {
     /// Spawns one owned supervisor thread.
+    #[cfg(test)]
     pub(super) fn spawn(
         supervise: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> anyhow::Result<Self> {
+        Self::spawn_inner(None, SUPERVISOR_SHUTDOWN_BUDGET, supervise)
+    }
+
+    pub(super) fn spawn_with_publication(
+        publication: workshop_server::GatewayUpdater,
+        supervise: impl FnOnce(CancellationToken) + Send + 'static,
+    ) -> anyhow::Result<Self> {
+        Self::spawn_inner(Some(publication), SUPERVISOR_SHUTDOWN_BUDGET, supervise)
+    }
+
+    #[cfg(test)]
+    pub(super) fn spawn_with_budget(
+        shutdown_budget: Duration,
+        supervise: impl FnOnce(CancellationToken) + Send + 'static,
+    ) -> anyhow::Result<Self> {
+        Self::spawn_inner(None, shutdown_budget, supervise)
+    }
+
+    fn spawn_inner(
+        publication: Option<workshop_server::GatewayUpdater>,
+        shutdown_budget: Duration,
+        supervise: impl FnOnce(CancellationToken) + Send + 'static,
+    ) -> anyhow::Result<Self> {
         let cancellation = CancellationToken::new();
-        let worker_cancellation = cancellation.clone();
-        let thread = std::thread::Builder::new()
+        let stop = StopSignal::default();
+        let worker_stop = stop.clone();
+        let completion = Completion::default();
+        let worker_completion = completion.clone();
+        let stop_bridge_completion = Completion::default();
+        let bridge_completion = stop_bridge_completion.clone();
+        let bridge_cancellation = cancellation.clone();
+        let stop_bridge = std::thread::Builder::new()
+            .name("gateway-supervisor-stop".to_owned())
+            .spawn(move || {
+                let _completion = bridge_completion.guard();
+                worker_stop.wait();
+                bridge_cancellation.cancel();
+            })
+            .context("spawn the gateway supervisor stop bridge")?;
+        let thread = match std::thread::Builder::new()
             .name("gateway-supervisor".to_owned())
-            .spawn(move || supervise(worker_cancellation))
-            .context("spawn the gateway supervisor")?;
+            .spawn(move || {
+                let _completion = worker_completion.guard();
+                supervise(cancellation);
+            }) {
+            Ok(thread) => thread,
+            Err(source) => {
+                stop.signal();
+                let error = anyhow::Error::new(source).context("spawn the gateway supervisor");
+                return match stop_bridge.join() {
+                    Ok(()) => Err(error),
+                    Err(_) => Err(error.context(
+                        "the gateway supervisor stop bridge panicked during spawn rollback",
+                    )),
+                };
+            }
+        };
         Ok(Self {
-            cancellation,
+            stop,
+            completion,
+            stop_bridge_completion,
             thread: Some(thread),
+            stop_bridge: Some(stop_bridge),
+            publication,
+            shutdown_budget,
         })
     }
 
-    /// Cancels supervision and joins its thread.
-    pub(crate) fn shutdown(mut self) {
-        self.cancel_and_join();
+    /// Revokes publication, requests stop, and waits at most one deadline.
+    pub(crate) fn shutdown(mut self) -> SupervisorShutdown {
+        self.stop_and_join()
     }
 
-    fn cancel_and_join(&mut self) {
-        let started = Instant::now();
-        self.cancellation.cancel();
-        if let Some(thread) = self.thread.take()
-            && thread.join().is_err()
+    fn stop_and_join(&mut self) -> SupervisorShutdown {
+        let deadline = Instant::now() + self.shutdown_budget;
+        if let Some(publication) = self.publication.as_ref() {
+            publication.close_publication();
+        }
+        self.stop.signal();
+        let thread = self.thread.take();
+        let stop_bridge = self.stop_bridge.take();
+        let (Some(thread), Some(stop_bridge)) = (thread, stop_bridge) else {
+            return SupervisorShutdown::Joined;
+        };
+        if !self.completion.wait_until(deadline)
+            || !self.stop_bridge_completion.wait_until(deadline)
         {
-            eprintln!("the gateway supervisor panicked during shutdown");
+            drop(thread);
+            drop(stop_bridge);
+            return SupervisorShutdown::Detached;
         }
-        let elapsed = started.elapsed();
-        if elapsed > SUPERVISOR_SHUTDOWN_BUDGET {
-            eprintln!(
-                "the gateway supervisor exceeded its {SUPERVISOR_SHUTDOWN_BUDGET:?} shutdown budget: {elapsed:?}"
-            );
+        match (thread.join(), stop_bridge.join()) {
+            (Ok(()), Ok(())) => SupervisorShutdown::Joined,
+            (Err(_), _) | (_, Err(_)) => SupervisorShutdown::Panicked,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn wake_completion_for_test(&self) {
+        self.completion.wake();
     }
 }
 
 impl Drop for GatewaySupervisor {
     fn drop(&mut self) {
-        self.cancel_and_join();
+        let _ = self.stop_and_join();
     }
 }
 
@@ -121,13 +403,16 @@ pub(crate) fn supervise(
         .map(Path::to_path_buf)
         .context("the executable has no parent directory")?;
     let sibling = boot::sibling_gateway(&exe_dir);
-    GatewaySupervisor::spawn(move |cancellation| {
+    let supervisor_publication = updater.clone();
+    GatewaySupervisor::spawn_with_publication(supervisor_publication, move |cancellation| {
         run_supervision(
-            initial,
+            RecoveryIdentity::Stable(initial),
             |_, cancellation| match shared_sidecar::resolve_cancellable(&run_dir, cancellation) {
                 Ok(Resolution::Attach(file)) => {
                     match ValidatedConnection::validate_cancellable(file, cancellation) {
-                        Ok(identity) => SupervisionProbe::Replacement(identity),
+                        Ok(identity) => {
+                            SupervisionProbe::Replacement(RecoveryIdentity::Stable(identity))
+                        }
                         Err(error) => {
                             eprintln!("could not retain the replacement gateway identity: {error}");
                             SupervisionProbe::Missing
@@ -144,13 +429,18 @@ pub(crate) fn supervise(
                 let exe = sibling.as_deref().context(
                     "the local gateway disappeared and no sibling gateway executable is installed",
                 )?;
-                let file = launch_and_attach_cancellable(&run_dir, exe, cancellation)?;
-                ValidatedConnection::validate_cancellable(file, cancellation)
-                    .context("retain the recovered gateway identity")
+                let recovery = launch_and_attach_cancellable(&run_dir, exe, cancellation)?;
+                validate_recovery(recovery, cancellation)
             },
-            |validated, cancellation| {
+            |identity, cancellation| {
+                if cancellation.is_cancelled() {
+                    anyhow::bail!("gateway publication was cancelled");
+                }
+                if updater.publication_closed() {
+                    anyhow::bail!("gateway publication is closed");
+                }
                 if updater
-                    .replace_sidecar_cancellable(validated, cancellation)
+                    .replace_sidecar_cancellable(identity.validated(), cancellation)
                     .context("publish the replacement gateway endpoint")?
                 {
                     Ok(())
@@ -163,6 +453,26 @@ pub(crate) fn supervise(
         );
     })
     .map(Some)
+}
+
+/// Validates a recovery result and authenticates child ownership by exact pid.
+pub(super) fn validate_recovery(
+    recovery: boot::RecoveryLaunch,
+    cancellation: &CancellationToken,
+) -> anyhow::Result<RecoveryIdentity> {
+    let (child_pid, file) = match recovery {
+        boot::RecoveryLaunch::Attached(file) => (None, file),
+        boot::RecoveryLaunch::Launched { child_pid, file } => (Some(child_pid), file),
+    };
+    let validated = ValidatedConnection::validate_cancellable(file, cancellation)
+        .context("retain the recovered gateway identity")?;
+    Ok(match child_pid {
+        Some(child_pid) => match RecoveryCandidate::authenticate(child_pid, validated) {
+            RecoveryOwnership::Owned(candidate) => RecoveryIdentity::Candidate(candidate),
+            RecoveryOwnership::Unowned(unowned) => RecoveryIdentity::Stable(unowned),
+        },
+        None => RecoveryIdentity::Stable(validated),
+    })
 }
 
 /// Runs the supervision state machine with I/O injected for tests.
@@ -198,8 +508,9 @@ pub(super) fn run_supervision<Identity, Probe, Recover, Publish, Wait, Error>(
                 }
                 continue;
             }
-            SupervisionProbe::Replacement(identity) => match publish(&identity, cancellation) {
+            SupervisionProbe::Replacement(mut identity) => match publish(&identity, cancellation) {
                 Ok(()) => {
+                    identity.publication_succeeded();
                     if cancellation.is_cancelled() {
                         return;
                     }
@@ -213,8 +524,9 @@ pub(super) fn run_supervision<Identity, Probe, Recover, Publish, Wait, Error>(
             },
             SupervisionProbe::Missing => match recover(cancellation) {
                 Ok(_) if cancellation.is_cancelled() => return,
-                Ok(identity) => match publish(&identity, cancellation) {
+                Ok(mut identity) => match publish(&identity, cancellation) {
                     Ok(()) => {
+                        identity.publication_succeeded();
                         if cancellation.is_cancelled() {
                             return;
                         }
@@ -243,7 +555,7 @@ fn launch_and_attach_cancellable(
     run_dir: &Path,
     exe: &Path,
     cancellation: &CancellationToken,
-) -> anyhow::Result<ConnectionFile> {
+) -> anyhow::Result<boot::RecoveryLaunch> {
     launch_and_attach_cancellable_with(
         run_dir,
         exe,
@@ -262,10 +574,10 @@ pub(super) fn launch_and_attach_cancellable_with<Settle, Spawn, Wait>(
     settle: Settle,
     spawn: Spawn,
     wait: Wait,
-) -> anyhow::Result<ConnectionFile>
+) -> anyhow::Result<boot::RecoveryLaunch>
 where
     Settle: FnOnce(&Path, Duration, &CancellationToken) -> Result<LaunchDecision, SidecarError>,
-    Spawn: FnOnce(&Path, &CancellationToken) -> std::io::Result<()>,
+    Spawn: FnOnce(&Path, &CancellationToken) -> std::io::Result<u32>,
     Wait: FnOnce(&Path, Duration, &CancellationToken) -> anyhow::Result<ConnectionFile>,
 {
     match settle(run_dir, RECOVERY_TIMEOUT, cancellation)
@@ -275,10 +587,10 @@ where
             if cancellation.is_cancelled() {
                 anyhow::bail!("gateway attachment was cancelled");
             }
-            Ok(file)
+            Ok(boot::RecoveryLaunch::Attached(file))
         }
         LaunchDecision::Launch(lock) => {
-            run_effect_if_active(cancellation, "gateway launch", |cancellation| {
+            let child_pid = run_effect_if_active(cancellation, "gateway launch", |cancellation| {
                 if cancellation.is_cancelled() {
                     anyhow::bail!("gateway launch was cancelled");
                 }
@@ -286,7 +598,7 @@ where
             })?;
             let file = wait(run_dir, RECOVERY_TIMEOUT, cancellation)?;
             drop(lock);
-            Ok(file)
+            Ok(boot::RecoveryLaunch::Launched { child_pid, file })
         }
         decision => anyhow::bail!("an unknown launch decision: {decision:?}"),
     }

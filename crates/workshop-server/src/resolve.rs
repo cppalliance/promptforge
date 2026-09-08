@@ -52,6 +52,17 @@ impl ResolvedGateway {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_validated(identity: ValidatedConnection) -> Self {
+        Self {
+            base_url: format!("http://127.0.0.1:{}", identity.port()),
+            api_key: identity.api_key().to_owned(),
+            identity: Some(identity),
+            source: GatewaySource::ConnectionFile,
+            stale: None,
+        }
+    }
+
     /// The resolved base URL, for example `http://127.0.0.1:8081`.
     #[must_use]
     pub fn base_url(&self) -> &str {

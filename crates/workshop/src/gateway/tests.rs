@@ -12,6 +12,7 @@ use super::boot as gateway_boot;
 mod boot;
 mod identity;
 mod recovery;
+mod shutdown;
 
 /// Resolves against the test process's own image.
 fn probe_own_image(run_dir: &Path) -> Result<Resolution, SidecarError> {

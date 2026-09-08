@@ -10,6 +10,7 @@ use shared_sidecar::{
 use workshop_server::Config;
 
 use super::identity::GatewayAttachment;
+use super::supervisor::{RecoveryCandidate, RecoveryOwnership};
 
 /// The sibling executable the shell launches, beside its own.
 #[cfg(windows)]
@@ -37,6 +38,19 @@ pub(super) enum GatewayPlan {
     Fail,
 }
 
+/// The result of a launch election, retaining the spawned pid only for the
+/// branch that actually created a child.
+#[derive(Debug)]
+pub(super) enum RecoveryLaunch {
+    /// A race winner had already published a live Gateway.
+    Attached(ConnectionFile),
+    /// This process spawned a child and observed a connection file.
+    Launched {
+        child_pid: u32,
+        file: ConnectionFile,
+    },
+}
+
 /// Connects the Gateway for boot.
 ///
 /// # Errors
@@ -62,7 +76,7 @@ pub(crate) fn ensure_gateway(config: &Config) -> anyhow::Result<GatewayAttachmen
         GatewayPlan::ConfigOnly => Ok(GatewayAttachment::Config),
         GatewayPlan::Fail => Err(no_gateway_error()),
         GatewayPlan::Launch(exe) => launch_and_attach(&run_dir, &exe)
-            .and_then(validated_attachment)
+            .and_then(validated_recovery_attachment)
             .context("launch the sidecar gateway"),
     }
 }
@@ -72,6 +86,22 @@ fn validated_attachment(file: ConnectionFile) -> anyhow::Result<GatewayAttachmen
     ValidatedConnection::validate(file)
         .map(GatewayAttachment::Sidecar)
         .context("validate the selected gateway process identity")
+}
+
+fn validated_recovery_attachment(recovery: RecoveryLaunch) -> anyhow::Result<GatewayAttachment> {
+    match recovery {
+        RecoveryLaunch::Attached(file) => validated_attachment(file),
+        RecoveryLaunch::Launched { child_pid, file } => {
+            let validated = ValidatedConnection::validate(file)
+                .context("validate the launched gateway process identity")?;
+            Ok(
+                match RecoveryCandidate::authenticate(child_pid, validated) {
+                    RecoveryOwnership::Owned(candidate) => GatewayAttachment::Launched(candidate),
+                    RecoveryOwnership::Unowned(unowned) => GatewayAttachment::Sidecar(unowned),
+                },
+            )
+        }
+    }
 }
 
 /// Chooses attach, launch, configured fallback, or failure.
@@ -112,16 +142,17 @@ pub(super) fn no_gateway_error() -> anyhow::Error {
 }
 
 /// Settles the launch race, launches once when elected, and attaches.
-fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<ConnectionFile> {
+fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<RecoveryLaunch> {
     match shared_sidecar::launch_or_attach(run_dir, LAUNCH_TIMEOUT)
         .context("settle the gateway launch race")?
     {
-        LaunchDecision::Attach(file) => Ok(file),
+        LaunchDecision::Attach(file) => Ok(RecoveryLaunch::Attached(file)),
         LaunchDecision::Launch(lock) => {
-            spawn_detached(exe).with_context(|| format!("spawn {}", exe.display()))?;
+            let child_pid =
+                spawn_detached(exe).with_context(|| format!("spawn {}", exe.display()))?;
             let file = wait_for_launched_file(run_dir, LAUNCH_TIMEOUT)?;
             drop(lock);
-            Ok(file)
+            Ok(RecoveryLaunch::Launched { child_pid, file })
         }
         decision => anyhow::bail!("an unknown launch decision: {decision:?}"),
     }
@@ -162,7 +193,7 @@ where
 }
 
 /// Spawns the Gateway detached from the shell lifetime.
-pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<()> {
+pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<u32> {
     let mut command = std::process::Command::new(exe);
     command
         .stdin(std::process::Stdio::null())
@@ -184,10 +215,11 @@ pub(super) fn spawn_detached(exe: &Path) -> std::io::Result<()> {
         command.process_group(0);
     }
     let mut child = command.spawn()?;
+    let child_pid = child.id();
     if let Err(error) = std::thread::Builder::new().spawn(move || {
         let _ = child.wait();
     }) {
         eprintln!("could not spawn the gateway reaper thread; the child goes unreaped: {error}");
     }
-    Ok(())
+    Ok(child_pid)
 }
