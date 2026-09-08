@@ -1,8 +1,7 @@
 # promptforge-parser
 
-This crate is the PromptForge prompt document parser: YAML frontmatter, the heading/section tree, exact `lua` / `lua shared` fence splitting, and the `ParseError`/`ParseErrorKind` vocabulary. It compiles each Lua region into a `LuaProgram` (from `promptforge-lua`) at parse time and does no execution.
+This crate owns PromptForge prompt-document parsing and compiles each Lua region into a `LuaProgram` without executing it.
 
-- PromptForge prompt documents only. General markdown-to-structure utilities (such as a Lua-callable markdown-to-table function) must not move here; they belong in the `promptforge-lua` host surface. The parser compiles `LuaProgram` at parse time, so hosting markdown utilities here would close a parser/Lua dependency cycle.
-- The crate never imports `promptforge-core`: core's executor consumes this crate, never the reverse. Its only promptforge edges are `promptforge-lua` (`LuaProgram`) and `promptforge-core-support` (`Observer`, `detail`).
-- The `#[doc(hidden)]` `Error` substrate and `ParseError::into_inner` are a cross-crate seam for `promptforge-core`'s error substrate, not host API; they must not gain documented status without a design change.
-- The `test-support` feature gates cross-crate test fixtures (`test_support`); it stays off by default and out of core's re-exports.
+- General Markdown host utilities stay in the Lua host surface. Moving them here would close the parser-to-Lua dependency cycle.
+- Core's executor consumes this crate. This crate never imports an executor.
+- Hidden parser error seams used by Core are not host API and must not gain documented status without a design change.

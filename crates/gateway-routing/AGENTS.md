@@ -1,5 +1,6 @@
 # gateway-routing
 
-This crate owns the routing vocabulary shared by the gateway and the local inference subsystem: the `Model`/`Endpoint` table entries and the per-dominion admission queues (`DominionQueue`, `ClientId`, `Permit`, `AdmitError`, `dominion_queues`).
+This crate owns routing vocabulary shared by the Gateway and local-inference subsystem.
 
-- Shared routing vocabulary only: no HTTP handling, no upstream construction, no error envelopes, no local inference. The `Routing` table and `GatewayError` stay in the gateway; provisioning stays in `gateway-local`.
+- Keep shared model, endpoint, and admission vocabulary here.
+- HTTP handling, upstream construction, local inference, the routing table, and Gateway error types stay in their owning crates.

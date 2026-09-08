@@ -1,7 +1,7 @@
 # promptforge-webfetch
 
-This crate fetches and converts one known URL: it retrieves the page and returns its main content as markdown. That is the whole scope.
+This crate fetches and converts one caller-supplied URL into Markdown.
 
-- Tool vocabulary (`Tool`, `ToolId`, `ToolOutput`, `ToolError`, and their kinds) comes from `promptforge-tools`. This crate does not depend on `promptforge-core`.
-- No search, crawling, or discovery: the caller supplies the URL.
-- SSRF defenses (address pinning, redirect policy, bounded bodies) stay in this crate and apply to every fetch.
+- The caller defines URL scope. This provider does not search, crawl, or discover targets.
+- Every initial request and redirect hop uses the guarded resolver, address pinning, redirect policy, and bounded body handling. No hop may bypass SSRF validation.
+- Tool vocabulary comes from `promptforge-tools`. This provider does not depend on Core.

@@ -1,6 +1,6 @@
 # shared-protocol
 
-This crate owns the OpenAI wire protocol and the upstream abstraction: the wire types and their validation, the `Upstream` trait and `OpenAiUpstream`, the bounded HTTP client helpers, and the protocol-level error types.
+This crate owns the OpenAI wire protocol, bounded client behavior, and the upstream abstraction.
 
-- OpenAI wire protocol and upstream abstraction only: no local inference, no routing, no axum handlers.
-- The crate never names gateway-local concepts (`LocalError`, profile switching, dominion queues); the `Upstream::shutdown` seam is typed on this crate's own `ShutdownError` so no edge points back into gateway code.
+- Local inference, routing, and HTTP handlers stay in their owning crates.
+- Shared protocol errors do not name Gateway-local concepts. Upstream shutdown uses this crate's error vocabulary so no dependency points back into Gateway code.

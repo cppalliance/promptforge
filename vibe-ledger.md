@@ -1,0 +1,7 @@
+# Vibe Ledger
+
+- Step 1 baseline - Clean detached HEAD `0d534eeb8ffed7370316f2950a39ba0e89cda9ea`; review anchor `84b2c9261f96642bb3fa02836d4e98b13cde8208` is not an ancestor; merge base `0c1e42cbb7ad1ebaaf702ec8265d1389749eb97f`.
+- Step 1 Rust baseline - `cargo test -p gateway-config --lib; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p gateway-logging --lib; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p gateway-stt --test it batch; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p promptforge-core --test suite shipped; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p promptforge-webfetch --lib; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p shared-loopback --lib; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p shared-sidecar --test it; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p workshop-server --test it realtime_relay; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cargo test -p workshop --lib` - preceding suites passed; Workshop has no library target, exit 101.
+- Step 1 UI baseline - `node --test test/stt-stream.mjs test/take-registry.mjs` - 15 passed, 0 failed.
+- Step 1 Workshop baseline - `cargo test -p workshop --bin promptforge-workshop gateway` - blocked because `binaries\promptforge-gateway-x86_64-pc-windows-msvc.exe` was not staged.
+- Step 1 post-fix verification - `cargo build -p gateway`; `git diff --check HEAD^ HEAD` - pass. Decisions made alone: none.

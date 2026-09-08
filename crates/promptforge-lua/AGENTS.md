@@ -1,8 +1,8 @@
 # promptforge-lua
 
-This crate is the sandboxed Lua runtime and its host surface: the hardened section VM, the coroutine yield/resume protocol vocabulary, the host tables (`store`, `models`, `tools`, `sys`, `var`, `log`, `untrusted`), and the compiled `LuaProgram`.
+This crate owns the sandboxed Lua runtime, its host surface, and coroutine protocol vocabulary.
 
-- Lua sandbox and host surface only. Markdown-to-table host functions land here, built directly on `pulldown-cmark`; they never land in `promptforge-parser`, which is a prompt-document parser (the parser compiles `LuaProgram` at parse time, so host functions there would close a parser/Lua dependency cycle).
-- The crate never imports the executor: `promptforge-core`'s execute layer drives this crate, never the reverse. `section_vm` setup composition stays with the executor.
-- Hosts tool-dispatch support that executors invoke: `dispatch_tool` is the one shared dispatch body; executors call it, never duplicate it.
-- Most of the surface is `#[doc(hidden)]` cross-crate seam for the executors (`promptforge-core`, `promptforge-agent`), not host API; it must not gain documented status without a design change. `LuaProgram` is the exception: it is genuine API, re-exported by core under its historical path.
+- Host functions that would create a parser-to-Lua dependency cycle stay in this crate rather than `promptforge-parser`.
+- Executors drive this crate. It never imports or composes an executor.
+- `dispatch_tool` is the single tool-dispatch body used by every executor.
+- Hidden cross-crate seams for executors are not host API and must not gain documented status without a design change. `LuaProgram` remains genuine API.
