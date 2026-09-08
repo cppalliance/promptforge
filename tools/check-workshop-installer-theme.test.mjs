@@ -321,3 +321,14 @@ test("path-gated Windows CI compiles an unsigned debug NSIS installer", () => {
     "the smoke config disables signed updater artifacts",
   );
 });
+
+test("installer names components in operator-facing order", () => {
+  const components = [...installer.matchAll(
+    /^Section "([^"]+)" Sec(Workshop|Gateway|STT)$/gm,
+  )].map((match) => [match[1], match[2]]);
+  assert.deepEqual(components, [
+    ["PromptForge Workshop", "Workshop"],
+    ["PromptForge Gateway", "Gateway"],
+    ["Speech to Text (Transcription)", "STT"],
+  ]);
+});

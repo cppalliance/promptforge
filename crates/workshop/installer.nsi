@@ -720,38 +720,7 @@ Section "-Prepare"
  !endif
 SectionEnd
 
-Section "Gateway" SecGateway
- SetOutPath $INSTDIR
-
- ; The updater's passive install only auto-kills the main binary (the
- ; CheckIfAppIsRunning in the Workshop section), so a running gateway
- ; would file-lock its own overwrite and fail the update. Stop it by
- ; process name through the same nsis_tauri_utils mechanism - parsing
- ; %USERPROFILE%\.promptforge\run\gateway.json for the pid in NSIS buys
- ; nothing when the image name is unique - and relaunch it in the
- ; Finalize section. Living inside the Gateway section, the stop runs
- ; only when the component is selected: a declined section leaves the
- ; payload untouched, and a daemon the install does not overwrite is
- ; not the installer's to kill.
- !if "${INSTALLMODE}" == "currentUser"
- nsis_tauri_utils::FindProcessCurrentUser "promptforge-gateway.exe"
- !else
- nsis_tauri_utils::FindProcess "promptforge-gateway.exe"
- !endif
- Pop $R0
- ${If} $R0 = 0
- StrCpy $GatewayWasRunning 1
- !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
- ${EndIf}
-
- ; Copy external binaries (promptforge-gateway.exe via bundle.externalBin,
- ; the only entry today - split per-component if that changes)
- {{#each binaries}}
- File /a "/oname={{this}}" "{{no-escape @key}}"
- {{/each}}
-SectionEnd
-
-Section "Workshop" SecWorkshop
+Section "PromptForge Workshop" SecWorkshop
  SetOutPath $INSTDIR
 
  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
@@ -805,7 +774,38 @@ Section "Workshop" SecWorkshop
  ${EndIf}
 SectionEnd
 
-Section "STT" SecSTT
+Section "PromptForge Gateway" SecGateway
+ SetOutPath $INSTDIR
+
+ ; The updater's passive install only auto-kills the main binary (the
+ ; CheckIfAppIsRunning in the Workshop section), so a running gateway
+ ; would file-lock its own overwrite and fail the update. Stop it by
+ ; process name through the same nsis_tauri_utils mechanism - parsing
+ ; %USERPROFILE%\.promptforge\run\gateway.json for the pid in NSIS buys
+ ; nothing when the image name is unique - and relaunch it in the
+ ; Finalize section. Living inside the Gateway section, the stop runs
+ ; only when the component is selected: a declined section leaves the
+ ; payload untouched, and a daemon the install does not overwrite is
+ ; not the installer's to kill.
+ !if "${INSTALLMODE}" == "currentUser"
+ nsis_tauri_utils::FindProcessCurrentUser "promptforge-gateway.exe"
+ !else
+ nsis_tauri_utils::FindProcess "promptforge-gateway.exe"
+ !endif
+ Pop $R0
+ ${If} $R0 = 0
+ StrCpy $GatewayWasRunning 1
+ !insertmacro CheckIfAppIsRunning "promptforge-gateway.exe" "${PRODUCTNAME}"
+ ${EndIf}
+
+ ; Copy external binaries (promptforge-gateway.exe via bundle.externalBin,
+ ; the only entry today - split per-component if that changes)
+ {{#each binaries}}
+ File /a "/oname={{this}}" "{{no-escape @key}}"
+ {{/each}}
+SectionEnd
+
+Section "Speech to Text (Transcription)" SecSTT
  ; No files: STT is a config gate. The Finalize section records the
  ; selection for the gateway's first-run config generation.
 SectionEnd
