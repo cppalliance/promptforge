@@ -763,40 +763,725 @@ fn realtime_retirement_is_registry_owned_event_driven_and_keeps_state_pure() {
     }
 }
 
+fn blank_rust_non_code(masked: &mut [u8], start: usize, end: usize) {
+    for byte in &mut masked[start..end] {
+        if !matches!(*byte, b'\n' | b'\r') {
+            *byte = b' ';
+        }
+    }
+}
+
+fn rust_raw_string_end(source: &[u8], start: usize) -> Option<usize> {
+    let mut cursor = start;
+    if source.get(cursor) == Some(&b'b') {
+        cursor += 1;
+    }
+    if source.get(cursor) != Some(&b'r') {
+        return None;
+    }
+    cursor += 1;
+    let hashes_start = cursor;
+    while source.get(cursor) == Some(&b'#') {
+        cursor += 1;
+    }
+    let hashes = cursor - hashes_start;
+    if source.get(cursor) != Some(&b'"') {
+        return None;
+    }
+    cursor += 1;
+    while cursor < source.len() {
+        if source[cursor] == b'"'
+            && source.get(cursor + 1..cursor + 1 + hashes)
+                == Some(&source[hashes_start..hashes_start + hashes])
+        {
+            return Some(cursor + 1 + hashes);
+        }
+        cursor += 1;
+    }
+    Some(source.len())
+}
+
+fn rust_quoted_end(source: &[u8], start: usize, quote: u8) -> usize {
+    let mut cursor = start + 1;
+    while cursor < source.len() {
+        match source[cursor] {
+            b'\\' => cursor = (cursor + 2).min(source.len()),
+            byte if byte == quote => return cursor + 1,
+            _ => cursor += 1,
+        }
+    }
+    source.len()
+}
+
+fn rust_char_literal_end(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = start + 1;
+    match *bytes.get(cursor)? {
+        b'\\' => {
+            cursor += 1;
+            match *bytes.get(cursor)? {
+                b'x' => cursor += 3,
+                b'u' if bytes.get(cursor + 1) == Some(&b'{') => {
+                    cursor += 2;
+                    while bytes.get(cursor) != Some(&b'}') {
+                        cursor += 1;
+                        if cursor >= bytes.len() {
+                            return None;
+                        }
+                    }
+                    cursor += 1;
+                }
+                _ => cursor += 1,
+            }
+        }
+        _ => {
+            cursor += source[cursor..].chars().next()?.len_utf8();
+        }
+    }
+    (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
+}
+
+fn mask_rust_non_code(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let mut masked = bytes.to_vec();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes.get(cursor..cursor + 2) == Some(b"//") {
+            let start = cursor;
+            cursor += 2;
+            while !matches!(bytes.get(cursor), None | Some(b'\n')) {
+                cursor += 1;
+            }
+            blank_rust_non_code(&mut masked, start, cursor);
+        } else if bytes.get(cursor..cursor + 2) == Some(b"/*") {
+            let start = cursor;
+            cursor += 2;
+            let mut depth = 1_usize;
+            while cursor < bytes.len() && depth > 0 {
+                if bytes.get(cursor..cursor + 2) == Some(b"/*") {
+                    depth += 1;
+                    cursor += 2;
+                } else if bytes.get(cursor..cursor + 2) == Some(b"*/") {
+                    depth -= 1;
+                    cursor += 2;
+                } else {
+                    cursor += 1;
+                }
+            }
+            blank_rust_non_code(&mut masked, start, cursor);
+        } else if let Some(end) = rust_raw_string_end(bytes, cursor) {
+            blank_rust_non_code(&mut masked, cursor, end);
+            cursor = end;
+        } else if bytes[cursor] == b'"' {
+            let end = rust_quoted_end(bytes, cursor, b'"');
+            blank_rust_non_code(&mut masked, cursor, end);
+            cursor = end;
+        } else if bytes[cursor] == b'\'' {
+            if let Some(end) = rust_char_literal_end(source, cursor) {
+                blank_rust_non_code(&mut masked, cursor, end);
+                cursor = end;
+            } else {
+                cursor += 1;
+            }
+        } else {
+            cursor += 1;
+        }
+    }
+    String::from_utf8(masked).unwrap_or_else(|error| panic!("masking must preserve UTF-8: {error}"))
+}
+
+fn compact_rust_code(source: &str) -> String {
+    mask_rust_non_code(source)
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect()
+}
+
+fn production_rust_code(source: &str) -> String {
+    let mut code = compact_rust_code(source);
+    if let Some(tests) = code.rfind("#[cfg(test)]modtests{") {
+        code.truncate(tests);
+    }
+    code
+}
+
+fn matching_delimiter(source: &str, open: usize, opening: u8, closing: u8) -> Option<usize> {
+    let mut depth = 0_usize;
+    for (offset, byte) in source.as_bytes()[open..].iter().enumerate() {
+        if *byte == opening {
+            depth += 1;
+        } else if *byte == closing {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(open + offset);
+            }
+        }
+    }
+    None
+}
+
+fn braced_body_after<'a>(source: &'a str, marker: &str) -> Result<&'a str, String> {
+    let marker = source
+        .find(marker)
+        .ok_or_else(|| format!("missing `{marker}`"))?;
+    let open = source[marker..]
+        .find('{')
+        .map(|offset| marker + offset)
+        .ok_or_else(|| format!("`{marker}` has no body"))?;
+    let close = matching_delimiter(source, open, b'{', b'}')
+        .ok_or_else(|| format!("`{marker}` has an unbalanced body"))?;
+    Ok(&source[open + 1..close])
+}
+
+fn split_top_level(source: &str, delimiter: u8) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut round = 0_usize;
+    let mut square = 0_usize;
+    let mut curly = 0_usize;
+    let mut angle = 0_usize;
+    for (index, byte) in source.bytes().enumerate() {
+        match byte {
+            b'(' => round += 1,
+            b')' => round = round.saturating_sub(1),
+            b'[' => square += 1,
+            b']' => square = square.saturating_sub(1),
+            b'{' => curly += 1,
+            b'}' => curly = curly.saturating_sub(1),
+            b'<' => angle += 1,
+            b'>' => angle = angle.saturating_sub(1),
+            byte if byte == delimiter && round == 0 && square == 0 && curly == 0 && angle == 0 => {
+                parts.push(&source[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < source.len() {
+        parts.push(&source[start..]);
+    }
+    parts
+}
+
+fn strip_attributes(mut field: &str) -> Result<&str, String> {
+    while field.starts_with("#[") {
+        let close = matching_delimiter(field, 1, b'[', b']')
+            .ok_or_else(|| format!("unbalanced field attribute in `{field}`"))?;
+        field = &field[close + 1..];
+    }
+    Ok(field)
+}
+
+fn struct_field_types(source: &str, name: &str) -> Result<BTreeSet<String>, String> {
+    let body = braced_body_after(source, &format!("struct{name}"))?;
+    split_top_level(body, b',')
+        .into_iter()
+        .filter(|field| !field.is_empty())
+        .map(|field| {
+            let field = strip_attributes(field)?;
+            let colon = field
+                .find(':')
+                .ok_or_else(|| format!("`{name}` field `{field}` has no type"))?;
+            Ok(field[colon + 1..].to_owned())
+        })
+        .collect()
+}
+
+const TRANSACTION_RESOURCE_TYPES: [&str; 13] = [
+    "AppState",
+    "ProfileName",
+    "ProgressTree",
+    "SwitchTarget",
+    "StopSet",
+    "PreparedPersistence",
+    "PriorRuntimeSnapshot",
+    "StagedTarget",
+    "RuntimeReplacement",
+    "CancellationToken",
+    "Routing",
+    "StartReport",
+    "GatewayError",
+];
+
+fn require_exact_resources(source: &str, owner: &str, expected: &[&str]) -> Result<(), String> {
+    let fields = struct_field_types(source, owner)?;
+    let actual = fields
+        .into_iter()
+        .filter(|field| TRANSACTION_RESOURCE_TYPES.contains(&field.as_str()))
+        .collect::<BTreeSet<_>>();
+    let expected = expected
+        .iter()
+        .copied()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{owner} transaction ownership must be exactly {expected:?}, got {actual:?}"
+        ))
+    }
+}
+
+fn method_body<'a>(source: &'a str, owner: &str, signature: &str) -> Result<&'a str, String> {
+    let implementation = braced_body_after(source, &format!("impl{owner}"))?;
+    braced_body_after(implementation, signature)
+}
+
+fn require_order(source: &str, markers: &[&str], invariant: &str) -> Result<(), String> {
+    let mut cursor = 0;
+    for marker in markers {
+        let position = source[cursor..]
+            .find(marker)
+            .ok_or_else(|| format!("{invariant} must retain ordered `{marker}`"))?;
+        cursor += position + marker.len();
+    }
+    Ok(())
+}
+
+fn is_single_awaited_call(body: &str, callee: &str) -> bool {
+    let prefix = format!("{callee}(");
+    if !body.starts_with(&prefix) {
+        return false;
+    }
+    let open = prefix.len() - 1;
+    matching_delimiter(body, open, b'(', b')')
+        .is_some_and(|close| body.get(close + 1..) == Some(".await"))
+}
+
+fn validate_transaction_phase_ownership(profile: &str) -> Result<(), String> {
+    for (owner, resources) in [
+        (
+            "PreparedPhase",
+            &[
+                "AppState",
+                "ProfileName",
+                "ProgressTree",
+                "SwitchTarget",
+                "StopSet",
+                "PreparedPersistence",
+                "CancellationToken",
+            ][..],
+        ),
+        (
+            "CutoverPhase",
+            &[
+                "AppState",
+                "ProfileName",
+                "ProgressTree",
+                "SwitchTarget",
+                "PreparedPersistence",
+                "PriorRuntimeSnapshot",
+                "CancellationToken",
+            ],
+        ),
+        (
+            "CutoverOwner",
+            &[
+                "AppState",
+                "ProfileName",
+                "StagedTarget",
+                "PreparedPersistence",
+                "PriorRuntimeSnapshot",
+                "CancellationToken",
+            ],
+        ),
+        (
+            "StagedPhase",
+            &[
+                "AppState",
+                "ProfileName",
+                "StagedTarget",
+                "RuntimeReplacement",
+                "PreparedPersistence",
+                "PriorRuntimeSnapshot",
+                "CancellationToken",
+            ],
+        ),
+        (
+            "CommitTail",
+            &[
+                "AppState",
+                "ProfileName",
+                "StagedTarget",
+                "RuntimeReplacement",
+                "PriorRuntimeSnapshot",
+                "CancellationToken",
+            ],
+        ),
+        (
+            "PublicationPhase",
+            &[
+                "AppState",
+                "ProfileName",
+                "StagedTarget",
+                "RuntimeReplacement",
+                "CancellationToken",
+                "Routing",
+            ],
+        ),
+    ] {
+        require_exact_resources(profile, owner, resources)?;
+    }
+    Ok(())
+}
+
+fn validate_terminal_ownership(profile: &str) -> Result<(), String> {
+    for (owner, resources) in [
+        ("CommittedPhase", &["StartReport"][..]),
+        ("RolledBackPhase", &["GatewayError"]),
+        ("IndeterminatePhase", &["GatewayError"]),
+        (
+            "RollbackOwner",
+            &[
+                "AppState",
+                "PriorRuntimeSnapshot",
+                "CancellationToken",
+                "GatewayError",
+            ],
+        ),
+    ] {
+        require_exact_resources(profile, owner, resources)?;
+    }
+    let terminal = braced_body_after(profile, "enumTerminalPhase")?;
+    if terminal
+        != "Committed(CommittedPhase),RolledBack(RolledBackPhase),Indeterminate(IndeterminatePhase),"
+    {
+        return Err(format!(
+            "TerminalPhase must exactly own committed, rolled-back, and indeterminate outcomes, \
+             got `{terminal}`"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_preparation_and_staging(profile: &str) -> Result<(), String> {
+    let cutover = method_body(
+        profile,
+        "PreparedPhase",
+        "asyncfncut_over(self)->Result<CutoverPhase,TerminalPhase>",
+    )?;
+    require_order(
+        cutover,
+        &[
+            "capture_runtime_snapshot(&self.state).await",
+            "cut_over(&self.state,&self.target,&self.tree,self.stop,&self.token,).await",
+            "self.roll_back(prior,error).await",
+            "CutoverPhase{",
+        ],
+        "prepared-to-cutover transition",
+    )?;
+
+    let stage = method_body(
+        profile,
+        "CutoverPhase",
+        "asyncfnstage(self)->Result<StagedPhase,TerminalPhase>",
+    )?;
+    require_order(
+        stage,
+        &[
+            "ifself.token.is_cancelled(){",
+            "letSome(deadline)=",
+            "letowner=CutoverOwner{",
+            "spawn_runtimes(",
+            "letstaged=owner.into_staged(replacement);",
+            "ifstaged.token.is_cancelled(){",
+            "staged.roll_back_after_stage(switch_cancelled).await",
+        ],
+        "cutover-to-staged cancellation and ownership",
+    )?;
+
+    let prepare = braced_body_after(profile, "pub(super)asyncfnprepare(")?;
+    require_order(
+        prepare,
+        &[
+            "iftoken.is_cancelled(){",
+            "prepare_target(",
+            "iftoken.is_cancelled(){",
+            "download_artifacts(",
+            "iftoken.is_cancelled(){",
+            "PreparedPersistence::prepare(",
+            "iftoken.is_cancelled(){",
+            "Ok(PreparedPhase{",
+        ],
+        "preparation cancellation and persistence ownership",
+    )
+}
+
+fn validate_commit_and_publication(profile: &str) -> Result<(), String> {
+    let commit = method_body(profile, "StagedPhase", "asyncfncommit(self)->TerminalPhase")?;
+    require_order(
+        commit,
+        &[
+            "ifself.token.is_cancelled(){",
+            "letpublication_state=state.clone();",
+            "()=self.token.cancelled()=>",
+            "ifself.token.is_cancelled(){",
+            "letStagedPhase{",
+            "matchpersistence.commit().await{",
+            "PersistenceCommitError::Determinate(error)",
+            "tail.into_rollback(error)",
+            "PersistenceCommitError::Indeterminate(error)",
+            "tail.into_indeterminate(",
+            "letpublication=tail.into_publication(routing);",
+            "publication.publish().await",
+        ],
+        "persistence-before-publication and commit cancellation",
+    )?;
+    if commit.matches("into_publication(").count() != 1 {
+        return Err(
+            "persistence-before-publication requires one consuming publication transition"
+                .to_owned(),
+        );
+    }
+
+    method_body(
+        profile,
+        "CommitTail",
+        "fninto_publication(self,routing:Routing)->PublicationPhase",
+    )?;
+    method_body(
+        profile,
+        "PublicationPhase",
+        "asyncfnpublish(self)->TerminalPhase",
+    )?;
+    method_body(
+        profile,
+        "TerminalPhase",
+        "fnfinish(self)->Result<StartReport,GatewayError>",
+    )?;
+    Ok(())
+}
+
+fn validate_rollback_reconstruction(profile: &str, generation: &str) -> Result<(), String> {
+    let restore = braced_body_after(profile, "asyncfnrestore_runtime_snapshot(")?;
+    require_order(
+        restore,
+        &[
+            "LocalRuntime::start(",
+            "state.live.write().await",
+            "live.routing=prior.routing",
+            "live.config=prior.config",
+            "live.profile_name=prior.profile_name",
+            "live.model_allowlist=prior.model_allowlist",
+            "live.loading=prior.loading",
+        ],
+        "prior runtime reconstruction before republication",
+    )?;
+
+    let rollback = method_body(
+        profile,
+        "RollbackOwner",
+        "asyncfnfinish(self)->TerminalPhase",
+    )?;
+    require_order(
+        rollback,
+        &[
+            "restore_runtime_snapshot(&self.state,self.prior).await",
+            "request_fatal_shutdown(",
+        ],
+        "rollback reconstruction failure escalation",
+    )?;
+    let runtime_rollback = braced_body_after(profile, "fnrollback_runtime(")?;
+    if !runtime_rollback.contains("abort_replacement(replacement.speech)") {
+        return Err("staged rollback must reconstruct the retired speech generation".to_owned());
+    }
+
+    let replacement = struct_field_types(generation, "SpeechReplacement")?;
+    for owned in [
+        "Weak<Shared>",
+        "Option<Generation>",
+        "Option<GenerationSpec>",
+        "ReplacementPermit",
+    ] {
+        if !replacement.contains(owned) {
+            return Err(format!(
+                "SpeechReplacement must own restartable rollback resource `{owned}`"
+            ));
+        }
+    }
+    let speech_rollback = method_body(
+        generation,
+        "SpeechReplacement",
+        "fnrollback(&mutself)->Result<(),SpeechError>",
+    )?;
+    if !speech_rollback.contains("restore_generation(&owner,&self.permit,&rollback)") {
+        return Err("speech rollback must reconstruct its retired generation".to_owned());
+    }
+    let speech_drop = method_body(generation, "DropforSpeechReplacement", "fndrop(&mutself)")?;
+    if !speech_drop.contains("self.rollback()") {
+        return Err("dropped speech replacement must roll back its owned generation".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_fatal_indeterminate_shutdown(profile: &str) -> Result<(), String> {
+    let fatal = braced_body_after(profile, "pub(super)fnrequest_fatal_shutdown(")?;
+    require_order(
+        fatal,
+        &[
+            "token.cancel();",
+            "state.shutdown.fire();",
+            "state.speech.shutdown();",
+            "GatewayError::switch_failed(",
+        ],
+        "fatal indeterminate shutdown",
+    )?;
+
+    let mut cursor = 0;
+    let mut constructors = 0;
+    while let Some(relative) = profile[cursor..].find("IndeterminatePhase{") {
+        let start = cursor + relative;
+        let open = start + "IndeterminatePhase".len();
+        cursor = open + 1;
+        if profile[..start].ends_with("struct") {
+            continue;
+        }
+        let close = matching_delimiter(profile, open, b'{', b'}')
+            .ok_or_else(|| "indeterminate phase construction must be balanced".to_owned())?;
+        if !profile[open + 1..close].starts_with("error:request_fatal_shutdown(") {
+            return Err(
+                "every indeterminate outcome must be constructed through fatal shutdown".to_owned(),
+            );
+        }
+        constructors += 1;
+    }
+    if constructors == 0 {
+        return Err("transaction must construct fatal indeterminate outcomes".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_root_transaction_delegation(root: &str) -> Result<(), String> {
+    let root_delegate = braced_body_after(root, "asyncfnrun_switch_with_config(")?;
+    if !is_single_awaited_call(root_delegate, "profile_switch::run") {
+        return Err(
+            "Gateway root must delegate profile switching as one awaited transaction call"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_profile_replacement_architecture(
+    profile_switch: &str,
+    gateway_root: &str,
+    speech_generation: &str,
+) -> Result<(), String> {
+    let profile = production_rust_code(profile_switch);
+    let root = production_rust_code(gateway_root);
+    let generation = production_rust_code(speech_generation);
+    validate_transaction_phase_ownership(&profile)?;
+    validate_terminal_ownership(&profile)?;
+    validate_preparation_and_staging(&profile)?;
+    validate_commit_and_publication(&profile)?;
+    validate_rollback_reconstruction(&profile, &generation)?;
+    validate_fatal_indeterminate_shutdown(&profile)?;
+    validate_root_transaction_delegation(&root)
+}
+
 #[test]
 fn profile_replacement_policy_requires_restartable_rollback_and_fatal_shutdown() {
     let generation = read(&crate_root("gateway-stt").join("src/generation.rs"));
     let gateway = read(&crate_root("gateway").join("src/lib.rs"));
-    let persistence = read(&crate_root("gateway").join("src/config_write.rs"));
+    let profile_switch = read(&crate_root("gateway").join("src/profile_switch.rs"));
 
-    for policy in [
-        "rollback: Option<GenerationSpec>",
-        "restore_generation",
-        "impl Drop for SpeechReplacement",
-    ] {
+    validate_profile_replacement_architecture(&profile_switch, &gateway, &generation)
+        .unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+fn profile_replacement_architecture_rejects_adversarial_mutations() {
+    let generation = read(&crate_root("gateway-stt").join("src/generation.rs"));
+    let gateway = read(&crate_root("gateway").join("src/lib.rs"));
+    let profile_switch = read(&crate_root("gateway").join("src/profile_switch.rs"));
+    let mutation = |source: &str, from: &str, to: &str| {
         assert!(
-            generation.contains(policy),
-            "speech replacement must retain {policy}"
+            source.contains(from),
+            "mutation fixture must contain `{from}`"
         );
-    }
-    for policy in [
-        "PreparedPersistence::prepare",
-        "PersistenceCommitError::Determinate",
-        "PersistenceCommitError::Indeterminate",
-        "PROFILE_STAGE_TIMEOUT",
-        "state.shutdown.fire()",
-    ] {
-        assert!(
-            gateway.contains(policy),
-            "Gateway transaction policy must retain {policy}"
-        );
-    }
-    for policy in ["file.sync_all()", "std::fs::rename", "sync_parent"] {
-        assert!(
-            persistence.contains(policy),
-            "profile persistence must retain {policy}"
-        );
-    }
+        source.replacen(from, to, 1)
+    };
+
+    let ownership = mutation(
+        &profile_switch,
+        "    persistence: PreparedPersistence,\n",
+        "    persistence: Arc<PreparedPersistence>,\n",
+    );
+    assert!(
+        validate_profile_replacement_architecture(&ownership, &gateway, &generation)
+            .is_err_and(|error| error.contains("PreparedPhase transaction ownership"))
+    );
+
+    let early_publication = mutation(
+        &profile_switch,
+        "        match persistence.commit().await {",
+        "        let _premature = tail.into_publication(routing);\n\
+         match persistence.commit().await {",
+    );
+    assert!(
+        validate_profile_replacement_architecture(&early_publication, &gateway, &generation)
+            .is_err_and(|error| error.contains("persistence-before-publication"))
+    );
+
+    let cancelled_boundary = mutation(
+        &profile_switch,
+        "        if self.token.is_cancelled() {\n            let error = switch_cancelled(&self.name);",
+        "        if false {\n            let error = switch_cancelled(&self.name);",
+    );
+    assert!(
+        validate_profile_replacement_architecture(&cancelled_boundary, &gateway, &generation)
+            .is_err_and(|error| error.contains("cutover-to-staged cancellation"))
+    );
+
+    let nonfatal = mutation(
+        &profile_switch,
+        "    state.shutdown.fire();",
+        "    // state.shutdown.fire();",
+    );
+    assert!(
+        validate_profile_replacement_architecture(&nonfatal, &gateway, &generation)
+            .is_err_and(|error| error.contains("fatal indeterminate shutdown"))
+    );
+
+    let unowned_terminal = mutation(
+        &profile_switch,
+        "    Indeterminate(IndeterminatePhase),",
+        "    Indeterminate(GatewayError),",
+    );
+    assert!(
+        validate_profile_replacement_architecture(&unowned_terminal, &gateway, &generation)
+            .is_err_and(|error| error.contains("TerminalPhase must exactly own"))
+    );
+
+    let root_orchestration = mutation(
+        &gateway,
+        "    profile_switch::run(&state, name, tree, candidate, persistence, token).await",
+        "    let _duplicate_owner = &state;\n\
+         profile_switch::run(&state, name, tree, candidate, persistence, token).await",
+    );
+    assert!(
+        validate_profile_replacement_architecture(
+            &profile_switch,
+            &root_orchestration,
+            &generation
+        )
+        .is_err_and(|error| error.contains("Gateway root must delegate"))
+    );
+
+    let dropped_reconstruction = mutation(
+        &generation,
+        "restore_generation(&owner, &self.permit, &rollback)",
+        "Ok(())",
+    );
+    assert!(
+        validate_profile_replacement_architecture(
+            &profile_switch,
+            &gateway,
+            &dropped_reconstruction
+        )
+        .is_err_and(|error| error.contains("speech rollback must reconstruct"))
+    );
 }
 
 #[test]
