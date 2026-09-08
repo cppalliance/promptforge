@@ -85,6 +85,25 @@ impl FaultInjector {
             self.commit_marker_written = true;
         }
     }
+
+    #[cfg(test)]
+    fn crashing(fail_at: usize) -> Self {
+        Self {
+            fail_at: Some(fail_at),
+            simulated_crash: true,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    fn assert_selected(&self, fail_at: usize, transaction: &str) -> &'static str {
+        assert_eq!(
+            self.calls, fail_at,
+            "only the selected filesystem checkpoint interrupts {transaction}"
+        );
+        self.failed_operation
+            .unwrap_or_else(|| panic!("an injected {transaction} crash records its operation"))
+    }
 }
 
 impl RotationLimits {
@@ -738,8 +757,7 @@ enum Sink {
     #[cfg(test)]
     Stalled {
         point: StallPoint,
-        entered: std::sync::mpsc::SyncSender<()>,
-        release: Option<std::sync::mpsc::Receiver<()>>,
+        release: Option<crate::fault_injection::ReleasePoint>,
     },
 }
 
@@ -780,12 +798,10 @@ impl Sink {
             #[cfg(test)]
             Self::Stalled {
                 point: StallPoint::Write,
-                entered,
                 release,
             } => {
                 if let Some(release) = release.take() {
-                    let _ = entered.send(());
-                    let _ = release.recv();
+                    release.wait();
                 }
             }
             #[cfg(test)]
@@ -823,12 +839,10 @@ impl Sink {
             #[cfg(test)]
             Self::Stalled {
                 point: StallPoint::Flush,
-                entered,
                 release,
             } => {
                 if let Some(release) = release.take() {
-                    let _ = entered.send(());
-                    let _ = release.recv();
+                    release.wait();
                 }
             }
             #[cfg(test)]
@@ -915,31 +929,20 @@ impl LogWorker {
         queue: Arc<LogQueue>,
         point: StallPoint,
     ) -> io::Result<(Self, StalledSinkControl)> {
-        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
-        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let (release, control) = crate::fault_injection::release_point();
         let worker = Self::spawn_with_sink(
             queue,
             Sink::Stalled {
                 point,
-                entered: entered_tx,
-                release: Some(release_rx),
+                release: Some(release),
             },
         )?;
-        Ok((
-            worker,
-            StalledSinkControl {
-                entered: entered_rx,
-                release: release_tx,
-            },
-        ))
+        Ok((worker, StalledSinkControl(control)))
     }
 }
 
 #[cfg(test)]
-pub(crate) struct StalledSinkControl {
-    entered: std::sync::mpsc::Receiver<()>,
-    release: std::sync::mpsc::SyncSender<()>,
-}
+pub(crate) struct StalledSinkControl(crate::fault_injection::ReleaseControl);
 
 #[cfg(test)]
 impl StalledSinkControl {
@@ -947,11 +950,11 @@ impl StalledSinkControl {
         &self,
         timeout: std::time::Duration,
     ) -> Result<(), std::sync::mpsc::RecvTimeoutError> {
-        self.entered.recv_timeout(timeout)
+        self.0.wait_until_reached(timeout)
     }
 
     pub(crate) fn release(self) {
-        let _ = self.release.send(());
+        self.0.release();
     }
 }
 
@@ -1203,25 +1206,6 @@ mod tests {
             .sum()
     }
 
-    fn crashing_fault(fail_at: usize) -> FaultInjector {
-        FaultInjector {
-            fail_at: Some(fail_at),
-            simulated_crash: true,
-            ..FaultInjector::default()
-        }
-    }
-
-    fn assert_injected_checkpoint(fault: &FaultInjector, fail_at: usize, transaction: &str) {
-        assert_eq!(
-            fault.calls, fail_at,
-            "only the selected filesystem checkpoint interrupts {transaction}"
-        );
-        assert!(
-            fault.failed_operation.is_some(),
-            "an injected {transaction} crash records its filesystem operation"
-        );
-    }
-
     fn observed_rotation_commit(current: &Path, fault: &FaultInjector) -> bool {
         rotation_committed_path(current).exists() || fault.commit_marker_written
     }
@@ -1244,7 +1228,7 @@ mod tests {
             let temp = TempStateDir::new("compaction-crash");
             let path = temp.0.join("gateway.log");
             std::fs::write(&path, &original).expect("seed oversized source");
-            let mut fault = crashing_fault(fail_at);
+            let mut fault = FaultInjector::crashing(fail_at);
             let result = compact_oversized_segment_with(
                 &path,
                 64,
@@ -1259,8 +1243,8 @@ mod tests {
                 );
                 break;
             }
-            assert_injected_checkpoint(&fault, fail_at, "replacement");
-            if fault.failed_operation == Some("install replacement") {
+            let operation = fault.assert_selected(fail_at, "replacement");
+            if operation == "install replacement" {
                 forced_replacement_gap = true;
                 assert!(
                     !path.exists() && artifact_path(&path, ".compact-backup").exists(),
@@ -1307,7 +1291,7 @@ mod tests {
                 .map(|path| std::fs::read(path).expect("snapshot old chain"))
                 .collect();
             let disk_budget = old.iter().map(Vec::len).sum::<usize>() as u64;
-            let mut fault = crashing_fault(fail_at);
+            let mut fault = FaultInjector::crashing(fail_at);
             let result = rotate_files(
                 &current,
                 &retained,
@@ -1334,7 +1318,7 @@ mod tests {
                 }
                 break;
             }
-            assert_injected_checkpoint(&fault, fail_at, "rotation");
+            let operation = fault.assert_selected(fail_at, "rotation");
             assert!(
                 total_directory_file_bytes(&logs) <= disk_budget,
                 "transaction artifacts stay inside the aggregate budget at checkpoint {fail_at}"
@@ -1344,7 +1328,7 @@ mod tests {
             // exact sync is the injected crash boundary.
             let committed = observed_rotation_commit(&current, &fault);
             forced_commit_cleanup_gap |= interrupted_final_commit_cleanup(&current, &fault);
-            if fault.failed_operation == Some("stage rotation source")
+            if operation == "stage rotation source"
                 && rotation_targets(&current, &retained).iter().any(|target| {
                     !target.exists() && artifact_path(target, ".rotation-old").exists()
                 })
@@ -1414,7 +1398,7 @@ mod tests {
             std::fs::write(rotation_committed_path(&current), "").expect("seed commit marker");
             let disk_budget = total_directory_file_bytes(&logs);
 
-            let mut fault = crashing_fault(fail_at);
+            let mut fault = FaultInjector::crashing(fail_at);
             let result = cleanup_rotation_with(&current, &retained, &mut fault);
             if result.is_ok() {
                 completed = true;
@@ -1423,7 +1407,7 @@ mod tests {
                     "the loop injected every sparse cleanup checkpoint independently"
                 );
             } else {
-                assert_injected_checkpoint(&fault, fail_at, "cleanup");
+                fault.assert_selected(fail_at, "cleanup");
                 assert!(
                     total_directory_file_bytes(&logs) <= disk_budget,
                     "interrupted cleanup never duplicates segment bytes"

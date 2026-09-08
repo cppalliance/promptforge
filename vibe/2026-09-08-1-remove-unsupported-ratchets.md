@@ -414,7 +414,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Run focused tests for both UI packages, production bundles, retained Realtime fixtures, installer smoke behavior, JavaScript tools, and clean-tree generation.
 - Component boundary: run the cleanup-focused Rust compiler and behavior lanes plus both UI builds and tests. Do not run the complete repository suite. Commit the remaining snapshots, tools, package scripts, and CI cleanup together.
 
-### Step 5: Preserve logging while removing internal duplication
+### Step 5: Preserve logging while removing internal duplication [completed]
 
 - Limit production edits to `crates/gateway-logging/src/redact.rs` and shared fault support used by `queue.rs`, `worker.rs`, and `writer.rs`. Do not split modules, redesign queue ownership, change the public API, or add dependencies.
 - Keep structured credential classification before formatting and the bounded final-output pass. Preserve queue ordering, byte accounting, exact loss, bounded settlement, detached loss, stall handling, rotation rename and sync behavior, crash recovery, segment naming, pruning, and disk limits.

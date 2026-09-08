@@ -29,6 +29,74 @@ pub use crate::writer::LogWriter;
 pub use crate::writer::LogEventWriter;
 
 #[cfg(test)]
+pub(crate) mod fault_injection {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+    use std::time::Duration;
+
+    #[derive(Debug)]
+    pub(crate) struct ReleasePoint {
+        entered: SyncSender<()>,
+        release: Receiver<()>,
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct ReleaseControl {
+        entered: Receiver<()>,
+        release: SyncSender<()>,
+    }
+
+    pub(crate) fn release_point() -> (ReleasePoint, ReleaseControl) {
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        (
+            ReleasePoint {
+                entered: entered_tx,
+                release: release_rx,
+            },
+            ReleaseControl {
+                entered: entered_rx,
+                release: release_tx,
+            },
+        )
+    }
+
+    impl ReleasePoint {
+        pub(crate) fn wait(self) {
+            self.entered
+                .send(())
+                .expect("report that the fault boundary was reached");
+            self.release
+                .recv()
+                .expect("wait for the fault boundary release");
+        }
+    }
+
+    impl ReleaseControl {
+        pub(crate) fn wait_until_reached(&self, timeout: Duration) -> Result<(), RecvTimeoutError> {
+            self.entered.recv_timeout(timeout)
+        }
+
+        pub(crate) fn release(self) {
+            self.release.send(()).expect("release the fault boundary");
+        }
+    }
+
+    #[derive(Debug, Default)]
+    pub(crate) struct InvocationProbe(AtomicBool);
+
+    impl InvocationProbe {
+        pub(crate) fn record(&self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+
+        pub(crate) fn was_recorded(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) mod allocation_tracking {
     use std::cell::Cell;
 

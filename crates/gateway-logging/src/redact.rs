@@ -63,20 +63,12 @@ pub(crate) fn is_sensitive_field(name: &str) -> bool {
         .next()
         .unwrap_or(name)
         .trim_start_matches("r#");
-    SENSITIVE_FIELDS.iter().any(|candidate| {
-        leaf.eq_ignore_ascii_case(candidate)
-            || leaf
-                .get(..leaf.len().saturating_sub(candidate.len()))
-                .is_some_and(|prefix| {
-                    leaf.get(prefix.len()..)
-                        .is_some_and(|suffix| suffix.eq_ignore_ascii_case(candidate))
-                        && prefix.ends_with(['_', '-'])
-                })
-            || sensitive_component_alias(leaf, candidate)
-    })
+    SENSITIVE_FIELDS
+        .iter()
+        .any(|candidate| has_sensitive_component(leaf, candidate))
 }
 
-fn sensitive_component_alias(name: &str, component: &str) -> bool {
+fn has_sensitive_component(name: &str, component: &str) -> bool {
     let mut from = 0;
     while let Some(start) = find_ascii(name, component, from) {
         let end = start + component.len();
@@ -92,8 +84,8 @@ fn sensitive_component_alias(name: &str, component: &str) -> bool {
                 .is_some_and(|byte| matches!(byte, b'_' | b'-'));
         if left_boundary && right_boundary {
             let suffix = name[end..].trim_start_matches(['_', '-']);
-            if !suffix.is_empty()
-                && suffix.split(['_', '-']).all(|part| {
+            if suffix.is_empty()
+                || suffix.split(['_', '-']).all(|part| {
                     SENSITIVE_ALIAS_SUFFIXES
                         .iter()
                         .any(|suffix| part.eq_ignore_ascii_case(suffix))
@@ -586,6 +578,32 @@ mod tests {
             assert!(
                 !is_sensitive_field(field),
                 "{field} is an ordinary diagnostic field"
+            );
+        }
+    }
+
+    #[test]
+    fn structured_field_classification_preserves_namespaces_prefixes_and_alias_chains() {
+        for field in [
+            "request.authorization",
+            "request:authorization",
+            "r#authorization",
+            "gateway-api_key",
+            "request_token_raw_value",
+            "response-cookie-header-values",
+        ] {
+            assert!(is_sensitive_field(field), "{field} must be classified");
+        }
+        for field in [
+            "request.token_count",
+            "request:body_size",
+            "authorization_metadata",
+            "cookie_jar",
+            "secretary_value",
+        ] {
+            assert!(
+                !is_sensitive_field(field),
+                "{field} must remain an ordinary diagnostic field"
             );
         }
     }

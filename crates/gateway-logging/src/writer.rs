@@ -347,16 +347,15 @@ mod tests {
     use crate::config::LOG_LIMITS;
     use std::fmt;
     use std::io::Write as _;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct ProtectedValue<'a> {
         value: &'a str,
-        formatted: &'a AtomicBool,
+        formatted: &'a crate::fault_injection::InvocationProbe,
     }
 
     impl fmt::Debug for ProtectedValue<'_> {
         fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.formatted.store(true, Ordering::SeqCst);
+            self.formatted.record();
             formatter.write_str(self.value)
         }
     }
@@ -689,7 +688,7 @@ mod tests {
 
         let queue = Arc::new(LogQueue::new());
         let writer = LogWriter::new(Arc::clone(&queue));
-        let formatted = AtomicBool::new(false);
+        let formatted = crate::fault_injection::InvocationProbe::default();
         let protected = ProtectedValue {
             value: SECRETS[6],
             formatted: &formatted,
@@ -726,7 +725,7 @@ mod tests {
             );
         }
         assert!(
-            !formatted.load(Ordering::SeqCst),
+            !formatted.was_recorded(),
             "a secret-typed debug value was formatted before redaction"
         );
         assert!(
@@ -746,7 +745,8 @@ mod tests {
             "cookie-alias-secret",
             "token-alias-secret",
         ];
-        let formatted = std::array::from_fn::<_, 3, _>(|_| AtomicBool::new(false));
+        let formatted =
+            std::array::from_fn::<_, 3, _>(|_| crate::fault_injection::InvocationProbe::default());
         let authorization = ProtectedValue {
             value: SECRETS[0],
             formatted: &formatted[0],
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(batch.records.len(), 1);
         for (index, secret) in SECRETS.iter().enumerate() {
             assert!(
-                !formatted[index].load(Ordering::SeqCst),
+                !formatted[index].was_recorded(),
                 "the formatter for alias {index} was invoked"
             );
             assert!(

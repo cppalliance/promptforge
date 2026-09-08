@@ -1132,26 +1132,22 @@ mod tests {
     #[test]
     fn sequence_follows_admission_when_a_prepared_producer_is_paused() {
         let queue = Arc::new(LogQueue::new_for_test(8, 128));
-        let (prepared_tx, prepared_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
+        let (pause, control) = crate::fault_injection::release_point();
         let paused_queue = Arc::clone(&queue);
         let paused = std::thread::spawn(move || {
             paused_queue.enqueue_after(
                 LogPriority::Info,
                 line("prepared-first"),
                 FormatStatus::Complete,
-                || {
-                    prepared_tx.send(()).expect("report prepared producer");
-                    release_rx.recv().expect("release prepared producer");
-                },
+                || pause.wait(),
             );
         });
-        prepared_rx
-            .recv_timeout(Duration::from_secs(5))
+        control
+            .wait_until_reached(Duration::from_secs(5))
             .expect("the first producer pauses before admission");
 
         queue.enqueue(LogPriority::Warn, line("admitted-first"));
-        release_tx.send(()).expect("release first producer");
+        control.release();
         paused.join().expect("the paused producer joins");
         queue.close();
 
@@ -1170,24 +1166,18 @@ mod tests {
     fn abandonment_counts_admission_boundary_record_exactly_once() {
         let queue = Arc::new(LogQueue::new_for_test(8, 128));
         let producer_queue = Arc::clone(&queue);
-        let (admitted_tx, admitted_rx) = mpsc::sync_channel(0);
-        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let (pause, control) = crate::fault_injection::release_point();
         let producer = std::thread::spawn(move || {
             producer_queue.enqueue_around(
                 LogPriority::Warn,
                 line("admitted-before-timeout"),
                 FormatStatus::Complete,
                 || {},
-                || {
-                    admitted_tx
-                        .send(())
-                        .expect("report the atomic admission boundary");
-                    release_rx.recv().expect("release the admitting producer");
-                },
+                || pause.wait(),
             );
         });
-        admitted_rx
-            .recv_timeout(Duration::from_secs(5))
+        control
+            .wait_until_reached(Duration::from_secs(5))
             .expect("the producer pauses after admission");
 
         let loss = queue.abandon();
@@ -1200,7 +1190,7 @@ mod tests {
             },
             "one admitting producer is one undelivered record, not an active-plus-admitted double count"
         );
-        release_tx.send(()).expect("release the producer");
+        control.release();
         producer.join().expect("the producer joins");
         assert_eq!(
             queue.shutdown_loss_for_test(),
