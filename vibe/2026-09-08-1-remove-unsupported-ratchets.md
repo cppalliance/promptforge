@@ -389,7 +389,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Validate that all 31 original files have one recorded keep, rewrite, or remove disposition and that the policy permits the structural deletions in this plan without weakening behavior tests.
 - Commit the policy changes only after whitespace validation and the baseline record are complete.
 
-### Step 2: Correct the cross-platform Gateway build helper
+### Step 2: Correct the cross-platform Gateway build helper [completed]
 
 - In `crates/gateway/build.rs`, change non-Windows `embed_resources` to return unit. Keep the Windows implementation fallible, and keep `main` responsible for propagating Windows resource failures before returning success.
 - Do not add a lint exemption; correct the signatures and call sites directly.

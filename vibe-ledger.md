@@ -5,3 +5,4 @@
 - Step 1 UI baseline - `node --test test/stt-stream.mjs test/take-registry.mjs` - 15 passed, 0 failed.
 - Step 1 Workshop baseline - `cargo test -p workshop --bin promptforge-workshop gateway` - blocked because `binaries\promptforge-gateway-x86_64-pc-windows-msvc.exe` was not staged.
 - Step 1 post-fix verification - `cargo build -p gateway`; `git diff --check HEAD^ HEAD` - pass. Decisions made alone: none.
+- Step 2: Correct the cross-platform Gateway build helper - `clippy-driver crates/gateway/build.rs --crate-name gateway_build_script_build --edition=2024 --target=x86_64-unknown-linux-gnu --emit=metadata -o "$env:TEMP\gateway-build-script-linux.rmeta" -D warnings -W clippy::unnecessary_wraps` - pass; `cargo test -p gateway --test it icon::the_exe_carries_every_image_of_the_program_icon` - 1 passed, 103 filtered. Decisions made alone: none.

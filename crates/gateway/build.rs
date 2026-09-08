@@ -51,7 +51,11 @@ fn main() -> Result<(), String> {
     );
     let icon = manifest_dir.join(ICON);
     println!("cargo::rerun-if-changed={}", icon.display());
-    embed_resources(&icon)
+    #[cfg(windows)]
+    embed_resources(&icon)?;
+    #[cfg(not(windows))]
+    embed_resources(&icon);
+    Ok(())
 }
 
 /// Writes a resource script into `OUT_DIR` naming `icon` and the manifest
@@ -103,6 +107,4 @@ fn embed_resources(icon: &Path) -> Result<(), String> {
 /// Nothing to embed: only Windows executables carry icon and manifest
 /// resources.
 #[cfg(not(windows))]
-fn embed_resources(_icon: &Path) -> Result<(), String> {
-    Ok(())
-}
+fn embed_resources(_icon: &Path) {}
