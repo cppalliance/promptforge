@@ -150,7 +150,8 @@ pub(in crate::session_agents) struct SupervisorState {
     active_run: Option<RunId>,
     next_run: u64,
     catalog_generation: Option<u64>,
-    pending_catalog_generation: Option<u64>,
+    observed_catalog_generation: Option<u64>,
+    catalog_retirement_pending: bool,
     gateway_generation: u64,
     accepted_run: Option<RunId>,
 }
@@ -163,7 +164,8 @@ impl SupervisorState {
             active_run: None,
             next_run: 1,
             catalog_generation: None,
-            pending_catalog_generation: None,
+            observed_catalog_generation: None,
+            catalog_retirement_pending: false,
             gateway_generation,
             accepted_run: None,
         }
@@ -204,43 +206,38 @@ fn catalog_changed(
     generation: u64,
     disposition: CatalogDisposition,
 ) -> SupervisorTransition {
+    if state
+        .observed_catalog_generation
+        .is_some_and(|observed| generation <= observed)
+    {
+        return changed(
+            state,
+            SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
+        );
+    }
+    state.observed_catalog_generation = Some(generation);
+    state.catalog_generation =
+        (disposition != CatalogDisposition::Unavailable).then_some(generation);
+
     match state.phase {
         Phase::WaitingForCatalog => {
             if disposition == CatalogDisposition::Unavailable {
                 return changed(state, SupervisorEffect::Wait(WaitFor::Catalog));
             }
-            state.catalog_generation = Some(generation);
             relaunch(state)
         }
         Phase::Running => match disposition {
-            CatalogDisposition::Unavailable => changed(
-                state,
-                SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-            ),
-            CatalogDisposition::Retained => {
-                if state
-                    .catalog_generation
-                    .is_some_and(|active| generation <= active)
-                {
-                    return changed(
-                        state,
-                        SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-                    );
-                }
-                state.catalog_generation = Some(generation);
-                changed(
-                    state,
-                    SupervisorEffect::Preserve(PreserveReason::CurrentRun),
-                )
+            CatalogDisposition::Unavailable | CatalogDisposition::Retained => {
+                let effect =
+                    if state.catalog_retirement_pending && state.accepted_run == state.active_run {
+                        SupervisorEffect::Wait(WaitFor::TerminalSettlement)
+                    } else {
+                        SupervisorEffect::Preserve(PreserveReason::CurrentRun)
+                    };
+                changed(state, effect)
             }
             CatalogDisposition::Replacement => {
-                if newest_catalog(&state).is_some_and(|known| generation <= known) {
-                    return changed(
-                        state,
-                        SupervisorEffect::Preserve(PreserveReason::AlreadyHandled),
-                    );
-                }
-                state.pending_catalog_generation = Some(generation);
+                state.catalog_retirement_pending = true;
                 if state.accepted_run == state.active_run {
                     changed(state, SupervisorEffect::Wait(WaitFor::TerminalSettlement))
                 } else {
@@ -249,17 +246,10 @@ fn catalog_changed(
                 }
             }
         },
-        Phase::Cancelling => {
-            if disposition != CatalogDisposition::Unavailable
-                && newest_catalog(&state).is_none_or(|known| generation > known)
-            {
-                state.pending_catalog_generation = Some(generation);
-            }
-            changed(
-                state,
-                SupervisorEffect::Preserve(PreserveReason::CancellationPending),
-            )
-        }
+        Phase::Cancelling => changed(
+            state,
+            SupervisorEffect::Preserve(PreserveReason::CancellationPending),
+        ),
         Phase::Closed => changed(state, SupervisorEffect::Preserve(PreserveReason::Closed)),
     }
 }
@@ -345,7 +335,7 @@ fn turn_settled(mut state: SupervisorState, run: RunId) -> SupervisorTransition 
         );
     }
     state.accepted_run = None;
-    if state.pending_catalog_generation.is_some() {
+    if state.catalog_retirement_pending {
         state.phase = Phase::Cancelling;
         changed(state, SupervisorEffect::Cancel(CancelOrigin::Catalog))
     } else {
@@ -377,12 +367,9 @@ fn run_completed(
 }
 
 fn relaunch(mut state: SupervisorState) -> SupervisorTransition {
-    let Some(catalog_generation) = state
-        .pending_catalog_generation
-        .take()
-        .or(state.catalog_generation)
-    else {
+    let Some(catalog_generation) = state.catalog_generation else {
         state.phase = Phase::WaitingForCatalog;
+        state.catalog_retirement_pending = false;
         return changed(state, SupervisorEffect::Wait(WaitFor::Catalog));
     };
     let run = RunId(state.next_run);
@@ -391,6 +378,7 @@ fn relaunch(mut state: SupervisorState) -> SupervisorTransition {
     state.active_run = Some(run);
     state.accepted_run = None;
     state.phase = Phase::Running;
+    state.catalog_retirement_pending = false;
     let effect = RelaunchEffect {
         run,
         catalog_generation,
@@ -404,16 +392,9 @@ fn close(mut state: SupervisorState, reason: CloseReason) -> SupervisorTransitio
     state.phase = Phase::Closed;
     state.active_run = None;
     state.accepted_run = None;
-    state.pending_catalog_generation = None;
+    state.catalog_generation = None;
+    state.catalog_retirement_pending = false;
     changed(state, SupervisorEffect::Close(reason))
-}
-
-fn newest_catalog(state: &SupervisorState) -> Option<u64> {
-    state
-        .pending_catalog_generation
-        .into_iter()
-        .chain(state.catalog_generation)
-        .max()
 }
 
 fn changed(state: SupervisorState, effect: SupervisorEffect) -> SupervisorTransition {

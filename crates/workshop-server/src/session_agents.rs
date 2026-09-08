@@ -34,7 +34,7 @@ use std::fmt;
 use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use promptforge_core_support::cancel::CancelHandle;
@@ -44,7 +44,7 @@ use promptforge_core_support::observe::{Observation, Observer};
 use promptforge_model_client::client::GatewayClient as ModelClient;
 use promptforge_model_client::client::StreamDelta;
 use promptforge_model_client::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use tokio::sync::{Notify, broadcast};
+use tokio::sync::{broadcast, mpsc};
 
 use crate::backoff::ReconnectBackoff;
 use crate::catalog::{CatalogBus, is_chat_capable};
@@ -56,7 +56,8 @@ use crate::protocol::{Activity, AgentDeltaKind, InputFrame, InputResponse};
 use crate::push::Push;
 use crate::workspace::Workspace;
 
-use self::lifecycle::{CancelOrigin, RunLifecycle};
+use self::lifecycle::RunLifecycle;
+use self::supervisor::transition::RunId;
 
 /// Capacity of a session's delta broadcast. Deltas are ephemeral: a
 /// receiver that lags loses chunks, and the completed-reply event is the
@@ -231,7 +232,8 @@ impl AgentSessions {
             WorkshopObserver::new(Some(&log_path))
                 .map_err(|source| LaunchRefusal::SessionState { source })?,
         );
-        let lifecycle = Arc::new(RunLifecycle::new());
+        let (supervisor_events, events) = mpsc::unbounded_channel();
+        let lifecycle = Arc::new(RunLifecycle::new(supervisor_events));
         let waits = Arc::new(WaitRegistry::new());
         let (input_frames, _) = broadcast::channel(INPUT_CAPACITY);
         let (deltas, _) = broadcast::channel(DELTA_CAPACITY);
@@ -247,8 +249,6 @@ impl AgentSessions {
             input_frames,
             deltas,
             errors,
-            closing: AtomicBool::new(false),
-            closed: Notify::new(),
         });
         self.lock().insert(id, Arc::clone(&session));
         supervisor::spawn(
@@ -256,6 +256,7 @@ impl AgentSessions {
             self.clone(),
             self.inner.host.clone(),
             self.inner.gateway.clone(),
+            events,
         );
         Ok(session)
     }
@@ -369,11 +370,6 @@ pub(crate) struct AgentSession {
     /// ended in error. Ephemeral like the deltas - errors never enter
     /// the event log.
     errors: broadcast::Sender<String>,
-    /// Set by [`close`](Self::close): the supervisor ends instead of
-    /// relaunching.
-    closing: AtomicBool,
-    /// Wakes a supervisor that is waiting for its first usable catalog.
-    closed: Notify,
 }
 
 impl fmt::Debug for AgentSession {
@@ -397,16 +393,14 @@ impl AgentSession {
         self.errors.subscribe()
     }
 
-    /// Durably accepts one input and resumes its wait while excluding a
-    /// catalog cancellation from the observation-to-completion boundary.
+    /// Durably accepts one input and resumes its wait after publishing
+    /// acceptance ahead of the observation-to-completion boundary.
     pub(crate) fn accept_input(
         &self,
         response: InputResponse,
         after_acceptance: impl FnOnce(),
     ) -> Result<(), WaitError> {
-        let mut state = self.lifecycle.lock();
-        let previously_accepted = state.accepted_turn;
-        state.accepted_turn = true;
+        let accepted_run = self.lifecycle.accept_input();
         let result = deliver_input_response_before_completion(
             self.log.as_ref(),
             &self.waits,
@@ -415,8 +409,8 @@ impl AgentSession {
             response,
             after_acceptance,
         );
-        if result.is_err() {
-            state.accepted_turn = previously_accepted;
+        if let (Err(_), Some(run)) = (&result, accepted_run) {
+            self.lifecycle.settle_turn(run);
         }
         result
     }
@@ -426,46 +420,28 @@ impl AgentSession {
     /// frame), and the supervisor relaunches the program over the
     /// retained event log with a fresh handle.
     pub(crate) fn cancel_turn(&self) {
-        self.lifecycle.cancel(CancelOrigin::Operator);
+        self.lifecycle.operator_cancel();
     }
 
     /// Ends the session: the run is cancelled and the supervisor stops
     /// relaunching.
     fn close(&self) {
-        self.closing.store(true, Ordering::SeqCst);
-        self.cancel_turn();
-        self.closed.notify_waiters();
+        self.lifecycle.close();
     }
 
     /// Installs and retains the next run's fresh cancel handle.
-    fn arm_cancel(&self) -> CancelHandle {
-        let fresh = self.lifecycle.arm();
-        // A close that raced the swap still wins: cancel the fresh handle
-        // at once so the new run cannot outlive the decision to end.
-        if self.closing.load(Ordering::SeqCst) {
-            fresh.cancel();
-        }
-        fresh
+    fn arm_cancel(&self, run: RunId) -> CancelHandle {
+        self.lifecycle.arm(run)
     }
 
-    /// Requests catalog retirement, deferring while accepted input is active.
-    fn cancel_for_catalog(&self) -> bool {
-        self.lifecycle.cancel_for_catalog()
+    /// Cancels the run selected by a reducer effect.
+    fn cancel_current_run(&self) {
+        self.lifecycle.cancel_current();
     }
 
-    /// Retires the current run immediately after a Gateway replacement.
-    fn cancel_for_gateway(&self) {
-        self.lifecycle.cancel(CancelOrigin::Gateway);
-    }
-
-    /// Waits until the accepted turn reaches a terminal event.
-    async fn wait_until_turn_settled(&self) {
-        self.lifecycle.wait_until_settled().await;
-    }
-
-    /// Returns why the current run was cancelled.
-    fn cancel_origin(&self) -> Option<CancelOrigin> {
-        self.lifecycle.origin()
+    /// Clears the lifecycle identity after a run ends.
+    fn finish_run(&self, run: RunId) {
+        self.lifecycle.finish(run);
     }
 }
 
@@ -498,7 +474,7 @@ impl Observer for SessionObserver {
         // the SPA. The observation carries no payload; the frame names
         // the boundary that failed.
         if matches!(event, Observation::ModelTurnFailed) {
-            self.lifecycle.settle_turn();
+            self.lifecycle.settle_current_turn();
             let message = format!("{event} in agent `{section}`");
             let _ = self.errors.send(message.clone());
             // The failed round never reaches on_assistant_reply, so this
@@ -534,7 +510,7 @@ impl Observer for SessionObserver {
             model,
             metrics,
         );
-        self.lifecycle.settle_turn();
+        self.lifecycle.settle_current_turn();
         self.rounds.fetch_add(1, Ordering::SeqCst);
         self.backoff.record_useful_work();
         self.push.push_idle();
@@ -1006,13 +982,14 @@ mod tests {
         let catalog = CatalogBus::new();
         let menu = MenuBus::new(catalog.clone(), None);
         let (errors, mut errors_rx) = broadcast::channel(ERROR_CAPACITY);
+        let (supervisor_events, _events) = mpsc::unbounded_channel();
         let observer = SessionObserver {
             log: Arc::new(WorkshopObserver::new(None).expect("a memory log")),
             rounds: Arc::new(AtomicU64::new(0)),
             push: Push::new(status, catalog, menu),
             backoff: ReconnectBackoff::new(),
             errors,
-            lifecycle: Arc::new(RunLifecycle::new()),
+            lifecycle: Arc::new(RunLifecycle::new(supervisor_events)),
         };
 
         observer.observe("run", "chat", Observation::ModelTurnFailed);

@@ -200,16 +200,19 @@
 # Thinking LED, which only on_assistant_reply's idle otherwise clears)
 # and its pinning test.
 "session_agents.rs" = 1028
-# Cancellation provenance moved into the pure supervisor transition model;
-# this module retains the shared handle and accepted-turn notification.
+# Old accepted-turn and cancellation-provenance branches left this module;
+# it now publishes typed events and retains only current-run cancellation.
 "session_agents/lifecycle.rs" = 95
-# New module: one agent session's run lifecycle across turn cancellation,
-# delayed catalog readiness, and usable chat-catalog replacement.
-"session_agents/supervisor.rs" = 170
-# Catalog-generation waits split from agent run orchestration.
-"session_agents/supervisor/catalog.rs" = 53
-# New pure supervisor event reducer. The async loop remains unchanged until
-# its separate wiring step.
+# One agent supervisor now only reduces collected events and dispatches
+# their typed effects.
+"session_agents/supervisor.rs" = 71
+# Catalog generation collection classifies snapshots without deciding effects.
+"session_agents/supervisor/catalog.rs" = 55
+# Typed collection of lifecycle, catalog, Gateway, and run-completion events.
+"session_agents/supervisor/events.rs" = 137
+# Reducer-selected cancellation, relaunch, history, and close execution.
+"session_agents/supervisor/effects.rs" = 297
+# Pure supervisor event reducer used by the event collection loop.
 "session_agents/supervisor/transition.rs" = 431
 # Exhaustive event and effect tables plus exactly-once settlement invariants.
 "session_agents/supervisor/transition/tests.rs" = 336

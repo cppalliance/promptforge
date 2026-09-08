@@ -479,7 +479,7 @@ isProject: false
 - Exclusions: no async orchestration rewrite, model client change, catalog semantics change, or sidecar publication change in this step.
 - Focused verification: from the repository root run `cargo test -p workshop-server`.
 
-### Step 23: Wire agent supervision through transitions
+### Step 23: Wire agent supervision through transitions [completed]
 
 - Component and piece: Component 7 of 8, Workshop agent supervision; reduce the async supervisor loop to event collection and effect execution.
 - Dependency: depends on Step 22 because run and accepted-turn ownership must be decided by the tested transition table before branch interactions are removed.
