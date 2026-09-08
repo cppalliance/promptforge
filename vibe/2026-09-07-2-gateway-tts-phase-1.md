@@ -205,7 +205,7 @@ Components, in dependency order:
 - Root README only if it enumerates gateway endpoints or capabilities.
 - Verification: the gate suite green and the guide builds.
 
-### Step 9: As-built design document
+### Step 9: As-built design document [completed]
 
 - `design/design-gateway-tts-phase-1.md`: spawn a generator subagent to write the design as built: a title stating what was built, a standalone executive summary, and a numbered list of the key design choices, reconciled against the finished work and this plan's Decision Record.
 
