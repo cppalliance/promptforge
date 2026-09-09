@@ -6076,6 +6076,7 @@ name = "shared-protocol"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "futures-util",
  "gateway-config",
  "reqwest 0.12.28",
