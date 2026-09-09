@@ -16,37 +16,33 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 ## Invariants
 
-- A2. The gateway is the sole holder of vendor and remote-service credentials.
-- A5. The store confines every path to its configured backend root.
-- A6. The Lua VM boundary exposes only host-installed capabilities.
-- A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
-- A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
-- A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
-- A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
-- A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
-- A85. Workshop APIs reject cross-site traffic and unapproved WebSocket origins; writes to user files are atomic.
-- A87. Lua suspension crosses a closed yield/resume protocol; only structural requests alter scheduler state.
-- A95. Untrusted tool and Lua text neutralizes known control delimiters; model-generated wire payloads stay unchanged.
-- A96. Browser UIs obtain bounded third-party model content through the gateway, never credentialed sources directly.
-- A99. Cancellation flows to descendants; child cancellation never affects ancestors or siblings.
-- A100. Embedded pages navigate in place only within their exact boot origin.
-- A101. Desktop capabilities are granted per window and origin, with least privilege.
-- A102. Pipelines and agents are separate executors that install only their own host calls.
-- A103. The event log is lossless history; agents deliberately project it into model context.
-- A105. Model-authored markup is sanitized at the final DOM insertion boundary.
-
-- A112. Stream permits live through body termination; stalled reads expire within a bounded interval.
-
-- A113. Validate capabilities before queue admission; reject unsupported semantics.
-
-- A114. Only a service owns its connection record; clients validate identity, health, and authority before attaching.
-
-- A115. Control readiness does not await model provisioning; endpoint availability stays explicit.
-
-- A116. Config apply publishes files with live state; failure or cancellation leaves changes pending.
-
-- A117. Switch preparation preserves usable routing; only cutover and commit exclude inference, and loading models fail explicitly.
-
-## Principles
-
-- Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
+- A1. Reuse existing Lua, store, catalog, configuration, and protocol mechanisms before adding new machinery.
+- A2. Give each credential, connection record, lifecycle, and persisted state exactly one owning subsystem.
+- A3. Keep dependency direction explicit: higher layers depend on lower abstractions, never the reverse.
+- A4. Inject only explicitly named capabilities and reject unknown capabilities before execution.
+- A5. Bound every loop, queue, wait, stream, retry, and tool invocation.
+- A6. Validate capabilities and semantics before queue admission or side effects.
+- A7. Publish persisted configuration and live state atomically.
+- A8. On failure or cancellation, preserve the last valid state and expose pending work explicitly.
+- A9. Transfer durable state only through typed payloads or the run-scoped store.
+- A10. Give each section, task, and fan-out arm fresh execution context.
+- A11. Propagate cancellation to descendants only, never ancestors or siblings.
+- A12. Keep control-plane readiness independent from slow model provisioning.
+- A13. Preserve usable routing during preparation and exclude inference only during bounded cutover.
+- A14. Fail visibly when budgets, capabilities, dialects, or provisioning requirements are unsatisfied.
+- A15. Keep event history lossless and project it into model context deliberately.
+- A16. Revalidate model-selected network destinations after DNS resolution and every redirect.
+- A17. Deny private network destinations by default.
+- A18. Canonicalize file paths and confine them to explicitly granted roots.
+- A19. Keep vendor and remote-service credentials inside the gateway.
+- A20. Let only the owning service create or mutate its connection record.
+- A21. Require clients to validate process identity, health, and authority before attachment.
+- A22. Reject cross-site requests and unapproved WebSocket origins.
+- A23. Grant desktop capabilities per window and exact origin using least privilege.
+- A24. Sanitize model-authored markup at the final DOM insertion boundary.
+- A25. Neutralize control delimiters in untrusted text without rewriting model-generated wire payloads.
+- A26. Route bounded third-party model content through the gateway rather than credentialed browser sources.
+- A27. Hold stream permits until body termination and expire stalled reads.
+- A28. Keep suspension protocols closed and typed so only structural requests alter scheduler state.
+- A29. Restrict embedded navigation to the exact boot origin.
+- A30. Write user-controlled files atomically.
