@@ -259,7 +259,7 @@ isProject: false
 
 <step-2>
 
-### Step 2: Make the pending deque authoritative
+### Step 2: Make the pending deque authoritative [completed]
 
 - Component: Gateway infrastructure
 - Change: In `crates/gateway/src/commands.rs`, make `QueueState.pending` the sole command owner. Store each `Command` in `PendingEntry`, wake one worker with payload-free `Notify`, and remove `QueuedCommand`, the Tokio command channel, `QUEUE_CAPACITY`, transport overflow, and dead channel entries. Preserve debounce, FIFO order, progress, waiter attachment, cancellation, single-worker ownership, and bounded shutdown.

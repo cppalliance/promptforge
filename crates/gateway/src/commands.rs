@@ -2,7 +2,7 @@
 //!
 //! Everything slow the gateway does - the boot-time profile load, profile
 //! switches, config applies, model provisioning and unloads - runs as a
-//! [`Command`] on one worker task draining a bounded channel FIFO, so
+//! [`Command`] on one worker task draining a shared pending deque FIFO, so
 //! downloads never fight each other for bandwidth and the listener stays
 //! live while they run.
 //! Each command reports into its own [`ProgressTree`] on the process hub and
@@ -18,19 +18,12 @@ use std::time::Instant;
 use futures_util::future::BoxFuture;
 use gateway_config::ProfileName;
 use shared_progress::{OperationId, ProgressHub, ProgressTree};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::config_apply::ApplySnapshot;
 use crate::error::GatewayError;
 use crate::{AppState, StatePersistence};
-
-/// Bound on commands waiting to start. Debounce keeps at most one pending
-/// `LoadProfile`, one pending `ApplyConfig`, and one pending
-/// `ProvisionModel` per model, so a full queue means an `UnloadModel`
-/// burst; the sender settles the overflow with [`GatewayError::QueueFull`]
-/// rather than growing memory unboundedly.
-const QUEUE_CAPACITY: usize = 32;
 
 /// The `ApplyConfig` command's display name: the status bar and tray show
 /// it, and the switch's cancellation error names it.
@@ -187,18 +180,13 @@ impl DebounceKey {
     }
 }
 
-/// A command in the channel, carrying its queue id so the worker can find
-/// its pending entry (and skip it when the entry was cancelled away).
-#[derive(Debug)]
-struct QueuedCommand {
-    id: u64,
-    command: Command,
-}
-
-/// One waiting command's queue-side record.
+/// One waiting command's queue-side record. The deque owns the command
+/// itself: there is no separate transport, so a cancelled entry is gone
+/// completely rather than skipped when it surfaces.
 #[derive(Debug)]
 struct PendingEntry {
     id: u64,
+    command: Command,
     key: Option<DebounceKey>,
     label: String,
     queued_at: Instant,
@@ -298,19 +286,19 @@ pub(crate) struct Enqueued {
 pub(crate) type Executor =
     dyn Fn(AppState, Command, ProgressTree) -> BoxFuture<'static, Outcome> + Send + Sync;
 
-/// The gateway's command queue: one bounded channel, one worker task, and
-/// the in-process status the tray and routes read.
+/// The gateway's command queue: one shared pending deque, one worker task,
+/// and the in-process status the tray and routes read.
 #[derive(Debug)]
 pub(crate) struct CommandQueue {
     state: Arc<Mutex<QueueState>>,
-    sender: mpsc::Sender<QueuedCommand>,
-    /// The receiver moves to the one worker; only the original queue value
-    /// (the one `AppState::from_parts` builds) can spawn it.
-    receiver: Mutex<Option<mpsc::Receiver<QueuedCommand>>>,
-    /// Wakes a parked worker on shutdown: the sender set never empties while
-    /// the worker itself holds a state clone, so channel close alone cannot
-    /// end the loop.
-    closed_notify: Arc<tokio::sync::Notify>,
+    /// Wakes the parked worker when a command lands or the queue closes.
+    /// Payload-free: the worker re-reads the pending deque on each wake, so
+    /// one shared `Notify` serves both enqueue and shutdown.
+    notify: Arc<tokio::sync::Notify>,
+    /// Set once the one worker has been spawned; clones share it, so only
+    /// the first [`CommandQueue::spawn_worker`] call across every clone
+    /// starts a worker.
+    worker_taken: Arc<AtomicBool>,
     hub: Arc<ProgressHub>,
 }
 
@@ -318,9 +306,8 @@ impl Clone for CommandQueue {
     fn clone(&self) -> CommandQueue {
         CommandQueue {
             state: Arc::clone(&self.state),
-            sender: self.sender.clone(),
-            receiver: Mutex::new(None),
-            closed_notify: Arc::clone(&self.closed_notify),
+            notify: Arc::clone(&self.notify),
+            worker_taken: Arc::clone(&self.worker_taken),
             hub: Arc::clone(&self.hub),
         }
     }
@@ -330,12 +317,10 @@ impl CommandQueue {
     /// A queue over `hub`, with no worker yet; [`CommandQueue::spawn_worker`]
     /// starts the drain.
     pub(crate) fn new(hub: Arc<ProgressHub>) -> CommandQueue {
-        let (sender, receiver) = mpsc::channel(QUEUE_CAPACITY);
         CommandQueue {
             state: Arc::new(Mutex::new(QueueState::default())),
-            sender,
-            receiver: Mutex::new(Some(receiver)),
-            closed_notify: Arc::new(tokio::sync::Notify::new()),
+            notify: Arc::new(tokio::sync::Notify::new()),
+            worker_taken: Arc::new(AtomicBool::new(false)),
             hub,
         }
     }
@@ -415,22 +400,6 @@ impl CommandQueue {
         let persist = command.persist_flag();
         let tree = self.hub.operation();
         let operation = tree.operation();
-        // `try_send` under the lock, before the debounce side effects:
-        // `shutdown` takes the same lock before closing the channel, so a
-        // close cannot race this send, and a full channel must not cancel
-        // the active command or settle a replaced pending one for a command
-        // that never entered the queue.
-        if let Err(mpsc::error::TrySendError::Full(_) | mpsc::error::TrySendError::Closed(_)) =
-            self.sender.try_send(QueuedCommand { id, command })
-        {
-            drop(tree);
-            let _ = waiter_tx.send(Arc::new(Err(GatewayError::QueueFull)));
-            tracing::warn!(command = %label, "command queue full; command dropped");
-            return Enqueued {
-                operation,
-                outcome: waiter_rx,
-            };
-        }
         if key
             .as_ref()
             .is_some_and(DebounceKey::supersedes_load_profile)
@@ -460,6 +429,7 @@ impl CommandQueue {
         }
         state.pending.push_back(PendingEntry {
             id,
+            command,
             key,
             label,
             queued_at: Instant::now(),
@@ -467,6 +437,10 @@ impl CommandQueue {
             persist,
             waiters: vec![waiter_tx],
         });
+        // Wake after releasing the lock: the permit is stored, so a worker
+        // that re-checks the deque before sleeping cannot miss it.
+        drop(state);
+        self.notify.notify_one();
         Enqueued {
             operation,
             outcome: waiter_rx,
@@ -560,8 +534,8 @@ impl CommandQueue {
     }
 
     /// Removes the waiting command at `index`, settling its waiters as
-    /// cancelled. Returns whether an entry was removed. The command's id
-    /// stays in the channel; the worker skips it when it surfaces.
+    /// cancelled. Returns whether an entry was removed. The deque is the
+    /// sole owner, so the removed command never reaches the worker.
     pub(crate) fn cancel_pending(&self, index: usize) -> bool {
         let entry = self.lock().pending.remove(index);
         let Some(entry) = entry else {
@@ -592,9 +566,9 @@ impl CommandQueue {
             let label = entry.label.clone();
             entry.settle(Err(GatewayError::CommandCancelled(label)));
         }
-        // The notify stores a permit, so a worker parked on `recv` wakes even
-        // though the channel stays open.
-        self.closed_notify.notify_one();
+        // The notify stores a permit, so a worker parked on the empty deque
+        // wakes and observes `closed`.
+        self.notify.notify_one();
     }
 
     /// Spawns the worker task draining the queue, running the production
@@ -624,35 +598,45 @@ impl CommandQueue {
         state: &AppState,
         executor: Arc<Executor>,
     ) -> Option<tokio::task::JoinHandle<()>> {
-        let receiver = self
-            .receiver
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()?;
+        if self.worker_taken.swap(true, Ordering::SeqCst) {
+            return None;
+        }
         let queue = self.clone();
         let state = state.clone();
-        Some(tokio::spawn(worker_loop(queue, state, receiver, executor)))
+        Some(tokio::spawn(worker_loop(queue, state, executor)))
     }
 
-    /// Moves the pending entry `id` into the active slot, returning its
-    /// progress tree. Returns `None` when the entry is gone - cancelled
-    /// while pending, or drained by shutdown - and the worker skips it.
-    fn begin(&self, id: u64, command: &Command) -> Option<ProgressTree> {
+    /// Pops the next pending entry and installs it as the active command in
+    /// one critical section. A shutdown landing between a separate pop and
+    /// activate would drain a deque the entry already left and cancel only
+    /// the previous active token, letting the popped command start
+    /// uncancelled after close. Holding the lock across both means shutdown
+    /// either runs first (the worker observes `closed` and exits) or after
+    /// (it cancels this entry's token as the active command).
+    fn begin_next(&self) -> BeginNext {
         let mut state = self.lock();
-        let position = state.pending.iter().position(|entry| entry.id == id)?;
-        let entry = state.pending.remove(position)?;
+        if state.closed {
+            // Shutdown drained the deque under this same lock, so a closed
+            // queue has nothing left to run.
+            return BeginNext::Exit;
+        }
+        let Some(entry) = state.pending.pop_front() else {
+            return BeginNext::Wait;
+        };
         let tree = entry.tree;
+        let token = entry.command.token();
+        let id = entry.id;
         state.active = Some(ActiveEntry {
             id,
             key: entry.key,
             label: entry.label,
             operation: tree.operation(),
             started_at: Instant::now(),
-            token: command.token(),
+            token,
             persist: entry.persist,
             waiters: entry.waiters,
         });
-        Some(tree)
+        BeginNext::Run(id, entry.command, tree)
     }
 
     /// Clears the active command and settles its waiters, logging the
@@ -714,30 +698,38 @@ impl CommandQueue {
     }
 }
 
-/// The worker loop: one command at a time, FIFO, until the channel closes
-/// or the queue shuts down.
-async fn worker_loop(
-    queue: CommandQueue,
-    state: AppState,
-    mut receiver: mpsc::Receiver<QueuedCommand>,
-    executor: Arc<Executor>,
-) {
+/// What the worker does next, decided by [`CommandQueue::begin_next`] in
+/// one critical section so a shutdown cannot slip between the pop and the
+/// activation.
+enum BeginNext {
+    /// Run this command; it is installed as the active entry.
+    Run(u64, Command, ProgressTree),
+    /// The deque is empty; park until notified.
+    Wait,
+    /// The queue is closed; exit.
+    Exit,
+}
+
+/// The worker loop: one command at a time, FIFO off the shared pending
+/// deque, until the queue shuts down and the deque is empty.
+async fn worker_loop(queue: CommandQueue, state: AppState, executor: Arc<Executor>) {
     loop {
-        let queued = tokio::select! {
-            () = queue.closed_notify.notified() => break,
-            queued = receiver.recv() => match queued {
-                Some(queued) => queued,
-                None => break,
-            },
+        // Lost-wakeup-safe sleep: `enable` registers interest before the
+        // deque is re-checked, so an enqueue or shutdown landing between
+        // the check and the `await` still wakes this worker.
+        let notified = queue.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let (id, command, tree) = match queue.begin_next() {
+            BeginNext::Run(id, command, tree) => (id, command, tree),
+            BeginNext::Wait => {
+                notified.await;
+                continue;
+            }
+            BeginNext::Exit => break,
         };
-        let Some(tree) = queue.begin(queued.id, &queued.command) else {
-            continue;
-        };
-        let outcome = executor(state.clone(), queued.command, tree).await;
-        queue.finish(queued.id, outcome);
-        if queue.lock().closed {
-            break;
-        }
+        let outcome = executor(state.clone(), command, tree).await;
+        queue.finish(id, outcome);
     }
 }
 
@@ -1429,49 +1421,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_full_queue_rejects_the_new_command_without_cancelling_the_active_one() {
-        let state = state();
-        let queue = state.commands.clone();
-        let _worker = state
-            .commands
-            .spawn_worker_with(&state, parking_executor())
-            .expect("worker spawns");
-
-        let active = queue.enqueue(load_profile("alpha"));
-        wait_until("alpha to go active", || queue.active_command().is_some()).await;
-        // Unloads are never debounced, so they fill the channel to its bound.
-        for index in 0..QUEUE_CAPACITY {
-            queue.enqueue(unload(&format!("filler-{index}")));
-        }
-        let rejected = queue.enqueue(load_profile("beta"));
-        let outcome = rejected
-            .outcome
-            .await
-            .expect("the rejected command settles");
-        assert!(
-            matches!(&*outcome, Err(GatewayError::QueueFull)),
-            "a full queue rejects the new command: {outcome:?}"
-        );
-        assert_eq!(
-            queue.active_command().expect("active").name,
-            "load-profile: alpha",
-            "the active command was not cancelled for a command that never queued"
-        );
-        assert!(
-            queue
-                .pending_commands()
-                .iter()
-                .all(|entry| entry.name != "load-profile: beta"),
-            "the rejected command holds no pending slot"
-        );
-
-        queue.cancel_active();
-        let outcome = active.outcome.await.expect("alpha settles");
-        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
-        queue.shutdown();
-    }
-
-    #[tokio::test]
     async fn a_persisting_duplicate_upgrades_the_pending_boot_command() {
         let state = state();
         let queue = state.commands.clone();
@@ -1513,6 +1462,171 @@ mod tests {
             "the attached duplicate's persist flag reached the command body"
         );
         queue.shutdown();
+    }
+
+    /// An executor that records each command's label in run order, then
+    /// settles it Ok.
+    fn recording_executor(order: &Arc<Mutex<Vec<String>>>) -> Arc<Executor> {
+        Arc::new({
+            let order = Arc::clone(order);
+            move |_state, command: Command, _tree| {
+                let order = Arc::clone(&order);
+                Box::pin(async move {
+                    let label = command.label();
+                    order
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(label.clone());
+                    Ok(label)
+                }) as BoxFuture<'static, Outcome>
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn the_worker_drains_more_than_thirty_two_commands_in_fifo_order() {
+        let state = state();
+        let queue = state.commands.clone();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        // The pending deque is unbounded: every command waits for the one
+        // worker, well past the old channel's capacity.
+        let handles: Vec<Enqueued> = (0..40)
+            .map(|index| queue.enqueue(unload(&format!("m{index}"))))
+            .collect();
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, recording_executor(&order))
+            .expect("worker spawns");
+
+        for handle in handles {
+            let outcome = handle.outcome.await.expect("each command settles");
+            assert!(outcome.is_ok(), "no command is rejected: {outcome:?}");
+        }
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+
+        let expected: Vec<String> = (0..40)
+            .map(|index| format!("unload-model: m{index}"))
+            .collect();
+        assert_eq!(
+            order
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_slice(),
+            expected.as_slice(),
+            "the deque holds every command and the worker drains them FIFO"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_queue_spawns_at_most_one_worker() {
+        let state = state();
+        let queue = state.commands.clone();
+        let first = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("the first worker spawns");
+        assert!(
+            state
+                .commands
+                .spawn_worker_with(&state, parking_executor())
+                .is_none(),
+            "a second worker is refused"
+        );
+        queue.shutdown();
+        first.await.expect("the worker exits on shutdown");
+    }
+
+    #[tokio::test]
+    async fn shutdown_on_an_idle_queue_stops_the_parked_worker() {
+        let state = state();
+        let queue = state.commands.clone();
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+        // Let the worker park on the empty deque.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        queue.shutdown();
+        tokio::time::timeout(Duration::from_secs(10), worker)
+            .await
+            .expect("the parked worker wakes and exits")
+            .expect("the worker task joins");
+    }
+
+    #[tokio::test]
+    async fn an_enqueue_wakes_the_parked_worker() {
+        let state = state();
+        let queue = state.commands.clone();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, recording_executor(&order))
+            .expect("worker spawns");
+        // Let the worker park before the command lands.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        let handle = queue.enqueue(unload("m"));
+        let outcome = handle.outcome.await.expect("the command settles");
+        assert!(
+            outcome.is_ok(),
+            "the parked worker woke and ran it: {outcome:?}"
+        );
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    #[tokio::test]
+    async fn an_enqueue_racing_shutdown_around_the_workers_sleep_still_settles() {
+        let state = state();
+        let queue = state.commands.clone();
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, parking_executor())
+            .expect("worker spawns");
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        let handle = queue.enqueue(load_profile("alpha"));
+        queue.shutdown();
+        let outcome = handle.outcome.await.expect("the command settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "whether drained or started, shutdown settles it as cancelled: {outcome:?}"
+        );
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_pending_command_never_reaches_the_worker() {
+        let state = state();
+        let queue = state.commands.clone();
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let cancelled = queue.enqueue(unload("a"));
+        let kept = queue.enqueue(unload("b"));
+        assert!(queue.cancel_pending(0), "the first entry leaves the deque");
+        let worker = state
+            .commands
+            .spawn_worker_with(&state, recording_executor(&order))
+            .expect("worker spawns");
+
+        let outcome = cancelled.outcome.await.expect("the cancelled command settles");
+        assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
+        let outcome = kept.outcome.await.expect("the kept command settles");
+        assert!(outcome.is_ok(), "the kept command runs: {outcome:?}");
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        assert_eq!(
+            order
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_slice(),
+            ["unload-model: b"],
+            "the worker never saw the cancelled entry"
+        );
     }
 
     #[tokio::test]
