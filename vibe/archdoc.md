@@ -16,33 +16,11 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 ## Invariants
 
-- A1. Reuse existing Lua, store, catalog, configuration, and protocol mechanisms before adding new machinery.
-- A2. Give each credential, connection record, lifecycle, and persisted state exactly one owning subsystem.
-- A3. Keep dependency direction explicit: higher layers depend on lower abstractions, never the reverse.
-- A4. Inject only explicitly named capabilities and reject unknown capabilities before execution.
-- A5. Bound every loop, queue, wait, stream, retry, and tool invocation.
-- A6. Validate capabilities and semantics before queue admission or side effects.
-- A7. Publish persisted configuration and live state atomically.
-- A8. On failure or cancellation, preserve the last valid state and expose pending work explicitly.
-- A9. Transfer durable state only through typed payloads or the run-scoped store.
-- A10. Give each section, task, and fan-out arm fresh execution context.
-- A11. Propagate cancellation to descendants only, never ancestors or siblings.
-- A12. Keep control-plane readiness independent from slow model provisioning.
-- A13. Preserve usable routing during preparation and exclude inference only during bounded cutover.
-- A14. Fail visibly when budgets, capabilities, dialects, or provisioning requirements are unsatisfied.
-- A15. Keep event history lossless and project it into model context deliberately.
-- A16. Revalidate model-selected network destinations after DNS resolution and every redirect.
-- A17. Deny private network destinations by default.
-- A18. Canonicalize file paths and confine them to explicitly granted roots.
-- A19. Keep vendor and remote-service credentials inside the gateway.
-- A20. Let only the owning service create or mutate its connection record.
-- A21. Require clients to validate process identity, health, and authority before attachment.
-- A22. Reject cross-site requests and unapproved WebSocket origins.
-- A23. Grant desktop capabilities per window and exact origin using least privilege.
-- A24. Sanitize model-authored markup at the final DOM insertion boundary.
-- A25. Neutralize control delimiters in untrusted text without rewriting model-generated wire payloads.
-- A26. Route bounded third-party model content through the gateway rather than credentialed browser sources.
-- A27. Hold stream permits until body termination and expire stalled reads.
-- A28. Keep suspension protocols closed and typed so only structural requests alter scheduler state.
-- A29. Restrict embedded navigation to the exact boot origin.
-- A30. Write user-controlled files atomically.
+- A1. The Gateway binds its HTTP listener and reports readiness before it starts model downloads or model processes; slow provisioning runs afterward through the Gateway command queue.
+- A2. Vendor credentials remain inside the Gateway process; Workshop and CLI reach credentialed model providers only through server-side Gateway relays that never expose vendor bearer keys to browser or Lua code.
+- A3. `promptforge-webfetch` revalidates every model- or tool-selected URL and resolved address on each redirect, and denies non-global addresses unless fetch configuration grants an exact host-and-address exception.
+- A4. The Workshop server rejects cross-site requests, non-loopback Host values, and WebSocket origins outside its allowed loopback origins; the Workshop webview accepts in-view navigation only to its exact boot origin.
+- A5. During a Gateway profile switch, the previous routing table serves until a bounded in-flight drain completes; after cutover, a selected model that is not ready returns an explicit loading error.
+- A6. The executor neutralizes chat-template control delimiters in untrusted tool and Lua text, but never rewrites assistant replay or tool-call wire payloads.
+- A7. The Workshop shell grants each Tauri capability to one named window and the in-process server's exact bound origin, never a wildcard port.
+- A8. The Lua VM boundary accepts scheduler state changes only from typed `Request` variants yielded by the installed shim; direct or malformed yields fail without changing scheduler state.
