@@ -187,6 +187,7 @@ async fn mounted_route_drives_scripted_wire_ownership_errors_and_privacy() {
             .await
             .expect("interim completion observer joins")
         );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     send(
         &mut socket,
@@ -332,6 +333,7 @@ async fn standard_interims_emit_only_appendable_agreed_deltas() {
             .await
             .expect("interim completion observer joins")
         );
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     send(
         &mut socket,
