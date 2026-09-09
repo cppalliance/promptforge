@@ -168,7 +168,7 @@ Components, in dependency order:
 - Preflight before side effects (A6): extract the kind mapping into a side-effect-free `serve_mode_for(kind) -> Result<ServeMode, LocalError>`; `start_impl` runs it at the top of the per-model closure, before `ensure_model_with_cancellation` downloads anything and before `maybe_write_sidecar` writes metadata; `provision_artifacts_impl` checks every model's kind before provisioning the shared server or any model, so an all-speech profile fails without a single side effect; a mixed profile keeps supported-model progress while returning a per-model failure for each unsupported kind.
 - Tests: the speech arm errors rather than launching as chat; an all-speech profile touches neither the server provisioner nor the model store; a mixed profile provisions only supported models.
 
-### Step 3: SpeechRequest wire type
+### Step 3: SpeechRequest wire type [completed]
 
 - `crates/shared-protocol/src/wire.rs`: add `SpeechRequest` beside `EmbeddingRequest` with `validate() -> Result<(), &'static str>` mirroring `ChatRequest::validate`; `voice` is an untagged string-or-`{"id"}` enum; `response_format` is a closed enum with `#[serde(default)]` resolving an omitted field to `mp3`, so the pin is structural and no route can forget it; a flattened `rest` with `RESERVED` naming the seven known fields preserves verbatim passthrough.
 - Tests: the wire validation table (empty `model`, empty `input`, over-cap `input` past 4096 characters, out-of-range `speed`, unknown `response_format`), the intentional rejection of Together's `raw` (the closed enum stays unrepresentable, so the exclusion is pinned rather than incidental), the serde-default `mp3` resolution, and verbatim passthrough of unnamed fields.
