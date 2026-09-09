@@ -15,8 +15,7 @@ async fn live_h1_infer_runs_once() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let out = super::super::run(
         &prompt,
@@ -90,8 +89,7 @@ async fn shared_function_resolves_host_globals_when_called() {
         ## Result\n\n\
         ```lua\nreturn read_args()\n```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let out = super::super::run(
         &prompt,
@@ -111,8 +109,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     // The shared library replays as each section's first chunk with the full
     // host environment installed, so top-level shared code may use `store`,
     // `log`, and `args` at load.
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let store = StoreRef::memory();
     let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 1\n---\n\n\
@@ -179,8 +176,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
          ```lua\nreturn binding_names()\n```\n"
     );
     let prompt = parse(&source);
-    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-        .expect("tool picker must build");
+    let picker = build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default());
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
     let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
@@ -216,8 +212,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
         ## Result\n\n\
         ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let out = super::super::run(
         &prompt,
@@ -265,8 +260,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let recorder = Arc::new(Recorder::default());
 
@@ -319,8 +313,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         return writer:infer('must cancel')\n\
         ```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let recorder = Arc::new(Recorder::default());
     let cancel = crate::cancel::CancelHandle::new();
@@ -432,8 +425,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
          ```\n"
     );
     let prompt = parse(&source);
-    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-        .expect("tool picker must build");
+    let picker = build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default());
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
     let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
@@ -468,8 +460,7 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
         return reply\n\
         ```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let out = super::super::run(
         &prompt,
@@ -519,8 +510,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
         return 'ok'\n\
         ```\n";
     let prompt = parse(source);
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
+    let picker = empty_test_picker();
     let models = test_model_catalog();
     let out = super::super::run(
         &prompt,

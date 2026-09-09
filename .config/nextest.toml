@@ -1,0 +1,25 @@
+# Nextest configuration for PromptForge workspace.
+
+[profile.default]
+# Report slow tests after 60s and terminate if hung.
+slow-timeout = { period = "60s", terminate-after = 3 }
+# Cleanly terminate lingering background tasks/threads after test returns.
+leak-timeout = "250ms"
+
+[profile.ci]
+# CI profile settings: immediate failure reporting and timeout controls.
+slow-timeout = { period = "60s", terminate-after = 3 }
+leak-timeout = "250ms"
+failure-output = "immediate-final"
+
+[test-groups]
+# Limit concurrency for tensor/FFI-heavy suites to prevent core thrashing.
+heavy = { max-threads = 2 }
+
+[[profile.default.overrides]]
+filter = 'package(promptforge-tool-picker) | package(gateway-stt-backend-whisper) | package(gateway-stt)'
+test-group = 'heavy'
+
+[[profile.ci.overrides]]
+filter = 'package(promptforge-tool-picker) | package(gateway-stt-backend-whisper) | package(gateway-stt)'
+test-group = 'heavy'

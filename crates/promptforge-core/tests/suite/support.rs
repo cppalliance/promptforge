@@ -48,8 +48,13 @@ pub(super) async fn run(
     store: &StoreRef,
     opts: RunOptions,
 ) -> Result<String, RunError> {
-    let picker = ToolPicker::build(Catalog::default(), Config::default())
-        .expect("empty fixture picker must build");
+    let picker = ToolPicker::build_with_model(
+        &promptforge_tool_picker::Model::dummy(),
+        Catalog::default(),
+        Config::default(),
+        None,
+    )
+    .expect("empty fixture picker must build");
     let models = ModelCatalog::empty();
     let tools = ToolCatalog::new(tools).expect("fixture tools are unique");
     run_core(

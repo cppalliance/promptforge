@@ -33,7 +33,7 @@ use crate::error::{ModelLoadError, QueryError};
 #[non_exhaustive]
 pub struct Model {
     /// The loaded encoder, shared cheaply across clones and pickers.
-    encoder: Arc<Encoder>,
+    encoder: Option<Arc<Encoder>>,
 }
 
 impl Model {
@@ -69,13 +69,54 @@ impl Model {
     #[must_use = "loading the model is the expensive step; keep the handle to reuse it"]
     pub fn load_with_progress(progress: Option<&ProgressHandle>) -> Result<Self, ModelLoadError> {
         Ok(Self {
-            encoder: Arc::new(Encoder::load_with_progress(progress)?),
+            encoder: Some(Arc::new(Encoder::load_with_progress(progress)?)),
         })
+    }
+
+    /// Creates an empty dummy model that performs no weight loading or inference.
+    ///
+    /// Suitable for test fixtures with empty catalogs or where semantic
+    /// resolution is not exercised.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn dummy() -> Self {
+        Self { encoder: None }
     }
 
     /// Embeds one text with this model, for crate-internal indexing.
     pub(crate) fn embed(&self, text: &str) -> Result<Vec<f32>, QueryError> {
-        self.encoder.embed(text)
+        if let Some(encoder) = &self.encoder {
+            encoder.embed(text)
+        } else {
+            let mut vector = vec![0.0f32; crate::embed::EMBEDDING_DIMENSIONS];
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                vector[0] = 1.0;
+                return Ok(vector);
+            }
+            for word in trimmed.split_whitespace() {
+                let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+                for byte in word.as_bytes() {
+                    hash = (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "embedding dimensions fit in usize"
+                )]
+                let idx = (hash % (crate::embed::EMBEDDING_DIMENSIONS as u64)) as usize;
+                let sign = if (hash >> 32) & 1 == 0 { 1.0 } else { -1.0 };
+                vector[idx] += sign;
+            }
+            let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if norm <= 0.0 || !norm.is_finite() {
+                vector[0] = 1.0;
+            } else {
+                for v in &mut vector {
+                    *v /= norm;
+                }
+            }
+            Ok(vector)
+        }
     }
 
     /// Whether two handles share the same loaded encoder allocation.
@@ -87,7 +128,11 @@ impl Model {
     #[doc(hidden)]
     #[must_use]
     pub fn shares_encoder(&self, other: &Model) -> bool {
-        Arc::ptr_eq(&self.encoder, &other.encoder)
+        match (&self.encoder, &other.encoder) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        }
     }
 }
 
@@ -136,5 +181,18 @@ mod tests {
             saw_finished |= matches!(event.state, EventState::Finished { ok: true });
         }
         assert!(saw_finished, "completion emits Finished");
+    }
+
+    #[test]
+    fn dummy_model_shares_encoder_and_embeds_deterministically() {
+        let dummy1 = Model::dummy();
+        let dummy2 = Model::dummy();
+        assert!(dummy1.shares_encoder(&dummy2));
+        let vec1 = dummy1.embed("some text").expect("embed succeeds");
+        let vec2 = dummy2.embed("some text").expect("embed succeeds");
+        assert_eq!(vec1, vec2);
+        assert_eq!(vec1.len(), crate::embed::EMBEDDING_DIMENSIONS);
+        let norm = vec1.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5);
     }
 }

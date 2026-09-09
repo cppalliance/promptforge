@@ -278,8 +278,7 @@ async fn run(
         .with_similarity_floor(0.0)
         .and_then(|config| config.with_margin(0.0))
         .expect("test thresholds are in the supported domain");
-    let picker = ToolPicker::build_with_model(shared_test_model(), catalog, config, None)
-        .expect("test picker must build");
+    let picker = build_test_picker(catalog, config);
     let tool_catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
     let mut run_config = RunConfig::new(opts.execution).observer(opts.observer);
     if let Some(client) = opts.client {
@@ -299,7 +298,32 @@ async fn run(
     .map_err(Error::from)
 }
 
-fn shared_test_model() -> &'static promptforge_tool_picker::Model {
+pub(super) fn empty_test_picker() -> ToolPicker {
+    ToolPicker::build_with_model(
+        &promptforge_tool_picker::Model::dummy(),
+        Catalog::default(),
+        PickerConfig::default(),
+        None,
+    )
+    .expect("empty test picker must build")
+}
+
+pub(super) fn build_test_picker(catalog: Catalog, config: PickerConfig) -> ToolPicker {
+    if catalog.is_empty() {
+        ToolPicker::build_with_model(
+            &promptforge_tool_picker::Model::dummy(),
+            catalog,
+            config,
+            None,
+        )
+        .expect("empty test picker must build")
+    } else {
+        ToolPicker::build_with_model(shared_test_model(), catalog, config, None)
+            .expect("test picker must build")
+    }
+}
+
+pub(super) fn shared_test_model() -> &'static promptforge_tool_picker::Model {
     static MODEL: std::sync::OnceLock<promptforge_tool_picker::Model> = std::sync::OnceLock::new();
     MODEL.get_or_init(|| promptforge_tool_picker::Model::load().expect("the test model loads"))
 }
@@ -311,16 +335,7 @@ async fn run_with_config(
     test: &TestPrompt,
     configure: impl FnOnce(RunConfig) -> RunConfig,
 ) -> std::result::Result<String, RunError> {
-    let picker = ToolPicker::build_with_model(
-        shared_test_model(),
-        Catalog::new(Vec::new()),
-        PickerConfig::default()
-            .with_similarity_floor(0.0)
-            .and_then(|config| config.with_margin(0.0))
-            .expect("test thresholds are in the supported domain"),
-        None,
-    )
-    .expect("test picker must build");
+    let picker = empty_test_picker();
     super::run(
         &test.prompt,
         "",
