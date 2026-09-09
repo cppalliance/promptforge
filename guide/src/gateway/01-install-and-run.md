@@ -36,7 +36,7 @@ On a desktop system the gateway's face is the system tray. The icon shows the ga
 
 For servers and CI, `--no-tray` keeps the plain headless loop. In a tray-less environment, `--print-url` prints the Settings URL to stdout once the gateway is bound. `--browser` opens the Settings page in your default browser once bound; the installer uses it on a Gateway-only install's first run. Launching `promptforge-gateway` while one is already running never starts a second copy: it opens the running gateway's Settings page instead.
 
-After every successful bind the gateway writes a connection file (`gateway.json` in the run directory under the state directory) carrying its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
+After every successful bind the gateway writes a gateway discovery file (`gateway.json` in the run directory under the state directory) carrying its port, bearer key, and process id. PromptForge components read that file to attach to the running gateway instead of starting a second one, and a clean shutdown removes it.
 
 ## Check that it is healthy
 
@@ -88,7 +88,7 @@ Startup failures appear on stderr with the full cause chain: one `error:` line f
 
 ## Inspect a failed run
 
-When a gateway run fails before it can serve, `promptforge-gateway diagnostics` finds the evidence without any config knowledge. It prints a read-only JSON report: the state directory, the resolved config path and whether it exists, the current and retained log paths and which exist, the connection file, whether a gateway is running, and the version. It never serves, rotates a log, parses a config, or mutates the state directory, and it never prints secrets - no bearer key, environment value, config content, or log content. The generated config points at it in a comment.
+When a gateway run fails before it can serve, `promptforge-gateway diagnostics` finds the evidence without any config knowledge. It prints a read-only JSON report: the state directory, the resolved config path and whether it exists, the current and retained log paths and which exist, the gateway discovery file, whether a gateway is running, and the version. It never serves, rotates a log, parses a config, or mutates the state directory, and it never prints secrets - no bearer key, environment value, config content, or log content. The generated config points at it in a comment.
 
 ## Stop the gateway
 

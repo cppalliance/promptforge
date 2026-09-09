@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use shared_sidecar::{ConnectionFile, Resolution, SidecarError};
+use shared_sidecar::{GatewayDiscoveryFile, Resolution, SidecarError};
 
 use super::boot as gateway_boot;
 
@@ -25,16 +25,16 @@ fn probe_own_image(run_dir: &Path) -> Result<Resolution, SidecarError> {
     shared_sidecar::resolve_for_test(run_dir, &image)
 }
 
-/// Plants an unreadable connection-file path before resolving.
+/// Plants an unreadable discovery-file path before resolving.
 fn probe_read_failure(run_dir: &Path) -> Result<Resolution, SidecarError> {
-    std::fs::create_dir(shared_sidecar::connection_file_path(run_dir))
+    std::fs::create_dir(shared_sidecar::gateway_discovery_file_path(run_dir))
         .expect("plant the unreadable file");
     probe_own_image(run_dir)
 }
 
-/// A connection file pointing at the test process itself.
-fn live_file(port: u16, api_key: &str) -> ConnectionFile {
-    ConnectionFile {
+/// A gateway discovery file pointing at the test process itself.
+fn live_file(port: u16, api_key: &str) -> GatewayDiscoveryFile {
+    GatewayDiscoveryFile {
         port,
         api_key: api_key.to_owned(),
         pid: std::process::id(),

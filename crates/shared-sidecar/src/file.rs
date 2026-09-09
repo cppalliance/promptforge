@@ -1,5 +1,5 @@
-//! The `gateway.json` connection-file type: what the gateway writes after
-//! a successful bind and what readers validate before attaching.
+//! The `gateway.json` gateway-discovery-file type: what the gateway writes
+//! after a successful bind and what readers validate before attaching.
 
 use std::fmt;
 use std::fs;
@@ -10,15 +10,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::atomic::write_atomic_owner_only;
 use crate::error::SidecarError;
-use crate::paths::connection_file_path;
+use crate::paths::gateway_discovery_file_path;
 
-/// The on-disk connection file naming a running gateway's loopback port
-/// and bearer key.
+/// The on-disk gateway discovery file naming a running gateway's loopback
+/// port and bearer key.
 ///
 /// Readers must tolerate unknown fields: a newer gateway may write fields
 /// an older reader does not know, and serde ignores them.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConnectionFile {
+pub struct GatewayDiscoveryFile {
     /// The gateway's bound port; readers connect to `127.0.0.1:{port}`.
     pub port: u16,
     /// The bearer key the gateway expects.
@@ -33,10 +33,10 @@ pub struct ConnectionFile {
     pub started_at: String,
 }
 
-impl fmt::Debug for ConnectionFile {
+impl fmt::Debug for GatewayDiscoveryFile {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ConnectionFile")
+            .debug_struct("GatewayDiscoveryFile")
             .field("port", &self.port)
             .field("api_key", &"[REDACTED]")
             .field("pid", &self.pid)
@@ -47,7 +47,7 @@ impl fmt::Debug for ConnectionFile {
     }
 }
 
-impl ConnectionFile {
+impl GatewayDiscoveryFile {
     /// Whether the connection names one particular Gateway boot.
     pub(crate) fn has_boot_identity(&self) -> bool {
         self.epoch != 0 && !self.started_at.trim().is_empty()
@@ -74,7 +74,8 @@ impl ConnectionFile {
         None
     }
 
-    /// Reads and validates the connection file in `run_dir`, returning
+    /// Reads and validates the gateway discovery file in `run_dir`,
+    /// returning
     /// `None` when no file exists.
     ///
     /// # Errors
@@ -85,12 +86,12 @@ impl ConnectionFile {
     /// # Examples
     /// ```
     /// # let dir = tempfile::tempdir()?;
-    /// let file = shared_sidecar::ConnectionFile::read(dir.path())?;
+    /// let file = shared_sidecar::GatewayDiscoveryFile::read(dir.path())?;
     /// assert!(file.is_none());
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn read(run_dir: &Path) -> Result<Option<ConnectionFile>, SidecarError> {
-        let path = connection_file_path(run_dir);
+    pub fn read(run_dir: &Path) -> Result<Option<GatewayDiscoveryFile>, SidecarError> {
+        let path = gateway_discovery_file_path(run_dir);
         let raw = match fs::read_to_string(&path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -101,7 +102,7 @@ impl ConnectionFile {
                 });
             }
         };
-        let file: ConnectionFile =
+        let file: GatewayDiscoveryFile =
             serde_json::from_str(&raw).map_err(|source| SidecarError::Parse {
                 path: path.clone(),
                 source,
@@ -115,7 +116,8 @@ impl ConnectionFile {
         Ok(Some(file))
     }
 
-    /// Writes the connection file into `run_dir`, creating the directory
+    /// Writes the gateway discovery file into `run_dir`, creating the
+    /// directory
     /// when missing. The write is atomic (temp sibling, sync, rename) and
     /// the file lands owner-only; see the crate docs for the permission
     /// contract.
@@ -127,7 +129,7 @@ impl ConnectionFile {
     /// serialized, and [`SidecarError::Write`] when the atomic write
     /// fails.
     pub fn write_to(&self, run_dir: &Path) -> Result<(), SidecarError> {
-        let path = connection_file_path(run_dir);
+        let path = gateway_discovery_file_path(run_dir);
         if let Some(reason) = self.validation_error() {
             return Err(SidecarError::Invalid {
                 path,
@@ -145,7 +147,7 @@ impl ConnectionFile {
     }
 }
 
-/// Removes the connection file in `run_dir` when it still belongs to
+/// Removes the gateway discovery file in `run_dir` when it still belongs to
 /// process `pid`, so a shutting-down gateway withdraws itself from
 /// discovery but can never delete a replacement's file. A missing file is
 /// not an error; an unreadable or foreign file is left alone for the next
@@ -155,11 +157,11 @@ impl ConnectionFile {
 /// Returns [`SidecarError::Remove`] when the file is this process's own
 /// but cannot be removed.
 pub fn remove_if_mine(run_dir: &Path, pid: u32) -> Result<(), SidecarError> {
-    let path = connection_file_path(run_dir);
+    let path = gateway_discovery_file_path(run_dir);
     match fs::read_to_string(&path) {
         Ok(raw) => {
-            let owned =
-                serde_json::from_str::<ConnectionFile>(&raw).is_ok_and(|file| file.pid == pid);
+            let owned = serde_json::from_str::<GatewayDiscoveryFile>(&raw)
+                .is_ok_and(|file| file.pid == pid);
             if !owned {
                 return Ok(());
             }
@@ -181,8 +183,8 @@ pub fn remove_if_mine(run_dir: &Path, pid: u32) -> Result<(), SidecarError> {
 mod tests {
     use super::*;
 
-    fn valid_file() -> ConnectionFile {
-        ConnectionFile {
+    fn valid_file() -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port: 8081,
             api_key: "key".to_owned(),
             pid: 4242,
@@ -193,10 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn the_connection_file_round_trips_json() {
+    fn the_gateway_discovery_file_round_trips_json() {
         let file = valid_file();
         let json = serde_json::to_string(&file).expect("serialize");
-        let back: ConnectionFile = serde_json::from_str(&json).expect("deserialize");
+        let back: GatewayDiscoveryFile = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(file, back);
     }
 
@@ -223,7 +225,8 @@ mod tests {
     #[test]
     fn unknown_fields_are_tolerated_for_forward_compatibility() {
         let json = r#"{"port":8081,"api_key":"k","pid":1,"epoch":0,"version":"0","started_at":"","future":true}"#;
-        let file: ConnectionFile = serde_json::from_str(json).expect("unknown fields ignored");
+        let file: GatewayDiscoveryFile =
+            serde_json::from_str(json).expect("unknown fields ignored");
         assert_eq!(file.port, 8081);
     }
 
@@ -250,14 +253,14 @@ mod tests {
     #[test]
     fn read_returns_none_when_no_file_exists() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        assert_eq!(ConnectionFile::read(dir.path()).expect("read"), None);
+        assert_eq!(GatewayDiscoveryFile::read(dir.path()).expect("read"), None);
     }
 
     #[test]
     fn read_rejects_corrupt_json() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         fs::write(dir.path().join("gateway.json"), b"not json").expect("write fixture");
-        let error = ConnectionFile::read(dir.path()).expect_err("corrupt JSON must fail");
+        let error = GatewayDiscoveryFile::read(dir.path()).expect_err("corrupt JSON must fail");
         assert!(
             matches!(error, SidecarError::Parse { .. }),
             "a corrupt file is a parse error: {error}"
@@ -271,7 +274,7 @@ mod tests {
         file.port = 0;
         let json = serde_json::to_string(&file).expect("serialize");
         fs::write(dir.path().join("gateway.json"), json).expect("write fixture");
-        let error = ConnectionFile::read(dir.path()).expect_err("an invalid file must fail");
+        let error = GatewayDiscoveryFile::read(dir.path()).expect_err("an invalid file must fail");
         assert!(
             matches!(error, SidecarError::Invalid { .. }),
             "a zero port is a validation error: {error}"

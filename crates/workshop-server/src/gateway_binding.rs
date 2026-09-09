@@ -243,11 +243,11 @@ impl GatewayBinding {
 /// files cannot cross the publication boundary:
 ///
 /// ```compile_fail
-/// use shared_sidecar::ConnectionFile;
+/// use shared_sidecar::GatewayDiscoveryFile;
 ///
 /// # fn publish(
 /// #     updater: &workshop_server::GatewayUpdater,
-/// #     raw: &ConnectionFile,
+/// #     raw: &GatewayDiscoveryFile,
 /// # ) -> Result<(), workshop_server::GatewayPublicationError> {
 /// updater.replace_sidecar(raw)
 /// # }

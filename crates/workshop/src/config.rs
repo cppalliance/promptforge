@@ -8,7 +8,7 @@
 //! (the shell drives its own window). A discovered `workshop.toml` still
 //! owns the `[gateway]` connection settings and the state and
 //! agent-program paths; the gateway endpoint itself resolves inside the
-//! server, connection file first, explicit config second.
+//! server, gateway discovery file first, explicit config second.
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +30,7 @@ const SHELL_BIND: &str = "127.0.0.1:0";
 /// settings; the listener settings are forced to the shell's own. With
 /// no file, the default config anchors its state in the profile's
 /// `.promptforge` directory and carries no explicit gateway, so endpoint
-/// resolution attaches through the gateway's connection file or fails
+/// resolution attaches through the gateway's gateway discovery file or fails
 /// plainly.
 ///
 /// # Errors
@@ -93,7 +93,7 @@ fn shape_for_shell(config: &mut Config) {
 }
 
 /// The no-file configuration: no explicit gateway (endpoint resolution
-/// attaches through the connection file or fails plainly), with the
+/// attaches through the gateway discovery file or fails plainly), with the
 /// state and agent-program paths anchored at the profile directory.
 fn default_config(home: Option<&Path>) -> Config {
     let mut config = Config {

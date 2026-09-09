@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use shared_sidecar::{
-    ConnectionFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
+    GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError, ValidatedConnection,
 };
 use workshop_server::Config;
 
@@ -22,7 +22,7 @@ pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
 /// Budget for the launch race and the launched Gateway readiness wait.
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Delay between polls for the launched Gateway connection file.
+/// Delay between polls for the launched Gateway discovery file.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[cfg(windows)]
@@ -40,8 +40,8 @@ const WINDOWS_BREAKAWAY_CREATION_FLAGS: u32 =
 /// What the boot decision concluded.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum GatewayPlan {
-    /// A live connection file exists.
-    Attach(ConnectionFile),
+    /// A live gateway discovery file exists.
+    Attach(GatewayDiscoveryFile),
     /// No live file exists and a sibling Gateway can be launched.
     Launch(PathBuf),
     /// Explicit configuration is the only available endpoint.
@@ -55,11 +55,11 @@ pub(super) enum GatewayPlan {
 #[derive(Debug)]
 pub(super) enum RecoveryLaunch {
     /// A race winner had already published a live Gateway.
-    Attached(ConnectionFile),
-    /// This process spawned a child and observed a connection file.
+    Attached(GatewayDiscoveryFile),
+    /// This process spawned a child and observed a gateway discovery file.
     Launched {
         child_pid: u32,
-        file: ConnectionFile,
+        file: GatewayDiscoveryFile,
     },
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn ensure_gateway(config: &Config) -> anyhow::Result<GatewayAttachmen
 }
 
 /// Retains the selected process proof instead of reducing it to file fields.
-fn validated_attachment(file: ConnectionFile) -> anyhow::Result<GatewayAttachment> {
+fn validated_attachment(file: GatewayDiscoveryFile) -> anyhow::Result<GatewayAttachment> {
     ValidatedConnection::validate(file)
         .map(GatewayAttachment::Sidecar)
         .context("validate the selected gateway process identity")
@@ -127,7 +127,7 @@ pub(super) fn plan_gateway(
         Ok(Resolution::Attach(file)) => return GatewayPlan::Attach(file),
         Ok(_) => {}
         Err(error) => {
-            eprintln!("could not resolve the gateway connection file: {error}");
+            eprintln!("could not resolve the gateway discovery file: {error}");
         }
     }
     match sibling_gateway(exe_dir) {
@@ -171,7 +171,10 @@ fn launch_and_attach(run_dir: &Path, exe: &Path) -> anyhow::Result<RecoveryLaunc
 }
 
 /// Waits for the launched Gateway to publish a validated connection.
-fn wait_for_launched_file(run_dir: &Path, timeout: Duration) -> anyhow::Result<ConnectionFile> {
+fn wait_for_launched_file(
+    run_dir: &Path,
+    timeout: Duration,
+) -> anyhow::Result<GatewayDiscoveryFile> {
     wait_for_launched_file_with(run_dir, timeout, shared_sidecar::resolve)
 }
 
@@ -180,13 +183,13 @@ pub(super) fn wait_for_launched_file_with<Resolve>(
     run_dir: &Path,
     timeout: Duration,
     mut resolve: Resolve,
-) -> anyhow::Result<ConnectionFile>
+) -> anyhow::Result<GatewayDiscoveryFile>
 where
     Resolve: FnMut(&Path) -> Result<Resolution, SidecarError>,
 {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Ok(Some(file)) = ConnectionFile::read(run_dir) {
+        if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let url = format!("http://127.0.0.1:{}", file.port);
             shared_sidecar::wait_for_health(&url, remaining)
@@ -197,7 +200,7 @@ where
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
-                "the launched gateway wrote no validated connection file within {timeout:?}"
+                "the launched gateway wrote no validated gateway discovery file within {timeout:?}"
             );
         }
         std::thread::sleep(POLL_INTERVAL);

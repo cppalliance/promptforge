@@ -49,7 +49,8 @@ fn spawn_at_ownership_rendezvous(
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        !shared_sidecar::connection_file_path(&home.join(".promptforge").join("run")).exists(),
+        !shared_sidecar::gateway_discovery_file_path(&home.join(".promptforge").join("run"))
+            .exists(),
         "neither process can acquire ownership or publish before release"
     );
     std::fs::write(&release, b"release").expect("release both ownership contenders");
@@ -59,11 +60,11 @@ fn spawn_at_ownership_rendezvous(
 fn wait_for_connection(
     run_dir: &std::path::Path,
     timeout: Duration,
-) -> shared_sidecar::ConnectionFile {
+) -> shared_sidecar::GatewayDiscoveryFile {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if let Some(connection) =
-            shared_sidecar::ConnectionFile::read(run_dir).expect("read the connection file")
+        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(run_dir)
+            .expect("read the gateway discovery file")
         {
             return connection;
         }
@@ -79,7 +80,7 @@ fn wait_for_connection(
 fn assert_exactly_one_process_owns(
     first: &mut GatewayProcess,
     second: &mut GatewayProcess,
-    connection: &shared_sidecar::ConnectionFile,
+    connection: &shared_sidecar::GatewayDiscoveryFile,
 ) -> bool {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
@@ -392,8 +393,8 @@ fn headless_serve_bookends_the_log_file() {
         .expect("the gateway binary spawns");
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let connection = loop {
-        if let Some(file) =
-            shared_sidecar::ConnectionFile::read(&run_dir).expect("read the connection file")
+        if let Some(file) = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+            .expect("read the gateway discovery file")
         {
             break file;
         }
@@ -455,7 +456,7 @@ fn headless_serve_bookends_the_log_file() {
 
 /// The bare invocation needs no subcommand: with no `--config` the gateway
 /// runs boot discovery, generates the first-run config into the redirected
-/// profile, and serves - proved by the connection file written after the
+/// profile, and serves - proved by the gateway discovery file written after the
 /// bind. The child is killed once the file lands, before the generated
 /// config's boot command can provision anything.
 #[test]
@@ -528,11 +529,11 @@ fn the_workshop_package_smoke_profile_boots_without_cli_arguments() {
         );
         assert!(
             std::time::Instant::now() < deadline,
-            "the package smoke profile publishes a connection file"
+            "the package smoke profile publishes a gateway discovery file"
         );
         std::thread::sleep(Duration::from_millis(25));
     }
-    let file = shared_sidecar::ConnectionFile::read(&profile.join("run"))
+    let file = shared_sidecar::GatewayDiscoveryFile::read(&profile.join("run"))
         .expect("read package connection")
         .expect("package connection exists");
     assert_eq!(
@@ -586,9 +587,9 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
         std::thread::sleep(Duration::from_millis(50));
     }
     let file: Value = serde_json::from_str(
-        &std::fs::read_to_string(&connection).expect("read the connection file"),
+        &std::fs::read_to_string(&connection).expect("read the gateway discovery file"),
     )
-    .expect("the connection file is JSON");
+    .expect("the gateway discovery file is JSON");
     let port = file["port"].as_u64().expect("the file carries a port");
 
     // The second launch: the handoff prints the running gateway's URL and
@@ -744,7 +745,7 @@ fn a_silent_process_lease_owner_causes_a_bounded_console_only_failure() {
     let _owner = shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
         .expect("acquire the silent owner lease")
         .expect("the test owns the process lease");
-    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
     std::fs::write(&connection_path, b"owner-is-still-publishing")
         .expect("seed an unreadable owner record");
 
@@ -787,7 +788,7 @@ fn a_connection_resolution_failure_is_console_only() {
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
     let log_path = logs.join("gateway.log");
     std::fs::write(&log_path, "owner-log-sentinel").expect("seed the canonical log");
-    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
     std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
 
     let mut gateway = GatewayProcess::spawn(&config, temp.path());
@@ -840,8 +841,8 @@ fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
     let mut replacement = GatewayProcess::spawn(&config, temp.path());
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let replacement_connection = loop {
-        if let Some(connection) =
-            shared_sidecar::ConnectionFile::read(&run_dir).expect("read replacement connection")
+        if let Some(connection) = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+            .expect("read replacement connection")
             && connection.pid == replacement.id()
         {
             break connection;
@@ -895,9 +896,9 @@ fn version_and_help_never_rotate_the_log() {
 }
 
 /// `diagnostics` prints the JSON report and exits without serving: a
-/// pre-existing log is left untouched and unrotated, no connection file is
+/// pre-existing log is left untouched and unrotated, no gateway discovery file is
 /// created, and the report names the state dir, the config, the logs, and
-/// the connection file with `running: false`.
+/// the gateway discovery file with `running: false`.
 #[test]
 fn diagnostics_reports_without_serving_or_mutating() {
     let temp = tempfile::tempdir().unwrap();
@@ -966,7 +967,7 @@ fn diagnostics_reports_without_serving_or_mutating() {
     );
     assert!(
         !temp.path().join(".promptforge/run/gateway.json").exists(),
-        "diagnostics created no connection file"
+        "diagnostics created no gateway discovery file"
     );
 }
 

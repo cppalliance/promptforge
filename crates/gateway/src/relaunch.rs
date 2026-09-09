@@ -3,7 +3,7 @@
 //! duplicate server.
 //!
 //! Before any startup side effect, a process attempts the distinct
-//! process-lifetime lease. Its holder re-resolves the connection file and
+//! process-lifetime lease. Its holder re-resolves the gateway discovery file and
 //! either hands off to a validated owner or boots while retaining the lease.
 //! A lease loser reads without cleanup until the owner publishes a validated
 //! record, then hands off. It never deletes stale state or initializes
@@ -15,7 +15,7 @@ use crate::runner::ServeOptions;
 
 const OWNER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-/// What a launch does about an existing connection file.
+/// What a launch does about an existing gateway discovery file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Relaunch {
     /// A live gateway owns the file: hand off with its Settings URL.
@@ -54,7 +54,7 @@ pub enum GatewayStartupError {
     },
 }
 
-/// Maps a connection-file resolution to the relaunch decision. Only a
+/// Maps a gateway discovery file resolution to the relaunch decision. Only a
 /// fully live file hands off; `Absent` and every stale reason boot.
 pub(crate) fn decide(resolution: &shared_sidecar::Resolution) -> Relaunch {
     match resolution {
@@ -118,7 +118,7 @@ fn wait_for_owner(
     timeout: Duration,
 ) -> Result<GatewayStartup, GatewayStartupError> {
     wait_for_owner_with(timeout, |deadline| {
-        let connection = shared_sidecar::ConnectionFile::read(run_dir).ok()??;
+        let connection = shared_sidecar::GatewayDiscoveryFile::read(run_dir).ok()??;
         let validated =
             shared_sidecar::ValidatedConnection::validate_before(connection, deadline).ok()?;
         Some(settings_url(&validated))
@@ -149,9 +149,9 @@ fn wait_for_owner_with(
 mod tests {
     use super::*;
 
-    /// A connection file as a live gateway would write it.
-    fn live_file() -> shared_sidecar::ConnectionFile {
-        shared_sidecar::ConnectionFile {
+    /// A gateway discovery file as a live gateway would write it.
+    fn live_file() -> shared_sidecar::GatewayDiscoveryFile {
+        shared_sidecar::GatewayDiscoveryFile {
             port: 8081,
             api_key: "abc123".to_owned(),
             pid: std::process::id(),
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn a_live_file_with_a_query_special_key_encodes_the_url() {
-        let file = shared_sidecar::ConnectionFile {
+        let file = shared_sidecar::GatewayDiscoveryFile {
             api_key: "a&b=c d".to_owned(),
             ..live_file()
         };
@@ -231,7 +231,7 @@ mod tests {
         let pid = child.id();
         child.wait().expect("the child exits");
         drop(child);
-        let file = shared_sidecar::ConnectionFile { pid, ..live_file() };
+        let file = shared_sidecar::GatewayDiscoveryFile { pid, ..live_file() };
         file.write_to(temp.path()).expect("write fixture");
         let options = ServeOptions::new(None, None::<crate::ProfileName>)
             .with_run_dir(temp.path().to_path_buf());
@@ -245,7 +245,7 @@ mod tests {
             "a stale file lets the lease holder boot"
         );
         assert!(
-            !shared_sidecar::connection_file_path(temp.path()).exists(),
+            !shared_sidecar::gateway_discovery_file_path(temp.path()).exists(),
             "the stale file was deleted so the boot rewrites it cleanly"
         );
     }
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn a_connection_resolution_failure_stops_startup_with_its_source() {
         let temp = tempfile::TempDir::new().expect("tempdir");
-        let connection_path = shared_sidecar::connection_file_path(temp.path());
+        let connection_path = shared_sidecar::gateway_discovery_file_path(temp.path());
         std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
         let options = ServeOptions::new(None, None::<crate::ProfileName>)
             .with_run_dir(temp.path().to_path_buf());

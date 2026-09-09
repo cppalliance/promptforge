@@ -45,7 +45,7 @@ const USAGE: &str = concat!(
     "--config wins over it\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
     "and the profile's .promptforge directory, generating a default config on first run\n",
-    "diagnostics  print a JSON report of the state dir, config, logs, and connection file;\n",
+    "diagnostics  print a JSON report of the state dir, config, logs, and gateway discovery file;\n",
     "             never serves, rotates logs, or parses the config\n",
     "--no-tray    run headless (Ctrl-C driven); for servers and CI\n",
     "--login      the launch came from the OS autostart entry; never opens a browser\n",

@@ -50,7 +50,7 @@ pub(crate) use macos::process_identity;
 pub(crate) use windows::process_identity;
 
 /// Every other platform fails closed: no process identity means the
-/// connection file is always stale, so a reader relaunches rather than
+/// gateway discovery file is always stale, so a reader relaunches rather than
 /// attaching to an unverified process.
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub(crate) fn process_identity(_pid: u32) -> Option<ProcessIdentity> {

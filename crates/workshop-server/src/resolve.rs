@@ -1,4 +1,4 @@
-//! Gateway endpoint resolution: a live connection file in the run
+//! Gateway endpoint resolution: a live gateway discovery file in the run
 //! directory first, explicit `[gateway]` config second.
 //!
 //! The sidecar gateway writes `gateway.json` after a successful bind (see
@@ -31,8 +31,8 @@ pub struct ResolvedGateway {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GatewaySource {
-    /// A live `gateway.json` connection file in the run directory.
-    ConnectionFile,
+    /// A live `gateway.json` gateway discovery file in the run directory.
+    GatewayDiscoveryFile,
     /// Explicit `[gateway]` settings from `workshop.toml`.
     Config,
 }
@@ -58,7 +58,7 @@ impl ResolvedGateway {
             base_url: format!("http://127.0.0.1:{}", identity.port()),
             api_key: identity.api_key().to_owned(),
             identity: Some(identity),
-            source: GatewaySource::ConnectionFile,
+            source: GatewaySource::GatewayDiscoveryFile,
             stale: None,
         }
     }
@@ -86,7 +86,7 @@ impl ResolvedGateway {
         self.source
     }
 
-    /// Why a connection file was condemned on the way to the config
+    /// Why a gateway discovery file was condemned on the way to the config
     /// fallback, when one was.
     #[must_use]
     pub fn stale(&self) -> Option<StaleReason> {
@@ -97,7 +97,7 @@ impl ResolvedGateway {
     #[must_use]
     pub(crate) fn source_label(&self) -> &'static str {
         match self.source {
-            GatewaySource::ConnectionFile => "connection file",
+            GatewaySource::GatewayDiscoveryFile => "gateway discovery file",
             GatewaySource::Config => "workshop.toml",
         }
     }
@@ -110,7 +110,7 @@ impl ResolvedGateway {
 pub struct ResolveError {
     /// The rendered suffix: the stale-file note and the remedy.
     detail: String,
-    /// Why the connection file was condemned, when one was.
+    /// Why the gateway discovery file was condemned, when one was.
     stale: Option<StaleReason>,
 }
 
@@ -121,7 +121,7 @@ impl ResolveError {
         let note = stale
             .map(|reason| {
                 format!(
-                    " (removed a stale connection file: {})",
+                    " (removed a stale gateway discovery file: {})",
                     stale_clause(reason)
                 )
             })
@@ -134,7 +134,7 @@ impl ResolveError {
         }
     }
 
-    /// Why the connection file was condemned, when one was: a wrong key,
+    /// Why the gateway discovery file was condemned, when one was: a wrong key,
     /// a dead pid, and a foreign image are different problems for the
     /// operator.
     #[must_use]
@@ -143,12 +143,12 @@ impl ResolveError {
     }
 }
 
-/// Resolves the gateway endpoint for a loaded config: the live connection
-/// file in the default run directory first, explicit `[gateway]` config
-/// second.
+/// Resolves the gateway endpoint for a loaded config: the live gateway
+/// discovery file in the default run directory first, explicit `[gateway]`
+/// config second.
 ///
 /// # Errors
-/// Returns [`ResolveError`] when no live connection file exists and the
+/// Returns [`ResolveError`] when no live gateway discovery file exists and the
 /// config carries no explicit gateway.
 pub(crate) fn resolve(config: &GatewayConfig) -> Result<ResolvedGateway, ResolveError> {
     resolve_with(shared_sidecar::default_run_dir().as_deref(), config, probe)
@@ -175,7 +175,7 @@ fn resolve_with(
                         base_url: format!("http://127.0.0.1:{}", identity.port()),
                         api_key: identity.api_key().to_owned(),
                         identity: Some(identity),
-                        source: GatewaySource::ConnectionFile,
+                        source: GatewaySource::GatewayDiscoveryFile,
                         stale: None,
                     });
                 }
@@ -184,14 +184,14 @@ fn resolve_with(
             Ok(Resolution::Stale(reason)) => {
                 tracing::warn!(
                     reason = stale_clause(reason),
-                    "removed a stale gateway connection file"
+                    "removed a stale gateway discovery file"
                 );
                 stale = Some(reason);
             }
             // A read or cleanup I/O failure degrades discovery to the
             // config fallback; it never fails startup on its own.
             Err(error) => {
-                tracing::warn!("could not resolve the gateway connection file: {error}");
+                tracing::warn!("could not resolve the gateway discovery file: {error}");
             }
             // Absent, and any future resolution: nothing to attach to.
             _ => {}
@@ -212,7 +212,7 @@ fn resolve_with(
 /// Reifies the shared resolver's live result as the capability stored in
 /// Workshop's immutable Gateway snapshot.
 fn validate_resolved(
-    file: shared_sidecar::ConnectionFile,
+    file: shared_sidecar::GatewayDiscoveryFile,
 ) -> Result<ValidatedConnection, StaleReason> {
     ValidatedConnection::validate(file)
 }
@@ -223,7 +223,7 @@ fn validate_resolved(
 pub(crate) fn report(gateway: &ResolvedGateway, push: &Push) {
     if let Some(reason) = gateway.stale() {
         push.push_status_update(
-            "Stale gateway connection file",
+            "Stale gateway discovery file",
             format!("{}; attaching from workshop.toml", stale_clause(reason)),
             Activity::General,
         );
@@ -248,7 +248,7 @@ pub(crate) fn report(gateway: &ResolvedGateway, push: &Push) {
 /// explicit, an empty one (unset, or an unset `${PROMPTFORGE_GATEWAY_URL}`
 /// interpolation) is not. The explicit fallback exists for the gateways
 /// discovery cannot see - a LAN gateway; a local gateway writes a
-/// connection file, which discovery finds first.
+/// gateway discovery file, which discovery finds first.
 fn is_explicit(config: &GatewayConfig) -> bool {
     !config.base_url.is_empty()
 }
@@ -273,7 +273,7 @@ mod tests {
     use std::io::{Read, Write as _};
     use std::net::TcpListener;
 
-    use shared_sidecar::ConnectionFile;
+    use shared_sidecar::GatewayDiscoveryFile;
 
     use crate::catalog::CatalogBus;
     use crate::menu::MenuBus;
@@ -296,9 +296,9 @@ mod tests {
         shared_sidecar::resolve_for_test(run_dir, &own_image_name())
     }
 
-    /// A connection file pointing at the test process itself.
-    fn live_file(port: u16, api_key: &str) -> ConnectionFile {
-        ConnectionFile {
+    /// A gateway discovery file pointing at the test process itself.
+    fn live_file(port: u16, api_key: &str) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port,
             api_key: api_key.to_owned(),
             pid: std::process::id(),
@@ -361,18 +361,18 @@ mod tests {
     }
 
     #[test]
-    fn a_live_connection_file_wins_over_explicit_config() {
+    fn a_live_gateway_discovery_file_wins_over_explicit_config() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let gateway = crate::test_gateway::ValidatedGateway::spawn("file-key");
         let port = gateway.port();
         gateway
-            .connection_file("file-key", 1_757_000_000, "2026-09-03T12:00:00Z")
+            .gateway_discovery_file("file-key", 1_757_000_000, "2026-09-03T12:00:00Z")
             .write_to(dir.path())
             .expect("write");
 
         let resolved = resolve_with(Some(dir.path()), &explicit_config(), probe)
             .expect("a live file resolves");
-        assert_eq!(resolved.source(), GatewaySource::ConnectionFile);
+        assert_eq!(resolved.source(), GatewaySource::GatewayDiscoveryFile);
         assert_eq!(resolved.base_url(), format!("http://127.0.0.1:{port}"));
         assert_eq!(resolved.api_key(), "file-key");
         assert_eq!(
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn a_stale_file_is_cleaned_and_explicit_config_wins() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             pid: dead_pid(),
             ..live_file(1, "k")
         };
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(resolved.api_key(), "config-key");
         assert_eq!(resolved.stale(), Some(StaleReason::ProcessDead));
         assert!(
-            !shared_sidecar::connection_file_path(dir.path()).exists(),
+            !shared_sidecar::gateway_discovery_file_path(dir.path()).exists(),
             "the stale file was removed"
         );
     }
@@ -419,7 +419,7 @@ mod tests {
 
         // Dead pid: the process check fails before any probe runs.
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             pid: dead_pid(),
             ..live_file(1, "k")
         };
@@ -451,7 +451,7 @@ mod tests {
     fn an_explicitly_configured_default_url_is_honored() {
         // The well-known default URL written by hand is explicit config:
         // it names a gateway discovery cannot see (an SSH-tunneled remote,
-        // a gateway whose connection-file write failed), so it must
+        // a gateway whose discovery-file write failed), so it must
         // resolve, not read as an unset value.
         let dir = tempfile::TempDir::new().expect("tempdir");
         let config = GatewayConfig {
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(resolved.stale(), None);
     }
 
-    /// A probe whose connection-file read fails: a directory sits where
+    /// A probe whose discovery-file read fails: a directory sits where
     /// `gateway.json` belongs, so the read errors instead of answering.
     fn probe_read_failure(run_dir: &Path) -> Result<Resolution, SidecarError> {
         std::fs::create_dir(run_dir.join("gateway.json")).expect("the unreadable file plants");
@@ -576,7 +576,7 @@ mod tests {
         report(&resolved, &push);
 
         let stale_frame = receiver.try_recv().expect("the stale note is reported");
-        assert_eq!(stale_frame.label, "Stale gateway connection file");
+        assert_eq!(stale_frame.label, "Stale gateway discovery file");
         assert!(
             stale_frame.description.contains("key was rejected"),
             "the stale reason is named: {}",

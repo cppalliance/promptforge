@@ -1,4 +1,4 @@
-//! The connection-file lifecycle: [`spawn`] writes `gateway.json` after
+//! The gateway discovery file lifecycle: [`spawn`] writes `gateway.json` after
 //! the bind and [`GatewayHandle::shutdown`] removes it.
 
 use std::time::Duration;
@@ -33,7 +33,7 @@ models = ["alpha-model"]
 "#;
 
 #[test]
-fn spawn_writes_the_connection_file_and_shutdown_removes_it() {
+fn spawn_writes_the_gateway_discovery_file_and_shutdown_removes_it() {
     let temp = tempfile::TempDir::new().unwrap();
     let config_path = temp.path().join("gateway.toml");
     std::fs::write(&config_path, CATALOG).unwrap();
@@ -47,9 +47,9 @@ fn spawn_writes_the_connection_file_and_shutdown_removes_it() {
     let gateway = spawn(&options).expect("the gateway boots");
 
     // The file exists the moment spawn returns, carrying the real bind.
-    let file = shared_sidecar::ConnectionFile::read(&run_dir)
-        .expect("the connection file reads")
-        .expect("the connection file exists after the bind");
+    let file = shared_sidecar::GatewayDiscoveryFile::read(&run_dir)
+        .expect("the gateway discovery file reads")
+        .expect("the gateway discovery file exists after the bind");
     assert_eq!(file.pid, std::process::id());
     let port: u16 = gateway
         .url()
@@ -67,14 +67,14 @@ fn spawn_writes_the_connection_file_and_shutdown_removes_it() {
 
     gateway.shutdown().expect("clean shutdown");
     assert_eq!(
-        shared_sidecar::ConnectionFile::read(&run_dir).expect("read after shutdown"),
+        shared_sidecar::GatewayDiscoveryFile::read(&run_dir).expect("read after shutdown"),
         None,
-        "a clean shutdown removes the connection file"
+        "a clean shutdown removes the gateway discovery file"
     );
 }
 
 #[test]
-fn post_shutdown_stops_the_gateway_and_removes_the_connection_file() {
+fn post_shutdown_stops_the_gateway_and_removes_the_gateway_discovery_file() {
     let temp = tempfile::TempDir::new().unwrap();
     let config_path = temp.path().join("gateway.toml");
     std::fs::write(&config_path, CATALOG).unwrap();
@@ -116,8 +116,8 @@ fn post_shutdown_stops_the_gateway_and_removes_the_connection_file() {
         .expect("the route's signal stopped the gateway thread")
         .expect("clean shutdown");
     assert_eq!(
-        shared_sidecar::ConnectionFile::read(&run_dir).expect("read after shutdown"),
+        shared_sidecar::GatewayDiscoveryFile::read(&run_dir).expect("read after shutdown"),
         None,
-        "the route-driven shutdown removes the connection file"
+        "the route-driven shutdown removes the gateway discovery file"
     );
 }

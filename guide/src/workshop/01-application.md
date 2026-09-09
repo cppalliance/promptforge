@@ -37,7 +37,7 @@ You can also run the Workshop's server on its own and use the interface in an or
 The first time you start the Workshop, the application prepares everything it needs before you see a window. Follow what happens:
 
 1. The application looks for its boot configuration.
-2. It attaches to a running local gateway through its validated connection file. If none is running, it launches the sibling `promptforge-gateway`; a Workshop-only install instead uses the explicit gateway in `workshop.toml`.
+2. It attaches to a running local gateway through its validated gateway discovery file. If none is running, it launches the sibling `promptforge-gateway`; a Workshop-only install instead uses the explicit gateway in `workshop.toml`.
 3. It starts its server inside its own process and waits until the server accepts connections.
 4. It waits for the interface to answer a health check, up to 15 seconds.
 5. Only then does the window open.
@@ -55,7 +55,7 @@ The gateway owns its own boot config, `gateway.toml`, and the Workshop never rea
 The generated config is a single editable TOML file with a header that invites edits. Two properties of the generated file are worth knowing:
 
 - The gateway is secured with a freshly generated random bearer key, so no two installs share a key.
-- The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the connection file the gateway writes.
+- The gateway listens on the loopback address only, on an OS-assigned port. It is not reachable from other machines, and the Workshop learns the port from the gateway discovery file the gateway writes.
 
 A `gateway.toml` carried over from an older version may declare a `[workshop]` section with the inert `bind` and `open_browser` settings, which produce a deprecation warning because the Workshop's server now lives inside the desktop application. Speech pipeline tuning belongs in `[stt]`; legacy `[workshop.stt]` input is rejected as an unknown workshop field whether it appears alone or beside `[stt]`.
 
@@ -65,11 +65,11 @@ At run time the gateway also downloads the pinned voice runtime matched to your 
 
 ## The Workshop configuration
 
-You configure the Workshop through a TOML file named `workshop.toml`. The application searches three places in order: beside the executable, the current directory, and `~/.promptforge/workshop.toml`. The first file found wins. Every field is optional and the defaults are built in. With no file anywhere, the application keeps its state in `~/.promptforge/` and attaches to the gateway through its connection file. The application never writes the file, and the standalone server's `workbench.toml` fallback does not apply to it.
+You configure the Workshop through a TOML file named `workshop.toml`. The application searches three places in order: beside the executable, the current directory, and `~/.promptforge/workshop.toml`. The first file found wins. Every field is optional and the defaults are built in. With no file anywhere, the application keeps its state in `~/.promptforge/` and attaches to the gateway through its gateway discovery file. The application never writes the file, and the standalone server's `workbench.toml` fallback does not apply to it.
 
 The keys you are most likely to set:
 
-- `gateway.base_url` points the Workshop at a PromptForge gateway the connection file cannot see, such as one on another machine. When the value is empty, the Workshop attaches to a locally running gateway through its connection file or launches the sibling `promptforge-gateway`. A Workshop-only install has no sibling, so with neither a running gateway nor an explicit value, startup fails with an error that names both remedies.
+- `gateway.base_url` points the Workshop at a PromptForge gateway the gateway discovery file cannot see, such as one on another machine. When the value is empty, the Workshop attaches to a locally running gateway through its gateway discovery file or launches the sibling `promptforge-gateway`. A Workshop-only install has no sibling, so with neither a running gateway nor an explicit value, startup fails with an error that names both remedies.
 - `gateway.api_key` supplies the bearer key for the gateway API. An empty key sends no `Authorization` header, which is right for a gateway running with authentication disabled.
 - `server.bind` is honored only by the standalone `workshop-server` binary. The desktop application owns its listener and always binds `127.0.0.1` on an OS-assigned port.
 - `server.state_dir` chooses where the Workshop keeps persistent state. Agent session event logs live under `state_dir/sessions/`, and the per-profile model memory is written there. It defaults to the config file's own directory.

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use shared_sidecar::{
-    CancellationToken, ConnectionFile, LaunchDecision, Resolution, SidecarError,
+    CancellationToken, GatewayDiscoveryFile, LaunchDecision, Resolution, SidecarError,
     ValidatedConnection,
 };
 
@@ -384,7 +384,7 @@ impl Drop for GatewaySupervisor {
     }
 }
 
-/// Starts runtime supervision only for a connection-file sidecar.
+/// Starts runtime supervision only for a gateway discovery file sidecar.
 ///
 /// # Errors
 /// Returns an error when the supervisor cannot locate its runtime paths or
@@ -578,7 +578,7 @@ pub(super) fn launch_and_attach_cancellable_with<Settle, Spawn, Wait>(
 where
     Settle: FnOnce(&Path, Duration, &CancellationToken) -> Result<LaunchDecision, SidecarError>,
     Spawn: FnOnce(&Path, &CancellationToken) -> std::io::Result<u32>,
-    Wait: FnOnce(&Path, Duration, &CancellationToken) -> anyhow::Result<ConnectionFile>,
+    Wait: FnOnce(&Path, Duration, &CancellationToken) -> anyhow::Result<GatewayDiscoveryFile>,
 {
     match settle(run_dir, RECOVERY_TIMEOUT, cancellation)
         .context("settle the gateway launch race")?
@@ -621,7 +621,7 @@ fn wait_for_launched_file_cancellable(
     run_dir: &Path,
     timeout: Duration,
     cancellation: &CancellationToken,
-) -> anyhow::Result<ConnectionFile> {
+) -> anyhow::Result<GatewayDiscoveryFile> {
     wait_for_launched_file_cancellable_with(
         run_dir,
         timeout,
@@ -638,7 +638,7 @@ pub(super) fn wait_for_launched_file_cancellable_with<Health, Resolve>(
     cancellation: &CancellationToken,
     mut health: Health,
     mut resolve: Resolve,
-) -> anyhow::Result<ConnectionFile>
+) -> anyhow::Result<GatewayDiscoveryFile>
 where
     Health: FnMut(&str, Duration, &CancellationToken) -> Result<(), shared_sidecar::HealthError>,
     Resolve: FnMut(&Path, &CancellationToken) -> Result<Resolution, SidecarError>,
@@ -648,7 +648,7 @@ where
         if cancellation.is_cancelled() {
             anyhow::bail!("the launched gateway wait was cancelled");
         }
-        if let Ok(Some(file)) = ConnectionFile::read(run_dir) {
+        if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir) {
             let remaining = deadline.saturating_duration_since(Instant::now());
             let url = format!("http://127.0.0.1:{}", file.port);
             health(&url, remaining, cancellation)
@@ -674,7 +674,7 @@ where
         }
         if Instant::now() >= deadline {
             anyhow::bail!(
-                "the launched gateway wrote no validated connection file within {timeout:?}"
+                "the launched gateway wrote no validated gateway discovery file within {timeout:?}"
             );
         }
         if cancellation.wait_timeout(RECOVERY_POLL_INTERVAL) {

@@ -1,4 +1,5 @@
-//! The shared sidecar discovery seam: the `gateway.json` connection file.
+//! The shared sidecar discovery seam: the `gateway.json` gateway discovery
+//! file.
 //!
 //! The gateway writes `gateway.json` into the run directory
 //! (`<home>/.promptforge/run`) after a successful bind, Jupyter-style: the
@@ -10,7 +11,7 @@
 //!
 //! The flow:
 //!
-//! 1. The writer ([`ConnectionFile::write_to`]) lands the file atomically
+//! 1. The writer ([`GatewayDiscoveryFile::write_to`]) lands the file atomically
 //!    with owner-only permissions (mode `0600` on Unix; on Windows the file
 //!    relies on the user profile's ACL, which already restricts it to the
 //!    owner) and removes it on clean shutdown with [`remove_if_mine`].
@@ -47,15 +48,15 @@ mod validated;
 
 pub use crate::cancellation::CancellationToken;
 pub use crate::error::SidecarError;
-pub use crate::file::{ConnectionFile, remove_if_mine};
+pub use crate::file::{GatewayDiscoveryFile, remove_if_mine};
 pub use crate::health::{HealthError, ProbeError, wait_for_health, wait_for_health_cancellable};
 pub use crate::lock::{
     GatewayInstanceLease, LaunchDecision, LaunchLock, launch_or_attach,
     launch_or_attach_cancellable,
 };
 pub use crate::paths::{
-    CONNECTION_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME, connection_file_path,
-    default_run_dir, instance_lock_file_path, lock_file_path, run_dir,
+    GATEWAY_DISCOVERY_FILE_NAME, INSTANCE_LOCK_FILE_NAME, LOCK_FILE_NAME, default_run_dir,
+    gateway_discovery_file_path, instance_lock_file_path, lock_file_path, run_dir,
 };
 pub use crate::shutdown::{ShutdownError, request_shutdown, request_shutdown_before};
 pub use crate::stale::resolve_cancellable;

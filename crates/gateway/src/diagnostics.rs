@@ -1,10 +1,10 @@
 //! The `diagnostics` subcommand's report: formatted JSON naming the state
-//! directory, the config path, the log files, and the connection file,
+//! directory, the config path, the log files, and the gateway discovery file,
 //! plus whether a gateway is running right now.
 //!
 //! The report is read-only by contract: it never initializes logging,
 //! never rotates a log, never parses configuration, and never mutates the
-//! state directory - a stale connection file reads as not-running and
+//! state directory - a stale gateway discovery file reads as not-running and
 //! stays on disk for the next launch to clean. It never carries the
 //! bearer key, environment values, config contents, or log contents.
 
@@ -65,7 +65,7 @@ fn render(
     run_dir: Option<&Path>,
     running: bool,
 ) -> String {
-    let connection_file = run_dir.map(shared_sidecar::connection_file_path);
+    let discovery_file = run_dir.map(shared_sidecar::gateway_discovery_file_path);
     let mut out = String::new();
     // Writing to a String is infallible, so each writeln's Result is
     // dropped on purpose.
@@ -90,7 +90,7 @@ fn render(
     let _ = writeln!(
         out,
         "  \"connection_file\": {},",
-        path_entry(connection_file.as_deref())
+        path_entry(discovery_file.as_deref())
     );
     let _ = writeln!(out, "  \"running\": {running},");
     let _ = writeln!(
@@ -191,9 +191,9 @@ mod tests {
         let state_dir = temp.path().join("state");
         let run_dir = state_dir.join("run");
         std::fs::create_dir_all(&run_dir).expect("run dir");
-        // A live-looking connection file with a bearer key: the report
+        // A live-looking gateway discovery file with a bearer key: the report
         // names the file but never reads its contents into the output.
-        shared_sidecar::ConnectionFile {
+        shared_sidecar::GatewayDiscoveryFile {
             port: 8081,
             api_key: "the-bearer-key".to_owned(),
             pid: 4242,
@@ -202,7 +202,7 @@ mod tests {
             started_at: "2026-09-05T12:00:00Z".to_owned(),
         }
         .write_to(&run_dir)
-        .expect("write the connection file");
+        .expect("write the gateway discovery file");
 
         let rendered = render(Some(&state_dir), None, Some(&run_dir), false);
         assert!(
@@ -236,7 +236,7 @@ mod tests {
         );
         assert!(
             run_dir.join("gateway.json").exists(),
-            "a stale connection file is left for the next launch to clean"
+            "a stale gateway discovery file is left for the next launch to clean"
         );
     }
 

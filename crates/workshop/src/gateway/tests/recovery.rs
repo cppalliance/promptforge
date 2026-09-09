@@ -7,7 +7,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use shared_sidecar::{CancellationToken, ConnectionFile, Resolution, ValidatedConnection};
+use shared_sidecar::{CancellationToken, GatewayDiscoveryFile, Resolution, ValidatedConnection};
 
 use super::{get, live_file, validated_gateway};
 use crate::gateway::boot::RecoveryLaunch;
@@ -20,7 +20,7 @@ use crate::gateway::supervisor::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestIdentity {
-    file: ConnectionFile,
+    file: GatewayDiscoveryFile,
     process_boot: u64,
 }
 
@@ -33,7 +33,7 @@ impl SupervisedGatewayIdentity for TestIdentity {
     }
 }
 
-fn test_identity(file: ConnectionFile) -> TestIdentity {
+fn test_identity(file: GatewayDiscoveryFile) -> TestIdentity {
     TestIdentity {
         process_boot: u64::from(file.pid),
         file,
@@ -43,8 +43,9 @@ fn test_identity(file: ConnectionFile) -> TestIdentity {
 #[test]
 fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_atomically() {
     let gateway = validated_gateway("new-key");
-    let original = gateway.connection_file("old-key", 1_757_000_000, "2026-09-03T12:00:00Z");
-    let replacement = gateway.connection_file("new-key", 1_757_000_001, "2026-09-03T12:00:01Z");
+    let original = gateway.gateway_discovery_file("old-key", 1_757_000_000, "2026-09-03T12:00:00Z");
+    let replacement =
+        gateway.gateway_discovery_file("new-key", 1_757_000_001, "2026-09-03T12:00:01Z");
     let state_dir = tempfile::TempDir::new().expect("create Workshop state directory");
     let server = workshop_server::fixtures::spawn(workshop_server::Config {
         gateway: workshop_server::GatewayConfig {
@@ -60,7 +61,7 @@ fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_at
     })
     .expect("spawn Workshop against the original same-port key");
     let updater = server.gateway_updater();
-    let publish_replacement = |file: &ConnectionFile| -> anyhow::Result<()> {
+    let publish_replacement = |file: &GatewayDiscoveryFile| -> anyhow::Result<()> {
         let validated = ValidatedConnection::validate(file.clone())
             .context("validate the named local Gateway")?;
         updater
@@ -112,7 +113,7 @@ fn supervision_lives_past_sixty_seconds_then_propagates_a_configured_key_edit_at
     assert_eq!(
         published.borrow().as_slice(),
         [replacement],
-        "one successful relaunch publishes its exact connection-file pair"
+        "one successful relaunch publishes its exact discovery-file pair"
     );
     assert_eq!(
         published.borrow()[0].port,
@@ -211,7 +212,7 @@ fn a_mismatched_spawned_pid_never_claims_or_cleans_the_validated_process() {
     let validated = gateway.validate("unowned-key", 1_778_000_001, "2026-09-08T18:00:01Z");
     let run = tempfile::TempDir::new().expect("create run directory");
     gateway
-        .connection_file("unowned-key", 1_778_000_001, "2026-09-08T18:00:01Z")
+        .gateway_discovery_file("unowned-key", 1_778_000_001, "2026-09-08T18:00:01Z")
         .write_to(run.path())
         .expect("retain the uncertain connection record");
 
@@ -227,7 +228,7 @@ fn a_mismatched_spawned_pid_never_claims_or_cleans_the_validated_process() {
         "an uncertain process never receives destructive cleanup"
     );
     assert!(
-        shared_sidecar::connection_file_path(run.path()).exists(),
+        shared_sidecar::gateway_discovery_file_path(run.path()).exists(),
         "uncertain cleanup retains the connection record"
     );
 }
@@ -292,7 +293,7 @@ fn launched_recovery_retains_the_spawned_pid_and_releases_launch_lock() {
 #[test]
 fn failed_validation_never_claims_or_removes_a_spawned_process_record() {
     let run = tempfile::TempDir::new().expect("create run directory");
-    let file = ConnectionFile {
+    let file = GatewayDiscoveryFile {
         pid: super::dead_pid(),
         ..live_file(54_375, "unvalidated-key")
     };
@@ -312,7 +313,7 @@ fn failed_validation_never_claims_or_removes_a_spawned_process_record() {
         "failed validation creates no owned candidate"
     );
     assert!(
-        shared_sidecar::connection_file_path(run.path()).exists(),
+        shared_sidecar::gateway_discovery_file_path(run.path()).exists(),
         "failed validation retains an uncertain process record"
     );
 }

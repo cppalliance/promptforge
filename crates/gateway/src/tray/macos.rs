@@ -148,7 +148,7 @@ pub(super) fn run(options: &ServeOptions) -> Result<(), StartupError> {
         None => {
             // Unreachable in practice: the build timer fires on the first
             // loop pass, before any event that could stop the loop. The
-            // gateway thread's connection-file guard is lost with the
+            // gateway thread's gateway-discovery-file guard is lost with the
             // process, which stale-file detection covers on next launch.
             tracing::error!("the run loop exited before the tray was built");
             Ok(())
@@ -299,7 +299,7 @@ impl Tray {
     /// retains the block that touches the tray slot), then the tray icon
     /// (a surviving reference leaks a ghost status item), then the
     /// gateway's graceful shutdown - never `process::exit` ahead of
-    /// destructors, so the connection-file guard still runs.
+    /// destructors, so the gateway-discovery-file guard still runs.
     fn teardown(mut self) -> Result<(), StartupError> {
         self.tick_timer.invalidate();
         drop(self.icon.take());
@@ -451,7 +451,7 @@ fn open_settings(tray: &Tray) {
 /// with the containing .app bundle is sandbox-immune (NSWorkspace
 /// argument passing is not) and resolves the bundle's principal
 /// executable. The workshop attaches to this gateway through the
-/// connection file and outlives it. An unbundled dev run spawns the
+/// gateway discovery file and outlives it. An unbundled dev run spawns the
 /// sibling executable directly.
 fn launch_workshop(tray: &Tray) {
     let Some(exe) = tray.workshop_exe.as_ref() else {

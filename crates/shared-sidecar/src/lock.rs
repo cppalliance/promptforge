@@ -1,8 +1,8 @@
-//! The launch-race lock: `gateway.json.lock` beside the connection file,
+//! The launch-race lock: `gateway.json.lock` beside the gateway discovery file,
 //! electing one launcher when two readers find no live gateway at the
 //! same moment. The loser attaches to the winner.
 //!
-//! The protocol: the lock holder re-validates the connection file before
+//! The protocol: the lock holder re-validates the gateway discovery file before
 //! deciding, because a previous winner may have written it and released
 //! the lock; a loser never deletes anything, it waits for the winner's
 //! file to go live and attaches. Cleanup is the lock holder's privilege.
@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::error::SidecarError;
 use crate::paths::{instance_lock_file_path, lock_file_path};
 use crate::stale::{self, GATEWAY_IMAGE_NAME, Resolution};
-use crate::{CancellationToken, ConnectionFile};
+use crate::{CancellationToken, GatewayDiscoveryFile};
 
 /// Delay between lock retries while a winner finishes its launch.
 const RETRY_INTERVAL: Duration = Duration::from_millis(25);
@@ -87,7 +87,7 @@ pub enum LaunchDecision {
     /// launching its own.
     Launch(LaunchLock),
     /// A live gateway already exists: attach to it.
-    Attach(ConnectionFile),
+    Attach(GatewayDiscoveryFile),
 }
 
 /// Settles a launch race in `run_dir`: returns [`LaunchDecision::Launch`]
@@ -160,7 +160,7 @@ pub(crate) fn launch_or_attach_named(
             Err(TryLockError::WouldBlock) => {
                 // Another process holds the lock and is mid-launch. Attach
                 // as soon as its file goes live; never delete here.
-                if let Ok(Some(file)) = ConnectionFile::read(run_dir)
+                if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir)
                     && stale::is_live(&file, image_name)
                 {
                     return Ok(LaunchDecision::Attach(file));
@@ -242,7 +242,7 @@ fn launch_or_attach_named_cancellable_with(
                 if cancellation.is_cancelled() {
                     return Err(SidecarError::Cancelled);
                 }
-                if let Ok(Some(file)) = ConnectionFile::read(run_dir)
+                if let Ok(Some(file)) = GatewayDiscoveryFile::read(run_dir)
                     && stale::is_live_cancellable(&file, image_name, cancellation)?
                 {
                     if cancellation.is_cancelled() {
@@ -309,10 +309,10 @@ mod tests {
         port
     }
 
-    /// A live connection file on the fixture gateway, owned by the test
+    /// A live gateway discovery file on the fixture gateway, owned by the test
     /// process.
-    fn live_file(port: u16) -> ConnectionFile {
-        ConnectionFile {
+    fn live_file(port: u16) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port,
             api_key: "key".to_owned(),
             pid: std::process::id(),
@@ -493,7 +493,7 @@ mod tests {
         );
         assert!(matches!(result, Err(SidecarError::Cancelled)));
         assert!(
-            !crate::paths::connection_file_path(dir.path()).exists(),
+            !crate::paths::gateway_discovery_file_path(dir.path()).exists(),
             "the cancelled loser never publishes or launches"
         );
         drop(winner);

@@ -400,7 +400,7 @@ impl SniTray {
 
     /// Launches the workshop shell, detached: its own process group, so a
     /// terminal Ctrl-C on the gateway does not SIGINT the workshop. It
-    /// attaches to this gateway through the connection file and outlives
+    /// attaches to this gateway through the gateway discovery file and outlives
     /// it.
     fn launch_workshop(&self) {
         use std::os::unix::process::CommandExt as _;

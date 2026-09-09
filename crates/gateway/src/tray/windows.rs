@@ -300,7 +300,7 @@ impl Armed {
     /// Pumps messages until Quit, then tears down: the tray icon first (a
     /// surviving reference leaks a ghost icon in the notification area),
     /// then the window, then the gateway's graceful shutdown - never
-    /// `process::exit` ahead of destructors, so the connection-file guard
+    /// `process::exit` ahead of destructors, so the gateway-discovery-file guard
     /// still runs.
     fn run(self) -> Result<(), StartupError> {
         message_loop(self.hwnd);
@@ -598,7 +598,7 @@ fn open_settings(tray: &Tray) {
 }
 
 /// Launches the workshop shell, detached: it attaches to this gateway
-/// through the connection file and outlives it.
+/// through the gateway discovery file and outlives it.
 fn launch_workshop(tray: &Tray) {
     // The same detach the shell uses for its own gateway spawn
     // (crates/workshop/src/gateway.rs): broken out of any job object whose

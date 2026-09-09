@@ -162,7 +162,7 @@ pub enum SpawnError {
 ///
 /// # Errors
 /// Returns [`SpawnError::State`] if the gateway endpoint cannot be
-/// resolved (no live connection file and no explicit `[gateway]` config)
+/// resolved (no live gateway discovery file and no explicit `[gateway]` config)
 /// or the shared state cannot be built, and [`SpawnError::Io`] if the
 /// bind fails or the server thread cannot be spawned.
 pub fn spawn(config: Config) -> Result<ServerHandle, SpawnError> {

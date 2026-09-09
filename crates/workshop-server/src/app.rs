@@ -43,11 +43,11 @@ pub struct AppState {
 
 impl AppState {
     /// Builds shared state from the loaded configuration, resolving the
-    /// gateway endpoint first: a live connection file in the run
+    /// gateway endpoint first: a live gateway discovery file in the run
     /// directory wins over explicit `[gateway]` config.
     ///
     /// # Errors
-    /// Returns [`StateError::Resolution`] when no live connection file
+    /// Returns [`StateError::Resolution`] when no live gateway discovery file
     /// exists and the config carries no explicit gateway, and
     /// [`StateError::Gateway`] if the HTTP client cannot be built.
     pub fn new(config: &Config) -> Result<Self, StateError> {
@@ -153,7 +153,7 @@ impl AppState {
 
 /// Builds shared state against an already-resolved gateway endpoint: the
 /// construction phase a host holding its own endpoint enters directly,
-/// skipping connection-file discovery.
+/// skipping gateway discovery file resolution.
 ///
 /// # Errors
 /// Returns [`StateError::Gateway`] if the HTTP client cannot be built.
@@ -220,7 +220,7 @@ pub enum StateError {
     #[error("build gateway client")]
     Gateway(#[source] GatewayError),
 
-    /// No gateway endpoint could be resolved: no live connection file and
+    /// No gateway endpoint could be resolved: no live gateway discovery file and
     /// no explicit `[gateway]` config.
     #[non_exhaustive]
     #[error("resolve the gateway endpoint")]

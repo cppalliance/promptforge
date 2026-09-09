@@ -1,4 +1,4 @@
-//! The connection-file and launch-lock error type.
+//! The gateway-discovery-file and launch-lock error type.
 //!
 //! [`SidecarError`] is what the file and lock operations return; the health
 //! probe has its own [`crate::HealthError`].
@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// A failure of a connection-file or launch-lock operation.
+/// A failure of a gateway-discovery-file or launch-lock operation.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SidecarError {
@@ -24,7 +24,7 @@ pub enum SidecarError {
         source: std::io::Error,
     },
 
-    /// The connection file existed but could not be read.
+    /// The gateway discovery file existed but could not be read.
     #[error("read {path}")]
     Read {
         /// The file that could not be read.
@@ -34,7 +34,7 @@ pub enum SidecarError {
         source: std::io::Error,
     },
 
-    /// The connection file was not valid JSON.
+    /// The gateway discovery file was not valid JSON.
     #[error("parse {path}")]
     Parse {
         /// The file that could not be parsed.
@@ -44,8 +44,8 @@ pub enum SidecarError {
         source: serde_json::Error,
     },
 
-    /// The connection file failed validation.
-    #[error("invalid connection file {path}: {reason}")]
+    /// The gateway discovery file failed validation.
+    #[error("invalid gateway discovery file {path}: {reason}")]
     Invalid {
         /// The file that failed validation.
         path: PathBuf,
@@ -53,15 +53,15 @@ pub enum SidecarError {
         reason: String,
     },
 
-    /// The connection file could not be serialized for writing.
-    #[error("serialize the connection file")]
+    /// The gateway discovery file could not be serialized for writing.
+    #[error("serialize the gateway discovery file")]
     Serialize {
         /// The underlying JSON error.
         #[source]
         source: serde_json::Error,
     },
 
-    /// The atomic write of the connection file failed.
+    /// The atomic write of the gateway discovery file failed.
     #[error("write {path}")]
     Write {
         /// The file that could not be written.
@@ -71,7 +71,7 @@ pub enum SidecarError {
         source: std::io::Error,
     },
 
-    /// The connection file could not be removed.
+    /// The gateway discovery file could not be removed.
     #[error("remove {path}")]
     Remove {
         /// The file that could not be removed.

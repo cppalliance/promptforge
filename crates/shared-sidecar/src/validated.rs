@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::health::{self, ConnectionProbe};
 use crate::stale::StaleReason;
 use crate::sys::{ProcessIdentity, process_identity};
-use crate::{CancellationToken, ConnectionFile};
+use crate::{CancellationToken, GatewayDiscoveryFile};
 
 /// The image file name a live Gateway process must have.
 #[cfg(windows)]
@@ -62,9 +62,9 @@ pub enum ValidationError {
 /// constructor:
 ///
 /// ```compile_fail
-/// use shared_sidecar::{ConnectionFile, ValidatedConnection};
+/// use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
 ///
-/// let raw = ConnectionFile {
+/// let raw = GatewayDiscoveryFile {
 ///     port: 8081,
 ///     api_key: "forged".into(),
 ///     pid: std::process::id(),
@@ -78,9 +78,9 @@ pub enum ValidationError {
 /// The crate-private named validator is equally unavailable:
 ///
 /// ```compile_fail
-/// use shared_sidecar::{ConnectionFile, ValidatedConnection};
+/// use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
 ///
-/// let raw = ConnectionFile {
+/// let raw = GatewayDiscoveryFile {
 ///     port: 8081,
 ///     api_key: "forged".into(),
 ///     pid: std::process::id(),
@@ -92,17 +92,17 @@ pub enum ValidationError {
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct ValidatedConnection {
-    connection: ConnectionFile,
+    connection: GatewayDiscoveryFile,
     process_identity: ProcessIdentity,
 }
 
 impl ValidatedConnection {
-    /// Validates a raw connection file against the production Gateway image.
+    /// Validates a raw gateway discovery file against the production Gateway image.
     ///
     /// # Errors
     /// Returns the first [`StaleReason`] that prevents the raw connection
     /// from proving a live, authorized Gateway boot.
-    pub fn validate(connection: ConnectionFile) -> Result<Self, StaleReason> {
+    pub fn validate(connection: GatewayDiscoveryFile) -> Result<Self, StaleReason> {
         Self::validate_named(connection, GATEWAY_IMAGE_NAME)
     }
 
@@ -113,7 +113,7 @@ impl ValidatedConnection {
     /// Returns the first [`StaleReason`] that prevents the raw connection
     /// from proving a live, authorized Gateway boot before `deadline`.
     pub fn validate_before(
-        connection: ConnectionFile,
+        connection: GatewayDiscoveryFile,
         deadline: Instant,
     ) -> Result<Self, StaleReason> {
         Self::validate_named_before(connection, GATEWAY_IMAGE_NAME, deadline)
@@ -125,14 +125,14 @@ impl ValidatedConnection {
     /// Returns [`ValidationError::Cancelled`] when cancellation wins, or
     /// [`ValidationError::Stale`] when a liveness or authority check fails.
     pub fn validate_cancellable(
-        connection: ConnectionFile,
+        connection: GatewayDiscoveryFile,
         cancellation: &CancellationToken,
     ) -> Result<Self, ValidationError> {
         Self::validate_named_cancellable(connection, GATEWAY_IMAGE_NAME, cancellation)
     }
 
     pub(crate) fn validate_named(
-        connection: ConnectionFile,
+        connection: GatewayDiscoveryFile,
         image_name: &str,
     ) -> Result<Self, StaleReason> {
         validate_with(
@@ -146,7 +146,7 @@ impl ValidatedConnection {
     }
 
     fn validate_named_before(
-        connection: ConnectionFile,
+        connection: GatewayDiscoveryFile,
         image_name: &str,
         deadline: Instant,
     ) -> Result<Self, StaleReason> {
@@ -162,7 +162,7 @@ impl ValidatedConnection {
     }
 
     pub(crate) fn validate_named_cancellable(
-        connection: ConnectionFile,
+        connection: GatewayDiscoveryFile,
         image_name: &str,
         cancellation: &CancellationToken,
     ) -> Result<Self, ValidationError> {
@@ -232,11 +232,11 @@ impl ValidatedConnection {
         &self.connection.api_key
     }
 
-    pub(crate) fn connection_file(&self) -> &ConnectionFile {
+    pub(crate) fn gateway_discovery_file(&self) -> &GatewayDiscoveryFile {
         &self.connection
     }
 
-    pub(crate) fn into_connection_file(self) -> ConnectionFile {
+    pub(crate) fn into_gateway_discovery_file(self) -> GatewayDiscoveryFile {
         self.connection
     }
 }
@@ -259,7 +259,7 @@ impl fmt::Debug for ValidatedConnection {
 /// network seams in unit tests. Production passes only the platform process
 /// observer and the private shared probe.
 fn validate_with(
-    connection: ConnectionFile,
+    connection: GatewayDiscoveryFile,
     image_name: &str,
     observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
     prove_connection: impl FnOnce(&str, &str, Instant) -> ConnectionProbe,
@@ -274,7 +274,7 @@ fn validate_with(
 }
 
 fn validate_before_with(
-    connection: ConnectionFile,
+    connection: GatewayDiscoveryFile,
     image_name: &str,
     deadline: Instant,
     mut observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
@@ -319,7 +319,7 @@ fn validate_before_with(
 }
 
 fn validate_cancellable_with(
-    connection: ConnectionFile,
+    connection: GatewayDiscoveryFile,
     image_name: &str,
     cancellation: &CancellationToken,
     mut observe_process: impl FnMut(u32) -> Option<ProcessIdentity>,
@@ -403,7 +403,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, mpsc};
 
-    use crate::ConnectionFile;
+    use crate::GatewayDiscoveryFile;
 
     fn own_image_name() -> String {
         std::env::current_exe()
@@ -414,8 +414,8 @@ mod tests {
             .into_owned()
     }
 
-    fn connection(port: u16, api_key: &str) -> ConnectionFile {
-        ConnectionFile {
+    fn connection(port: u16, api_key: &str) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port,
             api_key: api_key.to_owned(),
             pid: std::process::id(),
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn a_dead_process_cannot_create_a_capability() {
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             pid: dead_pid(),
             ..connection(1, "key")
         };
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn a_stale_boot_identity_cannot_create_a_capability() {
-        let missing_epoch = ConnectionFile {
+        let missing_epoch = GatewayDiscoveryFile {
             epoch: 0,
             ..connection(1, "key")
         };
@@ -498,7 +498,7 @@ mod tests {
             Err(StaleReason::BootIdentityInvalid)
         );
 
-        let missing_start = ConnectionFile {
+        let missing_start = GatewayDiscoveryFile {
             started_at: String::new(),
             ..connection(1, "key")
         };
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn an_invalid_raw_connection_cannot_create_a_capability() {
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             port: 0,
             ..connection(1, "key")
         };
@@ -574,7 +574,7 @@ mod tests {
         let original =
             ValidatedConnection::validate_named(connection(port, "stable-key"), &own_image_name())
                 .expect("the original connection validates");
-        let replacement_file = ConnectionFile {
+        let replacement_file = GatewayDiscoveryFile {
             epoch: original.epoch() + 1,
             started_at: "2026-05-05T12:00:01Z".to_owned(),
             ..connection(port, "stable-key")

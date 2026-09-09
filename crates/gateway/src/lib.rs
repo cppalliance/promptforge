@@ -1631,7 +1631,7 @@ fn config_path(state: &AppState) -> Result<&std::path::Path, GatewayError> {
 /// Two edges of rule 3 are deliberate. A presented-but-wrong bearer is
 /// refused even on loopback: absence of credentials is what loopback
 /// trusts, and a caller presenting wrong ones meant to authenticate - the
-/// connection-file liveness probe relies on that to detect a stale key.
+/// gateway-discovery-file liveness probe relies on that to detect a stale key.
 /// And a request with no recorded peer address earns no trust: it needs
 /// a credential, the same fail-closed posture as the loopback wall.
 pub(crate) async fn check_auth(state: &AppState, caller: &Caller) -> Result<(), GatewayError> {
@@ -4116,7 +4116,7 @@ cache_dir = '{cache}'
     #[tokio::test]
     async fn the_host_wall_refuses_a_foreign_host_on_every_route() {
         let (_temp, state) = fixture();
-        // `/health` is deliberately not exempt: the connection-file probe
+        // `/health` is deliberately not exempt: the gateway-discovery-file probe
         // sends the bound address as Host, so the wall keeps it honest.
         for path in ["/health", "/admin/status", "/v1/models", "/shutdown"] {
             assert_eq!(

@@ -511,7 +511,7 @@ vram_gb = 2.0
 /// The boot configuration written on first run, with a freshly generated
 /// bearer key baked in.
 ///
-/// The gateway binds loopback on an OS-assigned port; the connection file
+/// The gateway binds loopback on an OS-assigned port; the gateway discovery file
 /// written after the bind carries the real port. There is no `[workshop]`
 /// section: the shell hosts the workshop UI itself.
 fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {

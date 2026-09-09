@@ -7,7 +7,7 @@
 //! no HTTP client.
 
 use crate::health::{self, ProbeError};
-use crate::{ConnectionFile, ValidatedConnection};
+use crate::{GatewayDiscoveryFile, ValidatedConnection};
 use std::time::Instant;
 
 /// The shutdown route's path on the gateway.
@@ -56,7 +56,7 @@ impl From<ProbeError> for ShutdownError {
 ///
 /// # Examples
 /// ```no_run
-/// # let file = shared_sidecar::ConnectionFile {
+/// # let file = shared_sidecar::GatewayDiscoveryFile {
 /// #     port: 8081,
 /// #     api_key: "secret".into(),
 /// #     pid: 42,
@@ -69,7 +69,7 @@ impl From<ProbeError> for ShutdownError {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn request_shutdown(connection: &ValidatedConnection) -> Result<(), ShutdownError> {
-    request_shutdown_file(connection.connection_file())
+    request_shutdown_file(connection.gateway_discovery_file())
 }
 
 /// Posts authenticated shutdown without allowing network I/O to outlive the
@@ -81,17 +81,17 @@ pub fn request_shutdown_before(
     connection: &ValidatedConnection,
     deadline: Instant,
 ) -> Result<(), ShutdownError> {
-    request_shutdown_file_before(connection.connection_file(), deadline)
+    request_shutdown_file_before(connection.gateway_discovery_file(), deadline)
 }
 
-fn request_shutdown_file(file: &ConnectionFile) -> Result<(), ShutdownError> {
+fn request_shutdown_file(file: &GatewayDiscoveryFile) -> Result<(), ShutdownError> {
     let address = format!("127.0.0.1:{}", file.port);
     let head = health::request_head(&address, "POST", SHUTDOWN_PATH, Some(&file.api_key))?;
     accepted(&head)
 }
 
 fn request_shutdown_file_before(
-    file: &ConnectionFile,
+    file: &GatewayDiscoveryFile,
     deadline: Instant,
 ) -> Result<(), ShutdownError> {
     let address = format!("127.0.0.1:{}", file.port);
@@ -127,9 +127,9 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    /// A connection file naming the fixture gateway's port.
-    fn file(port: u16) -> ConnectionFile {
-        ConnectionFile {
+    /// A gateway discovery file naming the fixture gateway's port.
+    fn file(port: u16) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port,
             api_key: "key".to_owned(),
             pid: 4242,

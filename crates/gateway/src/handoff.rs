@@ -13,7 +13,7 @@
 //! The cookie never carries the key. Cookies are not port-isolated (RFC
 //! 6265), so every local server the browser visits on the same address
 //! receives them, and a key-carrying cookie would hand any local process
-//! the connection file's long-term secret on a single navigation. The
+//! the gateway discovery file's long-term secret on a single navigation. The
 //! value is instead the hex of a session proof - SHA-256 over a
 //! process-lifetime random salt and the live key - so a harvested cookie
 //! authenticates only until a restart or key rotation and reveals nothing.

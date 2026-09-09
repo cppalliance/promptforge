@@ -1,4 +1,4 @@
-//! End-to-end tests against the public API: the connection-file
+//! End-to-end tests against the public API: the gateway discovery file
 //! lifecycle, stale detection with cleanup, the launch-race lock, and the
 //! health probe against a fixture listener.
 #![expect(
@@ -9,9 +9,9 @@
 use std::time::Duration;
 
 use shared_sidecar::{
-    ConnectionFile, GatewayInstanceLease, LaunchDecision, Resolution, SidecarError, StaleReason,
-    connection_file_path, instance_lock_file_path, launch_or_attach, lock_file_path, resolve,
-    wait_for_health,
+    GatewayDiscoveryFile, GatewayInstanceLease, LaunchDecision, Resolution, SidecarError,
+    StaleReason, gateway_discovery_file_path, instance_lock_file_path, launch_or_attach,
+    lock_file_path, resolve, wait_for_health,
 };
 
 const LEASE_CHILD_RUN_DIR: &str = "PROMPTFORGE_LEASE_CHILD_RUN_DIR";
@@ -52,9 +52,9 @@ impl Drop for BoundedChild {
     }
 }
 
-/// A valid connection file; the pid is the test process's own.
-fn valid_file() -> ConnectionFile {
-    ConnectionFile {
+/// A valid gateway discovery file; the pid is the test process's own.
+fn valid_file() -> GatewayDiscoveryFile {
+    GatewayDiscoveryFile {
         port: 8081,
         api_key: "key".to_owned(),
         pid: std::process::id(),
@@ -80,11 +80,14 @@ fn dead_pid() -> u32 {
 }
 
 #[test]
-fn a_write_then_read_round_trips_the_connection_file() {
+fn a_write_then_read_round_trips_the_gateway_discovery_file() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let file = valid_file();
     file.write_to(dir.path()).expect("write");
-    assert_eq!(ConnectionFile::read(dir.path()).expect("read"), Some(file));
+    assert_eq!(
+        GatewayDiscoveryFile::read(dir.path()).expect("read"),
+        Some(file)
+    );
 }
 
 #[test]
@@ -92,7 +95,7 @@ fn a_write_creates_a_missing_run_directory() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let run_dir = dir.path().join("nested").join("run");
     valid_file().write_to(&run_dir).expect("write");
-    assert!(connection_file_path(&run_dir).exists());
+    assert!(gateway_discovery_file_path(&run_dir).exists());
 }
 
 #[cfg(unix)]
@@ -101,7 +104,7 @@ fn the_written_file_is_owner_only() {
     use std::os::unix::fs::PermissionsExt as _;
     let dir = tempfile::TempDir::new().expect("tempdir");
     valid_file().write_to(dir.path()).expect("write");
-    let mode = connection_file_path(dir.path())
+    let mode = gateway_discovery_file_path(dir.path())
         .metadata()
         .expect("metadata")
         .permissions()
@@ -117,13 +120,13 @@ fn remove_if_mine_spares_a_foreign_pid_and_removes_the_owning_one() {
 
     shared_sidecar::remove_if_mine(dir.path(), file.pid + 1).expect("a foreign pid is tolerated");
     assert!(
-        connection_file_path(dir.path()).exists(),
+        gateway_discovery_file_path(dir.path()).exists(),
         "a foreign pid's removal spares the file"
     );
 
     shared_sidecar::remove_if_mine(dir.path(), file.pid).expect("the owning pid removes");
     assert!(
-        !connection_file_path(dir.path()).exists(),
+        !gateway_discovery_file_path(dir.path()).exists(),
         "the owning pid's removal deletes the file"
     );
 }
@@ -137,14 +140,14 @@ fn resolve_reports_absent_without_a_file() {
 #[test]
 fn resolve_cleans_a_corrupt_file() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(connection_file_path(dir.path()), b"not json").expect("write fixture");
+    std::fs::write(gateway_discovery_file_path(dir.path()), b"not json").expect("write fixture");
     assert_eq!(
         resolve(dir.path()).expect("resolve"),
         Resolution::Stale(StaleReason::Invalid),
         "a corrupt file is stale"
     );
     assert!(
-        !connection_file_path(dir.path()).exists(),
+        !gateway_discovery_file_path(dir.path()).exists(),
         "the corrupt file was deleted"
     );
 }
@@ -152,7 +155,7 @@ fn resolve_cleans_a_corrupt_file() {
 #[test]
 fn resolve_cleans_a_dead_pid_file() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let file = ConnectionFile {
+    let file = GatewayDiscoveryFile {
         pid: dead_pid(),
         ..valid_file()
     };
@@ -163,7 +166,7 @@ fn resolve_cleans_a_dead_pid_file() {
         "a dead pid is stale"
     );
     assert!(
-        !connection_file_path(dir.path()).exists(),
+        !gateway_discovery_file_path(dir.path()).exists(),
         "the stale file was deleted"
     );
 }

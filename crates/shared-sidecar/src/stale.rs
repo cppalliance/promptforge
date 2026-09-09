@@ -1,4 +1,4 @@
-//! Stale detection: decide whether a connection file names a live
+//! Stale detection: decide whether a gateway discovery file names a live
 //! gateway, and remove it when it does not.
 //!
 //! A file is live when one OS process boot with a `promptforge-gateway`
@@ -12,29 +12,29 @@ use std::io;
 use std::path::Path;
 
 use crate::error::SidecarError;
-use crate::paths::connection_file_path;
+use crate::paths::gateway_discovery_file_path;
 pub(crate) use crate::validated::GATEWAY_IMAGE_NAME;
 use crate::validated::{ValidatedConnection, ValidationError};
-use crate::{CancellationToken, ConnectionFile};
+use crate::{CancellationToken, GatewayDiscoveryFile};
 
 /// What [`resolve`] found in the run directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Resolution {
     /// A live gateway: attach with these parameters.
-    Attach(ConnectionFile),
-    /// No connection file exists: nothing to attach to, nothing to clean.
+    Attach(GatewayDiscoveryFile),
+    /// No gateway discovery file exists: nothing to attach to, nothing to clean.
     Absent,
-    /// A connection file existed but was stale; it was removed.
+    /// A gateway discovery file existed but was stale; it was removed.
     Stale(StaleReason),
 }
 
-/// Why a connection file was judged stale.
+/// Why a gateway discovery file was judged stale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StaleReason {
     /// The file was not valid JSON or failed validation.
-    #[error("the connection file is invalid")]
+    #[error("the gateway discovery file is invalid")]
     Invalid,
     /// The pid is dead.
     #[error("the recorded gateway process is dead")]
@@ -43,8 +43,8 @@ pub enum StaleReason {
     /// binary (a reused pid).
     #[error("the recorded pid belongs to another process image")]
     ImageMismatch,
-    /// The connection file does not carry a usable boot identity.
-    #[error("the connection file has no usable boot identity")]
+    /// The gateway discovery file does not carry a usable boot identity.
+    #[error("the gateway discovery file has no usable boot identity")]
     BootIdentityInvalid,
     /// The pid changed process boot while validation was in progress.
     #[error("the recorded process identity changed during validation")]
@@ -53,11 +53,11 @@ pub enum StaleReason {
     #[error("the recorded gateway does not answer its health probe")]
     HealthFailed,
     /// The bearer key was rejected.
-    #[error("the connection file bearer was rejected")]
+    #[error("the gateway discovery file bearer was rejected")]
     KeyRejected,
 }
 
-/// Resolves the connection file in `run_dir`: attach parameters for a
+/// Resolves the gateway discovery file in `run_dir`: attach parameters for a
 /// live gateway, or stale-file cleanup plus the reason.
 ///
 /// # Errors
@@ -68,7 +68,7 @@ pub fn resolve(run_dir: &Path) -> Result<Resolution, SidecarError> {
     resolve_named(run_dir, GATEWAY_IMAGE_NAME)
 }
 
-/// Resolves the connection file while observing caller cancellation.
+/// Resolves the gateway discovery file while observing caller cancellation.
 ///
 /// Cancellation never classifies or deletes the current file.
 ///
@@ -95,7 +95,7 @@ pub fn resolve_for_test(run_dir: &Path, image_name: &str) -> Result<Resolution, 
 /// full liveness gauntlet from a test binary, which is never named
 /// `promptforge-gateway`.
 pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resolution, SidecarError> {
-    let file = match ConnectionFile::read(run_dir) {
+    let file = match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => file,
         Ok(None) => return Ok(Resolution::Absent),
         Err(SidecarError::Parse { .. } | SidecarError::Invalid { .. }) => {
@@ -105,7 +105,7 @@ pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resoluti
         Err(error) => return Err(error),
     };
     match ValidatedConnection::validate_named(file, image_name) {
-        Ok(validated) => Ok(Resolution::Attach(validated.into_connection_file())),
+        Ok(validated) => Ok(Resolution::Attach(validated.into_gateway_discovery_file())),
         Err(reason) => {
             remove_stale(run_dir)?;
             Ok(Resolution::Stale(reason))
@@ -131,7 +131,7 @@ fn resolve_named_cancellable_with(
     image_name: &str,
     cancellation: &CancellationToken,
     validate: impl FnOnce(
-        ConnectionFile,
+        GatewayDiscoveryFile,
         &str,
         &CancellationToken,
     ) -> Result<ValidatedConnection, ValidationError>,
@@ -151,7 +151,7 @@ fn resolve_named_cancellable_with_effects(
     image_name: &str,
     cancellation: &CancellationToken,
     validate: impl FnOnce(
-        ConnectionFile,
+        GatewayDiscoveryFile,
         &str,
         &CancellationToken,
     ) -> Result<ValidatedConnection, ValidationError>,
@@ -161,7 +161,7 @@ fn resolve_named_cancellable_with_effects(
     if cancellation.is_cancelled() {
         return Err(SidecarError::Cancelled);
     }
-    let file = match ConnectionFile::read(run_dir) {
+    let file = match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => file,
         Ok(None) if cancellation.is_cancelled() => return Err(SidecarError::Cancelled),
         Ok(None) => return Ok(Resolution::Absent),
@@ -173,7 +173,7 @@ fn resolve_named_cancellable_with_effects(
         Err(error) => return Err(error),
     };
     match validate(file, image_name, cancellation) {
-        Ok(validated) => Ok(Resolution::Attach(validated.into_connection_file())),
+        Ok(validated) => Ok(Resolution::Attach(validated.into_gateway_discovery_file())),
         Err(ValidationError::Cancelled) => Err(SidecarError::Cancelled),
         Err(ValidationError::Stale(reason)) => {
             before_remove();
@@ -193,7 +193,7 @@ fn remove_stale_if_active(
         .unwrap_or(Err(SidecarError::Cancelled))
 }
 
-/// Whether the connection file in `run_dir` names a live gateway right
+/// Whether the gateway discovery file in `run_dir` names a live gateway right
 /// now, with no cleanup: the read-only check a diagnostics report runs.
 /// Stale-file deletion is the prospective owner's privilege, so a stale
 /// file reads as not-running and stays on disk for the next launch to
@@ -206,7 +206,7 @@ pub fn is_running(run_dir: &Path) -> bool {
 /// [`is_running`] against a caller-named process image, so a test binary -
 /// never named `promptforge-gateway` - can run the full liveness gauntlet.
 pub(crate) fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
-    match ConnectionFile::read(run_dir) {
+    match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => is_live(&file, image_name),
         // A missing, unreadable, or invalid file reads as not-running.
         Ok(None) | Err(_) => false,
@@ -216,12 +216,12 @@ pub(crate) fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
 /// Whether the file's gateway is live right now, with no cleanup: the
 /// check a launch-race loser runs, since deleting is the lock holder's
 /// privilege.
-pub(crate) fn is_live(file: &ConnectionFile, image_name: &str) -> bool {
+pub(crate) fn is_live(file: &GatewayDiscoveryFile, image_name: &str) -> bool {
     ValidatedConnection::validate_named(file.clone(), image_name).is_ok()
 }
 
 pub(crate) fn is_live_cancellable(
-    file: &ConnectionFile,
+    file: &GatewayDiscoveryFile,
     image_name: &str,
     cancellation: &CancellationToken,
 ) -> Result<bool, SidecarError> {
@@ -232,9 +232,9 @@ pub(crate) fn is_live_cancellable(
     }
 }
 
-/// Deletes the stale connection file, tolerating a concurrent deletion.
+/// Deletes the stale gateway discovery file, tolerating a concurrent deletion.
 fn remove_stale(run_dir: &Path) -> Result<(), SidecarError> {
-    let path = connection_file_path(run_dir);
+    let path = gateway_discovery_file_path(run_dir);
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -253,7 +253,7 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
 
-    use crate::paths::connection_file_path;
+    use crate::paths::gateway_discovery_file_path;
 
     /// The test process's own image name, so the pid and image checks
     /// pass and the test reaches the probe under test.
@@ -266,9 +266,9 @@ mod tests {
             .into_owned()
     }
 
-    /// A connection file pointing at the test process itself.
-    fn live_file(port: u16, api_key: &str) -> ConnectionFile {
-        ConnectionFile {
+    /// A gateway discovery file pointing at the test process itself.
+    fn live_file(port: u16, api_key: &str) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port,
             api_key: api_key.to_owned(),
             pid: std::process::id(),
@@ -326,7 +326,7 @@ mod tests {
     fn a_dead_pid_is_stale_and_cleaned() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let file = live_file(1, "key");
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             pid: dead_pid(),
             ..file
         };
@@ -335,7 +335,7 @@ mod tests {
         let resolution = resolve(dir.path()).expect("resolve");
         assert_eq!(resolution, Resolution::Stale(StaleReason::ProcessDead));
         assert!(
-            !connection_file_path(dir.path()).exists(),
+            !gateway_discovery_file_path(dir.path()).exists(),
             "the stale file was deleted"
         );
     }
@@ -350,7 +350,7 @@ mod tests {
         let resolution = resolve(dir.path()).expect("resolve");
         assert_eq!(resolution, Resolution::Stale(StaleReason::ImageMismatch));
         assert!(
-            !connection_file_path(dir.path()).exists(),
+            !gateway_discovery_file_path(dir.path()).exists(),
             "the stale file was deleted"
         );
     }
@@ -365,7 +365,7 @@ mod tests {
         let resolution = resolve_named(dir.path(), &own_image_name()).expect("resolve");
         assert_eq!(resolution, Resolution::Stale(StaleReason::HealthFailed));
         assert!(
-            !connection_file_path(dir.path()).exists(),
+            !gateway_discovery_file_path(dir.path()).exists(),
             "the stale file was deleted"
         );
     }
@@ -408,7 +408,7 @@ mod tests {
             "one dropped probe must not condemn a live gateway"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "a live file is left in place"
         );
     }
@@ -424,7 +424,7 @@ mod tests {
         let resolution = resolve_named(dir.path(), &own_image_name()).expect("resolve");
         assert_eq!(resolution, Resolution::Stale(StaleReason::KeyRejected));
         assert!(
-            !connection_file_path(dir.path()).exists(),
+            !gateway_discovery_file_path(dir.path()).exists(),
             "the stale file was deleted"
         );
     }
@@ -439,13 +439,13 @@ mod tests {
         let resolution = resolve_named(dir.path(), &own_image_name()).expect("resolve");
         assert_eq!(resolution, Resolution::Attach(file));
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "a live file is left in place"
         );
     }
 
     #[test]
-    fn cancellation_during_resolve_leaves_the_connection_file_untouched() {
+    fn cancellation_during_resolve_leaves_the_gateway_discovery_file_untouched() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         live_file(1, "key").write_to(dir.path()).expect("write");
         let cancellation = crate::CancellationToken::new();
@@ -479,15 +479,16 @@ mod tests {
         );
         assert!(matches!(result, Err(SidecarError::Cancelled)));
         assert!(
-            connection_file_path(dir.path()).exists(),
-            "cancellation never classifies or deletes the connection file"
+            gateway_discovery_file_path(dir.path()).exists(),
+            "cancellation never classifies or deletes the gateway discovery file"
         );
     }
 
     #[test]
     fn cancellation_immediately_before_invalid_file_removal_preserves_the_file() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        fs::write(connection_file_path(dir.path()), b"not json").expect("write invalid fixture");
+        fs::write(gateway_discovery_file_path(dir.path()), b"not json")
+            .expect("write invalid fixture");
         let cancellation = crate::CancellationToken::new();
         let worker_cancellation = cancellation.clone();
         let run_dir = dir.path().to_owned();
@@ -528,7 +529,7 @@ mod tests {
             "invalid-file cleanup cannot begin after cancellation returns"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "the cancelled invalid file remains untouched"
         );
     }
@@ -575,7 +576,7 @@ mod tests {
             "failed-validation cleanup cannot begin after cancellation returns"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "the cancelled stale file remains untouched"
         );
     }
@@ -593,7 +594,7 @@ mod tests {
             "a fully live file reads as running"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "the read-only check never deletes"
         );
     }
@@ -601,7 +602,7 @@ mod tests {
     #[test]
     fn is_running_leaves_a_stale_file_in_place() {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let file = ConnectionFile {
+        let file = GatewayDiscoveryFile {
             pid: dead_pid(),
             ..live_file(1, "key")
         };
@@ -612,7 +613,7 @@ mod tests {
             "a dead pid reads as not-running"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "stale-file deletion is the prospective owner's privilege"
         );
     }
@@ -622,15 +623,15 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("tempdir");
         assert!(
             !is_running_named(dir.path(), &own_image_name()),
-            "no connection file reads as not-running"
+            "no gateway discovery file reads as not-running"
         );
-        fs::write(connection_file_path(dir.path()), b"not json").expect("write fixture");
+        fs::write(gateway_discovery_file_path(dir.path()), b"not json").expect("write fixture");
         assert!(
             !is_running_named(dir.path(), &own_image_name()),
             "a corrupt file reads as not-running and is left alone"
         );
         assert!(
-            connection_file_path(dir.path()).exists(),
+            gateway_discovery_file_path(dir.path()).exists(),
             "the corrupt file was not deleted"
         );
     }

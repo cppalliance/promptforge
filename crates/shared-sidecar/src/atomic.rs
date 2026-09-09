@@ -1,10 +1,10 @@
-//! Crash-safe, owner-only file writes for the connection file: each write
+//! Crash-safe, owner-only file writes for the gateway discovery file: each write
 //! lands in a uniquely named sibling temp file, is synced to disk, and is
 //! renamed over the target, so a crash at any moment leaves either the old
 //! contents or the new, never a truncation. The pattern mirrors
 //! workshop-server's `atomic.rs`; this crate reimplements it rather than
 //! depending on a server crate, and adds the owner-only permission the
-//! bearer-carrying connection file needs.
+//! bearer-carrying gateway discovery file needs.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};

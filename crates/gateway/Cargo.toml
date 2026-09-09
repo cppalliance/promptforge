@@ -47,7 +47,7 @@ rand.workspace = true
 # because those endpoints hold secrets in every build.
 shared-loopback.workspace = true
 shared-protocol.workspace = true
-# The connection-file seam: gateway.json is written after every successful
+# The gateway-discovery-file seam: gateway.json is written after every successful
 # bind, in every build, so the workshop can discover a running gateway.
 shared-sidecar.workspace = true
 gateway-routing.workspace = true
@@ -72,7 +72,7 @@ toml.workspace = true
 url.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 thiserror.workspace = true
-# RFC 3339 rendering of the connection file's started_at.
+# RFC 3339 rendering of the gateway discovery file's started_at.
 time.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 # CancellationToken for the command queue's per-command cancellation;

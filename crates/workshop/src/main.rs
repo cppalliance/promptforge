@@ -9,7 +9,7 @@
 //! Hosts the workshop server in-process on a loopback listener with an
 //! OS-assigned port and opens a Tauri window pointed at the in-process
 //! listener's URL. Boot first connects the gateway: attach to a running
-//! gateway through its connection file, or launch the sibling
+//! gateway through its gateway discovery file, or launch the sibling
 //! `promptforge-gateway` detached when none is running - a Workshop-only
 //! install falls back to the explicit `workshop.toml` `[gateway]` config,
 //! and with neither boot fails loud naming both remedies. The in-process
@@ -219,10 +219,11 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
 }
 
-/// Connects the gateway (attach to a live connection file, or launch the
-/// sibling `promptforge-gateway` detached), then spawns the in-process
-/// workshop server - which resolves the same endpoint itself, connection
-/// file first, explicit `workshop.toml` config second - and waits out its
+/// Connects the gateway (attach to a live gateway discovery file, or
+/// launch the sibling `promptforge-gateway` detached), then spawns the
+/// in-process workshop server - which resolves the same endpoint itself,
+/// gateway discovery file first, explicit `workshop.toml` config
+/// second - and waits out its
 /// health probe. A failure after the spawn shuts the server down before
 /// propagating.
 fn boot() -> anyhow::Result<(

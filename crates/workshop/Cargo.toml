@@ -19,7 +19,7 @@ anyhow.workspace = true
 # loopback port and points the window at it.
 workshop-server.workspace = true
 serde_json.workspace = true
-# The health wait comes from the shared connection-file seam.
+# The health wait comes from the shared gateway-discovery-file seam.
 shared-sidecar.workspace = true
 tauri.workspace = true
 tauri-plugin-dialog.workspace = true

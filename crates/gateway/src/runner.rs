@@ -63,7 +63,7 @@ pub struct ServeOptions {
     pub config_path: Option<PathBuf>,
     /// Optional command-line profile override.
     pub profile: Option<ProfileName>,
-    /// Directory the `gateway.json` connection file is written to after a
+    /// Directory the `gateway.json` gateway discovery file is written to after a
     /// successful bind; `None` uses the default run directory under the
     /// user profile's `.promptforge` directory.
     pub run_dir: Option<PathBuf>,
@@ -88,7 +88,7 @@ impl ServeOptions {
         }
     }
 
-    /// Sets the connection-file run directory, for tests and portable
+    /// Sets the gateway discovery file's run directory, for tests and portable
     /// installs; the default is the user profile's `.promptforge/run`.
     #[must_use]
     pub fn with_run_dir(mut self, run_dir: PathBuf) -> ServeOptions {
@@ -927,7 +927,7 @@ fn serve_thread(
     };
     // The bind runs on this plain thread, apart from the serve future, so
     // the bound address is known before serving starts: the readiness
-    // signal and the connection file both carry the real port.
+    // signal and the gateway discovery file both carry the real port.
     let listener = match runtime.block_on(TcpListener::bind(bind)) {
         Ok(listener) => listener,
         Err(error) => {
@@ -948,10 +948,10 @@ fn serve_thread(
     // runtime. Provisioning is the boot command's work, not startup's.
     let boot_profile = profiles.active.clone();
     let gateway = Gateway::new_with_hub(&config, profiles, hub);
-    // The connection file lands before the readiness signal so a spawned
+    // The gateway discovery file lands before the readiness signal so a spawned
     // gateway is discoverable the moment `spawn` returns; the guard removes
     // it on every exit path below, graceful shutdown included.
-    let _connection_file = connection_file_guard(&config, options, address);
+    let _gateway_discovery_file = gateway_discovery_file_guard(&config, options, address);
     tracing::info!("gateway serving on {address}");
     let _ = ready.send(Ok(Ready {
         url: format!("http://{address}"),
@@ -980,42 +980,42 @@ fn serve_thread(
     result
 }
 
-/// Removes the connection file on drop when it still belongs to this
+/// Removes the gateway discovery file on drop when it still belongs to this
 /// process, so a graceful shutdown withdraws the gateway from discovery
 /// while a replacement's file is spared.
 #[derive(Debug)]
-struct ConnectionFileGuard {
+struct GatewayDiscoveryFileGuard {
     run_dir: PathBuf,
     pid: u32,
 }
 
-impl Drop for ConnectionFileGuard {
+impl Drop for GatewayDiscoveryFileGuard {
     fn drop(&mut self) {
         if let Err(error) = shared_sidecar::remove_if_mine(&self.run_dir, self.pid) {
-            tracing::warn!("could not remove the connection file: {error}");
+            tracing::warn!("could not remove the gateway discovery file: {error}");
         }
     }
 }
 
-/// Writes the `gateway.json` connection file for the just-bound `address`
+/// Writes the `gateway.json` gateway discovery file for the just-bound `address`
 /// and returns the guard that removes it on drop. A failure is logged and
 /// tolerated: the gateway keeps serving, and discovery degrades to a
 /// relaunch instead of an attach.
-fn connection_file_guard(
+fn gateway_discovery_file_guard(
     config: &Config,
     options: &ServeOptions,
     address: std::net::SocketAddr,
-) -> Option<ConnectionFileGuard> {
+) -> Option<GatewayDiscoveryFileGuard> {
     let Some(run_dir) = options
         .run_dir
         .clone()
         .or_else(shared_sidecar::default_run_dir)
     else {
-        tracing::warn!("no user profile directory found; no connection file written");
+        tracing::warn!("no user profile directory found; no gateway discovery file written");
         return None;
     };
     let now = time::OffsetDateTime::now_utc();
-    let file = shared_sidecar::ConnectionFile {
+    let file = shared_sidecar::GatewayDiscoveryFile {
         port: address.port(),
         api_key: config.server_key().expose().to_owned(),
         pid: std::process::id(),
@@ -1030,12 +1030,12 @@ fn connection_file_guard(
     let pid = file.pid;
     if let Err(error) = file.write_to(&run_dir) {
         tracing::warn!(
-            "could not write the connection file in {}: {error}; attachers will relaunch instead",
+            "could not write the gateway discovery file in {}: {error}; attachers will relaunch instead",
             run_dir.display()
         );
         return None;
     }
-    Some(ConnectionFileGuard { run_dir, pid })
+    Some(GatewayDiscoveryFileGuard { run_dir, pid })
 }
 
 /// Resolves only on an explicit shutdown send. A sender dropped without

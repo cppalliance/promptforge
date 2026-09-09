@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use shared_sidecar::ConnectionFile;
+use shared_sidecar::GatewayDiscoveryFile;
 
 use super::{dead_pid, exe_dir, fixture_gateway, live_file, probe_own_image, probe_read_failure};
 #[cfg(windows)]
@@ -155,7 +155,7 @@ fn no_file_no_sibling_exe_and_no_config_fails() {
 #[test]
 fn a_stale_file_is_cleaned_and_the_sibling_exe_launches() {
     let run = tempfile::TempDir::new().expect("tempdir");
-    ConnectionFile {
+    GatewayDiscoveryFile {
         pid: dead_pid(),
         ..live_file(1, "k")
     }
@@ -169,7 +169,7 @@ fn a_stale_file_is_cleaned_and_the_sibling_exe_launches() {
         "a stale file must not block the relaunch: {plan:?}"
     );
     assert!(
-        !shared_sidecar::connection_file_path(run.path()).exists(),
+        !shared_sidecar::gateway_discovery_file_path(run.path()).exists(),
         "the stale file was cleaned"
     );
 }
@@ -177,7 +177,7 @@ fn a_stale_file_is_cleaned_and_the_sibling_exe_launches() {
 #[test]
 fn a_stale_file_with_no_sibling_exe_falls_through_to_explicit_config() {
     let run = tempfile::TempDir::new().expect("tempdir");
-    ConnectionFile {
+    GatewayDiscoveryFile {
         pid: dead_pid(),
         ..live_file(1, "k")
     }
@@ -191,7 +191,7 @@ fn a_stale_file_with_no_sibling_exe_falls_through_to_explicit_config() {
         "a stale file must not wedge the LAN fallback"
     );
     assert!(
-        !shared_sidecar::connection_file_path(run.path()).exists(),
+        !shared_sidecar::gateway_discovery_file_path(run.path()).exists(),
         "the stale file was cleaned"
     );
 }
@@ -250,7 +250,9 @@ fn the_launch_wait_times_out_when_no_file_appears() {
         wait_for_launched_file_with(run.path(), Duration::from_millis(150), probe_own_image)
             .expect_err("a gateway that never writes must not hang boot");
     assert!(
-        error.to_string().contains("no validated connection file"),
+        error
+            .to_string()
+            .contains("no validated gateway discovery file"),
         "the error names the missing file: {error}"
     );
 }
@@ -264,9 +266,11 @@ fn the_launch_wait_rejects_a_key_the_live_process_does_not_accept() {
 
     let error =
         wait_for_launched_file_with(run.path(), Duration::from_millis(150), probe_own_image)
-            .expect_err("an unaccepted connection-file key must not publish");
+            .expect_err("an unaccepted discovery-file key must not publish");
     assert!(
-        error.to_string().contains("no validated connection file"),
+        error
+            .to_string()
+            .contains("no validated gateway discovery file"),
         "the error names the validation failure without exposing the key: {error}"
     );
 }

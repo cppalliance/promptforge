@@ -105,7 +105,7 @@ fn a_process_lease_loser_leaves_the_canonical_log_untouched() {
     let _owner = shared_sidecar::GatewayInstanceLease::try_acquire(&run_dir)
         .expect("acquire the owner lease")
         .expect("the test owns the process lease");
-    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
     std::fs::write(&connection_path, b"owner-is-still-publishing")
         .expect("seed an unreadable owner record");
     let options = ServeOptions::new(None, None::<gateway::ProfileName>).with_run_dir(run_dir);
@@ -141,7 +141,7 @@ fn a_lease_holder_resolution_failure_leaves_the_canonical_log_untouched() {
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
     let log_path = logs.join("gateway.log");
     std::fs::write(&log_path, "owner-log-sentinel").expect("seed the canonical log");
-    let connection_path = shared_sidecar::connection_file_path(&run_dir);
+    let connection_path = shared_sidecar::gateway_discovery_file_path(&run_dir);
     std::fs::create_dir_all(&connection_path).expect("create unreadable connection fixture");
     let options = ServeOptions::new(None, None::<gateway::ProfileName>).with_run_dir(run_dir);
 

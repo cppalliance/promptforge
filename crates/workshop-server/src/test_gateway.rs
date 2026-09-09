@@ -5,7 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use shared_sidecar::{ConnectionFile, ValidatedConnection};
+use shared_sidecar::{GatewayDiscoveryFile, ValidatedConnection};
 
 mod process;
 
@@ -149,14 +149,19 @@ impl ValidatedGateway {
         reason = "test fixture validation fails immediately with the failed invariant"
     )]
     pub fn validate(&self, api_key: &str, epoch: u64, started_at: &str) -> ValidatedConnection {
-        ValidatedConnection::validate(self.connection_file(api_key, epoch, started_at))
+        ValidatedConnection::validate(self.gateway_discovery_file(api_key, epoch, started_at))
             .expect("the named local Gateway validates")
     }
 
-    /// Builds a connection file naming this child and the supplied boot data.
+    /// Builds a gateway discovery file naming this child and the supplied boot data.
     #[must_use]
-    pub fn connection_file(&self, api_key: &str, epoch: u64, started_at: &str) -> ConnectionFile {
-        ConnectionFile {
+    pub fn gateway_discovery_file(
+        &self,
+        api_key: &str,
+        epoch: u64,
+        started_at: &str,
+    ) -> GatewayDiscoveryFile {
+        GatewayDiscoveryFile {
             port: self.port,
             api_key: api_key.to_owned(),
             pid: self.child.id(),
