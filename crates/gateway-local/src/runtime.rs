@@ -352,9 +352,25 @@ fn provision_artifacts_impl(
     if token.is_cancelled() {
         return Err(LocalError::Cancelled);
     }
-    let (store, _server) = provision_server(config, progress, provision)?;
+    // Kind preflight (A6): every model's kind is checked before the shared
+    // server or any model provisions, so a profile with no launchable model
+    // fails without a single side effect.
     let mut failures = Vec::new();
+    let mut launchable = Vec::new();
     for local_model in config.local_models() {
+        match serve_mode_for(local_model.kind()) {
+            Ok(_) => launchable.push(local_model),
+            Err(error) => failures.push(LocalStartFailure {
+                model: local_model.name().to_owned(),
+                error,
+            }),
+        }
+    }
+    if launchable.is_empty() {
+        return Ok(failures);
+    }
+    let (store, _server) = provision_server(config, progress, provision)?;
+    for local_model in launchable {
         // Phase boundary: a cancelled command provisions no further models.
         if token.is_cancelled() {
             return Err(LocalError::Cancelled);
@@ -456,13 +472,38 @@ fn start_impl(
     if token.is_some_and(CancellationToken::is_cancelled) {
         return Err(LocalError::Cancelled);
     }
+
+    // Kind preflight (A6): every model's kind is checked before the shared
+    // server provisions, so a profile with no launchable model fails without
+    // a single provisioning side effect.
+    let mut launchable = Vec::new();
+    let mut failures = Vec::new();
+    for local_model in config.local_models() {
+        match serve_mode_for(local_model.kind()) {
+            Ok(_) => launchable.push(local_model),
+            Err(error) if policy == StartPolicy::FailFast => return Err(error),
+            Err(error) => failures.push(LocalStartFailure {
+                model: local_model.name().to_owned(),
+                error,
+            }),
+        }
+    }
+    if launchable.is_empty() {
+        return Ok(LocalStartOutcome {
+            runtime: LocalRuntime {
+                models: Vec::new(),
+                upstreams: Vec::new(),
+                cache_dir,
+            },
+            failures,
+        });
+    }
     let (store, server) = provision_server(config, progress, provision)?;
 
     let dominion_queues = dominion_queues(config);
-    let mut started_models = Vec::with_capacity(config.local_models().len());
-    let mut failures = Vec::new();
+    let mut started_models = Vec::with_capacity(launchable.len());
 
-    for local_model in config.local_models() {
+    for local_model in launchable {
         // Phase boundary: a cancelled command starts no further models, and
         // the models already started drop with this in-progress outcome,
         // killing their children.
@@ -711,8 +752,29 @@ fn resolve_admission(
     Ok(LocalAdmission { parallel, queue })
 }
 
-fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
-    LaunchOptions {
+/// The `llama-server` serve mode for a model kind.
+///
+/// The mapping is side-effect-free, so a caller can preflight an unsupported
+/// kind before any provisioning side effect: a speech model has no local
+/// runtime yet, and a kind added to `ModelKind` after this mapping fails
+/// loudly instead of launching as a chat server.
+fn serve_mode_for(kind: ModelKind) -> Result<ServeMode, LocalError> {
+    match kind {
+        ModelKind::Chat => Ok(ServeMode::Chat),
+        ModelKind::Embedding => Ok(ServeMode::Embeddings),
+        ModelKind::Classifier => Ok(ServeMode::Reranking),
+        ModelKind::Speech => Err(LocalError::UnsupportedKind {
+            kind: ModelKind::Speech,
+        }),
+        // `ModelKind` is `#[non_exhaustive]`: a kind added after this mapping
+        // fails loudly instead of launching as a chat server.
+        kind => Err(LocalError::UnsupportedKind { kind }),
+    }
+}
+
+fn launch_options(model: &LocalModelConfig, parallel: u32) -> Result<LaunchOptions, LocalError> {
+    let serve_mode = serve_mode_for(model.kind())?;
+    Ok(LaunchOptions {
         ctx_size: model.context(),
         n_predict: model.n_predict(),
         parallel,
@@ -722,16 +784,11 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_v: model.cache_type_v().to_owned(),
         think: !matches!(model.thinking(), ThinkingMode::Never),
         chat_template_file: None,
-        serve_mode: match model.kind() {
-            ModelKind::Embedding => ServeMode::Embeddings,
-            ModelKind::Classifier => ServeMode::Reranking,
-            // Chat (and any kind added after this mapping) launches with no flag.
-            _ => ServeMode::Chat,
-        },
+        serve_mode,
         speculative: None,
         multimodal_projector: None,
         path_prefix: Vec::new(),
-    }
+    })
 }
 
 fn launch_options_for(
@@ -740,7 +797,7 @@ fn launch_options_for(
     model_path: &Path,
     admission: &LocalAdmission,
 ) -> Result<LaunchOptions, LocalError> {
-    let mut options = launch_options(model, admission.parallel);
+    let mut options = launch_options(model, admission.parallel)?;
     options.chat_template_file = resolve_chat_template_file(store, model, model_path)?;
     Ok(options)
 }
@@ -1388,6 +1445,365 @@ context = 4096
         );
     }
 
+    #[test]
+    fn provision_artifacts_with_an_all_speech_profile_has_no_side_effects() {
+        use crate::testsupport::hex_sha256;
+
+        // The kind preflight (A6) runs before the shared server or any model
+        // provisions: an all-speech profile collects one refusal per model
+        // and does nothing else - the server provisioner never runs and the
+        // cache directory is never even created.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let model_file = temp.path().join("tts.gguf");
+        std::fs::write(&model_file, b"mock-tts-bytes").expect("write model");
+        let cache_dir = temp.path().join("cache");
+        let config = Config::from_toml_str(&format!(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+cache_dir = '{}'
+
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = '{}'
+sha256 = "{}"
+context = 4096
+"#,
+            cache_dir.display(),
+            model_file.display(),
+            hex_sha256(b"mock-tts-bytes"),
+        ))
+        .expect("config");
+
+        let server_provisions = std::sync::atomic::AtomicUsize::new(0);
+        let failures = provision_artifacts_impl(
+            &config,
+            None,
+            &CancellationToken::new(),
+            |_store, _selection, _server| {
+                server_provisions.fetch_add(1, Ordering::Relaxed);
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+        )
+        .expect("an unsupported kind is a per-model failure, not a fatal one");
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].model(), "tts");
+        assert!(
+            matches!(
+                failures[0].error(),
+                LocalError::UnsupportedKind {
+                    kind: ModelKind::Speech
+                }
+            ),
+            "the refusal names the speech kind: {:?}",
+            failures[0].error()
+        );
+        assert_eq!(
+            server_provisions.load(Ordering::Relaxed),
+            0,
+            "the shared server is never provisioned"
+        );
+        assert!(
+            !cache_dir.exists(),
+            "the model store is never touched: the cache directory is never created"
+        );
+    }
+
+    #[test]
+    fn provision_artifacts_with_a_mixed_profile_provisions_only_supported_models() {
+        use crate::testsupport::hex_sha256;
+
+        // A mixed profile keeps supported-model progress: the chat model's
+        // blob is verified into the cache while the speech model is refused
+        // as a per-model failure and never provisioned.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let chat_file = temp.path().join("chat.gguf");
+        std::fs::write(&chat_file, b"mock-chat-bytes").expect("write chat model");
+        let tts_file = temp.path().join("tts.gguf");
+        std::fs::write(&tts_file, b"mock-tts-bytes").expect("write tts model");
+        let cache_dir = temp.path().join("cache");
+        let config = Config::from_toml_str(&format!(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+cache_dir = '{}'
+
+[[local_model]]
+name = "chat"
+description = "a local chat model"
+source = '{}'
+sha256 = "{}"
+context = 4096
+
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = '{}'
+sha256 = "{}"
+context = 4096
+"#,
+            cache_dir.display(),
+            chat_file.display(),
+            hex_sha256(b"mock-chat-bytes"),
+            tts_file.display(),
+            hex_sha256(b"mock-tts-bytes"),
+        ))
+        .expect("config");
+
+        let server_provisions = std::sync::atomic::AtomicUsize::new(0);
+        let failures = provision_artifacts_impl(
+            &config,
+            None,
+            &CancellationToken::new(),
+            |_store, _selection, _server| {
+                server_provisions.fetch_add(1, Ordering::Relaxed);
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+        )
+        .expect("a per-model refusal is not fatal");
+        assert_eq!(
+            failures
+                .iter()
+                .map(LocalStartFailure::model)
+                .collect::<Vec<_>>(),
+            ["tts"]
+        );
+        assert!(
+            matches!(
+                failures[0].error(),
+                LocalError::UnsupportedKind {
+                    kind: ModelKind::Speech
+                }
+            ),
+            "the refusal names the speech kind: {:?}",
+            failures[0].error()
+        );
+        assert_eq!(
+            server_provisions.load(Ordering::Relaxed),
+            1,
+            "the shared server provisions once for the supported model"
+        );
+        let chat_key = artifacts::source_cache_key(&chat_file.to_string_lossy());
+        assert!(
+            cache_dir
+                .join("markers")
+                .join(format!("{chat_key}.verified"))
+                .is_file(),
+            "the supported model's blob is verified into the cache"
+        );
+        let tts_key = artifacts::source_cache_key(&tts_file.to_string_lossy());
+        assert!(
+            !cache_dir
+                .join("markers")
+                .join(format!("{tts_key}.verified"))
+                .exists(),
+            "the refused speech model's blob is never provisioned"
+        );
+    }
+
+    #[test]
+    fn start_with_an_all_speech_profile_has_no_side_effects() {
+        use crate::testsupport::hex_sha256;
+
+        // The kind preflight (A6) runs before the shared server provisions:
+        // an all-speech profile collects one refusal per model and does
+        // nothing else - the server provisioner never runs and the cache
+        // directory is never even created.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let model_file = temp.path().join("tts.gguf");
+        std::fs::write(&model_file, b"mock-tts-bytes").expect("write model");
+        let cache_dir = temp.path().join("cache");
+        let config = Config::from_toml_str(&format!(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[local]
+cache_dir = '{}'
+
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = '{}'
+sha256 = "{}"
+context = 4096
+"#,
+            cache_dir.display(),
+            model_file.display(),
+            hex_sha256(b"mock-tts-bytes"),
+        ))
+        .expect("config");
+
+        let server_provisions = std::sync::atomic::AtomicUsize::new(0);
+        let outcome = start_impl(
+            &config,
+            None,
+            &startup_interrupt_flag(),
+            None,
+            |_store, _selection, _server| {
+                server_provisions.fetch_add(1, Ordering::Relaxed);
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+            |_, _, _, _, _| panic!("a refused model never spawns"),
+            StartPolicy::KeepReady,
+        )
+        .expect("a per-model refusal is not fatal under the partial policy");
+        assert_eq!(outcome.runtime().child_count(), 0);
+        assert_eq!(outcome.failures().len(), 1);
+        assert!(
+            matches!(
+                outcome.failures()[0].error(),
+                LocalError::UnsupportedKind {
+                    kind: ModelKind::Speech
+                }
+            ),
+            "the refusal names the speech kind: {:?}",
+            outcome.failures()[0].error()
+        );
+        assert_eq!(
+            server_provisions.load(Ordering::Relaxed),
+            0,
+            "the shared server is never provisioned"
+        );
+        assert!(
+            !cache_dir.exists(),
+            "the model store is never touched: the cache directory is never created"
+        );
+    }
+
+    #[test]
+    fn start_with_a_mixed_profile_provisions_the_server_once() {
+        use crate::testsupport::hex_sha256;
+
+        // A mixed profile keeps supported-model progress: the server
+        // provisions once, the embedding model's blob is verified into the
+        // cache and reaches the spawn, and the speech model is refused as a
+        // per-model failure whose blob is never provisioned.
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let embed_file = temp.path().join("embed.gguf");
+        std::fs::write(&embed_file, b"mock-embed-bytes").expect("write embed model");
+        let tts_file = temp.path().join("tts.gguf");
+        std::fs::write(&tts_file, b"mock-tts-bytes").expect("write tts model");
+        let cache_dir = temp.path().join("cache");
+        let config = Config::from_toml_str(&format!(
+            r#"
+config-version = 2
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+[local]
+cache_dir = '{}'
+[[local_model]]
+name = "embed"
+kind = "embedding"
+description = "a local embedding model"
+source = '{}'
+sha256 = "{}"
+context = 512
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = '{}'
+context = 4096
+"#,
+            cache_dir.display(),
+            embed_file.display(),
+            hex_sha256(b"mock-embed-bytes"),
+            tts_file.display(),
+        ))
+        .expect("config");
+        let server_provisions = std::sync::atomic::AtomicUsize::new(0);
+        let spawns = std::sync::atomic::AtomicUsize::new(0);
+        let outcome = start_impl(
+            &config,
+            None,
+            &startup_interrupt_flag(),
+            None,
+            |_store, _selection, _server| {
+                server_provisions.fetch_add(1, Ordering::Relaxed);
+                Ok(ProvisionedServer {
+                    executable: PathBuf::from("mock-llama-server"),
+                    path_prefix: Vec::new(),
+                })
+            },
+            |_, _, _, _, _| {
+                spawns.fetch_add(1, Ordering::Relaxed);
+                Err(LocalError::EarlyExit {
+                    status: "the mock layout has no llama-server to spawn".to_owned(),
+                })
+            },
+            StartPolicy::KeepReady,
+        )
+        .expect("per-model failures are not fatal under the partial policy");
+        assert_eq!(outcome.runtime().child_count(), 0);
+        assert_eq!(
+            server_provisions.load(Ordering::Relaxed),
+            1,
+            "the shared server provisions once for the supported model"
+        );
+        assert_eq!(
+            spawns.load(Ordering::Relaxed),
+            1,
+            "only the supported model reaches the spawn"
+        );
+        assert!(
+            outcome.failures().iter().any(|failure| {
+                failure.model() == "tts"
+                    && matches!(
+                        failure.error(),
+                        LocalError::UnsupportedKind {
+                            kind: ModelKind::Speech
+                        }
+                    )
+            }),
+            "the speech refusal is a per-model failure naming the kind: {:?}",
+            outcome.failures()
+        );
+        let embed_key = artifacts::source_cache_key(&embed_file.to_string_lossy());
+        let tts_key = artifacts::source_cache_key(&tts_file.to_string_lossy());
+        assert!(
+            cache_dir
+                .join("markers")
+                .join(format!("{embed_key}.verified"))
+                .is_file(),
+            "the supported model's blob is verified into the cache"
+        );
+        assert!(
+            !cache_dir
+                .join("markers")
+                .join(format!("{tts_key}.verified"))
+                .exists(),
+            "the refused speech model's blob is never provisioned"
+        );
+    }
+
     #[tokio::test]
     async fn parallel_field_feeds_parallel_arg_and_queue_limit() {
         // A local model with `parallel = 3` launches its child with
@@ -1416,7 +1832,12 @@ parallel = 3
         let admission = resolve_admission(&queues, model).expect("admission");
 
         assert_eq!(admission.parallel, 3);
-        assert_eq!(launch_options(model, admission.parallel).parallel, 3);
+        assert_eq!(
+            launch_options(model, admission.parallel)
+                .expect("launch options")
+                .parallel,
+            3
+        );
 
         let _first = admission.queue.admit("client").await.unwrap();
         let _second = admission.queue.admit("client").await.unwrap();
@@ -1518,8 +1939,14 @@ context = 4096
         .expect("config");
         let embed = &config.local_models()[0];
         let chat = &config.local_models()[1];
-        assert_eq!(launch_options(embed, 1).serve_mode, ServeMode::Embeddings);
-        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+        assert_eq!(
+            launch_options(embed, 1).expect("launch options").serve_mode,
+            ServeMode::Embeddings
+        );
+        assert_eq!(
+            launch_options(chat, 1).expect("launch options").serve_mode,
+            ServeMode::Chat
+        );
     }
 
     #[test]
@@ -1553,10 +1980,54 @@ context = 4096
         let classifier = &config.local_models()[0];
         let chat = &config.local_models()[1];
         assert_eq!(
-            launch_options(classifier, 1).serve_mode,
+            launch_options(classifier, 1)
+                .expect("launch options")
+                .serve_mode,
             ServeMode::Reranking
         );
-        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+        assert_eq!(
+            launch_options(chat, 1).expect("launch options").serve_mode,
+            ServeMode::Chat
+        );
+    }
+
+    #[test]
+    fn speech_kind_refuses_to_launch_as_chat() {
+        // A speech model has no `llama-server` serve mode: `launch_options`
+        // errors rather than falling through to the chat default, which is
+        // what the wildcard arm did before the mapping went fallible.
+        let config = Config::from_toml_str(
+            r#"
+config-version = 2
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "tts"
+kind = "speech"
+description = "a local speech model"
+source = "/models/tts.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let speech = &config.local_models()[0];
+        let error = launch_options(speech, 1).expect_err("a speech model must not launch as chat");
+        assert!(
+            matches!(
+                error,
+                LocalError::UnsupportedKind {
+                    kind: ModelKind::Speech
+                }
+            ),
+            "the refusal names the speech kind: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "local speech models are not yet supported"
+        );
     }
 
     fn companion_config(body: &str) -> Config {
@@ -1612,7 +2083,7 @@ sha256 = "{}"
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
 
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         provision_companions(&store, model, &mut options, None).expect("provision companions");
 
         let speculative = options.speculative.expect("speculative launch state");
@@ -1658,7 +2129,7 @@ draft_max = 2
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
         let model = &mismatching.local_models()[0];
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let error = provision_companions(&store, model, &mut options, None)
             .expect_err("pin mismatch must fail provisioning");
         assert!(matches!(error, LocalError::DigestMismatch { .. }));
@@ -1671,7 +2142,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
 "#,
         );
         let model = &missing.local_models()[0];
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let error = provision_companions(&store, model, &mut options, None)
             .expect_err("a missing local source must fail provisioning");
         assert!(matches!(error, LocalError::InvalidSource { .. }));
@@ -1687,7 +2158,7 @@ source = "/definitely/not/a/real/mmproj.gguf"
         let model = &config.local_models()[0];
         let temp = tempfile::TempDir::new().expect("tempdir");
         let store = ArtifactStore::new(temp.path()).expect("store");
-        let mut options = launch_options(model, 1);
+        let mut options = launch_options(model, 1).expect("launch options");
         let before = options.clone();
         provision_companions(&store, model, &mut options, None).expect("no companions");
         assert_eq!(options, before);

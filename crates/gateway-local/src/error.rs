@@ -3,6 +3,8 @@
 use std::io;
 use std::path::PathBuf;
 
+use gateway_config::ModelKind;
+
 /// A failure while downloading, verifying, or launching a local model.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -14,6 +16,17 @@ pub enum LocalError {
         os: String,
         /// CPU architecture (`x86_64`, `aarch64`).
         arch: String,
+    },
+
+    /// The model's kind has no local `llama-server` launch mode.
+    ///
+    /// Speech models configure through `kind = "speech"` but no local speech
+    /// runtime exists yet. A kind added to `ModelKind` after the launch-mode
+    /// mapping lands here too, failing loudly instead of launching as chat.
+    #[error("local {kind} models are not yet supported")]
+    UnsupportedKind {
+        /// The model kind that cannot launch locally.
+        kind: ModelKind,
     },
 
     /// Building the HTTP client failed.
