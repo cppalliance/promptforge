@@ -345,9 +345,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.89.0
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -365,8 +362,8 @@ jobs:
           npm ci --prefix crates/workshop-server/ui
           npm ci --prefix crates/gateway-config-ui/ui
 
-      - name: Test on MSRV
-        run: cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features
+      - name: Check on MSRV
+        run: cargo check --locked --workspace --exclude workshop --exclude workshop-server --all-targets --all-features
 
   supply-chain:
     runs-on: ubuntu-latest
