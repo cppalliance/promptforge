@@ -117,6 +117,9 @@ impl ValidatedGateway {
                 Err(error) => panic!("accept fixture control connection: {error}"),
             }
         };
+        stream
+            .set_nonblocking(false)
+            .expect("make accepted fixture control blocking");
         let mut port = [0_u8; 2];
         stream
             .read_exact(&mut port)
@@ -240,6 +243,32 @@ impl Drop for ValidatedGateway {
 #[ignore = "runs only as a named child process"]
 fn validated_gateway_fixture_process() {
     run_validated_gateway_fixture_process();
+}
+
+#[cfg(test)]
+#[test]
+fn received_shutdown_waits_for_a_delayed_marker() {
+    let mut gateway = ValidatedGateway::spawn("fixture-key");
+    let validated = gateway.validate("fixture-key", 1_778_000_001, "2026-09-07T18:00:01Z");
+    let delay = Duration::from_millis(100);
+    let started = Instant::now();
+
+    std::thread::scope(|scope| {
+        scope.spawn(move || {
+            std::thread::sleep(delay);
+            shared_sidecar::request_shutdown(&validated)
+                .expect("the delayed authenticated shutdown is accepted");
+        });
+        assert!(
+            gateway.received_shutdown(Duration::from_secs(2)),
+            "the control stream waits for the delayed shutdown marker"
+        );
+    });
+
+    assert!(
+        started.elapsed() >= delay,
+        "the delayed marker cannot be reported before it is sent"
+    );
 }
 
 #[cfg(test)]
