@@ -43,6 +43,18 @@ pub(crate) enum GatewayError {
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
+    /// The speech request's `voice` is not one of the model's catalog
+    /// voices. Checked at the route before queue admission, so the 400
+    /// never burns a queue slot; the message names the valid voices.
+    #[non_exhaustive]
+    #[error("unknown voice {voice}; the model offers: {}", valid.join(", "))]
+    InvalidVoice {
+        /// The voice the request named.
+        voice: String,
+        /// The voices the model's catalog declares.
+        valid: Vec<String>,
+    },
+
     /// A transport- or protocol-level failure from the upstream seam. The
     /// variants live in [`ProtocolError`]; the gateway wraps them so a route
     /// handler deals with one error type.
@@ -58,6 +70,19 @@ pub(crate) enum GatewayError {
     /// rate-limit error rather than a server failure.
     #[error("queue rejected at capacity")]
     QueueRejected,
+
+    /// The upstream provider rate-limited a speech request. Maps to 429 so
+    /// an OpenAI client surfaces a retryable rate-limit error rather than
+    /// a server failure. Speech-only: every other route keeps the shared
+    /// [`ProtocolError`] mapping, so their envelopes stay bit-identical.
+    #[error("upstream rate limited")]
+    UpstreamRateLimited,
+
+    /// The upstream provider was unavailable for a speech request. Maps to
+    /// 503 so a client can retry, rather than the shared mapping's 502.
+    /// Speech-only for the same reason as [`GatewayError::UpstreamRateLimited`].
+    #[error("upstream unavailable")]
+    UpstreamUnavailable,
 
     /// A bounded profile-switch drain expired and cancelled the request.
     #[error("request cancelled for profile switch")]
@@ -318,6 +343,11 @@ impl GatewayError {
                 "invalid_request_error",
                 "malformed_request",
             ),
+            GatewayError::InvalidVoice { .. } => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "invalid_voice",
+            ),
             GatewayError::Protocol(error) => error.classify(),
             GatewayError::QueueFull => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -328,6 +358,16 @@ impl GatewayError {
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limit_error",
                 "queue_rejected",
+            ),
+            GatewayError::UpstreamRateLimited => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                "upstream_rate_limited",
+            ),
+            GatewayError::UpstreamUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "upstream_unavailable",
             ),
             GatewayError::RequestCancelled => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -485,6 +525,10 @@ mod tests {
     use std::error::Error as _;
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a flat status table with one row per error variant"
+    )]
     fn gateway_error_classify_is_table_driven() {
         let cases: Vec<(GatewayError, (StatusCode, &str, &str))> = vec![
             (
@@ -529,6 +573,33 @@ mod tests {
                     StatusCode::TOO_MANY_REQUESTS,
                     "rate_limit_error",
                     "queue_rejected",
+                ),
+            ),
+            (
+                GatewayError::InvalidVoice {
+                    voice: "coral".to_owned(),
+                    valid: vec!["alloy".to_owned(), "nova".to_owned()],
+                },
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    "invalid_voice",
+                ),
+            ),
+            (
+                GatewayError::UpstreamRateLimited,
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_error",
+                    "upstream_rate_limited",
+                ),
+            ),
+            (
+                GatewayError::UpstreamUnavailable,
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "server_error",
+                    "upstream_unavailable",
                 ),
             ),
             (

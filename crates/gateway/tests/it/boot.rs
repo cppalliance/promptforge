@@ -705,6 +705,19 @@ fn workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot() {
 
 /// The ordinary production binary has no compiled rendezvous hook: even
 /// environment names used by the feature-enabled fixture are inert.
+///
+/// Retired from every current runner: the gateway's self dev-dependency
+/// (`gateway = { path = ".", features = ["test-fixtures"], ... }`, added so
+/// the speech relay suites get test-scaled bounds without a `--features`
+/// flag) forces `test-fixtures` into every test-target build, so this
+/// `not(test-fixtures)` test compiles out under plain `cargo test -p
+/// gateway` just as it does under CI's `--all-features` and `--features
+/// test-fixtures` invocations. The property it pins still matters - a
+/// default-feature binary must ignore the rendezvous environment - so the
+/// test stays. Anything that builds the gateway test targets without
+/// `test-fixtures` re-enables it: a `cargo test -p gateway
+/// --no-default-features`-shaped invocation once the self dev-dependency no
+/// longer forces the feature in, or the dev-dependency's removal.
 #[cfg(not(feature = "test-fixtures"))]
 #[test]
 fn the_default_binary_ignores_test_rendezvous_environment() {

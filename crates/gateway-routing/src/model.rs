@@ -43,7 +43,8 @@ impl std::fmt::Debug for Endpoint {
 pub struct Model {
     /// The caller-facing model name.
     pub name: String,
-    /// The workload this model serves: chat, embedding, or classifier.
+    /// The workload this model serves: chat, embedding, classifier, or
+    /// speech.
     pub kind: ModelKind,
     /// Prose describing the model for catalog consumers.
     pub description: String,

@@ -45,7 +45,7 @@ pub(crate) struct CatalogModelsResponse {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum CatalogModelInfo {
-    /// Existing chat, embedding, or classifier metadata.
+    /// Existing chat, embedding, classifier, or speech metadata.
     Inference(ModelInfo),
     /// Generic transcription metadata.
     #[cfg(feature = "stt")]
