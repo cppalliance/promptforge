@@ -1,4 +1,4 @@
-//! One complete engine generation and its immutable published facts.
+//! One complete engine runtime and its immutable published facts.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -72,7 +72,7 @@ impl GenerationSpec {
         spec
     }
 
-    pub(super) fn build(&self, id: u64) -> Result<Generation, SpeechError> {
+    pub(super) fn build(&self, id: u64) -> Result<SpeechRuntime, SpeechError> {
         let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
             .map_err(SpeechError::Engine)?;
         let names = if self.infer_scripted_final {
@@ -80,45 +80,30 @@ impl GenerationSpec {
         } else {
             self.names.clone()
         };
-        Ok(Generation {
+        Ok(SpeechRuntime {
             id,
             backend: self.backend,
             engine,
             names,
             guidance: self.guidance.clone().into(),
             admission: Arc::new(AdmissionGate::default()),
-            restart: self.clone(),
         })
     }
 }
 
+/// The smallest immutable runtime handle: engine, identity, guidance, and
+/// admission ownership shared by every admitted request and worker job.
 #[derive(Debug)]
-pub(super) struct Generation {
-    pub(super) id: u64,
+pub(crate) struct SpeechRuntime {
+    id: u64,
     backend: Backend,
     engine: SttEngine,
     names: ModelNames,
     pub(super) guidance: Arc<[String]>,
     pub(super) admission: Arc<AdmissionGate>,
-    restart: GenerationSpec,
 }
 
-impl Generation {
-    pub(super) fn from_factory(
-        id: u64,
-        backend: Backend,
-        factory: impl ModelFactory,
-        policy: EnginePolicy,
-        names: ModelNames,
-        guidance: Vec<String>,
-    ) -> Result<Self, SpeechError> {
-        GenerationSpec::new(backend, factory, policy, names, guidance).build(id)
-    }
-
-    pub(super) fn restart_spec(&self) -> GenerationSpec {
-        self.restart.clone()
-    }
-
+impl SpeechRuntime {
     pub(super) fn shutdown(&self) -> Result<(), SpeechError> {
         self.engine.shutdown().map_err(SpeechError::Engine)
     }
@@ -154,5 +139,46 @@ impl Generation {
 
     pub(super) async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
         self.engine.decode(request).await
+    }
+}
+
+/// One staged generation and the specification needed to reconstruct the
+/// runtime it replaces. Replacement compatibility only; the one-time initial
+/// load publishes a bare [`SpeechRuntime`].
+#[derive(Debug)]
+pub(super) struct Generation {
+    runtime: SpeechRuntime,
+    restart: GenerationSpec,
+}
+
+impl Generation {
+    pub(super) fn from_factory(
+        id: u64,
+        backend: Backend,
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        names: ModelNames,
+        guidance: Vec<String>,
+    ) -> Result<Self, SpeechError> {
+        Self::from_spec(
+            id,
+            GenerationSpec::new(backend, factory, policy, names, guidance),
+        )
+    }
+
+    pub(super) fn from_spec(id: u64, spec: GenerationSpec) -> Result<Self, SpeechError> {
+        let runtime = spec.build(id)?;
+        Ok(Self {
+            runtime,
+            restart: spec,
+        })
+    }
+
+    pub(super) fn shutdown(&self) -> Result<(), SpeechError> {
+        self.runtime.shutdown()
+    }
+
+    pub(super) fn into_parts(self) -> (SpeechRuntime, GenerationSpec) {
+        (self.runtime, self.restart)
     }
 }

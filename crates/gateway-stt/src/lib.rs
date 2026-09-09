@@ -1,6 +1,6 @@
 //! Gateway-owned speech facade and HTTP endpoints.
 //!
-//! [`SpeechService`] owns artifact preparation, complete generation
+//! [`SpeechService`] owns artifact preparation, one-time initial runtime
 //! publication, batch transcription, and Realtime transcription.
 
 mod artifacts;

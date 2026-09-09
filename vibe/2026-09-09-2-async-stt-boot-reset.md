@@ -270,7 +270,7 @@ isProject: false
 
 <step-3>
 
-### Step 3: Build one-time speech publication
+### Step 3: Build one-time speech publication [completed]
 
 - Component: STT lifecycle
 - Change: Refactor `gateway-stt` to one empty facade with one guarded initial publication. Move admission, session, engine, request, and decode-job ownership into the smallest immutable runtime handle. Preserve existing status fields, scripted injection, batch, Realtime, overload, cancellation, and ordinary last-owner shutdown. Keep temporary compatibility only until Step 4 removes replacement callers.

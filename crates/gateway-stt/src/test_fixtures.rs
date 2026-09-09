@@ -22,7 +22,8 @@ pub use gateway_stt_engine::test_fixtures::{ScriptedDecoder, ScriptedModelFactor
 #[cfg(feature = "test-fixtures")]
 pub use generation::{
     GenerationOwnershipFixture, GenerationWorkerJobFixture, begin_scripted_replacement,
-    generation_counts, generation_ownership, scripted_service,
+    generation_counts, generation_ownership, load_scripted_initial,
+    load_scripted_initial_with_cancellation, scripted_loaded_service, scripted_service,
 };
 #[cfg(feature = "test-fixtures")]
 pub use hour::{

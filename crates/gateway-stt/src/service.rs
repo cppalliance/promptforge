@@ -2,6 +2,7 @@
 
 use gateway_config::Config;
 use shared_progress::ProgressHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{self, PreparedSpeech, SpeechError};
 use crate::generation::{GenerationState, SpeechReplacement};
@@ -24,6 +25,26 @@ impl SpeechService {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Attempts the process's one initial speech load from the boot configuration.
+    ///
+    /// The facade starts empty and publishes at most one runtime. The attempt
+    /// is spent whether it publishes, fails, or is cancelled: speech remains
+    /// unavailable until process restart, and every later call is rejected.
+    ///
+    /// # Errors
+    /// Returns a typed store, download, verification, configuration, backend,
+    /// or worker startup error, [`SpeechError::InitialLoadCancelled`] when
+    /// cancellation fires before publication, or
+    /// [`SpeechError::InitialLoadAttempted`] for every call after the first.
+    pub fn load_initial(
+        &self,
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+        cancel: &CancellationToken,
+    ) -> Result<(), SpeechError> {
+        self.state.load_initial(config, progress, cancel)
     }
 
     /// Verifies and stages configured artifacts without starting workers.

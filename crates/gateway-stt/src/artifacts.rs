@@ -160,6 +160,14 @@ pub enum SpeechError {
     #[error("load STT engine")]
     Engine(#[source] gateway_stt_engine::TranscribeError),
 
+    /// The one permitted initial speech load already ran.
+    #[error("initial speech load was already attempted")]
+    InitialLoadAttempted,
+
+    /// The initial speech load was cancelled before publication.
+    #[error("initial speech load was cancelled")]
+    InitialLoadCancelled,
+
     /// A replacement token belongs to another service.
     #[error("speech replacement belongs to another service")]
     ReplacementOwner,

@@ -1,15 +1,18 @@
-//! Atomic publication and owned admission for one speech generation.
+//! One-time publication and owned admission for the single speech runtime.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
+use gateway_config::Config;
 use gateway_stt_backend_whisper::{WhisperConfig, WhisperModelFactory};
 #[cfg(feature = "test-fixtures")]
 use gateway_stt_engine::ModelFactory;
 use gateway_stt_engine::{DecodeMode, EnginePolicy};
+use shared_progress::ProgressHandle;
+use tokio_util::sync::CancellationToken;
 
-use crate::artifacts::{PreparedSpeech, SpeechError};
+use crate::artifacts::{self, PreparedGeneration, PreparedSpeech, SpeechError};
 #[cfg(feature = "test-fixtures")]
 use crate::model::ModelNames;
 use crate::model::SpeechModelInfo;
@@ -22,7 +25,7 @@ mod snapshot;
 #[cfg(feature = "test-fixtures")]
 pub(crate) use lease::GenerationJob;
 pub(crate) use lease::GenerationLease;
-use snapshot::{Backend, Generation, GenerationSpec};
+use snapshot::{Backend, Generation, GenerationSpec, SpeechRuntime};
 
 const GENERATION_QUIESCENCE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -39,12 +42,17 @@ pub struct SpeechReplacement {
 struct Shared {
     publication: RwLock<Publication>,
     next_generation: AtomicU64,
+    initial_load: AtomicBool,
     replacements: Arc<ReplacementCoordinator>,
 }
 
 #[derive(Debug, Default)]
 struct Publication {
-    active: Option<Arc<Generation>>,
+    active: Option<Arc<SpeechRuntime>>,
+    /// Reconstruction specification for `active`; only the compatibility
+    /// replacement path records one, so a one-time initial publication has
+    /// none.
+    restart: Option<GenerationSpec>,
     configured: bool,
 }
 
@@ -60,6 +68,7 @@ impl Default for GenerationState {
             shared: Arc::new(Shared {
                 publication: RwLock::new(Publication::default()),
                 next_generation: AtomicU64::new(1),
+                initial_load: AtomicBool::new(false),
                 replacements: Arc::new(ReplacementCoordinator::default()),
             }),
         }
@@ -67,6 +76,85 @@ impl Default for GenerationState {
 }
 
 impl GenerationState {
+    /// Claims the one initial load, builds the boot runtime, and publishes it.
+    ///
+    /// The attempt is spent whether it publishes, fails, or is cancelled, so
+    /// speech remains unavailable until process restart after any outcome
+    /// other than success.
+    pub(crate) fn load_initial(
+        &self,
+        config: &Config,
+        progress: Option<&ProgressHandle>,
+        cancel: &CancellationToken,
+    ) -> Result<(), SpeechError> {
+        self.claim_initial_load()?;
+        if cancel.is_cancelled() {
+            return Err(SpeechError::InitialLoadCancelled);
+        }
+        let prepared = artifacts::prepare(config, progress)?;
+        if cancel.is_cancelled() {
+            return Err(SpeechError::InitialLoadCancelled);
+        }
+        let runtime = prepared
+            .generation
+            .map(|prepared| {
+                whisper_spec(prepared, None).and_then(|spec| spec.build(self.next_id()))
+            })
+            .transpose()?;
+        self.publish_initial(runtime, cancel)
+    }
+
+    /// Claims the one initial load and publishes deterministic scripted workers.
+    #[cfg(feature = "test-fixtures")]
+    pub(crate) fn load_scripted(
+        &self,
+        factory: impl ModelFactory,
+        policy: EnginePolicy,
+        cancel: &CancellationToken,
+    ) -> Result<(), SpeechError> {
+        self.claim_initial_load()?;
+        if cancel.is_cancelled() {
+            return Err(SpeechError::InitialLoadCancelled);
+        }
+        let runtime = GenerationSpec::scripted_inferred(factory, policy).build(self.next_id())?;
+        self.publish_initial(Some(runtime), cancel)
+    }
+
+    fn claim_initial_load(&self) -> Result<(), SpeechError> {
+        if self.shared.initial_load.swap(true, Ordering::AcqRel) {
+            return Err(SpeechError::InitialLoadAttempted);
+        }
+        Ok(())
+    }
+
+    fn publish_initial(
+        &self,
+        runtime: Option<SpeechRuntime>,
+        cancel: &CancellationToken,
+    ) -> Result<(), SpeechError> {
+        if cancel.is_cancelled() {
+            if let Some(runtime) = &runtime
+                && let Err(error) = runtime.shutdown()
+            {
+                tracing::error!(error = %error, "cancelled initial speech load cleanup failed");
+            }
+            return Err(SpeechError::InitialLoadCancelled);
+        }
+        let configured = runtime.is_some();
+        // The facade is still empty here: the spent claim rejects every later
+        // initial load and the staging guard rejects the compatibility
+        // replacement path, so this is the only publication the process can
+        // perform.
+        let mut publication = self
+            .shared
+            .publication
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        publication.active = runtime.map(Arc::new);
+        publication.configured = configured;
+        Ok(())
+    }
+
     pub(crate) fn stage(&self, prepared: PreparedSpeech) -> Result<SpeechReplacement, SpeechError> {
         let deadline = Instant::now()
             .checked_add(GENERATION_QUIESCENCE_TIMEOUT)
@@ -83,29 +171,8 @@ impl GenerationState {
             prepared
                 .generation
                 .map(|prepared| {
-                    let backend_config = WhisperConfig::new(
-                        prepared.library,
-                        prepared.interim_model,
-                        prepared.final_model,
-                        prepared.progress,
-                    );
-                    let factory =
-                        WhisperModelFactory::new(backend_config).map_err(SpeechError::Engine)?;
-                    let policy = EnginePolicy::new(
-                        prepared.window_seconds,
-                        prepared.interval_ms,
-                        factory.gpu_available(),
-                    )
-                    .map_err(SpeechError::Engine)?
-                    .with_startup_timeout(startup_timeout);
-                    Generation::from_factory(
-                        id,
-                        Backend::Whisper,
-                        factory,
-                        policy,
-                        prepared.names,
-                        prepared.guidance,
-                    )
+                    whisper_spec(prepared, Some(startup_timeout))
+                        .and_then(|spec| Generation::from_spec(id, spec))
                 })
                 .transpose()
         })
@@ -143,9 +210,7 @@ impl GenerationState {
         policy: EnginePolicy,
     ) -> Result<SpeechReplacement, SpeechError> {
         self.replace_with(GENERATION_QUIESCENCE_TIMEOUT, move |id| {
-            GenerationSpec::scripted_inferred(factory, policy)
-                .build(id)
-                .map(Some)
+            Generation::from_spec(id, GenerationSpec::scripted_inferred(factory, policy)).map(Some)
         })
     }
 
@@ -158,7 +223,7 @@ impl GenerationState {
         }
 
         let mut replacement = replacement;
-        let published = replacement.generation.take().map(Arc::new);
+        let published = replacement.generation.take().map(Generation::into_parts);
         let configured = published.is_some();
         let committed = replacement.permit.with_current(|| {
             let mut publication = self
@@ -169,7 +234,13 @@ impl GenerationState {
             if publication.active.is_some() {
                 return false;
             }
-            publication.active = published;
+            if let Some((runtime, restart)) = published {
+                publication.active = Some(Arc::new(runtime));
+                publication.restart = Some(restart);
+            } else {
+                publication.active = None;
+                publication.restart = None;
+            }
             publication.configured = configured;
             true
         });
@@ -206,13 +277,20 @@ impl GenerationState {
         };
         generation.admission.shutdown();
         generation.admission.wait_until_idle();
-        let retired = self
-            .shared
-            .publication
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .active
-            .take_if(|active| Arc::ptr_eq(active, &generation));
+        let retired = {
+            let mut publication = self
+                .shared
+                .publication
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            let retired = publication
+                .active
+                .take_if(|active| Arc::ptr_eq(active, &generation));
+            if retired.is_some() {
+                publication.restart = None;
+            }
+            retired
+        };
         drop(generation);
         if let Some(retired) = retired
             && let Err(error) = retired.shutdown()
@@ -227,15 +305,15 @@ impl GenerationState {
             .publication
             .read()
             .unwrap_or_else(PoisonError::into_inner);
-        let generation = publication.active.as_ref()?;
-        let admission = generation.admission.admit()?;
-        Some(GenerationLease::new(Arc::clone(generation), admission))
+        let runtime = publication.active.as_ref()?;
+        let admission = runtime.admission.admit()?;
+        Some(GenerationLease::new(Arc::clone(runtime), admission))
     }
 
     pub(crate) fn select(&self, name: &str) -> Option<(GenerationLease, DecodeMode)> {
-        let generation = self.active()?;
-        let mode = generation.select(name)?;
-        Some((generation, mode))
+        let runtime = self.active()?;
+        let mode = runtime.select(name)?;
+        Some((runtime, mode))
     }
 
     pub(crate) fn status(&self) -> SpeechStatus {
@@ -247,10 +325,10 @@ impl GenerationState {
         publication
             .active
             .as_deref()
-            .filter(|generation| generation.admission.is_open())
+            .filter(|runtime| runtime.admission.is_open())
             .map_or_else(
                 || SpeechStatus::unready(publication.configured),
-                Generation::status,
+                SpeechRuntime::status,
             )
     }
 
@@ -263,8 +341,8 @@ impl GenerationState {
         publication
             .active
             .as_deref()
-            .filter(|generation| generation.admission.is_open())
-            .map_or_else(Vec::new, Generation::models)
+            .filter(|runtime| runtime.admission.is_open())
+            .map_or_else(Vec::new, SpeechRuntime::models)
     }
 
     #[cfg(feature = "test-fixtures")]
@@ -275,7 +353,7 @@ impl GenerationState {
             .unwrap_or_else(PoisonError::into_inner)
             .active
             .as_ref()
-            .map(|generation| generation.admission.counts())
+            .map(|runtime| runtime.admission.counts())
     }
 
     #[cfg(feature = "test-fixtures")]
@@ -295,6 +373,9 @@ impl GenerationState {
         deadline: Instant,
         build: impl FnOnce(u64, Duration) -> Result<Option<Generation>, SpeechError>,
     ) -> Result<SpeechReplacement, SpeechError> {
+        if self.shared.initial_load.load(Ordering::Acquire) {
+            return Err(SpeechError::InitialLoadAttempted);
+        }
         let permit = self.shared.replacements.acquire();
         let rollback = self.quiesce(&permit, deadline)?;
         if !permit.is_current() {
@@ -365,20 +446,29 @@ impl GenerationState {
             }
             DrainOutcome::Invalidated => Err(SpeechError::ReplacementInvalidated),
             DrainOutcome::Idle => {
-                let restart = generation.restart_spec();
                 let retired = permit
                     .with_current(|| {
-                        self.shared
+                        let mut publication = self
+                            .shared
                             .publication
                             .write()
-                            .unwrap_or_else(PoisonError::into_inner)
+                            .unwrap_or_else(PoisonError::into_inner);
+                        publication
                             .active
                             .take_if(|active| Arc::ptr_eq(active, &generation))
+                            .map(|retired| (retired, publication.restart.take()))
                     })
                     .flatten()
                     .ok_or(SpeechError::ReplacementInvalidated)?;
+                let (retired, restart) = retired;
                 drop(generation);
                 retired.shutdown()?;
+                let Some(restart) = restart else {
+                    // The staging guard refuses replacement once the one-time
+                    // initial load ran, so a compatibility-published runtime
+                    // always carries its reconstruction specification here.
+                    return Err(SpeechError::ReplacementInvalidated);
+                };
                 Ok(Some(restart))
             }
         }
@@ -387,6 +477,36 @@ impl GenerationState {
     fn next_id(&self) -> u64 {
         self.shared.next_generation.fetch_add(1, Ordering::Relaxed)
     }
+}
+
+fn whisper_spec(
+    prepared: PreparedGeneration,
+    startup_timeout: Option<Duration>,
+) -> Result<GenerationSpec, SpeechError> {
+    let backend_config = WhisperConfig::new(
+        prepared.library,
+        prepared.interim_model,
+        prepared.final_model,
+        prepared.progress,
+    );
+    let factory = WhisperModelFactory::new(backend_config).map_err(SpeechError::Engine)?;
+    let policy = EnginePolicy::new(
+        prepared.window_seconds,
+        prepared.interval_ms,
+        factory.gpu_available(),
+    )
+    .map_err(SpeechError::Engine)?;
+    let policy = match startup_timeout {
+        Some(timeout) => policy.with_startup_timeout(timeout),
+        None => policy,
+    };
+    Ok(GenerationSpec::new(
+        Backend::Whisper,
+        factory,
+        policy,
+        prepared.names,
+        prepared.guidance,
+    ))
 }
 
 fn restore_generation(
@@ -409,6 +529,7 @@ fn restore_generation(
                 return false;
             }
             publication.active = Some(generation);
+            publication.restart = Some(rollback.clone());
             true
         })
         .unwrap_or(false);

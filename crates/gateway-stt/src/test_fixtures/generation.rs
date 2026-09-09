@@ -2,6 +2,9 @@
 
 use std::time::Duration;
 
+use gateway_stt_engine::{EnginePolicy, ModelFactory};
+use tokio_util::sync::CancellationToken;
+
 use crate::generation::{GenerationJob, GenerationLease};
 use crate::{SpeechError, SpeechService};
 
@@ -23,6 +26,53 @@ pub fn scripted_service(
     let replacement = service.state.stage_scripted_with_policy(factory, policy)?;
     service.commit_replacement(replacement)?;
     Ok(service)
+}
+
+/// Builds a speech service whose one initial load publishes scripted workers.
+///
+/// # Errors
+/// Returns engine policy, startup, or worker construction failures.
+pub fn scripted_loaded_service(
+    factory: ScriptedModelFactory,
+    window_seconds: u64,
+    interval_ms: u64,
+) -> Result<SpeechService, SpeechError> {
+    let service = SpeechService::new();
+    load_scripted_initial(&service, factory, window_seconds, interval_ms)?;
+    Ok(service)
+}
+
+/// Attempts the one initial load with deterministic scripted workers.
+///
+/// # Errors
+/// Returns the spent-attempt rejection, engine policy, startup, or worker
+/// construction failures.
+pub fn load_scripted_initial(
+    service: &SpeechService,
+    factory: ScriptedModelFactory,
+    window_seconds: u64,
+    interval_ms: u64,
+) -> Result<(), SpeechError> {
+    let gpu_available = factory.gpu_available();
+    let policy = EnginePolicy::new(window_seconds, interval_ms, gpu_available)
+        .map_err(SpeechError::Engine)?;
+    service
+        .state
+        .load_scripted(factory, policy, &CancellationToken::new())
+}
+
+/// Attempts the one initial scripted load under a cancellation token.
+///
+/// # Errors
+/// Returns the spent-attempt rejection, cancellation, engine policy, startup,
+/// or worker construction failures.
+pub fn load_scripted_initial_with_cancellation(
+    service: &SpeechService,
+    factory: impl ModelFactory,
+    cancel: &CancellationToken,
+) -> Result<(), SpeechError> {
+    let policy = EnginePolicy::new(15, 500, false).map_err(SpeechError::Engine)?;
+    service.state.load_scripted(factory, policy, cancel)
 }
 
 /// Quiesces the current generation and builds one deterministic replacement.
