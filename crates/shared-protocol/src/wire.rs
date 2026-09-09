@@ -589,7 +589,8 @@ pub struct ModelInfo {
     pub id: String,
     /// Always `"model"`.
     pub object: &'static str,
-    /// The workload this model serves (`"chat"`, `"embedding"`, `"classifier"`).
+    /// The workload this model serves (`"chat"`, `"embedding"`,
+    /// `"classifier"`, `"speech"`).
     pub kind: ModelKind,
     /// Prose describing the model for catalog consumers and semantic bind.
     pub description: String,

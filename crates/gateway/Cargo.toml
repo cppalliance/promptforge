@@ -141,6 +141,13 @@ test-fixtures = ["local", "gateway-local/test-fixtures", "dep:anyhow"]
 
 [dev-dependencies]
 anyhow.workspace = true
+# The crate dev-depends on itself so every test target builds the library
+# with test-fixtures enabled, without gate commands needing a --features
+# flag: the integration suites drive the speech relay's test-scaled bounds.
+# default-features = false keeps `--no-default-features` test invocations
+# (the boot race jobs) headless; plain `cargo test` still gets the defaults
+# from the command line's own implicit feature request.
+gateway = { path = ".", features = ["test-fixtures"], default-features = false }
 base64.workspace = true
 hound.workspace = true
 # Encodes the generated test image for the live CUDA projector proof.

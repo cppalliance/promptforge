@@ -25,6 +25,18 @@ use gateway_web_search::WebSearchState;
 const PREPARED_CREATE_ATTEMPTS: u64 = 16;
 /// Shared deadline for target staging and prior-runtime reconstruction.
 pub(super) const STAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Deadline for the cut-over drain of in-flight requests before the switch
+/// cancels the stragglers: long enough that a healthy request finishes on
+/// its own, short enough that a switch cannot park forever behind one.
+#[cfg(not(any(test, feature = "test-fixtures")))]
+const INFERENCE_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Test-scaled so a switch cancelling an open stream lands in milliseconds;
+/// comfortably above the in-flight switch tests' ~100 ms release point and
+/// below the speech relay's 2 s total-lifetime bound, so a cancellation
+/// beats the relay's own deadline to the terminal error item.
+#[cfg(any(test, feature = "test-fixtures"))]
+const INFERENCE_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 static PERSISTENCE_NAMES: LazyLock<ProcessPreparationNames<fn() -> u128>> =
     LazyLock::new(|| ProcessPreparationNames::new(std::process::id(), random_persistence_nonce));
 
@@ -1266,7 +1278,7 @@ impl OldRuntimes {
 async fn drain_inference(state: &AppState) {
     if !state
         .in_flight
-        .drain_or_cancel(std::time::Duration::from_secs(30))
+        .drain_or_cancel(INFERENCE_DRAIN_TIMEOUT)
         .await
     {
         tracing::warn!(

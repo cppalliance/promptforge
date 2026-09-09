@@ -2017,6 +2017,7 @@ dependencies = [
  "dotenvy",
  "embed-resource",
  "futures-util",
+ "gateway",
  "gateway-config",
  "gateway-config-ui",
  "gateway-local",

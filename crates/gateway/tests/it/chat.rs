@@ -133,13 +133,22 @@ description = "a classifier model"
 context = 8192
 upstream = "backend-model"
 endpoints = ["fake"]
+
+[[model]]
+name = "tts-model"
+kind = "speech"
+description = "a speech model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+voices = ["alloy"]
 "#
     );
     let config = Config::from_toml_str(&toml).unwrap();
     let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
     let gateway = TestServer::start(gateway).await;
 
-    for model in ["embed-model", "reranker"] {
+    for model in ["embed-model", "reranker", "tts-model"] {
         let response = send_within(
             reqwest::Client::new()
                 .post(format!("http://{}/v1/chat/completions", gateway.addr))
