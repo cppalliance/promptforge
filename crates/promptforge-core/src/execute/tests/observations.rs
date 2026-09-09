@@ -303,11 +303,6 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let recorder = Arc::new(Recorder::default());
     let prompt = Prompt::parse(&source, EXECUTION, recorder.as_ref())
         .expect("the lifecycle fixture must parse");
-    let _picker = ToolPicker::build(
-        Catalog::new(vec![descriptor.clone()]),
-        PickerConfig::default(),
-    )
-    .expect("the lifecycle picker must build");
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
     let prompt = TestPrompt {
         prompt,

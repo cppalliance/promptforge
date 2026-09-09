@@ -1619,8 +1619,7 @@ impl H1Resolution {
     /// model binds resolve, tool binds report absent.
     fn models_only() -> Self {
         Self {
-            picker: ToolPicker::build(Catalog::default(), PickerConfig::default())
-                .expect("empty tool picker must build"),
+            picker: empty_test_picker(),
             models: test_model_catalog(),
             tools: ToolCatalog::default(),
         }
@@ -1629,8 +1628,7 @@ impl H1Resolution {
     /// Everything empty: model binds report absent.
     fn empty() -> Self {
         Self {
-            picker: ToolPicker::build(Catalog::default(), PickerConfig::default())
-                .expect("empty tool picker must build"),
+            picker: empty_test_picker(),
             models: ModelCatalog::empty(),
             tools: ToolCatalog::default(),
         }
@@ -2145,8 +2143,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
     let ctx = h1_context(&prompt);
     let tools: [Arc<dyn Tool>; 1] = [echo];
     let resolution = H1Resolution {
-        picker: ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-            .expect("tool picker must build"),
+        picker: build_test_picker(Catalog::new(vec![descriptor]), PickerConfig::default()),
         models: test_model_catalog(),
         tools: ToolCatalog::new(&tools).expect("the fixture tool is unique"),
     };
