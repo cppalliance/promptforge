@@ -230,6 +230,7 @@ fn enums_round_trip_with_their_toml_spellings() {
     check(ModelKind::Chat, "chat");
     check(ModelKind::Embedding, "embedding");
     check(ModelKind::Classifier, "classifier");
+    check(ModelKind::Speech, "speech");
     check(SttRole::Interim, "interim");
     check(SttRole::Final, "final");
 }
@@ -244,6 +245,7 @@ fn capabilities_round_trip_through_json() {
         effort_levels: vec!["low".to_owned(), "high".to_owned()],
         default_effort: Some("low".to_owned()),
         adaptive_thinking: true,
+        voices: vec!["alloy".to_owned()],
     };
     let json = serde_json::to_value(&capabilities).expect("serializes");
     let back: Capabilities = serde_json::from_value(json).expect("deserializes");

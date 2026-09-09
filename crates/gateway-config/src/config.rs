@@ -531,8 +531,8 @@ impl fmt::Display for ToolDialect {
     }
 }
 
-/// The workload a model serves: chat completions, embeddings, or
-/// classification.
+/// The workload a model serves: chat completions, embeddings,
+/// classification, or speech synthesis.
 ///
 /// The kind scopes which configuration fields are meaningful: chat-only
 /// fields (for example `thinking`, `default_max_tokens`,
@@ -550,6 +550,8 @@ pub enum ModelKind {
     Embedding,
     /// Classification / reranking.
     Classifier,
+    /// Speech synthesis (`POST /v1/audio/speech`).
+    Speech,
 }
 
 impl fmt::Display for ModelKind {
@@ -558,6 +560,7 @@ impl fmt::Display for ModelKind {
             ModelKind::Chat => "chat",
             ModelKind::Embedding => "embedding",
             ModelKind::Classifier => "classifier",
+            ModelKind::Speech => "speech",
         };
         f.write_str(spelling)
     }
@@ -569,7 +572,8 @@ impl fmt::Display for ModelKind {
 /// reaches it. They are flattened into `[[model]]` and `[[local_model]]`,
 /// validated at load, and surfaced verbatim on `GET /v1/models` so clients
 /// can shape requests before sending them. The effort knobs are chat-only
-/// and require a `thinking` mode other than `never`.
+/// and require a `thinking` mode other than `never`; the `voices` list is
+/// speech-only.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Capabilities {
@@ -599,6 +603,10 @@ pub struct Capabilities {
     /// chat kind only. Defaults to false.
     #[serde(default)]
     adaptive_thinking: bool,
+    /// The voices the model offers for speech synthesis; speech kind only.
+    /// Empty means the model exposes no fixed voice list.
+    #[serde(default)]
+    voices: Vec<String>,
 }
 
 /// One model name and the backend it resolves to.

@@ -667,7 +667,8 @@ impl Config {
 ///
 /// `default_effort` requires a non-empty `effort_levels` and must name a
 /// listed level; the effort knobs are meaningless on a model that never
-/// thinks; and `max_output` must fit the context window.
+/// thinks; `max_output` must fit the context window; and `voices` entries
+/// must be non-empty and unique.
 fn validate_capabilities(
     label: &str,
     name: &str,
@@ -701,10 +702,24 @@ fn validate_capabilities(
             "{label} {name} max_output {max_output} exceeds context {context}"
         )));
     }
+    let mut seen_voices = HashSet::new();
+    for voice in &capabilities.voices {
+        if voice.is_empty() {
+            return Err(ConfigError::Validation(format!(
+                "{label} {name} voices entries must not be empty"
+            )));
+        }
+        if !seen_voices.insert(voice.as_str()) {
+            return Err(ConfigError::Validation(format!(
+                "{label} {name} lists duplicate voice {voice}"
+            )));
+        }
+    }
     Ok(())
 }
 
-/// Reject chat-only fields on a non-chat model kind.
+/// Reject chat-only fields on a non-chat model kind and the speech-only
+/// `voices` list on a non-speech kind.
 ///
 /// `thinking` and the capability effort knobs (`effort_levels`,
 /// `default_effort`, `adaptive_thinking`) are chat-only on every model type;
@@ -719,6 +734,11 @@ fn validate_kind_scope(
     capabilities: &Capabilities,
     extra: &[(&str, bool)],
 ) -> Result<(), ConfigError> {
+    if kind != ModelKind::Speech && !capabilities.voices.is_empty() {
+        return Err(ConfigError::Validation(format!(
+            "{kind} {label} {name} must not set voices (speech-only)"
+        )));
+    }
     if kind == ModelKind::Chat {
         return Ok(());
     }
