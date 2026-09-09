@@ -43,6 +43,28 @@ pub fn streaming_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+/// TCP keepalive interval for audio streams, so a silently dead peer or an
+/// idle middlebox drop surfaces instead of hanging the stream forever.
+const AUDIO_TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+
+/// Build a reqwest client for long-lived binary audio streams.
+///
+/// Like [`streaming_client`] there is no whole-request timeout, which would
+/// kill any stream that outlives it, and TCP keepalive keeps middleboxes
+/// from dropping the connection between reads. There is no `read_timeout`
+/// either: reqwest arms it during the wait for response headers, and the
+/// speech path gives time-to-headers its own, larger budget, so both
+/// deadlines live in
+/// [`Upstream::send_speech`](crate::upstream::Upstream::send_speech).
+#[must_use]
+pub fn audio_streaming_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .tcp_keepalive(AUDIO_TCP_KEEPALIVE)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// Read at most `cap` bytes from `response`, stopping early once the cap is hit.
 ///
 /// The body is streamed chunk by chunk so an oversized or stalled response never
