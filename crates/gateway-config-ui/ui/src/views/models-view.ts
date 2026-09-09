@@ -644,7 +644,7 @@ export function createModelsView(deps: ModelsViewDeps): ModelsView {
           help: "The workload this model serves.",
           section: "header",
           type: "dropdown",
-          options: ["chat", "embedding", "classifier"],
+          options: ["chat", "embedding", "classifier", "speech"],
           default: "chat",
         }),
       );
