@@ -51,6 +51,7 @@ pub(crate) use promptforge_store::{StoreRef, WriteScope};
 pub(crate) use promptforge_tools::{Tool, ToolCatalog, ToolId};
 
 pub(crate) use crate::error::Result;
+pub(crate) use crate::messages::install_messages;
 pub(crate) use crate::models::{LuaModelHandle, ModelInferHook, ModelsInferHook};
 pub(crate) use crate::models::{install_h2_models, install_live_models};
 
@@ -102,6 +103,7 @@ pub(crate) use vm::{LuaOutcome, run_chunk};
 mod live;
 pub(crate) use live::validate_alias;
 mod handles;
+mod messages;
 mod program;
 mod scope;
 pub(crate) use handles::{LuaToolHandle, resolve_section_target};

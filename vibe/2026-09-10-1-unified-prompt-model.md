@@ -359,7 +359,7 @@ Extend message validation and typed request data in `crates/promptforge-lua/src/
 
 <step-2>
 
-### Step 2: `messages.new()` builders module
+### Step 2: `messages.new()` builders module [completed]
 
 - Component: messages
 

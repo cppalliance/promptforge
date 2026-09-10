@@ -8,9 +8,9 @@ use super::{
     Observer, Ordering, Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding,
     ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail, guarded_var, harden,
     install_h2_models, install_h2_tools, install_instruction_budget, install_log,
-    install_lua_tool_calls, install_shim_prelude, install_store_table, install_untrusted,
-    log_byte_budget, resolve_section_target, scalar_return, seal_sys, var_to_json,
-    wrap_shimmed_handle,
+    install_lua_tool_calls, install_messages, install_shim_prelude, install_store_table,
+    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
+    var_to_json, wrap_shimmed_handle,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -468,6 +468,7 @@ impl SectionVm {
             &self.local_tools,
         )?;
         install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
+        install_messages(&self.lua, &globals)?;
         let reply_value = match last_reply {
             Some(text) => Value::String(self.lua.create_string(text).map_err(Error::lua)?),
             None => Value::Nil,
