@@ -1,25 +1,25 @@
 ---
 name: Gateway TTS phase 1
-overview: "Implement phase 1 of design/report-gateway-tts-endpoint.md on branch add-tts-phase-1: a ModelKind::Speech config variant, the OpenAI-shaped POST /v1/audio/speech route, Upstream::send_speech streaming binary audio, a voices capability, GET /v1/audio/voices, remote passthrough, config-UI speech support, and docs. Phase 2 (local Orpheus engine) is out of scope."
+overview: "Implement phase 1 of the former design/report-gateway-tts-endpoint.md (removed from this repository when design records moved out; the as-built supersedes it) on branch add-tts-phase-1: a ModelKind::Speech config variant, the OpenAI-shaped POST /v1/audio/speech route, Upstream::send_speech streaming binary audio, a voices capability, GET /v1/audio/voices, remote passthrough, config-UI speech support, and docs. Phase 2 (local Orpheus engine) is out of scope."
 todos:
   - id: config-kind
     content: Add ModelKind::Speech, voices capability, kind-scope validation plus empty/duplicate voice rejection at load, fallible launch_options with refuse-unknown wildcard, config-UI speech kind + voices chips, config and UI tests
-    status: pending
+    status: completed
   - id: wire-types
     content: SpeechRequest with validate() and serde-defaulted response_format enum, StreamedAudio, Upstream::send_speech + OpenAiUpstream impl, audio streaming client, upstream status-shape tests
-    status: pending
+    status: completed
   - id: routes
     content: POST /v1/audio/speech and GET /v1/audio/voices handlers and registration, speech-only 429/503 GatewayError variants, admin status row, speech.rs integration tests incl. no-leak, permit-held, reverse kind_mismatch, mid-stream Err
-    status: pending
+    status: completed
   - id: remote-verify
     content: Dev-only zero-dependency Node live probe driving the gateway speech surface on a Together-backed throwaway profile (gateway-only per A19, vendor key from the process environment, ferried only to the gateway subprocess), with observed-dialect record, or documented deferral
-    status: pending
+    status: completed
   - id: docs
     content: Gateway README speech section, guide chapter 06-speech-synthesis (git mv renumber + build-user-guide assembler), kind lists in guide 03/04, gateway.local.example.toml, crate READMEs
-    status: pending
+    status: completed
   - id: design-doc
     content: "Final step: spawn generator subagent to write design/design-gateway-tts-phase-1.md from the finished work"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -128,7 +128,7 @@ Surveyed 2026-09-07 on branch `add-tts-phase-1` at its original base `f8e07fb6` 
 - Full-suite test command: `cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features`, plus doctests via the same invocation with `--doc`. Desktop: `cargo test --locked -p workshop -p workshop-server`. Bare `cargo test` at the root covers only the gateway default member.
 - Linters and formatters: `cargo fmt --all --check` (`rustfmt.toml`: `style_edition = "2024"`); `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (the workshop pair is linted separately on Windows CI: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`); `cargo deny check` and `cargo audit` (supply-chain job, `deny.toml`); `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server` with `RUSTDOCFLAGS=-D warnings`; STT native-policy gates (`cargo rustc -F unsafe-code` on `gateway-stt-engine`, `gateway-stt-backend-whisper`, and `gateway-stt`; `cargo check -p gateway-whisper-ffi` for the FFI crate's own lint policy); the product dependency-boundary guard `cargo test -p gateway-stt --test it architecture`. Opt-in git hooks in `.githooks/` (enable with `git config core.hooksPath .githooks`): pre-commit runs fmt, pre-push runs the headless check, clippy, and cargo deny.
 - Test placement and naming: Rust unit tests live in `#[cfg(test)]` modules beside the code. Gateway integration tests live in `crates/gateway/tests/it/` as a single harness binary (`main.rs`) with shared scaffolding in `support.rs` and one module per surface (`boot.rs`, `chat.rs`, `embeddings.rs`, `profiles.rs`, `progress.rs`, `queue.rs`, `rerank.rs`, `sidecar.rs`, `surface.rs`; `cache.rs`/`cuda.rs`/`local.rs` gated on `feature = "local"`, `icon.rs` Windows-only, `realtime_stt` gated on `feature = "stt"`, `web_search.rs` gated on `feature = "web-search"`). The suite runs a fake OpenAI backend behind the real gateway on a caller-owned ephemeral listener, with rendezvous shutdown and arrivals channels plus per-request release handles instead of sleeps. `gateway-stt` has its own `tests/it/` harness; its `architecture.rs` module is the CI dependency-boundary guard. `product-integration-tests` holds the boundary-neutral cross-product compatibility tests. UI tests are colocated `src/**/*.test.mjs` run by `node --test` (the workshop UI adds `test/**/*.mjs`). Every `tools/*.mjs` pairs with a `.test.mjs`. `clippy.toml` allows unwrap/expect in tests only.
-- Directory map: `crates/` holds the 34 Rust workspace members (`members = ["crates/*"]`; `crates/shared-ui` is TypeScript/CSS only and excluded from the glob). `design/` holds design docs, endpoint reports, and verification notes (this plan's source `report-gateway-tts-endpoint.md`). `guide/` is the mdBook user guide (`src/` split into `agent/`, `gateway/`, `language/`, `workshop/`; generated `SUMMARY.md`; the gateway part runs 01-10, with `05-speech.md` for STT). `prompts/` holds example pipelines. `tools/` holds repo tooling: `stage-gateway-sidecar.mjs` with its paired test, `check-stt-native-workflow.test.mjs` (tests the STT native workflow files), `validate-rust-1.89.0.ps1`, and `document.md` (the guide-rebuild tool). `vibe/` holds dated run records plus `archdoc.md` and `archdoc-next.md`. `images/` holds README artwork. `.github/workflows/` carries CI (`ci.yml` jobs: check, check-workshop, check-workshop-linux, ui, msrv, supply-chain) plus the release, nightly, guide, STT Miri, whisper-lib, and installer-smoke workflows (`dist-ci/` holds the shared dist build setup). `.githooks/`; `.cargo/config.toml` (Windows static CRT, the `cargo workshop` alias). Root files: `AGENTS.md`, `Cargo.toml`/`Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml`, `dist-workspace.toml`, `gateway.local.example.toml`, `README.md`, `LICENSE` (BSL-1.0), `vibe-ledger.md`.
+- Directory map: `crates/` holds the 34 Rust workspace members (`members = ["crates/*"]`; `crates/shared-ui` is TypeScript/CSS only and excluded from the glob). `design/` on this branch holds the as-built and verification note (`design-gateway-tts-phase-1.md`, `note-gateway-tts-phase-1-verification.md`); the original endpoint report `report-gateway-tts-endpoint.md` was removed from this repository when design records moved out. `guide/` is the mdBook user guide (`src/` split into `agent/`, `gateway/`, `language/`, `workshop/`; generated `SUMMARY.md`; the gateway part runs 01-10, with `05-speech.md` for STT). `prompts/` holds example pipelines. `tools/` holds repo tooling: `stage-gateway-sidecar.mjs` with its paired test, `check-stt-native-workflow.test.mjs` (tests the STT native workflow files), `validate-rust-1.89.0.ps1`, and `document.md` (the guide-rebuild tool). `vibe/` holds dated run records plus `archdoc.md` and `archdoc-next.md`. `images/` holds README artwork. `.github/workflows/` carries CI (`ci.yml` jobs: check, check-workshop, check-workshop-linux, ui, msrv, supply-chain) plus the release, nightly, guide, STT Miri, whisper-lib, and installer-smoke workflows (`dist-ci/` holds the shared dist build setup). `.githooks/`; `.cargo/config.toml` (Windows static CRT, the `cargo workshop` alias). Root files: `AGENTS.md`, `Cargo.toml`/`Cargo.lock`, `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml`, `dist-workspace.toml`, `gateway.local.example.toml`, `README.md`, `LICENSE` (BSL-1.0), `vibe-ledger.md`.
 - Component boundaries (archdoc components mapped to crate prefixes):
   - executor (parses and executes prompt pipelines and agent programs): `promptforge` facade (integrator library, lib-only; no standalone CLI binary crate exists at this commit), `promptforge-core`, `promptforge-agent`, `promptforge-parser`, `promptforge-lua` (the Lua VM boundary), `promptforge-store` (the run-scoped store), `promptforge-model-client`, `promptforge-tools`, `promptforge-tool-picker`, `promptforge-webfetch`, `promptforge-web-search`, `promptforge-core-support`.
   - gateway (owns model routing, provider access, and local inference lifecycle; sole credential holder per A2/A19): `gateway`, `gateway-config`, `gateway-config-ui`, `gateway-local`, `gateway-routing`, `gateway-logging`, `gateway-web-search`, and the STT stack `gateway-stt`, `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway-whisper-ffi`.
@@ -211,7 +211,7 @@ Components, in dependency order:
 - Root README only if it enumerates gateway endpoints or capabilities.
 - Verification: the gate suite green and the guide builds.
 
-### Step 9: As-built design document
+### Step 9: As-built design document [completed]
 
 - `design/design-gateway-tts-phase-1.md`: spawn a generator subagent to write the design as built: a title stating what was built, a standalone executive summary, and a numbered list of the key design choices, reconciled against the finished work and this plan's Decision Record (including the bounded relay, the split deadlines, the provisioning preflight, the Node live probe, and the A19 credential numbering).
 - Metadata synchronization: the six frontmatter todo statuses flip to `completed` in this final execution commit, and the as-built's commit and tree references name the objects the finished history actually contains.
