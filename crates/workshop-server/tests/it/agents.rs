@@ -37,7 +37,7 @@ use crate::common::{JsonSocket, spawn_gateway};
 const ECHO_AGENT: &str = r"
 models.use('test-model')
 while true do
-    local input = tool_call('user_input', {})
+    local input = tools.call('user_input', {})
     if input.text == 'quit' then return end
     models.chat({ { role = 'user', content = input.text } })
 end
@@ -899,7 +899,7 @@ async fn a_terminal_agent_failure_reaches_the_socket_as_an_error_frame() {
     // and subscribed long before the failure fires.
     std::fs::write(
         dir.path().join("agents").join("boom.lua"),
-        "tool_call('user_input', {})\nerror('kaboom')",
+        "tools.call('user_input', {})\nerror('kaboom')",
     )
     .expect("the boom agent writes");
     let mut socket = JsonSocket::connect(&format!("{base}/agents/ws")).await;

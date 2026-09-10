@@ -8,7 +8,7 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use mlua::{MultiValue, Thread, Value};
+use mlua::{MultiValue, Thread};
 use serde_json::json;
 
 use promptforge_lua::Error;
@@ -16,10 +16,11 @@ use promptforge_lua::Error;
 use crate::cancel::{CancelHandle, scope};
 use crate::execute::protocol::Request;
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, SectionVm, ToolSet};
+use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, SectionVm, ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelId, ModelInvocation, ModelSet};
 use crate::observe::{NullObserver, Observer};
 use crate::store::StoreRef;
+use crate::tools::{Tool, ToolError, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 
 fn test_models() -> ModelSet {
@@ -39,14 +40,71 @@ fn test_models() -> ModelSet {
     }
 }
 
+/// A minimal live tool behind a bound alias, for handle-form dispatch
+/// tests; dispatch never reaches its `call` through the yield boundary.
+struct StubTool;
+
+#[async_trait::async_trait]
+impl Tool for StubTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "echo").expect("valid id")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str"
+    )]
+    fn wire_name(&self) -> &str {
+        "echo"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str"
+    )]
+    fn description(&self) -> &str {
+        "echo tool"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        json!({ "type": "object" })
+    }
+
+    async fn call(&self, _args: serde_json::Value) -> std::result::Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted("echoed"))
+    }
+}
+
+/// One frozen tool set with the `echo` alias bound to the stub tool.
+fn test_tools() -> ToolSet {
+    ToolSet::for_test(
+        vec![ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(StubTool),
+        )],
+        Vec::new(),
+    )
+}
+
 /// Builds a section VM through the real setup path: construction, host
 /// injection, the control surface with the yield shims, the shared
 /// replay, and the captured alias bindings.
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
+    scheduler_vm_with_tools(models, &ToolSet::default(), var)
+}
+
+/// [`scheduler_vm`] with an explicit frozen tool set, so the captured
+/// tool alias globals install as inspectable Tool objects.
+fn scheduler_vm_with_tools(
+    models: &ModelSet,
+    tools: &ToolSet,
+    var: Option<&serde_json::Value>,
+) -> SectionVm {
     let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
-        &ToolSet::default(),
+        tools,
         models,
         "test-run",
         &NullObserver::default(),
@@ -157,12 +215,12 @@ fn fanout_yields_a_well_formed_request() {
 }
 
 #[test]
-fn tool_call_yields_a_well_formed_request() {
-    // The tool_call shim installs in section VMs through the same setup
+fn tools_call_yields_a_well_formed_request() {
+    // The tools.call shim installs in section VMs through the same setup
     // path as the other suspending calls; its yield parses into the
     // protocol's ToolCall variant with the author's args as JSON.
     let vm = scheduler_vm(&ModelSet::default(), None);
-    match yielded_request(&vm, r#"return tool_call("echo", { value = "hi" })"#) {
+    match yielded_request(&vm, r#"return tools.call("echo", { value = "hi" })"#) {
         Request::ToolCall { alias, args } => {
             assert_eq!(alias, "echo");
             assert_eq!(args, json!({ "value": "hi" }));
@@ -172,7 +230,54 @@ fn tool_call_yields_a_well_formed_request() {
 }
 
 #[test]
-fn handle_infer_yields_the_inner_handle() {
+fn the_bare_tool_call_global_is_not_installed() {
+    // Every tool operation lives under the `tools.*` namespace; the bare
+    // global from before the rename must be gone, not aliased.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let is_nil: bool = vm
+        .lua()
+        .load("return tool_call == nil")
+        .eval()
+        .expect("the global read evaluates");
+    assert!(is_nil, "the bare `tool_call` global must not exist");
+}
+
+#[test]
+fn tools_call_accepts_a_tool_handle_in_place_of_the_alias() {
+    // The captured alias global is an inspectable Tool object; passing it
+    // as the leading argument dispatches the binding it names.
+    let vm = scheduler_vm_with_tools(&ModelSet::default(), &test_tools(), None);
+    match yielded_request(&vm, r#"return tools.call(echo, { value = "hi" })"#) {
+        Request::ToolCall { alias, args } => {
+            assert_eq!(alias, "echo");
+            assert_eq!(args, json!({ "value": "hi" }));
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn tools_call_rejects_a_non_alias_non_tool_first_argument() {
+    // The polymorphism is alias string or Tool object; anything else is
+    // the call's own error at the protocol boundary, so an author pcall
+    // catches it at the call site.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (_thread, yielded) = start(&vm, "return tools.call(42, {})");
+    let value = yielded.into_iter().next().expect("one yielded value");
+    match Request::from_yield(vm.lua(), &value) {
+        crate::execute::protocol::YieldParse::Call(answer) => {
+            let message = format!("{answer:?}");
+            assert!(
+                message.contains("tools.call alias must be a string or Tool object"),
+                "the rejection names the expected forms: {message}"
+            );
+        }
+        other => panic!("expected the call's own error, got {other:?}"),
+    }
+}
+
+#[test]
+fn models_infer_takes_an_optional_leading_handle() {
     let vm = scheduler_vm(&test_models(), None);
     let request = yielded_request(
         &vm,
@@ -181,7 +286,7 @@ fn handle_infer_yields_the_inner_handle() {
             local u = models.use("fast")
             assert(h.name == "fast" and h.model_id == "test-model")
             assert(u.name == "fast")
-            return h:infer("yo")
+            return models.infer(h, "yo")
             "#,
     );
     match request {
@@ -198,9 +303,9 @@ fn handle_infer_yields_the_inner_handle() {
 }
 
 #[test]
-fn captured_model_aliases_install_as_shimmed_proxies() {
+fn captured_model_aliases_install_as_plain_handles() {
     let vm = scheduler_vm(&test_models(), None);
-    match yielded_request(&vm, r#"return fast:infer("yo")"#) {
+    match yielded_request(&vm, r#"return models.infer(fast, "yo")"#) {
         Request::Infer {
             prompt,
             binding: Some(binding),
@@ -213,17 +318,43 @@ fn captured_model_aliases_install_as_shimmed_proxies() {
 }
 
 #[test]
-fn a_shimmed_handle_hides_its_inner_userdata() {
+fn handles_carry_no_colon_methods() {
+    // Namespace-only invocation: a handle is a frozen, inspectable value,
+    // so the old `handle:infer` method is gone - reading `infer` off the
+    // userdata fails, and the one invocation form is the leading handle
+    // argument to `models.infer`.
     let vm = scheduler_vm(&test_models(), None);
-    // `getmetatable` survives hardening; the sealed proxy metatable is
-    // the only thing keeping the inner userdata (and its non-yielding
-    // Rust `infer` method) out of author reach.
-    let (_thread, returned) = start(
-        &vm,
-        "return getmetatable(fast), getmetatable(models.get(\"fast\"))",
+    let (is_userdata, read_failed): (bool, bool) = vm
+        .lua()
+        .load(
+            r#"
+            local h = models.get("fast")
+            local ok = pcall(function() return h.infer end)
+            return type(h) == "userdata" and type(fast) == "userdata", not ok
+            "#,
+        )
+        .eval()
+        .expect("the handle probe evaluates");
+    assert!(is_userdata, "handles install as bare userdata");
+    assert!(read_failed, "a handle has no `infer` field to call");
+}
+
+#[test]
+fn models_infer_rejects_a_third_argument() {
+    // `models.infer(handle?, prompt)` is the whole signature; a third
+    // argument (per-call options, or anything else) raises at the call
+    // site rather than being silently dropped.
+    let vm = scheduler_vm(&test_models(), None);
+    let program = compile_block(
+        r#"local ok, err = pcall(models.infer, models.get("fast"), "yo", { temperature = 0 })
+           assert(not ok, "a third argument must fail")
+           assert(err == "models.infer takes (handle?, prompt)", err)
+           return "rejected""#,
     );
-    let values: Vec<Value> = returned.into_iter().collect();
-    assert_eq!(values, vec![Value::Boolean(false), Value::Boolean(false)]);
+    match vm.start_block_coro(&program).expect("the block runs") {
+        CoroStep::Done(LuaBlockResult::Returned(Some(text))) => assert_eq!(text, "rejected"),
+        other => panic!("expected the rejection return, got {other:?}"),
+    }
 }
 
 #[test]

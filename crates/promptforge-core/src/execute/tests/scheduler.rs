@@ -1649,7 +1649,7 @@ async fn live_h1_infer_runs_once() {
         # Live H1\n\n\
         ```lua\n\
         local writer = models.default('writer', 'A general model for tests')\n\
-        var.answer = writer:infer('answer once')\n\
+        var.answer = models.infer(writer, 'answer once')\n\
         ```\n\n\
         ## Result\n\n\
         ```lua\nreturn var.answer\n```\n";
@@ -3312,7 +3312,7 @@ async fn an_answer_for_an_unknown_request_id_fails_loudly() {
     );
 }
 
-// --- Script-initiated tool_call dispatch ---
+// --- Script-initiated tools.call dispatch ---
 
 /// Arms the run's shared tool set with `bindings`, every alias in the
 /// prompt-wide `always` scope, so a section's effective scope carries them
@@ -3340,7 +3340,7 @@ fn arm_tool_set_scoped(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_dispatches_and_resumes_as_a_string() {
+async fn a_script_tools_call_dispatches_and_resumes_as_a_string() {
     // The whole script path in one pass: the shim yields, the scheduler
     // dispatches the bound tool, the plain binding resumes as a Lua
     // string, and the counts land in the same `tools.calls` table the
@@ -3349,7 +3349,7 @@ async fn a_script_tool_call_dispatches_and_resumes_as_a_string() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local out = tool_call('echo', { value = 'hi' })\n\
+        local out = tools.call('echo', { value = 'hi' })\n\
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
@@ -3370,14 +3370,43 @@ async fn a_script_tool_call_dispatches_and_resumes_as_a_string() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_with_an_unbound_alias_names_the_bound_set() {
+async fn a_script_tools_call_with_a_tool_object_dispatches_its_binding() {
+    // The handle form: the captured alias global is an inspectable Tool
+    // object, and passing it as the leading argument dispatches the binding
+    // it names, identically to the bare alias string.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # ToolCall\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        assert(type(echo) == 'userdata', 'the captured alias is a Tool object')\n\
+        return tools.call(echo, { value = 'hi' })\n\
+        ```\n";
+    let prompt = parse(md);
+    let ctx = scheduler_context(&prompt);
+    arm_tool_set(
+        &ctx,
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo tool",
+            Arc::new(EchoTool),
+        )],
+    );
+    let out = Scheduler::new(&ctx, None)
+        .drive()
+        .await
+        .expect("the handle-form dispatch succeeds");
+    assert_eq!(out, "echoed: hi");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_script_tools_call_with_an_unbound_alias_names_the_bound_set() {
     // Script-initiated resolution runs against the run's full bound
     // catalog, so the unknown-alias error names that whole set, not the
     // section's effective scope.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tool_call('missing', {})\n```\n";
+        ```lua\nreturn tools.call('missing', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
@@ -3402,7 +3431,7 @@ async fn a_script_tool_call_with_an_unbound_alias_names_the_bound_set() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_reaches_a_bound_tool_outside_the_section_scope() {
+async fn a_script_tools_call_reaches_a_bound_tool_outside_the_section_scope() {
     // A tool bound in the document catalog but never scoped into the
     // section (no `always`, no `tools.add`) still dispatches for a script:
     // the scope shapes what the model is offered, and the author's own
@@ -3412,7 +3441,7 @@ async fn a_script_tool_call_reaches_a_bound_tool_outside_the_section_scope() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local out = tool_call('echo', { value = 'hi' })\n\
+        local out = tools.call('echo', { value = 'hi' })\n\
         return out .. '|' .. tostring(tools.calls.echo)\n\
         ```\n";
     let prompt = parse(md);
@@ -3434,7 +3463,7 @@ async fn a_script_tool_call_reaches_a_bound_tool_outside_the_section_scope() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_outside_the_scope_never_widens_the_advertised_set() {
+async fn a_script_tools_call_outside_the_scope_never_widens_the_advertised_set() {
     // The widened script resolution must not leak into the model's offer:
     // after a script dispatch of a bound-but-unscoped tool, the same
     // section's prose round still advertises exactly the effective scope.
@@ -3445,7 +3474,7 @@ async fn a_script_tool_call_outside_the_scope_never_widens_the_advertised_set() 
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\ntool_call('hidden', { value = 'x' })\n```\n\n\
+        ```lua\ntools.call('hidden', { value = 'x' })\n```\n\n\
         Say something.\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
@@ -3520,13 +3549,13 @@ impl Tool for SignallingSlowTool {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn cancellation_interrupts_a_slow_script_tool_call() {
+async fn cancellation_interrupts_a_slow_script_tools_call() {
     use crate::cancel::{self, CancelHandle};
 
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tool_call('slow', {})\n```\n";
+        ```lua\nreturn tools.call('slow', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     let started = Arc::new(AtomicUsize::new(0));
@@ -3558,7 +3587,7 @@ async fn cancellation_interrupts_a_slow_script_tool_call() {
 
     assert!(
         matches!(result, Err(Error::Interrupted)),
-        "cancelling a suspended tool_call must interrupt the run, got {result:?}"
+        "cancelling a suspended tools.call must interrupt the run, got {result:?}"
     );
     assert_eq!(
         started.load(Ordering::SeqCst),
@@ -3573,11 +3602,11 @@ async fn cancellation_interrupts_a_slow_script_tool_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_untrusted_script_tool_call_result_is_nonce_wrapped() {
+async fn an_untrusted_script_tools_call_result_is_nonce_wrapped() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tool_call('fetch', { value = 'hi' })\n```\n";
+        ```lua\nreturn tools.call('fetch', { value = 'hi' })\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     arm_tool_set(
@@ -3608,7 +3637,7 @@ async fn a_structured_binding_resumes_as_a_lua_table() {
         # ToolCall\n\n\
         ## Only\n\n\
         ```lua\n\
-        local r = tool_call('form', {})\n\
+        local r = tools.call('form', {})\n\
         return r.text .. '|' .. tostring(#r.images)\n\
         ```\n";
     let prompt = parse(md);
@@ -3635,7 +3664,7 @@ async fn invalid_json_from_a_structured_tool_is_a_tool_error() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tool_call('form', {})\n```\n";
+        ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     let mut binding = crate::lua::ToolBinding::for_test(
@@ -3672,7 +3701,7 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\nreturn tool_call('form', {})\n```\n";
+        ```lua\nreturn tools.call('form', {})\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     let mut binding = crate::lua::ToolBinding::for_test(
@@ -3701,15 +3730,15 @@ async fn an_untrusted_structured_output_is_wrapped_before_classification() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_script_tool_call_before_prose_keeps_the_model_install() {
+async fn a_script_tools_call_before_prose_keeps_the_model_install() {
     // The one-time section scope install is shared between the first prose
-    // block and the first script dispatch: a script `tool_call` that runs
+    // block and the first script dispatch: a script `tools.call` that runs
     // first must not swallow the prose path's model resolution.
     let gateway = ScriptedGateway::start(vec![resp_text("prose answer")]).await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
         ## Only\n\n\
-        ```lua\ntool_call('echo', { value = 'x' })\n```\n\n\
+        ```lua\ntools.call('echo', { value = 'x' })\n```\n\n\
         Say something.\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
@@ -3729,8 +3758,8 @@ async fn a_script_tool_call_before_prose_keeps_the_model_install() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_document_prompt_without_tool_call_is_unaffected() {
-    // Bindings installed, shim present, `tool_call` never called: the
+async fn a_document_prompt_without_tools_call_is_unaffected() {
+    // Bindings installed, shim present, `tools.call` never called: the
     // section runs exactly as before the dispatch arm existed.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # ToolCall\n\n\
@@ -3749,7 +3778,7 @@ async fn a_document_prompt_without_tool_call_is_unaffected() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("a prompt that never calls tool_call is unchanged");
+        .expect("a prompt that never calls tools.call is unchanged");
     assert_eq!(out, "plain");
 }
 

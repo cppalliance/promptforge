@@ -171,7 +171,7 @@ impl Default for RunLimits {
 /// the gateway client, an explicit cancellation handle, and resource limits.
 ///
 /// `RunConfig` is owned (no borrows), so its observer and debug sinks reach the
-/// nested `model:infer` hook that a borrowed option could not.
+/// nested `models.infer` path that a borrowed option could not.
 ///
 /// # Examples
 /// ```

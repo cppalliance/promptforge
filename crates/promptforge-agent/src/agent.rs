@@ -3,7 +3,7 @@
 //! An agent program is one Lua chunk run as one coroutine on an agent VM -
 //! a [`SectionVm`] built with the section construction sequence (harden,
 //! untrusted, host injection, store, log, var) minus the section control
-//! surface. The shared kernel is `models.infer` and `tool_call`; the
+//! surface. The shared kernel is `models.infer` and `tools.call`; the
 //! agent-only `models.chat`, `runtime.events()`, and `ui()` are installed
 //! here and nowhere else; `call`, `fanout`, and `jump` are absent, not
 //! stubbed, so touching them is an undefined-global failure. The driver
@@ -131,7 +131,7 @@ impl From<LuaError> for AgentError {
 /// view over [`AgentConfig::event_log`] whose snapshot length bound
 /// refreshes at every host-call resume - and `ui()` - a fresh host-state
 /// snapshot per call from [`AgentConfig::ui`], nil as a global when the
-/// host supplies no provider. Shared kernel: `tool_call`, `store`, `var`,
+/// host supplies no provider. Shared kernel: `tools.call`, `store`, `var`,
 /// cancel checkpoints, `models.infer`. `call()`, `fanout()`, and
 /// `jump()` do not exist here - absent, not stubbed. `run_agent` installs
 /// `config.cancel` as the task's cancel scope, so every suspended host
@@ -270,7 +270,7 @@ async fn drive(
 
 /// Registers every catalog tool by its wire name, with no semantic
 /// resolution: one binding per tool, every alias in scope (the
-/// `always` list), so `tool_call` reaches the whole catalog. Wire names are
+/// `always` list), so `tools.call` reaches the whole catalog. Wire names are
 /// assumed unique within one agent catalog; on a collision the first
 /// binding wins alias lookup. A tool declaring
 /// [`structured_output`](promptforge_tools::Tool::structured_output) binds
@@ -341,7 +341,7 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 ///
 /// Absent, not stubbed: the shared shim prelude installs `call` and
 /// `fanout` for section VMs, but the agent kernel is `models.infer` and
-/// `tool_call` alone, so both globals are removed here, before any author
+/// `tools.call` alone, so both globals are removed here, before any author
 /// code runs - an agent touching them fails as an undefined global. `jump`
 /// is never installed at all: the scheduler control-global install is
 /// skipped outright. `models.chat` is the mirror image: installed here and
@@ -397,7 +397,7 @@ struct AgentRun<'a> {
     vm: &'a SectionVm,
     /// The compiled agent program.
     program: &'a LuaProgram,
-    /// The frozen tool bindings (`tool_call`'s scope).
+    /// The frozen tool bindings (`tools.call`'s scope).
     tool_set: &'a ToolSet,
     /// The frozen model bindings behind `models.use`/`models.get`, read
     /// through the `ModelView` impl on the mutex.
@@ -885,7 +885,7 @@ fn call_metrics(completion: &Completion) -> Option<CallMetrics> {
     measured.then_some(metrics)
 }
 
-/// One `tool_call` dispatch: the alias resolved against the agent's
+/// One `tools.call` dispatch: the alias resolved against the agent's
 /// registered catalog, then the shared [`dispatch_tool`] body (cancel race,
 /// counts, untrusted wrap, observer events), classified by the binding's
 /// declared output kind.

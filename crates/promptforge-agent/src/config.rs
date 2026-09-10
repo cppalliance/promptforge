@@ -31,7 +31,7 @@ pub struct AgentConfig {
     pub observer: Arc<dyn Observer>,
     /// The run's cancel handle. `run_agent` installs it as the task's
     /// cancel scope, so every suspended host call (`models.infer`,
-    /// `tool_call`) races cancellation and running Lua observes it through
+    /// `tools.call`) races cancellation and running Lua observes it through
     /// the instruction hook.
     pub cancel: CancelHandle,
     /// The read-side history the agent builds context from, when the host

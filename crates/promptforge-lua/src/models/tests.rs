@@ -2,7 +2,6 @@ use super::decode::{
     decode_lua_number, parse_bind_args, parse_opts_table, parse_single_alias, validate_alias,
     value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
-use super::userdata::reject_infer_options;
 use super::{ModelRuntime, record_default_binding};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
@@ -102,30 +101,6 @@ fn model_runtime_select_enforces_at_most_once() {
         runtime.select("other".to_owned()).is_err(),
         "a second select must be rejected"
     );
-}
-
-#[test]
-fn infer_options_absent_or_nil_are_accepted() {
-    assert!(reject_infer_options(None).is_ok());
-    assert!(reject_infer_options(Some(&Value::Nil)).is_ok());
-}
-
-#[test]
-fn infer_options_reject_a_table_or_any_non_nil_value() {
-    let lua = Lua::new();
-    let table = Value::Table(lua.create_table().expect("create Lua table"));
-    let boolean = Value::Boolean(true);
-    let integer = Value::Integer(1);
-    for value in [&table, &boolean, &integer] {
-        let error = reject_infer_options(Some(value))
-            .expect_err("a non-nil infer options argument must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("does not accept a second argument"),
-            "error must explain the rejection, got: {error}"
-        );
-    }
 }
 
 // PF-LM-014: direct coverage of every parser branch and state transition.

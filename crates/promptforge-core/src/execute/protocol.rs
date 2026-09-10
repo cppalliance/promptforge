@@ -1,8 +1,8 @@
 //! The coroutine protocol: validated request and answer types for the
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
-//! A suspending host call (`models.infer`, `handle:infer`, `call`,
-//! `fanout`) is a Lua-side shim that yields a request table; the driver
+//! A suspending host call (`models.infer(handle?, prompt)`, `call`,
+//! `fanout`, `tools.call`) is a Lua-side shim that yields a request table; the driver
 //! validates the yield into a [`Request`], dispatches it, and resumes the
 //! coroutine with the `(ok, result)` envelope rendered from an [`Answer`].
 //!

@@ -1,8 +1,8 @@
 //! The coroutine protocol: validated request and answer types for the
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
-//! A suspending host call (`models.infer`, `handle:infer`, `call`,
-//! `fanout`, `tool_call`, the agent-only `models.chat`) is a Lua-side shim
+//! A suspending host call (`models.infer(handle?, prompt)`, `call`,
+//! `fanout`, `tools.call`, the agent-only `models.chat`) is a Lua-side shim
 //! that yields a request table; the driver validates the yield into a
 //! [`Request`], dispatches it, and resumes the coroutine with the
 //! `(ok, result)` envelope rendered from an [`Answer`]. The two enums are
@@ -15,6 +15,7 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
 use promptforge_core_support::events::{CallMetrics, ToolCallEvent};
 use promptforge_model_client::model::ModelBinding;
 
+use crate::tools::tool_alias;
 use crate::{
     Error, LuaFanoutResult, LuaModelHandle, Result, ToolOutputKind, pack_sequence,
     resolve_section_target,
@@ -124,12 +125,13 @@ fn shim_var(
 /// lifetime-bound enters the enum.
 #[derive(Debug)]
 pub enum Request {
-    /// `models.infer` (`binding: None`: resolve the section's current model)
-    /// or `handle:infer` (`binding: Some`: the handle's frozen binding).
+    /// `models.infer(prompt)` (`binding: None`: resolve the section's
+    /// current model) or `models.infer(handle, prompt)` (`binding: Some`:
+    /// the handle's frozen binding).
     Infer {
         /// The author-supplied prompt text.
         prompt: String,
-        /// The handle's frozen binding for `handle:infer`, else `None`.
+        /// The leading handle's frozen binding, else `None`.
         binding: Option<ModelBinding>,
     },
     /// `call(target, input?)`: run a contained chain over the target's
@@ -156,8 +158,8 @@ pub enum Request {
         /// The caller's `var` snapshot; each arm seeds from its own clone.
         var: serde_json::Value,
     },
-    /// `tool_call(alias, args)`: suspending dispatch of a bound tool
-    /// through the shared dispatch function.
+    /// `tools.call(alias_or_tool, args)`: suspending dispatch of a bound
+    /// tool through the shared dispatch function.
     ToolCall {
         /// The author-supplied prompt-local tool alias.
         alias: String,
@@ -227,9 +229,7 @@ impl Request {
         };
         match op.as_str() {
             "infer" => classify(parse_infer(table), |error| Answer::Infer(Err(error))),
-            "call" => classify(parse_call(lua, table), |error| {
-                Answer::Call(Err(error))
-            }),
+            "call" => classify(parse_call(lua, table), |error| Answer::Call(Err(error))),
             "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
                 Answer::ToolCallResult(Err(error))
@@ -268,17 +268,31 @@ fn classify(
 }
 
 /// Parses an `infer` request: the author-supplied `prompt`, and the
-/// shim-produced `handle` userdata whose frozen [`ModelBinding`] is cloned
-/// out of its borrow while the VM handle is live.
+/// optional leading handle's userdata whose frozen [`ModelBinding`] is
+/// cloned out of its borrow while the VM handle is live.
+///
+/// The handle is author-supplied under namespace-only invocation
+/// (`models.infer(handle?, prompt)`), so a wrong shape is the call's error,
+/// not a malformed yield.
 fn parse_infer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let prompt = call_string(table, "prompt")?;
     let binding = match table.raw_get::<Value>("handle") {
         Ok(Value::Nil) => None,
         Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
             Ok(handle) => Some(handle.binding().clone()),
-            Err(_) => return Err(FieldFailure::Malformed),
+            Err(_) => {
+                return Err(FieldFailure::Call(Error::Lua(
+                    "models.infer handle must be a model handle".to_owned(),
+                )));
+            }
         },
-        _ => return Err(FieldFailure::Malformed),
+        Ok(other) => {
+            return Err(FieldFailure::Call(Error::Lua(format!(
+                "models.infer handle must be a model handle, got {}",
+                other.type_name()
+            ))));
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
     };
     Ok(Request::Infer { prompt, binding })
 }
@@ -314,14 +328,24 @@ fn parse_fanout(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, 
     Ok(Request::Fanout { worker, items, var })
 }
 
-/// Parses a `tool_call` request: the author-supplied `alias` and `args`.
+/// Parses a `tools.call` request: the author-supplied `alias` (a string or
+/// a Tool object, decoded through the one alias-or-Tool polymorphism) and
+/// `args`.
 ///
 /// An absent or nil `args` parses as the empty object (the empty-argument
 /// call every tool accepts). A non-table or JSON-unrepresentable `args` is
 /// the call's error, framed exactly as the other author-argument failures,
 /// so an author `pcall` catches it at the call site.
 fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let alias = call_string(table, "alias")?;
+    let alias = match table.raw_get::<Value>("alias") {
+        // Flatten to the call-error string so the answer frames exactly as
+        // the other author-argument failures (`Error::Lua`, not a runtime
+        // wrapper).
+        Ok(value) => {
+            tool_alias(&value).map_err(|error| FieldFailure::Call(Error::Lua(error.to_string())))?
+        }
+        Err(_) => return Err(FieldFailure::Malformed),
+    };
     let args = match table.raw_get::<Value>("args") {
         Ok(Value::Nil) => serde_json::Value::Object(serde_json::Map::new()),
         Ok(Value::Table(_)) => json_field(lua, table, "args").map_err(|_| {
@@ -778,7 +802,7 @@ pub enum YieldParse {
     Malformed(Error),
 }
 
-/// One dispatched `tool_call`'s successful output, classified by the
+/// One dispatched `tools.call`'s successful output, classified by the
 /// binding's declared [`ToolOutputKind`] so the envelope resumes the right
 /// Lua shape: a plain binding's text resumes as a Lua string, a structured
 /// binding's parsed JSON resumes as a Lua table through the serde boundary.
@@ -905,7 +929,7 @@ pub enum Answer<E> {
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
     /// [`ChatResult`] does not size every answer the non-chat paths move.
     Chat(std::result::Result<Box<ChatResult>, E>),
-    /// The classified output for a `tool_call` request.
+    /// The classified output for a `tools.call` request.
     ToolCallResult(std::result::Result<ToolCallOutcome, E>),
 }
 
@@ -1182,7 +1206,28 @@ mod tests {
     }
 
     #[test]
-    fn a_tool_call_with_a_non_string_alias_is_the_calls_error() {
+    fn a_tool_call_with_a_tool_object_alias_decodes_to_its_alias() {
+        // The alias-or-Tool polymorphism at the protocol boundary: a Tool
+        // object (a captured alias global, a `tools.bind` return) names the
+        // binding it was created from.
+        let lua = Lua::new();
+        let table = request_table(&lua, "tool_call");
+        let handle = crate::LuaToolHandle::from_binding(
+            "echo",
+            "echo tool",
+            &promptforge_tools::ToolId::new("tests", "echo").expect("valid id"),
+        );
+        let userdata = lua.create_userdata(handle).expect("userdata");
+        table.raw_set("alias", userdata).expect("raw_set");
+        let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+        match request {
+            Request::ToolCall { alias, .. } => assert_eq!(alias, "echo"),
+            other => panic!("expected a tool_call request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_with_a_non_alias_alias_is_the_calls_error() {
         // The author-facing argument error rides back as the call's answer,
         // framed byte-identically with the other author-argument failures.
         let lua = Lua::new();
@@ -1190,7 +1235,10 @@ mod tests {
         table.raw_set("alias", 42).expect("raw_set");
         match Request::from_yield(&lua, &Value::Table(table)) {
             YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
-                assert_eq!(message, "alias must be a string, got integer");
+                assert_eq!(
+                    message,
+                    "tools.call alias must be a string or Tool object, got integer"
+                );
             }
             other => panic!("expected the alias call error, got {other:?}"),
         }
@@ -1861,21 +1909,37 @@ mod tests {
     }
 
     #[test]
-    fn an_infer_with_a_wrong_handle_type_is_rejected() {
+    fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
+        // The handle is author-supplied under namespace-only invocation, so
+        // a wrong shape is the call's error (pcall-able at the call site),
+        // not a malformed-yield block failure.
         let lua = Lua::new();
         let as_string = request_table(&lua, "infer");
         as_string.raw_set("prompt", "hi").expect("raw_set");
         as_string
             .raw_set("handle", "not a handle")
             .expect("raw_set");
-        assert_direct_yield(Request::from_yield(&lua, &Value::Table(as_string)));
+        match Request::from_yield(&lua, &Value::Table(as_string)) {
+            YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
+                assert_eq!(
+                    message,
+                    "models.infer handle must be a model handle, got string"
+                );
+            }
+            other => panic!("expected the handle call error, got {other:?}"),
+        }
         let as_other_userdata = request_table(&lua, "infer");
         as_other_userdata.raw_set("prompt", "hi").expect("raw_set");
         let wrong = lua
             .create_userdata(LuaFanoutResult::success(json!(1), "x"))
             .expect("userdata creation cannot fail on a fresh VM");
         as_other_userdata.raw_set("handle", wrong).expect("raw_set");
-        assert_direct_yield(Request::from_yield(&lua, &Value::Table(as_other_userdata)));
+        match Request::from_yield(&lua, &Value::Table(as_other_userdata)) {
+            YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
+                assert_eq!(message, "models.infer handle must be a model handle");
+            }
+            other => panic!("expected the handle call error, got {other:?}"),
+        }
     }
 
     #[test]

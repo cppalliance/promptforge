@@ -607,7 +607,7 @@ async fn reply_substitution_nil_is_a_hard_error() {
     );
 }
 
-// --- models.get / models.infer / handle:infer ---
+// --- models.get / models.infer with a leading handle ---
 
 /// A two-model catalog: `writer` resolves to `writer-model`, `analyst` to
 /// `analyst-model`, so a test can tell which model a request used.
@@ -723,7 +723,7 @@ models.default('writer', 'A general model for tests')\n\
 models.bind('analyst', 'A careful analysis model')\n\
 ```\n\n\
 ## Only\n\n\
-```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
+```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
     let prompt = TestPrompt {
         prompt: parse(md),
         models: writer_and_analyst_catalog(),
@@ -738,7 +738,7 @@ models.bind('analyst', 'A careful analysis model')\n\
         .expect("complete must reach the gateway");
     assert_eq!(
         body["model"], "analyst-model",
-        "handle:infer must use the handle's model, not the section default"
+        "a leading handle must use the handle's model, not the section default"
     );
 }
 
@@ -791,7 +791,7 @@ async fn models_get_infer_works_without_any_section_model() {
 # T\n\n\
 ```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
-```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
+```lua\nreturn models.infer(models.get('analyst'), 'ping')\n```\n";
     let prompt = TestPrompt {
         prompt: parse(md),
         models: analyst_only_catalog(),

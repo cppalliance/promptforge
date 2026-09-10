@@ -55,7 +55,7 @@ pub(crate) fn env_client_with_limits(limits: RunLimits) -> Result<GatewayClient>
         .map_err(Error::from)
 }
 
-/// How the nested `model:infer` hook obtains its gateway client.
+/// How the nested `models.infer` path obtains its gateway client.
 ///
 /// Centralizes lazy client acquisition (F5): rather than eagerly building an
 /// environment client and discarding a construction failure with `.ok()`, the

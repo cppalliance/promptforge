@@ -37,10 +37,9 @@ pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 pub(crate) use mlua::thread::ThreadStatus;
 pub(crate) use mlua::{
     Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue,
-    StdLib, Thread, UserData, UserDataFields, UserDataMethods, Value, Variadic, VmState,
+    StdLib, Thread, UserData, UserDataFields, UserDataMethods, Value, VmState,
 };
 pub(crate) use serde_json::Value as Json;
-pub(crate) use serde_json::json;
 
 pub(crate) use promptforge_core_support::observe::{Observation, Observer, detail};
 pub(crate) use promptforge_core_support::untrusted::GuardNonce;
@@ -52,7 +51,7 @@ pub(crate) use promptforge_tools::{Tool, ToolCatalog, ToolId};
 
 pub(crate) use crate::error::Result;
 pub(crate) use crate::messages::install_messages;
-pub(crate) use crate::models::{LuaModelHandle, ModelInferHook, ModelsInferHook};
+pub(crate) use crate::models::{LuaModelHandle, ModelsInferHook};
 pub(crate) use crate::models::{install_h2_models, install_live_models};
 
 #[doc(hidden)]
@@ -88,25 +87,24 @@ mod error;
 mod hardening;
 pub(crate) use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
 mod coro;
-pub(crate) use coro::{install_shim_prelude, wrap_shimmed_handle};
+pub(crate) use coro::install_shim_prelude;
 mod dispatch;
 mod sys;
 pub(crate) use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
 mod host;
 pub(crate) use host::{install_log, install_store_table, install_untrusted};
-mod tools_bridge;
-pub(crate) use tools_bridge::{install_h2_tools, install_lua_tool_calls};
+mod tools;
+pub(crate) use tools::{LuaToolHandle, install_h2_tools, install_tool_call_counts};
 mod vm;
-pub(crate) use vm::{LocalTools, pack_sequence};
+pub(crate) use vm::pack_sequence;
 #[cfg(test)]
 pub(crate) use vm::{LuaOutcome, run_chunk};
-mod live;
-pub(crate) use live::validate_alias;
 mod handles;
+mod live;
 mod messages;
 mod program;
 mod scope;
-pub(crate) use handles::{LuaToolHandle, resolve_section_target};
+pub(crate) use handles::resolve_section_target;
 mod models;
 mod protocol;
 mod runtime_events;

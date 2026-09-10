@@ -15,7 +15,7 @@ use crate::{Error, Result};
 mod decode;
 mod userdata;
 
-pub(crate) use userdata::{LuaModelHandle, ModelInferHook, ModelsInferHook};
+pub(crate) use userdata::{LuaModelHandle, ModelsInferHook};
 
 use decode::{parse_bind_args, parse_single_alias, validate_alias};
 

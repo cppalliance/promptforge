@@ -379,7 +379,7 @@ Rename `execute(heading, input?)` to synchronous `call(heading, input?)` across 
 
 <step-4>
 
-### Step 4: namespace-only tool and model invocation
+### Step 4: namespace-only tool and model invocation [completed]
 
 - Component: section-call
 

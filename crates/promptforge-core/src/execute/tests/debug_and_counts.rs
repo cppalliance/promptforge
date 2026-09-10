@@ -90,7 +90,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = writer:infer('say hello')\n\
+        local text = models.infer(writer, 'say hello')\n\
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md, Vec::new());
@@ -102,13 +102,13 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
-    .expect("handle:infer must return text");
+    .expect("handle-form infer must return text");
     assert_eq!(out, "final answer");
 
     let events = capture.events();
     assert!(
         !events.is_empty(),
-        "nested model:infer must reach the debug sink (F4), got no events"
+        "nested handle-form infer must reach the debug sink (F4), got no events"
     );
     assert!(
         events
@@ -443,7 +443,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handle_infer_returns_text_without_touching_reply_or_sys() {
-    // The one infer shape: `handle:infer` returns the round's text and never
+    // The one infer shape: `models.infer(handle, ...)` returns the round's text and never
     // sets `reply` or `sys.reply_finish_reason`.
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
@@ -452,7 +452,7 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
-        local text = writer:infer('say hello')\n\
+        local text = models.infer(writer, 'say hello')\n\
         assert(type(text) == 'string', 'infer must return text')\n\
         assert(text == 'pong')\n\
         assert(reply == nil, 'infer must not set reply')\n\
@@ -463,13 +463,13 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(&prompt, "", &[], &StoreRef::memory(), gatewayed(addr))
         .await
-        .expect("handle:infer must return text");
+        .expect("handle-form infer must return text");
     assert_eq!(out, "pong");
     let body = gateway
         .last_request()
         .expect("infer must reach the gateway");
     assert!(
         body.get("tools").is_none(),
-        "handle:infer advertises no tools: {body}"
+        "handle-form infer advertises no tools: {body}"
     );
 }

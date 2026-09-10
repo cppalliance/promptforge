@@ -10,7 +10,7 @@
 -- the session surfaces the failure to the operator, and the loop returns
 -- to user_input.
 while true do
-    tool_call('user_input', {})
+    tools.call('user_input', {})
     local messages = {}
     local events = runtime.events()
     for index = 1, #events do

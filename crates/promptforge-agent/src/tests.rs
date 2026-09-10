@@ -1169,10 +1169,10 @@ async fn an_agent_tool_call_is_counted_and_wraps_untrusted_output() {
     let run = run_over_fixture(
         r"
 store.write('count0.txt', tostring(tools.calls.plain))
-store.write('plain.txt', tool_call('plain', { value = 'hi' }))
-store.write('wrapped.txt', tool_call('tainted', { value = 'hi' }))
+store.write('plain.txt', tools.call('plain', { value = 'hi' }))
+store.write('wrapped.txt', tools.call('tainted', { value = 'hi' }))
 store.write('counts.txt', tools.calls.plain .. ' ' .. tools.calls.tainted)
-local ok, err = pcall(function() return tool_call('ghost', {}) end)
+local ok, err = pcall(function() return tools.call('ghost', {}) end)
 store.write('ghost_ok.txt', tostring(ok))
 store.write('ghost_err.txt', err)
 ",
@@ -1265,7 +1265,7 @@ async fn a_structured_tool_resumes_as_a_table() {
     let tools = ToolCatalog::new(&[structured]).expect("the fixture catalog is valid");
     let run = run_over_fixture(
         r"
-local result = tool_call('structured', {})
+local result = tools.call('structured', {})
 store.write('type.txt', type(result))
 store.write('text.txt', result.text)
 store.write('images.txt', tostring(#result.images))
@@ -1302,7 +1302,7 @@ async fn firing_cancel_interrupts_a_suspended_tool_call() {
     let run = tokio::spawn(async move {
         let store = StoreRef::memory();
         run_agent(
-            "tool_call('blocking', {})",
+            "tools.call('blocking', {})",
             &tools,
             &fixture_models(),
             &store,

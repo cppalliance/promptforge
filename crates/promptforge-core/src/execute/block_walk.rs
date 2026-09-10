@@ -141,7 +141,7 @@ pub(crate) async fn run_live_h1_prose(
 
 /// Installs the section's one-time tool-call counts and model resolution,
 /// gated on the counts slot: the first consumer - the section's first prose
-/// block or its first script-initiated `tool_call` - performs the install,
+/// block or its first script-initiated `tools.call` - performs the install,
 /// and every later call is a no-op. The counts install backs the Lua
 /// `tools.calls` table; the model resolution freezes the section's binding,
 /// enriches `sys.model`, and fills the completion options the prose loop

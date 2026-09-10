@@ -228,7 +228,7 @@ pub(crate) async fn run_prose_inference(
                             // dispatch body owns the cancel race, the counts
                             // increment, the untrusted wrap, and the observer
                             // events, so this loop and the scheduler's
-                            // `tool_call` arm cannot drift. Model-initiated
+                            // `tools.call` arm cannot drift. Model-initiated
                             // calls pass no script report: their results ride
                             // the conversation echo below.
                             dispatch_tool(

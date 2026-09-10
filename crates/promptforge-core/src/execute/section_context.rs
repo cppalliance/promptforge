@@ -191,8 +191,9 @@ impl SectionContext {
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
     /// the frame seeds an empty `var`, no reply, no item, and no write
-    /// scope. The scheduler answers the pass's `models.infer`/`handle:infer`
-    /// yields through its driver, so the shim base keeps the control stubs,
+    /// scope. The scheduler answers the pass's `models.infer` yields (with
+    /// or without a leading handle) through its driver, so the shim base
+    /// keeps the control stubs,
     /// which raise before anything structural can yield.
     ///
     /// # Errors

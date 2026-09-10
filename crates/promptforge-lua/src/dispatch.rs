@@ -2,7 +2,7 @@
 //!
 //! [`dispatch_tool`] is the one place a bound tool's call composes the
 //! cancel race, the per-VM call counts, the untrusted nonce wrap, and the
-//! observer events. Core's model tool loop and its scheduler's `tool_call`
+//! observer events. Core's model tool loop and its scheduler's `tools.call`
 //! arm both call it; the agent driver adopts it unchanged. Keeping the body
 //! here - the crate every executor already depends on - is what stops
 //! dispatch semantics from forking.

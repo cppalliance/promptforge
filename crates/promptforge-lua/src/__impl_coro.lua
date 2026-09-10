@@ -5,35 +5,29 @@
 -- globals: `yield` is coroutine.yield (the coroutine global is stripped
 -- after install, so author code cannot yield directly), `var_snapshot` is
 -- the host helper returning the hidden `var` data table as a plain deep
--- copy, and `models` is the section's models table, passed in so the chunk
--- never reads a global.
-local yield, var_snapshot, models = ...
+-- copy, and `models`/`tools` are the section's namespace tables, passed in
+-- so the chunk never reads a global.
+local yield, var_snapshot, models, tools = ...
 
 -- The (ok, result) envelope: level 0 suppresses the position prefix, so a
 -- shim-raised error carries exactly the host's message.
-local function infer(prompt)
-  local ok, result = yield({ op = "infer", prompt = prompt })
+--
+-- models.infer(handle?, prompt): an optional leading model handle runs the
+-- round on the handle's frozen binding; without one the driver resolves the
+-- section's current model. Invocation is namespace-only (A9): handles are
+-- plain inspectable userdata with no colon methods.
+local function infer(...)
+  local handle, prompt
+  if select('#', ...) > 2 then
+    error("models.infer takes (handle?, prompt)", 0)
+  elseif select('#', ...) == 2 then
+    handle, prompt = ...
+  else
+    prompt = ...
+  end
+  local ok, result = yield({ op = "infer", prompt = prompt, handle = handle })
   if not ok then error(result, 0) end
   return result
-end
-
--- A model handle reaches author code as a proxy table: field reads pass
--- through to the inner userdata, and infer is a Lua method that yields with
--- the inner userdata attached (a Rust userdata method cannot yield).
-local function wrap_handle(handle)
-  -- __metatable seals the proxy: getmetatable survives hardening, so an
-  -- unprotected metatable would hand the inner userdata (and its
-  -- non-yielding Rust infer method) back to author code.
-  local proxy = setmetatable({}, { __index = handle, __metatable = false })
-  function proxy.infer(_, prompt, opts)
-    if opts ~= nil then
-      error("model:infer(prompt) does not accept a second argument; per-call inference options are not supported", 0)
-    end
-    local ok, result = yield({ op = "infer", prompt = prompt, handle = handle })
-    if not ok then error(result, 0) end
-    return result
-  end
-  return proxy
 end
 
 local function call_section(target, input)
@@ -60,11 +54,13 @@ local function fanout_collection(worker, collection)
   return result
 end
 
--- Suspending dispatch of a bound tool. The driver resumes the result by
--- the binding's declared output kind: a plain binding's text as a string,
--- a structured binding's JSON output as a table.
-local function tool_call(alias, args)
-  local ok, result = yield({ op = "tool_call", alias = alias, args = args })
+-- Suspending dispatch of a bound tool. The first argument is the
+-- prompt-local alias string or a Tool object; the alias-or-Tool
+-- polymorphism decodes once, in the protocol parse. The driver resumes the
+-- result by the binding's declared output kind: a plain binding's text as a
+-- string, a structured binding's JSON output as a table.
+local function tools_call(alias_or_tool, args)
+  local ok, result = yield({ op = "tool_call", alias = alias_or_tool, args = args })
   if not ok then error(result, 0) end
   return result
 end
@@ -80,21 +76,20 @@ local function chat(messages, opts)
   return result
 end
 
--- The section install passes the section's models table; the live H1 base
--- install passes nil (H1's live models table exists only per block, wrapped
--- by __impl_coro_h1.lua) and takes `infer`/`wrap_handle` from the return.
+-- The section install passes the section's namespace tables; the live H1
+-- base install passes nil for both (H1's live models table exists only per
+-- block, given the shim by the host's per-step wrap) and takes `infer` from
+-- the return.
 if models then
   models.infer = infer
-  local raw_use, raw_get = models.use, models.get
-  models.use = function(alias) return wrap_handle(raw_use(alias)) end
-  models.get = function(alias) return wrap_handle(raw_get(alias)) end
+end
+if tools then
+  tools.call = tools_call
 end
 
 return {
   call = call_section,
   fanout = fanout_collection,
-  tool_call = tool_call,
   chat = chat,
-  wrap_handle = wrap_handle,
   infer = infer,
 }

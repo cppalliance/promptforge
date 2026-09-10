@@ -1,8 +1,33 @@
-use super::{
-    Arc, Error, Function, Json, LocalTools, Lua, LuaToolHandle, MultiValue, Mutex, Result,
-    ToolCallCounts, ToolRuntime, ToolSet, Value, Variadic, json, validate_alias,
-};
+//! The `tools` namespace: declaration, scoping, invocation, and counts.
+//!
+//! One Lua table carries every tool operation, mirroring the `models.*`
+//! namespacing of model operations: `bind` and `always` declare during
+//! live H1 (forbidden stubs here), `add` and `add_local` scope tools into
+//! the section, `call` dispatches a bound tool by alias or Tool object
+//! (installed by the coroutine shim prelude, since dispatch suspends), and
+//! `calls` is the read-only per-alias dispatch counter surface. The
+//! installation logic lives here, out of the VM driver; the VM only calls
+//! the installers in setup order.
+
+use std::sync::{Arc, Mutex};
+
+use mlua::{Function, Lua, MultiValue, Table, Value, Variadic};
 use promptforge_model_client::client::ToolSchema;
+
+use crate::error::{Error, Result};
+use crate::handles::{ToolBinding, ToolSet};
+use crate::live::validate_alias;
+use crate::scope::{ToolCallCounts, ToolRuntime};
+use crate::vm::LocalTools;
+
+mod decode;
+mod userdata;
+
+pub(crate) use userdata::LuaToolHandle;
+
+pub(crate) use decode::tool_alias;
+
+use decode::{add_local_params_schema, collect_tools_add_entries};
 
 /// Installs the read-only `tools.calls` counter table over `counts`;
 /// `declared` feeds the unknown-key diagnostic.
@@ -16,7 +41,7 @@ pub(crate) fn install_lua_tool_calls(
     declared: &[String],
 ) -> Result<()> {
     let globals = lua.globals();
-    let tools: mlua::Table = globals.raw_get("tools").map_err(Error::lua)?;
+    let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
 
     let calls_inner = lua.create_table().map_err(Error::lua)?;
     let meta = lua.create_table().map_err(Error::lua)?;
@@ -24,7 +49,7 @@ pub(crate) fn install_lua_tool_calls(
     let counts_for_index = counts.clone();
     let declared: Vec<String> = declared.to_vec();
     let index = lua
-        .create_function(move |_, (_table, key): (mlua::Table, String)| {
+        .create_function(move |_, (_table, key): (Table, String)| {
             let value = counts_for_index.get(&key).map_err(mlua::Error::external)?;
             if let Some(count) = value {
                 Ok(count)
@@ -36,7 +61,7 @@ pub(crate) fn install_lua_tool_calls(
                      seeded aliases: {seeded:?}{}",
                     if declared_unseeded {
                         " (alias was declared by tools.bind but neither added to \
-                         this section's scope nor dispatched by tool_call)"
+                         this section's scope nor dispatched by tools.call)"
                     } else if seeded.is_empty() {
                         ""
                     } else {
@@ -61,119 +86,45 @@ pub(crate) fn install_lua_tool_calls(
     Ok(())
 }
 
-/// One flattened `tools.add` entry: alias plus optional model-description override.
-pub(crate) struct ToolsAddEntry {
-    alias: String,
-    description_override: Option<String>,
-}
-
-/// Reads one `tools.add` element as an alias: a string or a Tool handle.
-fn add_alias(value: Value) -> mlua::Result<String> {
-    match value {
-        Value::String(s) => Ok(s.to_string_lossy()),
-        Value::UserData(ud) => Ok(ud.borrow::<LuaToolHandle>()?.name().to_owned()),
-        other => Err(mlua::Error::external(format!(
-            "tools.add expects strings, Tool objects, or arrays of either, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
-/// Flattens the `tools.add` arguments into alias/override entries.
+/// Installs `tools.calls` as a read-only Lua table backed by a fresh
+/// [`ToolCallCounts`]. Each seeded alias reads its live count; indexing an
+/// unseeded key is a hard error that names the bad key and lists the seeded
+/// set. When the key was declared by `tools.bind` but never seeded - neither
+/// scoped into the section nor dispatched by a script `tools.call` - the
+/// diagnostic says so.
 ///
-/// `tools.add(alias, override?)` takes one alias (string or Tool handle) with
-/// an optional model-description override. The array form
-/// `tools.add({"a", "b"})` covers bulk and takes no per-element overrides.
-pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
-    let mut args = args.into_iter();
-    let Some(target) = args.next() else {
-        return Ok(Vec::new());
-    };
-    let description_override = match args.next() {
-        None => None,
-        Some(Value::String(s)) => Some(s.to_string_lossy()),
-        Some(other) => {
-            return Err(mlua::Error::external(format!(
-                "tools.add override must be a string, got {}",
-                other.type_name()
-            )));
-        }
-    };
-    if let Some(extra) = args.next() {
-        return Err(mlua::Error::external(format!(
-            "tools.add takes one alias plus an optional override, got extra {}",
-            extra.type_name()
-        )));
-    }
-    match target {
-        Value::Table(table) => {
-            if description_override.is_some() {
-                return Err(mlua::Error::external(
-                    "tools.add array form takes no override",
-                ));
-            }
-            table
-                .sequence_values::<Value>()
-                .map(|item| {
-                    Ok(ToolsAddEntry {
-                        alias: add_alias(item?)?,
-                        description_override: None,
-                    })
-                })
-                .collect()
-        }
-        single => Ok(vec![ToolsAddEntry {
-            alias: add_alias(single)?,
-            description_override,
-        }]),
-    }
-}
-
-/// Builds the JSON Schema `parameters` object from a `tools.add_local` params
-/// table. Each value is a bare type string or a `{type, description}` array;
-/// every declared parameter is required.
-fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
-    for pair in params.pairs::<String, Value>() {
-        let (name, spec) = pair?;
-        let (ty, description) = match spec {
-            Value::String(s) => (s.to_string_lossy(), None),
-            Value::Table(t) => (t.get::<String>(1)?, t.get::<Option<String>>(2)?),
-            _ => {
-                return Err(mlua::Error::external(format!(
-                    "tools.add_local param {name:?} must be a type string or a {{type, description}} array"
-                )));
-            }
-        };
-        if !matches!(ty.as_str(), "string" | "integer" | "number" | "boolean") {
-            return Err(mlua::Error::external(format!(
-                "tools.add_local param {name:?} has unsupported type {ty:?}: \
-                 expected \"string\", \"integer\", \"number\", or \"boolean\""
-            )));
-        }
-        let mut property = json!({ "type": ty });
-        if let Some(description) = description {
-            property["description"] = Json::String(description);
-        }
-        properties.insert(name.clone(), property);
-        required.push(Json::String(name));
-    }
-    Ok(json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    }))
+/// Returns the `ToolCallCounts` handle so the executor's tool loop can
+/// increment it.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
+pub(crate) fn install_tool_call_counts(
+    lua: &Lua,
+    bound_tools: &ToolSet,
+    bindings: &[ToolBinding],
+) -> Result<ToolCallCounts> {
+    let counts = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
+    let declared: Vec<String> = bound_tools
+        .bindings()
+        .iter()
+        .map(|binding| binding.alias().to_owned())
+        .collect();
+    install_lua_tool_calls(lua, &counts, &declared)?;
+    Ok(counts)
 }
 
 /// Installs the H2 tool declaration and local-tool APIs into one section VM.
+///
+/// The suspending `tools.call` is not installed here: yield cannot cross
+/// the Rust callback boundary, so the coroutine shim prelude installs it on
+/// this table as a Lua function.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if a Lua table or callback cannot be created or
 /// installed.
 pub(crate) fn install_h2_tools(
     lua: &Lua,
-    globals: &mlua::Table,
+    globals: &Table,
     bindings: &ToolSet,
     runtime: &Arc<Mutex<ToolRuntime>>,
     local_tools: &LocalTools,
@@ -234,13 +185,7 @@ pub(crate) fn install_h2_tools(
     let local = local_tools.clone();
     let add_local_fn = lua
         .create_function(
-            move |lua,
-                  (alias, description, params, handler): (
-                String,
-                String,
-                mlua::Table,
-                Function,
-            )| {
+            move |lua, (alias, description, params, handler): (String, String, Table, Function)| {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
                 if declared.binding(&alias).is_some() {
                     return Err(mlua::Error::external(format!(
@@ -267,3 +212,6 @@ pub(crate) fn install_h2_tools(
 
     globals.raw_set("tools", tools).map_err(Error::lua)
 }
+
+#[cfg(test)]
+mod tests;

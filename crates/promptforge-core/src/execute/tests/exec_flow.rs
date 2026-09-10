@@ -1925,7 +1925,7 @@ Second ask.\n",
     );
 }
 
-/// `model:infer` works inside an arm: the arm installs the infer hook, so a
+/// `models.infer(handle, ...)` works inside an arm: the arm installs the infer hook, so a
 /// worker's Lua can call the model directly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_works_inside_an_arm() {
@@ -1935,7 +1935,7 @@ async fn fanout_arm_model_infer_works_inside_an_arm() {
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.get('writer'):infer('ping about ' .. item)\n\
+return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 ```\n",
     ]
     .concat();
@@ -1947,7 +1947,7 @@ return models.get('writer'):infer('ping about ' .. item)\n\
         gatewayed(addr),
     )
     .await
-    .expect("model:infer inside an arm must run");
+    .expect("handle infer inside an arm must run");
     assert_eq!(out, "pong");
 
     let body = gateway
@@ -1992,7 +1992,7 @@ async fn fanout_arm_without_a_client_creates_one_lazily_when_prose_needs_it() {
     );
 }
 
-/// `model:infer` inside an arm handed no client surfaces the lazy-creation
+/// `models.infer(handle, ...)` inside an arm handed no client surfaces the lazy-creation
 /// error through the infer hook - a different code path than the prose walk's
 /// lazy creation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2005,7 +2005,7 @@ async fn fanout_arm_model_infer_without_a_client_surfaces_the_lazy_error() {
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.get('writer'):infer('ping about ' .. item)\n\
+return models.infer(models.get('writer'), 'ping about ' .. item)\n\
 ```\n",
     ]
     .concat();
@@ -2017,7 +2017,7 @@ return models.get('writer'):infer('ping about ' .. item)\n\
         silent(),
     )
     .await
-    .expect_err("model:infer in an arm with no client must surface the lazy error");
+    .expect_err("handle infer in an arm with no client must surface the lazy error");
     let rendered = error.to_string();
     assert!(
         rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
@@ -2032,7 +2032,7 @@ async fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-return models.get('ghost'):infer('ping')\n\
+return models.infer(models.get('ghost'), 'ping')\n\
 ```\n",
     ]
     .concat();

@@ -1492,7 +1492,7 @@ impl<'a> Scheduler<'a> {
     ) -> Result<(RequestId, tokio::task::JoinHandle<()>)> {
         let chain = &mut self.chains[id.index()];
         if chain.h1.is_some() {
-            // Unreachable: section VMs alone install the `tool_call` shim,
+            // Unreachable: section VMs alone install the `tools.call` shim,
             // the H1 VM never does, and stripped coroutines make a
             // hand-rolled yield impossible.
             return Err(Error::Internal(

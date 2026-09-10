@@ -14,3 +14,9 @@
   - Decision: renamed internal depth machinery (`execute_depth` -> `call_depth`, `MAX_EXECUTE_DEPTH` -> `MAX_CALL_DEPTH`) since it is diagnostics-adjacent core naming for this op | Falsifier: any user-visible string or field still renders `execute` for a heading call.
   - Decision: left `guide/`, READMEs, AGENTS.md, and `vibe/` docs untouched; the plan's `migrate-prompts-guides` todo owns doc migration | Falsifier: a doc example that runs in a test still uses heading `execute(`.
   - Decision: kept generic verb uses of "execute" and the `crate::execute` module path unchanged | Falsifier: the executor module itself gets renamed.
+- Step 4: namespace-only tool and model invocation - COMPONENT verify: build, `cargo fmt --check`, clippy `-D warnings`, and `cargo test -p promptforge-lua` / `-p promptforge-core` all passed (nextest unavailable, survey fallback used).
+  - Decision: internal protocol op string stays `"tool_call"` and Rust variants keep their names; only the Lua-facing surface moved | Falsifier: a later step renames protocol vocabulary to match the namespace.
+  - Decision: removed the proxy machinery outright (`wrap_handle`, H1 wrap chunk, `coro_shims` flag, unused `ModelInferHook`) since it existed solely for colon `infer` | Falsifier: a future per-handle Lua-callable shim need reappears.
+  - Decision: alias-or-Tool decodes once in `tools/decode.rs::tool_alias`, with the shim passing the raw value through the yield | Falsifier: a consumer needs different error wording per call site.
+  - Decision: legacy non-coroutine `models.infer` (hook path, test-only) keeps its single-arg form | Falsifier: the legacy engine is revived for production paths.
+  - Pre-existing (deferred): `cargo check -p workshop` fails on a missing staged gateway sidecar binary - environmental setup, untouched by this change.

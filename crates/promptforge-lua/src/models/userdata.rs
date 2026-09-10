@@ -1,25 +1,15 @@
 //! Inspectable Lua userdata returned by `models.bind` / `models.default`.
 //!
-//! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields to
-//! Lua and dispatches `model:infer` through the executor's installed hook.
+//! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields
+//! to Lua. Invocation is namespace-only (A9): the handle carries no methods,
+//! and `models.infer(handle?, prompt)` takes it as an optional leading
+//! argument.
 
 use std::sync::Arc;
 
-use mlua::{Lua, UserData, UserDataFields, UserDataMethods, Value};
+use mlua::{Lua, UserData, UserDataFields};
 
 use promptforge_model_client::model::ModelBinding;
-
-/// Host hook that runs `handle:infer` from Lua via the executor's shared
-/// context.
-///
-/// The one infer shape: a single direct, tool-free gateway round on a fresh
-/// conversation with the handle's frozen binding. It never sets `reply` and
-/// never touches `sys`.
-///
-/// Installed as Lua app data for the duration of a section phase that may call
-/// infer. Absent app data means infer is unavailable in that context.
-pub(crate) type ModelInferHook =
-    Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
 
 /// Host hook that runs `models.infer` from Lua via the executor's shared
 /// context.
@@ -27,10 +17,9 @@ pub(crate) type ModelInferHook =
 /// Takes only the prompt: the hook resolves the section's current model
 /// binding itself, because the executor side knows the section name needed
 /// for a typed model-required failure and, on the live H1 path, the
-/// bindings are still being recorded into the run's producer. The resolved
-/// binding runs the same single tool-free round as [`ModelInferHook`].
-/// Installed as Lua app data alongside [`ModelInferHook`]; absent app data
-/// means `models.infer` is unavailable in that context.
+/// bindings are still being recorded into the run's producer.
+/// Installed as Lua app data; absent app data means `models.infer` is
+/// unavailable in that context.
 pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
 
 /// Inspectable Lua userdata returned by `models.bind` / `models.default`.
@@ -122,40 +111,5 @@ impl UserData for LuaModelHandle {
         fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
         fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
         fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method(
-            "infer",
-            |lua, this, (prompt, opts): (String, Option<Value>)| {
-                // Per-call options are not supported. Reject them explicitly so
-                // an author-supplied table can never be silently discarded.
-                reject_infer_options(opts.as_ref())?;
-                let hook = lua
-                    .app_data_ref::<ModelInferHook>()
-                    .ok_or_else(|| {
-                        mlua::Error::external(
-                            "model:infer is not available outside section execution",
-                        )
-                    })?
-                    .clone();
-                hook(lua, this.binding(), &prompt)
-            },
-        );
-    }
-}
-
-/// Rejects any per-call `model:infer` options argument.
-///
-/// `model:infer` takes only a prompt string. A second argument (a table of
-/// options, or anything non-nil) has no supported effect, so it is rejected
-/// rather than silently dropped. An absent or `nil` second argument is allowed.
-pub(crate) fn reject_infer_options(opts: Option<&Value>) -> mlua::Result<()> {
-    match opts {
-        None | Some(Value::Nil) => Ok(()),
-        Some(_) => Err(mlua::Error::external(
-            "model:infer(prompt) does not accept a second argument; \
-             per-call inference options are not supported",
-        )),
     }
 }

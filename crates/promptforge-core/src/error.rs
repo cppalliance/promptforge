@@ -428,7 +428,7 @@ pub(crate) enum Error {
 
     /// The model referenced a tool outside the section's advertised scope.
     ///
-    /// This is the model tool loop's error alone: a script `tool_call`
+    /// This is the model tool loop's error alone: a script `tools.call`
     /// resolves against the run's full bound catalog and fails with
     /// [`Error::UnboundToolCall`] instead.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
@@ -442,7 +442,7 @@ pub(crate) enum Error {
         in_scope: Vec<String>,
     },
 
-    /// A script `tool_call` referenced an alias with no binding in the run's
+    /// A script `tools.call` referenced an alias with no binding in the run's
     /// tool catalog.
     ///
     /// Script-initiated dispatch resolves against the run's full bound set,

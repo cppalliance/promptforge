@@ -1,8 +1,8 @@
 //! The coroutine-protocol shim layer: per-VM Lua yield wrappers for the
 //! suspending host calls.
 //!
-//! Yield cannot cross the C boundary, so `models.infer`, `handle:infer`,
-//! `call`, `fanout`, and `tool_call` are Lua shims (source in `__impl_coro.lua` beside this
+//! Yield cannot cross the C boundary, so `models.infer`, `call`, `fanout`,
+//! and `tools.call` are Lua shims (source in `__impl_coro.lua` beside this
 //! file) that `coroutine.yield` a request table and interpret the two
 //! resume values as the `(ok, result)` envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 
 use mlua::{Function, Table, Value};
 
-use super::{Error, Lua, LuaModelHandle, LuaProgram, Result, StdLib, var_snapshot_table};
+use super::{Error, Lua, LuaProgram, Result, StdLib, var_snapshot_table};
 
 /// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
 /// path, making unexpected shim errors clickable `file:line:` references.
@@ -25,10 +25,6 @@ const SHIM_CHUNK_NAME: &str = "@crates/promptforge-core/src/lua/__impl_coro.lua"
 /// The shim source, embedded verbatim so chunk line 1 is file line 1.
 const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
 
-/// The registry key for the shim's `wrap_handle`, stashed at install so the
-/// captured model alias globals (which install last) wrap too.
-const WRAP_HANDLE_REGISTRY: &str = "promptforge.impl_coro.wrap_handle";
-
 /// The registry key for the shim's `chat`, stashed by the prelude install so
 /// an agent host can install it as `models.chat`. The registry is host-side
 /// only: a section VM's `models.chat` stays nil because nothing ever reads
@@ -36,15 +32,8 @@ const WRAP_HANDLE_REGISTRY: &str = "promptforge.impl_coro.wrap_handle";
 const CHAT_REGISTRY: &str = "promptforge.impl_coro.chat";
 
 /// The registry key for the shim's `infer`, stashed by the live H1 base
-/// install so each H1 block's fresh live models table can be wrapped.
+/// install so each H1 block's fresh live models table can receive it.
 const INFER_REGISTRY: &str = "promptforge.impl_coro.infer";
-
-/// The live H1 wrap chunk's name: `@`-prefixed so PUC renders it verbatim
-/// as a file path, like the main shim chunk.
-const H1_SHIM_CHUNK_NAME: &str = "@crates/promptforge-core/src/lua/__impl_coro_h1.lua";
-
-/// The live H1 wrap source, embedded verbatim so chunk line 1 is file line 1.
-const H1_SHIM_SOURCE: &str = include_str!("__impl_coro_h1.lua");
 
 /// The shim program, compiled once and loaded per VM. Compilation of the
 /// bundled source fails only on a crate bug, so the payload is the error's
@@ -53,23 +42,16 @@ static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = LazyLoc
     LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME).map_err(|error| error.to_string())
 });
 
-/// The live H1 wrap program, compiled once and loaded per H1 block step.
-static H1_SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = LazyLock::new(|| {
-    LuaProgram::compile_internal(H1_SHIM_SOURCE, H1_SHIM_CHUNK_NAME)
-        .map_err(|error| error.to_string())
-});
-
 /// Installs the yield shims on a VM whose host tables already exist.
 ///
 /// Scheduler-mode VMs load the coroutine standard library for the shim's
 /// `yield` capture (legacy VMs keep exactly `STRING | TABLE | MATH`); the
 /// `coroutine` global is stripped again before returning, so author code
 /// cannot yield directly and a hand-rolled yield fails the driver's strict
-/// validation. The `models` table is passed to the shim chunk as an
-/// argument, so the chunk never reads a global; the chunk shims
-/// `models.infer` and wraps the `models.use`/`models.get` returns, and the
-/// `call`/`fanout`/`tool_call` shims and `wrap_handle` come back for the
-/// host to install.
+/// validation. The `models` and `tools` tables are passed to the shim chunk
+/// as arguments, so the chunk never reads a global; the chunk shims
+/// `models.infer` and installs `tools.call`, and the `call`/`fanout` shims
+/// come back for the host to install.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
@@ -83,24 +65,18 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .create_function(|lua, ()| var_snapshot_table(lua).map_err(mlua::Error::external))
         .map_err(Error::lua)?;
     let models: Table = globals.raw_get("models").map_err(Error::lua)?;
+    let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
     let program = SHIM_PROGRAM
         .as_ref()
         .map_err(|message| Error::Lua(message.clone()))?;
     let shims: Table = program
         .load(lua)?
-        .call((yield_fn, var_snapshot, models))
+        .call((yield_fn, var_snapshot, models, tools))
         .map_err(Error::lua)?;
     let call: Function = shims.raw_get("call").map_err(Error::lua)?;
     globals.raw_set("call", call).map_err(Error::lua)?;
     let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
-    let tool_call: Function = shims.raw_get("tool_call").map_err(Error::lua)?;
-    globals
-        .raw_set("tool_call", tool_call)
-        .map_err(Error::lua)?;
-    let wrap_handle: Function = shims.raw_get("wrap_handle").map_err(Error::lua)?;
-    lua.set_named_registry_value(WRAP_HANDLE_REGISTRY, wrap_handle)
-        .map_err(Error::lua)?;
     let chat: Function = shims.raw_get("chat").map_err(Error::lua)?;
     lua.set_named_registry_value(CHAT_REGISTRY, chat)
         .map_err(Error::lua)?;
@@ -130,14 +106,14 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
 }
 
 /// Installs the live H1 shim base: the coroutine standard library for the
-/// yield capture, and the shim prelude's `infer`/`wrap_handle` stashed in
-/// the registry so each H1 block's fresh live models table can be wrapped
-/// by [`shim_live_h1_models`].
+/// yield capture, and the shim prelude's `infer` stashed in the registry so
+/// each H1 block's fresh live models table can receive it through
+/// [`shim_live_h1_models`].
 ///
 /// The H1 control stubs are untouched: `call`/`fanout`/`jump`/
 /// `list_from_section` keep raising before anything can yield. H1's live
 /// models table does not exist at construction (the capability resolvers
-/// install it per block), so the prelude runs with a nil models table and
+/// install it per block), so the prelude runs with nil namespace tables and
 /// only its captures are taken.
 ///
 /// # Errors
@@ -156,10 +132,7 @@ pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
         .map_err(|message| Error::Lua(message.clone()))?;
     let shims: Table = program
         .load(lua)?
-        .call((yield_fn, var_snapshot, Value::Nil))
-        .map_err(Error::lua)?;
-    let wrap_handle: Function = shims.raw_get("wrap_handle").map_err(Error::lua)?;
-    lua.set_named_registry_value(WRAP_HANDLE_REGISTRY, wrap_handle)
+        .call((yield_fn, var_snapshot, Value::Nil, Value::Nil))
         .map_err(Error::lua)?;
     let infer: Function = shims.raw_get("infer").map_err(Error::lua)?;
     lua.set_named_registry_value(INFER_REGISTRY, infer)
@@ -170,49 +143,22 @@ pub fn install_live_h1_shim_base(lua: &Lua) -> Result<()> {
     Ok(())
 }
 
-/// Wraps one live H1 block's freshly installed live models table:
-/// `models.infer` becomes the yield shim and the `bind`/`default` returns
-/// become shim-wrapped handle proxies.
+/// Gives one live H1 block's freshly installed live models table the yield
+/// shim as its `models.infer`.
 ///
 /// Reapplied on every H1 coroutine step: the capability resolvers install
-/// a fresh live models table per step's scope, so each resume re-wraps the
-/// fresh table before the thread runs again.
+/// a fresh live models table per step's scope, so each resume re-installs
+/// the shim on the fresh table before the thread runs again. The handles
+/// `models.bind`/`models.default` return are plain userdata: invocation is
+/// namespace-only, `models.infer(handle?, prompt)`.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the base install never ran on this VM, the
-/// live models table is absent, or the wrap chunk fails.
+/// Returns [`Error::Lua`] if the base install never ran on this VM or the
+/// live models table is absent.
 pub fn shim_live_h1_models(lua: &Lua) -> Result<()> {
-    let wrap_handle: Function = lua
-        .named_registry_value(WRAP_HANDLE_REGISTRY)
-        .map_err(Error::lua)?;
     let infer: Function = lua
         .named_registry_value(INFER_REGISTRY)
         .map_err(Error::lua)?;
     let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
-    let program = H1_SHIM_PROGRAM
-        .as_ref()
-        .map_err(|message| Error::Lua(message.clone()))?;
-    program
-        .load(lua)?
-        .call::<()>((infer, wrap_handle, models))
-        .map_err(Error::lua)?;
-    Ok(())
-}
-
-/// Wraps one model handle as a shimmed proxy table: field reads pass
-/// through to the inner userdata and `infer` is the yield shim.
-///
-/// Everywhere a handle reaches author code in scheduler mode sees the
-/// proxy: the `models.use`/`models.get` returns (wrapped by the prelude
-/// itself) and the captured alias globals (wrapped here).
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the shim prelude was never installed on this
-/// VM or the wrap fails.
-pub(crate) fn wrap_shimmed_handle(lua: &Lua, handle: LuaModelHandle) -> Result<Value> {
-    let wrap_handle: Function = lua
-        .named_registry_value(WRAP_HANDLE_REGISTRY)
-        .map_err(Error::lua)?;
-    let userdata = lua.create_userdata(handle).map_err(Error::lua)?;
-    wrap_handle.call(userdata).map_err(Error::lua)
+    models.raw_set("infer", infer).map_err(Error::lua)
 }

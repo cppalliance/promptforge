@@ -1,6 +1,6 @@
 use super::{
     Arc, Error, Json, LuaSerdeExt, MetaMethod, Mutex, Result, Tool, ToolId, UserData,
-    UserDataFields, UserDataMethods, Value, json,
+    UserDataFields, UserDataMethods, Value,
 };
 
 /// Resolves one plain-English capability description to one stable live tool.
@@ -61,7 +61,7 @@ impl PartialEq for Conflict {
 
 impl Eq for Conflict {}
 
-/// How a bound tool's output resumes into Lua at the `tool_call` boundary.
+/// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
 /// Declared on the binding, not the tool implementation, so a host decides
 /// per binding how scripts receive the output. Every existing tool is
@@ -105,7 +105,7 @@ pub struct ToolBinding {
     /// Binding records, never fails: a clash errors only when both halves
     /// enter one model-visible scope.
     pub conflicts: Vec<Conflict>,
-    /// How a script-initiated `tool_call` resumes this binding's output;
+    /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
     pub output_kind: ToolOutputKind,
 }
@@ -195,87 +195,6 @@ impl ToolBinding {
     #[must_use]
     pub fn conflicts(&self) -> &[Conflict] {
         &self.conflicts
-    }
-}
-
-/// Inspectable Tool object returned by Lua `tools.bind`.
-///
-/// Authors read `.name`, `.description`, `.parameters`, `.wire_name`, and
-/// `.untrusted`. The object is frozen: model-facing description overrides are
-/// positional arguments to `tools.bind` / `tools.always` / `tools.add`, never
-/// assignments on this handle. Existing callers that ignore the return value
-/// keep working.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct LuaToolHandle {
-    name: String,
-    description: String,
-    parameters: Json,
-    wire_name: String,
-    untrusted: bool,
-}
-
-impl LuaToolHandle {
-    /// Builds a handle from a bound alias, capability description, and identity.
-    ///
-    /// Without a live catalog lookup, `wire_name` is the identity's stable
-    /// name, `parameters` is an empty object, and `untrusted` is false.
-    #[must_use]
-    pub(crate) fn from_binding(
-        alias: impl Into<String>,
-        description: impl Into<String>,
-        id: &ToolId,
-    ) -> Self {
-        Self {
-            name: alias.into(),
-            description: description.into(),
-            parameters: json!({}),
-            wire_name: id.name().to_owned(),
-            untrusted: false,
-        }
-    }
-
-    /// Builds a handle from a live tool and its prompt-local binding metadata.
-    pub(crate) fn from_live_binding(
-        alias: impl Into<String>,
-        description: impl Into<String>,
-        tool: &dyn Tool,
-    ) -> Self {
-        Self {
-            name: alias.into(),
-            description: description.into(),
-            parameters: tool.parameters_schema(),
-            wire_name: tool.wire_name().to_owned(),
-            // Trust is now carried per-call in `ToolOutput`, not a static
-            // per-tool flag; the executor wraps untrusted results at dispatch.
-            untrusted: false,
-        }
-    }
-
-    /// Returns the prompt-local alias.
-    #[must_use]
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl UserData for LuaToolHandle {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
-        fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
-        fields.add_field_method_get("parameters", |lua, this| lua.to_value(&this.parameters));
-        fields.add_field_method_get("wire_name", |_, this| Ok(this.wire_name.clone()));
-        fields.add_field_method_get("untrusted", |_, this| Ok(this.untrusted));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_method(
-            MetaMethod::NewIndex,
-            |_, _, (key, _): (String, Value)| -> mlua::Result<()> {
-                Err(mlua::Error::external(format!(
-                    "Tool objects are frozen: cannot assign field {key:?}"
-                )))
-            },
-        );
     }
 }
 

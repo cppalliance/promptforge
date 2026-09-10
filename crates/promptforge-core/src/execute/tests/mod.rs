@@ -504,7 +504,7 @@ impl Tool for UntrustedEchoTool {
 }
 
 /// A tool returning a JSON object as text, bound structured in scheduler
-/// fixtures so a script `tool_call` resumes it as a Lua table.
+/// fixtures so a script `tools.call` resumes it as a Lua table.
 struct StructuredFixtureTool {
     /// The exact output text; valid JSON for the happy path, garbage for
     /// the invalid-JSON tool-error path.

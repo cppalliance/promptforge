@@ -8,7 +8,7 @@
 //!
 //! An agent program is one long-running Lua chunk driven as a single
 //! coroutine. Its host surface is the shared kernel - `models.infer`,
-//! `tool_call`, `store`, `log`, `var`, and cooperative cancellation - plus
+//! `tools.call`, `store`, `log`, `var`, and cooperative cancellation - plus
 //! the agent-only calls: `models.chat(messages, opts)`, one stateless
 //! tool-capable model round that streams deltas to the host and returns
 //! the reply or the unexecuted tool calls, and `runtime.events()`, a

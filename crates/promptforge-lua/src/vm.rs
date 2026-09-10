@@ -3,14 +3,14 @@ use super::LuaFanoutResult;
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, GuardNonce, InstructionBudget, IntoLuaMulti, Json, Lua, LuaBlockResult,
-    LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding,
-    ModelInferHook, ModelRuntime, ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex,
-    Observer, Ordering, Result, StdLib, StoreRef, Thread, ThreadStatus, ToolBinding,
-    ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail, guarded_var, harden,
-    install_h2_models, install_h2_tools, install_instruction_budget, install_log,
-    install_lua_tool_calls, install_messages, install_shim_prelude, install_store_table,
+    LuaModelHandle, LuaOptions, LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelRuntime,
+    ModelSet, ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, StdLib,
+    StoreRef, Thread, ThreadStatus, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
+    WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
+    install_instruction_budget, install_log, install_messages, install_shim_prelude,
+    install_store_table, install_tool_call_counts as install_tool_call_counts_impl,
     install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
-    var_to_json, wrap_shimmed_handle,
+    var_to_json,
 };
 use promptforge_model_client::client::ToolSchema;
 
@@ -87,10 +87,6 @@ pub struct SectionVm {
     log_byte_budget: Arc<AtomicUsize>,
     /// Local tools registered by Lua code, dispatched back into this VM.
     local_tools: LocalTools,
-    /// Set by [`install_coro_shims`](Self::install_coro_shims): the captured
-    /// model alias globals install as shim-wrapped proxy tables so
-    /// `handle:infer` yields like `models.infer`.
-    coro_shims: bool,
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
@@ -268,7 +264,6 @@ impl SectionVm {
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
-            coro_shims: false,
             instruction_budget: InstructionBudget::default(),
         };
         if let Err(error) = harden(&vm.lua) {
@@ -370,17 +365,13 @@ impl SectionVm {
                 .map_err(Error::lua)?;
         }
         for binding in self.bound_models.bindings() {
+            // Handles are plain frozen userdata in every mode: invocation is
+            // namespace-only (`models.infer(handle, prompt)`), so no
+            // shim-wrapped proxy is needed.
             let handle = LuaModelHandle::from_binding(binding);
-            // Scheduler mode: the alias installs as a shim-wrapped proxy so
-            // `handle:infer` yields like `models.infer`; legacy mode keeps
-            // the bare userdata.
-            let value = if self.coro_shims {
-                wrap_shimmed_handle(&self.lua, handle)?
-            } else {
-                Value::UserData(self.lua.create_userdata(handle).map_err(Error::lua)?)
-            };
+            let userdata = self.lua.create_userdata(handle).map_err(Error::lua)?;
             globals
-                .raw_set(binding.alias(), value)
+                .raw_set(binding.alias(), userdata)
                 .map_err(Error::lua)?;
         }
         Ok(())
@@ -570,8 +561,8 @@ impl SectionVm {
     /// Installs the scheduler-mode control surface: `jump` and
     /// `list_from_section` as Rust callbacks (neither suspends).
     ///
-    /// The suspending calls (`models.infer`, `handle:infer`, `call`,
-    /// `fanout`) are the yield shims installed by
+    /// The suspending calls (`models.infer`, `call`, `fanout`,
+    /// `tools.call`) are the yield shims installed by
     /// [`install_coro_shims`](Self::install_coro_shims).
     ///
     /// # Errors
@@ -586,16 +577,13 @@ impl SectionVm {
         self.install_list_global(&globals, list_callback)
     }
 
-    /// Installs the coroutine yield shims (`models.infer`, `handle:infer`,
-    /// `call`, `fanout`, `tool_call`) and marks the VM so the captured
-    /// model alias globals install as shim-wrapped proxies.
+    /// Installs the coroutine yield shims (`models.infer`, `call`,
+    /// `fanout`, `tools.call`).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the shim prelude cannot install.
     pub fn install_coro_shims(&mut self) -> Result<()> {
-        install_shim_prelude(&self.lua)?;
-        self.coro_shims = true;
-        Ok(())
+        install_shim_prelude(&self.lua)
     }
 
     fn install_jump_global(&self, globals: &mlua::Table) -> Result<()> {
@@ -895,7 +883,10 @@ impl SectionVm {
     /// an unseeded key is a hard error that names the bad key and lists the
     /// seeded set. When the key was declared by `tools.bind` but never
     /// seeded - neither scoped into the section nor dispatched by a script
-    /// `tool_call` - the diagnostic says so.
+    /// `tools.call` - the diagnostic says so.
+    ///
+    /// The installation itself lives in the `tools` module; this method only
+    /// supplies the VM's own state.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
     /// increment it.
@@ -903,15 +894,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
     pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
-        let counts = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
-        let declared: Vec<String> = self
-            .bound_tools
-            .bindings()
-            .iter()
-            .map(|binding| binding.alias().to_owned())
-            .collect();
-        install_lua_tool_calls(&self.lua, &counts, &declared)?;
-        Ok(counts)
+        install_tool_call_counts_impl(&self.lua, &self.bound_tools, bindings)
     }
 
     /// Returns frozen tool bindings and the live H2 addition runtime.
@@ -996,9 +979,8 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Clears the `model:infer` and `models.infer` host hooks.
+    /// Clears the `models.infer` host hook.
     pub(crate) fn clear_infer_hook(&self) {
-        let _ = self.lua.remove_app_data::<ModelInferHook>();
         let _ = self.lua.remove_app_data::<ModelsInferHook>();
     }
 
