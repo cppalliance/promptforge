@@ -1,28 +1,49 @@
+#[cfg(feature = "stt")]
 use std::path::PathBuf;
+#[cfg(feature = "stt")]
 use std::process::Command;
 use std::time::Duration;
 
+#[cfg(feature = "stt")]
 use base64::Engine as _;
+#[cfg(feature = "stt")]
 use futures_util::{SinkExt as _, StreamExt as _};
-use gateway::{Config, Gateway, ProfilesContext, ServeOptions};
+use gateway::ServeOptions;
+#[cfg(feature = "stt")]
+use gateway::{Config, Gateway, ProfilesContext};
+#[cfg(feature = "stt")]
 use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
+#[cfg(feature = "stt")]
 use tokio::net::TcpListener;
+#[cfg(feature = "stt")]
 use tokio::sync::oneshot;
+#[cfg(feature = "stt")]
 use tokio_tungstenite::tungstenite::Message;
+#[cfg(feature = "stt")]
 use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+#[cfg(feature = "stt")]
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
+#[cfg(feature = "stt")]
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+#[cfg(feature = "stt")]
 const CHILD_STATE_DIR: &str = "PROMPTFORGE_ALIGNMENT_LOG_CHILD_STATE_DIR";
+#[cfg(feature = "stt")]
 const CHILD_TEST: &str = "logging_tests::gateway_no_alignment_uses_production_logging_child";
+#[cfg(feature = "stt")]
 const BEARER_SENTINEL: &str = "PROTECTED_BEARER_SENTINEL";
+#[cfg(feature = "stt")]
 const PROMPT_SENTINEL: &str = "PROTECTED_PROMPT_SENTINEL";
+#[cfg(feature = "stt")]
 const TRANSCRIPT_SENTINEL: &str = "PROTECTED_TRANSCRIPT_SENTINEL";
+#[cfg(feature = "stt")]
 const PATH_SENTINEL: &str = r"C:\PROTECTED_PATH_SENTINEL\model.gguf";
+#[cfg(feature = "stt")]
 const INJECTED_SENTINEL: &str = "INJECTED_PROTECTED_SENTINEL";
 
+#[cfg(feature = "stt")]
 #[test]
 fn mounted_no_alignment_is_drained_through_production_logging() {
     let temp = tempfile::tempdir().expect("temporary logging state");
@@ -170,6 +191,7 @@ fn a_lease_holder_resolution_failure_leaves_the_canonical_log_untouched() {
     );
 }
 
+#[cfg(feature = "stt")]
 fn audio_payload() -> String {
     let samples = (0..240_000)
         .map(|index| {
@@ -184,6 +206,7 @@ fn audio_payload() -> String {
     base64::engine::general_purpose::STANDARD.encode(samples)
 }
 
+#[cfg(feature = "stt")]
 #[test]
 #[ignore = "spawned by the production logging parent"]
 fn gateway_no_alignment_uses_production_logging_child() {
@@ -203,6 +226,7 @@ fn gateway_no_alignment_uses_production_logging_child() {
         .expect("production Gateway logging drains");
 }
 
+#[cfg(feature = "stt")]
 fn unaligned_decoder() -> ScriptedDecoder {
     let final_decoder = ScriptedDecoder::new();
     for window in 0..6 {
@@ -226,6 +250,7 @@ fn unaligned_decoder() -> ScriptedDecoder {
     final_decoder
 }
 
+#[cfg(feature = "stt")]
 async fn append_unaligned_windows(
     socket: &mut Socket,
     final_decoder: &ScriptedDecoder,
@@ -252,6 +277,7 @@ async fn append_unaligned_windows(
     }
 }
 
+#[cfg(feature = "stt")]
 async fn expect_healthy_completion(socket: &mut Socket) {
     send(
         socket,
@@ -272,6 +298,7 @@ async fn expect_healthy_completion(socket: &mut Socket) {
     panic!("mounted session did not complete after estimated reconciliation");
 }
 
+#[cfg(feature = "stt")]
 async fn drive_no_alignment() {
     let final_decoder = unaligned_decoder();
     let service = scripted_service(
@@ -336,6 +363,7 @@ async fn drive_no_alignment() {
         .expect("mounted Gateway serves");
 }
 
+#[cfg(feature = "stt")]
 async fn connect(address: std::net::SocketAddr) -> Socket {
     let mut request = format!("ws://{address}/v1/realtime?intent=transcription")
         .into_client_request()
@@ -351,6 +379,7 @@ async fn connect(address: std::net::SocketAddr) -> Socket {
     socket
 }
 
+#[cfg(feature = "stt")]
 async fn send(socket: &mut Socket, value: serde_json::Value) {
     socket
         .send(Message::Text(value.to_string().into()))
@@ -358,6 +387,7 @@ async fn send(socket: &mut Socket, value: serde_json::Value) {
         .expect("client event sends");
 }
 
+#[cfg(feature = "stt")]
 async fn receive(socket: &mut Socket) -> serde_json::Value {
     let message = tokio::time::timeout(Duration::from_secs(10), socket.next())
         .await

@@ -101,15 +101,9 @@ fn fixture_service_with_models_on_dedicated_thread(
         .select_profile(&gateway_config::ProfileName::parse("work").expect("profile name"))
         .expect("fixture profile selects");
     let service = SpeechService::new();
-    let prepared = service
-        .prepare(&config, None)
-        .expect("fixture artifacts prepare");
-    let replacement = service
-        .begin_replacement(prepared)
-        .expect("fixture engine loads");
     service
-        .commit_replacement(replacement)
-        .expect("fixture generation publishes");
+        .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
+        .expect("fixture engine loads");
     service
 }
 

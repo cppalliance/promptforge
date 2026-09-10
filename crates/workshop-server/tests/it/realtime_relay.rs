@@ -59,7 +59,6 @@ fn canonical_server_frames() -> Vec<String> {
         "overlapping_items_reverse_completion",
         "clear_retires_only_uncommitted_input",
         "saturated_commit_retry",
-        "engine_replacement",
     ]
     .into_iter()
     .flat_map(|name| {

@@ -8,9 +8,9 @@ use shared_progress::ProgressHandle;
 
 use crate::model::{ModelNames, REALTIME_TRANSCRIBE_MODEL};
 
-/// Verified artifacts and policy for a generation that has not started workers.
+/// Verified artifacts and policy for a runtime that has not started workers.
 #[derive(Debug)]
-pub struct PreparedSpeech {
+pub(crate) struct PreparedSpeech {
     pub(crate) generation: Option<PreparedGeneration>,
 }
 
@@ -168,31 +168,6 @@ pub enum SpeechError {
     #[error("initial speech load was cancelled")]
     InitialLoadCancelled,
 
-    /// A replacement token belongs to another service.
-    #[error("speech replacement belongs to another service")]
-    ReplacementOwner,
-
-    /// A replacement was committed while a generation was still active.
-    #[error("an active speech generation must be shut down before replacement")]
-    GenerationActive,
-
-    /// Old-generation ownership did not drain before replacement's deadline.
-    #[error("speech generation quiescence deadline expired")]
-    QuiescenceDeadline,
-
-    /// Shutdown invalidated a replacement before it could publish.
-    #[error("speech replacement was invalidated by shutdown")]
-    ReplacementInvalidated,
-
-    /// Reconstructing the old generation failed after a determinate replacement failure.
-    #[error("speech replacement failed ({failure}); reconstruct old generation ({rollback})")]
-    Rollback {
-        /// The determinate failure that required reconstruction.
-        failure: Box<SpeechError>,
-        /// The failure returned while reconstructing the old specification.
-        rollback: Box<SpeechError>,
-    },
-
     /// Multipart framing could not be decoded.
     #[non_exhaustive]
     #[error("invalid multipart transcription request")]
@@ -249,20 +224,6 @@ pub enum SpeechError {
 }
 
 impl SpeechError {
-    /// Returns whether worker construction exceeded a deadline and left a
-    /// non-preemptible native call running.
-    #[must_use]
-    pub fn is_non_preemptible_startup_timeout(&self) -> bool {
-        match self {
-            Self::Engine(error) => error.is_non_preemptible_startup_timeout(),
-            Self::Rollback { failure, rollback } => {
-                failure.is_non_preemptible_startup_timeout()
-                    || rollback.is_non_preemptible_startup_timeout()
-            }
-            _ => false,
-        }
-    }
-
     /// Returns the unknown physical model name for a selection failure.
     #[must_use]
     pub fn model_not_found(&self) -> Option<&str> {

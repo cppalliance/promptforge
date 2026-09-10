@@ -142,7 +142,6 @@ async fn speech_status_is_generic_and_inactive_models_are_not_advertised() {
             "configured": false,
             "ready": false,
             "gpu": false,
-            "generation": null,
         })
     );
 

@@ -1,16 +1,28 @@
 //! Cloneable host facade for speech lifecycle, facts, and routes.
 
+#[cfg(feature = "test-fixtures")]
+use std::sync::Arc;
+
 use gateway_config::Config;
 use shared_progress::ProgressHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::artifacts::{self, PreparedSpeech, SpeechError};
-use crate::generation::{GenerationState, SpeechReplacement};
+use crate::artifacts::SpeechError;
+use crate::generation::GenerationState;
 use crate::model::SpeechModelInfo;
 #[cfg(feature = "test-fixtures")]
 use crate::realtime::ForcedPrecommitFailure;
 use crate::realtime::{RoutePolicy, SessionRegistry};
 use crate::status::SpeechStatus;
+
+/// Scripted workers a test-fixture facade publishes on its one initial load
+/// instead of the Whisper backend.
+#[cfg(feature = "test-fixtures")]
+#[derive(Debug)]
+struct ScriptedInitialLoad {
+    factory: Arc<dyn gateway_stt_engine::ModelFactory>,
+    policy: gateway_stt_engine::EnginePolicy,
+}
 
 /// Cloneable Gateway handle for all speech behavior.
 #[derive(Debug, Clone, Default)]
@@ -18,6 +30,8 @@ pub struct SpeechService {
     pub(crate) state: GenerationState,
     sessions: SessionRegistry,
     realtime_policy: RoutePolicy,
+    #[cfg(feature = "test-fixtures")]
+    scripted: Option<Arc<ScriptedInitialLoad>>,
 }
 
 impl SpeechService {
@@ -25,6 +39,23 @@ impl SpeechService {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Arms the empty facade to publish `factory`'s deterministic workers on
+    /// its one initial load, replacing the Whisper backend for route,
+    /// embedder, and boot-path tests.
+    #[cfg(feature = "test-fixtures")]
+    #[must_use]
+    pub fn with_scripted_initial_load(
+        mut self,
+        factory: impl gateway_stt_engine::ModelFactory,
+        policy: gateway_stt_engine::EnginePolicy,
+    ) -> Self {
+        self.scripted = Some(Arc::new(ScriptedInitialLoad {
+            factory: Arc::new(factory),
+            policy,
+        }));
+        self
     }
 
     /// Attempts the process's one initial speech load from the boot configuration.
@@ -44,61 +75,18 @@ impl SpeechService {
         progress: Option<&ProgressHandle>,
         cancel: &CancellationToken,
     ) -> Result<(), SpeechError> {
+        #[cfg(feature = "test-fixtures")]
+        if let Some(scripted) = &self.scripted {
+            return self.state.load_scripted_shared(
+                Arc::clone(&scripted.factory),
+                scripted.policy,
+                cancel,
+            );
+        }
         self.state.load_initial(config, progress, cancel)
     }
 
-    /// Verifies and stages configured artifacts without starting workers.
-    ///
-    /// # Errors
-    /// Returns a typed store, download, verification, or configuration error.
-    pub fn prepare(
-        &self,
-        config: &Config,
-        progress: Option<&ProgressHandle>,
-    ) -> Result<PreparedSpeech, SpeechError> {
-        artifacts::prepare(config, progress)
-    }
-
-    /// Serializes replacement, drains old ownership, and loads a staged generation.
-    ///
-    /// # Errors
-    /// Returns a drain deadline, backend, policy, or worker startup error.
-    pub fn begin_replacement(
-        &self,
-        prepared: PreparedSpeech,
-    ) -> Result<SpeechReplacement, SpeechError> {
-        self.state.stage(prepared)
-    }
-
-    /// Serializes replacement and constrains drain plus worker startup to one deadline.
-    ///
-    /// # Errors
-    /// Returns a drain deadline, backend, policy, or worker startup error.
-    pub fn begin_replacement_before(
-        &self,
-        prepared: PreparedSpeech,
-        deadline: std::time::Instant,
-    ) -> Result<SpeechReplacement, SpeechError> {
-        self.state.stage_until(prepared, deadline)
-    }
-
-    /// Publishes every fact in a staged generation through one transition.
-    ///
-    /// # Errors
-    /// Returns an ownership error for a foreign or shutdown-invalidated token.
-    pub fn commit_replacement(&self, replacement: SpeechReplacement) -> Result<(), SpeechError> {
-        self.state.commit(replacement)
-    }
-
-    /// Stops a staged generation and reconstructs the old specification.
-    ///
-    /// # Errors
-    /// Returns an ownership, shutdown, or old-generation reconstruction error.
-    pub fn abort_replacement(&self, replacement: SpeechReplacement) -> Result<(), SpeechError> {
-        self.state.abort(replacement)
-    }
-
-    /// Stops admitting work and waits for the active generation to unload.
+    /// Stops admitting work and waits for the published runtime to unload.
     pub fn shutdown(&self) {
         self.state.shutdown();
     }
@@ -133,6 +121,15 @@ impl SpeechService {
     pub fn overload_realtime_final_segment(&mut self) {
         self.realtime_policy
             .force_precommit_failure(ForcedPrecommitFailure::FinalSegmentOverload);
+    }
+
+    /// Closes admission on the published runtime the way [`Self::shutdown`]
+    /// does - cancelling the session epoch - without draining or retiring
+    /// it, so a test can observe cancelled work while worker ownership
+    /// persists.
+    #[cfg(feature = "test-fixtures")]
+    pub fn shutdown_admission(&self) {
+        self.state.shutdown_admission();
     }
 
     /// Returns the batch and Realtime Gateway routes.

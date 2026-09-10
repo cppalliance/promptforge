@@ -9,9 +9,7 @@ use base64::Engine as _;
 use futures_util::{SinkExt as _, StreamExt as _};
 use gateway::{Config, Gateway, ProfilesContext};
 use gateway_stt::SpeechService;
-use gateway_stt::test_fixtures::{
-    ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, scripted_service,
-};
+use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory, scripted_service};
 use gateway_stt_engine::test_fixtures::native::require_fixture;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
@@ -245,13 +243,9 @@ fn native_speech_service() -> SpeechService {
             .select_profile(&gateway_config::ProfileName::parse("native").expect("profile name"))
             .expect("native fixture profile selects");
         let service = SpeechService::new();
-        let prepared = service.prepare(&config, None).expect("artifacts prepare");
-        let replacement = service
-            .begin_replacement(prepared)
-            .expect("native engine loads");
         service
-            .commit_replacement(replacement)
-            .expect("native generation publishes");
+            .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
+            .expect("native engine loads");
         service
     })
     .join()

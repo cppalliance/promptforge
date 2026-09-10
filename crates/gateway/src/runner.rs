@@ -302,12 +302,12 @@ impl Gateway {
             let progress = tree.register("startup-stt", 1.0);
             let service = gateway_stt::SpeechService::new();
             let started = service
-                .prepare(config, Some(&progress))
-                .and_then(|prepared| service.begin_replacement(prepared))
-                .and_then(|replacement| {
-                    service.commit_replacement(replacement)?;
-                    Ok(service)
-                })
+                .load_initial(
+                    config,
+                    Some(&progress),
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .map(|()| service)
                 .map_err(StartupError::provisioning);
             match &started {
                 Ok(_) => progress.complete(),
@@ -369,7 +369,8 @@ impl Gateway {
         build_router(self.state.clone(), None)
     }
 
-    /// Replaces the speech facade used by routes and profile transitions.
+    /// Replaces the speech facade used by routes and the boot command's one
+    /// initial load.
     ///
     /// This composition seam lets embedders provide an already prepared
     /// speech generation while preserving the Gateway's authentication,
@@ -960,16 +961,15 @@ fn serve_thread(
     }));
     // The boot command lands after the readiness signal: the queue worker
     // loads the active profile's models into the live routing table while
-    // the gateway is already reachable. `persist: false` keeps a
-    // command-line or environment profile override ephemeral, exactly as
-    // startup always behaved.
+    // the gateway is already reachable, and the boot command alone then
+    // makes the process's one guarded STT load attempt. The boot selection
+    // stays ephemeral, exactly as startup always behaved.
     if let Some(name) = boot_profile {
         let _boot = gateway
             .state
             .commands
-            .enqueue(crate::commands::Command::load_profile(
+            .enqueue(crate::commands::Command::boot_load_profile(
                 name,
-                false,
                 tokio_util::sync::CancellationToken::new(),
             ));
     }

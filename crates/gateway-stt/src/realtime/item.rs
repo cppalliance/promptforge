@@ -105,10 +105,6 @@ impl CommittedItem {
             .is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
-    pub(crate) const fn is_terminal(&self) -> bool {
-        self.terminal
-    }
-
     pub(crate) async fn finish_finalization(&mut self) -> Result<ItemResult, String> {
         let Some(task) = self.finalization.as_mut() else {
             return Err("the committed item has no active finalization".to_owned());

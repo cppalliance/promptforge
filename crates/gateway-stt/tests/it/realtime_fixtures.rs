@@ -43,7 +43,6 @@ const VALID_SEQUENCE_CASES: &[&str] = &[
     "clear_retires_only_uncommitted_input",
     "configuration_snapshot_isolation",
     "durable_lineage",
-    "engine_replacement",
     "first_event_readiness",
     "hypothesis_negotiation",
     "immediate_commit_and_provisional_promotion",

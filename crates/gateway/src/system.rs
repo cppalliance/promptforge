@@ -30,7 +30,6 @@ pub(crate) struct SpeechSnapshot {
     configured: bool,
     ready: bool,
     gpu: bool,
-    generation: Option<u64>,
 }
 
 #[cfg(feature = "stt")]
@@ -40,7 +39,6 @@ impl From<gateway_stt::SpeechStatus> for SpeechSnapshot {
             configured: status.configured(),
             ready: status.ready(),
             gpu: status.gpu(),
-            generation: status.generation(),
         }
     }
 }
@@ -320,7 +318,6 @@ mod tests {
                 "configured": false,
                 "ready": false,
                 "gpu": false,
-                "generation": null,
             })
         );
     }

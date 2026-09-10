@@ -281,7 +281,7 @@ isProject: false
 
 <step-4>
 
-### Step 4: Move STT to boot only and delete replacement
+### Step 4: Move STT to boot only and delete replacement [completed]
 
 - Component: STT lifecycle
 - Change: Give the startup `LoadProfile` an internal `boot: bool` field set only by the runner's boot enqueue; debounce attach and supersession preserve it, and only a command carrying it may call the guarded STT initial load after its remote and local work. In the same commit, remove STT from later profile and Apply transactions and delete replacement APIs, coordinator, snapshots, quiescence, rollback, reconstruction, replacement events, and replacement-only tests. Keep the listener, routes, Config UI, health, status, and progress serving before provisioning. Add no command, worker, task, lane, retry, or public status field.

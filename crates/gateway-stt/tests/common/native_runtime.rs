@@ -10,12 +10,8 @@ pub(crate) fn start(config: gateway_config::Config) -> SpeechService {
     let startup = std::thread::spawn(move || {
         let service = SpeechService::new();
         let result = service
-            .prepare(&config, None)
-            .and_then(|prepared| service.begin_replacement(prepared))
-            .and_then(|replacement| {
-                service.commit_replacement(replacement)?;
-                Ok(service)
-            });
+            .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
+            .map(|()| service);
         drop(result_tx.send(result));
     });
     let service = result_rx

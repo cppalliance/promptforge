@@ -18,7 +18,6 @@ fn clones_observe_one_complete_scripted_generation() {
     assert!(status.configured());
     assert!(status.ready());
     assert!(status.gpu());
-    assert_eq!(status.generation(), Some(1));
     assert_eq!(
         clone
             .models()
@@ -74,7 +73,7 @@ fn physical_interim_cannot_claim_the_logical_realtime_identity() {
         "[\"realtime-transcribe\"]",
     );
     let error = SpeechService::new()
-        .prepare(&config, None)
+        .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
         .expect_err("the logical name is reserved before artifact access");
     assert!(error.to_string().contains("reserved"), "{error}");
 }
@@ -89,7 +88,7 @@ fn physical_final_in_a_pair_cannot_claim_the_logical_realtime_identity() {
         "[\"physical-interim\", \"realtime-transcribe\"]",
     );
     let error = SpeechService::new()
-        .prepare(&config, None)
+        .load_initial(&config, None, &tokio_util::sync::CancellationToken::new())
         .expect_err("the logical name is reserved before artifact access");
     assert!(error.to_string().contains("reserved"), "{error}");
 }

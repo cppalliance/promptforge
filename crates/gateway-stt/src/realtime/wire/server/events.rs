@@ -122,22 +122,6 @@ impl ServerEvent {
             },
         }
     }
-
-    pub(in crate::realtime) fn engine_replaced_item(event_id: String, item_id: String) -> Self {
-        Self::TranscriptionFailed {
-            event_id,
-            item_id,
-            content_index: 0,
-            error: replacement_error(OptionalNullable::Missing),
-        }
-    }
-
-    pub(in crate::realtime) fn engine_replaced(event_id: String) -> Self {
-        Self::Error {
-            event_id,
-            error: replacement_error(OptionalNullable::Null),
-        }
-    }
 }
 
 fn item_failure_error(failure: &ItemFailure) -> WireError {
@@ -167,14 +151,5 @@ fn item_failure_error(failure: &ItemFailure) -> WireError {
         message: message.to_owned(),
         param,
         event_id: OptionalNullable::Missing,
-    }
-}
-fn replacement_error(event_id: OptionalNullable<String>) -> WireError {
-    WireError {
-        r#type: "server_error".to_owned(),
-        code: "engine_replaced".to_owned(),
-        message: "The speech engine was replaced".to_owned(),
-        param: OptionalNullable::Null,
-        event_id,
     }
 }

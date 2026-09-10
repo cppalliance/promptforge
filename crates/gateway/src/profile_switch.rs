@@ -19,8 +19,6 @@ use crate::error::GatewayError;
 #[cfg(feature = "local")]
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
-#[cfg(feature = "stt")]
-use gateway_stt::{SpeechReplacement, SpeechService};
 #[cfg(feature = "web-search")]
 use gateway_web_search::WebSearchState;
 
@@ -399,11 +397,9 @@ pub(super) struct SwitchTarget {
     /// Model names admitted by the selected profile.
     pub(super) allowlist: Option<Vec<String>>,
     loading: BTreeSet<String>,
-    #[cfg(feature = "stt")]
-    speech: gateway_stt::PreparedSpeech,
 }
 
-/// Target data that remains after the prepared speech artifact enters staging.
+/// Target data that remains after the cutover consumed the loading set.
 pub(super) struct StagedTarget {
     config: Config,
     remote_routing: Routing,
@@ -416,8 +412,6 @@ pub(super) struct StagedTarget {
 struct StopSet {
     #[cfg(feature = "local")]
     local: bool,
-    #[cfg(feature = "stt")]
-    stt: bool,
 }
 
 impl StopSet {
@@ -425,8 +419,6 @@ impl StopSet {
         let any = false;
         #[cfg(feature = "local")]
         let any = any || self.local;
-        #[cfg(feature = "stt")]
-        let any = any || self.stt;
         !any
     }
 }
@@ -470,7 +462,7 @@ pub(super) struct CutoverPhase {
     token: CancellationToken,
 }
 
-/// Cutover ownership after the prepared speech artifact has entered staging.
+/// Cutover ownership carried into runtime staging.
 struct CutoverOwner {
     state: AppState,
     name: ProfileName,
@@ -508,8 +500,6 @@ struct PublicationPhase {
     name: ProfileName,
     target: StagedTarget,
     replacement: RuntimeReplacement,
-    #[cfg(feature = "stt")]
-    token: CancellationToken,
     routing: Routing,
 }
 
@@ -565,13 +555,11 @@ pub(super) struct RuntimeReplacement {
     pub(super) local: LocalRuntime,
     #[cfg(feature = "local")]
     pub(super) start_failures: Vec<crate::local::LocalStartFailure>,
-    #[cfg(feature = "stt")]
-    pub(super) speech: SpeechReplacement,
 }
 
 #[derive(Debug)]
 #[cfg_attr(
-    not(any(feature = "local", feature = "stt")),
+    not(feature = "local"),
     expect(
         dead_code,
         reason = "the featureless stage stub cannot produce either runtime failure classification"
@@ -673,8 +661,6 @@ impl CutoverPhase {
             web_search,
             allowlist,
             loading: _,
-            #[cfg(feature = "stt")]
-                speech: prepared_speech,
         } = target;
         let owner = CutoverOwner {
             state,
@@ -706,26 +692,16 @@ impl CutoverPhase {
                 ),
             ));
         }
-        let replacement = match spawn_runtimes(
-            &owner.target.config,
-            #[cfg(feature = "stt")]
-            owner.state.speech.clone(),
-            #[cfg(feature = "stt")]
-            prepared_speech,
-            &tree,
-            &owner.token,
-            deadline,
-        )
-        .await
-        {
-            Ok(replacement) => replacement,
-            Err(RuntimeStageFailure::Determinate(error)) => {
-                return Err(owner.roll_back(error).await);
-            }
-            Err(RuntimeStageFailure::Indeterminate(error)) => {
-                return Err(owner.into_indeterminate("stage-profile-timeout", error));
-            }
-        };
+        let replacement =
+            match spawn_runtimes(&owner.target.config, &tree, &owner.token, deadline).await {
+                Ok(replacement) => replacement,
+                Err(RuntimeStageFailure::Determinate(error)) => {
+                    return Err(owner.roll_back(error).await);
+                }
+                Err(RuntimeStageFailure::Indeterminate(error)) => {
+                    return Err(owner.into_indeterminate("stage-profile-timeout", error));
+                }
+            };
         let staged = owner.into_staged(replacement);
         if staged.token.is_cancelled() {
             return Err(staged.roll_back_after_stage(switch_cancelled).await);
@@ -876,26 +852,26 @@ impl StagedPhase {
     }
 
     fn into_rollback(self, failure: GatewayError) -> RollbackOwner {
-        let runtime_rollback = rollback_runtime(&self.state, self.replacement);
+        // The staged runtime is not carried into the rollback owner: its
+        // local children stop on drop here, and there is no speech
+        // participant to roll back.
         RollbackOwner {
             state: self.state,
             prior: self.prior,
             token: self.token,
             failure,
-            runtime_rollback,
         }
     }
 }
 
 impl CommitTail {
     fn into_rollback(self, failure: GatewayError) -> RollbackOwner {
-        let runtime_rollback = rollback_runtime(&self.state, self.replacement);
+        // See StagedPhase::into_rollback: the staged runtime drops here.
         RollbackOwner {
             state: self.state,
             prior: self.prior,
             token: self.token,
             failure,
-            runtime_rollback,
         }
     }
 
@@ -911,8 +887,6 @@ impl CommitTail {
             name: self.name,
             target: self.target,
             replacement: self.replacement,
-            #[cfg(feature = "stt")]
-            token: self.token,
             routing,
         }
     }
@@ -925,25 +899,12 @@ impl PublicationPhase {
             state,
             name,
             target,
-            #[cfg(any(feature = "local", feature = "stt"))]
+            #[cfg(feature = "local")]
             replacement,
-            #[cfg(not(any(feature = "local", feature = "stt")))]
+            #[cfg(not(feature = "local"))]
                 replacement: _,
-            #[cfg(feature = "stt")]
-            token,
             routing,
         } = self;
-        #[cfg(feature = "stt")]
-        if let Err(error) = state.speech.commit_replacement(replacement.speech) {
-            return TerminalPhase::Indeterminate(IndeterminatePhase {
-                error: request_fatal_shutdown(
-                    &state,
-                    &token,
-                    "publish-stt",
-                    GatewayError::switch_failed("publish-stt", error),
-                ),
-            });
-        }
 
         let mut live = state.live.write().await;
         live.routing = Arc::new(routing);
@@ -1068,16 +1029,6 @@ async fn prepare_target(
             std::io::Error::other(LOCAL_MODELS_UNSUPPORTED),
         ));
     }
-    #[cfg(feature = "stt")]
-    let speech = {
-        let service = state.speech.clone();
-        let config = config.clone();
-        let progress = loading.clone();
-        tokio::task::spawn_blocking(move || service.prepare(&config, Some(&progress)))
-            .await
-            .map_err(|error| GatewayError::switch_failed("prepare-stt-task", error))?
-            .map_err(|error| GatewayError::switch_failed("prepare-stt", error))?
-    };
     loading.complete();
 
     #[cfg(feature = "web-search")]
@@ -1100,8 +1051,6 @@ async fn prepare_target(
         web_search,
         allowlist,
         loading,
-        #[cfg(feature = "stt")]
-        speech,
     })
 }
 
@@ -1147,7 +1096,7 @@ fn switch_cancelled(name: &ProfileName) -> GatewayError {
     GatewayError::CommandCancelled(format!("load-profile: {name}"))
 }
 
-#[cfg(all(test, feature = "stt"))]
+#[cfg(test)]
 /// Resolves only a target for tests of the unchanged terminal commit.
 pub(super) async fn prepare_target_for_test(
     state: &AppState,
@@ -1162,7 +1111,6 @@ pub(super) async fn prepare_target_for_test(
         web_search,
         allowlist,
         loading: _,
-        speech: _,
     } = prepare_target(state, name, tree, candidate).await?;
     Ok(StagedTarget {
         config,
@@ -1173,19 +1121,15 @@ pub(super) async fn prepare_target_for_test(
     })
 }
 
-#[cfg(any(feature = "local", feature = "stt"))]
+#[cfg(feature = "local")]
 async fn stop_set(state: &AppState) -> StopSet {
-    #[cfg(feature = "local")]
     let live = state.live.read().await;
     StopSet {
-        #[cfg(feature = "local")]
         local: live.local.child_count() > 0,
-        #[cfg(feature = "stt")]
-        stt: state.speech.status().ready(),
     }
 }
 
-#[cfg(not(any(feature = "local", feature = "stt")))]
+#[cfg(not(feature = "local"))]
 async fn stop_set(_state: &AppState) -> StopSet {
     StopSet {}
 }
@@ -1432,27 +1376,7 @@ pub(super) fn request_fatal_shutdown(
 ) -> GatewayError {
     token.cancel();
     state.shutdown.fire();
-    #[cfg(feature = "stt")]
-    state.speech.shutdown();
     GatewayError::switch_failed(phase, error)
-}
-
-#[cfg_attr(
-    not(feature = "stt"),
-    expect(
-        unused_variables,
-        reason = "featureless runtime replacement has no speech owner to restore"
-    )
-)]
-fn rollback_runtime(state: &AppState, replacement: RuntimeReplacement) -> Result<(), GatewayError> {
-    #[cfg(feature = "stt")]
-    state
-        .speech
-        .abort_replacement(replacement.speech)
-        .map_err(|error| GatewayError::switch_failed("rollback-stt", error))?;
-    #[cfg(not(feature = "stt"))]
-    let _replacement = replacement;
-    Ok(())
 }
 
 struct RollbackOwner {
@@ -1460,48 +1384,27 @@ struct RollbackOwner {
     prior: PriorRuntimeSnapshot,
     token: CancellationToken,
     failure: GatewayError,
-    runtime_rollback: Result<(), GatewayError>,
 }
 
 impl RollbackOwner {
     async fn finish(self) -> TerminalPhase {
-        match self.runtime_rollback {
-            Ok(()) => match restore_runtime_snapshot(&self.state, self.prior).await {
-                Ok(()) => TerminalPhase::RolledBack(RolledBackPhase {
-                    error: self.failure,
-                }),
-                Err(rollback) => TerminalPhase::Indeterminate(IndeterminatePhase {
-                    error: request_fatal_shutdown(
-                        &self.state,
-                        &self.token,
-                        "rollback-profile",
-                        rollback,
-                    ),
-                }),
-            },
-            Err(rollback) => {
-                let failure = GatewayError::switch_failed(
-                    "determinate-profile-failure",
-                    std::io::Error::other(format!(
-                        "{}; {}",
-                        crate::config_write::error_chain(&self.failure),
-                        crate::config_write::error_chain(&rollback)
-                    )),
-                );
-                TerminalPhase::Indeterminate(IndeterminatePhase {
-                    error: request_fatal_shutdown(
-                        &self.state,
-                        &self.token,
-                        "rollback-staged-profile",
-                        failure,
-                    ),
-                })
-            }
+        match restore_runtime_snapshot(&self.state, self.prior).await {
+            Ok(()) => TerminalPhase::RolledBack(RolledBackPhase {
+                error: self.failure,
+            }),
+            Err(rollback) => TerminalPhase::Indeterminate(IndeterminatePhase {
+                error: request_fatal_shutdown(
+                    &self.state,
+                    &self.token,
+                    "rollback-profile",
+                    rollback,
+                ),
+            }),
         }
     }
 }
 
-#[cfg(all(test, feature = "stt"))]
+#[cfg(test)]
 pub(super) async fn commit_for_test(
     state: &AppState,
     name: ProfileName,
@@ -1547,20 +1450,7 @@ fn start_report(_replacement: &RuntimeReplacement) -> StartReport {
     StartReport {}
 }
 
-#[cfg(feature = "stt")]
-pub(super) fn classify_speech_stage_failure(
-    error: gateway_stt::SpeechError,
-) -> RuntimeStageFailure {
-    let indeterminate = error.is_non_preemptible_startup_timeout();
-    let error = GatewayError::switch_failed("start-stt", error);
-    if indeterminate {
-        RuntimeStageFailure::Indeterminate(error)
-    } else {
-        RuntimeStageFailure::Determinate(error)
-    }
-}
-
-#[cfg(not(any(feature = "local", feature = "stt")))]
+#[cfg(not(feature = "local"))]
 async fn spawn_runtimes(
     _config: &Config,
     _tree: &ProgressTree,
@@ -1570,25 +1460,16 @@ async fn spawn_runtimes(
     Ok(RuntimeReplacement {})
 }
 
-#[cfg(any(feature = "local", feature = "stt"))]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the moved staging sequence preserves one shared deadline and exact local-before-speech cancellation order"
-)]
+#[cfg(feature = "local")]
 async fn spawn_runtimes(
     config: &Config,
-    #[cfg(feature = "stt")] speech: SpeechService,
-    #[cfg(feature = "stt")] prepared_speech: gateway_stt::PreparedSpeech,
     tree: &ProgressTree,
     token: &CancellationToken,
     deadline: std::time::Instant,
 ) -> Result<RuntimeReplacement, RuntimeStageFailure> {
     let starting = tree.register("starting-models", 5.0);
-    #[cfg(feature = "local")]
     let start_config = config.clone();
-    #[cfg(feature = "local")]
     let start_progress = starting.clone();
-    #[cfg(feature = "local")]
     let outcome = {
         let start_token = token.clone();
         let interrupted = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1641,47 +1522,15 @@ async fn spawn_runtimes(
             }
         }
     };
-    #[cfg(feature = "local")]
     let (runtime, failures) = outcome.into_parts();
-    #[cfg(feature = "stt")]
-    if token.is_cancelled() {
-        return Err(RuntimeStageFailure::Determinate(
-            GatewayError::CommandCancelled("profile switch".to_owned()),
-        ));
-    }
-    #[cfg(feature = "stt")]
-    let speech = match tokio::task::spawn_blocking(move || {
-        speech.begin_replacement_before(prepared_speech, deadline)
-    })
-    .await
-    {
-        Ok(Ok(runtime)) => runtime,
-        Ok(Err(error)) => {
-            starting.fail();
-            return Err(classify_speech_stage_failure(error));
-        }
-        Err(error) => {
-            starting.fail();
-            return Err(RuntimeStageFailure::Determinate(
-                GatewayError::switch_failed("start-stt-task", error),
-            ));
-        }
-    };
-    #[cfg(feature = "local")]
     if failures.is_empty() {
         starting.complete();
     } else {
         starting.fail();
     }
-    #[cfg(not(feature = "local"))]
-    starting.complete();
     Ok(RuntimeReplacement {
-        #[cfg(feature = "local")]
         local: runtime,
-        #[cfg(feature = "local")]
         start_failures: failures,
-        #[cfg(feature = "stt")]
-        speech,
     })
 }
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gateway_stt_engine::{DecodeMode, DecodeRequest, TranscribeError};
 
-use crate::replacement::{AdmissionLease, JobLease, SessionEpoch};
+use crate::admission::{AdmissionLease, JobLease, SessionEpoch};
 
 use super::snapshot::SpeechRuntime;
 

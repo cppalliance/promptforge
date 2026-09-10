@@ -1,12 +1,11 @@
 //! Point-in-time speech service status.
 
-/// Generic facts about the active speech generation.
+/// Generic facts about the published speech runtime.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SpeechStatus {
     configured: bool,
     ready: bool,
     gpu: bool,
-    generation: Option<u64>,
 }
 
 impl SpeechStatus {
@@ -15,16 +14,14 @@ impl SpeechStatus {
             configured,
             ready: false,
             gpu: false,
-            generation: None,
         }
     }
 
-    pub(crate) const fn active(gpu: bool, generation: u64) -> Self {
+    pub(crate) const fn active(gpu: bool) -> Self {
         Self {
             configured: true,
             ready: true,
             gpu,
-            generation: Some(generation),
         }
     }
 
@@ -34,7 +31,7 @@ impl SpeechStatus {
         self.configured
     }
 
-    /// Returns whether one complete generation accepts requests.
+    /// Returns whether the published runtime accepts requests.
     #[must_use]
     pub const fn ready(self) -> bool {
         self.ready
@@ -44,11 +41,5 @@ impl SpeechStatus {
     #[must_use]
     pub const fn gpu(self) -> bool {
         self.gpu
-    }
-
-    /// Returns the active generation identifier.
-    #[must_use]
-    pub const fn generation(self) -> Option<u64> {
-        self.generation
     }
 }

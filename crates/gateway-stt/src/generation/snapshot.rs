@@ -1,4 +1,4 @@
-//! One complete engine runtime and its immutable published facts.
+//! The one complete engine runtime and its immutable published facts.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,9 +7,9 @@ use gateway_stt_engine::{
     DecodeMode, DecodeRequest, EnginePolicy, ModelFactory, SttEngine, TranscribeError,
 };
 
+use crate::admission::AdmissionGate;
 use crate::artifacts::SpeechError;
 use crate::model::{ModelNames, SpeechModelInfo};
-use crate::replacement::AdmissionGate;
 use crate::status::SpeechStatus;
 
 #[derive(Debug, Clone, Copy)]
@@ -20,7 +20,7 @@ pub(super) enum Backend {
 }
 
 #[derive(Debug)]
-struct SharedFactory(Arc<dyn ModelFactory>);
+pub(super) struct SharedFactory(pub(super) Arc<dyn ModelFactory>);
 
 impl ModelFactory for SharedFactory {
     fn create(
@@ -31,7 +31,7 @@ impl ModelFactory for SharedFactory {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct GenerationSpec {
     backend: Backend,
     factory: Arc<dyn ModelFactory>,
@@ -72,7 +72,7 @@ impl GenerationSpec {
         spec
     }
 
-    pub(super) fn build(&self, id: u64) -> Result<SpeechRuntime, SpeechError> {
+    pub(super) fn build(&self) -> Result<SpeechRuntime, SpeechError> {
         let engine = SttEngine::new(SharedFactory(Arc::clone(&self.factory)), self.policy)
             .map_err(SpeechError::Engine)?;
         let names = if self.infer_scripted_final {
@@ -81,7 +81,6 @@ impl GenerationSpec {
             self.names.clone()
         };
         Ok(SpeechRuntime {
-            id,
             backend: self.backend,
             engine,
             names,
@@ -95,7 +94,6 @@ impl GenerationSpec {
 /// admission ownership shared by every admitted request and worker job.
 #[derive(Debug)]
 pub(crate) struct SpeechRuntime {
-    id: u64,
     backend: Backend,
     engine: SttEngine,
     names: ModelNames,
@@ -114,7 +112,7 @@ impl SpeechRuntime {
             #[cfg(feature = "test-fixtures")]
             Backend::Scripted => self.engine.gpu_transcription_available(),
         };
-        SpeechStatus::active(gpu, self.id)
+        SpeechStatus::active(gpu)
     }
 
     pub(super) fn models(&self) -> Vec<SpeechModelInfo> {
@@ -139,46 +137,5 @@ impl SpeechRuntime {
 
     pub(super) async fn decode(&self, request: DecodeRequest) -> Result<String, TranscribeError> {
         self.engine.decode(request).await
-    }
-}
-
-/// One staged generation and the specification needed to reconstruct the
-/// runtime it replaces. Replacement compatibility only; the one-time initial
-/// load publishes a bare [`SpeechRuntime`].
-#[derive(Debug)]
-pub(super) struct Generation {
-    runtime: SpeechRuntime,
-    restart: GenerationSpec,
-}
-
-impl Generation {
-    pub(super) fn from_factory(
-        id: u64,
-        backend: Backend,
-        factory: impl ModelFactory,
-        policy: EnginePolicy,
-        names: ModelNames,
-        guidance: Vec<String>,
-    ) -> Result<Self, SpeechError> {
-        Self::from_spec(
-            id,
-            GenerationSpec::new(backend, factory, policy, names, guidance),
-        )
-    }
-
-    pub(super) fn from_spec(id: u64, spec: GenerationSpec) -> Result<Self, SpeechError> {
-        let runtime = spec.build(id)?;
-        Ok(Self {
-            runtime,
-            restart: spec,
-        })
-    }
-
-    pub(super) fn shutdown(&self) -> Result<(), SpeechError> {
-        self.runtime.shutdown()
-    }
-
-    pub(super) fn into_parts(self) -> (SpeechRuntime, GenerationSpec) {
-        (self.runtime, self.restart)
     }
 }

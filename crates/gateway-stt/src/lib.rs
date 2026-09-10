@@ -3,13 +3,13 @@
 //! [`SpeechService`] owns artifact preparation, one-time initial runtime
 //! publication, batch transcription, and Realtime transcription.
 
+mod admission;
 mod artifacts;
 mod audio;
 mod batch;
 mod generation;
 mod model;
 mod realtime;
-mod replacement;
 mod segment;
 mod service;
 mod status;
@@ -19,8 +19,7 @@ mod test_fixtures;
 #[cfg(feature = "test-fixtures")]
 pub mod test_fixtures;
 
-pub use artifacts::{PreparedSpeech, SpeechError};
-pub use generation::SpeechReplacement;
+pub use artifacts::SpeechError;
 pub use model::SpeechModelInfo;
 pub use service::SpeechService;
 pub use status::SpeechStatus;

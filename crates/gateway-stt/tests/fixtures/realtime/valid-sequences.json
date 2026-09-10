@@ -47,17 +47,6 @@
       "previous_item_id is determined only by commit order"
     ]
   },
-  "engine_replacement": {
-    "events": [
-      { "direction": "server", "message": { "event_id": "evt_replaced_item", "type": "conversation.item.input_audio_transcription.failed", "item_id": "item_replaced", "content_index": 0, "error": { "type": "server_error", "code": "engine_replaced", "message": "The speech engine was replaced", "param": null } } },
-      { "direction": "server", "message": { "event_id": "evt_replaced_general", "type": "error", "error": { "type": "server_error", "code": "engine_replaced", "message": "The speech engine was replaced", "param": null, "event_id": null } } }
-    ],
-    "invariants": [
-      "every committed in-flight item fails exactly once",
-      "uncommitted audio receives one general error",
-      "the server closes with code 1012 and reason engine_replaced"
-    ]
-  },
   "first_event_readiness": {
     "events": [
       { "direction": "server", "message": { "event_id": "evt_ready", "type": "session.created", "session": { "id": "sess_ready", "object": "realtime.transcription_session", "type": "transcription", "audio": { "input": { "format": { "type": "audio/pcm", "rate": 24000 }, "noise_reduction": null, "transcription": { "model": "realtime-transcribe", "prompt": "" }, "turn_detection": null } }, "include": [] } } }

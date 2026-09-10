@@ -14,7 +14,7 @@ use gateway_config::{Config, ProfileName};
 use gateway_stt::SpeechService;
 use gateway_stt::test_fixtures::{
     ScriptedDecoder, ScriptedModelFactory, generation_ownership, load_scripted_initial,
-    load_scripted_initial_with_cancellation, scripted_loaded_service,
+    load_scripted_initial_with_cancellation, scripted_service,
 };
 use gateway_stt_engine::{DecodeMode, DecodeRequest, Decoder, ModelFactory, TranscribeError};
 use tokio_util::sync::CancellationToken;
@@ -43,7 +43,6 @@ fn an_inactive_facade_reports_unready_and_discovers_no_models() {
     assert!(!status.configured());
     assert!(!status.ready());
     assert!(!status.gpu());
-    assert_eq!(status.generation(), None);
     assert!(service.models().is_empty());
 }
 
@@ -52,7 +51,7 @@ async fn the_initial_load_publishes_one_complete_runtime() {
     let interim = ScriptedDecoder::new();
     interim.push_text("boot transcript");
     let final_decoder = ScriptedDecoder::new();
-    let service = scripted_loaded_service(
+    let service = scripted_service(
         ScriptedModelFactory::new(interim.clone())
             .with_final(final_decoder.clone())
             .with_gpu_available(true),
@@ -65,7 +64,6 @@ async fn the_initial_load_publishes_one_complete_runtime() {
     assert!(status.configured());
     assert!(status.ready());
     assert!(status.gpu());
-    assert_eq!(status.generation(), Some(1));
     assert_eq!(
         service
             .models()
@@ -88,7 +86,7 @@ async fn the_initial_load_publishes_one_complete_runtime() {
 #[test]
 fn a_second_initial_load_is_rejected_without_disturbing_the_runtime() {
     let first = ScriptedDecoder::new();
-    let service = scripted_loaded_service(ScriptedModelFactory::new(first.clone()), 15, 500)
+    let service = scripted_service(ScriptedModelFactory::new(first.clone()), 15, 500)
         .expect("the initial load publishes");
     let second = ScriptedDecoder::new();
 
@@ -102,7 +100,6 @@ fn a_second_initial_load_is_rejected_without_disturbing_the_runtime() {
 
     let status = service.status();
     assert!(status.ready());
-    assert_eq!(status.generation(), Some(1));
     assert_eq!(
         service
             .models()
@@ -274,7 +271,7 @@ fn an_initial_load_without_speech_models_leaves_the_facade_inactive() {
 #[test]
 fn request_and_worker_job_ownership_are_counted_independently() {
     let decoder = ScriptedDecoder::new();
-    let service = scripted_loaded_service(ScriptedModelFactory::new(decoder.clone()), 15, 500)
+    let service = scripted_service(ScriptedModelFactory::new(decoder.clone()), 15, 500)
         .expect("the initial load publishes");
     let request = generation_ownership(&service).expect("the published runtime admits a request");
 
@@ -291,7 +288,7 @@ fn request_and_worker_job_ownership_are_counted_independently() {
 #[test]
 fn shutdown_stops_admission_and_joins_workers() {
     let interim = ScriptedDecoder::new();
-    let service = scripted_loaded_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
+    let service = scripted_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
         .expect("the initial load publishes");
 
     service.shutdown();
@@ -305,7 +302,7 @@ fn shutdown_stops_admission_and_joins_workers() {
 #[test]
 fn dropping_the_final_owner_joins_the_workers() {
     let interim = ScriptedDecoder::new();
-    let service = scripted_loaded_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
+    let service = scripted_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
         .expect("the initial load publishes");
     let clone = service.clone();
 
@@ -319,29 +316,4 @@ fn dropping_the_final_owner_joins_the_workers() {
         interim.wait_until_worker_dropped(WAIT),
         "the final owner drop joins the workers"
     );
-}
-
-#[test]
-fn a_replacement_is_refused_after_the_initial_load() {
-    let interim = ScriptedDecoder::new();
-    let service = scripted_loaded_service(ScriptedModelFactory::new(interim.clone()), 15, 500)
-        .expect("the initial load publishes");
-    let replacement = ScriptedDecoder::new();
-
-    let error = gateway_stt::test_fixtures::begin_scripted_replacement(
-        &service,
-        ScriptedModelFactory::new(replacement.clone()),
-        false,
-        WAIT,
-    )
-    .expect_err("the compatibility replacement path is closed after the initial load");
-    assert!(error.to_string().contains("already attempted"), "{error}");
-    assert!(
-        replacement.creation_thread().is_none(),
-        "a refused replacement never constructs workers"
-    );
-    assert!(service.status().ready());
-
-    service.shutdown();
-    assert!(interim.worker_dropped());
 }

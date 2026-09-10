@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::extract::State;
-use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -23,7 +23,6 @@ use crate::audio::AudioError;
 use crate::generation::{GenerationLease, GenerationState};
 
 const SEND_DEADLINE: Duration = Duration::from_millis(500);
-const REPLACEMENT_CLOSE_CODE: u16 = 1012;
 
 #[derive(Clone, Debug)]
 struct RouteState {
@@ -153,10 +152,8 @@ async fn run_socket(
         tokio::select! {
             biased;
             () = generation.cancelled() => {
-                if !send_events(&mut socket, &session.replacement_events(), &policy).await {
-                    return;
-                }
-                close_for_replacement(&mut socket, &policy).await;
+                // The one runtime is shutting down; the server drain closes
+                // the socket.
                 return;
             }
             _ = completions.tick() => {
@@ -423,16 +420,4 @@ async fn send_message(socket: &mut WebSocket, message: Message, policy: &RoutePo
     })
     .await
     .is_ok_and(|result| result.is_ok())
-}
-
-async fn close_for_replacement(socket: &mut WebSocket, policy: &RoutePolicy) {
-    let _sent = send_message(
-        socket,
-        Message::Close(Some(CloseFrame {
-            code: REPLACEMENT_CLOSE_CODE,
-            reason: "engine_replaced".into(),
-        })),
-        policy,
-    )
-    .await;
 }

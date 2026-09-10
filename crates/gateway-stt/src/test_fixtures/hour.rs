@@ -333,10 +333,11 @@ fn timeline_text(start_second: usize, end_second: usize) -> String {
 pub fn hour_simulation_service(probe: HourSimulationProbe) -> Result<SpeechService, SpeechError> {
     let service = SpeechService::new();
     let policy = EnginePolicy::new(15, 500, false).map_err(SpeechError::Engine)?;
-    let replacement = service
-        .state
-        .stage_scripted_with_policy(HourSimulationFactory::new(probe), policy)?;
-    service.commit_replacement(replacement)?;
+    service.state.load_scripted(
+        HourSimulationFactory::new(probe),
+        policy,
+        &tokio_util::sync::CancellationToken::new(),
+    )?;
     Ok(service)
 }
 

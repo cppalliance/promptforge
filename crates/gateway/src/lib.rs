@@ -1351,7 +1351,7 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// phase in execution order - `loading-profile` around config load and
 /// validation, `downloading-models` while the new local models' weights
 /// stage into the cache (only when the profile names local models),
-/// `stopping-models` before the old local children and speech generation shut
+/// `stopping-models` before the old local children shut
 /// down (only when there are any to stop), `starting-models` before the new
 /// children load their weights into VRAM (the long pole) - and the stream
 /// ends with exactly one terminal event, `{"status": "ready", "profile":
@@ -1364,7 +1364,9 @@ fn event_line(event: &ProgressEvent) -> Option<String> {
 /// envelope. Builds without the `local` feature emit no
 /// `downloading-models`/`stopping-models`/`starting-models` stages, and
 /// refuse a profile declaring `[[local_model]]` with a terminal error event
-/// instead of starting children.
+/// instead of starting children. Speech never participates: the runner's
+/// boot command alone appends a `loading-speech` stage for the process's
+/// one initial STT load, after its switch settles.
 ///
 /// The switch runs as a `LoadProfile` command on the gateway's command
 /// queue: serialized with every other command, debounced so a burst of
@@ -1408,7 +1410,7 @@ async fn admin_switch_profile(
 /// spawn:
 ///
 /// 1. **Prepare** (unlocked): the `loading-profile` leaf, the catalog, the
-///    target profile's config, remote routing table, and speech artifacts.
+///    target profile's config, and remote routing table.
 /// 2. **Download** (unlocked): every artifact the new local models need,
 ///    under a `downloading-models` leaf, through the same artifact store
 ///    the `ProvisionModel` command uses. Cancellation lands at chunk
@@ -1420,8 +1422,7 @@ async fn admin_switch_profile(
 ///    publishes the interim state: the new profile's remote models as the
 ///    routing table, the surviving runtimes, and the local models about to
 ///    spawn as [`LiveState::loading`].
-/// 4. **Spawn** (unlocked): speech quiesces its old generation without
-///    detachment, then all target workers start under one deadline. A request for a model in `loading` earns
+/// 4. **Spawn** (unlocked): all target children start under one deadline. A request for a model in `loading` earns
 ///    [`GatewayError::ModelLoading`] (503, `Retry-After`); remote models
 ///    serve.
 /// 5. **Commit** (locked, brief): prepared files atomically replace their
@@ -1430,7 +1431,7 @@ async fn admin_switch_profile(
 ///    profile, and clears `loading`.
 ///
 /// Ordering: the cut-over runs as soon as there is nothing old to stop.
-/// When the live state holds no local children and no speech generation (a cold
+/// When the live state holds no local children (a cold
 /// boot, or a remote-only previous profile) phase 3 follows phase 1
 /// directly, so the remote models are published before the download
 /// starts. Otherwise the download runs first, so the old runtimes keep
@@ -1438,13 +1439,18 @@ async fn admin_switch_profile(
 /// runtimes stop only right before the new ones spawn, never before a
 /// download.
 ///
-/// Determinate failure or cancellation after cutover reconstructs speech,
-/// restores the prior routing snapshot, and drops target workers. Indeterminate
-/// persistence or non-preemptible staging timeout invalidates replacement
-/// and requests controlled shutdown. A partial start (some children ready, others
+/// Determinate failure or cancellation after cutover
+/// restores the prior routing snapshot and drops target workers. Indeterminate
+/// persistence or non-preemptible staging timeout
+/// requests controlled shutdown. A partial start (some children ready, others
 /// failed) is not that case: as before, it commits and swaps the ready
 /// children in, and reports the rest through [`GatewayError::PartialStart`].
 /// A failure before the cut-over leaves the live state untouched.
+///
+/// Speech is never part of the transaction: the runner's boot command makes
+/// the process's one guarded STT load after its switch settles, and later
+/// switches persist desired speech state without touching the running
+/// runtime.
 ///
 /// `token` is the command's cancellation: checked at phase boundaries and
 /// honored by the download and the local start, so a cancelled switch
@@ -1894,11 +1900,6 @@ mod provisioning_tests {
     use axum::http::{Request, StatusCode};
     use futures_util::future::BoxFuture;
     use gateway_config::{Config, ProfileName};
-    #[cfg(feature = "stt")]
-    use gateway_stt::test_fixtures::{
-        ScriptedDecoder, ScriptedModelFactory, begin_scripted_replacement, generation_ownership,
-        scripted_service,
-    };
     use tokio_util::sync::CancellationToken;
     use tower::ServiceExt as _;
 
@@ -2354,210 +2355,13 @@ mod provisioning_tests {
         assert!(live.routing.model("beta-model").is_ok());
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
-        #[cfg(feature = "stt")]
-        assert!(!state.speech.status().ready());
     }
 
-    #[cfg(feature = "stt")]
-    #[tokio::test]
-    async fn failed_speech_publication_is_indeterminate_after_persistence() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
-        let park = Arc::new(crate::switch_park::PhasePark::at(
-            crate::switch_park::SwitchPhase::Publish,
-        ));
-        state.park = Some(Arc::clone(&park));
-        let token = CancellationToken::new();
-        let switch_state = state.clone();
-        let switch_token = token.clone();
-        let switch = tokio::spawn(async move {
-            let tree = switch_state.hub.operation();
-            crate::run_switch_with_config(
-                switch_state,
-                ProfileName::parse("beta").expect("profile name"),
-                tree,
-                None,
-                || crate::StatePersistence::Write,
-                &switch_token,
-            )
-            .await
-        });
-
-        tokio::time::timeout(Duration::from_secs(10), park.entered())
-            .await
-            .expect("switch reaches speech publication");
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read profile state"),
-            "active_profile = \"beta\"\n"
-        );
-        state.speech.shutdown();
-        park.release();
-        let error = tokio::time::timeout(Duration::from_secs(10), switch)
-            .await
-            .expect("failed speech publication settles")
-            .expect("switch task joins")
-            .expect_err("invalidated speech publication is fatal");
-
-        let chain = crate::config_write::error_chain(&error);
-        assert!(chain.contains("publish-stt"));
-        assert!(chain.contains("invalidated"));
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_err());
-        assert!(live.routing.model("beta-model").is_ok());
-        assert!(!state.speech.status().ready());
-        assert!(token.is_cancelled());
-        assert!(state.shutdown.is_fired());
-    }
-
-    #[cfg(feature = "stt")]
-    #[tokio::test]
-    async fn determinate_commit_with_failed_speech_rollback_requests_shutdown() {
-        let old = ScriptedDecoder::new();
-        let service = scripted_service(ScriptedModelFactory::new(old.clone()), 15, 500)
-            .expect("old speech starts");
-        let mut state = two_remote_profiles();
-        state.speech = service;
-        let next = ScriptedDecoder::new();
-        let speech = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(next.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("new speech stages");
-        old.fail_next_construction("gateway rollback sentinel");
-
-        let temp = tempfile::tempdir().expect("tempdir");
-        let target_path = temp.path().join("gateway.state.toml");
-        std::fs::write(&target_path, "active_profile = \"alpha\"\n").expect("write state");
-        let persistence = crate::profile_switch::PreparedPersistence::for_test(
-            target_path,
-            "active_profile = \"beta\"\n".to_owned(),
-        )
-        .expect("prepare state");
-        persistence.discard_temporaries();
-        let name = ProfileName::parse("beta").expect("profile name");
-        let tree = state.hub.operation();
-        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
-            .await
-            .expect("target prepares");
-        let replacement = crate::profile_switch::RuntimeReplacement {
-            #[cfg(feature = "local")]
-            local: crate::local::LocalRuntime::empty(),
-            #[cfg(feature = "local")]
-            start_failures: Vec::new(),
-            speech,
-        };
-        let token = CancellationToken::new();
-
-        let error = crate::profile_switch::commit_for_test(
-            &state,
-            name,
-            target,
-            replacement,
-            persistence,
-            token.clone(),
-        )
-        .await
-        .expect_err("failed rollback makes a determinate persistence failure fatal");
-
-        assert!(crate::config_write::error_chain(&error).contains("gateway rollback sentinel"));
-        assert!(
-            token.is_cancelled(),
-            "fatal rollback cancels the command token"
-        );
-        assert!(
-            state.shutdown.is_fired(),
-            "fatal rollback requests shutdown"
-        );
-        assert!(next.worker_dropped(), "the staged worker is joined");
-        assert!(!state.speech.status().ready());
-    }
-
-    #[cfg(feature = "stt")]
-    #[tokio::test]
-    async fn determinate_persistence_failure_reconstructs_speech_and_persisted_profile() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let (mut state, state_path) = persisted_two_remote_profiles(&temp);
-        let old = ScriptedDecoder::new();
-        state.speech =
-            scripted_service(ScriptedModelFactory::new(old), 15, 500).expect("old speech starts");
-        let old_generation = state.speech.status().generation();
-        let next = ScriptedDecoder::new();
-        let speech = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(next.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("new speech stages");
-        let persistence = crate::profile_switch::PreparedPersistence::for_test(
-            state_path.clone(),
-            "active_profile = \"beta\"\n".to_owned(),
-        )
-        .expect("prepare state");
-        persistence.discard_temporaries();
-        let name = ProfileName::parse("beta").expect("profile name");
-        let tree = state.hub.operation();
-        let target = crate::profile_switch::prepare_target_for_test(&state, &name, &tree, None)
-            .await
-            .expect("target prepares");
-        let replacement = crate::profile_switch::RuntimeReplacement {
-            #[cfg(feature = "local")]
-            local: crate::local::LocalRuntime::empty(),
-            #[cfg(feature = "local")]
-            start_failures: Vec::new(),
-            speech,
-        };
-        let token = CancellationToken::new();
-
-        let error = crate::profile_switch::commit_for_test(
-            &state,
-            name,
-            target,
-            replacement,
-            persistence,
-            token.clone(),
-        )
-        .await
-        .expect_err("missing prepared file makes persistence fail determinately");
-
-        assert!(
-            matches!(error, crate::error::GatewayError::ConfigWriteIo(_)),
-            "the original persistence failure is returned: {error:?}"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&state_path).expect("read state"),
-            "active_profile = \"alpha\"\n",
-            "determinate failure leaves the persisted profile unchanged"
-        );
-        let live = state.live.read().await;
-        assert_eq!(live.profile_name.as_deref(), Some("alpha"));
-        assert!(live.routing.model("alpha-model").is_ok());
-        assert!(live.routing.model("beta-model").is_err());
-        drop(live);
-        let restored = state.speech.status();
-        assert!(restored.ready(), "old speech is reconstructed");
-        assert_ne!(restored.generation(), old_generation);
-        assert!(
-            generation_ownership(&state.speech).is_some(),
-            "reconstructed speech admits work"
-        );
-        assert!(next.worker_dropped(), "the staged worker is joined");
-        assert!(!token.is_cancelled());
-        assert!(!state.shutdown.is_fired());
-        state.speech.shutdown();
-    }
-
-    #[cfg(all(feature = "stt", feature = "test-fixtures"))]
+    #[cfg(all(feature = "local", feature = "test-fixtures"))]
     #[tokio::test]
     async fn determinate_persistence_failure_reconstructs_and_republishes_local_models() {
         let temp = tempfile::tempdir().expect("tempdir");
         let (mut state, state_path) = persisted_profiles_with_local(&temp);
-        let old_speech = ScriptedDecoder::new();
-        state.speech = scripted_service(ScriptedModelFactory::new(old_speech), 15, 500)
-            .expect("old speech starts");
         let old_local = local_runtime_fixture("retired-local");
         {
             let mut live = state.live.write().await;
@@ -2572,14 +2376,6 @@ mod provisioning_tests {
         }
         state.local_restarter = Some(restart_local_fixture);
 
-        let next = ScriptedDecoder::new();
-        let speech = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(next.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("new speech stages");
         let persistence = crate::profile_switch::PreparedPersistence::for_test(
             state_path.clone(),
             "active_profile = \"beta\"\n".to_owned(),
@@ -2594,7 +2390,6 @@ mod provisioning_tests {
         let replacement = crate::profile_switch::RuntimeReplacement {
             local: crate::local::LocalRuntime::empty(),
             start_failures: Vec::new(),
-            speech,
         };
         let token = CancellationToken::new();
 
@@ -2632,24 +2427,13 @@ mod provisioning_tests {
         assert_eq!(live.local.models().len(), 1);
         assert_eq!(live.local.models()[0].upstream_name, "restored-local");
         drop(live);
-        assert!(next.worker_dropped(), "the staged worker is joined");
         assert!(!token.is_cancelled());
         assert!(!state.shutdown.is_fired());
-        state.speech.shutdown();
     }
 
-    #[cfg(feature = "stt")]
     #[tokio::test]
-    async fn indeterminate_persistence_invalidates_staging_and_requests_shutdown() {
+    async fn indeterminate_persistence_requests_shutdown_without_claiming_state() {
         let state = two_remote_profiles();
-        let next = ScriptedDecoder::new();
-        let speech = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(next.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("speech stages");
         let temp = tempfile::tempdir().expect("tempdir");
         let target_path = temp.path().join("gateway.state.toml");
         std::fs::write(&target_path, "active_profile = \"alpha\"\n").expect("write state");
@@ -2671,7 +2455,6 @@ mod provisioning_tests {
             local: crate::local::LocalRuntime::empty(),
             #[cfg(feature = "local")]
             start_failures: Vec::new(),
-            speech,
         };
         let token = CancellationToken::new();
 
@@ -2697,7 +2480,6 @@ mod provisioning_tests {
         );
         assert!(token.is_cancelled());
         assert!(state.shutdown.is_fired());
-        assert!(next.worker_dropped(), "invalidated staging is still joined");
         assert_eq!(
             std::fs::read_to_string(&target_path).expect("read uncertain state"),
             "uncertain authoritative contents",
@@ -2708,7 +2490,6 @@ mod provisioning_tests {
         assert!(live.routing.model("beta-model").is_err());
     }
 
-    #[cfg(feature = "stt")]
     #[tokio::test]
     #[expect(
         clippy::too_many_lines,
@@ -2733,14 +2514,6 @@ mod provisioning_tests {
                 config_path,
             }),
         );
-        let decoder = ScriptedDecoder::new();
-        let speech = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(decoder.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("speech stages");
         let persistence = crate::profile_switch::PreparedPersistence::for_test(
             state_path.clone(),
             "active_profile = \"beta\"\n".to_owned(),
@@ -2756,7 +2529,6 @@ mod provisioning_tests {
             local: crate::local::LocalRuntime::empty(),
             #[cfg(feature = "local")]
             start_failures: Vec::new(),
-            speech,
         };
         let park = Arc::new(crate::switch_park::PhasePark::at(
             crate::switch_park::SwitchPhase::Publish,
@@ -2837,13 +2609,13 @@ mod provisioning_tests {
             tokio::time::timeout(Duration::from_millis(50), &mut catalog_reader)
                 .await
                 .is_err(),
-            "model discovery waits while speech and profile publication differ"
+            "model discovery waits while disk and live publication differ"
         );
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut status_reader)
                 .await
                 .is_err(),
-            "operational status waits while speech and profile publication differ"
+            "operational status waits while disk and live publication differ"
         );
 
         token.cancel();
@@ -2871,110 +2643,12 @@ mod provisioning_tests {
         assert_eq!(reply["profile"]["active_profile"], "beta");
         assert_eq!(dirty["dirty"], false);
         let catalog = serde_json::to_value(catalog).expect("catalog serializes");
-        assert_eq!(catalog["data"][1]["id"], "scripted-interim");
+        assert_eq!(catalog["data"][0]["id"], "beta-model");
         assert_eq!(status["profile"], "beta");
-        assert_eq!(
-            status["speech"],
-            serde_json::json!({
-                "configured": true,
-                "ready": true,
-                "gpu": false,
-                "generation": 1,
-            })
-        );
         assert_eq!(
             state.live.read().await.profile_name.as_deref(),
             Some("beta")
         );
-        assert!(decoder.creation_thread().is_some());
-    }
-
-    #[cfg(feature = "stt")]
-    #[test]
-    fn non_preemptible_speech_startup_timeout_is_fatal() {
-        let old = ScriptedDecoder::new();
-        let service = scripted_service(ScriptedModelFactory::new(old.clone()), 15, 500)
-            .expect("old speech starts");
-        let next = ScriptedDecoder::new();
-        let replacement_service = service.clone();
-        let next_factory = ScriptedModelFactory::new(next.clone());
-        let (result, ()) = next_factory
-            .with_construction_blocked(
-                Duration::from_secs(1),
-                Duration::from_secs(1),
-                |factory| {
-                    begin_scripted_replacement(
-                        &replacement_service,
-                        factory,
-                        false,
-                        Duration::from_millis(20),
-                    )
-                },
-                || (),
-            )
-            .expect("next construction reaches the blocked scenario");
-        let error = result.expect_err("parked native-equivalent startup times out");
-        let crate::profile_switch::RuntimeStageFailure::Indeterminate(error) =
-            crate::profile_switch::classify_speech_stage_failure(error)
-        else {
-            panic!("non-preemptible speech timeout must be fatal");
-        };
-        let mut state = two_remote_profiles();
-        state.speech = service;
-        let token = CancellationToken::new();
-
-        let _error = crate::profile_switch::request_fatal_shutdown(
-            &state,
-            &token,
-            "stage-profile-timeout",
-            error,
-        );
-
-        assert!(token.is_cancelled());
-        assert!(state.shutdown.is_fired());
-        assert!(
-            old.worker_dropped(),
-            "the old generation was joined before startup"
-        );
-        assert!(!state.speech.status().ready());
-        assert!(
-            next.wait_until_worker_dropped(Duration::from_secs(1)),
-            "abandoned startup worker exits after construction returns"
-        );
-    }
-
-    #[cfg(feature = "stt")]
-    #[test]
-    fn controlled_shutdown_invalidates_an_unpublished_replacement_token() {
-        let state = two_remote_profiles();
-        let decoder = ScriptedDecoder::new();
-        let replacement = begin_scripted_replacement(
-            &state.speech,
-            ScriptedModelFactory::new(decoder.clone()),
-            false,
-            Duration::from_secs(1),
-        )
-        .expect("speech stages");
-        let token = CancellationToken::new();
-
-        let _error = crate::profile_switch::request_fatal_shutdown(
-            &state,
-            &token,
-            "fatal-test",
-            crate::error::GatewayError::switch_failed(
-                "fatal-test",
-                std::io::Error::other("sentinel"),
-            ),
-        );
-        let error = state
-            .speech
-            .commit_replacement(replacement)
-            .expect_err("shutdown invalidates the staged token");
-
-        assert!(error.to_string().contains("invalidated"));
-        assert!(token.is_cancelled());
-        assert!(state.shutdown.is_fired());
-        assert!(decoder.worker_dropped());
     }
 
     /// A profile over one remote model on `backend` and one local model
@@ -3357,6 +3031,714 @@ mod provisioning_tests {
             matches!(unknown, Err(crate::error::GatewayError::UnknownModel(_))),
             "a name outside loading keeps its 404: {unknown:?}"
         );
+    }
+}
+
+/// The boot `LoadProfile` command owns the process's one STT load: the
+/// control plane serves complete responses while that load is parked,
+/// speech becomes ready when it completes, and later profile and Apply
+/// transactions persist new speech state without touching the running
+/// runtime.
+#[cfg(all(test, feature = "stt"))]
+mod boot_speech_tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "boot-path integration fixtures fail with the invariant named"
+    )]
+
+    use std::time::Duration;
+
+    use gateway_config::{Config, ProfileName};
+    use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+    use tokio_tungstenite::tungstenite::http::HeaderValue;
+    use tokio_util::sync::CancellationToken;
+
+    use crate::commands::Command;
+    use crate::test_support::{
+        AdminPaths, GatedConstructionFactory, arm_boot_speech, boot_state_with_paths, serve_state,
+    };
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    /// A catalog with one remote model per profile on the fake backend.
+    fn catalog(backend: std::net::SocketAddr) -> String {
+        format!(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [stt]\nwindow_seconds = 8\ninterval_ms = 250\nvocabulary = [\"alpha-words\"]\n\
+             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
+             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"backend-model\"\nendpoints = [\"e\"]\n\
+             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
+             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n"
+        )
+    }
+
+    /// A fake OpenAI backend answering every chat completion with a canned
+    /// reply, so a routed request completes end to end.
+    async fn fake_chat_backend() -> std::net::SocketAddr {
+        async fn completions(
+            axum::Json(body): axum::Json<serde_json::Value>,
+        ) -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "id": "cmpl-test",
+                "object": "chat.completion",
+                "model": body["model"].as_str().unwrap_or(""),
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": "pong" },
+                    "finish_reason": "stop"
+                }]
+            }))
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the backend listener binds");
+        let addr = listener.local_addr().expect("the bound address");
+        tokio::spawn(async move {
+            let _ignored = axum::serve(
+                listener,
+                axum::Router::new().route("/chat/completions", axum::routing::post(completions)),
+            )
+            .await;
+        });
+        addr
+    }
+
+    /// Writes the catalog and its state file, returning the fixture pieces.
+    fn persisted_catalog(
+        temp: &tempfile::TempDir,
+        backend: std::net::SocketAddr,
+        active: &str,
+    ) -> (Config, AdminPaths) {
+        let config_path = temp.path().join("gateway.toml");
+        std::fs::write(&config_path, catalog(backend)).expect("write catalog");
+        std::fs::write(
+            gateway_config::profile_state_path(&config_path),
+            format!("active_profile = \"{active}\"\n"),
+        )
+        .expect("write state");
+        let config = Config::load(
+            &config_path,
+            &gateway_config::ProfileSelection::new(Some(active), None),
+        )
+        .expect("load the active profile");
+        let paths = AdminPaths {
+            fixture_dir: temp.path().to_path_buf(),
+            active: active.to_owned(),
+            config_path,
+        };
+        (config, paths)
+    }
+
+    /// Polls `condition` with a bounded wait.
+    async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+        tokio::time::timeout(WAIT, async {
+            while !condition() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+    }
+
+    async fn get(addr: std::net::SocketAddr, path: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .get(format!("http://{addr}{path}"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("GET sends")
+    }
+
+    async fn get_json(addr: std::net::SocketAddr, path: &str) -> serde_json::Value {
+        let response = get(addr, path).await;
+        assert_eq!(response.status(), reqwest::StatusCode::OK, "GET {path}");
+        response.json().await.expect("JSON body")
+    }
+
+    /// One batch transcription through the served router.
+    async fn transcribe(addr: std::net::SocketAddr) -> reqwest::Response {
+        const BOUNDARY: &str = "boot-speech-boundary";
+        let wav = [
+            b'R', b'I', b'F', b'F', 38, 0, 0, 0, b'W', b'A', b'V', b'E', b'f', b'm', b't', b' ',
+            16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0x00, 0x7d, 0, 0, 2, 0, 16, 0, b'd', b'a',
+            b't', b'a', 2, 0, 0, 0, 0, 32,
+        ];
+        let mut body = format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n\
+             scripted-interim\r\n\
+             --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"sample.wav\"\r\n\
+             Content-Type: audio/wav\r\n\r\n"
+        )
+        .into_bytes();
+        body.extend_from_slice(&wav);
+        body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+        reqwest::Client::new()
+            .post(format!("http://{addr}/v1/audio/transcriptions"))
+            .bearer_auth("test-token")
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={BOUNDARY}"),
+            )
+            .body(body)
+            .send()
+            .await
+            .expect("batch transcription sends")
+    }
+
+    /// The Realtime upgrade's status code: 101 once speech is ready with a
+    /// final pass, 503 before. A successful upgrade is closed explicitly so
+    /// the server-side session releases its admission before shutdown.
+    async fn realtime_upgrade_status(addr: std::net::SocketAddr) -> u16 {
+        let mut request = format!("ws://{addr}/v1/realtime?intent=transcription")
+            .into_client_request()
+            .expect("Realtime request builds");
+        request.headers_mut().insert(
+            "authorization",
+            HeaderValue::from_static("Bearer test-token"),
+        );
+        match tokio::time::timeout(WAIT, tokio_tungstenite::connect_async(request))
+            .await
+            .expect("the upgrade answers before the deadline")
+        {
+            Ok((mut socket, response)) => {
+                let status = response.status().as_u16();
+                socket.close(None).await.expect("the socket closes");
+                status
+            }
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                response.status().as_u16()
+            }
+            Err(other) => panic!("expected an upgrade or a refusal, got {other:?}"),
+        }
+    }
+
+    fn speech_models(state: &crate::AppState) -> Vec<String> {
+        state
+            .speech
+            .models()
+            .iter()
+            .map(|model| model.name().to_owned())
+            .collect()
+    }
+
+    /// Labels of every progress event the hub broadcast for `operation`.
+    fn begun_stages(
+        events: &mut tokio::sync::broadcast::Receiver<shared_progress::ProgressEvent>,
+        operation: shared_progress::OperationId,
+    ) -> Vec<String> {
+        let mut labels = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if event.operation == operation
+                && matches!(event.state, shared_progress::EventState::Begun { .. })
+            {
+                labels.push(event.label.clone());
+            }
+        }
+        labels
+    }
+
+    /// While the boot command is parked inside its STT load, every
+    /// control-plane and ready non-STT route answers completely; releasing
+    /// the load brings batch and Realtime to readiness.
+    ///
+    /// Multi-threaded: the closing `speech.shutdown()` blocks its calling
+    /// thread while the served realtime session's cleanup runs on another.
+    #[cfg(feature = "config-ui")]
+    #[tokio::test(flavor = "multi_thread")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the single linear scenario probes every control-plane surface across the same parked-load boundary"
+    )]
+    async fn the_parked_boot_speech_load_never_blocks_the_control_plane() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let interim = ScriptedDecoder::new();
+        interim.push_text("boot transcript");
+        let gate = GatedConstructionFactory::new(
+            ScriptedModelFactory::new(interim).with_final(ScriptedDecoder::new()),
+        );
+        let mut state = boot_state_with_paths(config, paths);
+        arm_boot_speech(&mut state, gate.clone());
+        let addr = serve_state(state.clone()).await;
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let boot = state.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("alpha").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        wait_until("the boot command to park inside the speech load", || {
+            gate.entered()
+        })
+        .await;
+
+        // The switch published before the speech load parked: the remote
+        // model routes and answers end to end.
+        let chat = reqwest::Client::new()
+            .post(format!("http://{addr}/v1/chat/completions"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "alpha-model",
+                "messages": [{"role": "user", "content": "ping"}]
+            }))
+            .send()
+            .await
+            .expect("chat sends");
+        assert_eq!(chat.status(), reqwest::StatusCode::OK, "chat completes");
+        let catalog = get_json(addr, "/v1/models").await;
+        assert_eq!(
+            catalog["data"]
+                .as_array()
+                .expect("catalog data")
+                .iter()
+                .map(|model| model["id"].as_str().expect("model id"))
+                .collect::<Vec<_>>(),
+            ["alpha-model"],
+            "only the ready non-STT model is advertised"
+        );
+
+        let health = get(addr, "/health").await;
+        assert_eq!(health.status(), reqwest::StatusCode::OK);
+        let status = get_json(addr, "/admin/status").await;
+        assert_eq!(status["profile"], "alpha");
+        assert_eq!(
+            status["speech"],
+            serde_json::json!({"configured": false, "ready": false, "gpu": false}),
+            "speech is not ready while its load is parked"
+        );
+        assert_eq!(
+            status["queue"]["active"]["name"], "load-profile: alpha",
+            "the queue status names the boot command doing the load"
+        );
+
+        let progress = get(addr, "/admin/progress").await;
+        assert_eq!(progress.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            progress
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream"),
+            "the progress stream serves while the load is parked"
+        );
+
+        let config_body = get_json(addr, "/admin/config").await;
+        assert_eq!(config_body["active_profile"], "alpha");
+        let profiles = get_json(addr, "/admin/profiles").await;
+        assert_eq!(profiles["profiles"], serde_json::json!(["alpha", "beta"]));
+
+        for (path, content_type) in [
+            ("/config/", "text/html"),
+            ("/config/app.js", "text/javascript"),
+            ("/config/app.css", "text/css"),
+            ("/config/icons/promptforge-icon.png", "image/png"),
+        ] {
+            let response = get(addr, path).await;
+            assert_eq!(response.status(), reqwest::StatusCode::OK, "GET {path}");
+            let served = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .expect("content type")
+                .to_owned();
+            assert!(
+                served.starts_with(content_type),
+                "GET {path} serves {content_type}, got {served}"
+            );
+            assert!(
+                !response.bytes().await.expect("asset body").is_empty(),
+                "GET {path} serves a complete body"
+            );
+        }
+
+        // Speech routes keep their unavailable behavior while parked.
+        let batch = transcribe(addr).await;
+        assert_eq!(
+            batch.status(),
+            reqwest::StatusCode::NOT_FOUND,
+            "batch transcription has no model before the load completes"
+        );
+        assert_eq!(realtime_upgrade_status(addr).await, 503);
+
+        // Release the load: the boot command settles and speech is ready.
+        gate.release();
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the boot command settles")
+            .expect("the worker settles the command");
+        assert!(outcome.is_ok(), "the boot command succeeds: {outcome:?}");
+
+        let status = get_json(addr, "/admin/status").await;
+        assert_eq!(
+            status["speech"],
+            serde_json::json!({"configured": true, "ready": true, "gpu": false})
+        );
+        let catalog = get_json(addr, "/v1/models").await;
+        assert_eq!(
+            catalog["data"]
+                .as_array()
+                .expect("catalog data")
+                .iter()
+                .map(|model| model["id"].as_str().expect("model id"))
+                .collect::<Vec<_>>(),
+            [
+                "alpha-model",
+                "scripted-interim",
+                "scripted-final",
+                "realtime-transcribe"
+            ]
+        );
+        let batch = transcribe(addr).await;
+        assert_eq!(batch.status(), reqwest::StatusCode::OK, "batch is ready");
+        let body: serde_json::Value = batch.json().await.expect("batch body");
+        assert_eq!(body["text"], "boot transcript");
+        assert_eq!(
+            realtime_upgrade_status(addr).await,
+            101,
+            "Realtime is ready"
+        );
+
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        state.speech.shutdown();
+    }
+
+    /// A failed boot STT load fails the boot command but never the gateway:
+    /// the published profile keeps serving, speech stays unavailable, and a
+    /// later switch neither retries the load nor emits a speech stage.
+    #[tokio::test]
+    async fn a_failed_boot_speech_load_leaves_the_gateway_serving_without_speech() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let mut state = boot_state_with_paths(config, paths);
+        arm_boot_speech(
+            &mut state,
+            ScriptedModelFactory::new(ScriptedDecoder::new())
+                .with_interim_failure("boot speech sentinel"),
+        );
+        let addr = serve_state(state.clone()).await;
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let boot = state.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("alpha").expect("profile name"),
+            CancellationToken::new(),
+        ));
+
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the boot command settles")
+            .expect("the worker settles the command");
+        let chain = match &*outcome {
+            Ok(profile) => panic!("the STT failure fails the boot command, got {profile}"),
+            Err(error) => crate::config_write::error_chain(error),
+        };
+        assert!(chain.contains("load-speech"), "the stage is named: {chain}");
+        assert!(
+            chain.contains("boot speech sentinel"),
+            "the cause is preserved: {chain}"
+        );
+        assert!(
+            !state.shutdown.is_fired(),
+            "an STT failure never requests gateway shutdown"
+        );
+
+        let health = get(addr, "/health").await;
+        assert_eq!(health.status(), reqwest::StatusCode::OK);
+        let status = get_json(addr, "/admin/status").await;
+        assert_eq!(status["profile"], "alpha", "the switch published");
+        assert_eq!(
+            status["speech"],
+            serde_json::json!({"configured": false, "ready": false, "gpu": false})
+        );
+        let catalog = get_json(addr, "/v1/models").await;
+        assert_eq!(
+            catalog["data"]
+                .as_array()
+                .expect("catalog data")
+                .iter()
+                .map(|model| model["id"].as_str().expect("model id"))
+                .collect::<Vec<_>>(),
+            ["alpha-model"],
+            "speech discovery stays empty until restart"
+        );
+
+        // A later switch runs its full course without a speech stage and
+        // without retrying the spent initial load.
+        let mut events = state.hub.subscribe();
+        let switch = state.commands.enqueue(Command::load_profile(
+            ProfileName::parse("beta").expect("profile name"),
+            true,
+            CancellationToken::new(),
+        ));
+        let operation = switch.operation;
+        let outcome = tokio::time::timeout(WAIT, switch.outcome)
+            .await
+            .expect("the switch settles")
+            .expect("the worker settles the command");
+        assert!(outcome.is_ok(), "the later switch succeeds: {outcome:?}");
+        assert!(
+            !begun_stages(&mut events, operation).contains(&"loading-speech".to_owned()),
+            "a non-boot switch emits no speech stage"
+        );
+        assert!(!state.speech.status().ready());
+
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+    }
+
+    /// Cancelling the boot command while its STT load is parked settles the
+    /// command as cancelled, spends the one attempt, and lets the worker
+    /// exit on queue shutdown.
+    #[tokio::test]
+    async fn cancelling_the_parked_boot_speech_load_settles_cancelled() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let gate = GatedConstructionFactory::new(ScriptedModelFactory::new(ScriptedDecoder::new()));
+        let mut state = boot_state_with_paths(config, paths);
+        arm_boot_speech(&mut state, gate.clone());
+        let addr = serve_state(state.clone()).await;
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let boot = state.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("alpha").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        wait_until("the boot command to park inside the speech load", || {
+            gate.entered()
+        })
+        .await;
+
+        assert!(state.commands.cancel_active(), "the boot command is active");
+        gate.release();
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the cancelled command settles")
+            .expect("the worker settles the command");
+        assert!(
+            matches!(
+                &*outcome,
+                Err(crate::error::GatewayError::CommandCancelled(_))
+            ),
+            "the cancelled speech load settles the command as cancelled: {outcome:?}"
+        );
+        assert!(
+            !state.speech.status().ready(),
+            "the cancelled load published nothing"
+        );
+        let health = get(addr, "/health").await;
+        assert_eq!(health.status(), reqwest::StatusCode::OK);
+
+        state.commands.shutdown();
+        tokio::time::timeout(WAIT, worker)
+            .await
+            .expect("the worker exits on shutdown")
+            .expect("the worker task joins");
+    }
+
+    /// Boot speech A keeps serving after a later switch persists B, with no
+    /// speech stage on the switch's stream; a fresh process state over the
+    /// persisted selection loads B.
+    #[tokio::test]
+    async fn a_later_switch_persists_b_while_boot_speech_a_keeps_serving() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let config_path = paths.config_path.clone();
+        let interim = ScriptedDecoder::new();
+        interim.push_text("boot alpha transcript");
+        let mut state = boot_state_with_paths(config, paths);
+        arm_boot_speech(&mut state, ScriptedModelFactory::new(interim));
+        let addr = serve_state(state.clone()).await;
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let boot = state.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("alpha").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the boot command settles")
+            .expect("the worker settles the command");
+        assert!(outcome.is_ok(), "boot A loads: {outcome:?}");
+        assert_eq!(speech_models(&state), ["scripted-interim"]);
+
+        // Switch to beta through the admin route, reading its stage stream
+        // to the terminal event.
+        let mut switching = reqwest::Client::new()
+            .post(format!("http://{addr}/admin/switch-profile"))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": "beta" }))
+            .send()
+            .await
+            .expect("the switch request sends");
+        assert_eq!(switching.status(), reqwest::StatusCode::OK);
+        let mut body = String::new();
+        while !body.contains("\"status\"") {
+            let chunk = tokio::time::timeout(WAIT, switching.chunk())
+                .await
+                .expect("the switch stream answers")
+                .expect("the switch stream reads");
+            let Some(chunk) = chunk else { break };
+            body.push_str(std::str::from_utf8(&chunk).expect("SSE frames are UTF-8"));
+        }
+        assert!(
+            body.contains("\"ready\""),
+            "the switch to beta succeeds: {body}"
+        );
+        assert!(
+            !body.contains("loading-speech"),
+            "the switch emits no speech stage: {body}"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(gateway_config::profile_state_path(&config_path))
+                .expect("read state"),
+            "active_profile = \"beta\"\n",
+            "the switch persisted B"
+        );
+        assert_eq!(
+            speech_models(&state),
+            ["scripted-interim"],
+            "the running process stays on boot speech A"
+        );
+        let batch = transcribe(addr).await;
+        assert_eq!(batch.status(), reqwest::StatusCode::OK);
+        let batch_body: serde_json::Value = batch.json().await.expect("batch body");
+        assert_eq!(
+            batch_body["text"], "boot alpha transcript",
+            "boot speech A still serves"
+        );
+
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        state.speech.shutdown();
+
+        // The restart: a fresh process state over the persisted selection
+        // loads B through its own boot command.
+        let config = Config::load(&config_path, &gateway_config::ProfileSelection::default())
+            .expect("the persisted selection loads");
+        let paths = AdminPaths {
+            fixture_dir: temp.path().to_path_buf(),
+            active: "beta".to_owned(),
+            config_path: config_path.clone(),
+        };
+        let mut restarted = boot_state_with_paths(config, paths);
+        arm_boot_speech(
+            &mut restarted,
+            ScriptedModelFactory::new(ScriptedDecoder::new()).with_final(ScriptedDecoder::new()),
+        );
+        let worker = restarted
+            .commands
+            .spawn_worker(&restarted)
+            .expect("worker spawns");
+        let boot = restarted.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("beta").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the restart boot command settles")
+            .expect("the worker settles the command");
+        assert!(outcome.is_ok(), "the restart boot loads: {outcome:?}");
+        assert_eq!(
+            speech_models(&restarted),
+            ["scripted-interim", "scripted-final", "realtime-transcribe"],
+            "the new process loads B"
+        );
+        restarted.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        restarted.speech.shutdown();
+    }
+
+    /// An Apply that persists an STT settings change leaves the running
+    /// boot runtime untouched and emits no speech stage.
+    #[tokio::test]
+    async fn an_apply_persisting_speech_changes_leaves_boot_speech_untouched() {
+        let backend = fake_chat_backend().await;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (config, paths) = persisted_catalog(&temp, backend, "alpha");
+        let config_path = paths.config_path.clone();
+        let interim = ScriptedDecoder::new();
+        interim.push_text("boot alpha transcript");
+        let mut state = boot_state_with_paths(config, paths);
+        arm_boot_speech(&mut state, ScriptedModelFactory::new(interim));
+        let addr = serve_state(state.clone()).await;
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+        let boot = state.commands.enqueue(Command::boot_load_profile(
+            ProfileName::parse("alpha").expect("profile name"),
+            CancellationToken::new(),
+        ));
+        let outcome = tokio::time::timeout(WAIT, boot.outcome)
+            .await
+            .expect("the boot command settles")
+            .expect("the worker settles the command");
+        assert!(outcome.is_ok(), "boot A loads: {outcome:?}");
+
+        // Stage an STT vocabulary change through the real save route.
+        let mut document = get_json(addr, "/admin/config").await;
+        document["stt"]["vocabulary"] = serde_json::json!(["beta-words"]);
+        let save = reqwest::Client::new()
+            .put(format!("http://{addr}/admin/config"))
+            .bearer_auth("test-token")
+            .json(&document)
+            .send()
+            .await
+            .expect("the save sends");
+        assert_eq!(save.status(), reqwest::StatusCode::OK);
+
+        let mut events = state.hub.subscribe();
+        let apply = reqwest::Client::new()
+            .post(format!("http://{addr}/admin/config-apply"))
+            .bearer_auth("test-token")
+            .send()
+            .await
+            .expect("the apply sends");
+        assert_eq!(apply.status(), reqwest::StatusCode::OK);
+        let reply: serde_json::Value = apply.json().await.expect("apply body");
+        assert_eq!(reply["reloaded"], true);
+        assert_eq!(
+            reply["applied"],
+            serde_json::json!(["gateway.state.toml", "gateway.toml"])
+        );
+
+        assert!(
+            std::fs::read_to_string(&config_path)
+                .expect("read applied config")
+                .contains("beta-words"),
+            "the apply persisted the new speech setting"
+        );
+        assert_eq!(
+            speech_models(&state),
+            ["scripted-interim"],
+            "the running process stays on boot speech A"
+        );
+        let batch = transcribe(addr).await;
+        let batch_body: serde_json::Value = batch.json().await.expect("batch body");
+        assert_eq!(batch_body["text"], "boot alpha transcript");
+        let statuses = state.commands.active_command();
+        assert!(statuses.is_none(), "the apply command settled");
+        assert!(
+            !begun_stages_any(&mut events).contains(&"loading-speech".to_owned()),
+            "the apply emits no speech stage"
+        );
+
+        state.commands.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        state.speech.shutdown();
+    }
+
+    /// Labels of every begun progress event, across operations.
+    fn begun_stages_any(
+        events: &mut tokio::sync::broadcast::Receiver<shared_progress::ProgressEvent>,
+    ) -> Vec<String> {
+        let mut labels = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if matches!(event.state, shared_progress::EventState::Begun { .. }) {
+                labels.push(event.label.clone());
+            }
+        }
+        labels
     }
 }
 

@@ -7,7 +7,7 @@ use crate::audio::AudioError;
 use crate::realtime::input::{InputSnapshot, UncommittedInput};
 use crate::realtime::registry::SessionRegistry;
 use crate::realtime::session::{Session, SessionError};
-use crate::test_fixtures::{begin_scripted_replacement, scripted_service};
+use crate::test_fixtures::scripted_service;
 
 const WAIT: Duration = Duration::from_secs(1);
 
@@ -45,37 +45,23 @@ fn session_with_audio(service: &crate::SpeechService, payload: &str, budget: usi
     session
 }
 
+/// Cancels the session's generation epoch the way production still can:
+/// closing the runtime's admission, as service shutdown does.
 #[allow(
     clippy::expect_used,
-    reason = "the replacement outcome is the deterministic cancellation assertion"
+    reason = "the session owns its generation in these fixtures"
 )]
-async fn cancel_generation_epoch(service: &crate::SpeechService, session: &Session) {
+fn cancel_generation_epoch(service: &crate::SpeechService, session: &Session) {
     let epoch = session
         .engine
         .as_ref()
         .expect("session owns its generation")
         .epoch()
         .clone();
-    let replacement_service = service.clone();
-    let attempt = tokio::task::spawn_blocking(move || {
-        begin_scripted_replacement(
-            &replacement_service,
-            ScriptedModelFactory::new(ScriptedDecoder::new()),
-            false,
-            Duration::from_millis(50),
-        )
-    })
-    .await
-    .expect("replacement attempt joins");
-    assert!(
-        attempt
-            .expect_err("the live session prevents replacement")
-            .to_string()
-            .contains("quiescence deadline")
-    );
+    service.shutdown_admission();
     assert!(
         epoch.is_cancelled(),
-        "replacement cancels the request epoch"
+        "admission shutdown cancels the request epoch"
     );
 }
 
@@ -126,7 +112,7 @@ async fn blocked_interim_keeps_exact_budget_until_worker_retirement_and_commit_r
             },
             |session| async {
                 assert_eq!(probe.retained_samples(), 16_002);
-                cancel_generation_epoch(&service, session).await;
+                cancel_generation_epoch(&service, session);
                 assert!(matches!(
                     session.finish_interim().await,
                     Err(SessionError::Inference)
@@ -191,7 +177,7 @@ async fn blocked_final_keeps_budget_after_epoch_cancellation_until_worker_retire
         .take()
         .pcm_budget_probe();
     let blocked_probe = probe.clone();
-    let replacement_service = service.clone();
+    let cancellation_service = service.clone();
 
     final_decoder
         .with_next_decode_blocked(
@@ -202,7 +188,7 @@ async fn blocked_final_keeps_budget_after_epoch_cancellation_until_worker_retire
             },
             |(session, item_id)| async move {
                 assert_eq!(blocked_probe.retained_samples(), 8_000);
-                cancel_generation_epoch(&replacement_service, session).await;
+                cancel_generation_epoch(&cancellation_service, session);
                 session
                     .finish_finalization(&item_id)
                     .await

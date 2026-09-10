@@ -82,6 +82,85 @@ pub(crate) fn boot_state(config: Config) -> AppState {
     state_over(config, Routing::empty(), None)
 }
 
+/// [`boot_state`] with config-file context, so a boot command's switch can
+/// persist the active-profile selection.
+pub(crate) fn boot_state_with_paths(config: Config, paths: AdminPaths) -> AppState {
+    state_over(config, Routing::empty(), Some(paths))
+}
+
+/// Arms the state's empty speech facade to publish `factory`'s
+/// deterministic workers on its one initial load, replacing the Whisper
+/// backend for boot-path tests.
+#[cfg(feature = "stt")]
+pub(crate) fn arm_boot_speech(
+    state: &mut AppState,
+    factory: impl gateway_stt_engine::ModelFactory,
+) {
+    let policy = gateway_stt_engine::EnginePolicy::new(15, 500, false)
+        .expect("the scripted boot policy is valid");
+    state.speech = gateway_stt::SpeechService::new().with_scripted_initial_load(factory, policy);
+}
+
+/// A scripted speech factory whose worker construction parks until
+/// [`GatedConstructionFactory::release`], so a test can hold the boot
+/// command inside its STT load while it probes the serving surface.
+#[cfg(feature = "stt")]
+#[derive(Clone, Debug)]
+pub(crate) struct GatedConstructionFactory {
+    inner: Arc<gateway_stt::test_fixtures::ScriptedModelFactory>,
+    entered: Arc<std::sync::atomic::AtomicBool>,
+    open: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+#[cfg(feature = "stt")]
+impl GatedConstructionFactory {
+    /// Wraps a scripted factory with a closed construction gate.
+    pub(crate) fn new(inner: gateway_stt::test_fixtures::ScriptedModelFactory) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            entered: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            open: Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new())),
+        }
+    }
+
+    /// Whether worker construction has entered the gate.
+    pub(crate) fn entered(&self) -> bool {
+        self.entered.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Lets parked worker construction complete.
+    pub(crate) fn release(&self) {
+        let (lock, changed) = &*self.open;
+        *lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        changed.notify_all();
+    }
+}
+
+#[cfg(feature = "stt")]
+impl gateway_stt_engine::ModelFactory for GatedConstructionFactory {
+    fn create(
+        &self,
+        mode: gateway_stt_engine::DecodeMode,
+    ) -> Result<Option<Box<dyn gateway_stt_engine::Decoder>>, gateway_stt_engine::TranscribeError>
+    {
+        self.entered
+            .store(true, std::sync::atomic::Ordering::Release);
+        let (lock, changed) = &*self.open;
+        let mut open = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while !*open {
+            open = changed
+                .wait(open)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        drop(open);
+        self.inner.create(mode)
+    }
+}
+
 /// The shared body behind [`app_state`] and [`boot_state`].
 fn state_over(config: Config, routing: Routing, paths: Option<AdminPaths>) -> AppState {
     let key = config.server_key();
@@ -292,7 +371,6 @@ mod tests {
                 "configured": true,
                 "ready": true,
                 "gpu": true,
-                "generation": 1,
             })
         );
         let speech_endpoint = status["endpoints"]

@@ -183,18 +183,6 @@ impl Session {
         }
         Ok(self.drain_events())
     }
-    pub(crate) fn replacement_events(&self) -> Vec<ServerEvent> {
-        let mut events = self
-            .committed
-            .values()
-            .filter(|item| !item.is_terminal())
-            .map(|item| ServerEvent::engine_replaced_item(self.ids.event(), item.id().to_owned()))
-            .collect::<Vec<_>>();
-        if self.input.is_some() {
-            events.push(ServerEvent::engine_replaced(self.ids.event()));
-        }
-        events
-    }
 }
 
 fn sample_millis(samples: u64) -> u64 {

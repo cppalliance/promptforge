@@ -46,11 +46,21 @@ pub(crate) enum Command {
     /// is shared: a debounced duplicate that asks to persist upgrades the
     /// command it attaches to, so an explicit switch to the boot profile
     /// still persists.
+    ///
+    /// `boot` marks the runner's startup command - the only command allowed
+    /// to attempt the process's one guarded STT load, which it runs after
+    /// its remote and local work publishes. The flag lives on the command
+    /// itself: a debounced duplicate attaches to the pending or active
+    /// command without disturbing it, and a superseding switch carries no
+    /// flag, so a superseded or cancelled boot command is never retried.
     LoadProfile {
         /// The profile to load.
         name: ProfileName,
         /// Whether a successful load persists the active-profile selection.
         persist: Arc<AtomicBool>,
+        /// Whether this is the runner's boot command, permitted to attempt
+        /// the one initial STT load after its switch work.
+        boot: bool,
         /// Cancellation token, checked at chunk and phase boundaries.
         token: CancellationToken,
     },
@@ -115,6 +125,19 @@ impl Command {
         Command::LoadProfile {
             name,
             persist: Arc::new(AtomicBool::new(persist)),
+            boot: false,
+            token,
+        }
+    }
+
+    /// The runner's boot command: the one `LoadProfile` permitted to attempt
+    /// the process's single STT load after its remote and local work. The
+    /// boot selection stays ephemeral, exactly as startup always behaved.
+    pub(crate) fn boot_load_profile(name: ProfileName, token: CancellationToken) -> Command {
+        Command::LoadProfile {
+            name,
+            persist: Arc::new(AtomicBool::new(false)),
+            boot: true,
             token,
         }
     }
@@ -739,8 +762,9 @@ async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> O
         Command::LoadProfile {
             name,
             persist,
+            boot,
             token,
-        } => load_profile(&state, name, persist, token, tree).await,
+        } => load_profile(&state, name, persist, boot, token, tree).await,
         Command::ApplyConfig { snapshot, token } => {
             crate::config_apply::apply_config(&state, snapshot, token, tree).await
         }
@@ -754,10 +778,13 @@ async fn run_command(state: AppState, command: Command, tree: ProgressTree) -> O
 }
 
 /// The `LoadProfile` body: the profile-switch machinery, made cancellable.
+/// The boot command alone follows its published switch with the process's
+/// one guarded STT load attempt.
 async fn load_profile(
     state: &AppState,
     name: ProfileName,
     persist: Arc<AtomicBool>,
+    boot: bool,
     token: CancellationToken,
     tree: ProgressTree,
 ) -> Outcome {
@@ -766,6 +793,12 @@ async fn load_profile(
     // shadows. Holding the lock across the download is what used to park
     // every save, revert, and apply behind a boot load.
     let label = format!("load-profile: {name}");
+    // The boot command's speech stage registers before the tree moves into
+    // the switch (registration is what emits the stage's begun event); the
+    // leaf reports nothing until the load itself begins after the switch
+    // settles.
+    #[cfg(feature = "stt")]
+    let speech = boot.then(|| tree.register("loading-speech", 5.0));
     // The flag is read at commit time, so a debounced duplicate arriving
     // mid-run can still upgrade an ephemeral boot load into a persisted one.
     let result = crate::run_switch_with_config(
@@ -783,12 +816,71 @@ async fn load_profile(
         &token,
     )
     .await;
-    match result {
+    let result = match result {
         Ok(profile) => Ok(profile),
         // A failure under a fired token reports as the cancellation it is,
         // however deep in provisioning the stop landed.
-        Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label)),
+        Err(_) if token.is_cancelled() => Err(GatewayError::CommandCancelled(label.clone())),
         Err(error) => Err(error),
+    };
+    #[cfg(feature = "stt")]
+    if let Some(loading) = speech {
+        // The switch's remote and local work has settled: a full commit and
+        // a partial start both published the profile, and only a published
+        // boot profile makes the STT attempt.
+        let published = match &result {
+            Ok(_) => true,
+            #[cfg(feature = "local")]
+            Err(GatewayError::PartialStart { .. }) => true,
+            Err(_) => false,
+        };
+        if published {
+            boot_speech_load(state, loading, &token, &label).await?;
+        } else {
+            loading.fail();
+        }
+    }
+    #[cfg(not(feature = "stt"))]
+    let _ = boot;
+    result
+}
+
+/// The boot command's isolated STT attempt: the process's one guarded
+/// initial load, after the switch published the boot profile. A failure
+/// fails the boot command but never the gateway - speech stays unavailable
+/// until process restart, and no later command retries.
+#[cfg(feature = "stt")]
+async fn boot_speech_load(
+    state: &AppState,
+    loading: shared_progress::ProgressHandle,
+    token: &CancellationToken,
+    label: &str,
+) -> Result<(), GatewayError> {
+    let service = state.speech.clone();
+    let config = state.live.read().await.config.as_ref().clone();
+    let progress = loading.clone();
+    let worker_token = token.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        service.load_initial(&config, Some(&progress), &worker_token)
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => {
+            loading.complete();
+            Ok(())
+        }
+        Ok(Err(_)) if token.is_cancelled() => {
+            loading.fail();
+            Err(GatewayError::CommandCancelled(label.to_owned()))
+        }
+        Ok(Err(error)) => {
+            loading.fail();
+            Err(GatewayError::switch_failed("load-speech", error))
+        }
+        Err(join) => {
+            loading.fail();
+            Err(GatewayError::switch_failed("load-speech-task", join))
+        }
     }
 }
 
@@ -1613,7 +1705,10 @@ mod tests {
             .spawn_worker_with(&state, recording_executor(&order))
             .expect("worker spawns");
 
-        let outcome = cancelled.outcome.await.expect("the cancelled command settles");
+        let outcome = cancelled
+            .outcome
+            .await
+            .expect("the cancelled command settles");
         assert!(matches!(&*outcome, Err(GatewayError::CommandCancelled(_))));
         let outcome = kept.outcome.await.expect("the kept command settles");
         assert!(outcome.is_ok(), "the kept command runs: {outcome:?}");
@@ -1638,5 +1733,169 @@ mod tests {
             matches!(&outcome, Err(GatewayError::UnknownModel(name)) if name == "ghost"),
             "an unload miss is UnknownModel, not a queue error: {outcome:?}"
         );
+    }
+
+    /// A two-profile remote catalog on an endpoint nothing listens on:
+    /// remote routing is static, so the switch succeeds without network.
+    #[cfg(feature = "stt")]
+    fn speech_state() -> AppState {
+        let catalog = Config::from_toml_str(
+            "config-version = 2\n\
+             [server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\
+             [[endpoint]]\nid = \"e\"\nprotocol = \"openai\"\nbase_url = \"http://127.0.0.1:9\"\napi_key = \"\"\n\
+             [[model]]\nname = \"alpha-model\"\ndescription = \"a\"\ncontext = 1024\nupstream = \"a\"\nendpoints = [\"e\"]\n\
+             [[model]]\nname = \"beta-model\"\ndescription = \"b\"\ncontext = 1024\nupstream = \"b\"\nendpoints = [\"e\"]\n\
+             [[profile]]\nname = \"alpha\"\nmodels = [\"alpha-model\"]\n\
+             [[profile]]\nname = \"beta\"\nmodels = [\"beta-model\"]\n",
+        )
+        .expect("catalog parses");
+        crate::test_support::boot_state(catalog)
+    }
+
+    #[cfg(feature = "stt")]
+    fn boot(name: &str) -> Command {
+        Command::boot_load_profile(
+            ProfileName::parse(name).expect("profile name"),
+            CancellationToken::new(),
+        )
+    }
+
+    /// The boot command runs its switch first, then makes the process's one
+    /// guarded STT load attempt.
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn the_boot_command_loads_speech_after_its_switch() {
+        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+        let mut state = speech_state();
+        crate::test_support::arm_boot_speech(
+            &mut state,
+            ScriptedModelFactory::new(ScriptedDecoder::new()),
+        );
+        let tree = state.hub.operation();
+        let outcome = run_command(state.clone(), boot("alpha"), tree).await;
+
+        assert_eq!(
+            outcome.as_deref().ok(),
+            Some("alpha"),
+            "the boot command settles with the profile: {outcome:?}"
+        );
+        assert_eq!(
+            state.live.read().await.profile_name.as_deref(),
+            Some("alpha"),
+            "the switch published before the command settled"
+        );
+        assert!(
+            state.speech.status().ready(),
+            "the boot command's guarded load published the speech runtime"
+        );
+        assert_eq!(
+            state
+                .speech
+                .models()
+                .iter()
+                .map(gateway_stt::SpeechModelInfo::name)
+                .collect::<Vec<_>>(),
+            ["scripted-interim"]
+        );
+        state.speech.shutdown();
+    }
+
+    /// A `LoadProfile` without the boot flag never attempts the STT load:
+    /// the guarded initial load stays unspent and speech stays inactive.
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn a_plain_load_profile_never_attempts_the_speech_load() {
+        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+        let mut state = speech_state();
+        crate::test_support::arm_boot_speech(
+            &mut state,
+            ScriptedModelFactory::new(ScriptedDecoder::new()),
+        );
+        let tree = state.hub.operation();
+        let outcome = run_command(state.clone(), load_profile("alpha"), tree).await;
+
+        assert!(outcome.is_ok(), "the switch itself succeeds: {outcome:?}");
+        assert!(!state.speech.status().ready());
+        assert!(
+            state.speech.models().is_empty(),
+            "no speech model is discovered after a non-boot switch"
+        );
+    }
+
+    /// A duplicate attaching to the pending boot command shares its outcome;
+    /// the single load attempt runs once for both waiters.
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn a_duplicate_attached_to_the_boot_command_shares_the_single_speech_load() {
+        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+        let mut state = speech_state();
+        crate::test_support::arm_boot_speech(
+            &mut state,
+            ScriptedModelFactory::new(ScriptedDecoder::new()),
+        );
+        let queue = state.commands.clone();
+        // Both enqueue before the worker spawns, so the attach cannot race
+        // the drain.
+        let boot_handle = queue.enqueue(boot("alpha"));
+        let attached = queue.enqueue(load_profile("alpha"));
+        assert_eq!(
+            boot_handle.operation, attached.operation,
+            "the duplicate attaches to the boot command"
+        );
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+
+        let outcome = boot_handle.outcome.await.expect("the boot command settles");
+        assert!(outcome.is_ok(), "the boot command succeeds: {outcome:?}");
+        let outcome = attached.outcome.await.expect("the attached waiter settles");
+        assert!(
+            outcome.is_ok(),
+            "the attached duplicate shares the outcome: {outcome:?}"
+        );
+        assert!(
+            state.speech.status().ready(),
+            "the one guarded load published the runtime for both waiters"
+        );
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
+        state.speech.shutdown();
+    }
+
+    /// A newer switch superseding the pending boot command does not inherit
+    /// its flag: the process never attempts the STT load.
+    #[cfg(feature = "stt")]
+    #[tokio::test]
+    async fn a_superseded_boot_command_leaves_speech_unattempted() {
+        use gateway_stt::test_fixtures::{ScriptedDecoder, ScriptedModelFactory};
+
+        let mut state = speech_state();
+        crate::test_support::arm_boot_speech(
+            &mut state,
+            ScriptedModelFactory::new(ScriptedDecoder::new()),
+        );
+        let queue = state.commands.clone();
+        let booted = queue.enqueue(boot("alpha"));
+        let newer = queue.enqueue(load_profile("beta"));
+        let outcome = booted.outcome.await.expect("the superseded boot settles");
+        assert!(
+            matches!(&*outcome, Err(GatewayError::CommandCancelled(_))),
+            "supersession settles the boot command as cancelled: {outcome:?}"
+        );
+        let worker = state.commands.spawn_worker(&state).expect("worker spawns");
+
+        let outcome = newer.outcome.await.expect("the newer switch settles");
+        assert!(outcome.is_ok(), "the newer switch succeeds: {outcome:?}");
+        assert_eq!(
+            state.live.read().await.profile_name.as_deref(),
+            Some("beta")
+        );
+        assert!(
+            !state.speech.status().ready() && state.speech.models().is_empty(),
+            "the superseding command carries no boot flag and loads no speech"
+        );
+        queue.shutdown();
+        worker.await.expect("the worker exits on shutdown");
     }
 }
