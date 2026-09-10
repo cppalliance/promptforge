@@ -42,7 +42,7 @@ use super::tool_loop::ProseMode;
 ///
 /// The frame is born at a section entry and dies at its teardown. One
 /// section entry is one frame, regardless of arrival mode (fall-through,
-/// jump, execute); a jump ends the current frame and the driver builds a
+/// jump, call); a jump ends the current frame and the driver builds a
 /// fresh one for the target - only `reply` and `var` cross, as call data.
 /// No derives: the VM and the trait-object handles support neither `Clone`
 /// nor `Debug`.
@@ -140,7 +140,7 @@ impl SectionContext {
         )?;
         let reply = incoming_reply.map(str::to_owned);
         // The `list_from_section` callback resolves over the section's
-        // visible set; the suspending calls (`execute`, `fanout`,
+        // visible set; the suspending calls (`call`, `fanout`,
         // `models.infer`) are the yield shims the setup half installs.
         let visible = visible_sections(siblings, section);
         let list_callback = move |heading: String| list_items_from_visible(&heading, &visible);
@@ -257,7 +257,7 @@ impl SectionContext {
     /// effective reporting handles
     /// are the fanout's too: the run's own observer and debug sink with the
     /// fanout's fresh turn counter arrive through the context's fanout fork,
-    /// so the arm's nested `execute`/`fanout` chains report through them as
+    /// so the arm's nested `call`/`fanout` chains report through them as
     /// well.
     ///
     /// # Errors

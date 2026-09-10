@@ -2,7 +2,7 @@
 //! suspending host calls.
 //!
 //! Yield cannot cross the C boundary, so `models.infer`, `handle:infer`,
-//! `execute`, `fanout`, and `tool_call` are Lua shims (source in `__impl_coro.lua` beside this
+//! `call`, `fanout`, and `tool_call` are Lua shims (source in `__impl_coro.lua` beside this
 //! file) that `coroutine.yield` a request table and interpret the two
 //! resume values as the `(ok, result)` envelope; coroutine driving itself
 //! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
@@ -68,7 +68,7 @@ static H1_SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, String>> = Lazy
 /// validation. The `models` table is passed to the shim chunk as an
 /// argument, so the chunk never reads a global; the chunk shims
 /// `models.infer` and wraps the `models.use`/`models.get` returns, and the
-/// `execute`/`fanout`/`tool_call` shims and `wrap_handle` come back for the
+/// `call`/`fanout`/`tool_call` shims and `wrap_handle` come back for the
 /// host to install.
 ///
 /// # Errors
@@ -90,8 +90,8 @@ pub(crate) fn install_shim_prelude(lua: &Lua) -> Result<()> {
         .load(lua)?
         .call((yield_fn, var_snapshot, models))
         .map_err(Error::lua)?;
-    let execute: Function = shims.raw_get("execute").map_err(Error::lua)?;
-    globals.raw_set("execute", execute).map_err(Error::lua)?;
+    let call: Function = shims.raw_get("call").map_err(Error::lua)?;
+    globals.raw_set("call", call).map_err(Error::lua)?;
     let fanout: Function = shims.raw_get("fanout").map_err(Error::lua)?;
     globals.raw_set("fanout", fanout).map_err(Error::lua)?;
     let tool_call: Function = shims.raw_get("tool_call").map_err(Error::lua)?;
@@ -134,7 +134,7 @@ pub fn install_agent_chat_shim(lua: &Lua) -> Result<()> {
 /// the registry so each H1 block's fresh live models table can be wrapped
 /// by [`shim_live_h1_models`].
 ///
-/// The H1 control stubs are untouched: `execute`/`fanout`/`jump`/
+/// The H1 control stubs are untouched: `call`/`fanout`/`jump`/
 /// `list_from_section` keep raising before anything can yield. H1's live
 /// models table does not exist at construction (the capability resolvers
 /// install it per block), so the prelude runs with a nil models table and

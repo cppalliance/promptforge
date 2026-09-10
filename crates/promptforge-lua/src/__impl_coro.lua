@@ -36,9 +36,9 @@ local function wrap_handle(handle)
   return proxy
 end
 
-local function execute_section(target, input)
+local function call_section(target, input)
   local ok, result = yield({
-    op = "execute",
+    op = "call",
     target = target,
     input = input,
     var = var_snapshot(),
@@ -91,7 +91,7 @@ if models then
 end
 
 return {
-  execute = execute_section,
+  call = call_section,
   fanout = fanout_collection,
   tool_call = tool_call,
   chat = chat,

@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::{Error, Result};
 
-/// Maximum nested `execute()` depth (inclusive of the first call).
-pub(crate) const MAX_EXECUTE_DEPTH: usize = 8;
+/// Maximum nested `call()` depth (inclusive of the first call).
+pub(crate) const MAX_CALL_DEPTH: usize = 8;
 
 /// The prompt language major this executor implements.
 pub(crate) const SUPPORTED_MAJOR: u32 = 1;

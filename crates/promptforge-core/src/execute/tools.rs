@@ -5,7 +5,7 @@
 //! fresh conversation. `handle:infer(prompt)` runs it with the handle's
 //! frozen binding; `models.infer(prompt)` resolves the section's current
 //! model and runs the same path. Neither form advertises tools, sets
-//! `reply`, or touches `sys`. A Lua block that needs tools uses `execute`
+//! `reply`, or touches `sys`. A Lua block that needs tools uses `call`
 //! on a section. The scheduler's leaf dispatch spawns the round and resumes
 //! the yielding chain with its outcome.
 

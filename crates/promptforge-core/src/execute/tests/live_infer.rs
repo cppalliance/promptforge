@@ -141,7 +141,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn captured_bindings_reach_section_execute_and_fanout_vms() {
+async fn captured_bindings_reach_section_call_and_fanout_vms() {
     let echo = Arc::new(EchoTool);
     let descriptor = ToolDescriptor::new(
         PickerToolId::new("tests", "echo"),
@@ -163,7 +163,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
          ## Parent\n\n\
          ```lua\n\
          local direct = binding_names()\n\
-         local called = execute('## Called')\n\
+         local called = call('## Called')\n\
          local arms = fanout('### Worker', list_from_section('### Items'))\n\
          return direct .. '|' .. called .. '|' .. table.concat(arms, ',')\n\
          ```\n\n\

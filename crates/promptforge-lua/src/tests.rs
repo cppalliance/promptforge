@@ -1473,7 +1473,7 @@ fn jump_during_shared_replay_is_a_hard_error() {
     vm.install_host_apis(&observer, "Test")
         .expect("host APIs must install");
     vm.install_control_globals(
-        |_, _, _| Err(Error::Lua("execute is not needed here".to_owned())),
+        |_, _, _| Err(Error::Lua("call is not needed here".to_owned())),
         |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
         |_| {
             Err(Error::Lua(
@@ -1495,7 +1495,7 @@ fn jump_during_shared_replay_is_a_hard_error() {
 }
 
 #[test]
-fn execute_with_a_non_string_target_errors() {
+fn call_with_a_non_string_target_errors() {
     // The control callback resolves its target through the same
     // `resolve_section_target` boundary as the engine: a number is not a
     // heading, and the error says so.
@@ -1519,14 +1519,14 @@ fn execute_with_a_non_string_target_errors() {
     let out = run_scalar(
         &vm,
         &program(
-            "local ok, err = pcall(execute, 42)\n\
+            "local ok, err = pcall(call, 42)\n\
              assert(not ok and tostring(err):find('section target must be a string'), tostring(err))\n\
              return 'ok'",
         ),
         &NullObserver::default(),
         "Test",
     )
-    .expect("a non-string execute target must error");
+    .expect("a non-string call target must error");
     assert_eq!(out.as_deref(), Some("ok"));
     vm.teardown(&NullObserver::default(), "Test");
 }

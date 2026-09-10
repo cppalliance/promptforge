@@ -127,16 +127,16 @@ fn models_infer_yields_a_well_formed_request() {
 }
 
 #[test]
-fn execute_yields_target_input_and_the_var_snapshot() {
+fn call_yields_target_input_and_the_var_snapshot() {
     let var = json!({ "k": 1 });
     let vm = scheduler_vm(&ModelSet::default(), Some(&var));
-    match yielded_request(&vm, r###"return execute("## Child", "override")"###) {
-        Request::Execute { target, input, var } => {
+    match yielded_request(&vm, r###"return call("## Child", "override")"###) {
+        Request::Call { target, input, var } => {
             assert_eq!(target, "## Child");
             assert_eq!(input.as_deref(), Some("override"));
             assert_eq!(var, json!({ "k": 1 }));
         }
-        other => panic!("expected an execute request, got {other:?}"),
+        other => panic!("expected a call request, got {other:?}"),
     }
 }
 
@@ -250,7 +250,7 @@ fn a_traceback_through_a_shim_shows_unmapped_impl_frames() {
     // The var_snapshot capture fails on a reassigned `var` global: an
     // unexpected shim error, whose frames must render verbatim.
     let program = LuaProgram::compile(
-        "var = 5\nexecute(\"## Child\")",
+        "var = 5\ncall(\"## Child\")",
         "section `Test` prologue",
         NonZeroU32::new(40).expect("40 is non-zero"),
         "test-run",

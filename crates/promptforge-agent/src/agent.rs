@@ -5,7 +5,7 @@
 //! untrusted, host injection, store, log, var) minus the section control
 //! surface. The shared kernel is `models.infer` and `tool_call`; the
 //! agent-only `models.chat`, `runtime.events()`, and `ui()` are installed
-//! here and nowhere else; `execute`, `fanout`, and `jump` are absent, not
+//! here and nowhere else; `call`, `fanout`, and `jump` are absent, not
 //! stubbed, so touching them is an undefined-global failure. The driver
 //! is leaf dispatch only: it resumes the coroutine, validates each yield
 //! into a [`Request`], awaits exactly one future - the current request -
@@ -132,7 +132,7 @@ impl From<LuaError> for AgentError {
 /// refreshes at every host-call resume - and `ui()` - a fresh host-state
 /// snapshot per call from [`AgentConfig::ui`], nil as a global when the
 /// host supplies no provider. Shared kernel: `tool_call`, `store`, `var`,
-/// cancel checkpoints, `models.infer`. `execute()`, `fanout()`, and
+/// cancel checkpoints, `models.infer`. `call()`, `fanout()`, and
 /// `jump()` do not exist here - absent, not stubbed. `run_agent` installs
 /// `config.cancel` as the task's cancel scope, so every suspended host
 /// call races cancellation through the shared dispatch.
@@ -339,7 +339,7 @@ fn agent_model_set(catalog: &ModelCatalog) -> ModelSet {
 /// counts the dispatches increment and, when a log was supplied, the
 /// driver's [`EventsSnapshot`] refresh handle.
 ///
-/// Absent, not stubbed: the shared shim prelude installs `execute` and
+/// Absent, not stubbed: the shared shim prelude installs `call` and
 /// `fanout` for section VMs, but the agent kernel is `models.infer` and
 /// `tool_call` alone, so both globals are removed here, before any author
 /// code runs - an agent touching them fails as an undefined global. `jump`
@@ -373,7 +373,7 @@ fn setup_agent_vm(
             .map_err(install_failed)?;
         globals.raw_set("ui", snapshot).map_err(install_failed)?;
     }
-    for global in ["execute", "fanout"] {
+    for global in ["call", "fanout"] {
         globals
             .raw_set(global, mlua::Value::Nil)
             .map_err(|error| AgentError::Program {
@@ -525,12 +525,12 @@ async fn dispatch(run: &AgentRun<'_>, request: Request) -> Result<Answer<AgentEr
             Err(AgentError::Interrupted) => Err(AgentError::Interrupted),
             outcome => Ok(Answer::Chat(outcome.map(Box::new))),
         },
-        // Unreachable: the execute/fanout shims are removed from the agent
+        // Unreachable: the call/fanout shims are removed from the agent
         // VM before author code runs, no shim produces an mcp request, and
         // stripped coroutines make a hand-rolled yield fail validation
         // before dispatch.
-        Request::Execute { .. } => Err(AgentError::Internal(
-            "an agent VM cannot yield an execute request: the shim is never installed",
+        Request::Call { .. } => Err(AgentError::Internal(
+            "an agent VM cannot yield a call request: the shim is never installed",
         )),
         Request::Fanout { .. } => Err(AgentError::Internal(
             "an agent VM cannot yield a fanout request: the shim is never installed",
@@ -908,7 +908,7 @@ async fn dispatch_tool_call(
             source: None,
         });
     };
-    // Agents have no fanout chains or execute nesting: chain 0, depth 0.
+    // Agents have no fanout chains or call nesting: chain 0, depth 0.
     let report = ScriptReport {
         chain_id: 0,
         depth: 0,
@@ -985,7 +985,7 @@ mod tests {
         // `function: 0x...`; only true absence renders three nils.
         let store = StoreRef::memory();
         let error = run_agent(
-            "return tostring(execute) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump)",
+            "return tostring(call) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump)",
             &empty_tools(),
             &ModelCatalog::empty(),
             &store,
@@ -999,7 +999,7 @@ mod tests {
         // The scalar return is not surfaced by run_agent; prove nil-ness
         // through the store instead.
         run_agent(
-            "store.write('nils.txt', tostring(execute) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump))",
+            "store.write('nils.txt', tostring(call) .. ' ' .. tostring(fanout) .. ' ' .. tostring(jump))",
             &empty_tools(),
             &ModelCatalog::empty(),
             &store,
@@ -1010,13 +1010,13 @@ mod tests {
         assert_eq!(
             store.read("nils.txt").expect("the probe wrote its reading"),
             "nil nil nil",
-            "execute, fanout, and jump must all be nil in the agent VM"
+            "call, fanout, and jump must all be nil in the agent VM"
         );
     }
 
     #[tokio::test]
     async fn calling_an_absent_control_global_is_an_undefined_global_failure() {
-        for global in ["execute", "fanout", "jump"] {
+        for global in ["call", "fanout", "jump"] {
             let store = StoreRef::memory();
             let source = format!("{global}('anything')");
             let error = run_agent(

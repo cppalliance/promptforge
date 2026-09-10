@@ -25,7 +25,7 @@ use crate::{ToolBinding, ToolCallCounts};
 pub struct ScriptReport {
     /// The chain the call fired in.
     pub chain_id: u32,
-    /// The calling chain's execute depth.
+    /// The calling chain's call depth.
     pub depth: u32,
     /// The section's completed model-turn count at dispatch.
     pub turn: u32,

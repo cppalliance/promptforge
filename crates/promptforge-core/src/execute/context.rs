@@ -30,8 +30,8 @@ use super::support::{now_rfc3339_checked, sys_json};
 /// The three sanctioned forks: [`with_walk_state`](Self::with_walk_state)
 /// at the H1-to-walk handoff,
 /// [`with_effective_handles`](Self::with_effective_handles) for a fanout's
-/// proxy reporting handles, and [`with_args`](Self::with_args) carrying an
-/// `execute` call's args override into its contained chain.
+/// proxy reporting handles, and [`with_args`](Self::with_args) carrying a
+/// `call` call's args override into its contained chain.
 #[derive(Clone)]
 pub(crate) struct RunContext {
     /// The prompt this run executes.
@@ -248,7 +248,7 @@ impl RunContext {
     }
 
     /// The context a contained chain runs under: `args` in place of the
-    /// run's own, because an `execute` call's explicit input overrides the
+    /// run's own, because a `call` call's explicit input overrides the
     /// run's args for the chain.
     #[must_use]
     pub(crate) fn with_args(&self, args: &str) -> Self {

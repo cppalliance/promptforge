@@ -1,7 +1,7 @@
 //! The coroutine protocol: validated request and answer types for the
 //! yield/resume boundary between section Lua and the scheduler driver.
 //!
-//! A suspending host call (`models.infer`, `handle:infer`, `execute`,
+//! A suspending host call (`models.infer`, `handle:infer`, `call`,
 //! `fanout`, `tool_call`, the agent-only `models.chat`) is a Lua-side shim
 //! that yields a request table; the driver validates the yield into a
 //! [`Request`], dispatches it, and resumes the coroutine with the
@@ -132,9 +132,9 @@ pub enum Request {
         /// The handle's frozen binding for `handle:infer`, else `None`.
         binding: Option<ModelBinding>,
     },
-    /// `execute(target, input?)`: run a contained chain over the target's
+    /// `call(target, input?)`: run a contained chain over the target's
     /// slice.
-    Execute {
+    Call {
         /// The heading string, validated with the `resolve_section_target`
         /// rule so a non-string target keeps its byte-identical error.
         target: String,
@@ -210,8 +210,8 @@ impl Request {
     /// argument fails validation is [`YieldParse::Call`]: the error rides
     /// back as the call's answer so the shim raises it at the call site,
     /// keeping the legacy callback's errors catchable by an author `pcall`.
-    /// Two boundary conversions keep their own byte-identical errors: an
-    /// `execute` target that is not a string fails as
+    /// Two boundary conversions keep their own byte-identical errors: a
+    /// `call` target that is not a string fails as
     /// `resolve_section_target` fails, and a fanout collection fails as
     /// `collection_to_items` fails.
     pub fn from_yield(lua: &Lua, yielded: &Value) -> YieldParse {
@@ -227,8 +227,8 @@ impl Request {
         };
         match op.as_str() {
             "infer" => classify(parse_infer(table), |error| Answer::Infer(Err(error))),
-            "execute" => classify(parse_execute(lua, table), |error| {
-                Answer::Execute(Err(error))
+            "call" => classify(parse_call(lua, table), |error| {
+                Answer::Call(Err(error))
             }),
             "fanout" => classify(parse_fanout(lua, table), |error| Answer::Fanout(Err(error))),
             "tool_call" => classify(parse_tool_call(lua, table), |error| {
@@ -283,10 +283,10 @@ fn parse_infer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure
     Ok(Request::Infer { prompt, binding })
 }
 
-/// Parses an `execute` request: the author-supplied `target` (validated
+/// Parses a `call` request: the author-supplied `target` (validated
 /// with the `resolve_section_target` rule, keeping its byte-identical
 /// error) and `input`, plus the shim-produced `var` snapshot.
-fn parse_execute(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
+fn parse_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let target = match table.raw_get::<Value>("target") {
         Ok(value) => {
             resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))?
@@ -295,7 +295,7 @@ fn parse_execute(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request,
     };
     let input = call_optional_string(table, "input")?;
     let var = shim_var(lua, table)?;
-    Ok(Request::Execute { target, input, var })
+    Ok(Request::Call { target, input, var })
 }
 
 /// Parses a `fanout` request: the author-supplied `worker` heading and
@@ -886,7 +886,7 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
 /// driver, which retains it against the pending request and substitutes it
 /// when the shim-raised error surfaces as the coroutine's failure. This holds
 /// uniformly for leaf and structural answers: the enum owns the typed error
-/// until the envelope is rendered, so an `Execute` or `Fanout` failure
+/// until the envelope is rendered, so a `Call` or `Fanout` failure
 /// round-trips with its structure intact, never stringified.
 ///
 /// The error type is the driver's: the Lua side produces
@@ -898,8 +898,8 @@ fn chat_result_table(lua: &Lua, result: ChatResult) -> mlua::Result<mlua::Table>
 pub enum Answer<E> {
     /// The completion text for an `infer` request.
     Infer(std::result::Result<String, E>),
-    /// The contained chain's final text for an `execute` request.
-    Execute(std::result::Result<String, E>),
+    /// The contained chain's final text for a `call` request.
+    Call(std::result::Result<String, E>),
     /// The ordered arm results for a `fanout` request, in collection order.
     Fanout(std::result::Result<Vec<LuaFanoutResult>, E>),
     /// The classified output for a `chat` request. Boxed so the metrics-heavy
@@ -914,7 +914,7 @@ impl<E> Answer<E> {
     pub fn map_error<F>(self, map: impl FnOnce(E) -> F) -> Answer<F> {
         match self {
             Answer::Infer(result) => Answer::Infer(result.map_err(map)),
-            Answer::Execute(result) => Answer::Execute(result.map_err(map)),
+            Answer::Call(result) => Answer::Call(result.map_err(map)),
             Answer::Fanout(result) => Answer::Fanout(result.map_err(map)),
             Answer::ToolCallResult(result) => Answer::ToolCallResult(result.map_err(map)),
             Answer::Chat(result) => Answer::Chat(result.map_err(map)),
@@ -938,7 +938,7 @@ impl<E: std::fmt::Display> Answer<E> {
     pub fn into_envelope(self, lua: &Lua) -> mlua::Result<(MultiValue, Option<E>)> {
         match self {
             Answer::Infer(Ok(text))
-            | Answer::Execute(Ok(text))
+            | Answer::Call(Ok(text))
             | Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(text))) => {
                 let text = lua.create_string(&text)?;
                 Ok((
@@ -975,7 +975,7 @@ impl<E: std::fmt::Display> Answer<E> {
                 ))
             }
             Answer::Infer(Err(error))
-            | Answer::Execute(Err(error))
+            | Answer::Call(Err(error))
             | Answer::Fanout(Err(error))
             | Answer::ToolCallResult(Err(error))
             | Answer::Chat(Err(error)) => {
@@ -1096,33 +1096,33 @@ mod tests {
     }
 
     #[test]
-    fn execute_parses_target_input_and_var_snapshot() {
+    fn call_parses_target_input_and_var_snapshot() {
         let lua = Lua::new();
-        let table = request_table(&lua, "execute");
+        let table = request_table(&lua, "call");
         table.raw_set("target", "## Child").expect("raw_set");
         table.raw_set("input", "override").expect("raw_set");
         set_var_snapshot(&lua, &table);
         let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
-            Request::Execute { target, input, var } => {
+            Request::Call { target, input, var } => {
                 assert_eq!(target, "## Child");
                 assert_eq!(input.as_deref(), Some("override"));
                 assert_eq!(var, json!({ "k": 1 }));
             }
-            other => panic!("expected an execute request, got {other:?}"),
+            other => panic!("expected a call request, got {other:?}"),
         }
     }
 
     #[test]
-    fn execute_without_input_yields_none() {
+    fn call_without_input_yields_none() {
         let lua = Lua::new();
-        let table = request_table(&lua, "execute");
+        let table = request_table(&lua, "call");
         table.raw_set("target", "## Child").expect("raw_set");
         set_var_snapshot(&lua, &table);
         let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
         match request {
-            Request::Execute { input, .. } => assert_eq!(input, None),
-            other => panic!("expected an execute request, got {other:?}"),
+            Request::Call { input, .. } => assert_eq!(input, None),
+            other => panic!("expected a call request, got {other:?}"),
         }
     }
 
@@ -1879,13 +1879,13 @@ mod tests {
     }
 
     #[test]
-    fn an_execute_with_a_non_string_target_keeps_the_resolve_error() {
+    fn a_call_with_a_non_string_target_keeps_the_resolve_error() {
         let lua = Lua::new();
-        let table = request_table(&lua, "execute");
+        let table = request_table(&lua, "call");
         table.raw_set("target", 42).expect("raw_set");
         set_var_snapshot(&lua, &table);
         match Request::from_yield(&lua, &Value::Table(table)) {
-            YieldParse::Call(Answer::Execute(Err(Error::LuaRuntime { message, .. }))) => {
+            YieldParse::Call(Answer::Call(Err(Error::LuaRuntime { message, .. }))) => {
                 assert!(
                     message.contains("section target must be a string, got integer"),
                     "unexpected message: {message}"
@@ -1917,7 +1917,7 @@ mod tests {
     #[test]
     fn a_request_without_a_var_snapshot_is_rejected() {
         let lua = Lua::new();
-        let table = request_table(&lua, "execute");
+        let table = request_table(&lua, "call");
         table.raw_set("target", "## Child").expect("raw_set");
         assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
     }
@@ -1974,9 +1974,9 @@ mod tests {
     }
 
     #[test]
-    fn an_ok_execute_answer_round_trips_through_lua() {
+    fn an_ok_call_answer_round_trips_through_lua() {
         let lua = Lua::new();
-        let (envelope, retained) = Answer::<Error>::Execute(Ok("chain text".to_owned()))
+        let (envelope, retained) = Answer::<Error>::Call(Ok("chain text".to_owned()))
             .into_envelope(&lua)
             .expect("the envelope renders");
         assert!(retained.is_none());
@@ -1991,7 +1991,7 @@ mod tests {
     #[test]
     fn an_err_answer_round_trips_and_retains_the_typed_error() {
         let lua = Lua::new();
-        let (envelope, retained) = Answer::Execute(Err(Error::LuaQuota {
+        let (envelope, retained) = Answer::Call(Err(Error::LuaQuota {
             resource: "instruction",
         }))
         .into_envelope(&lua)

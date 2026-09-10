@@ -34,7 +34,7 @@
 //! advertised under their local aliases and dispatched through the
 //! implementation each binding carries.
 //!
-//! Lua `execute()` starts a contained chain at a visible section (fresh VM,
+//! Lua `call()` starts a contained chain at a visible section (fresh VM,
 //! fresh conversation, recursion capped at 8): the chain runs from the target
 //! with every normal walk rule - fall-through, off-walk skips, jumps, child
 //! chains - and the outer walk never moves while it runs. When the chain
@@ -67,7 +67,7 @@
 //! `block_walk` (the per-block prose paths), `engine` (the walk-target
 //! resolution helpers), `protocol` (the coroutine request/answer types
 //! for the yield/resume boundary), `scheduler` (the chain-stack scheduler
-//! driving the coroutine protocol: the live H1 pass, the walk, execute
+//! driving the coroutine protocol: the live H1 pass, the walk, call
 //! chains, and fanout), and `support` (shared helpers).
 
 mod block_walk;
@@ -165,7 +165,7 @@ pub(crate) use crate::model::ModelSet;
 /// - [`RunErrorKind::Internal`] - an internal invariant failed.
 ///
 /// # Examples
-/// A no-network prompt whose walk makes a nested host call: `execute` is a
+/// A no-network prompt whose walk makes a nested host call: `call` is a
 /// structural request the scheduler drives on the run's one thread, so the
 /// current-thread runtime below runs the whole prompt, host calls included:
 /// ```
@@ -181,7 +181,7 @@ pub(crate) use crate::model::ModelSet;
 ///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
 ///     "# Title\n\n",
 ///     "## Calls\n\n",
-///     "```lua\nreturn execute('## Answers')\n```\n\n",
+///     "```lua\nreturn call('## Answers')\n```\n\n",
 ///     "## Answers\n\n",
 ///     "```lua\nreturn 'hello'\n```\n",
 /// );
@@ -204,9 +204,9 @@ pub(crate) use crate::model::ModelSet;
 ///
 /// # Runtime
 /// A run needs no particular Tokio runtime flavor. Every chain step - all
-/// Lua, the walk, execute chains, and fanout joins - executes inside the
+/// Lua, the walk, call chains, and fanout joins - executes inside the
 /// one driver task, and suspending Lua host calls (`models.infer`,
-/// `execute`, `fanout`) are coroutine yields the scheduler answers, so no
+/// `call`, `fanout`) are coroutine yields the scheduler answers, so no
 /// host call parks a worker thread. Concurrency (a fanout's arms) comes
 /// from interleaving chains at I/O points, not from threads; on a
 /// multi-thread runtime only the leaf I/O waits, which never touch Lua or

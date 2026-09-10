@@ -37,7 +37,7 @@ use crate::{Error, Result};
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VmSeed<'a> {
     /// The walk's current `var`: rolled forward across sections on one walk,
-    /// cloned into an `execute` chain or a fanout arm; `None` seeds an empty
+    /// cloned into a `call` chain or a fanout arm; `None` seeds an empty
     /// table.
     pub(crate) var: Option<&'a serde_json::Value>,
     /// The fanout arm's collection member; `None` outside an arm.

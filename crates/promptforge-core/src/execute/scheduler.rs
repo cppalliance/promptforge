@@ -14,7 +14,7 @@
 //! A chain whose coroutine yields a leaf request (`infer`) is parked in the
 //! pending table while a spawned task runs the single gateway round and
 //! posts the answer to the channel; a chain that yields a structural
-//! request (`execute`) blocks while its child chain runs, and the child's
+//! request (`call`) blocks while its child chain runs, and the child's
 //! finish delivers its final text as the parent's answer. When no chain is
 //! ready the driver awaits the answer channel or cancellation, whichever
 //! comes first.
@@ -27,7 +27,7 @@
 //!
 //! This module carries the scheduler core plus the walk rules: sections run
 //! in fall-through order, a section marked off-walk is skipped unless the
-//! arrival is addressed (a jump or execute target runs anyway), the reply
+//! arrival is addressed (a jump or call target runs anyway), the reply
 //! and `var` roll forward across sections and jumps, every section entry
 //! takes the next run-global id, and a jump transfers control - a sibling
 //! move within the chain's slice, or a descent into the jumper's child
@@ -80,7 +80,7 @@ use super::engine::{
 use super::gateway::{GatewaySource, ResolutionContext};
 use super::protocol::{Answer, Request, ToolCallOutcome, YieldParse};
 use super::section_context::SectionContext;
-use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, next_id, now_rfc3339_checked};
+use super::support::{GENERIC_COMPLETION, MAX_CALL_DEPTH, next_id, now_rfc3339_checked};
 use super::tools::infer_round;
 
 /// Arena index of a chain: ids, not references, so no chain ever holds a
@@ -157,8 +157,8 @@ struct ArmTemplate<'a> {
     /// The caller's `var` snapshot; each arm seeds from its own clone and
     /// its writes never reach the caller.
     var: serde_json::Value,
-    /// The arms' execute depth: the fanout caller's depth plus one.
-    execute_depth: usize,
+    /// The arms' call depth: the fanout caller's depth plus one.
+    call_depth: usize,
     /// The caller's client snapshot: each arm starts from it, resolving one
     /// lazily when absent.
     client: Option<GatewayClient>,
@@ -284,7 +284,7 @@ fn resolve_arm_target<'a>(
 /// next entry constructs the next.
 struct Chain<'a> {
     /// The chain's fork of the run context: the run's own for the root
-    /// chain, `with_args` for an execute chain's input override.
+    /// chain, `with_args` for a call chain's input override.
     ctx: RunContext,
     /// The per-section frame (VM, `sys`, conversation, counts): `Some`
     /// while a section is entered, `None` before the first entry and
@@ -302,7 +302,7 @@ struct Chain<'a> {
     /// child pushes the current position and descends; when the child
     /// level exhausts, the pop resumes the parent after the jumper.
     positions: Vec<(&'a [Section], usize)>,
-    /// Set when the next entry is an addressed arrival (an execute target):
+    /// Set when the next entry is an addressed arrival (a call target):
     /// an addressed section runs even when marked off-walk. One entry
     /// consumes the flag; fall-through arrival is never addressed.
     addressed: bool,
@@ -321,24 +321,24 @@ struct Chain<'a> {
     reply: Option<String>,
     /// The walk's clipboard: seeds each section's VM at entry; the
     /// section's final `var` is read back before teardown and replaces the
-    /// slot. An execute chain's slot seeds from the caller's snapshot and
+    /// slot. A call chain's slot seeds from the caller's snapshot and
     /// is discarded with the chain, so the caller never sees the chain's
     /// writes.
     var: serde_json::Value,
-    /// The chain's execute nesting depth: each execute child runs one level
+    /// The chain's call nesting depth: each call child runs one level
     /// deeper. The recursion cap checks this field, never the chain-stack
     /// length - fanout arms live on the ready queue, not the stack, so only
     /// the field carries the accounting across a fanout boundary.
-    execute_depth: usize,
+    call_depth: usize,
     /// The chain's client slot: seeded from the parent, resolved lazily on
     /// first inference through the scheduler's gateway source, so a
     /// construction error surfaces at first use rather than being swallowed.
     client: Option<GatewayClient>,
-    /// The execute parent blocked on this chain, if any.
+    /// The call parent blocked on this chain, if any.
     parent: Option<ChainId>,
     /// The fanout-arm state when this chain is a fanout arm: the arm runs
     /// the same walk machinery as any chain, and its finish writes its
-    /// join's result slot instead of an execute answer.
+    /// join's result slot instead of a call answer.
     arm: Option<ArmState<'a>>,
     /// The live H1 pass marker: the prompt's H1 blocks under its title.
     /// `Some` chains run the live pass's rules instead of the walk's: the
@@ -374,11 +374,11 @@ impl Chain<'_> {
 /// loop's stack frame.
 pub(crate) struct Scheduler<'a> {
     /// The ambient run context, borrowed by chain steps and forked by
-    /// execute chains.
+    /// call chains.
     ctx: &'a RunContext,
     /// The chain arena: append-only, indexed by [`ChainId`].
     chains: Vec<Chain<'a>>,
-    /// The execute-nesting chain stack (LIFO): an execute dispatch pushes
+    /// The call-nesting chain stack (LIFO): a call dispatch pushes
     /// the child, the child's finish pops it.
     stack: Vec<ChainId>,
     /// Chains eligible to resume (FIFO); the driver drains it before
@@ -591,9 +591,9 @@ impl<'a> Scheduler<'a> {
 
     /// Creates one chain over `slice` from `index` and returns its id. The
     /// chain enters its first section on its first step; `addressed` marks
-    /// an addressed arrival (an execute target or a fanout arm's worker),
+    /// an addressed arrival (a call target or a fanout arm's worker),
     /// which runs even when the section is marked off-walk. The chain's
-    /// `var` slot seeds from `var` (an execute chain's or arm's caller
+    /// `var` slot seeds from `var` (a call chain's or arm's caller
     /// snapshot, discarded with the chain). `arm` carries the fanout-arm
     /// state for an arm chain.
     ///
@@ -611,7 +611,7 @@ impl<'a> Scheduler<'a> {
         addressed: bool,
         parent: Option<ChainId>,
         var: &serde_json::Value,
-        execute_depth: usize,
+        call_depth: usize,
         arm: Option<ArmState<'a>>,
     ) -> Result<ChainId> {
         if self.chains.len() >= self.max_chains {
@@ -633,7 +633,7 @@ impl<'a> Scheduler<'a> {
             incoming: None,
             reply: None,
             var: var.clone(),
-            execute_depth,
+            call_depth,
             client: None,
             parent,
             arm,
@@ -685,7 +685,7 @@ impl<'a> Scheduler<'a> {
             incoming: None,
             reply: None,
             var: serde_json::json!({}),
-            execute_depth: 0,
+            call_depth: 0,
             client,
             parent: None,
             arm: None,
@@ -1359,8 +1359,8 @@ impl<'a> Scheduler<'a> {
                 self.dispatch_infer(id, prompt, binding);
                 Ok(())
             }
-            Request::Execute { target, input, var } => {
-                self.dispatch_execute(id, &target, input.as_deref(), &var);
+            Request::Call { target, input, var } => {
+                self.dispatch_call(id, &target, input.as_deref(), &var);
                 Ok(())
             }
             Request::Fanout { worker, items, var } => {
@@ -1529,9 +1529,9 @@ impl<'a> Scheduler<'a> {
         let nonce = chain.ctx.nonce().clone();
         let report = ScriptReport {
             chain_id: id.0,
-            // The execute depth is capped at MAX_EXECUTE_DEPTH, far inside
+            // The call depth is capped at MAX_CALL_DEPTH, far inside
             // u32; the saturation is a defensive no-op.
-            depth: u32::try_from(chain.execute_depth).unwrap_or(u32::MAX),
+            depth: u32::try_from(chain.call_depth).unwrap_or(u32::MAX),
             turn: chain.ctx.turns().load(Ordering::Relaxed),
         };
         let output_kind = binding.output_kind;
@@ -1571,36 +1571,36 @@ impl<'a> Scheduler<'a> {
         Ok((request_id, task))
     }
 
-    /// Dispatches an `execute` request: constructs the child chain, pushes
+    /// Dispatches a `call` request: constructs the child chain, pushes
     /// it on the chain stack, and enqueues it; the parent blocks until the
     /// child's finish delivers its final text as the answer. Every dispatch
     /// failure - the depth cap, target resolution, child construction - is
     /// the call's answer, resumed into the caller so an author `pcall` can
     /// catch it exactly as on the legacy callback path.
-    fn dispatch_execute(
+    fn dispatch_call(
         &mut self,
         id: ChainId,
         target: &str,
         input: Option<&str>,
         var: &serde_json::Value,
     ) {
-        match self.prepare_execute(id, target, input, var) {
+        match self.prepare_call(id, target, input, var) {
             Ok(child) => {
                 self.stack.push(child);
                 self.ready.push_back(child);
             }
             Err(error) => {
-                self.chains[id.index()].incoming = Some(Answer::Execute(Err(error)));
+                self.chains[id.index()].incoming = Some(Answer::Call(Err(error)));
                 self.ready.push_back(id);
             }
         }
     }
 
-    /// The fallible half of execute dispatch: the depth cap checked against
-    /// the caller's execute-depth field, the target resolved over the
+    /// The fallible half of call dispatch: the depth cap checked against
+    /// the caller's call-depth field, the target resolved over the
     /// caller's visible set, and the child chain constructed one level
     /// deeper under the call's args and `var` snapshot.
-    fn prepare_execute(
+    fn prepare_call(
         &mut self,
         id: ChainId,
         target: &str,
@@ -1613,13 +1613,13 @@ impl<'a> Scheduler<'a> {
             // yield. A panic on the empty walk slice would be worse than
             // the typed invariant error.
             return Err(Error::Internal(
-                "the live H1 pass cannot dispatch an execute request",
+                "the live H1 pass cannot dispatch a call request",
             ));
         }
-        let depth = chain.execute_depth + 1;
-        if depth > MAX_EXECUTE_DEPTH {
+        let depth = chain.call_depth + 1;
+        if depth > MAX_CALL_DEPTH {
             return Err(Error::Lua(format!(
-                "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+                "call recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));
         }
         let args = input.unwrap_or_else(|| chain.ctx.args()).to_owned();
@@ -1668,7 +1668,7 @@ impl<'a> Scheduler<'a> {
     }
 
     /// The fallible half of fanout dispatch: the depth cap checked against
-    /// the caller's execute-depth field (each arm runs one level deeper),
+    /// the caller's call-depth field (each arm runs one level deeper),
     /// the empty collection rejected before any scheduling, the worker
     /// resolved over the caller's visible set, and the join state and
     /// first window of arm chains created.
@@ -1688,10 +1688,10 @@ impl<'a> Scheduler<'a> {
                 "the live H1 pass cannot dispatch a fanout request",
             ));
         }
-        let depth = chain.execute_depth + 1;
-        if depth > MAX_EXECUTE_DEPTH {
+        let depth = chain.call_depth + 1;
+        if depth > MAX_CALL_DEPTH {
             return Err(Error::Lua(format!(
-                "fanout recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+                "fanout recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));
         }
         // An empty collection runs zero arms; that is an authoring bug (a
@@ -1752,7 +1752,7 @@ impl<'a> Scheduler<'a> {
                     write_token: ctx.store().next_write_token(),
                     reply,
                     var: var.clone(),
-                    execute_depth: depth,
+                    call_depth: depth,
                     client,
                     cancel: cancel::current(),
                 },
@@ -1833,7 +1833,7 @@ impl<'a> Scheduler<'a> {
                 true,
                 None,
                 &template.var,
-                template.execute_depth,
+                template.call_depth,
                 Some(arm),
             )?;
             // The arm inherits the caller's reply seed and client slot, as
@@ -1967,7 +1967,7 @@ impl<'a> Scheduler<'a> {
     }
 
     /// Aborts one chain and everything it transitively blocks on - its
-    /// execute children and the arms of its nested fanouts - the scheduler
+    /// call children and the arms of its nested fanouts - the scheduler
     /// port of dropping a spawned arm task: the chain leaves the ready
     /// queue and the pending table, its in-flight leaf I/O task is aborted,
     /// and its state drops in the teardown order (the suspended coroutine,
@@ -2016,7 +2016,7 @@ impl<'a> Scheduler<'a> {
                 task.abort();
             }
         }
-        // A chain on the execute stack is the top here: only its own
+        // A chain on the call stack is the top here: only its own
         // descendants sit above it, and the recursion already removed them.
         if self.stack.last() == Some(&id) {
             self.stack.pop();
@@ -2030,7 +2030,7 @@ impl<'a> Scheduler<'a> {
 
     /// Finishes one chain: the frame's teardown boundary when the chain
     /// ends mid-section, then the outcome's delivery - the run's result for
-    /// the root chain, the execute answer for a child chain, the join
+    /// the root chain, the call answer for a child chain, the join
     /// slot's result for a fanout arm.
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
@@ -2058,7 +2058,7 @@ impl<'a> Scheduler<'a> {
         let outcome = outcome.and_then(|returned| {
             // A chain ending mid-section (a scalar return) reads its final
             // var back before teardown, exactly as a completed section does
-            // at fall-through (the walk rolls it forward; an execute chain
+            // at fall-through (the walk rolls it forward; a call chain
             // or a fanout arm discards its clone), and arms the completion
             // flag so the frame's drop fires SECTION_FINISHED. A failure -
             // the read-back's included - drops the frame unarmed.
@@ -2073,7 +2073,7 @@ impl<'a> Scheduler<'a> {
                 None => match reply {
                     Some(reply) => reply,
                     // The legacy mapping: the top-level chain falls back to
-                    // the shared generic completion; an execute chain or a
+                    // the shared generic completion; a call chain or a
                     // fanout arm to the empty string.
                     None if parent.is_none() && arm.is_none() => GENERIC_COMPLETION.to_owned(),
                     None => String::new(),
@@ -2093,9 +2093,9 @@ impl<'a> Scheduler<'a> {
                 debug_assert_eq!(
                     self.stack.pop(),
                     Some(id),
-                    "a finishing child chain is the execute stack's top"
+                    "a finishing child chain is the call stack's top"
                 );
-                self.chains[parent_id.index()].incoming = Some(Answer::Execute(outcome));
+                self.chains[parent_id.index()].incoming = Some(Answer::Call(outcome));
                 self.ready.push_back(parent_id);
             }
         }

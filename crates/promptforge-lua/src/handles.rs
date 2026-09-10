@@ -339,7 +339,7 @@ pub enum LuaBlockResult {
     Jump(String),
 }
 
-/// Resolves an `execute` / `jump` target from a heading string.
+/// Resolves a `call` / `jump` target from a heading string.
 ///
 /// # Errors
 /// Returns a Lua error when the value is not a string.

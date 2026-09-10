@@ -43,7 +43,7 @@ Final ask.\n\n\
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_runs_named_section_as_subroutine() {
+async fn call_runs_named_section_as_subroutine() {
     let gateway = ScriptedGateway::start(vec![resp_text("research-reply")]).await;
     let addr = gateway.addr();
 
@@ -54,7 +54,7 @@ async fn execute_runs_named_section_as_subroutine() {
         "\
 ## Main\n\n\
 ```lua\n\
-local by_name = execute('## Research')\n\
+local by_name = call('## Research')\n\
 assert(by_name == 'research-reply')\n\
 assert(store.read('evidence.md') == 'research-reply')\n\
 return by_name\n\
@@ -66,27 +66,27 @@ Research {{ args }}.\n\n\
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
         .await
-        .expect("execute must run named section as subroutine");
+        .expect("call must run named section as subroutine");
     assert_eq!(out, "research-reply");
 }
 
-/// The `with_args` fork scopes an execute call's input over its whole chain:
-/// a no-input `execute` nested inside the chain defaults to the chain's
+/// The `with_args` fork scopes a call's input over its whole chain:
+/// a no-input `call` nested inside the chain defaults to the chain's
 /// args, not the run's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn nested_execute_without_input_inherits_the_chains_args() {
+async fn nested_call_without_input_inherits_the_chains_args() {
     let gateway = ScriptedGateway::start(vec![resp_text("inner-reply")]).await;
     let addr = gateway.addr();
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-local r = execute('## Sub', 'chain-args')\n\
+local r = call('## Sub', 'chain-args')\n\
 assert(r == 'inner-reply')\n\
 return r\n\
 ```\n\n\
 ## Sub\n\n\
-```lua\nreturn execute('## Inner')\n```\n\n\
+```lua\nreturn call('## Inner')\n```\n\n\
 ## Inner\n\n\
 Args: {{ args }}\n"
     );
@@ -99,7 +99,7 @@ Args: {{ args }}\n"
         gatewayed(addr),
     )
     .await
-    .expect("the nested execute must inherit the chain's args");
+    .expect("the nested call must inherit the chain's args");
     assert_eq!(out, "inner-reply");
     let body = gateway
         .last_request()
@@ -107,7 +107,7 @@ Args: {{ args }}\n"
     let text = body.to_string();
     assert!(
         text.contains("chain-args"),
-        "the nested no-input execute substitutes the chain's args: {text}"
+        "the nested no-input call substitutes the chain's args: {text}"
     );
     assert!(
         !text.contains("run-args"),
@@ -290,17 +290,17 @@ async fn reply_assigned_a_non_string_errors() {
     );
 }
 
-/// A jump inside `execute()` is contained by the chain: followed, not
+/// A jump inside `call()` is contained by the chain: followed, not
 /// rejected (the retired reject policy's inversion). The chain's index moves
 /// to the target - the sections between the jumper and the target do not
 /// run - and the target's reply returns to the caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_execute_is_contained_in_the_chain() {
+async fn jump_inside_call_is_contained_in_the_chain() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 return 'main:' .. r\n\
 ```\n\n\
 ## Sub\n\n\
@@ -318,7 +318,7 @@ return 'peer-ran'\n\
     );
     let out = run_offline(md)
         .await
-        .expect("a jump inside execute must be followed within the chain");
+        .expect("a jump inside call must be followed within the chain");
     assert_eq!(out, "main:peer-ran");
 }
 
@@ -327,7 +327,7 @@ return 'peer-ran'\n\
 /// S2 finishes, the chain's final reply returns to A and the outer walk
 /// continues at B, never having moved.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
+async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
     let gateway = ScriptedGateway::start(vec![resp_text("reply-s1"), resp_text("reply-s2")]).await;
     let addr = gateway.addr();
     let md = flow_prompt!(
@@ -335,7 +335,7 @@ async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A1\\n')\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 assert(r == 'reply-s2', 'the chain final reply returns to A')\n\
 store.append('order.txt', 'A2\\n')\n\
 ```\n\n\
@@ -367,7 +367,7 @@ store.append('order.txt', 'S2\\n')\n\
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
         .await
-        .expect("the execute chain must jump, fall through, and return its reply");
+        .expect("the call chain must jump, fall through, and return its reply");
     assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
 }
 
@@ -375,12 +375,12 @@ store.append('order.txt', 'S2\\n')\n\
 /// which runs because it is addressed; the chain falls through to S2, and
 /// S2's reply returns to A. The main walk ends at B and never runs S1 or S2.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
+async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     let md = flow_prompt!(
         "\
 ## A\n\n\
 ```lua\n\
-local r = execute('## S1')\n\
+local r = call('## S1')\n\
 store.append('order.txt', 'A:' .. r .. '\\n')\n\
 ```\n\n\
 ## B\n\n\
@@ -406,16 +406,16 @@ return 's2-reply'\n\
     assert_eq!(out, "S1\nS2\nA:s2-reply\nB\n");
 }
 
-/// A jump inside an `execute()` chain to a sibling moves within the
+/// A jump inside a `call()` chain to a sibling moves within the
 /// contained chain: the walk continues from the jump target under the normal
 /// rules, and the chain's final reply is the call's return value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_an_execute_chain_moves_within_the_chain() {
+async fn jump_inside_a_call_chain_moves_within_the_chain() {
     let md = flow_prompt!(
         "\
 ## A\n\n\
 ```lua\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 return 'A:' .. r\n\
 ```\n\n\
 ## Sub\n\n\
@@ -448,7 +448,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         "\
 ## A\n\n\
 ```lua\n\
-execute('## Sub')\n\
+call('## Sub')\n\
 store.append('order.txt', 'A-done\\n')\n\
 ```\n\n\
 ## B\n\n\
@@ -481,7 +481,7 @@ async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
         "\
 ## A\n\n\
 ```lua\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 return r\n\
 ```\n\n\
 ## Sub\n\n\
@@ -516,7 +516,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         "\
 ## A\n\n\
 ```lua\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 store.append('order.txt', 'A:' .. r .. '\\n')\n\
 ```\n\n\
 ## B\n\n\
@@ -540,17 +540,17 @@ error('a return must end the chain before fall-through')\n\
     assert_eq!(out, "A:sub-reply\nB\n");
 }
 
-/// An `execute` chain's sections continue the run-global `sys.id` sequence:
+/// A `call` chain's sections continue the run-global `sys.id` sequence:
 /// the contained chain's entries take the next ids, and the outer walk
 /// resumes the same sequence when the chain ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_execute_chain_continues_the_global_sys_id_sequence() {
+async fn a_call_chain_continues_the_global_sys_id_sequence() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
 assert(sys.id == 1, 'the first walked section takes id 1')\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 store.append('order.txt', r .. '\\n')\n\
 ```\n\n\
 ## B\n\n\
@@ -571,7 +571,7 @@ return 'tail-reply'\n\
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("an execute chain must continue the global sys.id sequence");
+        .expect("a call chain must continue the global sys.id sequence");
     assert_eq!(out, "tail-reply\n");
 }
 
@@ -582,8 +582,8 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         "\
 ## Main\n\n\
 ```lua\n\
-local a = execute('## Sub')\n\
-local b = execute('## Sub')\n\
+local a = call('## Sub')\n\
+local b = call('## Sub')\n\
 return a .. ',' .. b\n\
 ```\n\n\
 ## Sub\n\n\
@@ -672,22 +672,22 @@ return tostring(sys.taskid)\n\
     );
 }
 
-/// Nested `execute()` is capped at [`MAX_EXECUTE_DEPTH`]. Locks the
-/// `execute_depth` divergence threaded through the unified engine (the
+/// Nested `call()` is capped at [`MAX_CALL_DEPTH`]. Locks the
+/// `call_depth` divergence threaded through the unified engine (the
 /// top-level walk always enters at depth 0; the subroutine carries its depth).
 /// The caller is not in its own visible set, so the recursion is mutual.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_recursion_is_capped() {
+async fn call_recursion_is_capped() {
     let md = flow_prompt!(
         "\
 ## A\n\n\
-```lua\nreturn execute('## B')\n```\n\n\
+```lua\nreturn call('## B')\n```\n\n\
 ## B\n\n\
-```lua\nreturn execute('## A')\n```\n"
+```lua\nreturn call('## A')\n```\n"
     );
     let error = run_offline(md)
         .await
-        .expect_err("unbounded execute recursion must fail");
+        .expect_err("unbounded call recursion must fail");
     let rendered = format!("{error:?}");
     assert!(
         rendered.contains("recursion exceeded cap"),
@@ -696,15 +696,15 @@ async fn execute_recursion_is_capped() {
 }
 
 /// The caller is outside its own visible set (decision 3): naming its own
-/// heading to `execute` resolves as not-found.
+/// heading to `call` resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn section_cannot_execute_itself() {
+async fn section_cannot_call_itself() {
     let md = flow_prompt!(
         "\
 ## Self\n\n\
-```lua\nreturn execute('## Self')\n```\n"
+```lua\nreturn call('## Self')\n```\n"
     );
-    let error = run_offline(md).await.expect_err("self-execute must fail");
+    let error = run_offline(md).await.expect_err("self-call must fail");
     let rendered = error.to_string();
     assert!(
         rendered.contains("not found"),
@@ -796,8 +796,8 @@ async fn off_walk_sections_run_only_when_addressed() {
         "\
 ## A\n\n\
 ```lua\n\
-local rb = execute('## B')\n\
-local rc = execute('## C')\n\
+local rb = call('## B')\n\
+local rc = call('## C')\n\
 store.write('order.txt', rb .. ',' .. rc)\n\
 ```\n\n\
 ## B\n\n\
@@ -1052,16 +1052,16 @@ return store.read('order.txt')\n\
     assert_eq!(out, "Off\nY\n");
 }
 
-/// `execute` to a child starts a contained chain at the target: the chain
+/// `call` to a child starts a contained chain at the target: the chain
 /// falls through to the target's following siblings under the same rules as
 /// any walk, and the chain's final reply is the call's return value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_to_a_child_starts_a_contained_chain() {
+async fn call_to_a_child_starts_a_contained_chain() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-local r = execute('### Sub')\n\
+local r = call('### Sub')\n\
 return 'got:' .. r\n\
 ```\n\n\
 ### Sub\n\n\
@@ -1077,7 +1077,7 @@ return 'after-reply'\n\
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("execute to a child must start a contained chain");
+        .expect("call to a child must start a contained chain");
     assert_eq!(out, "got:after-reply");
     assert_eq!(store.read("order.txt").expect("order log"), "Sub\nAfter\n");
 }
@@ -1121,7 +1121,7 @@ jump('### X')\n\
 ```\n\n\
 ### X\n\n\
 ```lua\n\
-local r = execute('#### Grand')\n\
+local r = call('#### Grand')\n\
 store.append('order.txt', 'X:' .. r .. '\\n')\n\
 jump('### Y')\n\
 ```\n\n\
@@ -1493,19 +1493,19 @@ return item .. ':' .. table.concat(items, ',')\n\
     assert_eq!(out, "alpha:x,y");
 }
 
-/// `execute` inside a fanout arm runs a contained chain over the worker's
+/// `call` inside a fanout arm runs a contained chain over the worker's
 /// visible set: the chain continues the run-global `sys.id` sequence, runs
 /// as plain
 /// sections (no `item` seed), and its final reply is the call's return value.
 /// The arm and the contained chain also see the run's `sys.section_count`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_inside_a_fanout_arm_runs_a_contained_chain() {
+async fn call_inside_a_fanout_arm_runs_a_contained_chain() {
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
 assert(sys.section_count == 1, 'the arm sees the run top-level section count')\n\
-local got = execute('### Sub')\n\
+local got = call('### Sub')\n\
 return 'worker:' .. got .. ':' .. item\n\
 ```\n\n\
 ### Sub\n\n\
@@ -1522,7 +1522,7 @@ return 'tail-reply'\n\
     .concat();
     let out = run_offline(&md)
         .await
-        .expect("execute inside an arm must run a contained chain");
+        .expect("call inside an arm must run a contained chain");
     assert_eq!(out, "worker:tail-reply:alpha");
 }
 
@@ -1689,18 +1689,18 @@ jump('## Parent')\n\
     );
 }
 
-/// `execute` and `list_from_section` inside an arm naming a section outside
+/// `call` and `list_from_section` inside an arm naming a section outside
 /// the worker's visible set both error not-found; the arm catches them with
 /// `pcall` and asserts on the messages.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_and_list_inside_a_fanout_arm_reject_non_visible_sections() {
+async fn call_and_list_inside_a_fanout_arm_reject_non_visible_sections() {
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-local ok_exec, err_exec = pcall(execute, '## Parent')\n\
-assert(not ok_exec, 'execute of a non-visible section must fail')\n\
-assert(tostring(err_exec):find('not found', 1, true), 'execute error must be not-found: ' .. tostring(err_exec))\n\
+local ok_call, err_call = pcall(call, '## Parent')\n\
+assert(not ok_call, 'call of a non-visible section must fail')\n\
+assert(tostring(err_call):find('not found', 1, true), 'call error must be not-found: ' .. tostring(err_call))\n\
 local ok_list, err_list = pcall(list_from_section, '## Parent')\n\
 assert(not ok_list, 'list_from_section of a non-visible section must fail')\n\
 assert(tostring(err_list):find('not found', 1, true), 'list error must be not-found: ' .. tostring(err_list))\n\
@@ -1712,20 +1712,20 @@ return item .. ':rejected'\n\
     .concat();
     let out = run_offline(&md)
         .await
-        .expect("non-visible execute/list inside an arm must error not-found");
+        .expect("non-visible call/list inside an arm must error not-found");
     assert_eq!(out, "alpha:rejected");
 }
 
 /// Recursion depth accumulates across a fanout boundary: a section at the
-/// execute cap cannot fan out, because its arms would run one level deeper
-/// still. Mutual `execute` recursion drives the depth to the cap (a worker's
-/// visible set never contains the worker, so only an execute chain can reach
+/// call cap cannot fan out, because its arms would run one level deeper
+/// still. Mutual `call` recursion drives the depth to the cap (a worker's
+/// visible set never contains the worker, so only a call chain can reach
 /// the cap); the store counter switches the last recursion step to `fanout`,
 /// which must trip the same cap at the boundary rather than resetting.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
     // A runs at depths 0, 2, 4, 6, 8 (its 5th run); the fanout there would
-    // spawn arms at depth 9, past MAX_EXECUTE_DEPTH (8).
+    // spawn arms at depth 9, past MAX_CALL_DEPTH (8).
     let md = flow_prompt!(
         "\
 ## A\n\n\
@@ -1736,11 +1736,11 @@ store.write('n.txt', tostring(n))\n\
 if n >= 5 then\n\
   return fanout('## W', {'x'})\n\
 end\n\
-return execute('## B')\n\
+return call('## B')\n\
 ```\n\n\
 ## B\n\n\
 ```lua\n\
-return execute('## A')\n\
+return call('## A')\n\
 ```\n\n\
 ## W\n\n\
 ---\n\n\
@@ -1750,7 +1750,7 @@ return item\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("a fanout at the execute cap must fail");
+        .expect_err("a fanout at the call cap must fail");
     let rendered = format!("{error:?}");
     assert!(
         rendered.contains("fanout recursion exceeded cap of 8"),
@@ -1758,20 +1758,20 @@ return item\n\
     );
 }
 
-/// An arm runs one execute level deeper than its fanout caller: an arm
-/// spawned at the cap's edge trips MAX_EXECUTE_DEPTH on its OWN `execute`.
+/// An arm runs one call level deeper than its fanout caller: an arm
+/// spawned at the cap's edge trips MAX_CALL_DEPTH on its OWN `call`.
 /// Dropping the `+ 1` from the arm's depth in `run_fanout_arms` must fail
 /// this test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
+async fn call_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
     // B runs at depths 1, 3, 5, 7 (its 4th run); the fanout there spawns arms
-    // at depth 8, and the arm's own `execute` would need depth 9 - past
-    // MAX_EXECUTE_DEPTH (8).
+    // at depth 8, and the arm's own `call` would need depth 9 - past
+    // MAX_CALL_DEPTH (8).
     let md = flow_prompt!(
         "\
 ## A\n\n\
 ```lua\n\
-return execute('## B')\n\
+return call('## B')\n\
 ```\n\n\
 ## B\n\n\
 ```lua\n\
@@ -1782,12 +1782,12 @@ if n >= 4 then\n\
   local r = fanout('## W', {'x'})\n\
   return r[1].text\n\
 end\n\
-return execute('## A')\n\
+return call('## A')\n\
 ```\n\n\
 ## W\n\n\
 ---\n\n\
 ```lua\n\
-return execute('## C')\n\
+return call('## C')\n\
 ```\n\n\
 ## C\n\n\
 ---\n\n\
@@ -1797,11 +1797,11 @@ return 'c-reply'\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("an execute inside an arm spawned at the cap's edge must fail");
+        .expect_err("a call inside an arm spawned at the cap's edge must fail");
     let rendered = format!("{error:?}");
     assert!(
-        rendered.contains("execute recursion exceeded cap of 8"),
-        "expected the execute recursion-cap error, got: {rendered}"
+        rendered.contains("call recursion exceeded cap of 8"),
+        "expected the call recursion-cap error, got: {rendered}"
     );
 }
 
@@ -2118,16 +2118,16 @@ Ask about {{ item }}.\n"
     );
 }
 
-/// `execute()` on a child heading resolves the target's index within the
+/// `call()` on a child heading resolves the target's index within the
 /// caller's CHILD slice, not the sibling slice: earlier children do not run,
 /// and the chain falls through to the target's following child siblings.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_to_a_later_child_runs_the_child_slice_from_that_index() {
+async fn call_to_a_later_child_runs_the_child_slice_from_that_index() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
-local r = execute('### Sub2')\n\
+local r = call('### Sub2')\n\
 return 'got:' .. r\n\
 ```\n\n\
 ### Sub1\n\n\
@@ -2147,7 +2147,7 @@ return 'sub3-reply'\n\
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("execute to a later child must run the child slice from that index");
+        .expect("call to a later child must run the child slice from that index");
     assert_eq!(out, "got:sub3-reply");
     assert_eq!(store.read("order.txt").expect("order log"), "Sub2\nSub3\n");
 }
@@ -2280,16 +2280,16 @@ return var.from_h1 .. var.from_a .. var.from_c\n\
     assert_eq!(out, "seedac");
 }
 
-/// `execute` clones the caller's `var` in: the contained chain reads the
+/// `call` clones the caller's `var` in: the contained chain reads the
 /// clone, and its writes are discarded when the chain ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_clones_var_in_and_discards_child_writes() {
+async fn call_clones_var_in_and_discards_child_writes() {
     let md = flow_prompt!(
         "\
 ## Main\n\n\
 ```lua\n\
 var.shared = 'caller'\n\
-local r = execute('## Sub')\n\
+local r = call('## Sub')\n\
 assert(r == 'sub saw caller', 'the child reads the cloned var')\n\
 assert(var.child_write == nil, 'child writes must not reach the caller')\n\
 return 'ok'\n\
@@ -2302,7 +2302,7 @@ return 'sub saw ' .. var.shared\n\
     );
     let out = run_offline(md)
         .await
-        .expect("execute must clone var in and discard child writes");
+        .expect("call must clone var in and discard child writes");
     assert_eq!(out, "ok");
 }
 
@@ -2389,17 +2389,17 @@ async fn missing_bare_global_in_prose_errors() {
 /// calling one fails the run with a message naming the cause instead of
 /// Lua's stock nil-call error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_is_a_clear_error_on_the_h1() {
+async fn call_is_a_clear_error_on_the_h1() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
 ```lua\n\
-execute('## Nope')\n\
+call('## Nope')\n\
 ```\n"
     );
     let error = run_offline(md)
         .await
-        .expect_err("execute from the H1 must fail with the stub error");
+        .expect_err("call from the H1 must fail with the stub error");
     let rendered = error.to_string();
     assert!(
         rendered.contains("only available in sections"),

@@ -99,7 +99,7 @@ async fn fanout_epilog_two_items() {
 async fn fanout_store_writes_persist_across_arms() {
     // The arms rendezvous by writing and polling ready-*.md, so concurrency is
     // proven by both ready markers and both arm writes existing. Each poll
-    // iteration yields through `execute` on the nop `## Yield` section: under
+    // iteration yields through `call` on the nop `## Yield` section: under
     // the scheduler "concurrent" means interleaving at I/O points, not
     // preemption, so the rendezvous completes only if the sibling arm gets the
     // driver's thread while the poller is suspended. A sequential driver never

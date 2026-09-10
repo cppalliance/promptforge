@@ -3,7 +3,7 @@
 -- privileged captures, passed in so the chunk never reads a global;
 -- `models` is the block's live table. The `bind`/`default` returns wrap
 -- into proxies so a handle's `infer` yields instead of calling the
--- non-yielding Rust method; `execute`/`fanout` keep their H1 stubs, which
+-- non-yielding Rust method; `call`/`fanout` keep their H1 stubs, which
 -- raise before anything can yield.
 local infer, wrap_handle, models = ...
 

@@ -369,7 +369,7 @@ Add `crates/promptforge-lua/src/messages/` mirroring the `models/` layout: `mod.
 
 <step-3>
 
-### Step 3: rename heading-based `execute` to `call`
+### Step 3: rename heading-based `execute` to `call` [completed]
 
 - Component: section-call
 

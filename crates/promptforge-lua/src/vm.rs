@@ -165,7 +165,7 @@ impl LocalTools {
     /// The `jump` global is nilled for the handler's duration and restored
     /// afterward: a local tool runs outside any chunk's control flow, so a
     /// jump recorded here would surface stale at the next chunk boundary.
-    /// Handlers cannot call the suspending shims (`execute`, `fanout`,
+    /// Handlers cannot call the suspending shims (`call`, `fanout`,
     /// `models.infer`): the handler runs outside any coroutine, so the
     /// shim's yield fails with "attempt to yield from outside a coroutine".
     ///
@@ -514,14 +514,14 @@ impl SectionVm {
         )
     }
 
-    /// Installs `execute`, `jump`, `fanout`, and `list_from_section` as
+    /// Installs `call`, `jump`, `fanout`, and `list_from_section` as
     /// persistent globals for the section's whole lifecycle.
     ///
     /// Called once by the engine after host injection. The callbacks own
     /// their run context, so the closures stay valid across every chunk this
     /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
     /// clone of the VM's jump slot; the slot is reset before each chunk and
-    /// read after it by the control-run path. The `execute` and `fanout`
+    /// read after it by the control-run path. The `call` and `fanout`
     /// closures snapshot this VM's `var` at call time (reading the hidden
     /// data table through the in-scope `&Lua`) and hand the JSON to their
     /// callback, so a contained chain or arm seeds from a clone and its
@@ -532,7 +532,7 @@ impl SectionVm {
     #[cfg(test)]
     pub(crate) fn install_control_globals<E, F, L>(
         &self,
-        execute_callback: E,
+        call_callback: E,
         fanout_callback: F,
         list_callback: L,
     ) -> Result<()>
@@ -544,14 +544,14 @@ impl SectionVm {
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
         let globals = self.lua.globals();
-        let execute_fn = self
+        let call_fn = self
             .lua
             .create_function(move |lua, (target, input): (Value, Option<String>)| {
                 let var = var_to_json(lua).map_err(mlua::Error::external)?;
-                execute_callback(target, input, var).map_err(mlua::Error::external)
+                call_callback(target, input, var).map_err(mlua::Error::external)
             })
             .map_err(Error::lua)?;
-        globals.raw_set("execute", execute_fn).map_err(Error::lua)?;
+        globals.raw_set("call", call_fn).map_err(Error::lua)?;
         self.install_jump_global(&globals)?;
         let fanout_fn = self
             .lua
@@ -570,7 +570,7 @@ impl SectionVm {
     /// Installs the scheduler-mode control surface: `jump` and
     /// `list_from_section` as Rust callbacks (neither suspends).
     ///
-    /// The suspending calls (`models.infer`, `handle:infer`, `execute`,
+    /// The suspending calls (`models.infer`, `handle:infer`, `call`,
     /// `fanout`) are the yield shims installed by
     /// [`install_coro_shims`](Self::install_coro_shims).
     ///
@@ -587,7 +587,7 @@ impl SectionVm {
     }
 
     /// Installs the coroutine yield shims (`models.infer`, `handle:infer`,
-    /// `execute`, `fanout`, `tool_call`) and marks the VM so the captured
+    /// `call`, `fanout`, `tool_call`) and marks the VM so the captured
     /// model alias globals install as shim-wrapped proxies.
     ///
     /// # Errors
@@ -632,7 +632,7 @@ impl SectionVm {
             .map_err(Error::lua)
     }
 
-    /// Installs `execute`, `jump`, `fanout`, and `list_from_section` as
+    /// Installs `call`, `jump`, `fanout`, and `list_from_section` as
     /// stubs that fail with a clear error, for the live H1 VM only.
     ///
     /// H1 runs before any section exists, so the real control globals can
@@ -643,7 +643,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if any global cannot be installed.
     pub fn install_h1_control_stubs(&self) -> Result<()> {
         let globals = self.lua.globals();
-        for name in ["execute", "jump", "fanout", "list_from_section"] {
+        for name in ["call", "jump", "fanout", "list_from_section"] {
             let stub = self
                 .lua
                 .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
@@ -715,7 +715,7 @@ impl SectionVm {
     /// `log` reports go to the observer captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
-    /// the chunk may call `execute`, `jump`, or `fanout`, those must
+    /// the chunk may call `call`, `jump`, or `fanout`, those must
     /// already be installed by
     /// [`install_control_globals`](Self::install_control_globals).
     ///

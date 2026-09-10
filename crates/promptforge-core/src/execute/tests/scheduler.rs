@@ -1,6 +1,6 @@
-//! Scheduler-side tests: the decision-gate scenario (nested execute plus
+//! Scheduler-side tests: the decision-gate scenario (nested call plus
 //! inference end-to-end on a current-thread runtime), cancellation while
-//! suspended on an infer, the per-chain execute-depth cap, and the walk
+//! suspended on an infer, the per-chain call-depth cap, and the walk
 //! rules mirrored from the legacy suite (fall-through order, off-walk
 //! skips, reply roll-forward, `var` discipline, the run-global id
 //! counter), plus the control-transfer rules: jump targets (sibling moves
@@ -70,17 +70,17 @@ fn scheduler_context_on(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_execute_and_inference_run_end_to_end_on_a_current_thread_runtime() {
+async fn nested_call_and_inference_run_end_to_end_on_a_current_thread_runtime() {
     // THE DECISION GATE: under the legacy bridge this prompt fails with
     // `Error::Internal` on a current-thread runtime; under the scheduler
-    // the nested execute and both infers complete on the one thread.
+    // the nested call and both infers complete on the one thread.
     let gateway =
         ScriptedGateway::start(vec![resp_text("inner answer"), resp_text("outer answer")]).await;
     let md = "---\nname: gate\ndescription: d\npromptforge: 1\n---\n\n\
         # Gate\n\n\
         ## Outer\n\n\
         ```lua\n\
-        local inner = execute('## Inner')\n\
+        local inner = call('## Inner')\n\
         return models.infer('outer saw: ' .. inner)\n\
         ```\n\n\
         ## Inner\n\n\
@@ -160,17 +160,17 @@ async fn cancellation_while_suspended_on_infer_interrupts_the_run() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_depth_cap_reads_the_chain_field() {
-    // Two sections executing each other ping-pong down the chain stack; the
-    // cap must fire from the requesting chain's execute-depth field. The
+async fn call_depth_cap_reads_the_chain_field() {
+    // Two sections calling each other ping-pong down the chain stack; the
+    // cap must fire from the requesting chain's call-depth field. The
     // typed error then round-trips through every parent's answer envelope
     // without flattening.
     let md = "---\nname: depth\ndescription: d\npromptforge: 1\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
-        ```lua\nreturn execute('## Beta')\n```\n\n\
+        ```lua\nreturn call('## Beta')\n```\n\n\
         ## Beta\n\n\
-        ```lua\nreturn execute('## Alpha')\n```\n";
+        ```lua\nreturn call('## Alpha')\n```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
     let error = Scheduler::new(&ctx, None)
@@ -179,7 +179,7 @@ async fn execute_depth_cap_reads_the_chain_field() {
         .expect_err("the depth cap must fail the run");
 
     match &error {
-        Error::Lua(message) => assert_eq!(message, "execute recursion exceeded cap of 8"),
+        Error::Lua(message) => assert_eq!(message, "call recursion exceeded cap of 8"),
         other => panic!("expected the typed depth-cap Lua error, got {other:?}"),
     }
 }
@@ -239,7 +239,7 @@ async fn a_lua_blocks_reply_read_back_steers_the_chain_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
-    // A failed dispatch (here an unresolvable execute target) is the call's
+    // A failed dispatch (here an unresolvable call target) is the call's
     // answer resumed through the error envelope, so an author `pcall`
     // catches it exactly as on the legacy callback path; a driver that
     // failed the chain instead would error the run.
@@ -247,7 +247,7 @@ async fn a_dispatch_failure_resumes_through_the_envelope_into_pcall() {
         # Catch\n\n\
         ## Only\n\n\
         ```lua\n\
-        local ok, err = pcall(execute, '## Missing')\n\
+        local ok, err = pcall(call, '## Missing')\n\
         if ok then return 'uncaught' end\n\
         return 'caught: ' .. tostring(err)\n\
         ```\n";
@@ -374,8 +374,8 @@ async fn off_walk_sections_run_only_when_addressed() {
         # Addressed\n\n\
         ## A\n\n\
         ```lua\n\
-        local rb = execute('## B')\n\
-        local rc = execute('## C')\n\
+        local rb = call('## B')\n\
+        local rc = call('## C')\n\
         store.write('order.txt', rb .. ',' .. rc)\n\
         ```\n\n\
         ## B\n\n\
@@ -407,7 +407,7 @@ async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
         # Contained\n\n\
         ## A\n\n\
         ```lua\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         return r\n\
         ```\n\n\
         ## Sub\n\n\
@@ -432,7 +432,7 @@ async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
+async fn call_chain_over_off_walk_siblings_returns_to_the_caller() {
     // Mirror of the legacy case of the same name: A executes the off-walk
     // S1, which runs because it is addressed; the chain falls through to
     // S2, and S2's reply returns to A. The main walk ends at B and never
@@ -442,7 +442,7 @@ async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
         # Siblings\n\n\
         ## A\n\n\
         ```lua\n\
-        local r = execute('## S1')\n\
+        local r = call('## S1')\n\
         store.append('order.txt', 'A:' .. r .. '\\n')\n\
         ```\n\n\
         ## B\n\n\
@@ -567,8 +567,8 @@ async fn var_persists_across_sections_in_fall_through() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_clones_var_in_and_discards_child_writes() {
-    // Mirror of the legacy case of the same name: `execute` clones the
+async fn call_clones_var_in_and_discards_child_writes() {
+    // Mirror of the legacy case of the same name: `call` clones the
     // caller's `var` in; the contained chain reads the clone, and its
     // writes are discarded when the chain ends.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
@@ -576,7 +576,7 @@ async fn execute_clones_var_in_and_discards_child_writes() {
         ## Main\n\n\
         ```lua\n\
         var.shared = 'caller'\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         assert(r == 'sub saw caller', 'the child reads the cloned var')\n\
         assert(var.child_write == nil, 'child writes must not reach the caller')\n\
         return 'ok'\n\
@@ -591,13 +591,13 @@ async fn execute_clones_var_in_and_discards_child_writes() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("execute must clone var in and discard child writes");
+        .expect("call must clone var in and discard child writes");
 
     assert_eq!(out, "ok");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_execute_chain_continues_the_global_sys_id_sequence() {
+async fn a_call_chain_continues_the_global_sys_id_sequence() {
     // Mirror of the legacy case of the same name: the contained chain's
     // entries take the next run-global ids, and the outer walk resumes the
     // same sequence when the chain ends.
@@ -607,7 +607,7 @@ async fn an_execute_chain_continues_the_global_sys_id_sequence() {
         ## Main\n\n\
         ```lua\n\
         assert(sys.id == 1, 'the first walked section takes id 1')\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         store.append('order.txt', r .. '\\n')\n\
         ```\n\n\
         ## B\n\n\
@@ -629,7 +629,7 @@ async fn an_execute_chain_continues_the_global_sys_id_sequence() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("an execute chain must continue the global sys.id sequence");
+        .expect("a call chain must continue the global sys.id sequence");
 
     assert_eq!(out, "tail-reply\n");
 }
@@ -642,8 +642,8 @@ async fn entering_the_same_section_twice_takes_two_ids() {
         # Twice\n\n\
         ## Main\n\n\
         ```lua\n\
-        local a = execute('## Sub')\n\
-        local b = execute('## Sub')\n\
+        local a = call('## Sub')\n\
+        local b = call('## Sub')\n\
         return a .. ',' .. b\n\
         ```\n\n\
         ## Sub\n\n\
@@ -1144,7 +1144,7 @@ async fn running_child_addresses_its_own_siblings_and_children() {
         ```lua\njump('### X')\n```\n\n\
         ### X\n\n\
         ```lua\n\
-        local r = execute('#### Grand')\n\
+        local r = call('#### Grand')\n\
         store.append('order.txt', 'X:' .. r .. '\\n')\n\
         jump('### Y')\n\
         ```\n\n\
@@ -1273,8 +1273,8 @@ async fn a_return_inside_a_child_walk_ends_the_whole_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn jump_inside_execute_is_contained_in_the_chain() {
-    // Mirror of the legacy case of the same name: a jump inside `execute()`
+async fn jump_inside_call_is_contained_in_the_chain() {
+    // Mirror of the legacy case of the same name: a jump inside `call()`
     // is contained by the chain - followed, not rejected. The chain's index
     // moves to the target, the sections between the jumper and the target
     // do not run, and the target's reply returns to the caller.
@@ -1282,7 +1282,7 @@ async fn jump_inside_execute_is_contained_in_the_chain() {
         # Contained\n\n\
         ## Main\n\n\
         ```lua\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         return 'main:' .. r\n\
         ```\n\n\
         ## Sub\n\n\
@@ -1296,15 +1296,15 @@ async fn jump_inside_execute_is_contained_in_the_chain() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("a jump inside execute must be followed within the chain");
+        .expect("a jump inside call must be followed within the chain");
 
     assert_eq!(out, "main:peer-ran");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn jump_inside_an_execute_chain_moves_within_the_chain() {
-    // Mirror of the legacy case of the same name: a jump inside an
-    // `execute()` chain to a sibling moves within the contained chain - the
+async fn jump_inside_a_call_chain_moves_within_the_chain() {
+    // Mirror of the legacy case of the same name: a jump inside a
+    // `call()` chain to a sibling moves within the contained chain - the
     // walk continues from the jump target under the normal rules, and the
     // chain's final reply is the call's return value.
     let store = StoreRef::memory();
@@ -1312,7 +1312,7 @@ async fn jump_inside_an_execute_chain_moves_within_the_chain() {
         # Move\n\n\
         ## A\n\n\
         ```lua\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         return 'A:' .. r\n\
         ```\n\n\
         ## Sub\n\n\
@@ -1336,7 +1336,7 @@ async fn jump_inside_an_execute_chain_moves_within_the_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
+async fn call_chain_jumps_to_a_child_and_returns_the_chain_reply() {
     // Mirror of the legacy case of the same name (the canonical contained
     // chain): A executes Sub; Sub jumps to its child S1, starting a
     // child-level walk that falls through to S2; when S2 finishes, the
@@ -1349,7 +1349,7 @@ async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
         ## A\n\n\
         ```lua\n\
         store.append('order.txt', 'A1\\n')\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         assert(r == 'reply-s2', 'the chain final reply returns to A')\n\
         store.append('order.txt', 'A2\\n')\n\
         ```\n\n\
@@ -1378,7 +1378,7 @@ async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
     let out = Scheduler::new(&ctx, Some(gateway_client(gateway.addr())))
         .drive()
         .await
-        .expect("the execute chain must jump, fall through, and return its reply");
+        .expect("the call chain must jump, fall through, and return its reply");
 
     assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
 }
@@ -1393,7 +1393,7 @@ async fn the_outer_walk_never_moves_during_a_contained_chain() {
         # Outer\n\n\
         ## A\n\n\
         ```lua\n\
-        execute('## Sub')\n\
+        call('## Sub')\n\
         store.append('order.txt', 'A-done\\n')\n\
         ```\n\n\
         ## B\n\n\
@@ -1429,7 +1429,7 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
         # Scoped\n\n\
         ## A\n\n\
         ```lua\n\
-        local r = execute('## Sub')\n\
+        local r = call('## Sub')\n\
         store.append('order.txt', 'A:' .. r .. '\\n')\n\
         ```\n\n\
         ## B\n\n\
@@ -1452,8 +1452,8 @@ async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_to_a_child_starts_a_contained_chain() {
-    // Mirror of the legacy case of the same name: `execute` to a child
+async fn call_to_a_child_starts_a_contained_chain() {
+    // Mirror of the legacy case of the same name: `call` to a child
     // starts a contained chain at the target - the chain falls through to
     // the target's following siblings under the same rules as any walk, and
     // the chain's final reply is the call's return value.
@@ -1462,7 +1462,7 @@ async fn execute_to_a_child_starts_a_contained_chain() {
         # ChildExecute\n\n\
         ## Main\n\n\
         ```lua\n\
-        local r = execute('### Sub')\n\
+        local r = call('### Sub')\n\
         return 'got:' .. r\n\
         ```\n\n\
         ### Sub\n\n\
@@ -1477,19 +1477,19 @@ async fn execute_to_a_child_starts_a_contained_chain() {
     let out = Scheduler::new(&ctx, None)
         .drive()
         .await
-        .expect("execute to a child must start a contained chain");
+        .expect("call to a child must start a contained chain");
 
     assert_eq!(out, "got:after-reply");
     assert_eq!(store.read("order.txt").expect("order log"), "Sub\nAfter\n");
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_jump_descent_does_not_consume_execute_depth() {
+async fn a_jump_descent_does_not_consume_call_depth() {
     // The depth-cap interaction, identical to the legacy engine: a jump
-    // descent is not an execute, so the child level shares the chain's
-    // execute-depth field. X and Y ping-pong executes from inside a
+    // descent is not a call, so the child level shares the chain's
+    // call-depth field. X and Y ping-pong calls from inside a
     // jump-started child walk; each entry appends once. The cap trips when
-    // the ninth nested execute would run (depth 9 > 8), after exactly nine
+    // the ninth nested call would run (depth 9 > 8), after exactly nine
     // section entries - a descent that wrongly consumed depth would trip
     // the cap one entry earlier.
     let store = StoreRef::memory();
@@ -1500,12 +1500,12 @@ async fn a_jump_descent_does_not_consume_execute_depth() {
         ### X\n\n\
         ```lua\n\
         store.append('depth.txt', 'x\\n')\n\
-        return execute('### Y')\n\
+        return call('### Y')\n\
         ```\n\n\
         ### Y\n\n\
         ```lua\n\
         store.append('depth.txt', 'y\\n')\n\
-        return execute('### X')\n\
+        return call('### X')\n\
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context_on(&prompt, &store, Arc::new(NullObserver::default()));
@@ -1515,13 +1515,13 @@ async fn a_jump_descent_does_not_consume_execute_depth() {
         .expect_err("the depth cap must fail the run");
 
     match &error {
-        Error::Lua(message) => assert_eq!(message, "execute recursion exceeded cap of 8"),
+        Error::Lua(message) => assert_eq!(message, "call recursion exceeded cap of 8"),
         other => panic!("expected the typed depth-cap Lua error, got {other:?}"),
     }
     assert_eq!(
         store.read("depth.txt").expect("depth log"),
         "x\ny\nx\ny\nx\ny\nx\ny\nx\n",
-        "the descent shares the chain's execute depth: nine entries, then the cap"
+        "the descent shares the chain's call depth: nine entries, then the cap"
     );
 }
 
@@ -1840,14 +1840,14 @@ async fn an_h1_scalar_return_still_reads_var_back() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn execute_is_a_clear_error_on_the_h1() {
+async fn call_is_a_clear_error_on_the_h1() {
     // Mirror of the legacy case of the same name: the H1 VM's control
     // globals are stubs - H1 runs before sections exist, so calling one
     // fails the run with a message naming the cause. On the scheduler the
     // stub must survive the shim base install.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n\
-        ```lua\nexecute('## Nope')\n```\n";
+        ```lua\ncall('## Nope')\n```\n";
     let prompt = parse(md);
     let ctx = h1_context(&prompt);
     let resolution = H1Resolution::empty();
@@ -1855,7 +1855,7 @@ async fn execute_is_a_clear_error_on_the_h1() {
         .with_live_h1(resolution.context())
         .drive()
         .await
-        .expect_err("execute from the H1 must fail with the stub error");
+        .expect_err("call from the H1 must fail with the stub error");
 
     assert!(
         error.to_string().contains("only available in sections"),
@@ -2723,25 +2723,25 @@ async fn fanout_worker_that_is_a_list_section_errors() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fanout_depth_cap_reads_the_chain_field() {
-    // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong executes
+    // Pin of the fanout depth-cap guard: Alpha and Beta ping-pong calls
     // down the chain stack, and the chain that lands at depth 8 calls
     // fanout - each arm would run one level deeper, so the cap fires from
-    // the requesting chain's execute-depth field with the fanout message,
-    // not the execute one.
+    // the requesting chain's call-depth field with the fanout message,
+    // not the call one.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
         ```lua\n\
         var.n = (var.n or 0) + 1\n\
         if var.n >= 9 then return fanout('### Worker', {'x'}) end\n\
-        return execute('## Beta')\n\
+        return call('## Beta')\n\
         ```\n\n\
         ### Worker\n\n\
         ```lua\nreturn item\n```\n\n\
         ## Beta\n\n\
         ```lua\n\
         var.n = var.n + 1\n\
-        return execute('## Alpha')\n\
+        return call('## Alpha')\n\
         ```\n";
     let prompt = parse(md);
     let ctx = scheduler_context(&prompt);
@@ -3758,7 +3758,7 @@ async fn models_chat_is_nil_in_a_section_vm() {
     // The agent-only `models.chat` never exists in a section VM - not
     // stubbed, simply absent - so a document prompt calling it fails with
     // Lua's own undefined-value error, the mirror of an agent calling the
-    // absent `execute`. No typed error exists for the absence.
+    // absent `call`. No typed error exists for the absence.
     let md = "---\nname: chat\ndescription: d\npromptforge: 1\n---\n\n\
         # Chat\n\n\
         ## Only\n\n\

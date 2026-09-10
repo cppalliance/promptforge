@@ -5,7 +5,7 @@
 //! itself, plus its direct children. The parent, aunts/uncles,
 //! nieces/nephews, and grandchildren are never in the set, so a resolution
 //! error that lists the set cannot leak the rest of the document's
-//! structure. The scheduler's chains resolve jumps, `execute` targets, and
+//! structure. The scheduler's chains resolve jumps, `call` targets, and
 //! fanout workers through these helpers, and the `list_from_section`
 //! callback resolves through them too, so every control surface agrees on
 //! what a heading may name.

@@ -13,7 +13,7 @@
 //! tool-capable model round that streams deltas to the host and returns
 //! the reply or the unexecuted tool calls, and `runtime.events()`, a
 //! read-only indexed view over the host-supplied event log whose snapshot
-//! refreshes at every host-call resume. `execute()`, `fanout()`, and
+//! refreshes at every host-call resume. `call()`, `fanout()`, and
 //! `jump()` are absent - not stubbed - so an agent touching them fails as
 //! an undefined global, exactly as a document prompt touching the
 //! agent-only calls does.
